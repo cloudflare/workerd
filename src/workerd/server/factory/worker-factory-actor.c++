@@ -303,6 +303,10 @@ class AlarmOwnedElsewhere final: public WorkerInterface {
       .retryCountsAgainstLimit = false,
       .outcome = again ? EventOutcome::CANCELED : EventOutcome::OK};
   }
+  // The owning instance holds the alarm state, so there is nothing to clear here.
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date) override {
+    return kj::Maybe<kj::Date>(kj::none);
+  }
   kj::Promise<void> request(kj::HttpMethod,
       kj::StringPtr,
       const kj::HttpHeaders&,

@@ -272,6 +272,7 @@ class RevocableWebSocketWorkerInterface final: public WorkerInterface {
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:
@@ -333,6 +334,11 @@ kj::Promise<WorkerInterface::AlarmResult> RevocableWebSocketWorkerInterface::run
   return worker.runAlarm(scheduledTime, retryCount);
 }
 
+kj::Promise<kj::Maybe<kj::Date>> RevocableWebSocketWorkerInterface::abandonAlarm(
+    kj::Date scheduledTime) {
+  return worker.abandonAlarm(scheduledTime);
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> RevocableWebSocketWorkerInterface::customEvent(
     kj::Own<CustomEvent> event) {
   return worker.customEvent(kj::mv(event));
@@ -388,6 +394,10 @@ class ErrorWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    kj::throwException(kj::mv(exception));
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
     kj::throwException(kj::mv(exception));
   }
 

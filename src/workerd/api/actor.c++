@@ -6,7 +6,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
@@ -279,10 +278,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   ActorRoutingMode routingMode = ActorRoutingMode::DEFAULT;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(r, o.retry) {
-      auto policy = toUserDefinedRetryPolicy(r);
-      if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-        retryPolicy = policy;
-      }
+      retryPolicy = toUserDefinedRetryPolicy(r);
     }
     KJ_IF_SOME(rm, o.routingMode) {
       JSG_REQUIRE(rm == "primary-only", RangeError, "unknown routingMode: ", rm);

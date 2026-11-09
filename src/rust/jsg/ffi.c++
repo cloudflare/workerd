@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -111,7 +112,12 @@ kj::StringPtr Wrappable::jsgGetMemoryName() const {
 }
 
 size_t Wrappable::jsgGetMemorySelfSize() const {
-  return sizeof(Wrappable);
+  return sizeof(Wrappable) + wrappable_invoke_get_memory_self_size(*this);
+}
+
+void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
+  ::workerd::jsg::Wrappable::jsgGetMemoryInfo(tracker);
+  wrappable_invoke_get_memory_info(*this, tracker);
 }
 
 // Local<T>
@@ -1144,6 +1150,75 @@ void global_clear_weak(uintptr_t* global) {
   }
 }
 
+// MemoryTracker
+Isolate* memory_tracker_isolate(MemoryTracker& tracker) {
+  return tracker.isolate();
+}
+
+void memory_tracker_track_field_with_size(
+    MemoryTracker& tracker, const char* edge_name, size_t size, const char* node_name) {
+  if (node_name == nullptr) {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size);
+  } else {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size, kj::StringPtr(node_name));
+  }
+}
+
+void memory_tracker_track_wrappable(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  // As the base class, so that the node is the one HeapTracer adds for the same Wrappable.
+  tracker.trackField(
+      memoryTrackerEdgeName(edge_name), static_cast<const ::workerd::jsg::Wrappable*>(&wrappable));
+}
+
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  // Reading the wrapper changes nothing, but tryGetHandle() is not const.
+  auto& base = const_cast<::workerd::jsg::Wrappable&>(
+      static_cast<const ::workerd::jsg::Wrappable&>(wrappable));
+  KJ_IF_SOME(handle, base.tryGetHandle(isolate)) {
+    tracker.trackField(memoryTrackerEdgeName(edge_name), handle);
+  } else {
+    // The name is a literal, as `jsgGetMemoryName()` says.
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), wrappable.jsgGetMemorySelfSize(),
+        wrappable.jsgGetMemoryName());
+  }
+}
+
+void memory_tracker_track_global(
+    MemoryTracker& tracker, const char* edge_name, const Global& global) {
+  if (global.ptr == 0) return;
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  tracker.trackField(memoryTrackerEdgeName(edge_name),
+      v8::Local<v8::Value>::New(isolate, global_as_ref_from_ffi<v8::Value>(global)));
+}
+
+bool memory_tracker_push_retainer(MemoryTracker& tracker,
+    size_t address,
+    size_t type,
+    const char* name,
+    size_t size,
+    const char* edge_name) {
+  return tracker.pushRetainer(reinterpret_cast<const void*>(address),
+      reinterpret_cast<const void*>(type), name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_push_container(
+    MemoryTracker& tracker, const char* name, size_t size, const char* edge_name) {
+  tracker.pushContainer(name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_pop_node(MemoryTracker& tracker) {
+  tracker.popNode();
+}
+
+size_t memory_tracker_depth(const MemoryTracker& tracker) {
+  return tracker.depth();
+}
+
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor) {
   auto* gcVisitor = gc_visitor_from_ffi(visitor);
@@ -1692,15 +1767,15 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
     default:
-      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
-      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      // Error, and the DOMException names, which Rust creates with
+      // dom_exception_create_from_bytes() instead. Only a fast callback could pass one here, and
+      // it throws only TypeErrors.
       return to_ffi(v8::Exception::Error(message));
   }
 }
-}  // namespace
 
-Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+v8::Local<v8::String> errorMessageFromBytes(
+    Isolate* isolate, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
@@ -1712,10 +1787,23 @@ Local exception_create_from_bytes(
   // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
   // after it NewFromUtf8 cannot refuse the string.
   auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
-  auto v8Message = newUtf8String(
+  return newUtf8String(
       isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
-                       .ToLocalChecked();
-  return exceptionCreateFromMessage(exception_type, v8Message);
+      .ToLocalChecked();
+}
+}  // namespace
+
+Local exception_create_from_bytes(
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+  return exceptionCreateFromMessage(exception_type, errorMessageFromBytes(isolate, message));
+}
+
+MaybeLocal dom_exception_create_from_bytes(
+    Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message) {
+  // Creating a DOMException instantiates a template in the current context.
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(::workerd::jsg::newDOMException(
+      isolate, kj::arrayPtr(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
 }
 
 namespace {

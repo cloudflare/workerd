@@ -1439,6 +1439,9 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     KJ_UNREACHABLE;
   }
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_UNREACHABLE;
+  }
 
  private:
   kj::EntropySource& entropySource;

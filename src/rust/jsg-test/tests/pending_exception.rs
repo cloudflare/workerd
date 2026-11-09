@@ -94,6 +94,46 @@ impl Thrower {
         self.throw_then(lock, first, jsg::resource::function_template_of::<Fresh>)
     }
 
+    /// Creates a `DOMException`, which instantiates a template.
+    #[jsg_method]
+    fn throw_then_create_dom_exception<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        })
+    }
+
+    /// Creates the exception for an `Error` of a `DOMException` type.
+    #[jsg_method]
+    fn throw_then_create_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.exception(&jsg::Error::new_abort_error("second"))
+        })
+    }
+
+    /// Fails with an `Error` of a `DOMException` type in place of the pending error, as code that
+    /// breaks the rule does. Throwing it creates nothing, so the exception `first` threw
+    /// propagates.
+    #[jsg_method]
+    fn throw_then_fail_with_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        let pending = self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        });
+        assert!(pending.is_err_and(|err| err.is_pending()));
+        Err(jsg::Error::new_abort_error("second"))
+    }
+
     /// Detaches a new `ArrayBuffer`, which leaves it attached.
     #[jsg_method]
     fn throw_then_detach<'s>(
@@ -194,6 +234,21 @@ fn wrapping_a_wrapped_resource_while_exception_pending_fails() {
 #[test]
 fn getting_a_constructor_while_exception_pending_fails() {
     exception_survives("throwThenGetConstructor(first)");
+}
+
+#[test]
+fn creating_a_dom_exception_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomException(first)");
+}
+
+#[test]
+fn creating_a_dom_error_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomError(first)");
+}
+
+#[test]
+fn throwing_a_dom_error_while_exception_pending_keeps_the_exception() {
+    exception_survives("throwThenFailWithDomError(first)");
 }
 
 #[test]

@@ -53,7 +53,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     auto event = api::TraceCustomEvent::fromRpc(api::TraceCustomEvent::TYPE, context.getParams());
     auto worker = getWorker();
     auto result = co_await worker->customEvent(kj::mv(event));
-    context.getResults().getResult().setOutcome(result.outcome);
+    context.initResults(capnp::MessageSize{4, 0}).initResult().setOutcome(result.outcome);
   }
 
   kj::Promise<void> prewarm(PrewarmContext context) override {
@@ -63,6 +63,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     throwUnsupported();
   }
   kj::Promise<void> runAlarm(RunAlarmContext context) override {
+    throwUnsupported();
+  }
+  kj::Promise<void> abandonAlarm(AbandonAlarmContext context) override {
     throwUnsupported();
   }
   kj::Promise<void> queue(QueueContext context) override {
@@ -85,7 +88,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
     pipelineBuilder.setTopLevel(cap);
     context.setPipeline(pipelineBuilder.build());
-    context.getResults().setTopLevel(kj::mv(cap));
+    // The results message lives as long as the session, so size it to fit rather than taking
+    // the default 8 KiB first segment.
+    context.initResults(capnp::MessageSize{4, 1}).setTopLevel(kj::mv(cap));
 
     auto worker = getWorker();
     auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));

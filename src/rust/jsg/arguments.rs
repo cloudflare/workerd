@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use crate::MemoryInfo;
+use crate::MemoryTracker;
 use crate::Traced;
 use crate::rtti;
 
@@ -71,6 +73,17 @@ impl<'a, T> IntoIterator for &'a Arguments<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
+    }
+}
+
+/// Reported as the `Vec` of the arguments.
+impl<T: MemoryInfo> MemoryInfo for Arguments<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        self.0.track_as_field(tracker, edge_name);
     }
 }
 

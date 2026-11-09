@@ -23,6 +23,7 @@
 
 #![forbid(unsafe_code)]
 
+mod memory_info;
 mod oneof;
 mod resource;
 mod trace;
@@ -903,6 +904,10 @@ fn reject(
 ///
 /// The generated `Traced::trace` body simply delegates to `Traced::trace()` on
 /// every named field.
+///
+/// With `memory_info`, it also emits `jsg::VisitForMemoryInfo`, reporting every named field
+/// under its name except those marked `#[jsg_memory_info(skip)]`; with `custom_memory_info`,
+/// the author implements it. Either makes `GarbageCollected::memory_info` call it.
 ///
 /// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,

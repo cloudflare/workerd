@@ -146,6 +146,18 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     result = v8::MaybeLocal<ReturnType>();
   });
 
+  // V8 aborts the process if asked to link a graph that reaches a module which is still
+  // kEvaluating. That happens when a graph linked during a module's evaluation (a nested
+  // require() or dynamic import) imports that module back. Fail the link instead.
+  if constexpr (!IsSourcePhase) {
+    v8::Local<v8::Module> resolved;
+    if (result.ToLocal(&resolved) && resolved->GetStatus() == v8::Module::Status::kEvaluating) {
+      js.v8Isolate->ThrowException(
+          js.v8Error(kj::str("Circular dependency when resolving module: ", specifier)));
+      return {};
+    }
+  }
+
   return result;
 }
 
@@ -281,6 +293,37 @@ v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
   return scope.EscapeMaybe(result);
 }
 
+// Returns false, with no exception pending, if `module`'s graph cannot be linked.
+bool tryInstantiate(Lock& js, v8::Local<v8::Module> module) {
+  return js.tryCatch([&] {
+    jsg::check(module->InstantiateModule(
+        js.v8Context(), resolveModuleCallback<false>, resolveModuleCallback<true>));
+    return true;
+  }, [](Value) { return false; });
+}
+
+// Links and evaluates `module` from a microtask. Nested evaluation never drains the queue, so it
+// runs once the evaluation in progress has unwound to depth 0, when no module that `module`
+// imports is still kEvaluating.
+v8::Local<v8::Promise> deferInstantiation(Lock& js, v8::Local<v8::Module> module) {
+  return js.resolvedPromise()
+      .then(js, [module = js.v8Ref(module)](Lock& js) mutable -> Value {
+    auto handle = module.getHandle(js);
+    if (handle->GetStatus() == v8::Module::Status::kUninstantiated) {
+      jsg::check(handle->InstantiateModule(
+          js.v8Context(), resolveModuleCallback<false>, resolveModuleCallback<true>));
+    }
+    // A microtask cannot drain the queue it runs from, so evaluate as if nested: a top-level
+    // await hands back its pending promise, which the ongoing drain then settles.
+    Lock::ModuleEvaluationScope nested(js);
+    KJ_IF_SOME(pending,
+        instantiateModule(js, handle, InstantiateModuleOptions::ALLOW_PENDING_EVALUATION)) {
+      return js.v8Ref<v8::Value>(pending);
+    }
+    return js.v8Ref<v8::Value>(js.v8Undefined());
+  }).consumeHandle(js);
+}
+
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
@@ -308,8 +351,18 @@ kj::Maybe<v8::Local<v8::Promise>> instantiateModule(
   }
 
   if (status == v8::Module::Status::kUninstantiated) {
-    jsg::check(module->InstantiateModule(
-        context, resolveModuleCallback<false>, resolveModuleCallback<true>));
+    // A nested dynamic import may reach a module that is still kEvaluating, and so cannot be
+    // linked until that evaluation finishes. Its caller accepts a promise, so link it later
+    // rather than fail. A link that fails for any other reason fails again then, rejecting the
+    // import.
+    if (js.isEvaluatingModule() && options == InstantiateModuleOptions::ALLOW_PENDING_EVALUATION) {
+      if (!tryInstantiate(js, module)) {
+        return deferInstantiation(js, module);
+      }
+    } else {
+      jsg::check(module->InstantiateModule(
+          context, resolveModuleCallback<false>, resolveModuleCallback<true>));
+    }
   }
 
   v8::Local<v8::Promise> prom;

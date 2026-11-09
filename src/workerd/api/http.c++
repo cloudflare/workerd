@@ -19,7 +19,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -1610,16 +1609,12 @@ template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A stub's own policy applies only when it was given one and the userland
-// retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
-// the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
-// a disabled rollout must never get that far.
+// actor call retries. A stub's own policy applies when it was given one. Otherwise the runtime's
+// default applies.
 kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
   if (!fetcher.supportsActorCallRetries()) return kj::none;
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
-      return ActorRetryPolicy::userDefined(userPolicy);
-    }
+  KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
+    return ActorRetryPolicy::userDefined(userPolicy);
   }
   return ActorRetryPolicy::systemDefault();
 }
