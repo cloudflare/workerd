@@ -18,6 +18,8 @@ use kj_rs::KjMaybe;
 use crate::attributes::Attributes;
 use crate::buffer;
 use crate::buffer::SpanBuffer;
+use crate::logs;
+use crate::logs::LogBuffer;
 use crate::proto;
 
 #[cxx::bridge(namespace = "workerd::rust::otlp")]
@@ -46,6 +48,22 @@ mod ffi {
     struct Batch {
         request: Vec<u8>,
         span_count: usize,
+    }
+
+    /// The console method a log came from.
+    enum LogLevel {
+        Debug,
+        Info,
+        Log,
+        Warn,
+        Error,
+    }
+
+    /// An encoded `ExportLogsServiceRequest` and the number of records in it. When there is
+    /// nothing to send yet, `request` is empty and `record_count` is zero.
+    struct LogBatch {
+        request: Vec<u8>,
+        record_count: usize,
     }
 
     extern "Rust" {
@@ -99,6 +117,40 @@ mod ffi {
         ) -> Batch;
         /// Ends the invocation: spans still open are closed at `now` and flagged as not ended.
         fn finish(buffer: &mut SpanBuffer, now: i64) -> Batch;
+
+        /// One invocation's logs on their way to a collector. Times are unix nanoseconds.
+        type LogBuffer;
+
+        /// `trace_id`, `trace_flags`, `omit_timestamps`, `resource` and `default_attributes` are
+        /// as for the invocation's `SpanBuffer`.
+        fn new_log_buffer(
+            trace_id: &[u8],
+            trace_flags: u32,
+            omit_timestamps: bool,
+            resource: Box<Attributes>,
+            default_attributes: Box<Attributes>,
+        ) -> Box<LogBuffer>;
+        /// `span_id` is the span that was active, or zero. `message` is the JSON array of the
+        /// call's arguments, unless `truncated`.
+        fn add_log(
+            buffer: &mut LogBuffer,
+            span_id: u64,
+            time: i64,
+            level: LogLevel,
+            message: &[u8],
+            truncated: bool,
+        ) -> LogBatch;
+        fn add_exception_log(
+            buffer: &mut LogBuffer,
+            span_id: u64,
+            time: i64,
+            name: &[u8],
+            message: &[u8],
+            stack: KjMaybe<&[u8]>,
+        ) -> LogBatch;
+        /// Hands out every buffered record, and from then on each record as it is added. Called
+        /// when the invocation's span closes.
+        fn flush_logs(buffer: &mut LogBuffer) -> LogBatch;
     }
 }
 
@@ -115,6 +167,19 @@ fn batch(batch: Option<buffer::Batch>) -> ffi::Batch {
         |batch| ffi::Batch {
             request: batch.request,
             span_count: batch.span_count,
+        },
+    )
+}
+
+fn log_batch(batch: Option<logs::Batch>) -> ffi::LogBatch {
+    batch.map_or_else(
+        || ffi::LogBatch {
+            request: Vec::new(),
+            record_count: 0,
+        },
+        |batch| ffi::LogBatch {
+            request: batch.request,
+            record_count: batch.record_count,
         },
     )
 }
@@ -201,4 +266,54 @@ fn close_span(
 
 fn finish(buffer: &mut SpanBuffer, now: i64) -> ffi::Batch {
     batch(buffer.finish(now))
+}
+
+fn new_log_buffer(
+    trace_id: &[u8],
+    trace_flags: u32,
+    omit_timestamps: bool,
+    resource: Box<Attributes>,
+    default_attributes: Box<Attributes>,
+) -> Box<LogBuffer> {
+    let options = logs::Options {
+        trace_id: trace_id.to_vec(),
+        trace_flags,
+        omit_timestamps,
+    };
+    Box::new(LogBuffer::new(options, *resource, *default_attributes))
+}
+
+fn add_log(
+    buffer: &mut LogBuffer,
+    span_id: u64,
+    time: i64,
+    level: ffi::LogLevel,
+    message: &[u8],
+    truncated: bool,
+) -> ffi::LogBatch {
+    let level = match level {
+        ffi::LogLevel::Debug => logs::Level::Debug,
+        ffi::LogLevel::Info => logs::Level::Info,
+        ffi::LogLevel::Warn => logs::Level::Warn,
+        ffi::LogLevel::Error => logs::Level::Error,
+        _ => logs::Level::Log,
+    };
+    let message = String::from_utf8_lossy(message);
+    log_batch(buffer.add_log(span_id, time, level, &message, truncated))
+}
+
+fn add_exception_log(
+    buffer: &mut LogBuffer,
+    span_id: u64,
+    time: i64,
+    name: &[u8],
+    message: &[u8],
+    stack: KjMaybe<&[u8]>,
+) -> ffi::LogBatch {
+    let stack = Option::from(stack).map(text);
+    log_batch(buffer.add_exception(span_id, time, text(name), text(message), stack))
+}
+
+fn flush_logs(buffer: &mut LogBuffer) -> ffi::LogBatch {
+    log_batch(buffer.flush())
 }

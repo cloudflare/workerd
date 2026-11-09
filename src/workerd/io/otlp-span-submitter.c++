@@ -60,27 +60,57 @@ template <typename Tags>
   return attributes;
 }
 
-::rust::Box<rust::otlp::SpanBuffer> newSpanBuffer(const tracing::SpanContext& context,
-    tracing::SpanId rootSpanId,
-    const OtlpSpanSubmitter::Options& options) {
+::rust::Box<rust::otlp::Attributes> newResource(const OtlpSpanSubmitter::Options& options) {
   auto resource = rust::otlp::new_attributes();
   rust::otlp::add_string(*resource, toRust("service.name"_kj), toRust(options.serviceName));
   for (auto& tag: options.resource) addTag(*resource, tag);
+  return resource;
+}
 
-  auto traceId = context.getTraceId().toProtobuf();
-  uint32_t traceFlags = 0;
-  KJ_IF_SOME(flags, context.getTraceFlags()) {
-    traceFlags = static_cast<uint8_t>(flags);
+uint32_t toRust(kj::Maybe<tracing::TraceFlags> traceFlags) {
+  KJ_IF_SOME(flags, traceFlags) {
+    return static_cast<uint8_t>(flags);
   }
+  return 0;
+}
+
+rust::otlp::LogLevel toRust(LogLevel level) {
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return rust::otlp::LogLevel::Debug;
+    case LogLevel::INFO:
+      return rust::otlp::LogLevel::Info;
+    case LogLevel::LOG:
+      return rust::otlp::LogLevel::Log;
+    case LogLevel::WARN:
+      return rust::otlp::LogLevel::Warn;
+    case LogLevel::ERROR:
+      return rust::otlp::LogLevel::Error;
+  }
+  KJ_UNREACHABLE;
+}
+
+::rust::Box<rust::otlp::SpanBuffer> newSpanBuffer(const tracing::SpanContext& context,
+    tracing::SpanId rootSpanId,
+    const OtlpSpanSubmitter::Options& options) {
+  auto traceId = context.getTraceId().toProtobuf();
   return rust::otlp::new_span_buffer(traceId.as<kj_rs::Rust>(),
       {
-        .trace_flags = traceFlags,
+        .trace_flags = toRust(context.getTraceFlags()),
         .root_span_id = rootSpanId.getId(),
         .redact_query_string = static_cast<bool>(options.redactQueryString),
         // As for Jaeger spans, so tests can compare whole spans.
         .omit_timestamps = isPredictableModeForTest(),
       },
-      kj::mv(resource), toAttributes(options.defaultTags));
+      newResource(options), toAttributes(options.defaultTags));
+}
+
+kj::Maybe<::rust::Box<rust::otlp::LogBuffer>> newLogBuffer(
+    const tracing::SpanContext& context, const OtlpSpanSubmitter::Options& options) {
+  if (!options.exportLogs) return kj::none;
+  auto traceId = context.getTraceId().toProtobuf();
+  return rust::otlp::new_log_buffer(traceId.as<kj_rs::Rust>(), toRust(context.getTraceFlags()),
+      isPredictableModeForTest(), newResource(options), toAttributes(options.defaultTags));
 }
 
 Span::TagValue text(kj::StringPtr value) {
@@ -153,20 +183,47 @@ kj::Array<Span::Tag> makeOtlpIdentityTags(const OtlpServiceInfo& service) {
   return tags.releaseAsArray();
 }
 
-SpanBuilder startExportedUserSpan(kj::EntropySource& entropySource,
-    kj::Rc<OtlpSpanExporter> exporter,
+namespace {
+
+SpanBuilder startSpan(kj::Own<OtlpSpanSubmitter> submitter,
     const tracing::SpanContext& context,
-    const OtlpSpanSubmitter::Options& options,
-    kj::ConstString operationName,
-    tracing::SpanId spanId) {
-  auto submitter =
-      kj::refcounted<OtlpSpanSubmitter>(entropySource, kj::mv(exporter), context, options, spanId);
+    kj::ConstString operationName) {
   // The submitter records this span itself, so its observer carries its span id and its parent's.
   auto rootSpanId = submitter->getRootSpanId();
   return SpanBuilder(
       kj::rc<UserSpanObserver>(kj::mv(submitter), context.getTraceId(), context.getTraceFlags(),
           rootSpanId, context.getSpanId().orDefault(tracing::SpanId::nullId)),
       kj::mv(operationName));
+}
+
+}  // namespace
+
+SpanBuilder startExportedUserSpan(kj::EntropySource& entropySource,
+    kj::Rc<OtlpSpanExporter> exporter,
+    const tracing::SpanContext& context,
+    const OtlpSpanSubmitter::Options& options,
+    kj::ConstString operationName,
+    tracing::SpanId spanId) {
+  return startSpan(
+      kj::refcounted<OtlpSpanSubmitter>(entropySource, kj::mv(exporter), context, options, spanId),
+      context, kj::mv(operationName));
+}
+
+StartedInvocationSpan startExportedInvocationSpan(kj::EntropySource& entropySource,
+    kj::Rc<OtlpSpanExporter> exporter,
+    const tracing::SpanContext& context,
+    const OtlpSpanSubmitter::Options& options,
+    tracing::SpanId spanId) {
+  auto submitter =
+      kj::refcounted<OtlpSpanSubmitter>(entropySource, kj::mv(exporter), context, options, spanId);
+  kj::Maybe<kj::Own<InvocationLogSubmitter>> logs;
+  if (options.exportLogs) logs = kj::addRef(*submitter);
+  // The tracer names the span after the event.
+  auto span = startSpan(kj::mv(submitter), context, "invocation"_kjc);
+  KJ_IF_SOME(l, logs) {
+    return StartedInvocationSpan(kj::mv(span), kj::mv(l));
+  }
+  return StartedInvocationSpan(kj::mv(span));
 }
 
 kj::Promise<void> postOtlpTraces(kj::HttpClient& client,
@@ -193,10 +250,14 @@ OtlpSpanSubmitter::OtlpSpanSubmitter(kj::EntropySource& entropySource,
       predictableSpanId((static_cast<uint64_t>(options.predictableSpanSpace) << 56) + 1),
       exporter(kj::mv(exporter)),
       rootSpanId(rootSpan == tracing::SpanId::nullId ? makeSpanId() : rootSpan),
-      buffer(newSpanBuffer(context, rootSpanId, options)) {}
+      buffer(newSpanBuffer(context, rootSpanId, options)),
+      logs(newLogBuffer(context, options)) {}
 
 OtlpSpanSubmitter::~OtlpSpanSubmitter() noexcept(false) {
   exportBatch(rust::otlp::finish(*buffer, toUnixNanos(kj::systemPreciseCalendarClock().now())));
+  KJ_IF_SOME(l, logs) {
+    exportLogs(rust::otlp::flush_logs(*l));
+  }
 }
 
 kj::Date OtlpSpanSubmitter::getTime() {
@@ -240,6 +301,12 @@ void OtlpSpanSubmitter::submitSpanClose(
     tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) {
   exportBatch(
       rust::otlp::close_span(*buffer, spanId.getId(), toUnixNanos(endTime), toAttributes(tags)));
+  // The invocation's logs go out with its spans.
+  if (spanId == rootSpanId) {
+    KJ_IF_SOME(l, logs) {
+      exportLogs(rust::otlp::flush_logs(*l));
+    }
+  }
 }
 
 void OtlpSpanSubmitter::submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -266,6 +333,28 @@ void OtlpSpanSubmitter::submitSpanException(tracing::SpanId spanId,
       toRust(message), stack.map([](kj::String& s) { return toRust(s); }));
 }
 
+void OtlpSpanSubmitter::submitLog(tracing::SpanId spanId,
+    kj::Date timestamp,
+    LogLevel level,
+    kj::ArrayPtr<const char> message,
+    tracing::LogTruncated truncated) {
+  KJ_IF_SOME(l, logs) {
+    exportLogs(rust::otlp::add_log(*l, spanId.getId(), toUnixNanos(timestamp), toRust(level),
+        message.asBytes().as<kj_rs::Rust>(), static_cast<bool>(truncated)));
+  }
+}
+
+void OtlpSpanSubmitter::submitException(tracing::SpanId spanId,
+    kj::Date timestamp,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  KJ_IF_SOME(l, logs) {
+    exportLogs(rust::otlp::add_exception_log(*l, spanId.getId(), toUnixNanos(timestamp),
+        toRust(name), toRust(message), stack.map([](kj::StringPtr s) { return toRust(s); })));
+  }
+}
+
 tracing::SpanId OtlpSpanSubmitter::makeSpanId() {
   if (isPredictableModeForTest()) {
     return tracing::SpanId(predictableSpanId++);
@@ -277,6 +366,12 @@ void OtlpSpanSubmitter::exportBatch(rust::otlp::Batch batch) {
   if (batch.span_count == 0) return;
   auto request = kj::from<kj_rs::Rust>(batch.request).attach(kj::mv(batch.request));
   exporter->exportSpans(kj::mv(request), batch.span_count);
+}
+
+void OtlpSpanSubmitter::exportLogs(rust::otlp::LogBatch batch) {
+  if (batch.record_count == 0) return;
+  auto request = kj::from<kj_rs::Rust>(batch.request).attach(kj::mv(batch.request));
+  exporter->exportLogs(kj::mv(request), batch.record_count);
 }
 
 }  // namespace workerd

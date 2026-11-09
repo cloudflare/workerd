@@ -177,6 +177,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     }
   }
 
+  exportInvocationLog(context, timestamp, logLevel, message);
+
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
@@ -308,6 +310,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     stackPtr = s;
   }
   recordInvocationLevelException(context, name, message, stackPtr);
+  exportInvocationException(context.getSpanId(), timestamp, name, message, stackPtr);
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -349,6 +352,7 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
     stackPtr = s;
   }
   recordInvocationSpanException(code, name, message, stackPtr);
+  exportInvocationException(spanId, timestamp, name, message, stackPtr);
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -677,7 +681,9 @@ void BaseTracer::setStartInvocationSpanFunc(StartInvocationSpanFunc func) {
 void BaseTracer::startInvocationSpan(
     IoContext::IncomingRequest& incomingRequest, const tracing::EventInfo& info) {
   KJ_IF_SOME(func, startInvocationSpanFunc) {
-    invocationSpan = func(incomingRequest.getInvocationSpanContext());
+    auto started = func(incomingRequest.getInvocationSpanContext());
+    invocationSpan = kj::mv(started.span);
+    invocationLogs = kj::mv(started.logs);
     describeInvocationSpan(invocationSpan, info);
   }
 }
@@ -738,6 +744,28 @@ void BaseTracer::recordInvocationLevelException(const tracing::InvocationSpanCon
     kj::Maybe<kj::StringPtr> stack) {
   if (context.getSpanId() != SpanParent(invocationSpan).getSpanId()) return;
   recordInvocationSpanException(kj::none, name, message, stack);
+}
+
+void BaseTracer::exportInvocationLog(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    LogLevel level,
+    kj::StringPtr message) {
+  KJ_IF_SOME(logs, invocationLogs) {
+    auto truncated =
+        message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
+    logs->submitLog(context.getSpanId(), timestamp, level,
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated);
+  }
+}
+
+void BaseTracer::exportInvocationException(tracing::SpanId spanId,
+    kj::Date timestamp,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  KJ_IF_SOME(logs, invocationLogs) {
+    logs->submitException(spanId, timestamp, name, message, stack);
+  }
 }
 
 void BaseTracer::endInvocationSpan(

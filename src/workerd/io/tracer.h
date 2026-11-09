@@ -17,6 +17,39 @@ class TailStreamWriter;
 
 class WorkerTracer;
 
+// Takes the logs and exceptions of an invocation whose span is exported, along with its spans (see
+// BaseTracer::setStartInvocationSpanFunc()). They are the ones the streaming tail would get as
+// `log` and `exception` events. `spanId` is the span that was active, and `message` is a log's
+// JSON array of arguments unless `truncated`.
+class InvocationLogSubmitter {
+ public:
+  virtual ~InvocationLogSubmitter() noexcept(false) = default;
+
+  virtual void submitLog(tracing::SpanId spanId,
+      kj::Date timestamp,
+      LogLevel level,
+      kj::ArrayPtr<const char> message,
+      tracing::LogTruncated truncated) = 0;
+  virtual void submitException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::StringPtr name,
+      kj::StringPtr message,
+      kj::Maybe<kj::StringPtr> stack) = 0;
+};
+
+// An invocation's span as BaseTracer::setStartInvocationSpanFunc()'s hook opens it, and where the
+// invocation's logs go, if anywhere.
+struct StartedInvocationSpan {
+  // Implicit, so that a hook whose invocation's logs go nowhere can return the span alone.
+  StartedInvocationSpan(SpanBuilder span): span(kj::mv(span)) {}
+  StartedInvocationSpan(SpanBuilder span, kj::Own<InvocationLogSubmitter> logs)
+      : span(kj::mv(span)),
+        logs(kj::mv(logs)) {}
+
+  SpanBuilder span;
+  kj::Maybe<kj::Own<InvocationLogSubmitter>> logs;
+};
+
 // An abstract class that defines shares functionality for tracers that have different
 // characteristics. This interface is used to submit both buffered and streaming tail events.
 // TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
@@ -117,8 +150,11 @@ class BaseTracer: public kj::Refcounted {
   // context, whose ids the span takes. The tracer names and tags the span from the invocation's
   // events (see invocation-span.h), including those the worker reports for its active span, and
   // ends it with the outcome. The hook can supply a default sampling decision on the context
-  // before user spans and subrequests inherit it.
-  using StartInvocationSpanFunc = kj::Function<SpanBuilder(tracing::InvocationSpanContext&)>;
+  // before user spans and subrequests inherit it. When it also returns a log submitter, the
+  // tracer gives it the invocation's logs and exceptions until the tracer is destroyed, as the
+  // streaming tail gets them.
+  using StartInvocationSpanFunc =
+      kj::Function<StartedInvocationSpan(tracing::InvocationSpanContext&)>;
   void setStartInvocationSpanFunc(StartInvocationSpanFunc func);
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
@@ -162,10 +198,23 @@ class BaseTracer: public kj::Refcounted {
       kj::StringPtr message,
       kj::Maybe<kj::StringPtr> stack);
   void endInvocationSpan(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  // For implementations: hand a log, or an exception reported for `spanId`, to the invocation's
+  // log submitter if the hook returned one. A message too big on its own is truncated as the
+  // streaming tail truncates it.
+  void exportInvocationLog(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      LogLevel level,
+      kj::StringPtr message);
+  void exportInvocationException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::StringPtr name,
+      kj::StringPtr message,
+      kj::Maybe<kj::StringPtr> stack);
 
   // See setStartInvocationSpanFunc(). Null unless the tracer records the invocation's span.
   kj::Maybe<StartInvocationSpanFunc> startInvocationSpanFunc;
   SpanBuilder invocationSpan = nullptr;
+  kj::Maybe<kj::Own<InvocationLogSubmitter>> invocationLogs;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.

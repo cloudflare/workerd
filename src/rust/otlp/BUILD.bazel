@@ -12,5 +12,7 @@ wd_rust_crate(
     deps = [
         "@crates_vendor//:ada-url",
         "@crates_vendor//:prost",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
     ],
 )

@@ -59,11 +59,22 @@ class TestEntropySource final: public kj::EntropySource {
 class RecordingExporter final: public OtlpSpanExporter {
  public:
   uint spanCount = 0;
+  uint logCount = 0;
+  kj::Vector<kj::Array<const kj::byte>> logRequests;
 
   void exportSpans(kj::Array<const kj::byte> request, uint count) override {
     spanCount += count;
   }
+  void exportLogs(kj::Array<const kj::byte> request, uint count) override {
+    logCount += count;
+    logRequests.add(kj::mv(request));
+  }
 };
+
+bool contains(kj::ArrayPtr<const kj::byte> request, kj::StringPtr text) {
+  return std::string_view(request.asChars().begin(), request.size()).find(text.cStr()) !=
+      std::string_view::npos;
+}
 
 void expectPreciseTime(SpanObserver& observer) {
   auto before = kj::systemPreciseCalendarClock().now();
@@ -190,6 +201,57 @@ KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps"
   KJ_EXPECT(response.statusCode == 200);
   KJ_EXPECT(response.body == "[123]");
   KJ_EXPECT(exporter->spanCount == 1);
+}
+
+// Runs an invocation that logs and throws while its span is open, and logs again after it closed.
+kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs) {
+  TestFixture fixture;
+  TestEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
+    return startExportedInvocationSpan(entropy, exporter.addRef(),
+        tracing::SpanContext(context.getTraceId(), kj::none, context.getTraceFlags()),
+        {.serviceName = "log-test", .exportLogs = exportLogs}, context.getSpanId());
+  });
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
+  tracer->setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+  kj::Maybe<tracing::InvocationSpanContext> spanContext;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& c = spanContext.emplace(env.context.getInvocationSpanContext());
+    tracer->addLog(c, env.context.now(), LogLevel::LOG, kj::str("[\"in-invocation\"]"));
+    tracer->addException(c, env.context.now(), kj::str("Error"), kj::str("boom"), kj::none);
+  });
+  // The invocation's logs wait for its span.
+  KJ_EXPECT(exporter->logCount == 0);
+  tracer->setOutcome(EventOutcome::OK, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS);
+  // Like the streaming tail, the export takes logs until the tracer goes away.
+  tracer->addLog(KJ_ASSERT_NONNULL(spanContext), kj::UNIX_EPOCH, LogLevel::WARN,
+      kj::str("[\"after-outcome\"]"));
+  fixture.drainAndDestroy(kj::mv(request));
+  tracer = nullptr;
+  KJ_EXPECT(exporter->spanCount == 1);
+  return exporter;
+}
+
+KJ_TEST("an exported invocation exports its logs and exceptions") {
+  auto exporter = exportInvocation(ExportLogs::YES);
+  KJ_ASSERT(exporter->logRequests.size() == 2);
+  KJ_EXPECT(exporter->logCount == 3);
+  KJ_EXPECT(contains(exporter->logRequests[0], "in-invocation"));
+  KJ_EXPECT(contains(exporter->logRequests[0], "boom"));
+  KJ_EXPECT(contains(exporter->logRequests[0], "log-test"));
+  KJ_EXPECT(contains(exporter->logRequests[1], "after-outcome"));
+}
+
+KJ_TEST("an exported invocation exports no logs unless asked to") {
+  auto exporter = exportInvocation(ExportLogs::NO);
+  KJ_EXPECT(exporter->logCount == 0);
 }
 
 }  // namespace
