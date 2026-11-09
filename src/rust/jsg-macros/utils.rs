@@ -423,6 +423,27 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     fast_return.then_some(args)
 }
 
+/// Whether `sig` returns, directly or in a `Result`, `()` or one of the types a fast callback
+/// returns, none of which keeps a `creator` (see `ToJS::to_js_with_creator`).
+pub fn returns_primitive(sig: &syn::Signature) -> bool {
+    let syn::ReturnType::Type(_, ty) = &sig.output else {
+        return true;
+    };
+    let mut ty = ty.as_ref();
+    if is_result_type(ty)
+        && let syn::Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ok)) = args.args.first()
+    {
+        ty = ok;
+    }
+    match ty {
+        syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
+        ty => is_named_type(ty, FAST_API_RETURN_TYPES),
+    }
+}
+
 /// Whether `ty` is one of `names`, written bare.
 fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
     let syn::Type::Path(type_path) = ty else {
