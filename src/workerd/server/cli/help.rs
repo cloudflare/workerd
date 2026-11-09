@@ -42,7 +42,7 @@ macro_rules! cluster_options {
     () => {
         "\
 Cluster (experimental):
-      --cluster-addr <addr>          Override cluster address; keep private
+      --cluster-addr <addr>          Cluster address, joining if config has none
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. An
