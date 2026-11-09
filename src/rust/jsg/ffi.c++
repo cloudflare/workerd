@@ -743,6 +743,12 @@ uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
+  auto buf = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  byteLength = buf->ByteLength();
+  return byteLength == 0 ? 0 : reinterpret_cast<uintptr_t>(buf->Data());
+}
+
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
@@ -759,6 +765,22 @@ size_t local_array_buffer_view_byte_length(const Local& view) {
 
 uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
+}
+
+uintptr_t local_array_buffer_view_contents(const Local& value, size_t& byteLength) {
+  auto view = local_as_ref_from_ffi<v8::ArrayBufferView>(value);
+  byteLength = view->ByteLength();
+  if (byteLength == 0) return 0;
+  auto buffer = view->Buffer();
+  auto byteOffset = view->ByteOffset();
+  // As jsg::JsBufferSource::asArrayPtr(): the view's range is checked against the backing store,
+  // which the sandbox can't corrupt.
+  auto bufferLength = buffer->ByteLength();
+  if (byteOffset > bufferLength || byteLength > bufferLength - byteOffset) [[unlikely]] {
+    byteLength = 0;
+    return 0;
+  }
+  return reinterpret_cast<uintptr_t>(buffer->Data()) + byteOffset;
 }
 
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
@@ -1066,19 +1088,7 @@ size_t local_typed_array_byte_offset(const Local& array) {
 }
 
 uintptr_t local_typed_array_contents(const Local& array, size_t& byteLength) {
-  auto view = local_as_ref_from_ffi<v8::TypedArray>(array);
-  byteLength = view->ByteLength();
-  if (byteLength == 0) return 0;
-  auto buffer = view->Buffer();
-  auto byteOffset = view->ByteOffset();
-  // As jsg::JsBufferSource::asArrayPtr(): the view's range is checked against the backing store,
-  // which the sandbox can't corrupt.
-  auto bufferLength = buffer->ByteLength();
-  if (byteOffset > bufferLength || byteLength > bufferLength - byteOffset) [[unlikely]] {
-    byteLength = 0;
-    return 0;
-  }
-  return reinterpret_cast<uintptr_t>(buffer->Data()) + byteOffset;
+  return local_array_buffer_view_contents(array, byteLength);
 }
 
 size_t local_typed_array_byte_length(const Local& array) {

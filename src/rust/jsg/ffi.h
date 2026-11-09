@@ -429,12 +429,14 @@ MaybeLocal array_buffer_new_with_mode(
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
 size_t local_array_buffer_byte_length(const Local& buffer);
 uint8_t* local_array_buffer_data(const Local& buffer);
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<ArrayBufferView>
 size_t local_array_buffer_view_byte_offset(const Local& view);
 size_t local_array_buffer_view_byte_length(const Local& view);
 uint8_t* local_array_buffer_view_buffer_data(const Local& view);
+uintptr_t local_array_buffer_view_contents(const Local& view, size_t& byteLength);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
 size_t local_array_buffer_view_element_size(const Local& view);
 bool local_array_buffer_view_is_integer_type(const Local& view);
