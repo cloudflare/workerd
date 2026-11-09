@@ -33,6 +33,13 @@ constexpr uint64_t QUICK_MIN_TIME_NS = 10'000'000;
 constexpr uint64_t QUICK_WARMUP_NS = 2'000'000;
 constexpr uint32_t QUICK_SAMPLES = 5;
 
+// Untimed starts before a startup group's samples, except under --quick.
+constexpr uint32_t STARTUP_WARMUPS = 1;
+
+// A startup group stops at the sampling budget only once it has at least this many samples, so
+// that a slow Worker still gets usable statistics.
+constexpr uint32_t STARTUP_MIN_SAMPLES = 5;
+
 // A calibrated batch takes at least this long, so that clock resolution and the cost of reading
 // the clocks don't matter.
 constexpr uint64_t MIN_BATCH_NS = 1'000'000;
@@ -263,17 +270,82 @@ void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::
   }
 }
 
-struct BenchController::BatchTiming {
-  int64_t wallNs = 0;
-  int64_t cpuNs = 0;
+BenchTiming BenchTiming::now() {
+  return {.wallNs = monotonicNs(), .cpuNs = threadCpuNs()};
+}
 
-  static BatchTiming now() {
-    return {.wallNs = monotonicNs(), .cpuNs = threadCpuNs()};
+kj::Promise<void> benchWorkerStartup(bench::BenchParams::Reader params,
+    kj::Function<kj::Promise<WorkerStartupTiming>()> startWorker,
+    bench::BenchReport::Group::Builder report) {
+  report.setStartup(true);
+
+  struct Phase {
+    kj::StringPtr name;
+    BenchTiming WorkerStartupTiming::*timing;
+  };
+  // The prefix keeps a pattern meant for a handler's cases, such as "w*", from selecting a phase.
+  // Its separator isn't "/", after which kj::GlobFilter starts matching the pattern again.
+  static constexpr Phase PHASES[] = {
+    {"startup:isolate"_kj, &WorkerStartupTiming::isolate},
+    {"startup:script"_kj, &WorkerStartupTiming::script},
+    {"startup:worker"_kj, &WorkerStartupTiming::worker},
+    {"startup:total"_kj, &WorkerStartupTiming::total},
+  };
+  auto caseFilter = params.getCaseFilter();
+  kj::GlobFilter filter(caseFilter == ""_kj ? "*"_kj : caseFilter);
+  kj::Vector<const Phase*> selected;
+  for (auto& phase: PHASES) {
+    if (filter.matches(phase.name)) selected.add(&phase);
   }
-  BatchTiming operator-(const BatchTiming& other) const {
-    return {.wallNs = wallNs - other.wallNs, .cpuNs = cpuNs - other.cpuNs};
+  if (selected.empty()) co_return;
+
+  // Each start is a sample, so there is no batch to calibrate. Starts stop at `samples`, or at the
+  // sampling budget once there are enough of them to summarize. Except under --quick, starts that
+  // aren't timed go first, like a case's warmup.
+  bool quick = params.getQuick();
+  auto defaults = params.getDefaults();
+  auto samples = defaults.getSamples();
+  if (samples == 0) samples = DEFAULT_SAMPLES;
+  samples = kj::min(samples, quick ? QUICK_SAMPLES : MAX_SAMPLES);
+  auto budgetNs = defaults.getMinTimeNs();
+  if (budgetNs == 0) budgetNs = DEFAULT_MIN_TIME_NS;
+  if (quick) budgetNs = kj::min(budgetNs, QUICK_MIN_TIME_NS);
+  uint32_t warmups = quick ? 0 : STARTUP_WARMUPS;
+
+  kj::Vector<WorkerStartupTiming> timings(samples);
+  kj::Maybe<kj::Exception> failure;
+  try {
+    for (uint32_t i = 0; i < warmups; ++i) {
+      co_await startWorker();
+    }
+    uint64_t sampledNs = 0;
+    while (timings.size() < samples &&
+        (timings.size() < STARTUP_MIN_SAMPLES || sampledNs < budgetNs)) {
+      auto& timing = timings.add(co_await startWorker());
+      sampledNs += static_cast<uint64_t>(kj::max(timing.total.wallNs, int64_t{0}));
+    }
+  } catch (...) {
+    failure = kj::getCaughtExceptionAsKj();
   }
-};
+  KJ_IF_SOME(exception, failure) {
+    report.setError(exception.getDescription());
+    co_return;
+  }
+
+  BenchGroupResult result{.cases = KJ_MAP(phase, selected) {
+    auto metric = [&](int64_t BenchTiming::*clock) {
+      return KJ_MAP(timing,
+          timings) { return static_cast<double>((timing.*(phase->timing)).*clock); };
+    };
+    return BenchCaseResult{
+      .name = kj::str(phase->name),
+      .iterationsPerSample = 1,
+      .wallNs = metric(&BenchTiming::wallNs),
+      .cpuNs = metric(&BenchTiming::cpuNs),
+    };
+  }};
+  fillBenchReport(result, report);
+}
 
 struct BenchController::CaseRun {
   enum class Phase { WARMUP, CALIBRATE, SAMPLE };
@@ -494,7 +566,7 @@ jsg::Promise<BenchCaseResult> BenchController::step(jsg::Lock& js, kj::Own<CaseR
         .then(js,
             IoContext::current().addFunctor(
                 [self = self.addRef(), run = kj::mv(run)](
-                    jsg::Lock& js, BatchTiming timing) mutable -> jsg::Promise<BenchCaseResult> {
+                    jsg::Lock& js, BenchTiming timing) mutable -> jsg::Promise<BenchCaseResult> {
       using Phase = CaseRun::Phase;
       auto& c = self->cases[run->index];
       auto wallNs = static_cast<uint64_t>(kj::max(timing.wallNs, int64_t{0}));
@@ -544,20 +616,19 @@ jsg::Promise<BenchCaseResult> BenchController::step(jsg::Lock& js, kj::Own<CaseR
   });
 }
 
-jsg::Promise<BenchController::BatchTiming> BenchController::runBatch(
-    jsg::Lock& js, size_t index, uint64_t calls) {
+jsg::Promise<BenchTiming> BenchController::runBatch(jsg::Lock& js, size_t index, uint64_t calls) {
   // Times the batch given the setup result (undefined without `setup`), then runs `teardown`.
   auto timeBatch = [self = JSG_THIS, index, calls](
-                       jsg::Lock& js, jsg::Value state) mutable -> jsg::Promise<BatchTiming> {
+                       jsg::Lock& js, jsg::Value state) mutable -> jsg::Promise<BenchTiming> {
     if (self->cases[index].teardown == kj::none) {
-      return self->callBatch(js, index, kj::mv(state), calls, BatchTiming::now());
+      return self->callBatch(js, index, kj::mv(state), calls, BenchTiming::now());
     }
     auto teardownState = state.addRef(js);
-    return self->callBatch(js, index, kj::mv(state), calls, BatchTiming::now())
+    return self->callBatch(js, index, kj::mv(state), calls, BenchTiming::now())
         .then(js,
             IoContext::current().addFunctor(
                 [self = self.addRef(), index, state = kj::mv(teardownState)](
-                    jsg::Lock& js, BatchTiming timing) mutable {
+                    jsg::Lock& js, BenchTiming timing) mutable {
       auto& teardown = KJ_ASSERT_NONNULL(self->cases[index].teardown);
       return settle(js, teardown(js, kj::mv(state))).then(js, [timing](jsg::Lock&, jsg::Value) {
         return timing;
@@ -571,8 +642,8 @@ jsg::Promise<BenchController::BatchTiming> BenchController::runBatch(
   return timeBatch(js, js.v8Ref(js.v8Undefined()));
 }
 
-jsg::Promise<BenchController::BatchTiming> BenchController::callBatch(
-    jsg::Lock& js, size_t index, jsg::Value state, uint64_t remaining, BatchTiming start) {
+jsg::Promise<BenchTiming> BenchController::callBatch(
+    jsg::Lock& js, size_t index, jsg::Value state, uint64_t remaining, BenchTiming start) {
   auto& c = cases[index];
   auto isolate = js.v8Isolate;
   auto context = js.v8Context();
@@ -605,7 +676,7 @@ jsg::Promise<BenchController::BatchTiming> BenchController::callBatch(
       }));
     }
   }
-  return js.resolvedPromise(BatchTiming::now() - start);
+  return js.resolvedPromise(BenchTiming::now() - start);
 }
 
 void BenchController::visitForGc(jsg::GcVisitor& visitor) {

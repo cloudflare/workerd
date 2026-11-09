@@ -1845,3 +1845,22 @@ wd_cli_test(
         "//src/workerd/server:workerd",
     ],
 )
+
+# Checks that `workerd bench` runs its startup group with the inspector enabled.
+wd_cli_test(
+    name = "bench-inspector-test",
+    src = "bench-inspector-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "bench",
+        "$(location bench-inspector-test.wd-bench)",
+        "--quick",
+        # Port 0 binds an ephemeral port, so parallel runs do not collide.
+        "--inspector-addr=127.0.0.1:0",
+    ],
+    data = [
+        "bench-inspector-test.js",
+        "bench-inspector-test.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
+)

@@ -8,6 +8,7 @@ wd_rust_crate(
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/server/factory:bootstrap-hdrs",
         "//src/workerd/server/factory:worker-factory-hdrs",
+        "//src/workerd/util:thread-scopes",
     ],
     cxx_bridge_hdrs = [],
     cxx_bridge_src = "bridge.rs",
