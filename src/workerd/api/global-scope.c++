@@ -1339,6 +1339,27 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   }
 }
 
+kj::Maybe<jsg::JsObject> ServiceWorkerGlobalScope::getSnapshotState(jsg::Lock& js) {
+  if (processValue == kj::none && bufferValue == kj::none) return kj::none;
+  auto state = js.objNoProto();
+  KJ_IF_SOME(p, processValue) {
+    state.set(js, "process"_kj, p.getHandle(js));
+  }
+  KJ_IF_SOME(b, bufferValue) {
+    state.set(js, "Buffer"_kj, b.getHandle(js));
+  }
+  return state;
+}
+
+void ServiceWorkerGlobalScope::restoreSnapshotState(jsg::Lock& js, jsg::JsObject state) {
+  if (state.has(js, "process"_kj)) {
+    processValue = jsg::JsRef(js, state.get(js, "process"_kj));
+  }
+  if (state.has(js, "Buffer"_kj)) {
+    bufferValue = jsg::JsRef(js, state.get(js, "Buffer"_kj));
+  }
+}
+
 void ServiceWorkerGlobalScope::setProcess(jsg::Lock& js, jsg::JsValue newProcess) {
   processValue = jsg::JsRef(js, newProcess);
 }
