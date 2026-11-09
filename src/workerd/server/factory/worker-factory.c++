@@ -1560,6 +1560,120 @@ kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags
   }
 }
 
+bool isPythonWorker(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
+  if (!featureFlags.getPythonWorkers()) return false;
+  KJ_IF_SOME(modules, source.variant.tryGet<WorkerSource::ModulesSource>()) {
+    return modules.isPython;
+  }
+  return false;
+}
+
+// The Pyodide bundles for `flags`, as the snapshot harness takes them. preloadPython() must have
+// fetched the runtime bundle.
+api::pyodide::PyodideSnapshotArtifacts pyodideSnapshotArtifacts(
+    const api::pyodide::PythonConfig& pythonConfig, CompatibilityFlags::Reader flags) {
+  auto release = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(flags));
+  auto version = getPythonBundleName(release);
+  return {
+    .staticBundle = PYODIDE_BUNDLE,
+    .runtimeBundle = KJ_ASSERT_NONNULL(pythonConfig.pyodideBundleManager.getPyodideBundle(version),
+        "Pyodide bundle was not preloaded", version),
+    .pyodideVersion = kj::str(release.getRealPyodideVersion()),
+    .compatibilityFlagsJson = getPythonCompatibilityFlagsJson(flags),
+  };
+}
+
+// The V8 heap snapshot of Pyodide a Python worker with `flags` starts from, if any.
+//
+// With the PYTHON_V8_SNAPSHOT autogate, every Python worker starts from a snapshot: the first one
+// for a given Pyodide version and Python compatibility flags builds it in-process (and so pays
+// for it) and later ones share it. `--python-save-v8-snapshot` additionally writes the first
+// snapshot built to disk, and `--python-load-v8-snapshot` seeds the cache from such a file; with
+// the autogate off, those two options are the only way a snapshot gets built or used.
+kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideV8Snapshot(
+    WorkerFactory::Impl& factory, CompatibilityFlags::Reader flags) {
+  auto& pythonConfig = factory.options->pythonConfig;
+  bool autogate = util::Autogate::isEnabled(util::AutogateKey::PYTHON_V8_SNAPSHOT);
+  if (!autogate && pythonConfig.saveV8Snapshot == kj::none &&
+      pythonConfig.loadV8Snapshot == kj::none) {
+    return kj::none;
+  }
+
+  if (!pythonV8SnapshotSupported(flags)) return kj::none;
+  // A V8 snapshot does not compose with Python memory snapshots yet: both describe the state
+  // after the baseline load, and the memory snapshot path (which also mounts the worker's files
+  // differently) has to be applied on top of a restored Pyodide rather than instead of a load.
+  // Workers that load or make a memory snapshot keep today's path.
+  if (pythonConfig.loadSnapshotFromDisk != kj::none || pythonConfig.createSnapshot ||
+      pythonConfig.createBaselineSnapshot) {
+    KJ_REQUIRE(pythonConfig.saveV8Snapshot == kj::none && pythonConfig.loadV8Snapshot == kj::none,
+        "--python-save-v8-snapshot/--python-load-v8-snapshot cannot be combined with "
+        "--python-save-snapshot/--python-load-snapshot");
+    return kj::none;
+  }
+
+  auto artifacts = pyodideSnapshotArtifacts(pythonConfig, flags);
+  auto key = artifacts.key();
+  KJ_IF_SOME(cached, factory.pyodideV8Snapshots.find(key)) {
+    return cached.map([](auto& loaded) { return loaded.addRef(); });
+  }
+
+  KJ_IF_SOME(name, pythonConfig.loadV8Snapshot) {
+    auto& dir = KJ_REQUIRE_NONNULL(
+        pythonConfig.snapshotDirectory, "--python-load-v8-snapshot needs --python-snapshot-dir");
+    auto bytes = dir->openFile(kj::Path(name))->readAllBytes();
+    auto loaded = api::pyodide::LoadedPyodideSnapshot::fromFile(bytes);
+    if (loaded->snapshot.key != key) {
+      // The file serves one Pyodide version and set of load flags; workers with another load
+      // Pyodide from scratch, as the save run let them.
+      KJ_LOG(WARNING,
+          "the Pyodide V8 snapshot file is for a different Pyodide version or "
+          "compatibility flags; this worker loads Pyodide from scratch",
+          name, loaded->snapshot.key, key);
+      factory.pyodideV8Snapshots.insert(kj::mv(key), kj::none);
+      return kj::none;
+    }
+    KJ_LOG(INFO, "loaded Pyodide V8 snapshot", name, bytes.size());
+    factory.pyodideV8Snapshots.insert(kj::mv(key), loaded.addRef());
+    return kj::mv(loaded);
+  }
+
+  if (!autogate && factory.savedPyodideV8Snapshot) return kj::none;
+
+  KJ_LOG(INFO, "building Pyodide V8 snapshot", key);
+  kj::Maybe<api::pyodide::PyodideSnapshot> maybeSnapshot;
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    maybeSnapshot = jsg::runInV8Stack([&](jsg::V8StackScope&) {
+      return api::pyodide::buildPyodideBaselineSnapshot([&factory](v8::Isolate* isolate) {
+        return factory.v8System.pumpMessageLoop(isolate);
+      }, artifacts);
+    });
+  })) {
+    // Workers with these flags load Pyodide the ordinary way from now on. `--python-save-v8-
+    // snapshot` is an explicit request, though, so there the failure is the caller's.
+    KJ_REQUIRE(pythonConfig.saveV8Snapshot == kj::none, "building the Pyodide V8 snapshot failed",
+        exception);
+    KJ_LOG(ERROR, "building the Pyodide V8 snapshot failed; its workers load Pyodide from scratch",
+        key, exception);
+    factory.pyodideV8Snapshots.insert(kj::mv(key), kj::none);
+    return kj::none;
+  }
+  auto snapshot = KJ_ASSERT_NONNULL(kj::mv(maybeSnapshot));
+  KJ_IF_SOME(name, pythonConfig.saveV8Snapshot) {
+    if (!factory.savedPyodideV8Snapshot) {
+      factory.savedPyodideV8Snapshot = true;
+      auto& dir = KJ_REQUIRE_NONNULL(
+          pythonConfig.snapshotDirectory, "--python-save-v8-snapshot needs --python-snapshot-dir");
+      auto bytes = api::pyodide::serializePyodideSnapshot(snapshot);
+      dir->openFile(kj::Path(name), kj::WriteMode::CREATE | kj::WriteMode::MODIFY)->writeAll(bytes);
+      KJ_LOG(INFO, "wrote Pyodide V8 snapshot", name, bytes.size());
+    }
+  }
+  auto loaded = api::pyodide::LoadedPyodideSnapshot::fromSnapshot(kj::mv(snapshot));
+  factory.pyodideV8Snapshots.insert(kj::mv(key), loaded.addRef());
+  return kj::mv(loaded);
+}
+
 bool hasWasmModules(const WorkerSource& source) {
   KJ_IF_SOME(modules, source.variant.tryGet<WorkerSource::ModulesSource>()) {
     for (auto& module: modules.modules) {
@@ -1695,6 +1809,12 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     }
   }
 
+  // Python workers start from a V8 heap snapshot of Pyodide when one is configured.
+  kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideSnapshot;
+  if (isPythonWorker(featureFlags, workerSource)) {
+    pyodideSnapshot = pyodideV8Snapshot(factory, featureFlags);
+  }
+
   // The isolate of the Worker, or of the zygote that snapshots its startup.
   auto makeIsolate = [&](kj::StringPtr isolateName, Worker::Isolate::InspectorPolicy policy,
                          kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
@@ -1706,10 +1826,15 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         .port = listener.port,
       };
     };
+    KJ_IF_SOME(loaded, pyodideSnapshot) {
+      KJ_REQUIRE(snapshotConfig == kj::none);
+      snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{loaded->artifact.addRef()});
+    }
     auto api = kj::heap<WorkerdApi>(factory.v8System, featureFlags, extensions,
         limitEnforcer->getCreateParams(), jsg::newIsolateGroup(),
         kj::atomicRefcounted<JsgIsolateObserver>(), *factory.memoryCacheProvider,
-        options.pythonConfig, kj::mv(listeners), kj::mv(snapshotConfig));
+        options.pythonConfig, kj::mv(listeners), kj::mv(snapshotConfig), kj::none,
+        pyodideSnapshot.map([](auto& s) { return s.addRef(); }));
     Worker::LoggingOptions isolateLoggingOptions = options.loggingOptions;
     isolateLoggingOptions.consoleMode =
         workerSource.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry

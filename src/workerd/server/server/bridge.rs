@@ -209,6 +209,8 @@ pub mod ffi {
         python_save_baseline_snapshot: bool,
         python_load_snapshot: KjMaybe<String>,
         python_snapshot_dir: KjMaybe<String>,
+        python_save_v8_snapshot: KjMaybe<String>,
+        python_load_v8_snapshot: KjMaybe<String>,
     }
 
     /// The options of `test` the C++ driver applies: logging, V8 modes, autogates, the

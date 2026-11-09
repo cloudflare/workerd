@@ -89,6 +89,12 @@ class V8System {
   using FatalErrorCallback = void(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
+  // Runs the platform's pending foreground tasks for `isolate` once; returns whether any ran.
+  // For isolates that jsg does not manage (e.g. one building a snapshot).
+  bool pumpMessageLoop(v8::Isolate* isolate) {
+    return pumpMsgLoop(isolate);
+  }
+
  private:
   kj::Own<v8::Platform> platformInner;
   kj::Own<V8PlatformWrapper> platformWrapper;

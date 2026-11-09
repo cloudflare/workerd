@@ -393,6 +393,16 @@ pub struct ServeOrTestArgs {
     /// Set the snapshot snapshot directory.
     #[arg(long, value_name = "path")]
     pub python_snapshot_dir: Option<String>,
+
+    /// Save a V8 heap snapshot of a freshly loaded Pyodide to <name> in the python snapshot
+    /// directory. Experimental.
+    #[arg(long, value_name = "name")]
+    pub python_save_v8_snapshot: Option<String>,
+
+    /// Start Python workers from the V8 heap snapshot <name> in the python snapshot directory.
+    /// Experimental.
+    #[arg(long, value_name = "name")]
+    pub python_load_v8_snapshot: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -735,6 +745,8 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
             python_load_snapshot: args.python_load_snapshot.clone().into(),
             python_snapshot_dir: args.python_snapshot_dir.clone().into(),
+            python_save_v8_snapshot: args.python_save_v8_snapshot.clone().into(),
+            python_load_v8_snapshot: args.python_load_v8_snapshot.clone().into(),
         }
     }
 }

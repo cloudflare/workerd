@@ -1,0 +1,74 @@
+# The first Python worker of its process: builds the V8 heap snapshot of Pyodide and starts from
+# it. worker.py, with nodejs_compat, then shares that snapshot.
+import asyncio
+import sys
+
+import js
+from js import globalThis
+
+from pyodide.ffi import run_sync
+from workers import WorkerEntrypoint
+
+# State created at the top level of the worker, i.e. after the snapshot.
+TOP_LEVEL = {"n": sum(range(1000))}
+
+
+def test():
+    import pyodide_js
+
+    assert pyodide_js._api.restoredFromV8Snapshot is True
+
+    # Python's `js` module is this worker's global scope, not the snapshot's.
+    assert js == globalThis
+    assert hasattr(js, "Response")
+    assert hasattr(js, "fetch")
+    assert TOP_LEVEL["n"] == 499500
+
+    # The baseline imports are present and functional.
+    for name in ("asyncio", "zipfile", "typing", "inspect", "re"):
+        assert name in sys.modules, name
+    import re
+
+    assert re.sub("a+", "b", "caaat") == "cbt"
+
+    # Host integration points that the snapshot cannot carry: timers and randomness.
+    import random
+
+    assert 0 <= random.random() < 1
+
+    # The restored context is as restricted as the worker's: Python's clock is the worker's
+    # performance.now() (Emscripten reads it from the restored context's global, which forwards
+    # to the worker's), and it cannot compile code from strings.
+    import time
+
+    from pyodide.ffi import create_proxy
+
+    real_now = js.performance.now
+    fake_now = create_proxy(lambda *_: 1234567.0)
+    js.performance.now = fake_now
+    try:
+        assert time.perf_counter() == 1234.567, time.perf_counter()
+    finally:
+        js.performance.now = real_now
+        fake_now.destroy()
+    try:
+        pyodide_js.constructor.constructor("return 1")()
+    except Exception as e:  # noqa: BLE001
+        assert "EvalError" in type(e).__name__ or "disallowed" in str(e).lower(), repr(e)
+    else:
+        raise AssertionError("eval was allowed in the restored context")
+
+    async def later():
+        await asyncio.sleep(0.01)
+        return 7
+
+    assert run_sync(later()) == 7
+    assert run_sync(js.Promise.resolve(41)) + 1 == 42
+
+    # Calling back from JS into Python.
+    assert js.Array.of(0, 1, 2).map(lambda x, *_: x * 2).to_py() == [0, 2, 4]
+
+
+class Default(WorkerEntrypoint):
+    async def test(self):
+        test()

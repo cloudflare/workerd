@@ -267,6 +267,12 @@ class Bootstrap {
     KJ_IF_SOME(path, serveOrTest.python_snapshot_dir) {
       python.snapshotDirectory = openWritableDirectory(kj::str(path));
     }
+    KJ_IF_SOME(name, serveOrTest.python_save_v8_snapshot) {
+      python.saveV8Snapshot = kj::str(name);
+    }
+    KJ_IF_SOME(name, serveOrTest.python_load_v8_snapshot) {
+      python.loadV8Snapshot = kj::str(name);
+    }
   }
 
   // The `test` options that apply to the process.

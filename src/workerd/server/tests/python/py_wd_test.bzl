@@ -199,8 +199,18 @@ def py_wd_test(
         make_snapshot = True,
         use_snapshot = "stacked",
         skip_default_data = False,
+        v8_snapshot = False,
         **kwargs):
+    """Defines Python worker tests, one per Pyodide version in `python_flags`.
+
+    With `v8_snapshot`, the test instead runs workerd twice without memory snapshots: once writing
+    a V8 heap snapshot of Pyodide and once starting from it.
+    """
     python_flags = compute_python_flags(python_flags, skip_python_flags)
+    if v8_snapshot:
+        make_snapshot = False
+        use_snapshot = None
+        kwargs["python_v8_snapshot_test"] = True
     if data == None:
         data = []
     if directory and not skip_default_data:

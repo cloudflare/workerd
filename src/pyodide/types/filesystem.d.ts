@@ -23,6 +23,8 @@ interface FSLookupResult<Info> {
 }
 
 interface FS {
+  root: FSNode<unknown>;
+  getMounts(mount: FSMount): FSMount[];
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
   writeFile: (
@@ -107,6 +109,7 @@ interface FSStreamOps<Info> {
 
 interface FSMount {
   type: EmscriptenFS<any>;
+  mounts: FSMount[];
 }
 
 interface FSNode<Info> {

@@ -16,7 +16,8 @@ namespace workerd {
 namespace api {
 namespace pyodide {
 struct PythonConfig;
-}
+struct LoadedPyodideSnapshot;
+}  // namespace pyodide
 }  // namespace api
 }  // namespace workerd
 namespace workerd {
@@ -49,7 +50,8 @@ class WorkerdApi final: public Worker::Api {
       const PythonConfig& pythonConfig,
       kj::Array<Worker::Api::InboundListener> inboundListeners = nullptr,
       kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none,
-      kj::Maybe<const EmbedderBootstrap&> embedderBootstrap = kj::none);
+      kj::Maybe<const EmbedderBootstrap&> embedderBootstrap = kj::none,
+      kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideV8Snapshot = kj::none);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);

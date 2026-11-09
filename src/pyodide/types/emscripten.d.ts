@@ -41,6 +41,8 @@ interface API {
     pyimport_impl: PyCallable;
   };
   serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
+  // The values of the first hiwire slots, in slot order.
+  getExpectedKeys(): unknown[];
   pyVersionTuple: [number, number, number];
   scheduleCallback: (callback: () => void, timeout: number) => void;
   // Callback invoked when Pyodide encounters a fatal error. Setting this allows
@@ -48,6 +50,8 @@ interface API {
   on_fatal?: (error: any) => void;
   // exists from 314.0.0
   initializeNodeSockFS?: (connect: unknown) => void | Promise<void>;
+  // Set by workerd when this Pyodide was restored from a V8 heap snapshot rather than loaded.
+  restoredFromV8Snapshot?: boolean;
 }
 
 interface LDSO {
@@ -110,6 +114,8 @@ interface Module {
     localScope: object
   ) => WebAssembly.Exports;
   growMemory(newSize: number): void;
+  // Stores `value` in Pyodide's JS reference table at `index`; negative on failure.
+  __hiwire_set(index: number, value: unknown): number;
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;

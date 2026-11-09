@@ -9,6 +9,7 @@
 #include "worker-factory.h"
 
 #include <workerd/api/bench.h>
+#include <workerd/api/pyodide/snapshot-harness.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -95,6 +96,15 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
   kj::Own<Options> options;
+
+  // The V8 heap snapshots of Pyodide that Python workers start from, by
+  // PyodideSnapshotArtifacts::key(): built by the first Python worker needing one (under the
+  // PYTHON_V8_SNAPSHOT autogate) or loaded from `--python-load-v8-snapshot`. A key whose build
+  // failed maps to none, so that it is not retried.
+  kj::HashMap<kj::String, kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>>>
+      pyodideV8Snapshots;
+  // Whether `--python-save-v8-snapshot` has been honored.
+  bool savedPyodideV8Snapshot = false;
 
   // The reader borrows the message, so the message is declared first.
   ::rust::Vec<uint64_t> configMessage;

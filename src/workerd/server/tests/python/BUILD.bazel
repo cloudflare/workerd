@@ -20,6 +20,61 @@ vendored_py_wd_test(
 
 py_wd_test("hello")
 
+# Python workers starting from a V8 heap snapshot of Pyodide: written to and read back from disk
+# by two workerd runs, and built in-process by one worker and shared with another whose
+# compatibility flags differ in nodejs_compat.
+#
+# A snapshot is only built for workers with every Python flag that predates their Pyodide release
+# on. The compat date gives most of them; python_dedicated_snapshot is implied by the 0.28.2
+# release flag, which these tests disable to pin their release; and enable_python_external_sdk
+# means the SDK must be vendored.
+vendored_py_wd_test(
+    "v8-snapshot",
+    compat_date = "2026-11-05",
+    feature_flags = ["python_dedicated_snapshot"],
+    level = 0,
+    main_py_file = "v8-snapshot/worker.py",
+    python_flags = ["development", "314.0.6", "314.0.4"],
+    test_template = "v8-snapshot/v8-snapshot.wd-test",
+    v8_snapshot = True,
+    vendored_package_name = "python-workers-runtime-sdk",
+)
+
+# Native extensions (numpy's) in a worker started from the snapshot. The default compatibility
+# date keeps enable_python_external_sdk off, so the built-in SDK serves; the load flags that
+# eligibility needs are passed explicitly.
+vendored_py_wd_test(
+    "v8-snapshot-numpy",
+    feature_flags = [
+        "python_process_pth_files",
+        "enable_weak_ref",
+    ],
+    level = 0,
+    main_py_file = "v8-snapshot-numpy/worker.py",
+    make_snapshot = False,
+    python_flags = ["development", "314.0.6", "314.0.4"],
+    test_template = "v8-snapshot-numpy/v8-snapshot-numpy.wd-test",
+    use_snapshot = None,
+    vendored_package_name = "numpy",
+)
+
+vendored_py_wd_test(
+    "v8-snapshot-nodejs-compat",
+    compat_date = "2026-11-05",
+    data = [
+        "v8-snapshot-nodejs-compat/disabled_flag_worker.py",
+        "v8-snapshot-nodejs-compat/plain_worker.py",
+    ],
+    feature_flags = ["python_dedicated_snapshot"],
+    level = 0,
+    main_py_file = "v8-snapshot-nodejs-compat/worker.py",
+    make_snapshot = False,
+    python_flags = ["development", "314.0.6", "314.0.4"],
+    test_template = "v8-snapshot-nodejs-compat/v8-snapshot-nodejs-compat.wd-test",
+    use_snapshot = None,
+    vendored_package_name = "python-workers-runtime-sdk",
+)
+
 py_wd_test("top-level-tests")
 
 py_wd_test("env-param")

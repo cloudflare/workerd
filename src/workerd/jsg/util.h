@@ -9,6 +9,7 @@
 #include <workerd/jsg/exception.h>
 
 #include <v8-array-buffer.h>
+#include <v8-context.h>
 #include <v8-exception.h>
 #include <v8-local-handle.h>
 #include <v8-primitive.h>
@@ -471,8 +472,36 @@ struct LiftKj_<v8::Local<v8::Promise>> {
 // concerned, it will likely be one of the ones listed here:
 //
 // https://heycam.github.io/webidl/#dfn-error-names-table
+namespace _ {
+
+// Property callbacks (native data properties, interceptors) run in the caller's context, unlike
+// API functions, which V8 runs in the context they were created in. An object may be reached from
+// another context of the same isolate, such as the context Python runs in when a worker starts
+// from a Pyodide snapshot; that context's embedder slots (module registry, global wrapper, ...)
+// do not describe the object, so the callback runs in the holder's own context.
+template <typename Info>
+struct HolderContextScope {
+  explicit HolderContextScope(const Info&) {}
+};
+
+template <typename T>
+struct HolderContextScope<v8::PropertyCallbackInfo<T>> {
+  explicit HolderContextScope(const v8::PropertyCallbackInfo<T>& info) {
+    auto isolate = info.GetIsolate();
+    v8::Local<v8::Context> holderContext;
+    if (info.Holder()->GetCreationContext(isolate).ToLocal(&holderContext) &&
+        holderContext != isolate->GetCurrentContext()) {
+      scope.emplace(holderContext);
+    }
+  }
+  kj::Maybe<v8::Context::Scope> scope;
+};
+
+}  // namespace _
+
 template <typename Info, typename Func>
 void liftKj(const Info& info, Func&& func) {
+  _::HolderContextScope<Info> holderContext(info);
   LiftKj_<decltype(func())>::apply(info, kj::fwd<Func>(func));
 }
 

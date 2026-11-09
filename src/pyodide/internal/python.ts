@@ -32,6 +32,7 @@ import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
 import { default as cloudflareWorkers } from 'cloudflare-internal:workers';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
+import { default as RestoredPyodide } from 'pyodide-internal:restored';
 import {
   PythonUserError,
   PythonWorkersInternalError,
@@ -42,7 +43,10 @@ import {
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
 import { default as introspectionSource } from 'pyodide-internal:introspection.py';
-import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
+import {
+  getTrustedReadFunc,
+  trustRestoredReadOnlyFileSystems,
+} from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
 import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
@@ -258,6 +262,49 @@ function compileModuleFromReadOnlyFS(
   return UnsafeEval.newWasmModule(buffer);
 }
 
+// The hiwire table slot that Python's `js` module refers to. Its value is
+// `Module.API.config.jsglobals`, the second of `Module.API.getExpectedKeys()`.
+const JSGLOBALS_HIWIRE_INDEX = 1;
+
+/**
+ * Adopts a Pyodide restored from a V8 heap snapshot (see
+ * src/workerd/api/pyodide/snapshot-harness.h) into this worker. The snapshot was taken at the
+ * baseline, in a bare context: everything up to and including `maybeCollectBaselineSnapshot` has
+ * already happened, and the hooks that connect Python to the host (the `js` module's target,
+ * timers, random numbers) point at that context's placeholders and are redirected here.
+ */
+function adoptRestoredPyodide(pyodide: Pyodide): Module {
+  const Module = pyodide._module;
+  Module.API.restoredFromV8Snapshot = true;
+  // Shared libraries are compiled by this context (compileModuleFromReadOnlyFS checks that they
+  // come from a read-only filesystem, so the ones mounted at the baseline must be known to it) and
+  // instantiated by the snapshot's, which accepts modules from any context once restored.
+  Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
+  trustRestoredReadOnlyFileSystems(Module);
+  // getExpectedKeys() lists the values of the first hiwire slots in order, so it says where the
+  // `js` module's target lives; check that the hard-coded index has not drifted before writing.
+  if (
+    Module.API.getExpectedKeys()[JSGLOBALS_HIWIRE_INDEX] !==
+    Module.API.config.jsglobals
+  ) {
+    throw new PythonWorkersInternalError(
+      'unexpected Pyodide hiwire layout: jsglobals is not at the expected slot'
+    );
+  }
+  Module.API.config.jsglobals = globalThis;
+  if (Module.__hiwire_set(JSGLOBALS_HIWIRE_INDEX, globalThis) < 0) {
+    throw new PythonWorkersInternalError('failed to set the js module target');
+  }
+  Module.setGetRandomValues(getRandomValues);
+  Module.setSetTimeout(
+    makeSetTimeout(Module),
+    clearTimeout,
+    setInterval,
+    clearInterval
+  );
+  return Module;
+}
+
 /**
  * Loads Pyodide up to the baseline: the interpreter is initialized and the baseline modules are
  * imported, but nothing specific to this worker (its files, its signal handling) has happened
@@ -302,7 +349,9 @@ export async function loadPyodide(
   customSerializedObjects: CustomSerializedObjects
 ): Promise<Pyodide> {
   try {
-    const Module = await loadPyodideBaseline(customSerializedObjects);
+    const Module = RestoredPyodide
+      ? adoptRestoredPyodide(RestoredPyodide)
+      : await loadPyodideBaseline(customSerializedObjects);
     return finishPythonBootstrap(Module, customSerializedObjects);
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception

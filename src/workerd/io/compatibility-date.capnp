@@ -77,6 +77,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # memory snapshots. See the doc comment for the `PythonSnapshotRelease` struct above for more
   # details.
 
+  annotation pythonLoadFlag @0xc1d3d48a24062c5e (field) :Void;
+  # This annotation marks a compat flag that changes the state Pyodide reaches at its baseline
+  # load (`loadPyodideBaseline()` in src/pyodide/internal/python.ts): the files it mounts, the
+  # globals it sees (enable_weak_ref decides whether FinalizationRegistry exists), the memory it
+  # ends up with. A V8 heap snapshot of a loaded Pyodide captures that state, so it is specific to
+  # the values of these flags (and of the $pythonSnapshotRelease ones) and is shared by workers
+  # that agree on them, whatever their other flags. Flags that Pyodide's JavaScript only reads
+  # after the baseline, while bootstrapping the worker (python_no_global_handlers, say), do not
+  # carry it: a worker started from a snapshot reads them from its own compatibility flags.
+
   formDataParserSupportsFiles @0 :Bool
       $compatEnableFlag("formdata_parser_supports_files")
       $compatEnableDate("2021-11-03")
@@ -759,7 +769,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   jsWeakRef @84 :Bool
       $compatEnableFlag("enable_weak_ref")
       $compatEnableDate("2025-05-05")
-      $compatDisableFlag("disable_weak_ref");
+      $compatDisableFlag("disable_weak_ref")
+      $pythonLoadFlag;
   # Enables WeakRefs and FinalizationRegistry API.
   # WebAssembly based projects often rely on this API for wasm memory cleanup
 
@@ -1553,6 +1564,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonProcessPthFiles @176 :Bool
       $compatEnableFlag("python_process_pth_files")
+      $pythonLoadFlag
       $compatDisableFlag("disable_python_process_pth_files")
       $compatEnableDate("2026-05-26");
   # When enabled, Python Workers process `.pth` files placed in the
@@ -1747,6 +1759,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonSharedStandardLibrary @198 :Bool
       $compatEnableFlag("python_shared_standard_library")
+      $pythonLoadFlag
       $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
   # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a

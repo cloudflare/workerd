@@ -63,6 +63,11 @@ struct PythonConfig {
   bool createSnapshot;
   bool createBaselineSnapshot;
   kj::Maybe<kj::String> loadSnapshotFromDisk;
+  // Names of files in `snapshotDirectory`: a V8 heap snapshot of a loaded Pyodide to write when
+  // the first Python worker starts, and one to start Python workers from. See
+  // api/pyodide/snapshot-harness.h.
+  kj::Maybe<kj::String> saveV8Snapshot;
+  kj::Maybe<kj::String> loadV8Snapshot;
 };
 
 // A function to read a segment of a buffer (e.g. an embedded package file) into a target buffer.
@@ -427,11 +432,11 @@ class DiskCache: public jsg::Object {
   const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT){};  // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
       const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
       : cacheRoot(cacheRoot),
-        snapshotRoot(snapshotRoot) {};
+        snapshotRoot(snapshotRoot){};
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
@@ -521,4 +526,17 @@ namespace workerd {
 kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
     CompatibilityFlags::Reader featureFlags);
 kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
+
+// The compatibility flags that the state of a baseline Pyodide load depends on, as JSON of
+// enable-flag name to value: the flags annotated $pythonLoadFlag or $pythonSnapshotRelease in
+// compatibility-date.capnp. A V8 snapshot of a loaded Pyodide is specific to these, and to
+// nothing else about the worker.
+kj::String getPythonCompatibilityFlagsJson(CompatibilityFlags::Reader flags);
+
+// Whether a Python worker with `flags` may start from a V8 heap snapshot of Pyodide. That takes
+// Pyodide 314 or newer (earlier ones import their memory from JavaScript, which the snapshot
+// harness does not support), and every $pythonLoadFlag whose enable date precedes the Pyodide
+// release's date to be on, so that snapshots are only built for the flag combinations workers
+// normally run with. Newer or undated flags may be either way; they are part of the snapshot key.
+bool pythonV8SnapshotSupported(CompatibilityFlags::Reader flags);
 }  // namespace workerd

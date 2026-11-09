@@ -83,5 +83,6 @@ static constexpr uint64_t EXPERIMENTAL_ANNOTATION_ID = 0xe3e5a63e76284d88;
 static constexpr uint64_t IMPLIED_BY_AFTER_DATE_ANNOTATION_ID = 0xe3e5a63e76284d89;
 static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
 static constexpr uint64_t PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID = 0xef74c0cc5d18cc0cull;
+static constexpr uint64_t PYTHON_LOAD_FLAG_ANNOTATION_ID = 0xc1d3d48a24062c5eull;
 
 }  // namespace workerd

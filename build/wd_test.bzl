@@ -233,6 +233,16 @@ echo Using Python Snapshot
 "$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot snapshot.bin
 """
 
+# Python V8 heap snapshot tests: the first run writes the snapshot (and runs the worker from
+# scratch), the second starts the worker from it.
+SH_RUNTEST_V8_SNAPSHOT = """
+echo Creating Python V8 Snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-v8-snapshot v8snapshot.bin
+echo ""
+echo Using Python V8 Snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-v8-snapshot v8snapshot.bin
+"""
+
 def _wd_test_impl(ctx):
     is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
     supervise = ctx.file.sidecar or ctx.attr.listen_port_bindings
@@ -258,7 +268,12 @@ def _wd_test_impl(ctx):
     else:
         executable = ctx.outputs.executable
         template = SH_TEMPLATE
-        runtest = SH_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else SH_RUNTEST_NORMAL
+        if ctx.attr.python_snapshot_test:
+            runtest = SH_RUNTEST_SNAPSHOT
+        elif ctx.attr.python_v8_snapshot_test:
+            runtest = SH_RUNTEST_V8_SNAPSHOT
+        else:
+            runtest = SH_RUNTEST_NORMAL
 
     content = template.format(
         supervise = "true" if supervise else "false",
@@ -417,6 +432,8 @@ _wd_test = rule(
             default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
+        # Runs workerd twice, saving then loading a Python V8 heap snapshot (not on Windows).
+        "python_v8_snapshot_test": attr.bool(),
         "load_snapshot": attr.label(allow_single_file = True),
         # Environment variables to set when running the test
         "env": attr.string_dict(),

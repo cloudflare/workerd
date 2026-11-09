@@ -42,6 +42,11 @@ export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags = {
   // registerJsModule so we create a new object here by copying the values.
   ...MetadataReader.getCompatibilityFlags(),
 };
+// Every flag below that loadPyodideBaseline() (python.ts) or anything it calls depends on must be
+// annotated $pythonLoadFlag in src/workerd/io/compatibility-date.capnp: a V8 heap snapshot of a
+// loaded Pyodide is keyed by, and only by, the values of those flags. Flags read only after the
+// baseline (by python-entrypoint-helper.ts, setupPythonSearchPath, snapshot collection) must not
+// be, or they split the snapshot cache for nothing.
 export const WORKFLOWS_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_workflows;
 const NO_GLOBAL_HANDLERS: boolean =

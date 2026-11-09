@@ -11,10 +11,32 @@ type ReadFn<Info> = FSStreamOps<Info>['read'];
 // creation and tricks us into loading a dynamically generated so file.
 const TRUSTED_READ_FUNCS: Map<object, ReadFn<any>> = new Map();
 
+// Marks a filesystem object as one createReadonlyFS() made. A symbol from the registry, so that
+// a filesystem created by another copy of this module, in the context a V8 heap snapshot of
+// Pyodide was built in, is recognized by this one (see trustRestoredReadOnlyFileSystems()).
+const READ_ONLY_FS_MARK = Symbol.for('workerd.pyodide.readOnlyFS');
+
 export function getTrustedReadFunc<Info>(
   node: FSNode<Info>
 ): ReadFn<Info> | undefined {
   return TRUSTED_READ_FUNCS.get(node.mount.type);
+}
+
+/**
+ * Trusts the read-only filesystems mounted in `Module`'s FS that another copy of this module
+ * created: those a Pyodide restored from a V8 heap snapshot was loaded with, in the snapshot's
+ * context. Must run before any user code, which is what the trusted-function map guards against;
+ * at that point the filesystems' read functions are still the ones createReadonlyFS() installed.
+ */
+export function trustRestoredReadOnlyFileSystems(Module: Module): void {
+  for (const mount of Module.FS.getMounts(Module.FS.root.mount)) {
+    const fs = mount.type as EmscriptenFS<unknown> & {
+      [READ_ONLY_FS_MARK]?: true;
+    };
+    if (fs[READ_ONLY_FS_MARK] && !TRUSTED_READ_FUNCS.has(fs)) {
+      TRUSTED_READ_FUNCS.set(fs, fs.stream_ops.read);
+    }
+  }
 }
 
 export function createReadonlyFS<Info>(
@@ -99,5 +121,6 @@ export function createReadonlyFS<Info>(
   // Register this filesystem as read-only and store its trusted read function so we can load so
   // files from it.
   TRUSTED_READ_FUNCS.set(ReadOnlyFS, ReadOnlyFS.stream_ops.read);
+  Object.defineProperty(ReadOnlyFS, READ_ONLY_FS_MARK, { value: true });
   return ReadOnlyFS;
 }

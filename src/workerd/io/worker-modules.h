@@ -509,7 +509,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
     kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
-    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none,
+    kj::Maybe<jsg::Value> restoredPyodide = kj::none) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
@@ -567,6 +568,18 @@ void registerPythonCommonModules(jsg::Lock& lock,
   modules.addBuiltinModule("pyodide-internal:fatal-reporter",
       lock.alloc<api::pyodide::WorkerFatalReporter>(), jsg::ModuleRegistry::Type::INTERNAL);
 
+  // The `pyodide` object of a Pyodide restored from a V8 heap snapshot (see
+  // api/pyodide/snapshot-harness.h), or undefined when this worker loads Pyodide from scratch.
+  modules.addBuiltinModule("pyodide-internal:restored",
+      [restored = kj::mv(restoredPyodide)](jsg::Lock& js, jsg::ModuleRegistry::ResolveMethod,
+          kj::Maybe<const kj::Path&>&) mutable -> kj::Maybe<jsg::ModuleRegistry::ModuleInfo> {
+    v8::Local<v8::Value> value = js.v8Undefined();
+    KJ_IF_SOME(r, restored) value = r.getHandle(js);
+    return jsg::ModuleRegistry::ModuleInfo(
+        js, "pyodide-internal:restored", kj::none, jsg::ModuleRegistry::JsonModuleInfo(js, value));
+  },
+      jsg::ModuleRegistry::Type::INTERNAL);
+
   // Inject a SimplePythonLimiter
   KJ_IF_SOME(limiter, maybeLimiter) {
     modules.addBuiltinModule(
@@ -586,7 +599,8 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
     CompatibilityFlags::Reader featureFlags,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     const api::pyodide::PythonConfig& pythonConfig,
-    const workerd::WorkerSource::ModulesSource& source) {
+    const workerd::WorkerSource::ModulesSource& source,
+    kj::Maybe<jsg::Value> restoredPyodide = kj::none) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
@@ -631,7 +645,8 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   modules::python::registerPythonCommonModules<api::pyodide::DisabledInternalJaeger>(lockParam,
       modules, featureFlags, bundle, source, kj::mv(snapshot), api::pyodide::IsWorkerd::YES,
       api::pyodide::IsTracing::NO, snapshotToDisk, createBaselineSnapshot, kj::mv(artifacts),
-      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */, wasmModuleHolder);
+      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */, wasmModuleHolder,
+      kj::mv(restoredPyodide));
 }
 }  // namespace modules::python
 

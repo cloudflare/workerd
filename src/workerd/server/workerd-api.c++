@@ -7,6 +7,7 @@
 #include "workerd-api-isolate.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/pyodide/snapshot-harness.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
@@ -124,6 +125,10 @@ struct WorkerdApi::Impl final {
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
+  // The snapshot this isolate was created from, if it is a Python worker starting from a V8 heap
+  // snapshot of Pyodide, and the Pyodide restored from it (set by compileModules()).
+  kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideV8Snapshot;
+  mutable kj::Maybe<kj::Own<api::pyodide::RestoredPyodide>> restoredPyodide;
 
   class Configuration {
    public:
@@ -157,7 +162,8 @@ struct WorkerdApi::Impl final {
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig,
-      kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none)
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none,
+      kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideV8Snapshot = kj::none)
       : features(capnp::clone(featuresParam)),
         extensions(extensionsParam),
         observer(kj::atomicAddRef(*observerParam)),
@@ -170,7 +176,8 @@ struct WorkerdApi::Impl final {
             /*instantiateTypeWrapper=*/true,
             kj::mv(snapshotConfig)),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {
+        pythonConfig(pythonConfig),
+        pyodideV8Snapshot(kj::mv(pyodideV8Snapshot)) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
       if (isNewModuleRegistryEnabled(featuresParam)) {
         jsgIsolate.setUsingNewModuleRegistry();
@@ -184,6 +191,35 @@ struct WorkerdApi::Impl final {
       }
     });
   }
+
+  ~Impl() noexcept(false) {
+    // The restored Pyodide holds V8 handles, which must be released under the isolate lock.
+    if (restoredPyodide != kj::none) {
+      jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock&) { restoredPyodide = kj::none; });
+    }
+  }
+
+  // Restores Pyodide from the snapshot this isolate was created from, once, and returns its
+  // `pyodide` object.
+  kj::Maybe<jsg::Value> restorePyodide(jsg::Lock& js) const {
+    auto& loaded = KJ_UNWRAP_OR_RETURN(pyodideV8Snapshot, kj::none);
+    auto& restored = restoredPyodide.emplace([&]() {
+      auto release = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
+      api::pyodide::PyodideSnapshotArtifacts artifacts{
+        .staticBundle = PYODIDE_BUNDLE,
+        .runtimeBundle =
+            modules::python::retrievePyodideBundle(pythonConfig, getPythonBundleName(release)),
+        .pyodideVersion = kj::str(release.getRealPyodideVersion()),
+        .compatibilityFlagsJson = getPythonCompatibilityFlagsJson(*features),
+      };
+      return kj::heap<api::pyodide::RestoredPyodide>(js.v8Isolate, artifacts, loaded->snapshot,
+          api::pyodide::RestoredPyodide::Options{.host = js.v8Context()->Global()});
+    }());
+    // Python reaches the worker's global scope (its `js` module) from the restored context; V8
+    // only allows a context to touch another's global object when they share a security token.
+    restored->getContext()->SetSecurityToken(js.v8Context()->GetSecurityToken());
+    return js.v8Ref(restored->getPyodide().As<v8::Value>());
+  }
 };
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
@@ -196,7 +232,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     const PythonConfig& pythonConfig,
     kj::Array<Worker::Api::InboundListener> inboundListeners,
     kj::Maybe<jsg::SnapshotConfig> snapshotConfig,
-    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap)
+    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap,
+    kj::Maybe<kj::Arc<api::pyodide::LoadedPyodideSnapshot>> pyodideV8Snapshot)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -205,7 +242,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           kj::mv(observer),
           memoryCacheProvider,
           pythonConfig,
-          kj::mv(snapshotConfig))),
+          kj::mv(snapshotConfig),
+          kj::mv(pyodideV8Snapshot))),
       inboundListeners(kj::mv(inboundListeners)),
       embedderBootstrap(embedderBootstrap) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
@@ -487,8 +525,9 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     api::registerModules(*modules, featureFlags);
 
     if (source.isPython) {
-      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
-          lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
+      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(lockParam, *modules,
+          featureFlags, kj::mv(artifacts), impl->pythonConfig, source,
+          impl->restorePyodide(lockParam));
     }
 
     for (auto extension: impl->extensions) {

@@ -394,6 +394,106 @@ kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
       pyodideRelease.getBackport());
 }
 
+namespace {
+
+// A compatibility flag that Pyodide's JavaScript reads while loading.
+struct PythonLoadFlag {
+  capnp::StructSchema::Field field;
+  kj::StringPtr enableName;
+  // The date ($compatEnableDate or $impliedByAfterDate) from which the flag is on by default,
+  // normalized to YYYY-MM-DD so that dates compare as strings; none for undated flags.
+  kj::Maybe<kj::String> enableDate;
+  // Whether this is a $pythonSnapshotRelease flag, selecting the Pyodide release.
+  bool release;
+};
+
+kj::Array<const PythonLoadFlag> makePythonLoadFlagTable() {
+  kj::Vector<PythonLoadFlag> table;
+  for (auto field: capnp::Schema::from<CompatibilityFlags>().getFields()) {
+    kj::Maybe<kj::StringPtr> enableName;
+    kj::Maybe<kj::String> enableDate;
+    bool pythonLoadFlag = false;
+    bool release = false;
+    for (auto annotation: field.getProto().getAnnotations()) {
+      switch (annotation.getId()) {
+        case COMPAT_ENABLE_FLAG_ANNOTATION_ID:
+          enableName = annotation.getValue().getText();
+          break;
+        case COMPAT_ENABLE_DATE_ANNOTATION_ID:
+          enableDate = KJ_ASSERT_NONNULL(normalizeCompatDate(annotation.getValue().getText()));
+          break;
+        case IMPLIED_BY_AFTER_DATE_ANNOTATION_ID:
+          enableDate = KJ_ASSERT_NONNULL(normalizeCompatDate(
+              annotation.getValue().getStruct().as<ImpliedByAfterDate>().getDate()));
+          break;
+        case PYTHON_LOAD_FLAG_ANNOTATION_ID:
+          pythonLoadFlag = true;
+          break;
+        case PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID:
+          pythonLoadFlag = true;
+          release = true;
+          break;
+      }
+    }
+    if (!pythonLoadFlag) continue;
+    table.add(PythonLoadFlag{
+      .field = field,
+      .enableName = KJ_ASSERT_NONNULL(enableName, "Python load flag without an enable flag name"),
+      .enableDate = kj::mv(enableDate),
+      .release = release,
+    });
+  }
+  return table.releaseAsArray();
+}
+
+const kj::Array<const PythonLoadFlag>& pythonLoadFlagTable() {
+  static const auto table = makePythonLoadFlagTable();
+  return table;
+}
+
+// The date of the Pyodide release `release` denotes, which for the development release is that of
+// the released Pyodide it tracks.
+kj::StringPtr pythonReleaseDate(PythonSnapshotRelease::Reader release) {
+  if (release.getPyodide() != "dev") return release.getPyodideRevision();
+  for (auto candidate: *RELEASES) {
+    if (candidate.getPyodide() == release.getRealPyodideVersion()) {
+      return candidate.getPyodideRevision();
+    }
+  }
+  KJ_FAIL_REQUIRE(
+      "the development Pyodide tracks no released Pyodide", release.getRealPyodideVersion());
+}
+
+// The release date of Pyodide 314.0.4, the first whose memory the V8 snapshot harness can carry.
+constexpr kj::StringPtr PYTHON_V8_SNAPSHOT_MIN_RELEASE_DATE = "2026-06-10"_kj;
+
+}  // namespace
+
+kj::String getPythonCompatibilityFlagsJson(CompatibilityFlags::Reader flags) {
+  auto dynamic = capnp::toDynamic(flags);
+  kj::Vector<kj::String> entries;
+  for (auto& flag: pythonLoadFlagTable()) {
+    entries.add(kj::str(
+        '"', flag.enableName, "\":", dynamic.get(flag.field).as<bool>() ? "true" : "false"));
+  }
+  return kj::str("{", kj::strArray(entries, ","), "}");
+}
+
+bool pythonV8SnapshotSupported(CompatibilityFlags::Reader flags) {
+  auto release = KJ_UNWRAP_OR_RETURN(getPythonSnapshotRelease(flags), false);
+  auto releaseDate = pythonReleaseDate(release);
+  if (releaseDate < PYTHON_V8_SNAPSHOT_MIN_RELEASE_DATE) return false;
+  auto dynamic = capnp::toDynamic(flags);
+  for (auto& flag: pythonLoadFlagTable()) {
+    // Which release flags are on is accounted for by the release itself.
+    if (flag.release) continue;
+    KJ_IF_SOME(date, flag.enableDate) {
+      if (date < releaseDate && !dynamic.get(flag.field).as<bool>()) return false;
+    }
+  }
+  return true;
+}
+
 namespace api::pyodide {
 
 // The Python stdlib packages are extracted at build time and embedded in the Pyodide bundle as a

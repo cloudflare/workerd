@@ -1,0 +1,44 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Python workers under the PYTHON_V8_SNAPSHOT autogate. The first two differ only in
+# nodejs_compat: the first to start builds the V8 heap snapshot of Pyodide and the second starts
+# from it, as the snapshot depends on the Python compatibility flags only, which are the same for
+# both. The third turns off a flag that Pyodide reads while loading and that predates its
+# release, a configuration no snapshot is built for.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-plain",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "v8-snapshot-nodejs-compat/plain_worker.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+    ( name = "python-nodejs-compat",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "v8-snapshot-nodejs-compat/worker.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "enable_nodejs_process_v2",
+        ],
+      )
+    ),
+    ( name = "python-disabled-flag",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "v8-snapshot-nodejs-compat/disabled_flag_worker.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_process_pth_files"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-python-v8-snapshot"],
+);
