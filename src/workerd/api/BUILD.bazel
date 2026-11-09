@@ -98,6 +98,7 @@ filegroup(
         "messagechannel.h",
         "per-isolate-bootstrap.h",
         "performance.h",
+        "performance-bootstrap.h",
         "queue.h",
         "request-io.h",
         "restore.h",
