@@ -22,7 +22,7 @@ namespace workerd::api {
 class Fetcher;
 
 // A special binding object that allows for dynamic evaluation.
-class UnsafeEval: public jsg::Object {
+class UnsafeEval final: public jsg::Object {
  public:
   UnsafeEval() = default;
   UnsafeEval(jsg::Lock&, const jsg::Url&) {}
@@ -99,7 +99,7 @@ class Stdin: public jsg::Object {
   }
 };
 
-class UnsafeModule: public jsg::Object {
+class UnsafeModule final: public jsg::Object {
  public:
   UnsafeModule() = default;
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}

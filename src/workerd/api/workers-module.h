@@ -74,7 +74,7 @@ class WorkflowEntrypoint: public jsg::Object {
 
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
 // for extending.
-class EntrypointsModule: public jsg::Object {
+class EntrypointsModule final: public jsg::Object {
  public:
   EntrypointsModule() = default;
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
