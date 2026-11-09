@@ -25,140 +25,144 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  // Exceptions must not unwind through V8's Module::Instantiate(), which would leave the graph
+  // half-linked.
   using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
+  return liftKj<v8::MaybeLocal<ReturnType>>(
+      Lock::current().v8Isolate, [&]() -> v8::MaybeLocal<ReturnType> {
+    auto& js = Lock::current();
+    v8::MaybeLocal<ReturnType> result;
 
-  auto& js = Lock::current();
-  v8::MaybeLocal<ReturnType> result;
-
-  // The specification for import attributes strongly recommends that embedders
-  // reject import attributes and types they do not understand/implement. This
-  // is because import attributes can alter the interpretation of a module and
-  // are considered to be part of the unique key for caching a module.
-  // Throwing an error for things we do not understand is the safest thing to do.
-  // However, historically we have not followed this guideline in the spec
-  // and unfortunately there are applications deployed that will break if we
-  // started enforcing that guideline without a compat flag.
-  if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
-    JSG_REQUIRE(!js.getThrowOnUnrecognizedImportAssertion(), Error,
-        "Unrecognized import attributes specified");
-  }
-
-  js.tryCatch([&] {
-    auto registry = getModulesForResolveCallback(js.v8Isolate);
-    KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
-
-    auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
-        "referrer passed to resolveCallback isn't in modules table");
-
-    auto spec = kj::str(specifier);
-
-    if (isNodeJsCompatEnabled(js)) {
-      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
-        spec = kj::mv(nodeSpec);
-      }
+    // The specification for import attributes strongly recommends that embedders
+    // reject import attributes and types they do not understand/implement. This
+    // is because import attributes can alter the interpretation of a module and
+    // are considered to be part of the unique key for caching a module.
+    // Throwing an error for things we do not understand is the safest thing to do.
+    // However, historically we have not followed this guideline in the spec
+    // and unfortunately there are applications deployed that will break if we
+    // started enforcing that guideline without a compat flag.
+    if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
+      JSG_REQUIRE(!js.getThrowOnUnrecognizedImportAssertion(), Error,
+          "Unrecognized import attributes specified");
     }
 
-    // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if constexpr (!IsSourcePhase) {
-      if (spec == "node:process") {
-        auto specifierPath =
-            kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                         : "node-internal:legacy_process"_kj);
-        KJ_IF_SOME(info,
-            registry->resolve(
-                js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-          result = info.module.getHandle(js.v8Isolate);
-          return;
+    js.tryCatch([&] {
+      auto registry = getModulesForResolveCallback(js.v8Isolate);
+      KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
+
+      auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
+          "referrer passed to resolveCallback isn't in modules table");
+
+      auto spec = kj::str(specifier);
+
+      if (isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+          spec = kj::mv(nodeSpec);
         }
       }
-    }
 
-    // If the referrer module is a built-in, it is only permitted to resolve
-    // internal modules. If the worker bundle provided an override for a builtin,
-    // then internalOnly will be false.
-    bool internalOnly =
-        ref.type == ModuleRegistry::Type::BUILTIN || ref.type == ModuleRegistry::Type::INTERNAL;
-
-    kj::Path targetPath = ([&] {
-      KJ_TRY {
-        // If the specifier begins with one of our known prefixes, let's not resolve
-        // it against the referrer.
-        if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
-            spec.startsWith("workerd:")) {
-          return kj::Path::parse(spec);
-        }
-        return ref.specifier.parent().eval(spec);
-      }
-      KJ_CATCH(_) {
-        JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", spec, "\".\n  imported from \"",
-            ref.specifier.toString(), "\".");
-      }
-    })();
-
-    KJ_IF_SOME(resolved,
-        registry->resolve(js, targetPath, ref.specifier,
-            internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
-                         : ModuleRegistry::ResolveOption::DEFAULT,
-            ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
+      // Handle process module redirection based on enable_nodejs_process_v2 flag
       if constexpr (!IsSourcePhase) {
-        result = resolved.module.getHandle(js);
-      } else {
-        KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
-          result = sourceObject;
-        } else {
-          js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
-              kj::str("Source phase import not available for module: ", targetPath.toString(),
-                  ".\n  imported from \"", ref.specifier.toString(), "\"")))));
-          return;
+        if (spec == "node:process") {
+          auto specifierPath =
+              kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                           : "node-internal:legacy_process"_kj);
+          KJ_IF_SOME(info,
+              registry->resolve(
+                  js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+            result = info.module.getHandle(js.v8Isolate);
+            return;
+          }
         }
       }
-    } else {
-      // This is a bit annoying. If the module was not found, then
-      // we need to check to see if it is a prefixed specifier. If it is,
-      // we'll try again with only the specifier and not the ref.specifier
-      // as parent. We have to do it this way just in case the worker bundle
-      // is using the prefix itself. (which isn't likely but is possible).
-      // We only need to do this if internalOnly is false.
-      if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
-        KJ_IF_SOME(resolve,
-            registry->resolve(js, kj::Path::parse(spec), ref.specifier,
-                ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
-                spec.asPtr())) {
-          if constexpr (!IsSourcePhase) {
-            result = resolve.module.getHandle(js);
+
+      // If the referrer module is a built-in, it is only permitted to resolve
+      // internal modules. If the worker bundle provided an override for a builtin,
+      // then internalOnly will be false.
+      bool internalOnly =
+          ref.type == ModuleRegistry::Type::BUILTIN || ref.type == ModuleRegistry::Type::INTERNAL;
+
+      kj::Path targetPath = ([&] {
+        KJ_TRY {
+          // If the specifier begins with one of our known prefixes, let's not resolve
+          // it against the referrer.
+          if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
+              spec.startsWith("workerd:")) {
+            return kj::Path::parse(spec);
+          }
+          return ref.specifier.parent().eval(spec);
+        }
+        KJ_CATCH(_) {
+          JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", spec,
+              "\".\n  imported from \"", ref.specifier.toString(), "\".");
+        }
+      })();
+
+      KJ_IF_SOME(resolved,
+          registry->resolve(js, targetPath, ref.specifier,
+              internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
+                           : ModuleRegistry::ResolveOption::DEFAULT,
+              ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
+        if constexpr (!IsSourcePhase) {
+          result = resolved.module.getHandle(js);
+        } else {
+          KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
+            result = sourceObject;
           } else {
             js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
                 kj::str("Source phase import not available for module: ", targetPath.toString(),
                     ".\n  imported from \"", ref.specifier.toString(), "\"")))));
             return;
           }
-          return;
         }
+      } else {
+        // This is a bit annoying. If the module was not found, then
+        // we need to check to see if it is a prefixed specifier. If it is,
+        // we'll try again with only the specifier and not the ref.specifier
+        // as parent. We have to do it this way just in case the worker bundle
+        // is using the prefix itself. (which isn't likely but is possible).
+        // We only need to do this if internalOnly is false.
+        if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
+          KJ_IF_SOME(resolve,
+              registry->resolve(js, kj::Path::parse(spec), ref.specifier,
+                  ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
+                  spec.asPtr())) {
+            if constexpr (!IsSourcePhase) {
+              result = resolve.module.getHandle(js);
+            } else {
+              js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+                  kj::str("Source phase import not available for module: ", targetPath.toString(),
+                      ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+              return;
+            }
+            return;
+          }
+        }
+        JSG_FAIL_REQUIRE(Error, "No such module \"", targetPath.toString(),
+            "\".\n  imported from \"", ref.specifier.toString(), "\"");
       }
-      JSG_FAIL_REQUIRE(Error, "No such module \"", targetPath.toString(), "\".\n  imported from \"",
-          ref.specifier.toString(), "\"");
+    }, [&](Value value) {
+      // We do not call js.throwException here since that will throw a JsExceptionThrown,
+      // which we do not want here. Instead, we'll schedule an exception on the isolate
+      // directly and set the result to an empty v8::MaybeLocal.
+      js.v8Isolate->ThrowException(value.getHandle(js));
+      result = v8::MaybeLocal<ReturnType>();
+    });
+
+    // V8 aborts the process if asked to link a graph that reaches a module which is still
+    // kEvaluating. That happens when a graph linked during a module's evaluation (a nested
+    // require() or dynamic import) imports that module back. Fail the link instead.
+    if constexpr (!IsSourcePhase) {
+      v8::Local<v8::Module> resolved;
+      if (result.ToLocal(&resolved) && resolved->GetStatus() == v8::Module::Status::kEvaluating) {
+        js.v8Isolate->ThrowException(
+            js.v8Error(kj::str("Circular dependency when resolving module: ", specifier)));
+        return {};
+      }
     }
-  }, [&](Value value) {
-    // We do not call js.throwException here since that will throw a JsExceptionThrown,
-    // which we do not want here. Instead, we'll schedule an exception on the isolate
-    // directly and set the result to an empty v8::MaybeLocal.
-    js.v8Isolate->ThrowException(value.getHandle(js));
-    result = v8::MaybeLocal<ReturnType>();
+
+    return result;
   });
-
-  // V8 aborts the process if asked to link a graph that reaches a module which is still
-  // kEvaluating. That happens when a graph linked during a module's evaluation (a nested
-  // require() or dynamic import) imports that module back. Fail the link instead.
-  if constexpr (!IsSourcePhase) {
-    v8::Local<v8::Module> resolved;
-    if (result.ToLocal(&resolved) && resolved->GetStatus() == v8::Module::Status::kEvaluating) {
-      js.v8Isolate->ThrowException(
-          js.v8Error(kj::str("Circular dependency when resolving module: ", specifier)));
-      return {};
-    }
-  }
-
-  return result;
 }
 
 // Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
