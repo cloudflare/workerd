@@ -322,8 +322,11 @@ bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
 
 MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  if (v8Value->IsString()) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8Value.As<v8::String>()));
+  }
+  return maybe_local_to_ffi(v8Value->ToString(isolate->GetCurrentContext()));
 }
 
 // Utf8Value
