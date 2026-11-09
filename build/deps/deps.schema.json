@@ -259,6 +259,40 @@
             },
             "required": ["type", "name"],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "sqlite"
+              },
+              "name": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              },
+              "freeze_year": {
+                "type": "string"
+              },
+              "freeze_sha256": {
+                "type": "string"
+              },
+              "build_file": {
+                "type": "string"
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patch_tool": {
+                "type": "string"
+              }
+            },
+            "required": ["type", "name"],
+            "additionalProperties": false
           }
         ]
       }

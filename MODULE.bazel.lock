@@ -403,7 +403,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "/SUkMRfRjFcq40s2JPwjmLhFsikPa31G4DJaS4nxQ7c=",
+        "usagesDigest": "0RJWjPUEQshxL53A6M8bwWgviEJqMOcxe+DLFZbM4TI=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -860,6 +860,43 @@
               "strip_prefix": "ruff-aarch64-unknown-linux-gnu",
               "type": "tgz",
               "url": "https://github.com/astral-sh/ruff/releases/download/0.12.1/ruff-aarch64-unknown-linux-gnu.tar.gz",
+              "urls": [],
+              "workspace_file_content": ""
+            }
+          },
+          "sqlite3": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "add_prefix": "",
+              "auth_patterns": {},
+              "build_file": "@@//:build/BUILD.sqlite3",
+              "build_file_content": "",
+              "canonical_id": "",
+              "files": {},
+              "integrity": "",
+              "netrc": "",
+              "patch_args": [],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_strip": 1,
+              "patch_tool": "patch",
+              "patches": [
+                "@@//:patches/sqlite/0001-row-counts-plain.patch",
+                "@@//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+                "@@//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+                "@@//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+                "@@//:patches/sqlite/0005-legacy-subquery-subtypes.patch"
+              ],
+              "remote_file_integrity": {},
+              "remote_file_urls": {},
+              "remote_module_file_integrity": "",
+              "remote_module_file_urls": [],
+              "remote_patch_strip": 0,
+              "remote_patches": {},
+              "sha256": "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
+              "strip_prefix": "sqlite-src-3540100",
+              "type": "zip",
+              "url": "https://sqlite.org/2026/sqlite-src-3540100.zip",
               "urls": [],
               "workspace_file_content": ""
             }

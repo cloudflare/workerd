@@ -4,6 +4,7 @@ Usage: update-deps.py [dep_name]
 """
 
 import base64
+import csv
 import datetime
 import hashlib
 import io
@@ -47,6 +48,8 @@ GITHUB_RELEASE_FILE_URL_TEMPLATE = (
 RUST_NIGHTLY_MANIFEST_URL = (
     "https://static.rust-lang.org/dist/{date}channel-rust-nightly.toml"
 )
+
+SQLITE_URL = "https://sqlite.org/"
 
 EXT_DEP_TEMPLATE = """# {name}
 {ext_name}.{rule_name}({attrs}
@@ -226,6 +229,7 @@ def repo_attributes(repo):
         "patches",
         "patch_cmds",
         "patch_cmds_win",
+        "patch_tool",
     ):
         if option in repo:
             repo_attrs[option] = repo[option]
@@ -620,6 +624,75 @@ def gen_bazel_dep(repo):
     )
 
 
+def sqlite_download_path(version, year):
+    # File names write the version without dots, with two digits for each part after the 3 and
+    # 00 for a missing fourth part: 3.54.1 is 3540100, and 3.8.11.1 is 3081101.
+    parts = [int(part) for part in version.split(".")]
+    assert len(parts) in (3, 4), f"Unexpected SQLite version: {version}"
+    major, x, y, z = parts if len(parts) == 4 else [*parts, 0]
+    return f"{year}/sqlite-src-{major}{x:02}{y:02}{z:02}.zip"
+
+
+def sqlite_last_release():
+    """Return the version, path and SHA3-256 hash of the newest SQLite source archive."""
+    # The download page lists its downloads for scripts as CSV in an HTML comment.
+    page = urllib.request.urlopen(SQLITE_URL + "download.html").read().decode()
+    _, start, data = page.partition("<!-- Download product data for scripts to read")
+    assert start, "SQLite's download page no longer lists its downloads for scripts"
+
+    rows = csv.DictReader(data.partition("-->")[0].strip().splitlines())
+    for row in rows:
+        path = row["RELATIVE-URL"]
+        if Path(path).name.startswith("sqlite-src-"):
+            version = row["VERSION"]
+            release_year = path.partition("/")[0]
+            assert path == sqlite_download_path(version, release_year), (
+                f"SQLite's source archive has an unexpected path: {path}"
+            )
+            return version, path, row["SHA3-HASH"]
+
+    raise AssetsException("SQLite's download page doesn't list a source archive")
+
+
+def gen_sqlite(repo):
+    last_version, last_path, last_sha3 = sqlite_last_release()
+
+    if "freeze_version" in repo:
+        frozen_version = repo["freeze_version"]
+        if frozen_version != last_version:
+            print(
+                f"frozen, update available: {frozen_version} -> {last_version}",
+                end="",
+            )
+        path = sqlite_download_path(frozen_version, repo["freeze_year"])
+    else:
+        print(last_version, end="")
+        path = last_path
+
+    url = SQLITE_URL + path
+    if "freeze_sha256" in repo:
+        sha256 = repo["freeze_sha256"]
+    else:
+        content = urllib.request.urlopen(url).read()
+        if path == last_path and hashlib.sha3_256(content).hexdigest() != last_sha3:
+            raise AssetsException(
+                f"{url} doesn't match the SHA3-256 hash on SQLite's download page"
+            )
+        sha256 = hashlib.sha256(content).hexdigest()
+
+    return format_ext_dep(
+        repo,
+        ext_name="http",
+        rule_name="archive",
+        attrs=dict(
+            url=url,
+            strip_prefix=Path(path).stem,
+            sha256=sha256,
+            type="zip",
+        ),
+    )
+
+
 def gen_repo_str(repo):
     if repo["type"] == "github_tarball":
         return gen_github_tarball(repo)
@@ -631,6 +704,8 @@ def gen_repo_str(repo):
         return gen_bazel_dep(repo)
     elif repo["type"] == "rust_nightly":
         return gen_rust_nightly(repo)
+    elif repo["type"] == "sqlite":
+        return gen_sqlite(repo)
     else:
         raise UnsupportedException(f"Unsupported repo type: {repo['type']}")
 
