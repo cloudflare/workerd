@@ -1,7 +1,12 @@
 // Shared helper for running capnpc-capnp on .capnp schema files.
 // Used by next-capnp-ordinal and compat-date-at tools.
 
-import path from 'path';
+import { execFile } from 'node:child_process';
+import { access, constants, realpath } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Run capnpc-capnp on a .capnp file and return the canonical text output.
@@ -9,7 +14,7 @@ import path from 'path';
  * Automatically locates the bazel-built capnp tools, building them if needed.
  * Includes standard import paths for workerd's capnp files.
  *
- * @param root - Project root directory (ctx.worktree or ctx.directory)
+ * @param root - Project root directory (the workerd checkout)
  * @param filePath - Absolute path to the .capnp file
  * @returns The canonical schema text, or an error string prefixed with "Error:"
  */
@@ -25,19 +30,22 @@ export async function runCapnpcCapnp(
     root,
     'bazel-bin/external/+http+capnp-cpp/src/capnp/capnpc-capnp'
   );
-  const importPath = path.join(
-    root,
-    'bazel-workerd/external/+http+capnp-cpp/src'
-  );
 
   // Check tools exist, build if needed
   try {
-    await Bun.$`test -x ${capnp} && test -x ${capnpcCapnp}`.quiet();
+    await access(capnp, constants.X_OK);
+    await access(capnpcCapnp, constants.X_OK);
   } catch {
     try {
-      await Bun.$`bazel build @capnp-cpp//src/capnp:capnp_tool @capnp-cpp//src/capnp:capnpc-capnp`
-        .cwd(root)
-        .quiet();
+      await execFileAsync(
+        'bazel',
+        [
+          'build',
+          '@capnp-cpp//src/capnp:capnp_tool',
+          '@capnp-cpp//src/capnp:capnpc-capnp',
+        ],
+        { cwd: root, maxBuffer: 64 * 1024 * 1024 }
+      );
     } catch {
       return {
         error:
@@ -45,6 +53,20 @@ export async function runCapnpcCapnp(
       };
     }
   }
+
+  // The execroot's convenience symlink is named after the checkout directory (`bazel-workerd`,
+  // or `bazel-<dir>` in a worktree), so reach the execroot through `bazel-out` instead.
+  let execroot: string;
+  try {
+    execroot = path.dirname(await realpath(path.join(root, 'bazel-out')));
+  } catch {
+    return {
+      error:
+        'Could not locate the bazel execroot: the bazel-out symlink in the project root is ' +
+        'missing. Run a bazel build (without --symlink_prefix or --experimental_convenience_symlinks=ignore) first.',
+    };
+  }
+  const importPath = path.join(execroot, 'external/+http+capnp-cpp/src');
 
   const fileDir = path.dirname(filePath);
   const importArgs = [
@@ -57,9 +79,12 @@ export async function runCapnpcCapnp(
   ];
 
   try {
-    return await Bun.$`${capnp} compile ${importArgs} -o${capnpcCapnp} ${filePath}`
-      .cwd(root)
-      .text();
+    const { stdout } = await execFileAsync(
+      capnp,
+      ['compile', ...importArgs, `-o${capnpcCapnp}`, filePath],
+      { cwd: root, maxBuffer: 64 * 1024 * 1024 }
+    );
+    return stdout;
   } catch (e: any) {
     return { error: `capnpc-capnp failed:\n${e.stderr || e.message}` };
   }
