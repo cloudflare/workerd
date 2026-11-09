@@ -684,6 +684,7 @@ void BaseTracer::startInvocationSpan(
     auto started = func(incomingRequest.getInvocationSpanContext());
     invocationSpan = kj::mv(started.span);
     invocationLogs = kj::mv(started.logs);
+    invocationExportsSpans = started.exportSpans;
     describeInvocationSpan(invocationSpan, info);
   }
 }
@@ -777,7 +778,7 @@ void BaseTracer::endInvocationSpan(
 
 SpanParent BaseTracer::makeUserRequestSpan(
     tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-  if (invocationSpan.isObserved()) return SpanParent(invocationSpan);
+  if (invocationSpan.isObserved() && invocationExportsSpans) return SpanParent(invocationSpan);
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
     return func(kj::mv(traceId), traceFlags);
   } else {

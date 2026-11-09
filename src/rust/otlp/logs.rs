@@ -160,6 +160,29 @@ impl LogBuffer {
         )
     }
 
+    /// Adds the record of the invocation as a whole, made from its root span once that closed: a
+    /// `cloudflare.invocation` event at the time the invocation ended, with the span's name as its
+    /// body and the span's attributes, which describe the trigger, the response and the outcome
+    /// with its CPU and wall time. It stands for the invocation log the streaming tail assembles
+    /// from its `onset`, `return` and `outcome` events, so it has no severity.
+    pub fn add_invocation(&mut self, root: proto::Span) -> Option<Batch> {
+        let record = proto::LogRecord {
+            time_unix_nano: root.end_time_unix_nano,
+            severity_number: proto::SeverityNumber::Unspecified.into(),
+            severity_text: String::new(),
+            body: Some(proto::AnyValue {
+                value: Some(Value::String(root.name)),
+            }),
+            attributes: root.attributes,
+            flags: root.flags,
+            trace_id: root.trace_id,
+            span_id: root.span_id,
+            observed_time_unix_nano: root.end_time_unix_nano,
+            event_name: "cloudflare.invocation".to_owned(),
+        };
+        self.push(record)
+    }
+
     /// Hands out every buffered record, and from then on each record as it is added.
     pub fn flush(&mut self) -> Option<Batch> {
         self.flushed = true;
@@ -198,6 +221,10 @@ impl LogBuffer {
             observed_time_unix_nano: time,
             event_name,
         };
+        self.push(record)
+    }
+
+    fn push(&mut self, record: proto::LogRecord) -> Option<Batch> {
         self.records_bytes += record.encoded_len();
         self.records.push(record);
         let due = self.flushed
@@ -581,6 +608,44 @@ mod tests {
                         ],
                     }),
                 ),
+                key_value("cloudflare.entrypoint", "MyEntrypoint"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_invocation_is_a_record_of_its_root_span() {
+        let mut buffer = buffer();
+        let root = proto::Span {
+            trace_id: (1..=16).collect(),
+            span_id: SPAN.to_be_bytes().to_vec(),
+            name: "GET".to_owned(),
+            end_time_unix_nano: 7,
+            flags: 0,
+            attributes: vec![
+                key_value("cloudflare.outcome", "ok"),
+                key_value("cloudflare.entrypoint", "MyEntrypoint"),
+            ],
+            ..Default::default()
+        };
+        buffer.add_invocation(root);
+        let records = decode(&buffer.flush().unwrap());
+        let invocation = &records[0];
+        assert_eq!(invocation.event_name, "cloudflare.invocation");
+        assert_eq!(
+            invocation.severity_number(),
+            proto::SeverityNumber::Unspecified
+        );
+        assert_eq!(invocation.time_unix_nano, 7);
+        assert_eq!(invocation.observed_time_unix_nano, 7);
+        assert_eq!(invocation.span_id, SPAN.to_be_bytes().to_vec());
+        assert_eq!(invocation.flags, 0);
+        assert_eq!(*body(invocation), Value::String("GET".to_owned()));
+        // The span's own attributes, which already carry the default ones.
+        assert_eq!(
+            invocation.attributes,
+            vec![
+                key_value("cloudflare.outcome", "ok"),
                 key_value("cloudflare.entrypoint", "MyEntrypoint"),
             ]
         );

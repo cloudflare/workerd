@@ -6,6 +6,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/refcount.h>
@@ -39,17 +40,25 @@ class InvocationLogSubmitter {
       kj::Maybe<kj::StringPtr> stack) = 0;
 };
 
+// Whether an invocation's spans are exported. Its logs may be while its trace is not sampled.
+WD_STRONG_BOOL(ExportSpans);
+
 // An invocation's span as BaseTracer::setStartInvocationSpanFunc()'s hook opens it, and where the
 // invocation's logs go, if anywhere.
 struct StartedInvocationSpan {
   // Implicit, so that a hook whose invocation's logs go nowhere can return the span alone.
   StartedInvocationSpan(SpanBuilder span): span(kj::mv(span)) {}
-  StartedInvocationSpan(SpanBuilder span, kj::Own<InvocationLogSubmitter> logs)
+  StartedInvocationSpan(
+      SpanBuilder span, kj::Own<InvocationLogSubmitter> logs, ExportSpans exportSpans)
       : span(kj::mv(span)),
-        logs(kj::mv(logs)) {}
+        logs(kj::mv(logs)),
+        exportSpans(exportSpans) {}
 
   SpanBuilder span;
   kj::Maybe<kj::Own<InvocationLogSubmitter>> logs;
+  // With NO the span only describes the invocation for its logs, and the invocation's other spans
+  // do not go under it: makeUserRequestSpan() returns what it would without the hook.
+  ExportSpans exportSpans = ExportSpans::YES;
 };
 
 // An abstract class that defines shares functionality for tracers that have different
@@ -218,6 +227,7 @@ class BaseTracer: public kj::Refcounted {
   kj::Maybe<StartInvocationSpanFunc> startInvocationSpanFunc;
   SpanBuilder invocationSpan = nullptr;
   kj::Maybe<kj::Own<InvocationLogSubmitter>> invocationLogs;
+  ExportSpans invocationExportsSpans = ExportSpans::YES;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.

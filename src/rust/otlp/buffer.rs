@@ -29,6 +29,11 @@ pub struct Options {
     pub redact_query_string: bool,
     /// Leaves every timestamp at zero, for tests that compare whole spans.
     pub omit_timestamps: bool,
+    /// Without it nothing is handed out: the buffer only works out the root's OTLP form, for an
+    /// invocation whose logs are exported and whose trace is not.
+    pub export_spans: bool,
+    /// Keeps the root's OTLP form once it closes, for [`SpanBuffer::take_root`].
+    pub keep_root: bool,
 }
 
 /// An encoded `ExportTraceServiceRequest` and the number of spans in it.
@@ -68,6 +73,8 @@ pub struct SpanBuffer {
     closed: Vec<proto::Span>,
     /// Encoded size of `closed`, kept so a close does not re-measure the batch.
     closed_bytes: usize,
+    /// The closed root, with `keep_root`.
+    root: Option<proto::Span>,
 }
 
 impl SpanBuffer {
@@ -83,7 +90,14 @@ impl SpanBuffer {
             open: HashMap::new(),
             closed: Vec::new(),
             closed_bytes: 0,
+            root: None,
         }
+    }
+
+    /// The root span as it was handed out, once it has closed and with `keep_root`. Its
+    /// attributes describe the whole invocation.
+    pub fn take_root(&mut self) -> Option<proto::Span> {
+        self.root.take()
     }
 
     /// Starts buffering a span. Returns false, leaving the buffer unchanged, when the id is already
@@ -228,11 +242,21 @@ impl SpanBuffer {
             status,
             flags: self.options.trace_flags,
         };
-        self.closed_bytes += out.encoded_len();
-        self.closed.push(out);
+        let keep = is_root && self.options.keep_root;
         if is_root {
             self.root_closed = true;
         }
+        if !self.options.export_spans {
+            if keep {
+                self.root = Some(out);
+            }
+            return;
+        }
+        if keep {
+            self.root = Some(out.clone());
+        }
+        self.closed_bytes += out.encoded_len();
+        self.closed.push(out);
     }
 
     fn take_batch(&mut self) -> Option<Batch> {
@@ -326,6 +350,8 @@ mod tests {
                 root_span_id: ROOT,
                 redact_query_string,
                 omit_timestamps: false,
+                export_spans: true,
+                keep_root: false,
             },
             resource,
             default_attributes,
@@ -754,6 +780,46 @@ mod tests {
     }
 
     #[test]
+    fn a_buffer_that_exports_no_spans_still_keeps_its_root() {
+        let mut resource = Attributes::default();
+        resource.push("service.name", "my-worker");
+        let mut buffer = SpanBuffer::new(
+            Options {
+                trace_id: (1..=16).collect(),
+                trace_flags: 0,
+                root_span_id: ROOT,
+                redact_query_string: true,
+                omit_timestamps: false,
+                export_spans: false,
+                keep_root: true,
+            },
+            resource,
+            Attributes::default(),
+        );
+        assert!(buffer.open(ROOT, 0, "GET".to_owned(), T0));
+        let closed = attributes(&[
+            ("url.full", string("https://example.com/a?b=1")),
+            ("cloudflare.outcome", string("exception")),
+        ]);
+        assert!(buffer.close(ROOT, T0 + 1, closed).is_none());
+        assert!(buffer.finish(T0 + 2).is_none());
+
+        // The root's OTLP form: the URL rules, the derived error and the sequence number apply.
+        let root = buffer.take_root().unwrap();
+        assert_eq!(root.name, "GET");
+        assert_eq!(root.end_time_unix_nano, (T0 + 1).cast_unsigned());
+        assert_eq!(
+            attribute(&root.attributes, "url.full"),
+            Some(&string("https://example.com/a"))
+        );
+        assert_eq!(
+            attribute(&root.attributes, "error.type"),
+            Some(&string("exception"))
+        );
+        assert!(buffer.take_root().is_none());
+    }
+
+    #[test]
     fn timestamps_can_be_omitted() {
         let mut buffer = SpanBuffer::new(
             Options {
@@ -762,6 +828,8 @@ mod tests {
                 root_span_id: ROOT,
                 redact_query_string: false,
                 omit_timestamps: true,
+                export_spans: true,
+                keep_root: false,
             },
             Attributes::default(),
             Attributes::default(),

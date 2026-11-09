@@ -26,6 +26,8 @@ namespace workerd {
 WD_STRONG_BOOL(RedactQueryString);
 // Whether an invocation's logs are exported along with its spans.
 WD_STRONG_BOOL(ExportLogs);
+// Whether an invocation whose logs are exported also gets a record of its own.
+WD_STRONG_BOOL(ExportInvocationLog);
 
 // Where an OtlpSpanSubmitter's spans go, and which spans it takes. Submitters share ownership
 // through kj::Rc because they may outlive the tracer.
@@ -97,7 +99,13 @@ kj::Array<Span::Tag> makeOtlpIdentityTags(const OtlpServiceInfo& service);
 //
 // With ExportLogs::YES it also takes the invocation's logs and exceptions as log records carrying
 // the same resource and default tags. They are batched like spans, go out when the root span
-// closes, and one at a time after that.
+// closes, and one at a time after that. With ExportInvocationLog::YES as well, the root span's
+// close adds a `cloudflare.invocation` record made from the root (see LogBuffer::add_invocation()
+// in src/rust/otlp/logs.rs), the counterpart of the streaming tail's invocation log.
+//
+// With ExportSpans::NO only the root span is recorded, and no span is exported: it serves the
+// logs of an invocation whose trace is not sampled, which still go out when it closes and still
+// get their invocation record.
 class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitter {
  public:
   struct Options {
@@ -111,6 +119,8 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
     // tell apart the spans of submitters that share a trace.
     uint8_t predictableSpanSpace = 0;
     ExportLogs exportLogs = ExportLogs::NO;
+    ExportSpans exportSpans = ExportSpans::YES;
+    ExportInvocationLog exportInvocationLog = ExportInvocationLog::NO;
   };
 
   // `context`'s trace id and flags are shared by every span. The root span is `rootSpanId`, or
@@ -169,11 +179,14 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
       kj::Date startTime);
   void exportBatch(rust::otlp::Batch batch);
   void exportLogs(rust::otlp::LogBatch batch);
+  // Adds the invocation record, if it is due, and hands out the logs.
+  void flushLogs();
 
   kj::EntropySource& entropySource;
   uint64_t predictableSpanId;
   kj::Rc<OtlpSpanExporter> exporter;
   tracing::SpanId rootSpanId;
+  ExportSpans exportSpans;
   ::rust::Box<rust::otlp::SpanBuffer> buffer;
   // Null without ExportLogs::YES.
   kj::Maybe<::rust::Box<rust::otlp::LogBuffer>> logs;

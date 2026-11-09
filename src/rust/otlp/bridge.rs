@@ -41,6 +41,11 @@ mod ffi {
         redact_query_string: bool,
         /// Leave every timestamp at zero, for tests that compare whole spans.
         omit_timestamps: bool,
+        /// Hand out spans. Without it the buffer only works out the root's OTLP form, for an
+        /// invocation whose logs are exported and whose trace is not.
+        export_spans: bool,
+        /// Keep the root's OTLP form for `add_invocation_log()`.
+        keep_root: bool,
     }
 
     /// An encoded `ExportTraceServiceRequest` and the number of spans in it. When there is nothing
@@ -160,6 +165,9 @@ mod ffi {
             message: &[u8],
             stack: KjMaybe<&[u8]>,
         ) -> LogBatch;
+        /// Adds the record of the invocation, made from `spans`' root once it has closed, if the
+        /// buffer keeps it and it has not been added already.
+        fn add_invocation_log(buffer: &mut LogBuffer, spans: &mut SpanBuffer) -> LogBatch;
         /// Hands out every buffered record, and from then on each record as it is added. Called
         /// when the invocation's span closes.
         fn flush_logs(buffer: &mut LogBuffer) -> LogBatch;
@@ -228,6 +236,8 @@ fn new_span_buffer(
         root_span_id: options.root_span_id,
         redact_query_string: options.redact_query_string,
         omit_timestamps: options.omit_timestamps,
+        export_spans: options.export_spans,
+        keep_root: options.keep_root,
     };
     Box::new(SpanBuffer::new(options, *resource, *default_attributes))
 }
@@ -335,6 +345,14 @@ fn add_exception_log(
 ) -> ffi::LogBatch {
     let stack = Option::from(stack).map(text);
     log_batch(buffer.add_exception(span_id, time, text(name), text(message), stack))
+}
+
+fn add_invocation_log(buffer: &mut LogBuffer, spans: &mut SpanBuffer) -> ffi::LogBatch {
+    log_batch(
+        spans
+            .take_root()
+            .and_then(|root| buffer.add_invocation(root)),
+    )
 }
 
 fn flush_logs(buffer: &mut LogBuffer) -> ffi::LogBatch {

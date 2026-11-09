@@ -116,6 +116,8 @@ rust::otlp::LogArgumentError toRust(const kj::Maybe<tracing::ErrorInfo>& slot) {
         .redact_query_string = static_cast<bool>(options.redactQueryString),
         // As for Jaeger spans, so tests can compare whole spans.
         .omit_timestamps = isPredictableModeForTest(),
+        .export_spans = static_cast<bool>(options.exportSpans),
+        .keep_root = options.exportLogs && options.exportInvocationLog,
       },
       newResource(options), toAttributes(options.defaultTags));
 }
@@ -236,7 +238,7 @@ StartedInvocationSpan startExportedInvocationSpan(kj::EntropySource& entropySour
   // The tracer names the span after the event.
   auto span = startSpan(kj::mv(submitter), context, "invocation"_kjc);
   KJ_IF_SOME(l, logs) {
-    return StartedInvocationSpan(kj::mv(span), kj::mv(l));
+    return StartedInvocationSpan(kj::mv(span), kj::mv(l), options.exportSpans);
   }
   return StartedInvocationSpan(kj::mv(span));
 }
@@ -265,14 +267,13 @@ OtlpSpanSubmitter::OtlpSpanSubmitter(kj::EntropySource& entropySource,
       predictableSpanId((static_cast<uint64_t>(options.predictableSpanSpace) << 56) + 1),
       exporter(kj::mv(exporter)),
       rootSpanId(rootSpan == tracing::SpanId::nullId ? makeSpanId() : rootSpan),
+      exportSpans(options.exportSpans),
       buffer(newSpanBuffer(context, rootSpanId, options)),
       logs(newLogBuffer(context, options)) {}
 
 OtlpSpanSubmitter::~OtlpSpanSubmitter() noexcept(false) {
   exportBatch(rust::otlp::finish(*buffer, toUnixNanos(kj::systemPreciseCalendarClock().now())));
-  KJ_IF_SOME(l, logs) {
-    exportLogs(rust::otlp::flush_logs(*l));
-  }
+  flushLogs();
 }
 
 kj::Date OtlpSpanSubmitter::getTime() {
@@ -304,6 +305,8 @@ bool OtlpSpanSubmitter::open(tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::StringPtr operationName,
     kj::Date startTime) {
+  // Not a dropped span: there is no trace to export it in.
+  if (!exportSpans && spanId != rootSpanId) return false;
   if (rust::otlp::open_span(*buffer, spanId.getId(), parentSpanId.getId(), toRust(operationName),
           toUnixNanos(startTime))) {
     return true;
@@ -317,11 +320,7 @@ void OtlpSpanSubmitter::submitSpanClose(
   exportBatch(
       rust::otlp::close_span(*buffer, spanId.getId(), toUnixNanos(endTime), toAttributes(tags)));
   // The invocation's logs go out with its spans.
-  if (spanId == rootSpanId) {
-    KJ_IF_SOME(l, logs) {
-      exportLogs(rust::otlp::flush_logs(*l));
-    }
-  }
+  if (spanId == rootSpanId) flushLogs();
 }
 
 void OtlpSpanSubmitter::submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -388,6 +387,13 @@ void OtlpSpanSubmitter::exportBatch(rust::otlp::Batch batch) {
   if (batch.span_count == 0) return;
   auto request = kj::from<kj_rs::Rust>(batch.request).attach(kj::mv(batch.request));
   exporter->exportSpans(kj::mv(request), batch.span_count);
+}
+
+void OtlpSpanSubmitter::flushLogs() {
+  KJ_IF_SOME(l, logs) {
+    exportLogs(rust::otlp::add_invocation_log(*l, *buffer));
+    exportLogs(rust::otlp::flush_logs(*l));
+  }
 }
 
 void OtlpSpanSubmitter::exportLogs(rust::otlp::LogBatch batch) {

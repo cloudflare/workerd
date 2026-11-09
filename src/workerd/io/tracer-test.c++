@@ -219,7 +219,9 @@ KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps"
 }
 
 // Runs an invocation that logs and throws while its span is open, and logs again after it closed.
-kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs) {
+kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
+    ExportSpans exportSpans = ExportSpans::YES,
+    ExportInvocationLog exportInvocationLog = ExportInvocationLog::NO) {
   TestFixture fixture;
   TestEntropySource entropy;
   auto exporter = kj::rc<RecordingExporter>();
@@ -230,12 +232,21 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs) {
   tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
     return startExportedInvocationSpan(entropy, exporter.addRef(),
         tracing::SpanContext(context.getTraceId(), kj::none, context.getTraceFlags()),
-        {.serviceName = "log-test", .exportLogs = exportLogs}, context.getSpanId());
+        {
+          .serviceName = "log-test",
+          .exportLogs = exportLogs,
+          .exportSpans = exportSpans,
+          .exportInvocationLog = exportInvocationLog,
+        },
+        context.getSpanId());
   });
   auto context = fixture.newIoContext();
   auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
   tracer->setEventInfo(*request, tracing::CustomEventInfo());
   request->delivered();
+  // Other spans go under the invocation's only when its spans are exported.
+  KJ_EXPECT(tracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none).isObserved() ==
+      bool(exportSpans));
   kj::Maybe<tracing::InvocationSpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     auto& c = spanContext.emplace(env.context.getInvocationSpanContext());
@@ -255,7 +266,7 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs) {
       kj::str("[\"after-outcome\"]"));
   fixture.drainAndDestroy(kj::mv(request));
   tracer = nullptr;
-  KJ_EXPECT(exporter->spanCount == 1);
+  KJ_EXPECT(exporter->spanCount == (exportSpans ? 1 : 0));
   return exporter;
 }
 
@@ -295,6 +306,36 @@ KJ_TEST("an exported invocation exports its logs and exceptions") {
   KJ_EXPECT(late[0].body().array_value().values(0).string_value() == "after-outcome");
   // Without Error arguments a record has no error info.
   for (auto& kv: late[0].attributes()) KJ_EXPECT(kv.key() != "cloudflare.log.error_info");
+}
+
+KJ_TEST("an invocation whose spans are not exported still exports its logs and its record") {
+  auto exporter = exportInvocation(ExportLogs::YES, ExportSpans::NO, ExportInvocationLog::YES);
+  KJ_ASSERT(exporter->logRequests.size() == 2);
+  KJ_EXPECT(exporter->logCount == 4);
+  auto& first = records(exporter->logRequests[0]);
+  KJ_ASSERT(first.size() == 3);
+  KJ_EXPECT(first[0].body().array_value().values(0).string_value() == "in-invocation");
+  KJ_EXPECT(first[1].event_name() == "exception");
+  // The invocation's record comes when its span closes, made from the span.
+  auto& invocation = first[2];
+  KJ_EXPECT(invocation.event_name() == "cloudflare.invocation");
+  KJ_EXPECT(invocation.severity_number() == otlp::logs::v1::SEVERITY_NUMBER_UNSPECIFIED);
+  KJ_EXPECT(invocation.span_id() == first[0].span_id());
+  KJ_EXPECT(invocation.body().string_value() == "custom");
+  KJ_EXPECT(attribute(invocation, "cloudflare.outcome").string_value() == "ok");
+  KJ_EXPECT(attribute(invocation, "faas.trigger").string_value() == "other");
+  KJ_EXPECT(attribute(invocation, "cpu_time_ms").int_value() == 0);
+  // The root span's attributes, the ones it gets at close included.
+  KJ_EXPECT(attribute(invocation, "cloudflare.invocation.sequence.number").int_value() == 1);
+  KJ_EXPECT(records(exporter->logRequests[1])[0].body().array_value().values(0).string_value() ==
+      "after-outcome");
+}
+
+KJ_TEST("an exported invocation has no record of its own unless asked to") {
+  auto exporter = exportInvocation(ExportLogs::YES);
+  for (auto& request: exporter->logRequests) {
+    for (auto& record: records(request)) KJ_EXPECT(record.event_name() != "cloudflare.invocation");
+  }
 }
 
 KJ_TEST("an exported invocation exports no logs unless asked to") {
