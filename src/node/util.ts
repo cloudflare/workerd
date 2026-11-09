@@ -245,12 +245,18 @@ export function parseArgs(): unknown {
   throw new Error('node:util parseArgs is not implemented');
 }
 
-export function transferableAbortController(): void {
-  throw new Error('node:util transferableAbortController is not implemented');
+// Workers has no worker_threads, and AbortSignal is only serializable over
+// RPC, so there is no extra transfer mode to mark. These return the signal or
+// a plain AbortController, keeping Node's argument validation.
+export function transferableAbortController(): AbortController {
+  return new AbortController();
 }
 
-export function transferableAbortSignal(): void {
-  throw new Error('node:util transferableAbortSignal is not implemented');
+export function transferableAbortSignal(signal: unknown): AbortSignal {
+  if (!(signal instanceof AbortSignal)) {
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+  }
+  return signal;
 }
 
 export async function aborted(

@@ -4539,6 +4539,42 @@ export const logTest = {
   },
 };
 
+// Ported from test/parallel/test-abortsignal-cloneable.js, without the
+// MessageChannel transfers.
+export const transferableAbortSignal = {
+  test() {
+    const signal = util.transferableAbortSignal(AbortSignal.abort('boom'));
+    assert.ok(signal instanceof AbortSignal);
+    assert.ok(signal.aborted);
+    assert.strictEqual(signal.reason, 'boom');
+
+    const original = new AbortController().signal;
+    assert.strictEqual(util.transferableAbortSignal(original), original);
+
+    for (const value of [
+      undefined,
+      null,
+      1,
+      'signal',
+      {},
+      { aborted: false },
+    ]) {
+      assert.throws(() => util.transferableAbortSignal(value), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      });
+    }
+  },
+};
+
+export const transferableAbortController = {
+  test() {
+    const ac = util.transferableAbortController();
+    assert.ok(ac instanceof AbortController);
+    assert.strictEqual(ac.signal.aborted, false);
+  },
+};
+
 export const aborted = {
   async test() {
     const signal = AbortSignal.timeout(10);
