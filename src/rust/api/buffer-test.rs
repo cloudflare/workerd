@@ -390,6 +390,28 @@ fn hex_pairs_are_lowercase_digits() {
 }
 
 #[test]
+fn hex_decoding_preserves_truncation_and_strict_errors() {
+    for (input, expected) in [
+        (&b"ABcd"[..], &b"\xab\xcd"[..]),
+        (b"abc", b"\xab"),
+        (b"abz1", b"\xab"),
+        (b"zz", b""),
+        (b"", b""),
+    ] {
+        let mut dest = vec![0xee; input.len() / 2];
+        let written = decode_hex(input, &mut dest, false).unwrap();
+        assert_eq!(&dest[..written], expected);
+        assert!(dest[written..].iter().all(|&byte| byte == 0xee));
+    }
+    for input in [&b"abc"[..], b"abz1", b"zz"] {
+        let mut dest = vec![0; input.len() / 2];
+        let error = decode_hex(input, &mut dest, true).unwrap_err();
+        assert_eq!(error.name, jsg::ExceptionType::TypeError);
+        assert_eq!(error.message, "The text is not valid hex");
+    }
+}
+
+#[test]
 fn range_checks_bounds() {
     assert_eq!(range(10, 2.0, 5.0).unwrap(), 2..5);
     assert_eq!(range(10, 0.0, 10.0).unwrap(), 0..10);
