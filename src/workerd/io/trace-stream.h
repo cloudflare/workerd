@@ -81,19 +81,27 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
 // A utility class that receives tracing events and generates/reports TailEvents.
 class TailStreamWriter final {
  public:
-  // The maximum size of the queue, in bytes.
-  const size_t maxQueueSize = 2 * 1024 * 1024;
-  // The estimated overhead of TailEvent wrapping per message. This does not need to be very
-  // accurate, but should be enough to avoid allocating too much memory/hitting capnp RPC message
-  // size limits when sending many tiny events.
-  const size_t tailSerializationOverhead = 64;
+  // The most memory, in bytes, that one session may hold in events it has queued or sent but not
+  // had acknowledged. Beyond this, events are dropped. This fits about 16K short logs.
+  static constexpr size_t MAX_SESSION_BYTES = 4 * 1024 * 1024;
+
+  // The memory a queued event holds: the TailEvent itself, its queue node, and what it owns on the
+  // heap, which `sizeHint` approximates.
+  static constexpr size_t queuedEventSize(size_t sizeHint) {
+    return sizeof(TailEvent) + 2 * sizeof(void*) + sizeHint;
+  }
 
   // The initial state of our tail worker writer is that it is pending the first onset event. During
   // this time we will only have a collection of WorkerInterface instances. When our first event is
   // reported (the onset) we will arrange to acquire tailStream capabilities from each then use
   // those to report the initial onset.
+  //
+  // If `budget` is given, every session's held events count against it as well as against
+  // MAX_SESSION_BYTES.
   using Pending = kj::Array<kj::Own<WorkerInterface>>;
-  TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks);
+  TailStreamWriter(Pending pending,
+      kj::TaskSet& waitUntilTasks,
+      kj::Maybe<kj::Rc<TailStreamBudget>> budget = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
   void report(const InvocationSpanContext& context,
@@ -111,20 +119,42 @@ class TailStreamWriter final {
     kj::Maybe<rpc::TailStreamTarget::Client> capability;
     bool pumping = false;
     bool onsetSeen = false;
-    // Estimated byte size of the queue, used to drop events to avoid excessive memory usage.
-    size_t queueSize = 0;
+    // The estimated memory held by the events in `queue`.
+    size_t queuedBytes = 0;
+    // The estimated memory held by events that have been sent but not acknowledged, which the
+    // serialized batch and the tail worker's copy of it still hold.
+    size_t sentBytes = 0;
+    // The estimated memory of the onset event, which is sent on its own.
+    size_t onsetBytes = 0;
     // The number of tail events we had to drop. We'll send a warning indicating this at the end of
     // the stream.
     uint32_t droppedEvents = 0;
     workerd::util::Queue<TailEvent> queue;
+    kj::Maybe<kj::Rc<TailStreamBudget>> budget;
 
-    Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
+    Active(rpc::TailStreamTarget::Client capability, kj::Maybe<kj::Rc<TailStreamBudget>> budget)
+        : capability(kj::mv(capability)),
+          budget(kj::mv(budget)) {}
+    ~Active() noexcept(false);
+
+    // Holds `bytes` for an event about to be queued, if neither this session nor the budget would
+    // exceed its limit.
+    bool tryHold(size_t bytes);
+    // Holds `bytes` for an event that must not be dropped.
+    void hold(size_t bytes);
+    // Moves `bytes` of queued events to sent.
+    void markSent(size_t bytes);
+    // Gives back `bytes` of sent events, once the tail worker has acknowledged them.
+    void releaseSent(size_t bytes);
+    // Drops all queued events and gives back everything held, once the session has stopped.
+    void stop();
   };
 
   struct Closed {};
 
   kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::Rc<TailStreamBudget>> budget;
 
   static kj::Promise<void> pump(kj::Own<Active> current);
   // Report an event to the tail stream writer.
@@ -137,6 +167,8 @@ class TailStreamWriter final {
 };
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks);
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Rc<TailStreamBudget>> budget = kj::none);
 
 }  // namespace workerd::tracing

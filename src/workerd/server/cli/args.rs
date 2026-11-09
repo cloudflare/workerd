@@ -533,6 +533,12 @@ pub struct TestArgs {
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 
+    /// Override the socket named <name> to bind to the address <addr> instead of the address
+    /// specified in the config file, as for `serve`. Lets a test listen on a port chosen when it
+    /// runs.
+    #[arg(short = 's', long = "socket-addr", value_name = "name>=<addr", value_parser = parse_override)]
+    pub socket_addr_overrides: Vec<Override>,
+
     #[arg(value_name = "filter", value_parser = parse_test_filter)]
     pub filter: Option<TestFilter>,
 }

@@ -267,7 +267,7 @@ thread_local! {
 }
 
 /// A Rust resource that uses C++ resources, as a ported `ExecutionContext` would.
-#[jsg_resource]
+#[jsg_resource(memory_info)]
 pub struct Host {
     pub label: String,
     /// A C++ resource, traced as a `jsg::Ref` field of a C++ resource is.

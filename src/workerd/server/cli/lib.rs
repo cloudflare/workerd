@@ -175,28 +175,8 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
         args::Command::Test {
             config,
             serve_or_test,
-            mut test,
-        } => {
-            check_serve_or_test::<T>(&serve_or_test);
-            let filter = test.filter.take().unwrap_or_default();
-            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(
-                config,
-                filter.const_name.clone(),
-                &process,
-                serve_or_test.experimental,
-            );
-            entry::test(
-                verbose,
-                config.into_words(),
-                (&serve_or_test).into(),
-                (&test).into(),
-                run_options(&serve_or_test),
-                patterns(filter),
-                watching(process),
-            )
-        }
+            test,
+        } => run_test(verbose, config, &serve_or_test, test, executable),
         args::Command::Bench {
             config,
             serve_or_test,
@@ -319,6 +299,40 @@ fn run_compile(
         process.write_compiled_binary(&config.into_words())
     };
     written.unwrap_or_else(|error| usage_error::<T>(format!("writing to stdout: {error}")));
+}
+
+/// `workerd test`: the tests of the config.
+fn run_test(
+    verbose: bool,
+    config: args::ConfigFileArgs,
+    serve_or_test: &args::ServeOrTestArgs,
+    mut test: args::TestArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    check_serve_or_test::<T>(serve_or_test);
+    let filter = test.filter.take().unwrap_or_default();
+    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
+    let process = Process::new(executable, watcher, Vec::new());
+    let config = load_config::<T>(
+        config,
+        filter.const_name.clone(),
+        &process,
+        serve_or_test.experimental,
+    );
+    entry::test(
+        verbose,
+        config.into_words(),
+        serve_or_test.into(),
+        (&test).into(),
+        RunOptions {
+            socket_addresses: args::override_map(test.socket_addr_overrides),
+            ..run_options(serve_or_test)
+        },
+        patterns(filter),
+        watching(process),
+    )
 }
 
 /// `workerd bench`: the benchmarks of the config.
