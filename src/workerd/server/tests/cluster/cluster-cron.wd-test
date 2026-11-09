@@ -3,7 +3,8 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 # cluster-cron-test's config: cluster-test.wd-test's sockets and cluster, and
-# "main", whose scheduled() a cron Worker runs every minute.
+# "main", whose scheduled() a cron Worker runs every minute, and whose
+# /cron-clock moves that node's cron clock (TEST_CLOCK).
 
 using Workerd = import "/workerd/workerd.capnp";
 using Base = import "cluster-test.wd-test";
@@ -21,6 +22,7 @@ const config :Workerd.Config = (
         bindings = [
           ( name = "COUNTER", durableObjectNamespace = "Counter" ),
           ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+          ( name = "CRON", service = "cron" ),
         ],
         durableObjectNamespaces = [
           ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -37,6 +39,7 @@ const config :Workerd.Config = (
           ( name = "SCHEDULE", durableObjectNamespace = "Schedule" ),
           ( name = "CRONS", json = "{\"main\": [\"* * * * *\"]}" ),
           ( name = "main", service = "main" ),
+          ( name = "TEST_CLOCK", json = "true" ),
         ],
         durableObjectNamespaces = [
           ( className = "Schedule", uniqueKey = "cron", enableSql = true ),

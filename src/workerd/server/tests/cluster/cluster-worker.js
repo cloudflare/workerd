@@ -104,6 +104,11 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/cron-clock') {
+      return env.CRON.fetch(`http://cron/clock${url.search}`, {
+        method: 'POST',
+      });
+    }
     if (url.pathname.startsWith('/on-hibernate/')) {
       return env.ON_HIBERNATE.fetch(request);
     }

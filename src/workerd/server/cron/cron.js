@@ -21,11 +21,16 @@
 //             `<binding>` is also a service binding to the Worker whose
 //             `scheduled()` handler the expressions run, and names its
 //             schedule
+//   TEST_CLOCK  JSON `true` for tests (optional)
 //
 // workerd sends a Worker using this module one scheduled event at startup,
 // which arms every schedule: an object has no client of its own to wake it.
 // The schedule is the config's, not the object's, so a changed expression
 // takes effect at the next arm and migrates nothing.
+//
+// With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock for
+// planning and re-arms every schedule by it, returning once each has, and
+// once any run in progress has finished; alarms keep the real clock.
 //
 // Expressions are Cloudflare's dialect, in UTC, as its parser (saffron)
 // reads them: weekdays 1 to 7 from Sunday, so `1-5` is Sunday to Thursday,
@@ -276,16 +281,30 @@ const schedules = Object.fromEntries(
 );
 const crons = (name) => schedules[name] ?? [];
 
+let skew = 0;
+const clock = () => Date.now() + skew;
+
+// Each schedule arms on its own: one failing never cancels another.
+async function armAll() {
+  const results = await Promise.allSettled(
+    Object.keys(schedules).map((name) =>
+      env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name)
+    )
+  );
+  const errors = results.flatMap((r) => r.reason ?? []);
+  if (errors.length > 0) throw new AggregateError(errors, 'not armed');
+}
+
 export default {
-  async scheduled(controller, env) {
-    // Each arms on its own: one failing never cancels another.
-    const results = await Promise.allSettled(
-      Object.keys(schedules).map((name) =>
-        env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name)
-      )
-    );
-    const errors = results.flatMap((r) => r.reason ?? []);
-    if (errors.length > 0) throw new AggregateError(errors, 'not armed');
+  scheduled: armAll,
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (!env.TEST_CLOCK || url.pathname !== '/clock') {
+      return new Response(null, { status: 404 });
+    }
+    skew += Number(url.searchParams.get('advance'));
+    await armAll();
+    return Response.json({ now: clock() });
   },
 };
 
@@ -293,6 +312,9 @@ export default {
 // what a retry runs, `{occurrence, due, retry}`, null when the alarm is an
 // occurrence. A retry survives an eviction and a restart.
 export class Schedule extends DurableObject {
+  // The run in progress, which an arm waits out rather than race.
+  #running = null;
+
   // Arms the plan's deadline, or retires the object when nothing matches.
   async #arm(name, p, owed = null) {
     const storage = this.ctx.storage;
@@ -302,22 +324,27 @@ export class Schedule extends DurableObject {
       return;
     }
     await storage.put({ name, at: p.armAt, owed: p.armIsRetry ? owed : null });
-    await storage.setAlarm(p.armAt);
+    await storage.setAlarm(p.armAt - skew);
   }
 
   async arm(name) {
-    const p = plan(crons(name), undefined, Date.now(), 0, false);
+    await this.#running?.catch(() => {});
+    const p = plan(crons(name), undefined, clock(), 0, false);
     // An alarm no later than the plan's, a retry or a missed occurrence, is
     // kept.
     const alarm = await this.ctx.storage.getAlarm();
-    if (alarm !== null && p.armAt !== null && alarm <= p.armAt) return;
+    if (alarm !== null && p.armAt !== null && alarm + skew <= p.armAt) return;
     await this.#arm(name, p);
+  }
+
+  alarm() {
+    return (this.#running = this.#fire());
   }
 
   // The expressions due run at once, and the next alarm is armed when they
   // all finish: one schedule's runs never overlap, and an occurrence that
   // comes due during a run is skipped.
-  async alarm() {
+  async #fire() {
     const stored = await this.ctx.storage.get(['name', 'at', 'owed']);
     const name = stored.get('name');
     if (name === undefined) return;
@@ -334,7 +361,7 @@ export class Schedule extends DurableObject {
     const failed = due.filter((_, i) => !ok[i]);
     // A schedule no longer in the config has no expressions, and retires.
     // A clock stepped back never brings the occurrence round again.
-    const now = Math.max(Date.now(), occurrence);
+    const now = Math.max(clock(), occurrence);
     const p = plan(schedule, undefined, now, retry, failed.length > 0);
     await this.#arm(name, p, { occurrence, due: failed, retry: retry + 1 });
   }

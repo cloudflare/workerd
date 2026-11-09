@@ -38,7 +38,8 @@
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
 //  14. A cron trigger runs once a minute, through its schedule owner's death
-//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one).
+//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
+//      a test clock moved to each minute.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -2818,23 +2819,40 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
 
 test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
   await withCluster(3, async ({ nodes }) => {
-    const TICK = /TICK \d+/;
-    // The node that runs a tick is the schedule's owner.
-    const tick = (ns, ms) =>
-      Promise.any(ns.map((n) => n.waitForStderr(TICK, ms).then(() => n)));
-    const owner = await tick(nodes, 75_000);
+    // Moves each node's cron clock alike; resolves to the last one's time,
+    // once each node's schedule is re-armed and any run has finished.
+    const clock = async (ns, ms) => {
+      let now;
+      for (const n of ns) {
+        now = (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body
+          .now;
+      }
+      return now;
+    };
+    // To a second before minute `at`, and the node that then runs it, the
+    // schedule's owner. A real minute may run first, before the move.
+    const tick = async (ns, at) => {
+      await clock(ns, at - 1000 - (await clock(ns, 0)));
+      const re = new RegExp(`TICK ${at}`);
+      return Promise.any(
+        ns.map((n) => n.waitForStderr(re, 10_000).then(() => n))
+      );
+    };
+    const now = await clock(nodes, 0);
+    const at = now - (now % 60_000) + 60_000;
+    const owner = await tick(nodes, at);
+    await clock(nodes, 0);
     await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
 
     // The next minute once, on a survivor, though the owner died.
     await tick(
       nodes.filter((n) => n !== owner),
-      90_000
+      at + 60_000
     );
     const seen = nodes
       .flatMap((n) => [...n.stderr.matchAll(/TICK (\d+)/g)])
       .map((m) => Number(m[1]))
-      .sort((a, b) => a - b);
-    assert.strictEqual(seen[0] % 60_000, 0, JSON.stringify(seen));
-    assert.deepStrictEqual(seen, [seen[0], seen[0] + 60_000]);
+      .filter((t) => t >= at);
+    assert.deepStrictEqual(seen.sort(), [at, at + 60_000]);
   });
 });

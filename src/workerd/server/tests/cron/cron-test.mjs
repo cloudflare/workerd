@@ -50,6 +50,7 @@ const config :Workerd.Config = (
           ( name = "SCHEDULE", durableObjectNamespace = "Schedule" ),
           ( name = "CRONS", json = "{\\"app\\": [\\"${expression}\\"]}" ),
           ( name = "app", service = "app" ),
+          ( name = "TEST_CLOCK", json = "true" ),
         ],
         durableObjectNamespaces = [
           ( className = "Schedule", uniqueKey = "Schedule", enableSql = true ),
@@ -58,6 +59,7 @@ const config :Workerd.Config = (
       )
     ),
   ],
+  sockets = [ ( name = "http", address = "127.0.0.1:0", http = (), service = "cron" ) ],
 );
 `;
 
@@ -70,13 +72,34 @@ async function project(expression = '* * * * *') {
 }
 
 // Runs workerd on `dir`'s config. `calls` holds each scheduled() call so far;
-// `until(f, ms)` resolves once f() holds, checked as each call arrives.
+// `until(f, ms)` resolves once f() holds, checked as each call arrives;
+// `clock(ms)` advances the cron Worker's clock and resolves to its time.
 function serve(dir, args) {
   const child = spawn(
     env.WORKERD_BINARY,
-    ['serve', join(dir, 'config.capnp'), ...args],
-    { stdio: ['ignore', 'pipe', 'pipe'] }
+    [
+      'serve',
+      join(dir, 'config.capnp'),
+      '--control-fd=3',
+      '--socket-addr=http=127.0.0.1:0',
+      ...args,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }
   );
+  const port = new Promise((resolve) => {
+    let control = '';
+    child.stdio[3].setEncoding('utf8').on('data', (d) => {
+      control += d;
+      for (const l of control.split('\n')) {
+        const m = l.match(/"event":"listen".*"port":(\d+)/);
+        if (m) resolve(Number(m[1]));
+      }
+    });
+  });
+  const clock = async (ms) => {
+    const url = `http://127.0.0.1:${await port}/clock?advance=${ms}`;
+    return (await (await fetch(url, { method: 'POST' })).json()).now;
+  };
   const calls = [];
   const waiters = new Set();
   let output = '';
@@ -113,30 +136,32 @@ function serve(dir, args) {
   return {
     calls,
     until,
+    clock,
     exited,
     output: () => output,
     stop: (signal) => (child.kill(signal), exited),
   };
 }
 
-// The one wait for the clock: the first occurrence, within a minute.
 test('an occurrence is retried with its scheduledTime, across a restart', async () => {
   const dir = await project();
   let server = serve(dir, ['--experimental']);
   try {
-    await server.until(() => server.calls.length >= 1, 75_000);
-    const [first] = server.calls;
-    assert.deepStrictEqual(first, {
-      cron: '* * * * *',
-      at: first.at - (first.at % 60_000),
-      n: 1,
-    });
+    // A second before the next minute, which then runs; a real minute may
+    // run first, before the move.
+    const now = await server.clock(0);
+    const at = now - (now % 60_000) + 60_000;
+    const runs = () => server.calls.filter((c) => c.at === at);
+    await server.clock(at - 1000 - now);
+    await server.until(() => runs().length >= 1, 10_000);
+    const [first] = runs();
+    assert.deepStrictEqual(first, { cron: '* * * * *', at, n: 1 });
     // Killed as the first attempt fails, before its retry; the retry runs
     // once it starts again.
     await server.stop('SIGKILL');
     server = serve(dir, ['--experimental']);
-    await server.until(() => server.calls.some(({ n }) => n === 2), 30_000);
-    assert.deepStrictEqual(server.calls, [first, { ...first, n: 2 }]);
+    await server.until(() => runs().some(({ n }) => n === 2), 30_000);
+    assert.deepStrictEqual(runs(), [first, { ...first, n: 2 }]);
   } finally {
     await server.stop();
     await rm(dir, { recursive: true });
