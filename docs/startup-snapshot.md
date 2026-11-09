@@ -56,9 +56,11 @@ all of these hold:
    calls `installRestoreTimeGlobalsForZygote()`: V8 leaves some properties out of a context built
    in a serializer-enabled isolate and adds them when the context is restored
    (`Error.stackTraceLimit`, `WebAssembly`, `SharedArrayBuffer`, the Iterator helpers behind
-   shipped flags). The zygote installs `Error.stackTraceLimit` as the data property V8 would, and
-   the others as fail-closed accessors that throw and record the use, so top-level code sees a
-   normal context and cannot bake a wrong feature test in, even when it catches the error. See the
+   shipped flags, `Temporal` and `Date.prototype.toTemporalInstant`). The zygote installs
+   `Error.stackTraceLimit` as the data property V8 would, and the others as fail-closed accessors
+   that throw and record the use, so top-level code sees a normal context and cannot bake a wrong
+   feature test in, even when it catches the error. The Temporal names are fail-closed only in a
+   Worker with the `temporal` flag; without it they are absent, as in a normal context. See the
    comment block above `RESTORE_TIME_GLOBALS` in `setup.h`.
 3. The zygote `Worker::Script` and `Worker` are built exactly as the real ones would be, with an
    `ErrorReporter` of their own, bindings included. A binding object is a description (a channel
@@ -69,6 +71,9 @@ all of these hold:
    (`WorkerdApi::isBindingTransferableThroughSnapshot()`: `cryptoKey`, `memoryCache`, `wrapped`).
 4. The module graph is evaluated: this is where top-level code runs. Console output it produces
    is held back (`Worker::Isolate::deferConsoleLine()`); see [Console output](#console-output).
+   The `env` object is pinned into the snapshot right before (`pinIntoSnapshot()`, index
+   `BINDINGS_SCOPE_SNAPSHOT_INDEX`), and the main module's namespace right after a successful
+   evaluation (`MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX`).
 5. Still in the `Worker` constructor, before the context's handle scope closes:
    - `settleFinalizationRegistriesForSnapshot()` runs the FinalizationRegistry cleanups the top
      level left due, the way the event loop would after its job: microtask checkpoint, WeakRef
@@ -79,16 +84,17 @@ all of these hold:
      the last JavaScript the zygote runs: everything recorded from here on could otherwise be
      changed behind the record's back, and the live-object record below keys wrappers by a
      cppgc shim address that is unique only while nothing allocates;
-   - the `env` object and the main module's namespace are pinned into the snapshot
-     (`pinIntoSnapshot()`, indices `BINDINGS_SCOPE_SNAPSHOT_INDEX` and
-     `MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX`);
    - `removeRestoreTimeGlobalsBeforeSnapshot()` records what the top level left of
-     `Error.stackTraceLimit` and removes every restore-time property, so that V8 can add them
-     back on restore. A fail-closed property the top level used (whether or not it caught the
-     error), a property it defined in their place, or a holder it made non-extensible, fails the
-     zygote here;
-   - the global scope's event listeners are recorded (`EventTarget::forEachSnapshotListener()`,
-     one pinned identity object per listener) into `artifact.listenerRecords`;
+     `Error.stackTraceLimit`, and which fail-closed properties it deleted, and removes every
+     restore-time property, so that V8 can add them back on restore. A fail-closed property the
+     top level used (whether or not it caught the error), a property it defined in their place,
+     or a holder it made non-extensible, fails the zygote here;
+   - the global scope's event listeners are recorded (`EventTarget::forEachSnapshotListener()`)
+     into `artifact.listenerRecords`: for each, its identity and the callback and receiver its
+     registration derived are pinned, with its `once` and `passive` options;
+   - the global scope's own state for its JavaScript, the `process` and `Buffer` values the top
+     level resolved or assigned (`ServiceWorkerGlobalScope::getSnapshotState()`), is pinned
+     (`artifact.globalScopeStateIndex`);
    - `stashPerIsolateBootstrapForSnapshot()` bundles the per-isolate bootstrap's JS-held state
      into one object and pins it (`artifact.bootstrapStateIndex`), the last of the record steps.
 
@@ -146,12 +152,17 @@ long as the isolate does. In order:
 3. `v8::Context::New()` deserializes the context. `deserializeInternalFields()` restores the
    wrapper-tag marker of every wrapper; `deserializeApiWrapperCallback()` links each wrapper to
    the shim pre-allocated for its payload's slot (`HeapTracer::linkRestoredWrapper()`). Then
-   `releaseSlotsWithChecks()` verifies every serialized slot was linked exactly once, and
-   `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded `Error.stackTraceLimit` state
-   on top of the defaults V8 just installed.
+   `relinkReferences()` hands each restored object that referred to other transferred objects
+   (`Wrappable::snapshotReferences()`, such as `Crypto`'s `subtle`) their restored instances
+   (`snapshotRelink()`), `releaseSlotsWithChecks()` verifies every serialized slot was linked
+   exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
+   `Error.stackTraceLimit` state and deletions on top of the defaults V8 just installed.
 4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
-   pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), replays
-   each recorded listener through the global's own `addEventListener`, and seeds the module
+   pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), hands the
+   fresh global scope the recorded `process`/`Buffer` state (`restoreSnapshotState()`),
+   re-registers each recorded listener in C++ (`EventTarget::restoreSnapshotListener()`, which
+   runs no JavaScript and does not consult the global's possibly replaced `addEventListener`),
+   and seeds the module
    registry: `addSnapshotSeed()` per `moduleRecords` entry, then `compileModules()`, which
    registers a bundle ES module the zygote instantiated around its baked instance
    (`tryTakeSnapshotModule()`) and still registers the lazily compilable builtins the zygote
@@ -172,14 +183,17 @@ long as the isolate does. In order:
 | `env` with its bindings, main module namespace | context-level `AddData`, fixed indices                     | `blob` (indices in `snapshot.h`)  |
 | JSG resource constructor templates           | isolate-level `AddData`, by position                        | `constructorTemplateIndices`      |
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
+| References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
-| `Error.stackTraceLimit` as the top level left it | pinned record, replayed after restore                   | `restoreTimeGlobalsIndex`         |
+| `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
+| `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
-| Global-scope event listeners                 | pinned identity objects, re-registered on load              | `listenerRecords`                 |
+| Global-scope event listeners                 | pinned identity, callback and receiver; re-registered in C++ | `listenerRecords`                |
 
 Not transferred, by design: `ctx.exports` (built for the real Worker after the zygote has run),
 the context global's own `ServiceWorkerGlobalScope` (`newContext()` attaches a fresh one; its
-listener map is what `listenerRecords` restores), and wrappers unreachable at `CreateBlob()`.
+listener map is what `listenerRecords` restores, and its `process`/`Buffer` values what
+`globalScopeStateIndex` restores), and wrappers unreachable at `CreateBlob()`.
 
 FinalizationRegistry cleanups the top level leaves due run in the zygote (step 5 above) and
 their effects are part of the snapshot, as if a collection had happened right after the top
@@ -193,11 +207,21 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
 - `static constexpr bool jsgSnapshotStateless = true;` when any fresh instance is
   interchangeable with any other (`SubtleCrypto`, `Navigator`, `TextEncoder`, ...). The snapshot
   records only the wrapper's tag; the worker started from it attaches an instance built by the
-  type's `Lock&` constructor, or its default constructor.
+  type's `Lock&` constructor, or its default constructor. The type must be `final` (a
+  `static_assert` enforces it), since a subclass would inherit the flag.
 - an override of `Wrappable::snapshotClone()` returning a deep, isolate-independent copy
-  (`Headers`, `URL`, `FileSystemModule`): no V8 handles, no `jsg::Ref` members, no IoContext.
-  It is called in the zygote on the live original, and once more per started worker on the
-  stored copy.
+  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`): no V8 handles, no `jsg::Ref` members,
+  no IoContext. It is called in the zygote on the live original, and once more per started
+  worker on the stored copy.
+
+A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
+also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
+`subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
+than to the one behind the restored wrapper.
+
+A `jsg::Function` the top level keeps (the function `createRequire()` returns, for example)
+transfers if its functor provides `Impl clone() const`; V8 patch 0052 keeps functions created by
+`v8::Function::New()` in the context snapshot so that their wrapper goes through the same path.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -216,8 +240,9 @@ its base type.
 
 Two outcomes are possible for a Worker that qualifies:
 
-- **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a
-  service-worker script, Wasm modules, Python, the new module registry, C++ streams, or a binding
+- **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a module
+  fallback service, a service-worker script, Wasm modules, Python, the new module registry, C++
+  streams, or a binding
   of a kind that cannot transfer (`cryptoKey`, `memoryCache`, `wrapped`, logged at INFO as
   `startup snapshot skipped: a binding of this kind cannot be transferred`), or a dynamically
   loaded Worker. No zygote runs.
@@ -260,19 +285,22 @@ once.
   address was not passed to `registerExternalReference()`. JSG registers its own callbacks; a new
   `v8::Function::New`/`FunctionTemplate::New` call site with a native callback needs to register
   it too.
-- `-c dbg` builds with the shared pointer-compression cage trip V8's read-only-heap checksum
-  check when a snapshot is consumed; use a fastbuild binary, or a multi-cage V8 build, to run the
-  pipeline under a debugger.
+- Without multiple pointer-compression cages every isolate shares one read-only heap, built from
+  the read-only snapshot of the isolate the group starts with. A zygote's read-only snapshot
+  differs from the built-in one only in the SharedFunctionInfo id it records; V8 patch 0053 leaves
+  that id out of the debug build's read-only-heap checksum and has a restored isolate continue
+  past it, so that isolates of both kinds can share the heap.
 
 ## Tests
 
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `dropUnreachableWrappables()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
-| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator` |
-| `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot, `signal` fallback      |
+| `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, and the `process`/`Buffer` globals |
+| `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
+| `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, crypto, navigator, bindings), GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, `node:fs` and ineligible cases fall back |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and ineligible cases fall back |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 
