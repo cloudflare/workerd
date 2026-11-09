@@ -10,6 +10,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 
 #include <kj/vector.h>
 
@@ -280,7 +281,8 @@ ProcessModule::MemoryUsage ProcessModule::getMemoryUsage(jsg::Lock& js) {
     .heapTotal = static_cast<double>(stats.total_heap_size()),
     .heapUsed = static_cast<double>(stats.used_heap_size()),
     .external = static_cast<double>(stats.external_memory()),
-    .arrayBuffers = 0,
+    .arrayBuffers =
+        static_cast<double>(jsg::IsolateBase::from(js.v8Isolate).getArrayBufferAllocatedBytes()),
   };
 }
 

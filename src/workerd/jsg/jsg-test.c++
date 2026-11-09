@@ -6,6 +6,8 @@
 
 #include <signal.h>
 
+#include <atomic>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -670,6 +672,72 @@ KJ_TEST("Memory Allocation Error Propagation") {
   isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
     KJ_EXPECT_THROW_MESSAGE(
         "Failed to allocate ArrayBuffer backing store", lock.allocBackingStore(100 * 1024));
+    // Failed allocations are not counted.
+    KJ_EXPECT(IsolateBase::from(lock.v8Isolate).getArrayBufferAllocatedBytes() == 0);
+  });
+}
+
+// Expects allocating and freeing a backing store to raise and restore the isolate's count.
+void expectArrayBufferBytesCounted(IsolateUuidIsolate& isolate) {
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    auto& base = IsolateBase::from(lock.v8Isolate);
+    auto before = base.getArrayBufferAllocatedBytes();
+    {
+      auto store = lock.allocBackingStore(1024);
+      KJ_EXPECT(base.getArrayBufferAllocatedBytes() == before + 1024);
+    }
+    KJ_EXPECT(base.getArrayBufferAllocatedBytes() == before);
+  });
+}
+
+// An embedder-supplied allocator that records the bytes V8 has allocated through it.
+class MallocArrayBufferAllocator final: public v8::ArrayBuffer::Allocator {
+ public:
+  // Atomic because V8 may free backing stores on other threads.
+  std::atomic<size_t> allocatedBytes = 0;
+
+  void* Allocate(size_t length) override {
+    allocatedBytes += length;
+    return calloc(length, 1);
+  }
+  void* AllocateUninitialized(size_t length) override {
+    allocatedBytes += length;
+    return malloc(length);
+  }
+  void Free(void* data, size_t length) override {
+    allocatedBytes -= length;
+    free(data);
+  }
+};
+
+KJ_TEST("ArrayBuffer allocator counts allocated bytes") {
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  expectArrayBufferBytesCounted(isolate);
+}
+
+KJ_TEST("ArrayBuffer allocator counts bytes from a raw embedder-supplied allocator") {
+  MallocArrayBufferAllocator allocator;
+  v8::Isolate::CreateParams createParams;
+  createParams.array_buffer_allocator = &allocator;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>(), kj::mv(createParams));
+  expectArrayBufferBytesCounted(isolate);
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    // Allocations went through the embedder's allocator.
+    KJ_EXPECT(allocator.allocatedBytes ==
+        IsolateBase::from(lock.v8Isolate).getArrayBufferAllocatedBytes());
+  });
+}
+
+KJ_TEST("ArrayBuffer allocator counts bytes from a shared embedder-supplied allocator") {
+  auto allocator = std::make_shared<MallocArrayBufferAllocator>();
+  v8::Isolate::CreateParams createParams;
+  createParams.array_buffer_allocator_shared = allocator;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>(), kj::mv(createParams));
+  expectArrayBufferBytesCounted(isolate);
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    // Allocations went through the embedder's allocator.
+    KJ_EXPECT(allocator->allocatedBytes ==
+        IsolateBase::from(lock.v8Isolate).getArrayBufferAllocatedBytes());
   });
 }
 

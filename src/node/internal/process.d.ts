@@ -17,7 +17,8 @@ export interface MemoryUsage {
   heapTotal: number;
   heapUsed: number;
   external: number;
-  // Always 0: workerd does not track ArrayBuffer allocations per isolate.
+  // Bytes currently allocated by this isolate's ArrayBuffer allocator; see
+  // jsg::IsolateBase::getArrayBufferAllocatedBytes().
   arrayBuffers: number;
 }
 export function getMemoryUsage(): MemoryUsage;

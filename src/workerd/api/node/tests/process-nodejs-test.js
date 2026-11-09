@@ -1190,6 +1190,18 @@ export const processMemoryUsage = {
     assert.ok(usage.heapUsed > 0, 'heapUsed should be > 0');
     assert.ok(usage.heapUsed <= usage.heapTotal);
     assert.strictEqual(usage.rss, usage.heapTotal + usage.external);
-    assert.strictEqual(usage.arrayBuffers, 0);
+  },
+};
+
+export const processMemoryUsageArrayBuffers = {
+  test() {
+    const size = 1024 * 1024;
+    const arrayBuffer = new ArrayBuffer(size);
+    const buffer = Buffer.alloc(size);
+    assert.ok(process.memoryUsage().arrayBuffers >= 2 * size);
+
+    // Keep both backing stores alive until after the measurement.
+    assert.strictEqual(arrayBuffer.byteLength, size);
+    assert.strictEqual(buffer.byteLength, size);
   },
 };

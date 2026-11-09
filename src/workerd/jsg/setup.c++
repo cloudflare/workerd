@@ -19,6 +19,8 @@
 #include <ucontext.h>
 #endif
 
+#include <atomic>
+
 #ifdef WORKERD_ICU_DATA_EMBED
 #include "icu-data-file.embed.h"
 
@@ -410,16 +412,6 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
     // V8 takes ownership of the v8::CppHeap.
     params.cpp_heap = cppHeap;
 
-    if (params.array_buffer_allocator == nullptr &&
-        params.array_buffer_allocator_shared == nullptr) {
-#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
-#else
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-#endif
-    }
     // Installed through the params rather than after creation so that the histograms V8 records
     // while creating the isolate (snapshot deserialization) are captured too.
     params.create_histogram_callback = &IsolateBase::createV8Histogram;
@@ -461,6 +453,111 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
 }
 }  // namespace
 
+// Wraps an isolate's ArrayBuffer allocator, counting the bytes it currently has allocated. The
+// wrapped allocator is the one the embedder supplied in the isolate's CreateParams, or V8's
+// default allocator if it supplied none. Every Allocator method forwards to it, so its behavior,
+// including MaxAllocationSize() and GetPageAllocator(), is unchanged.
+//
+// The count backs `arrayBuffers` in Node.js's `process.memoryUsage()` (see
+// api/node/process.c++), which Node.js computes the same way with its own allocator wrapper. It
+// covers only backing stores allocated through this allocator: native memory wrapped as an
+// ArrayBuffer with a custom deleter, resizable ArrayBuffers, and WebAssembly memory are allocated
+// elsewhere and are not counted.
+//
+// IsolateBase installs one allocator per isolate and shares it with V8, which keeps it alive while
+// any backing store it allocated remains, including after the isolate is destroyed.
+class CountingArrayBufferAllocator final: public v8::ArrayBuffer::Allocator {
+ public:
+  explicit CountingArrayBufferAllocator(std::shared_ptr<v8::ArrayBuffer::Allocator> inner)
+      : inner(kj::mv(inner)) {}
+
+  void* Allocate(size_t length) override {
+    return count(inner->Allocate(length), length);
+  }
+  void* AllocateUninitialized(size_t length) override {
+    return count(inner->AllocateUninitialized(length), length);
+  }
+  void Free(void* data, size_t length) override {
+    allocatedBytes.fetch_sub(length, std::memory_order_relaxed);
+    inner->Free(data, length);
+  }
+  size_t MaxAllocationSize() const override {
+    return inner->MaxAllocationSize();
+  }
+  v8::PageAllocator* GetPageAllocator() override {
+    return inner->GetPageAllocator();
+  }
+
+  size_t getAllocatedBytes() const {
+    return allocatedBytes.load(std::memory_order_relaxed);
+  }
+
+ private:
+  // A std::shared_ptr to match CreateParams::array_buffer_allocator_shared, which is where an
+  // embedder-supplied allocator comes from. Non-owning if the embedder supplied a raw
+  // CreateParams::array_buffer_allocator.
+  std::shared_ptr<v8::ArrayBuffer::Allocator> inner;
+
+  // Bytes allocated by `inner` and not yet freed: incremented on each successful allocation,
+  // decremented on each free.
+  //
+  // Atomic because V8 may allocate and free backing stores on threads other than the one holding
+  // the isolate lock; for example, a backing store can be freed by a background GC task or by
+  // whichever thread drops the last reference to it.
+  //
+  // Every access uses std::memory_order_relaxed. The counter is a standalone statistic: no other
+  // data is published through it, so no access needs to order surrounding memory operations, and
+  // relaxed avoids the barriers that stronger orders add on weakly ordered CPUs such as ARM on
+  // every ArrayBuffer allocation and free. Relaxed still guarantees that:
+  //  * No update is lost: each fetch_add()/fetch_sub() is an atomic read-modify-write.
+  //  * The count never underflows: an allocation happens before its free (V8 cannot free memory
+  //    it has not yet received), and modifications of a single atomic object follow
+  //    happens-before, so the matching add always precedes the subtract.
+  // The consequence is that a load() can return a slightly stale value: an allocation or free that
+  // just completed on another thread may not be reflected yet. A reading is therefore a
+  // point-in-time approximation, which is acceptable for reporting memory usage, but it must not
+  // be used to infer the state of any particular backing store.
+  std::atomic<size_t> allocatedBytes{0};
+
+  void* count(void* data, size_t length) {
+    if (data != nullptr) {
+      allocatedBytes.fetch_add(length, std::memory_order_relaxed);
+    }
+    return data;
+  }
+};
+
+namespace {
+// Installs a CountingArrayBufferAllocator in `params`, wrapping the allocator `params` already
+// names, or V8's default allocator if it names none.
+std::shared_ptr<CountingArrayBufferAllocator> installArrayBufferAllocator(
+    v8::Isolate::CreateParams& params, v8::IsolateGroup group) {
+  std::shared_ptr<v8::ArrayBuffer::Allocator> inner;
+  if (params.array_buffer_allocator_shared != nullptr) {
+    inner = kj::mv(params.array_buffer_allocator_shared);
+  } else if (params.array_buffer_allocator != nullptr) {
+    // Non-owning. V8 already requires a raw allocator to outlive every backing store it
+    // allocated, so the wrapper inherits that contract.
+    inner = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+        params.array_buffer_allocator, [](v8::ArrayBuffer::Allocator*) {});
+    params.array_buffer_allocator = nullptr;
+  } else {
+#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+    inner.reset(v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
+#else
+    inner.reset(v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+#endif
+  }
+  auto allocator = std::make_shared<CountingArrayBufferAllocator>(kj::mv(inner));
+  params.array_buffer_allocator_shared = allocator;
+  return allocator;
+}
+}  // namespace
+
+size_t IsolateBase::getArrayBufferAllocatedBytes() const {
+  return arrayBufferAllocator->getAllocatedBytes();
+}
+
 v8::IsolateGroup newIsolateGroup() {
   if (v8::IsolateGroup::CanCreateNewGroups()) {
     return v8::IsolateGroup::Create();
@@ -477,6 +574,7 @@ IsolateBase::IsolateBase(V8System& system,
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       snapshotCreator(kj::none),
+      arrayBufferAllocator(installArrayBufferAllocator(createParams, group)),
       ptr([&]() {
         auto [isolate, maybeCreator] = newIsolateWithSnapshotCreator(
             kj::mv(createParams), cppHeap.release(), group, *observer, snapshotConf);
