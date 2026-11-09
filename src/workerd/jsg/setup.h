@@ -150,9 +150,8 @@ class V8System {
 // installed), they are absent in the zygote as in a normal context, and a property the top level
 // defines under one of them fails the zygote.
 
-// The intrinsic a restore-time property lives on. The zygote captures each one except the global
-// object in a ContextDataSlot before any JavaScript runs, so that user code rebinding the global
-// name (`globalThis.Error = ...`) cannot divert the checks from the object V8 adds to.
+// The intrinsic a restore-time property lives on; see RestoreTimeHolderHandles for how the zygote
+// captures them before any JavaScript runs.
 enum class RestoreTimeHolder {
   GLOBAL,
   ERROR_CTOR,
@@ -200,6 +199,17 @@ constexpr RestoreTimeGlobal RESTORE_TIME_GLOBALS[] = {
 
 // The holder's JavaScript name ("globalThis", "Error", "Iterator.prototype", ...).
 kj::StringPtr jsNameOf(RestoreTimeHolder holder);
+
+// The holders a zygote captures before any JavaScript runs in its context, so that user code
+// rebinding their global names (`globalThis.Error = ...`) cannot divert the checks from the
+// objects V8 adds to. The global object and Date.prototype need no capture: they are reached
+// through the context and through a new Date.
+struct RestoreTimeHolderHandles {
+  v8::Global<v8::Context> context;
+  v8::Global<v8::Object> errorCtor;
+  v8::Global<v8::Object> iteratorCtor;
+  v8::Global<v8::Object> iteratorPrototype;
+};
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
@@ -856,6 +866,12 @@ class IsolateBase {
   // Whether the zygote's context has Temporal, which decides how the RestoreTimeKind::TEMPORAL
   // entries are handled. Set by installRestoreTimeGlobalsForZygote().
   bool zygoteHasTemporal = false;
+
+  // The zygote context's restore-time holders, from installRestoreTimeGlobalsForZygote() until
+  // removeRestoreTimeGlobalsBeforeSnapshot() stores them in the record it pins into the snapshot,
+  // where the restored context finds them. Not kept in the context's embedder data, which has no
+  // slots to spare in every embedder's V8 build.
+  kj::Maybe<RestoreTimeHolderHandles> zygoteRestoreTimeHolders;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
