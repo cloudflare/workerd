@@ -182,7 +182,7 @@ fn end_tag_handlers_run_for_the_element_end_tag() {
         run(r"let message;
             rewrite('<br>', [['br', { element(el) { message = error(() => el.onEndTag(0)); } }]]);
             message"),
-        "TypeError: Parser error: br can't have content"
+        "TypeError: Parser error: No end tag."
     );
 }
 
@@ -304,8 +304,7 @@ fn the_esi_compatibility_flag_makes_esi_include_a_void_tag() {
     let harness = Harness::with_flags(|mut flags| flags.set_esi_include_is_void_tag(true));
     assert_eq!(
         run_with(&harness, code),
-        "TypeError: Parser error: esi:include can't have content \
-         <esi:include src=a>x</esi:include>"
+        "TypeError: Parser error: No end tag. <esi:include src=a>x</esi:include>"
     );
 }
 

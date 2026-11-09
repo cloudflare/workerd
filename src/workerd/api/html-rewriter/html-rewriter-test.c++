@@ -206,7 +206,7 @@ KJ_TEST("lol-html's errors reject the call with a parser error") {
   )");
   fixture.pollEventLoop();
   // onEndTag() throws in the handler, so the call fails with that error.
-  KJ_EXPECT(evaluate(fixture, "log.join()") == "TypeError: Parser error: br can't have content");
+  KJ_EXPECT(evaluate(fixture, "log.join()") == "TypeError: Parser error: No end tag.");
   fixture.drainAndDestroy(kj::mv(request));
 }
 

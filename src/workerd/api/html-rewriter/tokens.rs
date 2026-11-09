@@ -287,7 +287,8 @@ impl ElementHandle {
     }
 
     /// Replaces the element's end tag handler with the one numbered `id`, which the rewriter
-    /// dispatches as a [`HandlerKind::EndTag`]. Fails for an element that can't have an end tag.
+    /// dispatches as a [`HandlerKind::EndTag`]. Fails for an element that can't have an end tag,
+    /// with the message of lol-html's C API, which C++ `HTMLRewriter` throws.
     #[jsg_method]
     pub fn on_end_tag(&self, id: u32) -> jsg::Result<()> {
         let shared = Arc::clone(&self.shared);
@@ -299,7 +300,7 @@ impl ElementHandle {
                 shared.dispatch(HandlerKind::EndTag, id, Token::EndTag(end_tag))
             }))
         })?
-        .map_err(parser_error)
+        .map_err(|_| parser_error("No end tag."))
     }
 }
 
