@@ -214,9 +214,25 @@ inline uint8_t GetHighestValueByte(uint8_t character) {
 // Searches for a byte value in a memory buffer, back to front.
 // Uses memrchr(3) on systems which support it, for speed.
 // Falls back to a vanilla for loop on non-GNU systems such as Windows.
+//
+// memrchr(3) runs on trailing chunks that double in size, not on the whole buffer at once:
+// sanitizers' memrchr interceptors check the entire range they are given before searching,
+// unlike memchr's, which check only up to the match. Backward searches call this once per
+// candidate match, each time with everything before it, so a single call would make each
+// search cost the whole buffer under ThreadSanitizer, whose range check is far slower than
+// the search itself. Chunks keep the bytes checked within twice the bytes searched.
 inline const void* MemrchrFill(const void* haystack, uint8_t needle, size_t haystack_len) {
 #ifdef _GNU_SOURCE
-  return memrchr(haystack, needle, haystack_len);
+  const uint8_t* haystack8 = static_cast<const uint8_t*>(haystack);
+  size_t end = haystack_len;
+  for (size_t chunk = 64; end > 0; chunk *= 2) {
+    size_t n = kj::min(chunk, end);
+    end -= n;
+    if (const void* found = memrchr(haystack8 + end, needle, n)) {
+      return found;
+    }
+  }
+  return nullptr;
 #else
   const uint8_t* haystack8 = static_cast<const uint8_t*>(haystack);
   for (size_t i = haystack_len - 1; i != static_cast<size_t>(-1); i--) {
