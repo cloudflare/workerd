@@ -13558,6 +13558,49 @@ type BrowserRunDevtools = {
 type BrowserRunCloseSessionResult = {
   status: "closing" | "closed";
 };
+/** Library the script runs against. Omit it to receive a raw CDP client. */
+type BrowserRunScriptLibrary = "playwright" | "puppeteer";
+/** Options for `script()`. */
+type BrowserRunScriptOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds, not counting browser
+   * acquisition. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** How long the session stays open without activity after the run, in
+   * milliseconds. Between 10000 and 1200000.
+   * @default 60000
+   */
+  keepAlive?: number;
+  /** Use the experimental pool, whose browsers enable Chrome features before
+   * they reach stable Chrome.
+   * @default false
+   */
+  lab?: boolean;
+  /** Record the browser session. @default false */
+  recording?: boolean;
+};
+/** Options for `scriptInSession()`. */
+type BrowserRunScriptSessionOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
+};
+/** JSON success body of `script()` and `scriptInSession()`. */
+type BrowserRunScriptSuccessResponse = {
+  success: true;
+  /** The script's return value, or `null` when it returned nothing. */
+  result: unknown;
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13772,6 +13815,57 @@ declare abstract class BrowserRun {
   getSession(sessionId: string): Promise<BrowserRunSession | null>;
   /** Close a browser session. */
   closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /**
+   * Run a script against a new browser session.
+   * @param code - Source of an async function. It receives the selected
+   * library's objects (Playwright `{ page, context, browser }`, Puppeteer
+   * `{ page, browser }`) or, without `library`, a CDP client.
+   * @param options - Library, timeout and session launch options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScriptSuccessResponse` JSON with `Content-Type: application/json`
+   * when the script returns a JSON-serializable value or nothing
+   * - The raw body and content type when the script returns binary or other
+   * non-JSON output
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - HTTP 408 when the script exceeds `timeout`
+   * - HTTP 422 when the script fails to compile or throws
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * - `cf-browser-target-id`: Page target the script ran on
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
+  /**
+   * Run a script against an existing browser session, such as one kept open by
+   * `script()`.
+   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
+   * header returned by `script()`.
+   * @param code - Source of an async function, as for `script()`.
+   * @param options - Library, timeout and page target options.
+   * @returns A `Response` with the same success bodies as `script()`.
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
+   * - HTTP 404 when the session or `targetId` does not exist
+   * - HTTP 410 when the session is already closed
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  scriptInSession(
+    sessionId: string,
+    code: string,
+    options?: BrowserRunScriptSessionOptions,
+  ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
 }
