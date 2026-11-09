@@ -8,34 +8,35 @@
 // src/workerd/api/node/buffer.c++. Functions that take `start` and `end`
 // operate on that range of the array.
 
-// v8::String::WriteFlags
-export const WRITE_NONE: number;
-export const WRITE_REPLACE_INVALID_UTF8: number;
-
 // V8 strings
 export function utf8Length(string: string): number;
-export function writeOneByte(
+export function writeOneByte(string: string, dest: Uint8Array): number;
+export function writeOneByteRange(
   string: string,
   dest: Uint8Array,
   start: number,
-  end: number,
-  flags: number
+  end: number
 ): number;
-export function writeUtf8(
+export function writeUtf8(string: string, dest: Uint8Array): number;
+export function writeUtf8Range(
   string: string,
   dest: Uint8Array,
   start: number,
-  end: number,
-  flags: number
+  end: number
 ): number;
-export function writeUtf16(
+export function writeUtf16(string: string, dest: Uint8Array): number;
+export function writeUtf16Range(
   string: string,
   dest: Uint8Array,
   start: number,
-  end: number,
-  flags: number
+  end: number
 ): number;
 export function newFromOneByte(
+  bytes: Uint8Array,
+  start: number,
+  end: number
+): string;
+export function newFromAscii(
   bytes: Uint8Array,
   start: number,
   end: number
@@ -92,10 +93,11 @@ export function decodeBase64Into(
   output: Uint8Array,
   start: number,
   end: number,
-  input: Uint8Array
+  input: string
 ): number;
 
 // Hex
+export function decodeHex(string: string, strict: boolean): Uint8Array;
 export function encodeHex(
   bytes: Uint8Array,
   start: number,

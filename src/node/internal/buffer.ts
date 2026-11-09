@@ -319,74 +319,6 @@ function fillArray(
   }
 }
 
-// KJ_STACK_ARRAY(kj::byte, name, size, 1024, ...): scratch space used only
-// within a single call. KJ_STACK_ARRAY puts up to 1024 bytes on the stack;
-// here sizes up to 1024 share one preallocated array, and larger sizes
-// allocate. Callers track the size themselves, since the shared array is
-// longer, and must not keep it past the call. No JavaScript runs while it is
-// in use.
-const kStackArrayMaxSize = 1024;
-let stackArray: Uint8Array | undefined;
-function stackArrayOf(size: number): Uint8Array {
-  if (size > kStackArrayMaxSize) return new Uint8Array(size);
-  return (stackArray ??= new Uint8Array(kStackArrayMaxSize));
-}
-
-// jsg::JsString::toString: the string as UTF-8, without replacing invalid
-// sequences.
-function jsStringToString(string: string): Uint8Array {
-  const buf = new Uint8Array(native.utf8Length(string));
-  native.writeUtf8(string, buf, 0, buf.length, native.WRITE_NONE);
-  return buf;
-}
-
-// =======================================================================================
-
-// tryFromHexDigit in the C++, as a table: the value of each hex digit, or -1
-// for any other byte.
-const kHexDigitValues = new Int8Array(256).fill(-1);
-for (let i = 0; i < 10; i++) kHexDigitValues[0x30 /* '0' */ + i] = i;
-for (let i = 0; i < 6; i++) {
-  kHexDigitValues[0x61 /* 'a' */ + i] = 10 + i;
-  kHexDigitValues[0x41 /* 'A' */ + i] = 10 + i;
-}
-
-// Decodes the first `textLength` bytes of `text`.
-function decodeHexTruncated(
-  text: Uint8Array,
-  textLength: number,
-  strict = false
-): Uint8Array {
-  // We do not use kj::decodeHex because we need to match Node.js'
-  // behavior of truncating the response at the first invalid hex
-  // pair as opposed to just marking that an error happened and
-  // trying to continue with the decode.
-  if (textLength % 2 !== 0) {
-    if (strict) throw new TypeError('The text is not valid hex');
-    textLength -= 1;
-  }
-  const vec = createUint8Array(textLength / 2);
-  let len = 0;
-
-  // The C++ checks each digit in turn, but either being invalid has the same
-  // effect, so both are checked at once.
-  for (let i = 0; i < textLength; i += 2) {
-    const d1 = kHexDigitValues[text[i]!]!;
-    const d2 = kHexDigitValues[text[i + 1]!]!;
-    if ((d1 | d2) < 0) {
-      if (strict) throw new TypeError('The text is not valid hex');
-      break;
-    }
-    vec[len++] = (d1 << 4) | d2;
-  }
-
-  if (len === vec.length) {
-    return vec;
-  }
-
-  return sliceUint8Array(vec, len);
-}
-
 function writeInto(
   buffer: Uint8Array,
   string: string,
@@ -403,30 +335,33 @@ function writeInto(
     return 0;
   }
 
-  const flags = native.WRITE_REPLACE_INVALID_UTF8;
-
   switch (encoding) {
     case ASCII:
     // Falls through
     case LATIN1: {
-      return native.writeOneByte(string, buffer, destStart, destEnd, flags);
+      return destStart === 0 && destEnd === buffer.length
+        ? native.writeOneByte(string, buffer)
+        : native.writeOneByteRange(string, buffer, destStart, destEnd);
     }
     case UTF8: {
-      return native.writeUtf8(string, buffer, destStart, destEnd, flags);
+      return destStart === 0 && destEnd === buffer.length
+        ? native.writeUtf8(string, buffer)
+        : native.writeUtf8Range(string, buffer, destStart, destEnd);
     }
     case UTF16LE: {
-      return native.writeUtf16(string, buffer, destStart, destEnd, flags) * 2;
+      return (
+        (destStart === 0 && destEnd === buffer.length
+          ? native.writeUtf16(string, buffer)
+          : native.writeUtf16Range(string, buffer, destStart, destEnd)) * 2
+      );
     }
     case BASE64:
     // Falls through
     case BASE64URL: {
-      const str = jsStringToString(string);
-      return native.decodeBase64Into(buffer, destStart, destEnd, str);
+      return native.decodeBase64Into(buffer, destStart, destEnd, string);
     }
     case HEX: {
-      const buf = stackArrayOf(string.length);
-      native.writeOneByte(string, buf, 0, string.length, flags);
-      const backing = decodeHexTruncated(buf, string.length, false);
+      const backing = native.decodeHex(string, false);
       const amountToCopy = Math.min(backing.length, destEnd - destStart);
       buffer.set(
         amountToCopy === backing.length
@@ -450,8 +385,6 @@ function decodeStringImpl(
   if (length === 0) {
     return createUint8Array(0);
   }
-
-  const options = native.WRITE_REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case ASCII:
@@ -477,9 +410,7 @@ function decodeStringImpl(
       return native.decodeBase64(string);
     }
     case HEX: {
-      const buf = stackArrayOf(length);
-      native.writeOneByte(string, buf, 0, length, options);
-      return decodeHexTruncated(buf, length, strict);
+      return native.decodeHex(string, strict);
     }
     default:
       throw internalError();
@@ -774,17 +705,16 @@ function decodeNeedle(needle: string, enc: Encoding): Uint8Array {
   }
   const scratch = (needleScratch ??= new Uint8Array(kNeedleScratchSize));
   // The same writes as writeInto, into the start of `scratch`.
-  const flags = native.WRITE_REPLACE_INVALID_UTF8;
   let length: number;
   switch (enc) {
     case UTF16LE:
-      length = native.writeUtf16(needle, scratch, 0, maxLength, flags) * 2;
+      length = native.writeUtf16Range(needle, scratch, 0, maxLength) * 2;
       break;
     case UTF8:
-      length = native.writeUtf8(needle, scratch, 0, maxLength, flags);
+      length = native.writeUtf8Range(needle, scratch, 0, maxLength);
       break;
     default:
-      length = native.writeOneByte(needle, scratch, 0, maxLength, flags);
+      length = native.writeOneByteRange(needle, scratch, 0, maxLength);
   }
   return scratch.subarray(0, length);
 }
@@ -868,15 +798,7 @@ function toStringImpl(
   if (sliceLength === 0) return '';
   switch (encoding) {
     case ASCII: {
-      // TODO(perf): We can look at making this more performant later.
-      // Essentially we have to modify the buffer such that every byte
-      // has the highest bit turned off. Whee! Node.js has a faster
-      // algorithm that it implements so we can likely adopt that.
-      const copy = new Uint8Array(sliceLength);
-      for (let i = 0; i < sliceLength; i++) {
-        copy[i] = bytes[start + i]! & 0x7f;
-      }
-      return native.newFromOneByte(copy, 0, sliceLength);
+      return native.newFromAscii(bytes, start, end);
     }
     case LATIN1: {
       return native.newFromOneByte(bytes, start, end);

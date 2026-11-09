@@ -34,7 +34,6 @@ use jsg::v8;
 use jsg::v8::WriteFlags;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-use jsg_macros::jsg_static_constant;
 use memchr::memmem;
 
 // =================================================================================================
@@ -530,6 +529,42 @@ const HEX_PAIRS: [[u8; 2]; 256] = {
     table
 };
 
+const HEX_DIGITS: [u8; 256] = {
+    let mut table = [INVALID; 256];
+    let mut digit = 0;
+    while digit < 10 {
+        table[b'0' as usize + digit] = digit as u8;
+        digit += 1;
+    }
+    digit = 0;
+    while digit < 6 {
+        table[b'a' as usize + digit] = (digit + 10) as u8;
+        table[b'A' as usize + digit] = (digit + 10) as u8;
+        digit += 1;
+    }
+    table
+};
+
+/// Decodes pairs of hex digits, truncating at the first invalid pair unless `strict`.
+/// `dest` has room for every pair; an odd final digit is ignored unless `strict`.
+fn decode_hex(text: &[u8], dest: &mut [u8], strict: bool) -> jsg::Result<usize> {
+    let invalid = || jsg::Error::new_type_error("The text is not valid hex");
+    if strict && !text.len().is_multiple_of(2) {
+        return Err(invalid());
+    }
+    let mut written = 0;
+    for (digits, byte) in text.chunks_exact(2).zip(dest) {
+        let hi = HEX_DIGITS[usize::from(digits[0])];
+        let lo = HEX_DIGITS[usize::from(digits[1])];
+        if (hi | lo) & 0x80 != 0 {
+            return if strict { Err(invalid()) } else { Ok(written) };
+        }
+        *byte = (hi << 4) | lo;
+        written += 1;
+    }
+    Ok(written)
+}
+
 /// Stack space for short results, as the C++ used `KJ_STACK_ARRAY`.
 const STACK_BUFFER_SIZE: usize = 1024;
 
@@ -575,12 +610,6 @@ unsafe fn bytes(array: v8::Local<'_, v8::Uint8Array>) -> &[u8] {
 unsafe fn bytes_mut(array: v8::Local<'_, v8::Uint8Array>) -> &mut [u8] {
     // SAFETY: as in `bytes`.
     unsafe { &mut *array.as_raw_slice() }
-}
-
-/// The addresses of `bytes`.
-fn address_range(bytes: *mut [u8]) -> Range<usize> {
-    let start = bytes.cast::<u8>() as usize;
-    start..start + bytes.len()
 }
 
 /// The `[start, end)` range of an array of `len` bytes, or a `RangeError` if it is out of bounds.
@@ -629,16 +658,6 @@ fn to_f64(len: usize) -> f64 {
     len as f64
 }
 
-/// Only these flags are accepted. Every write passes V8 the capacity of an exact range, so a
-/// null terminator would be written past it.
-fn write_flags(flags: u8) -> jsg::Result<WriteFlags> {
-    match flags {
-        0 => Ok(WriteFlags::None),
-        2 => Ok(WriteFlags::ReplaceInvalidUtf8),
-        _ => Err(jsg::Error::new_type_error("Invalid write flags")),
-    }
-}
-
 /// The length of `string` in UTF-16 code units.
 fn string_length(string: JsString<'_>) -> u32 {
     u32::try_from(string.length()).unwrap_or(0)
@@ -667,6 +686,107 @@ fn transcode_encoding(encoding: u8) -> jsg::Result<i18n::Encoding> {
     }
 }
 
+#[inline]
+fn write_one_byte<'s>(
+    lock: &mut jsg::Lock<'s>,
+    string: JsString<'s>,
+    dest: v8::Local<'s, v8::Uint8Array>,
+    bounds: Option<(f64, f64)>,
+) -> jsg::Result<f64> {
+    // SAFETY: writing a string runs no JavaScript, and `string` is not in an ArrayBuffer.
+    let dest = unsafe { bytes_mut(dest) };
+    let dest = if let Some((start, end)) = bounds {
+        let range = range(dest.len(), start, end)?;
+        &mut dest[range]
+    } else {
+        dest
+    };
+    if dest.is_empty() {
+        return Ok(0.0);
+    }
+    let length = string_length(string);
+    let written = dest.len().min(length as usize);
+    string.write_one_byte(
+        lock,
+        0,
+        units(written, length),
+        dest,
+        WriteFlags::ReplaceInvalidUtf8,
+    );
+    Ok(to_f64(written))
+}
+
+#[inline]
+fn write_utf8<'s>(
+    lock: &mut jsg::Lock<'s>,
+    string: JsString<'s>,
+    dest: v8::Local<'s, v8::Uint8Array>,
+    bounds: Option<(f64, f64)>,
+) -> jsg::Result<f64> {
+    // SAFETY: writing a string runs no JavaScript, and `string` is not in an ArrayBuffer.
+    let dest = unsafe { bytes_mut(dest) };
+    let dest = if let Some((start, end)) = bounds {
+        let range = range(dest.len(), start, end)?;
+        &mut dest[range]
+    } else {
+        dest
+    };
+    if dest.is_empty() {
+        return Ok(0.0);
+    }
+    Ok(to_f64(string.write_utf8(
+        lock,
+        dest,
+        WriteFlags::ReplaceInvalidUtf8,
+    )))
+}
+
+#[inline]
+fn write_utf16<'s>(
+    lock: &mut jsg::Lock<'s>,
+    string: JsString<'s>,
+    dest: v8::Local<'s, v8::Uint8Array>,
+    bounds: Option<(f64, f64)>,
+) -> jsg::Result<f64> {
+    // SAFETY: writing a string runs no JavaScript, and `string` is not in an ArrayBuffer.
+    let dest = unsafe { bytes_mut(dest) };
+    let dest = if let Some((start, end)) = bounds {
+        let range = range(dest.len(), start, end)?;
+        &mut dest[range]
+    } else {
+        dest
+    };
+    let length = string_length(string);
+    let written = (dest.len() / 2).min(length as usize);
+    if written == 0 {
+        return Ok(0.0);
+    }
+    // SAFETY: every bit pattern is a valid `u16`.
+    let (prefix, aligned, _) = unsafe { dest.align_to_mut::<u16>() };
+    if prefix.is_empty() {
+        string.write(
+            lock,
+            0,
+            units(written, length),
+            &mut aligned[..written],
+            WriteFlags::ReplaceInvalidUtf8,
+        );
+    } else {
+        let mut code_units = vec![0u16; written];
+        string.write(
+            lock,
+            0,
+            units(written, length),
+            &mut code_units,
+            WriteFlags::ReplaceInvalidUtf8,
+        );
+        for (pair, unit) in dest.chunks_exact_mut(2).zip(&code_units) {
+            pair.copy_from_slice(&unit.to_ne_bytes());
+        }
+    }
+    Ok(to_f64(written))
+}
+
 // =================================================================================================
 // Module
 
@@ -675,12 +795,6 @@ pub struct BufferNative;
 
 #[jsg_resource]
 impl BufferNative {
-    #[jsg_static_constant]
-    pub const WRITE_NONE: u32 = WriteFlags::None as u32;
-
-    #[jsg_static_constant]
-    pub const WRITE_REPLACE_INVALID_UTF8: u32 = WriteFlags::ReplaceInvalidUtf8 as u32;
-
     #[must_use]
     pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {
         jsg::Rc::new(lock, Self)
@@ -694,94 +808,93 @@ impl BufferNative {
         to_f64(string.utf8_length(lock))
     }
 
-    /// Writes the low byte of each UTF-16 code unit of `string` into the range. Returns the
-    /// number of bytes written.
+    /// Writes the low byte of each UTF-16 code unit of `string`. Returns bytes written.
     #[jsg_method]
     pub fn write_one_byte<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
         string: JsString<'s>,
         dest: v8::Local<'s, v8::Uint8Array>,
-        start: f64,
-        end: f64,
-        flags: u8,
     ) -> jsg::Result<f64> {
-        let flags = write_flags(flags)?;
-        // SAFETY: writing a string runs no JavaScript, and `string` is not in an ArrayBuffer.
-        let dest = unsafe { bytes_mut(dest) };
-        let range = range(dest.len(), start, end)?;
-        let dest = &mut dest[range];
-        if dest.is_empty() {
-            return Ok(0.0);
-        }
-        let length = string_length(string);
-        let written = dest.len().min(length as usize);
-        string.write_one_byte(lock, 0, units(written, length), dest, flags);
-        Ok(to_f64(written))
+        write_one_byte(lock, string, dest, None)
     }
 
-    /// Writes `string` into the range as UTF-8. Returns the number of bytes written.
+    /// As [`Self::write_one_byte`], restricted to the checked `[start, end)` range.
+    #[jsg_method]
+    pub fn write_one_byte_range<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        string: JsString<'s>,
+        dest: v8::Local<'s, v8::Uint8Array>,
+        start: f64,
+        end: f64,
+    ) -> jsg::Result<f64> {
+        write_one_byte(lock, string, dest, Some((start, end)))
+    }
+
+    /// Writes `string` as UTF-8, replacing lone surrogates. Returns bytes written.
     #[jsg_method]
     pub fn write_utf8<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
         string: JsString<'s>,
         dest: v8::Local<'s, v8::Uint8Array>,
-        start: f64,
-        end: f64,
-        flags: u8,
     ) -> jsg::Result<f64> {
-        let flags = write_flags(flags)?;
-        // SAFETY: as in `write_one_byte`.
-        let dest = unsafe { bytes_mut(dest) };
-        let range = range(dest.len(), start, end)?;
-        let dest = &mut dest[range];
-        if dest.is_empty() {
-            return Ok(0.0);
-        }
-        Ok(to_f64(string.write_utf8(lock, dest, flags)))
+        write_utf8(lock, string, dest, None)
     }
 
-    /// Writes `string` into the range as native-endian UTF-16 code units (the last byte of an
-    /// odd-length range is not written). Returns the number of code units written.
+    /// As [`Self::write_utf8`], restricted to the checked `[start, end)` range.
     #[jsg_method]
-    pub fn write_utf16<'s>(
+    pub fn write_utf8_range<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
         string: JsString<'s>,
         dest: v8::Local<'s, v8::Uint8Array>,
         start: f64,
         end: f64,
-        flags: u8,
     ) -> jsg::Result<f64> {
-        let flags = write_flags(flags)?;
-        // SAFETY: as in `write_one_byte`.
-        let dest = unsafe { bytes_mut(dest) };
-        let range = range(dest.len(), start, end)?;
-        let dest = &mut dest[range];
-        let length = string_length(string);
-        let written = (dest.len() / 2).min(length as usize);
-        if written == 0 {
-            return Ok(0.0);
-        }
-        // SAFETY: every bit pattern is a valid `u16`.
-        let (prefix, aligned, _) = unsafe { dest.align_to_mut::<u16>() };
-        if prefix.is_empty() {
-            string.write(
-                lock,
-                0,
-                units(written, length),
-                &mut aligned[..written],
-                flags,
-            );
-        } else {
-            let mut code_units = vec![0u16; written];
-            string.write(lock, 0, units(written, length), &mut code_units, flags);
-            for (pair, unit) in dest.chunks_exact_mut(2).zip(&code_units) {
-                pair.copy_from_slice(&unit.to_ne_bytes());
-            }
-        }
-        Ok(to_f64(written))
+        write_utf8(lock, string, dest, Some((start, end)))
+    }
+
+    /// Writes `string` as native-endian UTF-16, leaving a trailing odd byte untouched.
+    /// Returns code units written.
+    #[jsg_method]
+    pub fn write_utf16<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        string: JsString<'s>,
+        dest: v8::Local<'s, v8::Uint8Array>,
+    ) -> jsg::Result<f64> {
+        write_utf16(lock, string, dest, None)
+    }
+
+    /// As [`Self::write_utf16`], restricted to the checked `[start, end)` range.
+    #[jsg_method]
+    pub fn write_utf16_range<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        string: JsString<'s>,
+        dest: v8::Local<'s, v8::Uint8Array>,
+        start: f64,
+        end: f64,
+    ) -> jsg::Result<f64> {
+        write_utf16(lock, string, dest, Some((start, end)))
+    }
+
+    /// A string of the range's bytes with each byte's high bit cleared.
+    #[jsg_method]
+    pub fn new_from_ascii<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        bytes: v8::Local<'s, v8::Uint8Array>,
+        start: f64,
+        end: f64,
+    ) -> jsg::Result<JsString<'s>> {
+        // SAFETY: creating a string runs no JavaScript.
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let copy: Vec<u8> = data[range].iter().map(|byte| byte & 0x7f).collect();
+        new_one_byte_string(lock, &copy)
     }
 
     /// A string of the range's bytes as Latin-1.
@@ -980,37 +1093,53 @@ impl BufferNative {
         })
     }
 
-    /// Decodes `input` as base64 into the range of `output` (see [`decode_base64_legacy`]).
+    /// Decodes the UTF-8 bytes of `input` as base64 into the range of `output` (see
+    /// [`decode_base64_legacy`]). Invalid UTF-16 sequences use WTF-8, as C++'s `JsString::toString`.
     /// Returns the number of bytes written.
     #[jsg_method]
     pub fn decode_base64_into<'s>(
         &self,
+        lock: &mut jsg::Lock<'s>,
         output: v8::Local<'s, v8::Uint8Array>,
         start: f64,
         end: f64,
-        input: v8::Local<'s, v8::Uint8Array>,
+        input: JsString<'s>,
     ) -> jsg::Result<f64> {
-        let output = output.as_raw_slice();
-        let input = input.as_raw_slice();
-        let range = range(output.len(), start, end)?;
-        let output_addresses = address_range(output);
-        let input_addresses = address_range(input);
-        let overlapping = output_addresses.start < input_addresses.end
-            && input_addresses.start < output_addresses.end;
-        // SAFETY: both are the bytes of arrays, decoding runs no JavaScript, and an `input` that
-        // overlaps `output` is copied out before `output` is borrowed.
-        let written = unsafe {
-            if overlapping {
-                let input = (*input).to_vec();
-                decode_base64_legacy(&mut (&mut *output)[range], &input)
-            } else {
-                decode_base64_legacy(&mut (&mut *output)[range], &*input)
-            }
-        };
-        Ok(to_f64(written))
+        with_scratch(input.utf8_length(lock), |text| {
+            let text = input.write_utf8_uninit(lock, text, WriteFlags::None);
+            // SAFETY: decoding runs no JavaScript, and `text` is separate scratch space.
+            let output = unsafe { bytes_mut(output) };
+            let range = range(output.len(), start, end)?;
+            Ok(to_f64(decode_base64_legacy(&mut output[range], text)))
+        })
     }
 
     // Hex
+
+    /// Decodes the low bytes of `string` as hex, truncating at the first invalid pair unless
+    /// `strict`. An odd final digit is ignored unless `strict`.
+    #[jsg_method]
+    pub fn decode_hex<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        string: JsString<'s>,
+        strict: bool,
+    ) -> jsg::Result<v8::Local<'s, v8::Uint8Array>> {
+        let length = string_length(string);
+        with_zeroed_scratch(length as usize, |text| {
+            if !text.is_empty() {
+                string.write_one_byte(lock, 0, length, text, WriteFlags::ReplaceInvalidUtf8);
+            }
+            let (buffer, written) =
+                v8::ArrayBuffer::new_zeroed_with(lock, text.len() / 2, |dest| {
+                    decode_hex(text, dest, strict)
+                })
+                .ok_or_else(|| {
+                    jsg::Error::new_range_error("Failed to allocate memory for Uint8Array")
+                })?;
+            v8::Uint8Array::from_buffer(lock, &buffer, 0, written?)
+        })
+    }
 
     /// The range of `bytes` encoded as lowercase hex.
     #[jsg_method]

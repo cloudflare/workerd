@@ -33,6 +33,7 @@ export const base64Decoding = {
       ['a+b/c-d_', '6be6ff73e77f', '6be6ff73e77f'],
       ['QUJD\0REVG', '414243444546', '414243444546'],
       ['\u0100QUJD', '414243', '414243'],
+      ['\u0141QUJD', '010509', '414243'],
       ['\ud800QUJD', '414243', '414243'],
       ['QUJD\ud83d\ude00RA', '414243', '41424344'],
       ['QQ==QQ==', '41', '41'],
@@ -324,6 +325,47 @@ export const loneSurrogates = {
       const buffer = Buffer.from(bytes, 'hex');
       for (const [encoding, expected] of Object.entries(decoded)) {
         deepStrictEqual(codeUnits(buffer.toString(encoding)), expected);
+      }
+    }
+  },
+};
+
+export const asciiSubranges = {
+  test() {
+    const backing = Buffer.alloc(259, 0xee);
+    const source = backing.subarray(1, 257);
+    for (let i = 0; i < 256; i++) source[i] = i;
+    const original = Buffer.from(backing);
+    const ascii = String.fromCharCode(
+      ...Array.from({ length: 128 }, (_, i) => i)
+    );
+    strictEqual(source.toString('ascii'), ascii.repeat(2));
+    strictEqual(source.toString('ascii', 125, 132), '}~\x7f\0\x01\x02\x03');
+    strictEqual(source.toString('ascii', 127, 127), '');
+    deepStrictEqual(backing, original);
+  },
+};
+
+export const wholeAndPartialDestinationWrites = {
+  test() {
+    for (const encoding of ['ascii', 'latin1', 'utf8', 'utf16le']) {
+      for (const string of [
+        '',
+        'abc',
+        '\u00e9\u20ac',
+        '\ud800x\udc00',
+        '\ud83d\ude00',
+      ]) {
+        for (const size of [0, 1, 2, 3, 4, 7, 16]) {
+          const wholeBacking = Buffer.alloc(size + 2, 0xee);
+          const whole = wholeBacking.subarray(1, size + 1);
+          const partial = Buffer.alloc(size + 2, 0xee);
+          strictEqual(
+            whole.write(string, 0, size, encoding),
+            partial.write(string, 1, size, encoding)
+          );
+          deepStrictEqual(wholeBacking, partial);
+        }
       }
     }
   },
