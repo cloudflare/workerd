@@ -357,7 +357,7 @@ struct CryptoKeyPair {
   JSG_STRUCT(publicKey, privateKey);
 };
 
-class SubtleCrypto: public jsg::Object {
+class SubtleCrypto final: public jsg::Object {
  public:
   // Stateless object, safe to recreate for a worker started from a snapshot.
   static constexpr bool jsgSnapshotStateless = true;
@@ -1000,7 +1000,7 @@ class DigestStream: public WritableStream {
 
 // Implements the Crypto interface as prescribed by:
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
-class Crypto: public jsg::Object {
+class Crypto final: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
 

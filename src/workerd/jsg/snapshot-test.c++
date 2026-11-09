@@ -419,7 +419,7 @@ KJ_TEST("removal rejects a non-extensible holder") {
 // the artifact and attached to their restored wrappers in an isolate built from the blob.
 
 // Transferred by tag alone; the restore constructs a fresh one.
-struct StatelessThing: public Object {
+struct StatelessThing final: public Object {
   static constexpr bool jsgSnapshotStateless = true;
   inline static uint constructed = 0;
 

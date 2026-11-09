@@ -90,7 +90,7 @@ class URLSearchParams;
 using DOMException = jsg::DOMException;
 
 // A subset of the standard Navigator API.
-class Navigator: public jsg::Object {
+class Navigator final: public jsg::Object {
  public:
   // Stateless object, safe to recreate for a worker started from a snapshot.
   static constexpr bool jsgSnapshotStateless = true;
@@ -148,7 +148,7 @@ class Navigator: public jsg::Object {
 // Exposed as a global to provide access to certain Cloudflare-specific
 // configuration details. This is not a standard API and great care should
 // be taken when deciding to expose new properties or methods here.
-class Cloudflare: public jsg::Object {
+class Cloudflare final: public jsg::Object {
  public:
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
