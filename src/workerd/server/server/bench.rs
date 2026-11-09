@@ -8,6 +8,8 @@
 //! The worker factory runs a handler (`worker_bench`) and hands back the group the handler filled
 //! in as an encoded message, which the report copies in under the group's name.
 
+pub mod sparkline;
+
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::time::Duration;
@@ -53,6 +55,8 @@ pub struct Options {
     pub case_pattern: Option<String>,
     /// `--format=json`: the report as JSON rather than as a table.
     pub json: bool,
+    /// `--sparkline`: the table's sparklines of each case's samples, if any.
+    pub sparklines: Option<sparkline::Options>,
     /// `--output`: where to write the report; stdout if none.
     pub output: Option<String>,
     /// `--trace`: run tail workers, which add their cost to every request.
@@ -243,7 +247,7 @@ impl Report {
         let text = if options.json {
             format_json(report)?
         } else {
-            format_text(report)?
+            format_text(report, options.sparklines)?
         };
         let written = if let Some(path) = &options.output {
             write_file(path, &text)
@@ -331,8 +335,12 @@ fn governor() -> Option<String> {
     Some(std::fs::read_to_string(path).ok()?.trim().to_owned())
 }
 
-/// `report` as text: a header describing the environment, then a table for each group.
-fn format_text(report: bench_report::Reader<'_>) -> Result<String> {
+/// `report` as text: a header describing the environment, then a table for each group, with the
+/// `sparklines` asked for.
+fn format_text(
+    report: bench_report::Reader<'_>,
+    sparklines: Option<sparkline::Options>,
+) -> Result<String> {
     let mut out = String::from(
         "Results compare runs on this machine and build; they don't predict production latency.\n",
     );
@@ -372,13 +380,27 @@ fn format_text(report: bench_report::Reader<'_>) -> Result<String> {
         let _ = writeln!(out, "WARNING: {}", text(warning)?);
     }
     for group in report.get_groups().map_err(capnp_error)? {
-        format_group(&mut out, group)?;
+        format_group(&mut out, group, sparklines)?;
     }
     Ok(out)
 }
 
-/// The columns of a group's table.
+/// The columns of a group's table, without sparklines.
 const COLUMNS: [&str; 6] = ["case", "median", "95% CI", "mean", "cpu median", "samples"];
+
+/// The columns of a group's table, with `sparklines`' after the others.
+fn columns(sparklines: Option<sparkline::Options>) -> Vec<&'static str> {
+    let mut columns = COLUMNS.to_vec();
+    if let Some(options) = sparklines {
+        if options.metrics.wall() {
+            columns.push("wall histogram");
+        }
+        if options.metrics.cpu() {
+            columns.push("cpu histogram");
+        }
+    }
+    columns
+}
 
 /// A row of a group's table: a cell for each column, with any notes on the case as the message;
 /// or the case's name, with a message saying why it has no statistics.
@@ -388,8 +410,12 @@ struct Row {
 }
 
 /// Appends `group` to `out`: its name, error and the overhead subtracted from its cases, then a
-/// table of its cases, the columns padded to line up.
-fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Result<()> {
+/// table of its cases with `sparklines`, the columns padded to line up.
+fn format_group(
+    out: &mut String,
+    group: bench_report::group::Reader<'_>,
+    sparklines: Option<sparkline::Options>,
+) -> Result<()> {
     let _ = writeln!(out, "\n{}", text(group.get_name())?);
     if group.has_error() {
         let _ = writeln!(out, "  FAILED: {}", first_line(&text(group.get_error())?));
@@ -406,31 +432,32 @@ fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Res
     }
     let mut rows = Vec::new();
     for case in group.get_cases().map_err(capnp_error)? {
-        rows.push(case_row(case)?);
+        rows.push(case_row(case, sparklines)?);
     }
     if rows.is_empty() {
         return Ok(());
     }
 
+    let columns = columns(sparklines);
     let width = |cell: &str| cell.chars().count();
-    let mut widths = COLUMNS.map(width);
+    let mut widths: Vec<usize> = columns.iter().copied().map(width).collect();
     for row in &rows {
         for (column, cell) in widths.iter_mut().zip(&row.cells) {
             *column = (*column).max(width(cell));
         }
     }
     let header = Row {
-        cells: COLUMNS.map(str::to_owned).to_vec(),
+        cells: columns.into_iter().map(str::to_owned).collect(),
         message: None,
     };
     for row in std::iter::once(&header).chain(&rows) {
         out.push_str("  ");
-        for (index, (cell, column)) in row.cells.iter().zip(widths).enumerate() {
+        for (index, (cell, column)) in row.cells.iter().zip(&widths).enumerate() {
             // The last cell of a row has no padding after it.
             if index + 1 == row.cells.len() && row.message.is_none() {
                 out.push_str(cell);
             } else {
-                let _ = write!(out, "{cell:<width$}", width = column + 2);
+                let _ = write!(out, "{cell:<width$}", width = *column + 2);
             }
         }
         if let Some(message) = &row.message {
@@ -441,13 +468,16 @@ fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Res
     Ok(())
 }
 
-/// The row of `case`: its statistics, or why it has none.
-fn case_row(case: bench_report::case::Reader<'_>) -> Result<Row> {
+/// The row of `case`: its statistics with `sparklines`, or why it has none.
+fn case_row(
+    case: bench_report::case::Reader<'_>,
+    sparklines: Option<sparkline::Options>,
+) -> Result<Row> {
     use bench_report::case::Status;
 
     let name = text(case.get_name())?;
     let message = match case.get_status().map_err(|e| capnp_error(e.into()))? {
-        Status::Ok => return statistics_row(name, case),
+        Status::Ok => return statistics_row(name, case, sparklines),
         Status::Skipped => "skipped".to_owned(),
         Status::Failed => format!("FAILED: {}", first_line(&text(case.get_error())?)),
     };
@@ -457,25 +487,42 @@ fn case_row(case: bench_report::case::Reader<'_>) -> Result<Row> {
     })
 }
 
-/// The row of `case`, which ran, named `name`: its statistics, with notes on its flags.
-fn statistics_row(name: String, case: bench_report::case::Reader<'_>) -> Result<Row> {
+/// The row of `case`, which ran, named `name`: its statistics and `sparklines`, with notes on its
+/// flags.
+fn statistics_row(
+    name: String,
+    case: bench_report::case::Reader<'_>,
+    sparklines: Option<sparkline::Options>,
+) -> Result<Row> {
     use bench_report::case::Flag;
 
     let wall = case.get_wall_ns().map_err(capnp_error)?;
+    let cpu = case.get_cpu_ns().map_err(capnp_error)?;
     let median_interval = format!(
         "{} - {}",
         format_duration(wall.get_median_low()),
         format_duration(wall.get_median_high())
     );
     let samples = wall.get_samples().map_err(capnp_error)?.len();
-    let cells = vec![
+    let mut cells = vec![
         name,
         format_duration(wall.get_median()),
         median_interval,
         format_duration(wall.get_mean()),
-        format_duration(case.get_cpu_ns().map_err(capnp_error)?.get_median()),
+        format_duration(cpu.get_median()),
         format!("{samples} x {}", case.get_iterations_per_sample()),
     ];
+    if let Some(options) = sparklines {
+        let metrics = [(options.metrics.wall(), wall), (options.metrics.cpu(), cpu)];
+        for (_, metric) in metrics.into_iter().filter(|(shown, _)| *shown) {
+            let samples: Vec<f64> = metric.get_samples().map_err(capnp_error)?.iter().collect();
+            cells.push(sparkline::render(
+                &samples,
+                options.binning,
+                options.charset,
+            )?);
+        }
+    }
     let mut notes = Vec::new();
     for flag in case.get_flags().map_err(capnp_error)? {
         notes.push(match flag.map_err(|e| capnp_error(e.into()))? {
