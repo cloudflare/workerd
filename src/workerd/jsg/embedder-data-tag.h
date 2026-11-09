@@ -43,8 +43,10 @@ enum class EmbedderDataTag : v8::EmbedderDataTypeTag {
   // The pointers in a context's ContextPointerSlots, each tagged with its slot index.
   CONTEXT_POINTER_SLOT_FIRST = 1,
   CONTEXT_POINTER_SLOT_LAST = static_cast<int>(ContextPointerSlot::MAX_POINTER_SLOT),
+  // The WrappedInstance* in an instance stub's internal field (jsg/wasm-snapshot.c++).
+  WASM_WRAPPED_INSTANCE = CONTEXT_POINTER_SLOT_LAST + 1,
   // Keep this the highest tag.
-  MAX_TAG = CONTEXT_POINTER_SLOT_LAST,
+  MAX_TAG = WASM_WRAPPED_INSTANCE,
 };
 
 static_assert(static_cast<int>(EmbedderDataTag::MAX_TAG) < V8_EMBEDDER_DATA_TAG_COUNT,

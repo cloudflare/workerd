@@ -1,9 +1,11 @@
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("//:build/js_capnp_library.bzl", "js_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
@@ -340,6 +342,21 @@ wd_cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Embedder-side support for carrying Emscripten-style Wasm instances through a V8 context
+# snapshot. Deliberately independent of the rest of JSG: it only needs KJ, V8 and the embedder
+# data tag it stores its pointers with.
+wd_cc_library(
+    name = "wasm-snapshot",
+    srcs = ["wasm-snapshot.c++"],
+    hdrs = ["wasm-snapshot.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":embedder-data-tag",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
 wd_cc_capnp_library(
     name = "modules_capnp",
     srcs = ["modules.capnp"],
@@ -375,6 +392,7 @@ wd_cc_library(
         "tracing-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
+        "wasm-snapshot-test.c++",
     ],
 )]
 
@@ -431,6 +449,28 @@ kj_test(
         ":jsg",
         ":script",
         "@capnp-cpp//src/capnp",
+    ],
+)
+
+wasm_tools_parse(
+    name = "wasm-snapshot-test.wasm",
+    testonly = True,
+    src = "wasm-snapshot-test.wat",
+)
+
+wd_cc_embed(
+    name = "wasm-snapshot-test-wasm",
+    testonly = True,
+    src = ":wasm-snapshot-test.wasm",
+    base_name = "wasm-snapshot-test-wasm",
+)
+
+kj_test(
+    src = "wasm-snapshot-test.c++",
+    deps = [
+        ":jsg",
+        ":wasm-snapshot",
+        ":wasm-snapshot-test-wasm",
     ],
 )
 
