@@ -117,6 +117,16 @@ switch (MODE) {
   case 'date-frozen':
     Object.freeze(Date.prototype);
     break;
+  // The process and Buffer globals of nodejs_compat_v2 are held by the global scope's C++ object.
+  case 'process-assign':
+    globalThis.process = { custom: 'process' };
+    break;
+  case 'buffer-assign':
+    globalThis.Buffer = { custom: 'Buffer' };
+    break;
+  case 'process-env':
+    process.env.FROM_TOP_LEVEL = 'yes';
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -143,6 +153,9 @@ function report() {
         ? 'polyfill'
         : typeof globalThis.Temporal,
     toTemporalInstant: typeof Date.prototype.toTemporalInstant,
+    processCustom: globalThis.process?.custom ?? null,
+    bufferCustom: globalThis.Buffer?.custom ?? null,
+    processEnv: globalThis.process?.env?.FROM_TOP_LEVEL ?? null,
     types: {
       WebAssembly: typeof WebAssembly,
       SharedArrayBuffer: typeof SharedArrayBuffer,
@@ -216,6 +229,12 @@ async function test(ctrl, env) {
       strictEqual(r.temporal, 'object');
       strictEqual(r.toTemporalInstant, 'function');
     },
+    'process-assign'(r) {
+      strictEqual(r.processCustom, 'process');
+    },
+    'buffer-assign'(r) {
+      strictEqual(r.bufferCustom, 'Buffer');
+    },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top
   // level themselves against the real objects. The zygote records every use of a fail-closed
@@ -280,6 +299,13 @@ async function test(ctrl, env) {
     // V8 adds Date.prototype.toTemporalInstant on restore.
     'date-frozen'(r) {
       strictEqual(r.dateFrozen, true);
+    },
+    // Reading `process` evaluates node:process, whose module scope reaches UrlUtil, a Rust JSG
+    // resource (src/rust/api/url.rs). Rust resource types have no snapshot transfer, so this
+    // falls back until they do; the process value itself would carry over, as process-assign
+    // shows.
+    'process-env'(r) {
+      strictEqual(r.processEnv, 'yes');
     },
   };
 

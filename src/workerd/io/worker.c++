@@ -1587,6 +1587,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           const auto& artifact = isolateBase.finalizedSnapshotArtifact();
 
+          // The zygote's global scope state (process, Buffer) carries over to the fresh one.
+          KJ_IF_SOME(index, artifact.globalScopeStateIndex) {
+            JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+              mContext->restoreSnapshotState(
+                  js, jsg::JsObject(isolateBase.extractOnceFromSnapshot(context, index)));
+            });
+          }
+
           // Re-register the zygote's top-level event listeners on the fresh global scope, in
           // C++ and as they were registered: the callback and receiver the zygote's registration
           // derived, with its once and passive options. Nothing here runs JavaScript or reads
@@ -2684,6 +2692,17 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             .once = listener.once,
             .passive = listener.passive,
           });
+        });
+
+        // The global scope's own state for its JavaScript (process, Buffer), which the
+        // restored Worker's fresh global scope would otherwise lack.
+        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+          auto state = (*jsContext)->getSnapshotState(js);
+          if (state != kj::none) {
+            isolateBase.mutableSnapshotArtifact().globalScopeStateIndex =
+                isolateBase.pinIntoSnapshot(
+                    context, v8::Local<v8::Object>(KJ_ASSERT_NONNULL(state)));
+          }
         });
 
         // Bundle the per-isolate bootstrap's JS-held state and pin it, the last of the record
