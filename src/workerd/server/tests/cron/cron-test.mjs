@@ -4,8 +4,8 @@
 //
 // `workerd serve` of the cron module (`/workerd/cron.js`): armed at startup
 // with no request or socket, a failed occurrence retried with the same
-// scheduledTime, a pending retry run after a restart; a bad expression, or
-// no --experimental, refused.
+// scheduledTime and not dropped by a restart; a bad expression, or no
+// --experimental, refused.
 
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -143,7 +143,7 @@ function serve(dir, args) {
   };
 }
 
-test('an occurrence is retried with its scheduledTime, across a restart', async () => {
+test('a failed occurrence is retried, and a restart does not drop it', async () => {
   const dir = await project();
   let server = serve(dir, ['--experimental']);
   try {
@@ -156,8 +156,8 @@ test('an occurrence is retried with its scheduledTime, across a restart', async 
     await server.until(() => runs().length >= 1, 10_000);
     const [first] = runs();
     assert.deepStrictEqual(first, { cron: '* * * * *', at, n: 1 });
-    // Killed as the first attempt fails, before its retry; the retry runs
-    // once it starts again.
+    // Killed as the first attempt fails, before its retry: once it starts
+    // again, the occurrence runs, whether as the stored retry or afresh.
     await server.stop('SIGKILL');
     server = serve(dir, ['--experimental']);
     await server.until(() => runs().some(({ n }) => n === 2), 30_000);
