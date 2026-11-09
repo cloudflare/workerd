@@ -1496,137 +1496,143 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  // Exceptions must not unwind through V8's Module::Instantiate(), which would leave the graph
+  // half-linked.
   using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
-  auto& js = Lock::current();
-  auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
+  return liftKj<v8::MaybeLocal<ReturnType>>(
+      Lock::current().v8Isolate, [&]() -> v8::MaybeLocal<ReturnType> {
+    auto& js = Lock::current();
+    auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
-  return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
-    auto spec = js.toString(specifier);
+    return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
+      auto spec = js.toString(specifier);
 
-    // The proposed specification for import attributes strongly recommends that
-    // embedders reject import attributes and types they do not understand/implement.
-    // This is because import attributes can alter the interpretation of a module.
-    // Throwing an error for things we do not understand is the safest thing to do
-    // for backwards compatibility.
-    //
-    // Parse import attributes. Throws for unrecognized attribute keys.
-    auto importType = parseImportAttributes(js, import_attributes, AttributeStride::TRIPLES);
+      // The proposed specification for import attributes strongly recommends that
+      // embedders reject import attributes and types they do not understand/implement.
+      // This is because import attributes can alter the interpretation of a module.
+      // Throwing an error for things we do not understand is the safest thing to do
+      // for backwards compatibility.
+      //
+      // Parse import attributes. Throws for unrecognized attribute keys.
+      auto importType = parseImportAttributes(js, import_attributes, AttributeStride::TRIPLES);
 
-    ResolveContext::Type type = ResolveContext::Type::BUNDLE;
+      ResolveContext::Type type = ResolveContext::Type::BUNDLE;
 
-    // Clone the referrer URL out of the lookup cache entry rather than holding
-    // a reference into it. The lookupCache table may rehash during resolve()
-    // (via resolveWithCaching -> upsert), which would invalidate any reference
-    // into the table's storage.
-    Url referrerUrl = registry.lookup(js, referrer)
-                          .map([&](IsolateModuleRegistry::Entry& entry) -> Url {
-      type = moduleTypeToResolveContextType(entry.module.type());
-      return entry.id.clone();
-    }).orDefault(registry.getBundleBase().clone());
+      // Clone the referrer URL out of the lookup cache entry rather than holding
+      // a reference into it. The lookupCache table may rehash during resolve()
+      // (via resolveWithCaching -> upsert), which would invalidate any reference
+      // into the table's storage.
+      Url referrerUrl = registry.lookup(js, referrer)
+                            .map([&](IsolateModuleRegistry::Entry& entry) -> Url {
+        type = moduleTypeToResolveContextType(entry.module.type());
+        return entry.id.clone();
+      }).orDefault(registry.getBundleBase().clone());
 
-    // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
-    // is a bare node specifier and resolve it to a full node: URL.
-    if (isNodeJsCompatEnabled(js)) {
-      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
-        spec = kj::mv(nodeSpec);
-      }
-    }
-
-    // Note: node:process has no direct registration of its own in the builtin
-    // bundle; registry.resolve() below falls back to redirecting it to one of two
-    // internal implementations (selected by the enable_nodejs_process_v2 compat
-    // flag) only if nothing else — e.g. a worker bundle module intentionally
-    // shadowing "node:process" — resolves it first.
-
-    KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
-      // Make sure that percent-encoding in the path is normalized so we can match correctly.
-      auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-      ResolveContext resolveContext = {
-        .type = type,
-        .source = ResolveContext::Source::STATIC_IMPORT,
-        .normalizedSpecifier = normalized,
-        .referrerNormalizedSpecifier = referrerUrl,
-        .rawSpecifier = spec.asPtr(),
-        .importType = importType,
-      };
-
-      auto maybeResolved = registry.resolve(js, resolveContext);
-
-      v8::Local<v8::Module> resolved;
-      if (!maybeResolved.ToLocal(&resolved)) {
-        return {};
+      // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
+      // is a bare node specifier and resolve it to a full node: URL.
+      if (isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+          spec = kj::mv(nodeSpec);
+        }
       }
 
-      // If the resolved module is in an errored state, we will rethrow the same exception here.
-      if (resolved->GetStatus() == v8::Module::kErrored) {
-        js.throwException(JsValue(resolved->GetException()));
-        return {};
-      }
-      if (resolved->GetStatus() == v8::Module::kEvaluating) {
-        // A circular dependency is a module-graph/loading error, not a type
-        // error, so this is an Error (matching the require path and Node's
-        // ERR_REQUIRE_CYCLE_MODULE which extends Error).
-        js.throwException(js.error(kj::str("Circular dependency when resolving module: ", spec)));
-        return v8::MaybeLocal<ReturnType>();
-      }
+      // Note: node:process has no direct registration of its own in the builtin
+      // bundle; registry.resolve() below falls back to redirecting it to one of two
+      // internal implementations (selected by the enable_nodejs_process_v2 compat
+      // flag) only if nothing else — e.g. a worker bundle module intentionally
+      // shadowing "node:process" — resolves it first.
 
-      // Validate import type attribute against the resolved module's content type.
-      KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
-        validateImportType(js, importType, entry.module, spec);
-      }
+      KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
+        // Make sure that percent-encoding in the path is normalized so we can match correctly.
+        auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+        ResolveContext resolveContext = {
+          .type = type,
+          .source = ResolveContext::Source::STATIC_IMPORT,
+          .normalizedSpecifier = normalized,
+          .referrerNormalizedSpecifier = referrerUrl,
+          .rawSpecifier = spec.asPtr(),
+          .importType = importType,
+        };
 
-      if constexpr (!IsSourcePhase) {
-        return resolved;
-      } else {
+        auto maybeResolved = registry.resolve(js, resolveContext);
+
+        v8::Local<v8::Module> resolved;
+        if (!maybeResolved.ToLocal(&resolved)) {
+          return {};
+        }
+
+        // If the resolved module is in an errored state, we will rethrow the same exception here.
+        if (resolved->GetStatus() == v8::Module::kErrored) {
+          js.throwException(JsValue(resolved->GetException()));
+          return {};
+        }
+        if (resolved->GetStatus() == v8::Module::kEvaluating) {
+          // A circular dependency is a module-graph/loading error, not a type
+          // error, so this is an Error (matching the require path and Node's
+          // ERR_REQUIRE_CYCLE_MODULE which extends Error).
+          js.throwException(js.error(kj::str("Circular dependency when resolving module: ", spec)));
+          return v8::MaybeLocal<ReturnType>();
+        }
+
+        // Validate import type attribute against the resolved module's content type.
         KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
-          // We only support source phase imports for Wasm modules.
-          // Since we do not have an async pre-instantiation phase which populates compilation,
-          // and instead have compilation happening lazily in evaluate calls, we implement this
-          // hack to synchronously obtain the compiled Wasm leaning into the require implementation
-          // for the Wasm then plucking out the compiled Wasm module.
-          // In future, the source phase should be eagerly populated during pre-innstantiation
-          // with the compiled record, so that we can just directly read `sourceObject_` off of
-          // entry.module instead.
-          if (entry.module.isWasm()) {
-            v8::Local<v8::Value> moduleNamespace;
-            if (registry
-                    .require(js, resolveContext, IsolateModuleRegistry::RequireOption::RETURN_EMPTY)
-                    .ToLocal(&moduleNamespace)) {
-              v8::Local<v8::Value> defaultExport;
-              if (moduleNamespace.As<v8::Object>()
-                      ->Get(js.v8Context(), js.strIntern("default"_kj))
-                      .ToLocal(&defaultExport)) {
-                if (defaultExport->IsWasmModuleObject()) {
-                  return defaultExport.As<v8::Object>();
+          validateImportType(js, importType, entry.module, spec);
+        }
+
+        if constexpr (!IsSourcePhase) {
+          return resolved;
+        } else {
+          KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
+            // We only support source phase imports for Wasm modules.
+            // Since we do not have an async pre-instantiation phase which populates compilation,
+            // and instead have compilation happening lazily in evaluate calls, we implement this
+            // hack to synchronously obtain the compiled Wasm leaning into the require implementation
+            // for the Wasm then plucking out the compiled Wasm module.
+            // In future, the source phase should be eagerly populated during pre-innstantiation
+            // with the compiled record, so that we can just directly read `sourceObject_` off of
+            // entry.module instead.
+            if (entry.module.isWasm()) {
+              v8::Local<v8::Value> moduleNamespace;
+              if (registry
+                      .require(
+                          js, resolveContext, IsolateModuleRegistry::RequireOption::RETURN_EMPTY)
+                      .ToLocal(&moduleNamespace)) {
+                v8::Local<v8::Value> defaultExport;
+                if (moduleNamespace.As<v8::Object>()
+                        ->Get(js.v8Context(), js.strIntern("default"_kj))
+                        .ToLocal(&defaultExport)) {
+                  if (defaultExport->IsWasmModuleObject()) {
+                    return defaultExport.As<v8::Object>();
+                  }
                 }
               }
-            }
-            // If require() failed with an exception (e.g. WASM compilation error),
-            // propagate that instead of masking it with the generic message below.
-            if (js.v8Isolate->HasPendingException()) {
-              return {};
+              // If require() failed with an exception (e.g. WASM compilation error),
+              // propagate that instead of masking it with the generic message below.
+              if (js.v8Isolate->HasPendingException()) {
+                return {};
+              }
             }
           }
+          js.throwException(js.v8Ref(v8::Exception::SyntaxError(
+              js.str(kj::str("Source phase import not available for module: "_kj, spec)))));
+          return {};
         }
-        js.throwException(js.v8Ref(v8::Exception::SyntaxError(
-            js.str(kj::str("Source phase import not available for module: "_kj, spec)))));
-        return {};
+        KJ_UNREACHABLE;
       }
-      KJ_UNREACHABLE;
-    }
 
-    // A malformed/unparseable specifier is a bad-value error, so this is a
-    // TypeError (matching the dynamic-import path and Node's
-    // ERR_INVALID_MODULE_SPECIFIER which extends TypeError).
-    js.throwException(js.typeError(kj::str("Invalid module specifier: "_kj, specifier)));
-    return {};
-  }, [&](Value exception) -> v8::MaybeLocal<ReturnType> {
-    // If there are any synchronously thrown exceptions, we want to catch them
-    // here and convert them into a rejected promise. The only exception are
-    // fatal cases where the isolate is terminating which won't make it here
-    // anyway.
-    js.v8Isolate->ThrowException(exception.getHandle(js));
-    return {};
+      // A malformed/unparseable specifier is a bad-value error, so this is a
+      // TypeError (matching the dynamic-import path and Node's
+      // ERR_INVALID_MODULE_SPECIFIER which extends TypeError).
+      js.throwException(js.typeError(kj::str("Invalid module specifier: "_kj, specifier)));
+      return {};
+    }, [&](Value exception) -> v8::MaybeLocal<ReturnType> {
+      // If there are any synchronously thrown exceptions, we want to catch them
+      // here and convert them into a rejected promise. The only exception are
+      // fatal cases where the isolate is terminating which won't make it here
+      // anyway.
+      js.v8Isolate->ThrowException(exception.getHandle(js));
+      return {};
+    });
   });
 }
 
