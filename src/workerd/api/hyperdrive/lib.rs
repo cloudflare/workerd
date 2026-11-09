@@ -123,13 +123,7 @@ impl Hyperdrive {
         if let Some(ip) = self.random_ip.borrow().as_ref() {
             return Ok(ip.clone());
         }
-        let port = self.get_port();
-        let mut random = [0_u8; 2];
-        ffi::fill_entropy(&mut random)?;
-        let ip = find_free_ip(u16::from_be_bytes(random), |candidate| {
-            ffi::has_connect_override(lock, &format!("{candidate}:{port}"))
-        })?;
-        ffi::register_overrides(lock, self.channel, &self.random_host, &ip, port)?;
+        let ip = ffi::register_overrides(lock, self.channel, &self.random_host, self.get_port())?;
         *self.random_ip.borrow_mut() = Some(ip.clone());
         Ok(ip)
     }
@@ -151,34 +145,6 @@ fn random_host(random: &[u8]) -> String {
     }
     host.push_str(".hyperdrive.local");
     host
-}
-
-/// The synthetic IPv4 address `240.0.x.y` whose low 16 bits are `suffix`.
-fn synthetic_ip(suffix: u16) -> String {
-    let [high, low] = suffix.to_be_bytes();
-    format!("240.0.{high}.{low}")
-}
-
-/// The first synthetic address, from the one for `start` on, that `is_taken` says no other
-/// binding has claimed. Within 240.0.0.0/16, which is in the reserved, non-routable 240.0.0.0/4
-/// block, so it can never collide with a real host the Worker might connect to.
-fn find_free_ip(
-    start: u16,
-    mut is_taken: impl FnMut(&str) -> Result<bool, jsg::Error>,
-) -> Result<String, jsg::Error> {
-    let mut suffix = start;
-    loop {
-        let candidate = synthetic_ip(suffix);
-        if !is_taken(&candidate)? {
-            return Ok(candidate);
-        }
-        suffix = suffix.wrapping_add(1);
-        if suffix == start {
-            return Err(jsg::Error::new_error(
-                "no free Hyperdrive address available",
-            ));
-        }
-    }
 }
 
 /// The connection string, with TLS disabled as each database spells it: the connection is to

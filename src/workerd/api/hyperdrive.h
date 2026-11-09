@@ -12,6 +12,7 @@ class AsyncIoStream;
 
 namespace workerd::api {
 
+class ServiceWorkerGlobalScope;
 class Socket;
 
 // A Hyperdrive resource for development integrations.
@@ -84,6 +85,20 @@ class Hyperdrive: public jsg::Object {
 // Hyperdrive binding's host and synthetic IP return.
 jsg::Ref<Socket> connectHyperdrive(
     jsg::Lock& js, uint clientIndex, kj::StringPtr host, uint16_t port);
+
+// Claims a synthetic IPv4 address for the Hyperdrive binding whose host is `host`, routes
+// `host:port` and the address's `:port` through `globalScope`'s connect overrides to the sockets
+// that `makeConnect()`'s functions return, resolves `host` to the address with its DNS override,
+// and returns the address.
+//
+// The address is in 240.0.0.0/16, within the reserved, non-routable 240.0.0.0/4 block, so it can
+// never collide with a real host the Worker might connect to. Its low 16 bits identify the
+// binding: the walk starts at a random suffix and takes the first whose address no other binding
+// has claimed for `port`, failing once every one is taken.
+kj::String registerHyperdriveOverrides(ServiceWorkerGlobalScope& globalScope,
+    kj::StringPtr host,
+    uint16_t port,
+    kj::FunctionParam<kj::Function<jsg::Ref<Socket>(jsg::Lock&)>()> makeConnect);
 
 #define EW_HYPERDRIVE_ISOLATE_TYPES api::Hyperdrive
 }  // namespace workerd::api

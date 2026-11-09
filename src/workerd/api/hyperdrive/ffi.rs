@@ -50,17 +50,12 @@ mod bridge {
         unsafe fn socket_wrap(isolate: *mut Isolate, cpp_ref: &CppRef) -> MaybeLocal;
 
         fn hyperdrive_fill_entropy(output: &mut [u8]) -> Result<()>;
-        unsafe fn hyperdrive_has_connect_override(
-            isolate: *mut Isolate,
-            address: &str,
-            result: &mut bool,
-        ) -> bool;
         unsafe fn hyperdrive_register_overrides(
             isolate: *mut Isolate,
             channel: u32,
             host: &str,
-            ip: &str,
             port: u16,
+            ip: &mut String,
         ) -> bool;
         unsafe fn hyperdrive_connect(
             isolate: *mut Isolate,
@@ -120,29 +115,22 @@ pub fn fill_entropy(output: &mut [u8]) -> Result<(), jsg::Error> {
         .map_err(|err| jsg::Error::new_internal_error(format!("getEntropy() failed: {err}")))
 }
 
-/// Whether the global scope of the current request has a connect override for `address`.
-pub fn has_connect_override(lock: &mut jsg::Lock<'_>, address: &str) -> Result<bool, jsg::Error> {
-    let mut result = false;
-    // SAFETY: `call_cpp` calls the shim with the lock's isolate.
-    jsg_cpp::call_cpp(lock, |isolate| unsafe {
-        bridge::hyperdrive_has_connect_override(isolate, address, &mut result)
-    })?;
-    Ok(result)
-}
-
-/// Routes `host:port` and `ip:port` to the database of the binding whose subrequest channel is
-/// `channel`, and resolves `host` to `ip`, for the current request's global scope.
+/// Claims a synthetic IPv4 address for the binding whose subrequest channel is `channel` and whose
+/// host is `host`, routes `host:port` and the address's `:port` to its database, resolves `host`
+/// to the address, for the current request's global scope, and returns the address. C++
+/// `registerHyperdriveOverrides()` says how the address is chosen.
 pub fn register_overrides(
     lock: &mut jsg::Lock<'_>,
     channel: u32,
     host: &str,
-    ip: &str,
     port: u16,
-) -> Result<(), jsg::Error> {
-    // SAFETY: as in `has_connect_override`.
+) -> Result<String, jsg::Error> {
+    let mut ip = String::new();
+    // SAFETY: `call_cpp` calls the shim with the lock's isolate.
     jsg_cpp::call_cpp(lock, |isolate| unsafe {
-        bridge::hyperdrive_register_overrides(isolate, channel, host, ip, port)
-    })
+        bridge::hyperdrive_register_overrides(isolate, channel, host, port, &mut ip)
+    })?;
+    Ok(ip)
 }
 
 /// A socket connected to `host:port` through the subrequest channel `channel`.

@@ -25,14 +25,10 @@ rust::jsg_cpp::MaybeLocal socket_wrap(v8::Isolate* isolate, const rust::jsg_cpp:
 // Fills `output` with random bytes from getEntropy().
 void hyperdrive_fill_entropy(::rust::Slice<uint8_t> output);
 
-// Sets `result` to whether the global scope of the current request has a connect override for
-// `address`.
-bool hyperdrive_has_connect_override(v8::Isolate* isolate, ::rust::Str address, bool& result);
-
-// Routes `host:port` and `ip:port` through connectHyperdrive() with the global scope's connect
-// overrides, and resolves `host` to `ip` with its DNS override.
+// registerHyperdriveOverrides() for the current request's global scope, routing the host and the
+// synthetic IP through connectHyperdrive(), and storing the IP in `ip`.
 bool hyperdrive_register_overrides(
-    v8::Isolate* isolate, uint32_t channel, ::rust::Str host, ::rust::Str ip, uint16_t port);
+    v8::Isolate* isolate, uint32_t channel, ::rust::Str host, uint16_t port, ::rust::String& ip);
 
 // connectHyperdrive(), storing the Socket in `result`.
 bool hyperdrive_connect(v8::Isolate* isolate,

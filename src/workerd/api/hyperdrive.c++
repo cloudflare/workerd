@@ -116,31 +116,35 @@ void Hyperdrive::registerConnectOverride() {
     return;
   }
   auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
-  auto port = getPort();
+  randomIp = registerHyperdriveOverrides(
+      globalScope, randomHost, getPort(), [this]() -> kj::Function<jsg::Ref<Socket>(jsg::Lock&)> {
+    return [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); };
+  });
+  registeredConnectOverride = true;
+}
 
-  // Assign a synthetic IPv4 from 240.0.0.0/16 (within the reserved, non-routable 240.0.0.0/4 block)
-  // so it can never collide with a real host the Worker might legitimately connect to. The low 16
-  // bits identify this binding; start at a random suffix and walk until we find one not already
-  // claimed by another Hyperdrive binding.
+kj::String registerHyperdriveOverrides(ServiceWorkerGlobalScope& globalScope,
+    kj::StringPtr host,
+    uint16_t port,
+    kj::FunctionParam<kj::Function<jsg::Ref<Socket>(jsg::Lock&)>()> makeConnect) {
   kj::FixedArray<kj::byte, 2> suffixBytes;
   getEntropy(suffixBytes.asPtr());
   uint16_t start = (static_cast<uint16_t>(suffixBytes[0]) << 8) | suffixBytes[1];
   uint16_t suffix = start;
+  kj::String ip;
   for (;;) {
     auto candidate = kj::str("240.0.", suffix >> 8, ".", suffix & 0xff);
     if (globalScope.getConnectOverride(kj::str(candidate, ":", port)) == kj::none) {
-      randomIp = kj::mv(candidate);
+      ip = kj::mv(candidate);
       break;
     }
     JSG_REQUIRE(++suffix != start, Error, "no free Hyperdrive address available");
   }
 
-  globalScope.setConnectOverride(kj::str(randomHost, ":", port),
-      [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
-  globalScope.setConnectOverride(kj::str(randomIp, ":", port),
-      [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
-  globalScope.setDnsOverride(kj::str(randomHost), kj::str(randomIp));
-  registeredConnectOverride = true;
+  globalScope.setConnectOverride(kj::str(host, ":", port), makeConnect());
+  globalScope.setConnectOverride(kj::str(ip, ":", port), makeConnect());
+  globalScope.setDnsOverride(kj::str(host), kj::str(ip));
+  return ip;
 }
 
 kj::StringPtr Hyperdrive::getHost() {

@@ -19,38 +19,6 @@ fn random_host_is_lowercase_hex() {
 }
 
 #[test]
-fn synthetic_ip_holds_the_suffix_in_its_low_bits() {
-    assert_eq!(synthetic_ip(0), "240.0.0.0");
-    assert_eq!(synthetic_ip(0x0102), "240.0.1.2");
-    assert_eq!(synthetic_ip(u16::MAX), "240.0.255.255");
-}
-
-#[test]
-fn find_free_ip_walks_from_start_and_wraps() {
-    let taken = ["240.0.255.255", "240.0.0.0"];
-    let mut asked = Vec::new();
-    let ip = find_free_ip(u16::MAX, |candidate| {
-        asked.push(candidate.to_owned());
-        Ok(taken.contains(&candidate))
-    })
-    .unwrap();
-    assert_eq!(ip, "240.0.0.1");
-    assert_eq!(asked, ["240.0.255.255", "240.0.0.0", "240.0.0.1"]);
-}
-
-#[test]
-fn find_free_ip_fails_once_every_address_is_taken() {
-    let mut asked = 0_u32;
-    let err = find_free_ip(7, |_| {
-        asked += 1;
-        Ok(true)
-    })
-    .unwrap_err();
-    assert_eq!(asked, 1 << 16);
-    assert_eq!(err.message, "no free Hyperdrive address available");
-}
-
-#[test]
 fn connection_string_disables_tls_as_each_database_spells_it() {
     assert_eq!(
         connection_string("postgresql", "u", "p", "h.hyperdrive.local", "db"),

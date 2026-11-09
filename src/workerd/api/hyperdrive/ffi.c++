@@ -37,25 +37,16 @@ void hyperdrive_fill_entropy(::rust::Slice<uint8_t> output) {
   getEntropy(kj::arrayPtr(output.data(), output.size()));
 }
 
-bool hyperdrive_has_connect_override(v8::Isolate* isolate, ::rust::Str address, bool& result) {
-  return rust::jsg_cpp::callCpp(isolate, [&](jsg::Lock&) {
-    result = currentGlobalScope().getConnectOverride(toKj(address)) != kj::none;
-  });
-}
-
 bool hyperdrive_register_overrides(
-    v8::Isolate* isolate, uint32_t channel, ::rust::Str host, ::rust::Str ip, uint16_t port) {
+    v8::Isolate* isolate, uint32_t channel, ::rust::Str host, uint16_t port, ::rust::String& ip) {
   return rust::jsg_cpp::callCpp(isolate, [&](jsg::Lock&) {
-    auto& globalScope = currentGlobalScope();
     auto hostStr = toKj(host);
-    auto ipStr = toKj(ip);
-    auto connect = [&]() {
+    auto claimed = registerHyperdriveOverrides(
+        currentGlobalScope(), hostStr, port, [&]() -> kj::Function<jsg::Ref<Socket>(jsg::Lock&)> {
       return [channel, host = kj::str(hostStr), port](
                  jsg::Lock& js) { return connectHyperdrive(js, channel, host, port); };
-    };
-    globalScope.setConnectOverride(kj::str(hostStr, ":", port), connect());
-    globalScope.setConnectOverride(kj::str(ipStr, ":", port), connect());
-    globalScope.setDnsOverride(kj::mv(hostStr), kj::mv(ipStr));
+    });
+    ip = ::rust::String(claimed.begin(), claimed.size());
   });
 }
 
