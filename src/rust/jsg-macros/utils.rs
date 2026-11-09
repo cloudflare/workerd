@@ -426,8 +426,18 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
 /// Whether `sig` returns, directly or in a `Result`, `()` or one of the types a fast callback
 /// returns, none of which keeps a `creator` (see `ToJS::to_js_with_creator`).
 pub fn returns_primitive(sig: &syn::Signature) -> bool {
+    primitive_return(sig).is_some()
+}
+
+pub enum PrimitiveReturn {
+    Void,
+    Boolean,
+    Number,
+}
+
+pub fn primitive_return(sig: &syn::Signature) -> Option<PrimitiveReturn> {
     let syn::ReturnType::Type(_, ty) = &sig.output else {
-        return true;
+        return Some(PrimitiveReturn::Void);
     };
     let mut ty = ty.as_ref();
     if is_result_type(ty)
@@ -439,8 +449,10 @@ pub fn returns_primitive(sig: &syn::Signature) -> bool {
         ty = ok;
     }
     match ty {
-        syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
-        ty => is_named_type(ty, FAST_API_RETURN_TYPES),
+        syn::Type::Tuple(tuple) if tuple.elems.is_empty() => Some(PrimitiveReturn::Void),
+        ty if is_named_type(ty, &["bool"]) => Some(PrimitiveReturn::Boolean),
+        ty if is_named_type(ty, FAST_API_RETURN_TYPES) => Some(PrimitiveReturn::Number),
+        _ => None,
     }
 }
 

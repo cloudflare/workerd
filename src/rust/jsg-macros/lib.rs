@@ -582,6 +582,24 @@ fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
 
+    if let Some(primitive) = utils::primitive_return(fn_sig) {
+        let set = match primitive {
+            utils::PrimitiveReturn::Void => quote! { let _ = value; },
+            utils::PrimitiveReturn::Boolean => quote! { args.set_return_boolean(value); },
+            utils::PrimitiveReturn::Number => quote! { args.set_return_number(f64::from(value)); },
+        };
+        return if is_result {
+            quote! {
+                match result {
+                    Ok(value) => { #set }
+                    Err(err) => lock.throw_exception(&err.into()),
+                }
+            }
+        } else {
+            quote! { let value = result; #set }
+        };
+    }
+
     // Like C++ JSG, an instance method or property passes its receiver as the `creator` of the
     // value it returns, which a promise keeps alive until it settles; a static one passes none.
     // Reading the receiver takes two calls into V8, so a method returning a value that keeps no
