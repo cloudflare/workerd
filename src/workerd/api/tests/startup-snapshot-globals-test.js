@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Top-level code that touches what V8 adds to a context only when it is not building a startup
-// snapshot: Error.stackTraceLimit, WebAssembly, SharedArrayBuffer and the Iterator helpers behind
-// shipped flags (RESTORE_TIME_GLOBALS in jsg/setup.h). One service per case: MODE selects the
+// snapshot: Error.stackTraceLimit, WebAssembly, SharedArrayBuffer, the Iterator helpers behind
+// shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h). One service per case: MODE selects the
 // case's top-level behaviour, and each case reports what its Worker sees at request time. The
 // runner asserts the reports. Under the startup-snapshot autogate every service here goes through
 // the zygote; without it they are plain Workers and the same assertions hold with snapshotUsed
@@ -99,6 +99,24 @@ switch (MODE) {
   case 'sab-probe':
     topLevel.sabType = typeof SharedArrayBuffer;
     break;
+  case 'wasm-delete':
+    // Hardening code that removes globals: deleting is not a use, and the restored Worker
+    // deletes them too.
+    delete globalThis.WebAssembly;
+    delete Iterator.concat;
+    break;
+  case 'temporal-probe':
+  case 'temporal-on-probe':
+    topLevel.temporalType = typeof Temporal;
+    break;
+  case 'temporal-polyfill':
+    globalThis.Temporal = { polyfill: true };
+    break;
+  case 'temporal-on-control':
+    break;
+  case 'date-frozen':
+    Object.freeze(Date.prototype);
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -119,6 +137,12 @@ function report() {
             configurable: desc.configurable,
           },
     errorFrozen: Object.isFrozen(Error),
+    dateFrozen: Object.isFrozen(Date.prototype),
+    temporal:
+      globalThis.Temporal?.polyfill === true
+        ? 'polyfill'
+        : typeof globalThis.Temporal,
+    toTemporalInstant: typeof Date.prototype.toTemporalInstant,
     types: {
       WebAssembly: typeof WebAssembly,
       SharedArrayBuffer: typeof SharedArrayBuffer,
@@ -128,7 +152,7 @@ function report() {
     concat: MODE === 'iter-assign' ? Iterator.concat() : undefined,
     join: [1, 2].values().join(),
     wasmValidates:
-      typeof WebAssembly.validate === 'function'
+      typeof globalThis.WebAssembly?.validate === 'function'
         ? WebAssembly.validate(WASM_EMPTY_MODULE)
         : null,
   };
@@ -174,6 +198,23 @@ async function test(ctrl, env) {
     },
     'stl-delete'(r) {
       strictEqual(r.stackTraceLimit, null);
+    },
+    'wasm-delete'(r) {
+      deepStrictEqual(r.types, {
+        ...NATIVE_TYPES,
+        WebAssembly: 'undefined',
+        concat: 'undefined',
+      });
+    },
+    // Without the temporal flag Temporal is absent in the zygote as in a normal context.
+    'temporal-probe'(r) {
+      strictEqual(r.topLevel.temporalType, 'undefined');
+      strictEqual(r.temporal, 'undefined');
+      strictEqual(r.toTemporalInstant, 'undefined');
+    },
+    'temporal-on-control'(r) {
+      strictEqual(r.temporal, 'object');
+      strictEqual(r.toTemporalInstant, 'function');
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top
@@ -227,6 +268,18 @@ async function test(ctrl, env) {
     'sab-probe'(r) {
       strictEqual(r.topLevel.sabType, 'function');
       deepStrictEqual(r.types, NATIVE_TYPES);
+    },
+    // Restoring the snapshot would replace the polyfill, and the Worker would then delete it.
+    'temporal-polyfill'(r) {
+      strictEqual(r.temporal, 'polyfill');
+    },
+    // With the temporal flag Temporal is fail-closed, as WebAssembly is.
+    'temporal-on-probe'(r) {
+      strictEqual(r.topLevel.temporalType, 'object');
+    },
+    // V8 adds Date.prototype.toTemporalInstant on restore.
+    'date-frozen'(r) {
+      strictEqual(r.dateFrozen, true);
     },
   };
 
