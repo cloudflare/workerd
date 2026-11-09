@@ -1289,6 +1289,14 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
+void fci_set_return_number(FunctionCallbackInfo* args, double value) {
+  args->GetReturnValue().Set(value);
+}
+
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
+  args->GetReturnValue().Set(value);
+}
+
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
@@ -1308,6 +1316,14 @@ Local pci_get_this(PropertyCallbackInfo* info) {
 
 void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
   info->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+void pci_set_return_number(PropertyCallbackInfo* info, double value) {
+  info->GetReturnValue().Set(value);
+}
+
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
+  info->GetReturnValue().Set(value);
 }
 
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info) {

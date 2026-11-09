@@ -512,6 +512,8 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+void fci_set_return_number(FunctionCallbackInfo* args, double value);
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value);
 // The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
 // attaches it; none if the data is anything else.
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
@@ -520,6 +522,8 @@ kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);
 Local pci_get_this(PropertyCallbackInfo* info);
 void pci_set_return_value(PropertyCallbackInfo* info, Local value);
+void pci_set_return_number(PropertyCallbackInfo* info, double value);
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value);
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info);
 Local psci_get_this(PropertySetterCallbackInfo* info);
 
