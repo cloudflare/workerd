@@ -891,11 +891,10 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
 
-  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, whether a request to arm the RPC subscription
-  // has been queued on rpcReceiverContext. Queued only once, so registrations can't pile requests
-  // up on an idle actor; it arms the subscription unless the context is aborted or destroyed, or
-  // its idle actor's onHibernate event drops it, first. Without the autogate, this stays false and
-  // every registration from another context queues a request.
+  // Whether a request to arm the RPC subscription has been queued on rpcReceiverContext. Queued
+  // only once, so registrations can't pile requests up on an idle actor; it arms the subscription
+  // unless the context is aborted or destroyed, or its idle actor's onHibernate event drops it,
+  // first.
   bool rpcSubscriptionRequested = false;
 
   // A promise that is fulfilled if an abort() message is received over RPC.

@@ -9,7 +9,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -588,22 +587,20 @@ size_t getOwnedBytes(const kj::Exception& exception) {
   return size;
 }
 
-// One copy of an abort's payload, shared by its deliveries. With the DEFER_CROSS_CONTEXT_ACTIONS
-// autogate, deliveries to an idle actor wait in its queue for its next request (see
-// DeleteQueue::scheduleAction()), so the copy counts as external memory.
+// One copy of an abort's payload, shared by its deliveries. Deliveries to an idle actor wait in its
+// queue for its next request (see DeleteQueue::scheduleAction()), so the copy counts as external
+// memory.
 template <typename T>
 class SharedAbortPayload final: public kj::AtomicRefcounted {
  public:
-  SharedAbortPayload(jsg::Lock& js, T value): value(kj::mv(value)) {
-    if (util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-      externalMemory = js.getExternalMemoryAdjustment(getOwnedBytes(this->value));
-    }
-  }
+  SharedAbortPayload(jsg::Lock& js, T value)
+      : value(kj::mv(value)),
+        externalMemory(js.getExternalMemoryAdjustment(getOwnedBytes(this->value))) {}
 
   const T value;
 
  private:
-  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemory;
+  jsg::ExternalMemoryAdjustment externalMemory;
 };
 
 using SerializedAbortReason = SharedAbortPayload<SerializedBytes>;
@@ -1348,13 +1345,12 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
     // through the pending-reason box (see docs/reference/detail/abort-signal.md).
     if (!rpcSubscriptionRequested) {
       KJ_IF_SOME(executor, rpcReceiverContext) {
-        bool queued = executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+        rpcSubscriptionRequested =
+            executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
           KJ_IF_SOME(self, weakSelf.tryAddRef(js)) {
             self->subscribeToRpcAbort(js);
           }
         });
-        rpcSubscriptionRequested =
-            queued && util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS);
       }
     }
     return;
