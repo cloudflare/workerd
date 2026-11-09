@@ -21,7 +21,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `setup.h`         | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                                                                                                                                                                 |
 | `sandbox.{h,c++}` | Cage-relative byte views for ArrayBuffer-backed native objects                                                                                                                                                                                                            |
 | `function.h`      | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                                                                                                                                                                |
-| `memory.h`        | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                                                                                                                                                                           |
+| `memory.h`        | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support; `pushRetainer`/`pushContainer`/`popNode`/`depth` for non-C++ objects (Rust JSG)                                                                                                                                |
 | `rtti.capnp`      | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                                                                                                                                                                         |
 | `rtti.h`          | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                                                                                                                                                                          |
 | `jsvalue.h`       | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                                                                                                                                                                 |
@@ -145,6 +145,12 @@ These rules MUST be followed when writing or modifying JSG code:
     must check the same settings. It never reuses a module when either isolate
     has `wasm_source_url_support`, because the URL is the module's name in the
     loaded Worker's bundle.
+
+14. **Don't visit through a shared owner.** A `kj::Rc`, `kj::Arc`, or `kj::Own` of a
+    refcounted type can have other owners that visit the same object, and a handle
+    visited from two owners is strong or traced depending on which visited last (a
+    `jsg::Ref` asserts instead). The `jsg-shared-visit` clang-tidy check flags such
+    visits; a deliberate one carries `// NOLINT(jsg-shared-visit)` with the reason.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

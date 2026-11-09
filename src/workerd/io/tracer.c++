@@ -467,7 +467,7 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
 
     // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
-        tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
+        kj::heap<tracing::Onset>(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
             attributes.releaseAsArray()),
         timestamp, 0);
   }
