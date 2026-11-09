@@ -916,6 +916,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
+
+  // The state of this global scope's own that a Worker started from a startup snapshot must see:
+  // the `process` and `Buffer` values the top level resolved or assigned, which live here rather
+  // than on the global object. A null-prototype object, or none when the top level touched
+  // neither. The caller has the context entered.
+  kj::Maybe<jsg::JsObject> getSnapshotState(jsg::Lock& js);
+  // Takes over the state getSnapshotState() returned in the zygote, on the fresh global scope of a
+  // Worker started from the snapshot.
+  void restoreSnapshotState(jsg::Lock& js, jsg::JsObject state);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
