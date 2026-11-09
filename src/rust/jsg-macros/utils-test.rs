@@ -340,3 +340,28 @@ fn invalid_typescript_options_still_evaluate_to_customizations() {
     assert!(expression.contains("compile_error"));
     assert!(expression.contains("TypeScript :: default ()"));
 }
+
+#[test]
+fn primitive_returns_do_not_keep_a_creator() {
+    for sig in [
+        parse_quote!(fn f()),
+        parse_quote!(fn f() -> ()),
+        parse_quote!(fn f() -> bool),
+        parse_quote!(fn f() -> u32),
+        parse_quote!(fn f() -> f64),
+        parse_quote!(fn f() -> Result<(), Error>),
+        parse_quote!(fn f() -> jsg::Result<u32>),
+        parse_quote!(fn f() -> std::result::Result<bool, Error>),
+    ] {
+        assert!(returns_primitive(&sig), "{sig:?}");
+    }
+    for sig in [
+        parse_quote!(fn f() -> jsg::Promise<u32>),
+        parse_quote!(fn f() -> Option<jsg::Promise<u32>>),
+        parse_quote!(fn f() -> Result<jsg::Promise<u32>, Error>),
+        parse_quote!(fn f() -> Option<u32>),
+        parse_quote!(fn f() -> MyReturnType),
+    ] {
+        assert!(!returns_primitive(&sig), "{sig:?}");
+    }
+}
