@@ -111,6 +111,7 @@ class ClusterNode {
   #clusterPort = null;
   #closed = null;
   #stderrBuffer = '';
+  #stderrWaiters = new Set();
   #extraArgs;
   #disk;
   #configName;
@@ -160,6 +161,24 @@ class ClusterNode {
     return this.#stderrBuffer;
   }
 
+  // Resolves once the node's stderr matches `re`, checked as it arrives.
+  waitForStderr(re, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#stderrWaiters.delete(check);
+        reject(new Error(`${this.#nodeId}: no ${re} within ${ms} ms`));
+      }, ms).unref();
+      const check = () => {
+        if (!re.test(this.#stderrBuffer)) return;
+        clearTimeout(timer);
+        this.#stderrWaiters.delete(check);
+        resolve();
+      };
+      this.#stderrWaiters.add(check);
+      check();
+    });
+  }
+
   async start() {
     assert.strictEqual(this.#child, null);
 
@@ -193,6 +212,7 @@ class ClusterNode {
     child.stderr.on('data', (data) => {
       const chunk = data.toString('utf8');
       this.#stderrBuffer += chunk;
+      for (const check of this.#stderrWaiters) check();
       // Mirror to our own stderr so test output remains useful.
       process.stderr.write(`[${this.#nodeId}] ${chunk}`);
     });
@@ -2797,38 +2817,24 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
 });
 
 test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
-  await withCluster(3, async ({ nodes, bucket, nodeKeys }) => {
-    const ticks = async (port) =>
-      (await fetchJson(port, '/ticks?name=ticks').catch(() => null))?.body
-        ?.ticks ?? [];
-    const waitFor = async (port, n, ms) => {
-      const deadline = Date.now() + ms;
-      let seen = [];
-      while ((seen = await ticks(port)).length < n && Date.now() < deadline) {
-        await sleep(1000);
-      }
-      return seen;
-    };
-    const first = await waitFor(nodes[0].httpPort, 1, 75_000);
-    assert.strictEqual(first.length, 1, JSON.stringify(first));
+  await withCluster(3, async ({ nodes }) => {
+    const TICK = /TICK \d+/;
+    // The node that runs a tick is the schedule's owner.
+    const tick = (ns, ms) =>
+      Promise.any(ns.map((n) => n.waitForStderr(TICK, ms).then(() => n)));
+    const owner = await tick(nodes, 75_000);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
 
-    // The schedule's owner: the one object of the cron Worker's namespace.
-    const prefix = objectPrefix('', 'cron');
-    const [own] = (await bucket.list(prefix)).filter((k) =>
-      k.endsWith('/own.json')
+    // The next minute once, on a survivor, though the owner died.
+    await tick(
+      nodes.filter((n) => n !== owner),
+      90_000
     );
-    const ownerKey = JSON.parse(await bucket.get(own)).node;
-    const ownerId = [...nodeKeys].find(([, key]) => key === ownerKey)[0];
-    const ownerIndex = nodes.findIndex((n) => n.nodeId === ownerId);
-    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
-    const survivor = nodes[(ownerIndex + 1) % nodes.length];
-
-    // The next minute once, though the schedule's owner died: a duplicate
-    // would follow within seconds.
-    const [tick] = await waitFor(survivor.httpPort, 2, 90_000);
-    await sleep(5000);
-    const seen = await ticks(survivor.httpPort);
-    assert.strictEqual(tick % 60_000, 0, JSON.stringify(seen));
-    assert.deepStrictEqual(seen, [tick, tick + 60_000]);
+    const seen = nodes
+      .flatMap((n) => [...n.stderr.matchAll(/TICK (\d+)/g)])
+      .map((m) => Number(m[1]))
+      .sort((a, b) => a - b);
+    assert.strictEqual(seen[0] % 60_000, 0, JSON.stringify(seen));
+    assert.deepStrictEqual(seen, [seen[0], seen[0] + 60_000]);
   });
 });

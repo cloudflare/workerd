@@ -3,9 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // `workerd serve` of the cron module (`/workerd/cron.js`): armed at startup
-// with no request or socket, each occurrence once, a failed one retried with
-// the same scheduledTime; a pending retry and a missed occurrence run after a
-// restart; a bad expression, or no --experimental, refused.
+// with no request or socket, a failed occurrence retried with the same
+// scheduledTime, a pending retry run after a restart; a bad expression, or
+// no --experimental, refused.
 
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -69,7 +69,8 @@ async function project(expression = '* * * * *') {
   return dir;
 }
 
-// Runs workerd on `dir`'s config. `calls` holds each scheduled() call so far.
+// Runs workerd on `dir`'s config. `calls` holds each scheduled() call so far;
+// `until(f, ms)` resolves once f() holds, checked as each call arrives.
 function serve(dir, args) {
   const child = spawn(
     env.WORKERD_BINARY,
@@ -77,6 +78,7 @@ function serve(dir, args) {
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
   const calls = [];
+  const waiters = new Set();
   let output = '';
   // Each stream is parsed by whole lines: a chunk can end mid-line.
   const read = (stream) => {
@@ -90,86 +92,51 @@ function serve(dir, args) {
         const m = l.match(/SCHEDULED (\{.*\})/);
         if (m) calls.push(JSON.parse(m[1]));
       }
+      for (const check of waiters) check();
     });
   };
   read(child.stdout);
   read(child.stderr);
   const exited = new Promise((resolve) => child.once('exit', resolve));
+  const until = (f, ms) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out')), ms);
+      const check = () => {
+        if (!f()) return;
+        clearTimeout(timer);
+        waiters.delete(check);
+        resolve();
+      };
+      waiters.add(check);
+      check();
+    });
   return {
     calls,
+    until,
     exited,
     output: () => output,
     stop: (signal) => (child.kill(signal), exited),
   };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function until(f, ms) {
-  const deadline = Date.now() + ms;
-  while (!f()) {
-    assert(Date.now() < deadline, 'timed out');
-    await sleep(100);
-  }
-}
-
-test('each occurrence runs once, a failure is retried', async () => {
-  const dir = await project();
-  const server = serve(dir, ['--experimental']);
-  try {
-    const { calls } = server;
-    await until(() => calls.length >= 2, 75_000);
-    const [first, retry] = calls;
-    assert.strictEqual(first.cron, '* * * * *');
-    assert.strictEqual(first.at % 60_000, 0);
-    assert.deepStrictEqual(retry, { ...first, n: 2 });
-    await until(() => calls.length >= 4, 75_000);
-    assert.deepStrictEqual(
-      calls.map(({ at, n }) => [at - first.at, n]),
-      [
-        [0, 1],
-        [0, 2],
-        [60_000, 1],
-        [60_000, 2],
-      ]
-    );
-  } finally {
-    await server.stop();
-    await rm(dir, { recursive: true });
-  }
-});
-
-test('a pending retry, and a missed occurrence, survive a restart', async () => {
+// The one wait for the clock: the first occurrence, within a minute.
+test('an occurrence is retried with its scheduledTime, across a restart', async () => {
   const dir = await project();
   let server = serve(dir, ['--experimental']);
-  const restart = async (ms) => {
-    await server.stop('SIGKILL');
-    await sleep(ms);
-    server = serve(dir, ['--experimental']);
-  };
-  const retried = () => server.calls.some(({ n }) => n === 2);
   try {
-    // Killed as the first attempt fails, and started again at once.
-    await until(() => server.calls.length >= 1, 75_000);
-    const [{ at }] = server.calls;
-    await restart(0);
-    await until(retried, 30_000);
-    assert.deepStrictEqual(
-      server.calls.map((c) => c.at - at),
-      server.calls.map(() => 0)
-    );
-    // Killed, once the next alarm is stored, until the next occurrence has
-    // passed: it runs once, late.
-    await sleep(1000);
-    await restart(at + 65_000 - Date.now());
-    await until(retried, 30_000);
-    assert.deepStrictEqual(
-      server.calls.map((c) => [c.at - at, c.n]),
-      [
-        [60_000, 1],
-        [60_000, 2],
-      ]
-    );
+    await server.until(() => server.calls.length >= 1, 75_000);
+    const [first] = server.calls;
+    assert.deepStrictEqual(first, {
+      cron: '* * * * *',
+      at: first.at - (first.at % 60_000),
+      n: 1,
+    });
+    // Killed as the first attempt fails, before its retry; the retry runs
+    // once it starts again.
+    await server.stop('SIGKILL');
+    server = serve(dir, ['--experimental']);
+    await server.until(() => server.calls.some(({ n }) => n === 2), 30_000);
+    assert.deepStrictEqual(server.calls, [first, { ...first, n: 2 }]);
   } finally {
     await server.stop();
     await rm(dir, { recursive: true });

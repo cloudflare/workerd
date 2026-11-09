@@ -96,10 +96,10 @@ import {
 } from 'cloudflare:workers';
 
 export default {
-  // cluster-cron.wd-test's trigger: each occurrence recorded by `/tick`.
-  async scheduled(controller, env) {
-    const ticks = env.COUNTER.get(env.COUNTER.idFromName('ticks'));
-    await ticks.fetch(`http://tick/tick?at=${controller.scheduledTime}`);
+  // cluster-cron.wd-test's trigger: each occurrence logged by the node
+  // that runs it, its schedule's owner.
+  scheduled(controller) {
+    console.error(`TICK ${controller.scheduledTime}`);
   },
 
   async fetch(request, env) {
@@ -440,14 +440,6 @@ export class Counter extends DurableObject {
         })
       );
       return Response.json({ nodeId, calls });
-    } else if (url.pathname === '/tick') {
-      const ticks = (await this.state.storage.get('ticks')) ?? [];
-      ticks.push(Number(url.searchParams.get('at')));
-      await this.state.storage.put('ticks', ticks);
-      return Response.json({ nodeId, id: idHex });
-    } else if (url.pathname === '/ticks') {
-      const ticks = (await this.state.storage.get('ticks')) ?? [];
-      return Response.json({ nodeId, id: idHex, ticks });
     } else if (url.pathname === '/set-alarm') {
       const ms = Number(url.searchParams.get('ms') ?? '60000');
       await this.state.storage.setAlarm(Date.now() + ms);
