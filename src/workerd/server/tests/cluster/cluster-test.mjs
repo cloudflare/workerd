@@ -37,6 +37,9 @@
 //      paced by the nodes' readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
+//  14. A cron trigger runs once a minute, through its schedule owner's death
+//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
+//      a test clock moved to each minute.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -72,15 +75,18 @@ assert(
   'You must set the FAKE_S3_CONFIG environment variable.'
 );
 
-// Bazel shards this file (`shard_count`): each shard runs every n-th test.
+// CLUSTER_TESTS, a regular expression, picks the tests a target runs, and
+// Bazel shards those (`shard_count`): each shard runs every n-th of them.
+const picked = new RegExp(env.CLUSTER_TESTS ?? '');
 const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
 const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
 if (env.TEST_SHARD_STATUS_FILE !== undefined) {
   await writeFile(env.TEST_SHARD_STATUS_FILE, '');
 }
 let testIndex = 0;
-function test(...args) {
-  if (testIndex++ % SHARDS === SHARD) nodeTest(...args);
+function test(name, ...rest) {
+  if (picked.test(name) && testIndex++ % SHARDS === SHARD)
+    nodeTest(name, ...rest);
 }
 
 const CONTROL_FD = 3;
@@ -106,6 +112,7 @@ class ClusterNode {
   #clusterPort = null;
   #closed = null;
   #stderrBuffer = '';
+  #stderrWaiters = new Set();
   #extraArgs;
   #disk;
   #configName;
@@ -155,6 +162,24 @@ class ClusterNode {
     return this.#stderrBuffer;
   }
 
+  // Resolves once the node's stderr matches `re`, checked as it arrives.
+  waitForStderr(re, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#stderrWaiters.delete(check);
+        reject(new Error(`${this.#nodeId}: no ${re} within ${ms} ms`));
+      }, ms).unref();
+      const check = () => {
+        if (!re.test(this.#stderrBuffer)) return;
+        clearTimeout(timer);
+        this.#stderrWaiters.delete(check);
+        resolve();
+      };
+      this.#stderrWaiters.add(check);
+      check();
+    });
+  }
+
   async start() {
     assert.strictEqual(this.#child, null);
 
@@ -188,6 +213,7 @@ class ClusterNode {
     child.stderr.on('data', (data) => {
       const chunk = data.toString('utf8');
       this.#stderrBuffer += chunk;
+      for (const check of this.#stderrWaiters) check();
       // Mirror to our own stderr so test output remains useful.
       process.stderr.write(`[${this.#nodeId}] ${chunk}`);
     });
@@ -2789,4 +2815,48 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
   } finally {
     await rm(project, { recursive: true, force: true });
   }
+});
+
+test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
+  await withCluster(3, async ({ nodes }) => {
+    // Once each node's cron Worker has armed, moves each node's cron clock
+    // alike; resolves to the last one's time, once each node's schedule is
+    // re-armed and any run has finished.
+    await Promise.all(
+      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+    );
+    const clock = async (ms) => {
+      let now;
+      for (const n of nodes) {
+        now = (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body
+          .now;
+      }
+      return now;
+    };
+    const to = async (t) => clock(t - (await clock(0)));
+    // The node that runs minute `t`: a real minute may run first.
+    const ran = (ns, t, ms) =>
+      Promise.any(
+        ns.map((n) =>
+          n.waitForStderr(new RegExp(`TICK ${t}`), ms).then(() => n)
+        )
+      );
+
+    const now = await clock(0);
+    const at = now - (now % 60_000) + 60_000;
+    await to(at - 1000);
+    const owner = await ran(nodes, at, 10_000);
+
+    // Killed 5 s before the next minute, which a survivor runs once it
+    // adopts the owner's alarm, after the owner's lease runs out.
+    await to(at + 55_000);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    const survivors = nodes.filter((n) => n !== owner);
+    await ran(survivors, at + 60_000, 60_000);
+    const seen = nodes
+      .flatMap((n) => [...n.stderr.matchAll(/TICK (\d+)/g)])
+      .map((m) => Number(m[1]))
+      .filter((t) => t >= at);
+    assert.deepStrictEqual(seen.sort(), [at, at + 60_000]);
+  });
 });
