@@ -2597,6 +2597,7 @@ void testHyperdriveParity(bool rust) {
                 `  out.push(`constructor: ${proto.constructor.name} ${hd instanceof proto.constructor}`);
                 `  out.push(`connect: ${typeof hd.connect} ${hd.connect.name} ${hd.connect.length}`);
                 `  out.push(`toString: ${Object.prototype.toString.call(hd)}`);
+                `  try { new proto.constructor(); } catch (e) { out.push(`new: ${e.name}: ${e.message}`); }
                 `  try { proto.connect.call({}); } catch (e) { out.push(`bad this: ${e.name}: ${e.message}`); }
                 `  try { hd.port = 1; } catch (e) { out.push(`assign: ${e.name}: ${e.message}`); }
                 `  return out.join("\n");
@@ -2698,6 +2699,7 @@ void testHyperdriveParity(bool rust) {
     constructor: Hyperdrive true
     connect: function connect 0
     toString: [object Object]
+    new: TypeError: Illegal constructor
     bad this: TypeError: Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.
     assign: TypeError: Cannot assign to read only property 'port' of object '#<Hyperdrive>'
     keys: connectionString,port,ip,host,password,user,database
@@ -2718,6 +2720,7 @@ void testHyperdriveParity(bool rust) {
     constructor: Hyperdrive true
     connect: function connect 0
     toString: [object Object]
+    new: TypeError: Illegal constructor
     bad this: TypeError: Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.
     assign: TypeError: Cannot assign to read only property 'port' of object '#<Hyperdrive>'
     distinct: true true
