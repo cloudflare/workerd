@@ -149,7 +149,8 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
       kj::Date timestamp,
       LogLevel level,
       kj::ArrayPtr<const char> message,
-      tracing::LogTruncated truncated) override;
+      tracing::LogTruncated truncated,
+      const tracing::LogErrorInfo& errorInfo) override;
   void submitException(tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,

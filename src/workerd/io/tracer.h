@@ -20,7 +20,8 @@ class WorkerTracer;
 // Takes the logs and exceptions of an invocation whose span is exported, along with its spans (see
 // BaseTracer::setStartInvocationSpanFunc()). They are the ones the streaming tail would get as
 // `log` and `exception` events. `spanId` is the span that was active, and `message` is a log's
-// JSON array of arguments unless `truncated`.
+// JSON array of arguments unless `truncated`. `errorInfo` holds the fields of the arguments that
+// were native Errors, which the JSON does not keep.
 class InvocationLogSubmitter {
  public:
   virtual ~InvocationLogSubmitter() noexcept(false) = default;
@@ -29,7 +30,8 @@ class InvocationLogSubmitter {
       kj::Date timestamp,
       LogLevel level,
       kj::ArrayPtr<const char> message,
-      tracing::LogTruncated truncated) = 0;
+      tracing::LogTruncated truncated,
+      const tracing::LogErrorInfo& errorInfo) = 0;
   virtual void submitException(tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,
@@ -204,7 +206,8 @@ class BaseTracer: public kj::Refcounted {
   void exportInvocationLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel level,
-      kj::StringPtr message);
+      kj::StringPtr message,
+      const tracing::LogErrorInfo& errorInfo);
   void exportInvocationException(tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,

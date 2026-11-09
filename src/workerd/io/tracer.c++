@@ -177,7 +177,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     }
   }
 
-  exportInvocationLog(context, timestamp, logLevel, message);
+  exportInvocationLog(context, timestamp, logLevel, message, errorInfo);
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
@@ -749,12 +749,13 @@ void BaseTracer::recordInvocationLevelException(const tracing::InvocationSpanCon
 void BaseTracer::exportInvocationLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel level,
-    kj::StringPtr message) {
+    kj::StringPtr message,
+    const tracing::LogErrorInfo& errorInfo) {
   KJ_IF_SOME(logs, invocationLogs) {
     auto truncated =
         message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
     logs->submitLog(context.getSpanId(), timestamp, level,
-        message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated);
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES)), truncated, errorInfo);
   }
 }
 

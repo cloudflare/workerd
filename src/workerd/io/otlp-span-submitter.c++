@@ -90,6 +90,21 @@ rust::otlp::LogLevel toRust(LogLevel level) {
   KJ_UNREACHABLE;
 }
 
+// One argument of a console call, borrowing the fields of an argument that was an Error.
+rust::otlp::LogArgumentError toRust(const kj::Maybe<tracing::ErrorInfo>& slot) {
+  rust::otlp::LogArgumentError argument{};
+  KJ_IF_SOME(info, slot) {
+    argument.is_error = true;
+    argument.name = toRust(info.name);
+    argument.message = toRust(info.message);
+    KJ_IF_SOME(stack, info.stack) {
+      argument.has_stack = true;
+      argument.stack = toRust(stack);
+    }
+  }
+  return argument;
+}
+
 ::rust::Box<rust::otlp::SpanBuffer> newSpanBuffer(const tracing::SpanContext& context,
     tracing::SpanId rootSpanId,
     const OtlpSpanSubmitter::Options& options) {
@@ -337,10 +352,17 @@ void OtlpSpanSubmitter::submitLog(tracing::SpanId spanId,
     kj::Date timestamp,
     LogLevel level,
     kj::ArrayPtr<const char> message,
-    tracing::LogTruncated truncated) {
+    tracing::LogTruncated truncated,
+    const tracing::LogErrorInfo& errorInfo) {
   KJ_IF_SOME(l, logs) {
+    // Borrows the fields; the call copies what it keeps.
+    kj::Array<rust::otlp::LogArgumentError> arguments;
+    KJ_IF_SOME(slots, errorInfo) {
+      arguments = KJ_MAP(slot, slots) { return toRust(slot); };
+    }
     exportLogs(rust::otlp::add_log(*l, spanId.getId(), toUnixNanos(timestamp), toRust(level),
-        message.asBytes().as<kj_rs::Rust>(), static_cast<bool>(truncated)));
+        message.asBytes().as<kj_rs::Rust>(), static_cast<bool>(truncated),
+        arguments.as<kj_rs::Rust>()));
   }
 }
 

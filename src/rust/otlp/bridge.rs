@@ -59,6 +59,16 @@ mod ffi {
         Error,
     }
 
+    /// The structured fields of one argument of a `console` call. For an argument that was not a
+    /// native `Error`, `is_error` is false and the rest is empty.
+    struct LogArgumentError<'a> {
+        is_error: bool,
+        name: &'a [u8],
+        message: &'a [u8],
+        has_stack: bool,
+        stack: &'a [u8],
+    }
+
     /// An encoded `ExportLogsServiceRequest` and the number of records in it. When there is
     /// nothing to send yet, `request` is empty and `record_count` is zero.
     struct LogBatch {
@@ -131,7 +141,8 @@ mod ffi {
             default_attributes: Box<Attributes>,
         ) -> Box<LogBuffer>;
         /// `span_id` is the span that was active, or zero. `message` is the JSON array of the
-        /// call's arguments, unless `truncated`.
+        /// call's arguments, unless `truncated`. `error_info` has an entry per argument, or none
+        /// when no argument was an `Error`.
         fn add_log(
             buffer: &mut LogBuffer,
             span_id: u64,
@@ -139,6 +150,7 @@ mod ffi {
             level: LogLevel,
             message: &[u8],
             truncated: bool,
+            error_info: &[LogArgumentError],
         ) -> LogBatch;
         fn add_exception_log(
             buffer: &mut LogBuffer,
@@ -290,6 +302,7 @@ fn add_log(
     level: ffi::LogLevel,
     message: &[u8],
     truncated: bool,
+    error_info: &[ffi::LogArgumentError],
 ) -> ffi::LogBatch {
     let level = match level {
         ffi::LogLevel::Debug => logs::Level::Debug,
@@ -299,7 +312,17 @@ fn add_log(
         _ => logs::Level::Log,
     };
     let message = String::from_utf8_lossy(message);
-    log_batch(buffer.add_log(span_id, time, level, &message, truncated))
+    let error_info = error_info
+        .iter()
+        .map(|argument| {
+            argument.is_error.then(|| logs::ErrorInfo {
+                name: text(argument.name),
+                message: text(argument.message),
+                stack: argument.has_stack.then(|| text(argument.stack)),
+            })
+        })
+        .collect();
+    log_batch(buffer.add_log(span_id, time, level, &message, truncated, error_info))
 }
 
 fn add_exception_log(

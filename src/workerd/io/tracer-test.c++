@@ -9,6 +9,8 @@
 #include <workerd/io/tracer.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <opentelemetry/proto/collector/logs/v1/logs_service.pb.h>
+
 #include <kj/test.h>
 
 namespace workerd {
@@ -56,24 +58,37 @@ class TestEntropySource final: public kj::EntropySource {
   kj::byte next = 1;
 };
 
+namespace otlp = ::opentelemetry::proto;
+
 class RecordingExporter final: public OtlpSpanExporter {
  public:
   uint spanCount = 0;
   uint logCount = 0;
-  kj::Vector<kj::Array<const kj::byte>> logRequests;
+  kj::Vector<otlp::collector::logs::v1::ExportLogsServiceRequest> logRequests;
 
   void exportSpans(kj::Array<const kj::byte> request, uint count) override {
     spanCount += count;
   }
   void exportLogs(kj::Array<const kj::byte> request, uint count) override {
     logCount += count;
-    logRequests.add(kj::mv(request));
+    KJ_ASSERT(logRequests.add().ParseFromArray(request.begin(), request.size()));
   }
 };
 
-bool contains(kj::ArrayPtr<const kj::byte> request, kj::StringPtr text) {
-  return std::string_view(request.asChars().begin(), request.size()).find(text.cStr()) !=
-      std::string_view::npos;
+// The records of a request that holds one resource's logs.
+const google::protobuf::RepeatedPtrField<otlp::logs::v1::LogRecord>& records(
+    const otlp::collector::logs::v1::ExportLogsServiceRequest& request) {
+  KJ_ASSERT(request.resource_logs_size() == 1);
+  KJ_ASSERT(request.resource_logs(0).scope_logs_size() == 1);
+  return request.resource_logs(0).scope_logs(0).log_records();
+}
+
+const otlp::common::v1::AnyValue& attribute(
+    const otlp::logs::v1::LogRecord& record, kj::StringPtr key) {
+  for (auto& kv: record.attributes()) {
+    if (kv.key() == key.cStr()) return kv.value();
+  }
+  KJ_FAIL_ASSERT("missing attribute", key);
 }
 
 void expectPreciseTime(SpanObserver& observer) {
@@ -224,7 +239,12 @@ kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs) {
   kj::Maybe<tracing::InvocationSpanContext> spanContext;
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     auto& c = spanContext.emplace(env.context.getInvocationSpanContext());
-    tracer->addLog(c, env.context.now(), LogLevel::LOG, kj::str("[\"in-invocation\"]"));
+    // The second argument was an Error, which the JSON message does not describe.
+    auto errorInfo = kj::heapArrayBuilder<kj::Maybe<tracing::ErrorInfo>>(2);
+    errorInfo.add(kj::none);
+    errorInfo.add(tracing::ErrorInfo(kj::str("TypeError"), kj::str("bad"), kj::str("at f")));
+    tracer->addLog(
+        c, env.context.now(), LogLevel::LOG, kj::str("[\"in-invocation\",{}]"), errorInfo.finish());
     tracer->addException(c, env.context.now(), kj::str("Error"), kj::str("boom"), kj::none);
   });
   // The invocation's logs wait for its span.
@@ -243,10 +263,38 @@ KJ_TEST("an exported invocation exports its logs and exceptions") {
   auto exporter = exportInvocation(ExportLogs::YES);
   KJ_ASSERT(exporter->logRequests.size() == 2);
   KJ_EXPECT(exporter->logCount == 3);
-  KJ_EXPECT(contains(exporter->logRequests[0], "in-invocation"));
-  KJ_EXPECT(contains(exporter->logRequests[0], "boom"));
-  KJ_EXPECT(contains(exporter->logRequests[0], "log-test"));
-  KJ_EXPECT(contains(exporter->logRequests[1], "after-outcome"));
+  auto& resource = exporter->logRequests[0].resource_logs(0).resource();
+  KJ_EXPECT(resource.attributes(0).key() == "service.name");
+  KJ_EXPECT(resource.attributes(0).value().string_value() == "log-test");
+
+  auto& first = records(exporter->logRequests[0]);
+  KJ_ASSERT(first.size() == 2);
+  auto& log = first[0];
+  KJ_EXPECT(log.severity_text() == "log");
+  KJ_EXPECT(log.body().array_value().values(0).string_value() == "in-invocation");
+  auto& arguments = attribute(log, "cloudflare.log.error_info").array_value();
+  KJ_ASSERT(arguments.values_size() == 2);
+  KJ_EXPECT(arguments.values(0).value_case() == otlp::common::v1::AnyValue::VALUE_NOT_SET);
+  auto& error = arguments.values(1).kvlist_value();
+  KJ_ASSERT(error.values_size() == 3);
+  KJ_EXPECT(error.values(0).key() == "name");
+  KJ_EXPECT(error.values(0).value().string_value() == "TypeError");
+  KJ_EXPECT(error.values(1).key() == "message");
+  KJ_EXPECT(error.values(1).value().string_value() == "bad");
+  KJ_EXPECT(error.values(2).key() == "stack");
+  KJ_EXPECT(error.values(2).value().string_value() == "at f");
+
+  auto& exception = first[1];
+  KJ_EXPECT(exception.event_name() == "exception");
+  KJ_EXPECT(exception.body().string_value() == "boom");
+  KJ_EXPECT(attribute(exception, "exception.type").string_value() == "Error");
+
+  auto& late = records(exporter->logRequests[1]);
+  KJ_ASSERT(late.size() == 1);
+  KJ_EXPECT(late[0].severity_text() == "warn");
+  KJ_EXPECT(late[0].body().array_value().values(0).string_value() == "after-outcome");
+  // Without Error arguments a record has no error info.
+  for (auto& kv: late[0].attributes()) KJ_EXPECT(kv.key() != "cloudflare.log.error_info");
 }
 
 KJ_TEST("an exported invocation exports no logs unless asked to") {

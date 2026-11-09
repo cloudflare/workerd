@@ -54,6 +54,14 @@ pub struct Options {
     pub omit_timestamps: bool,
 }
 
+/// The structured fields of a `console` argument that was a native `Error`, which its place in
+/// the JSON message does not keep.
+pub struct ErrorInfo {
+    pub name: String,
+    pub message: String,
+    pub stack: Option<String>,
+}
+
 /// An encoded `ExportLogsServiceRequest` and the number of records in it.
 pub struct Batch {
     pub request: Vec<u8>,
@@ -97,6 +105,11 @@ impl LogBuffer {
     /// the body as an array, keeping the order of object keys. A message that is not valid JSON,
     /// as a truncated one is not, becomes a string body instead. `truncated` adds
     /// `cloudflare.log.truncated`.
+    ///
+    /// `error_info` has one entry per argument, `Some` for each argument that was an `Error`, or
+    /// none at all when no argument was. It becomes `cloudflare.log.error_info`, an array in the
+    /// arguments' order, the same shape as the streaming tail's `errorInfo`: `name`, `message`
+    /// and `stack` for an `Error`, an empty value for any other argument.
     pub fn add_log(
         &mut self,
         span_id: u64,
@@ -104,11 +117,18 @@ impl LogBuffer {
         level: Level,
         message: &str,
         truncated: bool,
+        error_info: Vec<Option<ErrorInfo>>,
     ) -> Option<Batch> {
         let body = parse_json(message).unwrap_or_else(|| Value::String(message.to_owned()));
         let mut attributes = Vec::new();
         if truncated {
             attributes.push(key_value("cloudflare.log.truncated", true));
+        }
+        if !error_info.is_empty() {
+            attributes.push(key_value(
+                "cloudflare.log.error_info",
+                error_info_value(error_info),
+            ));
         }
         self.add(span_id, time, level, body, attributes, String::new())
     }
@@ -217,6 +237,25 @@ impl LogBuffer {
             unix_nanos.cast_unsigned()
         }
     }
+}
+
+fn error_info_value(error_info: Vec<Option<ErrorInfo>>) -> Value {
+    let values = error_info
+        .into_iter()
+        .map(|info| {
+            any_value(info.map(|info| {
+                let mut fields = vec![
+                    key_value("name", info.name),
+                    key_value("message", info.message),
+                ];
+                if let Some(stack) = info.stack {
+                    fields.push(key_value("stack", stack));
+                }
+                Value::KvList(proto::KeyValueList { values: fields })
+            }))
+        })
+        .collect();
+    Value::Array(proto::ArrayValue { values })
 }
 
 /// `text` as an OTLP value, or `None` when it is not JSON. serde_json's default recursion limit
@@ -364,12 +403,19 @@ mod tests {
         let mut buffer = buffer();
         assert!(
             buffer
-                .add_log(SPAN, T0, Level::Log, r#"["hello", 1]"#, false)
+                .add_log(SPAN, T0, Level::Log, r#"["hello", 1]"#, false, Vec::new())
                 .is_none()
         );
         assert!(
             buffer
-                .add_log(0x2000, T0 + 1, Level::Warn, r#"["careful"]"#, false)
+                .add_log(
+                    0x2000,
+                    T0 + 1,
+                    Level::Warn,
+                    r#"["careful"]"#,
+                    false,
+                    Vec::new()
+                )
                 .is_none()
         );
         let records = decode(&buffer.flush().unwrap());
@@ -401,7 +447,7 @@ mod tests {
         assert_eq!(warn.span_id, 0x2000_u64.to_be_bytes().to_vec());
 
         // Once flushed, each record goes out on its own.
-        let late = buffer.add_log(SPAN, T0, Level::Debug, r#"["late"]"#, false);
+        let late = buffer.add_log(SPAN, T0, Level::Debug, r#"["late"]"#, false, Vec::new());
         let records = decode(&late.unwrap());
         assert_eq!(records[0].severity_number(), proto::SeverityNumber::Debug);
         assert!(buffer.flush().is_none());
@@ -428,7 +474,7 @@ mod tests {
         let message = r#"[{"z": 1, "a": [true, null, 1.5], "big": 18446744073709551615}, null]"#;
         let records = decode(
             &buffer
-                .add_log(SPAN, T0, Level::Log, message, false)
+                .add_log(SPAN, T0, Level::Log, message, false, Vec::new())
                 .unwrap(),
         );
         let object = proto::KeyValueList {
@@ -470,7 +516,11 @@ mod tests {
             "null",
             &format!("{}{}", "[".repeat(200), "]".repeat(200)),
         ] {
-            let records = decode(&buffer.add_log(SPAN, T0, Level::Log, message, true).unwrap());
+            let records = decode(
+                &buffer
+                    .add_log(SPAN, T0, Level::Log, message, true, Vec::new())
+                    .unwrap(),
+            );
             assert_eq!(*body(&records[0]), Value::String(message.to_owned()));
             assert_eq!(
                 records[0].attributes,
@@ -480,6 +530,60 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn error_arguments_keep_their_fields() {
+        let mut buffer = buffer();
+        buffer.flush();
+        let error_info = vec![
+            None,
+            Some(ErrorInfo {
+                name: "TypeError".to_owned(),
+                message: "boom".to_owned(),
+                stack: Some("at x".to_owned()),
+            }),
+            Some(ErrorInfo {
+                name: "Error".to_owned(),
+                message: "no stack".to_owned(),
+                stack: None,
+            }),
+        ];
+        let batch = buffer.add_log(
+            SPAN,
+            T0,
+            Level::Error,
+            r#"["failed", {}, {}]"#,
+            false,
+            error_info,
+        );
+        let records = decode(&batch.unwrap());
+        let error = |fields: Vec<proto::KeyValue>| {
+            any_value(Some(Value::KvList(proto::KeyValueList { values: fields })))
+        };
+        assert_eq!(
+            records[0].attributes,
+            vec![
+                key_value(
+                    "cloudflare.log.error_info",
+                    Value::Array(proto::ArrayValue {
+                        values: vec![
+                            any_value(None),
+                            error(vec![
+                                key_value("name", "TypeError"),
+                                key_value("message", "boom"),
+                                key_value("stack", "at x"),
+                            ]),
+                            error(vec![
+                                key_value("name", "Error"),
+                                key_value("message", "no stack"),
+                            ]),
+                        ],
+                    }),
+                ),
+                key_value("cloudflare.entrypoint", "MyEntrypoint"),
+            ]
+        );
     }
 
     #[test]
@@ -515,16 +619,20 @@ mod tests {
         for _ in 1..MAX_BATCH_RECORDS {
             assert!(
                 buffer
-                    .add_log(SPAN, T0, Level::Log, r#"["x"]"#, false)
+                    .add_log(SPAN, T0, Level::Log, r#"["x"]"#, false, Vec::new())
                     .is_none()
             );
         }
-        let batch = buffer.add_log(SPAN, T0, Level::Log, r#"["x"]"#, false);
+        let batch = buffer.add_log(SPAN, T0, Level::Log, r#"["x"]"#, false, Vec::new());
         assert_eq!(batch.unwrap().record_count, MAX_BATCH_RECORDS);
 
         let big = format!(r#"["{}"]"#, "x".repeat(MAX_BATCH_BYTES / 2));
-        assert!(buffer.add_log(SPAN, T0, Level::Log, &big, false).is_none());
-        let batch = buffer.add_log(SPAN, T0, Level::Log, &big, false);
+        assert!(
+            buffer
+                .add_log(SPAN, T0, Level::Log, &big, false, Vec::new())
+                .is_none()
+        );
+        let batch = buffer.add_log(SPAN, T0, Level::Log, &big, false, Vec::new());
         assert_eq!(batch.unwrap().record_count, 2);
         assert!(buffer.flush().is_none());
     }
@@ -541,7 +649,9 @@ mod tests {
             Attributes::default(),
         );
         buffer.flush();
-        let batch = buffer.add_log(0, T0, Level::Log, "[]", false).unwrap();
+        let batch = buffer
+            .add_log(0, T0, Level::Log, "[]", false, Vec::new())
+            .unwrap();
         let request = proto::ExportLogsServiceRequest::decode(batch.request.as_slice()).unwrap();
         let record = &request.resource_logs[0].scope_logs[0].log_records[0];
         assert_eq!(record.time_unix_nano, 0);

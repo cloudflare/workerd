@@ -687,6 +687,7 @@ kj_test(
         ":io",
         ":otlp-span-submitter",
         ":timer-test-fixture",
+        "//src/opentelemetry:otlp_cc_proto",
         "//src/workerd/tests:test-fixture",
     ],
 )
