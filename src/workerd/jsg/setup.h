@@ -607,6 +607,14 @@ class IsolateBase {
     return value;
   }
 
+  // As extractOnceFromSnapshot(), for a value that need not be an object.
+  v8::Local<v8::Value> extractValueOnceFromSnapshot(v8::Local<v8::Context> context, size_t index) {
+    v8::Local<v8::Value> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Value>(index).ToLocal(&value),
+        "no value pinned into the snapshot under this index", index);
+    return value;
+  }
+
   // Zygote, right after `context` is created and before any JavaScript runs in it: captures the
   // holders and installs the properties.
   void installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context);
