@@ -1,3 +1,4 @@
+load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
@@ -5,6 +6,11 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 # binding when the RUST_HYPERDRIVE autogate is on; hyperdrive.c++ otherwise.
 wd_rust_crate(
     name = "hyperdrive",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "lib-test.rs",
+    ],
     cxx_bridge_deps = [
         "//src/rust/jsg",
         "//src/rust/jsg-cpp:ffi",
@@ -33,5 +39,32 @@ wd_cc_library(
         "//src/workerd/api:hyperdrive",
         "//src/workerd/io",
         "//src/workerd/util:entropy",
+    ],
+)
+
+# The Rust half of rtti-test.
+wd_rust_crate(
+    name = "rtti-test-bridge",
+    testonly = True,
+    srcs = ["rtti_test_bridge.rs"],
+    crate_root = "rtti_test_bridge.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "rtti_test_bridge.rs",
+    deps = [
+        ":hyperdrive",
+        "//src/rust/jsg",
+    ],
+)
+
+# The RTTI of the Rust Hyperdrive, compared with the C++ one's.
+kj_test(
+    src = "rtti-test.c++",
+    deps = [
+        ":rtti-test-bridge",
+        "//src/workerd/api:hyperdrive",
+        "//src/workerd/api:streams",
+        "//src/workerd/io",
+        "//src/workerd/jsg:rtti",
+        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
