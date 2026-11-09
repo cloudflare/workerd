@@ -123,13 +123,30 @@ JsObject toJsError(Lock& js, ErrorTag tag, JsString message) {
   return JsObject(v8::Exception::Error(message).As<v8::Object>());
 }
 
-// Returns the value of `object`'s own data property `name`, or kj::none if it has none, or has an
-// accessor instead. Runs no JavaScript: it calls no Proxy trap or JavaScript accessor, and does not
-// read the prototype chain.
-kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
+struct OwnDataProperty {
+  v8::Local<v8::Object> descriptor;
+  v8::Local<v8::Value> value;
+
+  // Whether the property is neither writable nor configurable, as a frozen object's are, so that
+  // its value can never change.
+  bool isConstant(Lock& js) const {
+    auto context = js.v8Context();
+    // The descriptor is a new plain object, whose own properties these are.
+    auto isTrue = [&](kj::StringPtr flag) {
+      v8::Local<v8::String> flagKey = js.strIntern(flag);
+      return check(descriptor->GetRealNamedProperty(context, flagKey))->IsTrue();
+    };
+    return !isTrue("writable"_kj) && !isTrue("configurable"_kj);
+  }
+};
+
+// Returns `object`'s own data property `name`, or kj::none if it has none, or has an accessor
+// instead. Runs no JavaScript: it calls no Proxy trap or JavaScript accessor, and does not read
+// the prototype chain.
+kj::Maybe<OwnDataProperty> tryGetOwnDataProperty(
     Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
   auto context = js.v8Context();
-  v8::Local<v8::String> key = js.str(name);
+  v8::Local<v8::String> key = js.strIntern(name);
   // False for a Proxy, so the descriptor below is not a Proxy trap's.
   if (!check(object->HasRealNamedProperty(context, key))) return kj::none;
   // A native accessor, such as a function's `prototype`, is described as a data property.
@@ -138,7 +155,19 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
   auto descriptor = maybeDescriptor.As<v8::Object>();
   v8::Local<v8::String> valueKey = js.strIntern("value"_kj);
   if (!check(descriptor->HasOwnProperty(context, valueKey))) return kj::none;
-  return check(descriptor->GetRealNamedProperty(context, valueKey));
+  return OwnDataProperty{
+    .descriptor = descriptor,
+    .value = check(descriptor->GetRealNamedProperty(context, valueKey)),
+  };
+}
+
+// Returns the value of `object`'s own data property `name`, as tryGetOwnDataProperty() does.
+kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
+    Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
+  KJ_IF_SOME(property, tryGetOwnDataProperty(js, object, name)) {
+    return property.value;
+  }
+  return kj::none;
 }
 
 // The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
@@ -393,9 +422,10 @@ kj::Maybe<v8::Local<v8::Value>> Serializer::tryGetJsSerializeMark(
     Lock& js, v8::Local<v8::Object> object) {
   // Such an instance has no internal fields, unlike a workerd API object.
   if (jsSerializeModeKey.IsEmpty() || object->InternalFieldCount() > 0) return kj::none;
-  auto context = js.v8Context();
-  if (!check(object->HasPrivate(context, jsSerializeModeKey))) return kj::none;
-  return check(object->GetPrivate(context, jsSerializeModeKey));
+  // No mark is undefined (see serialization.ts), so undefined means that there is none.
+  auto mark = check(object->GetPrivate(js.v8Context(), jsSerializeModeKey));
+  if (mark->IsUndefined()) return kj::none;
+  return mark;
 }
 
 void Serializer::writeJsSerializable(
@@ -406,20 +436,14 @@ void Serializer::writeJsSerializable(
     if (eh.trySerializeClassInstance(js, *this, object)) return;
   }
 
-  // The mark of a cloneable instance is its class's descriptor.
-  if (!mark->IsObject()) throwDataCloneErrorForObject(js, object);
-  auto descriptor = mark.As<v8::Object>();
-  auto clone = KJ_UNWRAP_OR(
-      tryGetOwnProperty(js, descriptor, "clone"_kj), throwDataCloneErrorForObject(js, object));
-  auto deserializeInfo = KJ_UNWRAP_OR(tryGetOwnProperty(js, descriptor, "deserializeInfo"_kj),
-      throwDataCloneErrorForObject(js, object));
-  if (!clone->IsFunction() || !deserializeInfo->IsString()) {
-    throwDataCloneErrorForObject(js, object);
-  }
+  auto& cls = getJsSerializableClass(js, object, mark);
+  v8::Local<v8::Function> clone = cls.clone.getHandle(js);
+  // Stays valid when jsSerializableClasses grows, which moves the string but not its text.
+  kj::StringPtr deserializeInfo = cls.deserializeInfo;
 
   auto context = js.v8Context();
   v8::Local<v8::Value> arg = object;
-  auto data = check(clone.As<v8::Function>()->Call(context, js.undefined(), 1, &arg));
+  auto data = check(clone->Call(context, js.undefined(), 1, &arg));
 
   // An error's message and stack are written as a native error's are, so that the deserializer,
   // rather than the class, decides whether to keep the stack, and a stack it captures begins with
@@ -449,7 +473,7 @@ void Serializer::writeJsSerializable(
   }
 
   writeRawUint32(SERIALIZATION_TAG_JS_SERIALIZABLE);
-  writeLengthDelimited(JsString(deserializeInfo.As<v8::String>()).toString(js));
+  writeLengthDelimited(deserializeInfo);
   writeRawUint32(flags);
   KJ_IF_SOME(m, message) {
     write(js, m);
@@ -458,6 +482,30 @@ void Serializer::writeJsSerializable(
     write(js, s);
   }
   pendingJsSerializableData.add(js.v8Ref(data));
+}
+
+Serializer::JsSerializableClass& Serializer::getJsSerializableClass(
+    Lock& js, v8::Local<v8::Object> object, v8::Local<v8::Value> mark) {
+  // The mark of a cloneable instance is its class's descriptor.
+  if (!mark->IsObject()) throwDataCloneErrorForObject(js, object);
+  auto descriptor = mark.As<v8::Object>();
+  for (auto& cls: jsSerializableClasses) {
+    if (cls.descriptor.getHandle(js) == descriptor) return cls;
+  }
+
+  auto clone = KJ_UNWRAP_OR(
+      tryGetOwnDataProperty(js, descriptor, "clone"_kj), throwDataCloneErrorForObject(js, object));
+  auto deserializeInfo = KJ_UNWRAP_OR(tryGetOwnDataProperty(js, descriptor, "deserializeInfo"_kj),
+      throwDataCloneErrorForObject(js, object));
+  if (!clone.value->IsFunction() || !deserializeInfo.value->IsString() || !clone.isConstant(js) ||
+      !deserializeInfo.isConstant(js)) {
+    throwDataCloneErrorForObject(js, object);
+  }
+  return jsSerializableClasses.add(JsSerializableClass{
+    .descriptor = js.v8Ref(descriptor),
+    .clone = js.v8Ref(clone.value.As<v8::Function>()),
+    .deserializeInfo = JsString(deserializeInfo.value.As<v8::String>()).toString(js),
+  });
 }
 
 Serializer::Released Serializer::release() {
@@ -641,6 +689,7 @@ void Deserializer::init(Lock& js,
 JsValue Deserializer::readValue(Lock& js) {
   ++readDepth;
   KJ_DEFER(--readDepth);
+  KJ_DEFER(if (readDepth == 1) jsSerializableClasses.clear());
   KJ_ON_SCOPE_FAILURE(if (readDepth == 1) pendingJsSerializables.clear());
   auto value = [&]() {
     js.setDisallowJavascriptExecution(true);
@@ -788,6 +837,60 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js) {
       js.v8Context(), ContextPointerSlot::BOOTSTRAP_STATE);
 }
 
+size_t Deserializer::findJsSerializableClass(Lock& js, kj::String deserializeInfo) {
+  for (auto i: kj::indices(jsSerializableClasses)) {
+    if (jsSerializableClasses[i].deserializeInfo == deserializeInfo) return i;
+  }
+  auto unknownClass = [&]() -> size_t {
+    JSG_FAIL_REQUIRE(
+        DOMDataCloneError, "Deserialization failed: unknown class implemented in JavaScript.");
+  };
+
+  kj::StringPtr info = deserializeInfo;
+  auto colon = KJ_UNWRAP_OR(info.findFirst(':'), return unknownClass());
+  auto specifier = kj::str(info.first(colon));
+  auto exportName = info.slice(colon + 1);
+
+  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return unknownClass());
+  auto exports = KJ_UNWRAP_OR(modules.tryGetLoadedExports(js, specifier), return unknownClass());
+  auto exportsObject = KJ_UNWRAP_OR(exports.tryCast<JsObject>(), return unknownClass());
+  auto ctor = KJ_UNWRAP_OR(tryGetOwnProperty(js, exportsObject, exportName), return unknownClass());
+  if (!ctor->IsFunction()) return unknownClass();
+  auto prototype = KJ_UNWRAP_OR(
+      tryGetOwnProperty(js, ctor.As<v8::Object>(), "prototype"_kj), return unknownClass());
+  if (!prototype->IsObject()) return unknownClass();
+
+  // Undefined if the class did not opt in.
+  auto descriptor = KJ_UNWRAP_OR(
+      JsObject(prototype.As<v8::Object>()).getPrivate(js, JS_CLONEABLE_KEY).tryCast<JsObject>(),
+      return unknownClass());
+  auto deserialize =
+      KJ_UNWRAP_OR(tryGetOwnProperty(js, descriptor, "deserialize"_kj), return unknownClass());
+  if (!deserialize->IsFunction()) return unknownClass();
+
+  if (errorPrototype == kj::none) {
+    errorPrototype = js.v8Ref(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context()));
+  }
+  v8::Local<v8::Value> errorProto = KJ_ASSERT_NONNULL(errorPrototype).getHandle(js);
+  bool isError = false;
+  for (auto current = prototype; current->IsObject();
+       current = current.As<v8::Object>()->GetPrototype()) {
+    if (current == errorProto) {
+      isError = true;
+      break;
+    }
+  }
+
+  jsSerializableClasses.add(JsSerializableClass{
+    .deserializeInfo = kj::mv(deserializeInfo),
+    .prototype = js.v8Ref(prototype.As<v8::Object>()),
+    .descriptor = js.v8Ref(v8::Local<v8::Object>(descriptor)),
+    .deserialize = js.v8Ref(deserialize.As<v8::Function>()),
+    .isError = isError,
+  });
+  return jsSerializableClasses.size() - 1;
+}
+
 v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   // Runs no JavaScript: V8 forbids it while it reads a value. The data may come from an untrusted
   // source, so whatever it names is checked to be a class that opted into the protocol.
@@ -813,56 +916,19 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
     });
     stack = v8::Local<v8::String>(value);
   }
-  auto unknownClass = [&]() -> v8::Local<v8::Object> {
-    JSG_FAIL_REQUIRE(
-        DOMDataCloneError, "Deserialization failed: unknown class implemented in JavaScript.");
-  };
-
-  kj::StringPtr info = deserializeInfo;
-  auto colon = KJ_UNWRAP_OR(info.findFirst(':'), return unknownClass());
-  auto specifier = kj::str(info.first(colon));
-  auto exportName = info.slice(colon + 1);
-
-  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return unknownClass());
-  auto exports = KJ_UNWRAP_OR(modules.tryGetLoadedExports(js, specifier), return unknownClass());
-  auto exportsObject = KJ_UNWRAP_OR(exports.tryCast<JsObject>(), return unknownClass());
-  auto ctor = KJ_UNWRAP_OR(tryGetOwnProperty(js, exportsObject, exportName), return unknownClass());
-  if (!ctor->IsFunction()) return unknownClass();
-  auto prototype = KJ_UNWRAP_OR(
-      tryGetOwnProperty(js, ctor.As<v8::Object>(), "prototype"_kj), return unknownClass());
-  if (!prototype->IsObject()) return unknownClass();
-
-  auto context = js.v8Context();
-  // Undefined if the class did not opt in.
-  auto descriptor = KJ_UNWRAP_OR(
-      JsObject(prototype.As<v8::Object>()).getPrivate(js, JS_CLONEABLE_KEY).tryCast<JsObject>(),
-      return unknownClass());
-  auto deserialize =
-      KJ_UNWRAP_OR(tryGetOwnProperty(js, descriptor, "deserialize"_kj), return unknownClass());
-  if (!deserialize->IsFunction()) return unknownClass();
+  auto classIndex = findJsSerializableClass(js, kj::mv(deserializeInfo));
+  auto& cls = jsSerializableClasses[classIndex];
+  v8::Local<v8::Object> prototype = cls.prototype.getHandle(js);
 
   // The instance is what calling the constructor would make, minus whatever the constructor does:
   // `deserialize` initializes it. A class that inherits from Error makes native errors.
-  auto emptyString = v8::String::Empty(js.v8Isolate);
-  if (errorPrototype == kj::none) {
-    auto error = v8::Exception::Error(emptyString).As<v8::Object>();
-    errorPrototype = js.v8Ref(error->GetPrototype());
-  }
-  v8::Local<v8::Value> errorProto = KJ_ASSERT_NONNULL(errorPrototype).getHandle(js);
-  bool isError = false;
-  for (auto current = prototype; current->IsObject();
-       current = current.As<v8::Object>()->GetPrototype()) {
-    if (current == errorProto) {
-      isError = true;
-      break;
-    }
-  }
-
+  auto context = js.v8Context();
   v8::Local<v8::Object> instance;
-  if (isError) {
+  if (cls.isError) {
     // The message is what the stack just captured begins with, after the error's name, as for a
     // native error.
-    instance = v8::Exception::Error(message.orDefault(emptyString)).As<v8::Object>();
+    instance =
+        v8::Exception::Error(message.orDefault(v8::String::Empty(js.v8Isolate))).As<v8::Object>();
     // Error() always gives the error an own `message`, which a class's instance does not have
     // until it is initialized.
     check(instance->Delete(context, js.strIntern("message"_kj)));
@@ -876,15 +942,18 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
       }
     }
   } else {
-    instance = v8::Object::New(js.v8Isolate, prototype, nullptr, nullptr, 0);
+    // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
+    // given a new prototype, as by Object.setPrototypeOf(), keeps fast properties.
+    instance = v8::Object::New(js.v8Isolate);
+    check(instance->SetPrototype(context, prototype));
   }
   // It was cloneable when written, and so is the copy.
-  check(
-      instance->SetPrivate(context, IsolateBase::getJsSerializeModeKey(js.v8Isolate), descriptor));
+  check(instance->SetPrivate(
+      context, IsolateBase::getJsSerializeModeKey(js.v8Isolate), cls.descriptor.getHandle(js)));
 
   pendingJsSerializables.add(PendingJsSerializable{
     .instance = js.v8Ref(instance),
-    .deserialize = js.v8Ref(deserialize.As<v8::Function>()),
+    .classIndex = classIndex,
   });
   return instance;
 }
@@ -908,7 +977,8 @@ void Deserializer::finishJsSerializables(Lock& js) {
       "Objects implemented in JavaScript cannot be deserialized here.");
   auto pending = kj::mv(pendingJsSerializables);
   for (auto i: kj::indices(pending)) {
-    v8::Local<v8::Function> deserialize = pending[i].deserialize.getHandle(js);
+    v8::Local<v8::Function> deserialize =
+        jsSerializableClasses[pending[i].classIndex].deserialize.getHandle(js);
     v8::Local<v8::Value> args[] = {pending[i].instance.getHandle(js), data[i].getHandle(js)};
     check(deserialize->Call(context, js.undefined(), kj::size(args), args));
   }

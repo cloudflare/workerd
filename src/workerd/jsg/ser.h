@@ -105,7 +105,8 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   an untrusted source can make an instance of any class whose module is loaded.
 //   `clone(instance)` returns the instance's data, any serializable value, and
 //   `deserialize(instance, data)` initializes an instance from it. The class's constructor's
-//   `prototype` holds the descriptor under JS_CLONEABLE_KEY.
+//   `prototype` holds the descriptor under JS_CLONEABLE_KEY. Its `clone` and `deserializeInfo`
+//   are constants, neither writable nor configurable, as freezing it makes them.
 // * An instance carries a mark under JS_SERIALIZE_MODE_KEY. If the instance is cloneable, the mark
 //   is its class's descriptor, so the class that marked an instance decides how it is written,
 //   whatever its prototype is now. Any other mark makes serializing it throw DataCloneError,
@@ -292,6 +293,18 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // queues its data to follow the top-level value.
   void writeJsSerializable(Lock& js, v8::Local<v8::Object> object, v8::Local<v8::Value> mark);
 
+  // A class implemented in JavaScript, as its descriptor describes it.
+  struct JsSerializableClass {
+    V8Ref<v8::Object> descriptor;
+    V8Ref<v8::Function> clone;
+    kj::String deserializeInfo;
+  };
+
+  // Returns the class that `mark`, the mark of `object`, describes, or throws DataCloneError for
+  // `object` if it describes none.
+  JsSerializableClass& getJsSerializableClass(
+      Lock& js, v8::Local<v8::Object> object, v8::Local<v8::Value> mark);
+
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
   // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
@@ -320,6 +333,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // The data of the instances of classes implemented in JavaScript written by the current
   // top-level write(), which it writes after the value.
   kj::Vector<V8Ref<v8::Value>> pendingJsSerializableData;
+  // The classes that getJsSerializableClass() has found. A descriptor's properties can't change,
+  // so each is read once.
+  kj::Vector<JsSerializableClass> jsSerializableClasses;
   // How many calls to write() are in progress: a type's serializer calls it for nested values.
   uint writeDepth = 0;
   bool released = false;
@@ -432,6 +448,20 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // initialized by finishJsSerializables().
   v8::Local<v8::Object> readJsSerializable(Lock& js);
 
+  // A class implemented in JavaScript that readJsSerializable() found.
+  struct JsSerializableClass {
+    kj::String deserializeInfo;
+    V8Ref<v8::Object> prototype;
+    V8Ref<v8::Object> descriptor;
+    V8Ref<v8::Function> deserialize;
+    // Whether the prototype inherits from Error.prototype, so that its instances are native errors.
+    bool isError;
+  };
+
+  // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or
+  // throws DataCloneError if it names none.
+  size_t findJsSerializableClass(Lock& js, kj::String deserializeInfo);
+
   // Reads the data of the instances that readJsSerializable() created during the current
   // top-level readValue(), then initializes them with their classes' `deserialize` functions.
   void finishJsSerializables(Lock& js);
@@ -456,7 +486,8 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
   struct PendingJsSerializable {
     V8Ref<v8::Object> instance;
-    V8Ref<v8::Function> deserialize;
+    // The instance's class in jsSerializableClasses.
+    size_t classIndex;
   };
   // The instances of classes implemented in JavaScript read by the current top-level readValue(),
   // in the order they were read.
@@ -464,8 +495,11 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // How many calls to readValue() are in progress: a type's deserializer calls it for nested
   // values.
   uint readDepth = 0;
-  // Error.prototype of the current context, once readJsSerializable() needs it.
+  // Error.prototype of the current context, once findJsSerializableClass() needs it.
   kj::Maybe<V8Ref<v8::Value>> errorPrototype;
+  // The classes that findJsSerializableClass() has found during the current top-level
+  // readValue(). No JavaScript runs while it reads, so none of them can change before it ends.
+  kj::Vector<JsSerializableClass> jsSerializableClasses;
 };
 
 // For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or

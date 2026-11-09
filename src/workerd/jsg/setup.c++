@@ -587,6 +587,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 2. Reset isolate level handles.
   opaqueTemplate.Reset();
   jsSerializeModeKey.Reset();
+  errorPrototypeTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -649,6 +650,20 @@ v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) 
   return self.jsSerializeModeKey.Get(isolate);
 }
 
+v8::Local<v8::Value> IsolateBase::getErrorPrototype(
+    v8::Isolate* isolate, v8::Local<v8::Context> context) {
+  static constexpr kj::StringPtr ERROR_PROTOTYPE_KEY = "errorPrototype"_kj;
+  auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  auto key = v8StrIntern(isolate, ERROR_PROTOTYPE_KEY);
+  if (self.errorPrototypeTemplate.IsEmpty()) {
+    auto tmpl = v8::ObjectTemplate::New(isolate);
+    tmpl->SetIntrinsicDataProperty(key, v8::kErrorPrototype);
+    self.errorPrototypeTemplate.Reset(isolate, tmpl);
+  }
+  auto holder = check(self.errorPrototypeTemplate.Get(isolate)->NewInstance(context));
+  return check(holder->GetRealNamedProperty(context, key));
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -676,6 +691,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
+    KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
 

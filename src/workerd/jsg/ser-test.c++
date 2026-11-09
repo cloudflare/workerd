@@ -885,8 +885,10 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "p[kMode] = 'yes';\n"
              "try { roundTrip(p); } catch (e) { e.name }",
       "string", "DataCloneError");
-  // Nor is one whose descriptor lacks a clone function or a deserializeInfo string.
-  for (auto mark: {"{}"_kj, "descriptor('test:Point')"_kj, "descriptor(1, () => 1)"_kj}) {
+  // Nor is one whose descriptor lacks a clone function or a deserializeInfo string, or isn't
+  // frozen, so that the serializer reads each descriptor once.
+  for (auto mark: {"{}"_kj, "descriptor('test:Point')"_kj, "descriptor(1, () => 1)"_kj,
+         "{ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1 }"_kj}) {
     expectEval(kj::str("const n = new NoDeserialize();\n"
                        "n[kMode] = ",
                    mark,

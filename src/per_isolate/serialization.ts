@@ -124,7 +124,9 @@ const kNativelySerializedPrototypes: readonly object[] = [
 
 // How the instances of a class are serialized: the class's descriptor in
 // jsg/ser.h, whose own properties C++ reads. A null-prototype record, so that
-// reading it finds no Object.prototype property.
+// reading it finds no Object.prototype property, which makeCloneable()
+// freezes: the serializer reads a descriptor's properties once, and rejects
+// one whose clone or deserializeInfo could change.
 class Cloneable<T extends object> {
   declare deserializeInfo: string;
   declare clone: (instance: T) => unknown;
