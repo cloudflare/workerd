@@ -38,6 +38,17 @@ export const aRetryNeverDelaysTheNextOccurrence = test(() => {
   assert.strictEqual(p.armIsRetry, false);
 });
 
+// Behind a clock stepped back, the next occurrence is still after the one
+// that fired, and a retry still waits only its backoff.
+export const aClockSteppedBack = test(() => {
+  const p = plan([parse('0 * * * *')], NOON, NOON - 30_000, 0, true);
+  assert.strictEqual(p.armAt, NOON - 30_000 + 2_000);
+  assert.strictEqual(
+    plan([parse('0 * * * *')], NOON, NOON - 30_000, 6, true).armAt,
+    NOON + 3_600_000
+  );
+});
+
 export const retriesStopAtTheCeiling = test(() => {
   const p = plan([parse('0 * * * *')], NOON, NOON + 10, 6, true);
   assert.strictEqual(p.armAt, NOON + 3_600_000);

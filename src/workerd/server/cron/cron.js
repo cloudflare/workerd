@@ -249,7 +249,9 @@ export function next(c, after) {
 // wins whenever it is sooner, so a failing cron never delays the next run.
 export function plan(crons, fired, now, retry, failed) {
   const due = fired === undefined ? [] : crons.filter((c) => matches(c, fired));
-  const nexts = crons.map((c) => next(c, now)).filter((t) => t !== null);
+  // After both: a clock stepped back never brings `fired` round again.
+  const from = Math.max(now, fired ?? now);
+  const nexts = crons.map((c) => next(c, from)).filter((t) => t !== null);
   const occurrence = nexts.length > 0 ? Math.min(...nexts) : null;
   const retryAt =
     failed && retry < RETRIES ? now + BACKOFF_MS * 2 ** retry : null;
@@ -360,9 +362,7 @@ export class Schedule extends DurableObject {
     );
     const failed = due.filter((_, i) => !ok[i]);
     // A schedule no longer in the config has no expressions, and retires.
-    // A clock stepped back never brings the occurrence round again.
-    const now = Math.max(clock(), occurrence);
-    const p = plan(schedule, undefined, now, retry, failed.length > 0);
+    const p = plan(schedule, occurrence, clock(), retry, failed.length > 0);
     await this.#arm(name, p, { occurrence, due: failed, retry: retry + 1 });
   }
 
