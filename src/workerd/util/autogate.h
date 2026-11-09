@@ -115,6 +115,10 @@ namespace workerd::util {
      (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
      api/urlpattern-standard.h. */                                                                 \
   V(TS_URL_PATTERN)                                                                                \
+  /* HTMLRewriter is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/htmlrewriter/), over the Rust handle in api/html-rewriter/, rather than      \
+     the C++ class in api/html-rewriter.h. */                                                      \
+  V(TS_HTML_REWRITER)                                                                              \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

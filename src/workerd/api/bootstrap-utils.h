@@ -25,6 +25,9 @@ class BootstrapUtils {
   // as a MIME type, or undefined if it does not parse as one. Throws a TypeError if `input` is not
   // a string.
   static jsg::JsValue mimeTypeEssence(jsg::Lock& js, jsg::JsValue input);
+  // The value of the parameter `name` (matched in lowercase) of the MIME type `input`, or
+  // undefined if `input` is not a MIME type or has no such parameter.
+  static jsg::JsValue mimeTypeParameter(jsg::Lock& js, jsg::JsValue input, jsg::JsValue name);
 
   // Undefined if `value` is not a ReadableStream of either implementation, else "locked",
   // "disturbed" (unlocked, but read from) or "readable".

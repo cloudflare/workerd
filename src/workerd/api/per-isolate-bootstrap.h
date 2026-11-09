@@ -82,10 +82,14 @@ class EmbedderBootstrap {
 //
 // Throws kj::Exception on failure (compilation errors, missing scripts, cycles).
 // This is fatal for isolate creation since these are runtime-owned scripts.
+//
+// `htmlRewriterUtils`, if any, becomes `utils.htmlRewriter`; see
+// Worker::Api::newHtmlRewriterUtils().
 void runPerIsolateBootstrap(jsg::Lock& js,
     CompatibilityFlags::Reader flags,
     kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
-    const jsg::ModuleSource* moduleSource = nullptr);
+    const jsg::ModuleSource* moduleSource = nullptr,
+    kj::Maybe<jsg::JsObject> htmlRewriterUtils = kj::none);
 
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).

@@ -163,8 +163,12 @@ void maybePerIsolateBootstrap(
     const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-    runPerIsolateBootstrap(
-        js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
+    kj::Maybe<jsg::JsObject> htmlRewriterUtils;
+    if (util::Autogate::isEnabled(util::AutogateKey::TS_HTML_REWRITER)) {
+      htmlRewriterUtils = api.newHtmlRewriterUtils(js);
+    }
+    runPerIsolateBootstrap(js, api.getFeatureFlags(), api.getEmbedderBootstrap(),
+        api.getModuleSource(), htmlRewriterUtils);
   });
 }
 

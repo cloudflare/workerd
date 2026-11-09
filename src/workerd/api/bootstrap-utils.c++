@@ -7,6 +7,7 @@
 #include "http.h"
 #include "js-readable-stream.h"
 #include "streams/readable.h"
+#include "util.h"
 
 #include <workerd/jsg/url.h>
 #include <workerd/util/mimetype.h>
@@ -39,6 +40,20 @@ jsg::JsValue BootstrapUtils::mimeTypeEssence(jsg::Lock& js, jsg::JsValue input) 
                  .toString(js);
   KJ_IF_SOME(parsed, MimeType::tryParse(str)) {
     return js.str(parsed.essence());
+  }
+  return js.undefined();
+}
+
+jsg::JsValue BootstrapUtils::mimeTypeParameter(
+    jsg::Lock& js, jsg::JsValue input, jsg::JsValue name) {
+  auto str = JSG_REQUIRE_NONNULL(
+      input.tryCast<jsg::JsString>(), TypeError, "mimeTypeParameter() expects a string")
+                 .toString(js);
+  auto key = JSG_REQUIRE_NONNULL(
+      name.tryCast<jsg::JsString>(), TypeError, "mimeTypeParameter() expects a string")
+                 .toString(js);
+  KJ_IF_SOME(value, readContentTypeParameter(str, key)) {
+    return js.str(value);
   }
   return js.undefined();
 }
