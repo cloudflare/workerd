@@ -679,6 +679,93 @@ fn sample_parses() {
     );
 }
 
+/// The kubernetes sample's projects translate for the flags that `kubernetes.yaml` passes, which
+/// name each project's disk service.
+#[test]
+fn kubernetes_samples_translate() {
+    let process = Process::new(None, None, Vec::new());
+    let app = project(&[
+        (
+            "wrangler.json",
+            include_str!("../../../../samples/kubernetes/app/wrangler.json"),
+        ),
+        (
+            "src/index.js",
+            include_str!("../../../../samples/kubernetes/app/src/index.js"),
+        ),
+    ]);
+    let bucket = project(&[
+        (
+            "wrangler.json",
+            include_str!("../../../../samples/kubernetes/bucket/wrangler.json"),
+        ),
+        (
+            "fake-s3.js",
+            include_str!("../../../../samples/kubernetes/bucket/fake-s3.js"),
+        ),
+    ]);
+    let standalone = RunOptions {
+        overrides: workerd_server::config::Overrides {
+            directories: HashMap::from([("fake-s3-do-storage".to_owned(), "/data".to_owned())]),
+            ..Default::default()
+        },
+        ..RunOptions::default()
+    };
+    for (dir, options, worker, disk) in [
+        (
+            app,
+            joining(&[(CLUSTER_STORAGE, "/data")]),
+            "counter",
+            CLUSTER_STORAGE,
+        ),
+        (bucket, standalone, "fake-s3", "fake-s3-do-storage"),
+    ] {
+        let path = dir.join("wrangler.json");
+        let config = load(path.to_str().unwrap(), &process, &options, true).unwrap();
+        let message = read(config);
+        let names: Vec<String> = message
+            .get_root::<config::Reader>()
+            .unwrap()
+            .get_services()
+            .unwrap()
+            .iter()
+            .map(|service| service.get_name().unwrap().to_string().unwrap())
+            .collect();
+        assert_eq!(names, [worker, disk]);
+        // Bundling would write to the project, which is read-only in the image.
+        assert!(!dir.join(".wrangler").exists());
+    }
+}
+
+#[test]
+fn a_missing_config_names_the_one_next_to_it() {
+    let dir = project(&[("wrangler.jsonc", "{}")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        missing_config(missing),
+        format!(
+            "{missing}: No such file. Did you mean {}?",
+            dir.join("wrangler.jsonc").display()
+        )
+    );
+    let dir = project(&[("wrangler.toml", "")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(
+        missing_config(missing),
+        format!(
+            "{missing}: No such file. There is a {}, but wrangler.toml is not supported. Convert \
+             it to wrangler.jsonc.",
+            dir.join("wrangler.toml").display()
+        )
+    );
+    let dir = project(&[("index.js", "")]);
+    let missing = dir.join("wrangler.json");
+    let missing = missing.to_str().unwrap();
+    assert_eq!(missing_config(missing), format!("{missing}: No such file."));
+}
+
 #[test]
 fn unsupported_field_is_an_error() {
     let error = load_project(&[

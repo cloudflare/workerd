@@ -1,0 +1,247 @@
+# The sample: three workerd pods that serve the app and share a bucket, and the demo bucket. See
+# README.md. Before applying this, create the cluster key:
+#
+#     kubectl create secret generic workerd-cluster --from-literal=key="$(openssl rand -hex 32)"
+#
+# The pods meet the "restricted" Pod Security Standard. Each image is named with a tag of its own
+# build: build a new image under a new tag and change it here, since `IfNotPresent` reuses an
+# image that a node already has under the same tag.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workerd
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: workerd
+  # Start one new pod at a time and stop an old one once the new one has been ready for 10 s,
+  # longer than the 8 s a stopping pod takes to hand off its Durable Objects.
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: workerd
+    spec:
+      # Above the time a pod takes to stop: the 20 s preStop sleep, then up to 8 s after SIGTERM.
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        # Makes the data volume writable by that group.
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # Prefer spreading the pods over the nodes, so a node going away stops as few of them as
+      # possible. On a single node, or under scheduling pressure, pods may still share a node.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: workerd
+      containers:
+        - name: workerd
+          image: workerd-sample:v1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --experimental
+            # Join the cluster. The pods reach each other on port 7000 of their pod IPs.
+            - --cluster-addr=$(POD_IP):7000
+            # Keep this pod's copy of its Durable Objects on the `data` volume.
+            - --directory-path=do-storage=/data
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: cluster
+              containerPort: 7000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: WORKERD_CLUSTER_KEY_FILE
+              value: /etc/workerd-cluster/key
+            - name: WORKERD_CLUSTER_BUCKET
+              value: s3://cluster/sample
+            - name: AWS_ENDPOINT_URL
+              value: http://fake-s3
+            # Demo only: the fake bucket accepts any credentials. Take a real bucket's from a
+            # Secret; see README.md.
+            - name: AWS_ACCESS_KEY_ID
+              value: sample
+            - name: AWS_SECRET_ACCESS_KEY
+              value: sample
+          # 503 while the pod is starting or stopping, so the Service sends it no new requests.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: cluster
+            periodSeconds: 2
+          # Keep serving for 20 s after the pod starts terminating, before workerd gets SIGTERM,
+          # while a cloud load balancer in front of the Service still sends requests here. The
+          # kubelet sleeps, as the image has no shell (Kubernetes 1.30 or later).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cluster-key
+              mountPath: /etc/workerd-cluster
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: cluster-key
+          secret:
+            secretName: workerd-cluster
+---
+# Voluntary disruptions, such as a node drain, may evict a workerd pod only while every other one
+# is ready. This does not wait out minReadySeconds, so a second pod may be evicted while the first
+# is still handing off its Durable Objects.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: workerd
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: workerd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workerd
+spec:
+  selector:
+    app: workerd
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Anyone who can reach a pod's cluster port with the key can call every service in the pod, and
+# the traffic is not encrypted. Only the cluster's own pods may connect to it. This takes effect
+# only where the network plugin enforces NetworkPolicy, and does not apply to connections from the
+# pod's own node, such as the kubelet's readiness probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workerd-cluster-port
+spec:
+  podSelector:
+    matchLabels:
+      app: workerd
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: workerd
+      ports:
+        - port: 7000
+---
+# The demo bucket. It keeps its data on an emptyDir volume, so deleting its pod deletes the
+# cluster's state. Use a real bucket for anything else; see README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-s3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-s3
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: fake-s3
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fake-s3
+          image: workerd-sample-bucket:v1
+          imagePullPolicy: IfNotPresent
+          # It joins no cluster, so its Durable Objects' disk is named after the project.
+          args:
+            - --directory-path=fake-s3-do-storage=/data
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-s3
+spec:
+  selector:
+    app: fake-s3
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Whoever can write to the bucket can publish code that every workerd pod runs, so only the
+# workerd pods may connect to the demo bucket. As above, this takes effect only where the network
+# plugin enforces NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fake-s3
+spec:
+  podSelector:
+    matchLabels:
+      app: fake-s3
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: workerd
+      ports:
+        - port: 8080

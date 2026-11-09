@@ -1,0 +1,9 @@
+{
+  "name": "fake-s3",
+  "main": "fake-s3.js",
+  "compatibility_date": "2026-01-01",
+  "no_bundle": true,
+  "durable_objects": {
+    "bindings": [{ "name": "BUCKET", "class_name": "Bucket" }]
+  }
+}

@@ -1,0 +1,5 @@
+# Local state from running the project outside the image, and files the image does not need.
+.wrangler
+node_modules
+Dockerfile
+.dockerignore
