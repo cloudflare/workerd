@@ -25,6 +25,17 @@ static MemoryCacheLimits testLimits() {
   };
 }
 
+// Makes a private cache from `provider` the global `CACHE` of the fixture's worker.
+static void setCacheGlobal(TestFixture& fixture, MemoryCacheProvider& provider) {
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
+    auto cache =
+        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
+    jsg::check(
+        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
+  });
+}
+
 KJ_TEST("serializes concurrent final release and acquisition") {
   MemoryCacheProvider provider;
   auto run = [&provider]() {
@@ -229,13 +240,7 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
     )SCRIPT"_kj,
     .requestObserverFactory = records->requestObserverFactory(),
   });
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
-    auto cache =
-        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
-    jsg::check(
-        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
-  });
+  setCacheGlobal(fixture, provider);
   auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
   KJ_EXPECT(response.statusCode == 200, response.body);
 
@@ -257,6 +262,38 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
   KJ_EXPECT(fallbacks[1].startsWith("memory_cache_fallback <- memory_cache_read: fallback_error="),
       fallbacks[1]);
   KJ_EXPECT(fallbacks[1].endsWith(" fallback_success=bool:false key=str:function"), fallbacks[1]);
+}
+
+KJ_TEST("the spans of a fallback that never settles end with its request") {
+  // V8 owns the continuations attached to the fallback's Promise, and destroys them only when it
+  // collects them, which this fixture does not do on its own.
+  MemoryCacheProvider provider;
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture({
+    .mainModuleSource = R"SCRIPT(
+      export default {
+        async fetch() {
+          let fallbackStarted;
+          const started = new Promise(resolve => fallbackStarted = resolve);
+          globalThis.CACHE.read("key", () => {
+            fallbackStarted();
+            return new Promise(() => {});
+          });
+          await started;
+          return new Response("ok");
+        }
+      };
+    )SCRIPT"_kj,
+    .requestObserverFactory = records->requestObserverFactory(),
+  });
+  setCacheGlobal(fixture, provider);
+  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
+  KJ_EXPECT(response.statusCode == 200, response.body);
+
+  for (auto name: {"memory_cache_read"_kj, "memory_cache_fallback"_kj}) {
+    auto& span = KJ_ASSERT_NONNULL(records->find(name), name);
+    KJ_EXPECT(span.ended, name);
+  }
 }
 
 }  // namespace
