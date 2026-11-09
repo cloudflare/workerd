@@ -99,6 +99,57 @@ impl Config {
         bytes_from_words(&self.0)
     }
 
+    /// Whether the config has `cluster`.
+    pub fn has_cluster(&self) -> Result<bool, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        Ok(root.has_cluster())
+    }
+
+    /// Joins the config to a cluster at `address`, the value of `--cluster-addr`, if it has no
+    /// `cluster`: adds one with that address and every other setting at its default, so the key
+    /// and bucket come from the environment ([`Self::with_cluster_environment`]) and an `s3://`
+    /// bucket's endpoint and credentials from the `AWS_*` variables. A config with a `cluster` is
+    /// unchanged, since `--cluster-addr` overrides its address. Without either, `advertise`, the
+    /// value of `--cluster-advertise`, is an error.
+    pub fn joining_cluster(
+        self,
+        address: Option<&str>,
+        advertise: Option<&str>,
+    ) -> Result<Self, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        if root.has_cluster() {
+            return Ok(self);
+        }
+        let Some(address) = address else {
+            return match advertise {
+                Some(_) => Err("--cluster-advertise: the config has no cluster. Pass \
+                                --cluster-addr to join one."
+                    .to_owned()),
+                None => Ok(self),
+            };
+        };
+        let mut message = capnp::message::Builder::new_default();
+        message.set_root(root).map_err(|error| error.to_string())?;
+        message
+            .get_root::<config::Builder>()
+            .map_err(|error| error.to_string())?
+            .init_cluster()
+            .set_address(address);
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message),
+        )))
+    }
+
     /// Fills `cluster.key` and `cluster.bucket` from the environment where the config leaves them
     /// empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable and
     /// returns `None` when it is unset or empty. A config without `cluster` is unchanged. A key or

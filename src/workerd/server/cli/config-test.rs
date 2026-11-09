@@ -261,3 +261,63 @@ fn cluster_environment_reports_an_unreadable_key_file() {
         "{error}"
     );
 }
+
+#[test]
+fn cluster_address_joins_a_config_without_cluster_with_defaults() {
+    let config = cluster_config(None)
+        .joining_cluster(Some("10.0.0.4:7000"), None)
+        .unwrap();
+    let message = read(&config);
+    let cluster = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_cluster()
+        .unwrap();
+    assert_eq!(cluster.get_address().unwrap(), "10.0.0.4:7000");
+    assert!(!cluster.has_advertise());
+    assert!(!cluster.has_bucket_options());
+    assert_eq!(cluster.get_stop_timeout_ms(), 8000);
+    assert!(!cluster.get_unsafe_public_address());
+    // The key and bucket are left to the environment.
+    let vars = [(CLUSTER_KEY, KEY), (CLUSTER_BUCKET, "s3://bucket/prefix")];
+    let config = config.with_cluster_environment(env(&vars)).unwrap();
+    assert_eq!(
+        cluster_of(&config),
+        (KEY.to_owned(), "s3://bucket/prefix".to_owned())
+    );
+}
+
+#[test]
+fn cluster_address_leaves_a_config_with_cluster_unchanged() {
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")));
+    let before = config.0.clone();
+    let config = config
+        .joining_cluster(Some("10.0.0.4:7000"), Some("10.0.0.4:7000"))
+        .unwrap();
+    assert_eq!(config.0, before);
+}
+
+#[test]
+fn without_cluster_address_a_config_without_cluster_is_unchanged() {
+    let config = cluster_config(None);
+    let before = config.0.clone();
+    let config = config.joining_cluster(None, None).unwrap();
+    assert_eq!(config.0, before);
+    assert!(
+        !read(&config)
+            .get_root::<config::Reader>()
+            .unwrap()
+            .has_cluster()
+    );
+}
+
+#[test]
+fn cluster_advertise_without_a_cluster_is_an_error() {
+    let Err(error) = cluster_config(None).joining_cluster(None, Some("10.0.0.4:7000")) else {
+        panic!("expected an error");
+    };
+    assert_eq!(
+        error,
+        "--cluster-advertise: the config has no cluster. Pass --cluster-addr to join one."
+    );
+}

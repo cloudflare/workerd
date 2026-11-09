@@ -96,7 +96,11 @@ struct Config {
   # Console and Stdio logging configuration options.
 
   cluster @7 :ClusterConfig;
-  # Set when this instance should join a cluster. Requires `--experimental`.
+  # Set when this instance should join a cluster. Requires `--experimental`. `workerd serve
+  # --cluster-addr=<addr>` joins a config without it, such as a wrangler config, to a cluster as if
+  # it were `(address = "<addr>")`: every other field at its default, so `key` and `bucket` come
+  # from the environment. A config compiled into a binary by `workerd compile` cannot join this
+  # way; compile one that sets `cluster`.
 }
 
 struct ClusterConfig {

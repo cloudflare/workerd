@@ -4,8 +4,8 @@
 //! command line), parses the command line, produces the encoded config (C++ compiles schema
 //! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
-//! first adds the deployments in the cluster's bucket to the config ([`deployments`]), and
-//! `deploy` publishes one ([`deploy`]).
+//! first joins a config without a cluster to one with `--cluster-addr` and adds the deployments in
+//! the cluster's bucket to the config ([`deployments`]), and `deploy` publishes one ([`deploy`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
@@ -99,7 +99,19 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    let (config, options) = with_deployments(config, &args.serve_or_test, options, &process);
+    // `compile` translates a wrangler config for a server that joins no cluster, so a compiled
+    // config without `cluster` cannot become a node of one.
+    let has_cluster = config.has_cluster().unwrap_or_else(|error| {
+        usage_error::<T>(format!("the config compiled into this executable: {error}"))
+    });
+    if options.cluster_address.is_some() && !has_cluster {
+        usage_error::<T>(
+            "--cluster-addr: the config compiled into this executable has no cluster, so it \
+             cannot join one. Serve the config with `workerd serve --cluster-addr` instead, or \
+             compile a config that has `cluster`.",
+        );
+    }
+    let (config, options) = with_cluster::<T>(config, &args.serve_or_test, options, &process);
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -131,7 +143,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 &process,
                 serve_or_test.experimental,
             );
-            let (config, options) = with_deployments(config, &serve_or_test, options, &process);
+            let (config, options) = with_cluster::<T>(config, &serve_or_test, options, &process);
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -495,20 +507,28 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Fills `config`'s cluster key and bucket from the environment, then adds cluster deployments to
-/// `config` and records their service sources in `options`.
+/// Joins `config` to a cluster with `--cluster-addr` if it has none, fills its cluster key and
+/// bucket from the environment, then adds cluster deployments to `config` and records their
+/// service sources in `options`.
 ///
-/// Both happen only with `--experimental`. A public cluster address or an error in `config` found
-/// during composition is a config error. A deployment that does not compose is skipped. An
-/// unusable cluster environment variable, or a bucket that cannot be opened or read, ends the
-/// process, even under `--watch`, because the cause lies outside the config files. See
-/// `deployments.rs`.
-fn with_deployments(
+/// Only joining happens without `--experimental`, so that the server refuses the cluster as it
+/// refuses one in the config. A public cluster address or an error in `config` found during
+/// composition is a config error. A deployment that does not compose is skipped. A cluster key or
+/// bucket that is missing or whose environment variable is unusable, or a bucket that cannot be
+/// opened or read, ends the process, even under `--watch`, because the cause can lie outside the
+/// config files. See `deployments.rs`.
+fn with_cluster<T: CommandFactory>(
     config: Config,
     serve_or_test: &args::ServeOrTestArgs,
     mut options: RunOptions,
     process: &Process,
 ) -> (Config, RunOptions) {
+    let config = config
+        .joining_cluster(
+            options.cluster_address.as_deref(),
+            options.cluster_advertise.as_deref(),
+        )
+        .unwrap_or_else(|error| usage_error::<T>(error));
     if !serve_or_test.experimental {
         return (config, options);
     }
