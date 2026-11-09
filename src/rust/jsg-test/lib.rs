@@ -120,6 +120,13 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
+        /// Takes a heap snapshot of the isolate, which includes what `jsg::MemoryTracker`
+        /// reports, and returns it serialized as JSON.
+        pub unsafe fn take_heap_snapshot(isolate: *mut Isolate) -> Result<String>;
+
+        /// `sizeof` the C++ `Wrappable` of a Rust resource, which its heap snapshot node counts.
+        pub fn rust_wrappable_size() -> usize;
+
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
         /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
         #[expect(clippy::allow_attributes)]
@@ -597,6 +604,25 @@ impl Harness {
     pub fn used_global_handles_size(lock: &mut jsg::Lock<'_>) -> usize {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
+    }
+
+    /// Takes a heap snapshot, as the inspector's `HeapProfiler.takeHeapSnapshot` does, and
+    /// returns it in V8's JSON format.
+    ///
+    /// # Panics
+    ///
+    /// If V8 fails to take the snapshot.
+    pub fn take_heap_snapshot(lock: &mut jsg::Lock<'_>) -> String {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::take_heap_snapshot(lock.isolate().as_ffi()) }
+            .expect("V8 takes a heap snapshot")
+    }
+
+    /// The size of the C++ `Wrappable` of a Rust resource, which the resource's heap snapshot
+    /// node adds to the resource's own.
+    #[must_use]
+    pub fn rust_wrappable_size() -> usize {
+        ffi::rust_wrappable_size()
     }
 
     /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
