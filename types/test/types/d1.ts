@@ -2,6 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import type {
+  D1BindingService,
+  D1QueryRequest,
+  D1QueryResponse,
+} from "cloudflare:workers";
+
 function expectType<T>(_value: T) {}
 
 type Row = { col1: string; col2: string };
@@ -130,3 +136,41 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
     return new Response();
   },
 };
+
+// CUSTOM BINDING
+export class D1CustomBinding implements D1BindingService {
+  constructor(private readonly db: D1Database & D1BindingService) {}
+
+  async query(params: D1QueryRequest): Promise<D1QueryResponse> {
+    for (const stmt of params.queries) {
+      expectType<string>(stmt.sql);
+      expectType<unknown[] | undefined>(stmt.params);
+    }
+    expectType<string | undefined>(params.bookmark);
+
+    const response = await this.db.query(params);
+    expectType<D1SessionBookmark | undefined>(response.bookmark);
+    const [result] = response.results;
+    expectType<D1Meta>(result.meta);
+    expectType<'raw'>(result.data.kind);
+    expectType<string[]>(result.data.columns);
+    expectType<unknown[][]>(result.data.rows);
+    return response;
+  }
+}
+
+{
+  const constraint: D1QueryRequest = { queries: [], bookmark: 'first-primary' };
+  const bookmark: D1QueryRequest = { queries: [], bookmark: 'any-bookmark' };
+  expectType<D1QueryRequest[]>([constraint, bookmark]);
+}
+
+// query() is not yet part of the public D1Database API. The method will be
+// available once the `d1_binding_jsrpc` compatibility flag is removed and all
+// D1 bindings use the JSRPC binding.
+// @ts-expect-error
+export const noQuery: D1Database['query'] = undefined;
+
+// The custom binding types are not global types.
+// @ts-expect-error
+export type NoGlobalBindingService = globalThis.D1BindingService;
