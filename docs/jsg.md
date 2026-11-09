@@ -1816,10 +1816,11 @@ instance from `Export.prototype` without calling the constructor (as a native
 error if the prototype inherits from `Error.prototype`), marks it with the
 class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
 value has been read. An error's `stack` is not part of its data: the serializer
-writes it, and the deserializer restores it as it does a native error's,
-according to `preserveStackInErrors`. The class that marked an instance decides how it is
-written, so an instance of a subclass is written as one of `Range`, and
-changing an instance's prototype does not change which `clone()` runs. A
+writes it, and the deserializer restores it as it does a native error's, when
+`preserveStackInErrors` is set or enhanced error serialization is off. The class
+that marked an instance decides how it is written, so an instance of a subclass
+is written as one of `Range`, and changing an instance's prototype does not
+change which `clone()` runs. A
 `deserializeInfo` is part of the format: like a tag, it must never change.
 `src/workerd/jsg/ser.h` describes the protocol in full.
 
