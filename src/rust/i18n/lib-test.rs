@@ -17,8 +17,7 @@ fn transcodes_into_a_narrowed_uint8_array() {
         // in ASCII, so the destination is allocated at 3 bytes and the
         // returned view must be narrowed to 1.
         let source = "☕".as_bytes();
-        let array =
-            transcode_impl(lock, source, ffi::Encoding::Utf8, ffi::Encoding::Ascii).unwrap();
+        let array = transcode(lock, source, Encoding::Utf8, Encoding::Ascii).unwrap();
         assert_eq!(array.len(), 1);
         assert_eq!(array.as_slice(lock), b"?");
         Ok(())
@@ -29,7 +28,7 @@ fn transcodes_into_a_narrowed_uint8_array() {
 fn empty_input_yields_an_empty_uint8_array() {
     let harness = Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let array = transcode_impl(lock, &[], ffi::Encoding::Utf8, ffi::Encoding::Utf16Le).unwrap();
+        let array = transcode(lock, &[], Encoding::Utf8, Encoding::Utf16Le).unwrap();
         assert!(array.is_empty());
         Ok(())
     });
@@ -41,8 +40,7 @@ fn full_length_result_is_not_narrowed() {
     harness.run_in_context(|lock, _ctx| {
         // Latin-1 -> UTF-16LE widens every byte to exactly two, so the
         // conversion fills the destination exactly.
-        let array =
-            transcode_impl(lock, b"Hi", ffi::Encoding::Latin1, ffi::Encoding::Utf16Le).unwrap();
+        let array = transcode(lock, b"Hi", Encoding::Latin1, Encoding::Utf16Le).unwrap();
         assert_eq!(array.as_slice(lock), &[0x48, 0x00, 0x69, 0x00]);
         Ok(())
     });
@@ -53,7 +51,7 @@ fn failure_surfaces_as_an_error() {
     let harness = Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // Odd-length UTF-16LE input is rejected before any allocation.
-        let result = transcode_impl(lock, &[0x61], ffi::Encoding::Utf16Le, ffi::Encoding::Utf8);
+        let result = transcode(lock, &[0x61], Encoding::Utf16Le, Encoding::Utf8);
         assert!(result.is_err());
         Ok(())
     });
