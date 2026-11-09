@@ -15152,6 +15152,11 @@ export interface ForwardableEmailMessage extends EmailMessage {
    */
   readonly rawSize: number;
   /**
+   * Whether this email message can be forwarded with `forward()`. Only
+   * authenticated messages can be forwarded.
+   */
+  readonly canBeForwarded: boolean;
+  /**
    * Reject this email message by returning a permanent SMTP error back to the connecting client including the given reason.
    * @param reason The reject reason.
    * @returns void

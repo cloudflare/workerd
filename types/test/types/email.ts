@@ -49,3 +49,8 @@ sender.send({
 // send() requires at least one of to/cc/bcc.
 // @ts-expect-error send() requires at least one recipient
 sender.send({ from: 'sender@example.com', subject: 'hi' });
+
+// `canBeForwarded` is a read-only boolean.
+expectType<boolean>(message.canBeForwarded);
+// @ts-expect-error canBeForwarded is read-only
+message.canBeForwarded = true;
