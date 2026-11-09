@@ -2601,6 +2601,9 @@ void testHyperdriveParity(bool rust) {
                 `  try { hd.port = 1; } catch (e) { out.push(`assign: ${e.name}: ${e.message}`); }
                 `  return out.join("\n");
                 `}
+                `function codePoints(text) {
+                `  return [...text].map(c => c < "\x7f" ? c : `<U+${c.codePointAt(0).toString(16)}>`).join("");
+                `}
                 `async function send(socket, text) {
                 `  await socket.writable.getWriter().write(new TextEncoder().encode(text));
                 `  return socket;
@@ -2609,6 +2612,9 @@ void testHyperdriveParity(bool rust) {
                 `  async fetch(request, env) {
                 `    const out = [describe(env.pg), describe(env.mysql)];
                 `    out.push(`distinct: ${env.pg.host !== env.mysql.host} ${env.pg.ip !== env.mysql.ip}`);
+                `    const bytes = env.bytes;
+                `    out.push(`bytes: ${codePoints(bytes.database)} ${codePoints(bytes.user)} ${codePoints(bytes.password)}`);
+                `    out.push(`bytes: ${codePoints(bytes.connectionString.replace(bytes.host, "HOST"))}`);
                 `    const socket = await send(env.pg.connect(), "pg-connect");
                 `    out.push(`socket: ${socket.constructor.name} ${socket.opened instanceof Promise}`);
                 `    await send(connect(`${env.pg.host}:5432`), "pg-host");
@@ -2637,6 +2643,17 @@ void testHyperdriveParity(bool rust) {
                 user = "mysql-user",
                 password = "mysql-password",
                 scheme = "mysql"
+              )
+            ),
+            # Cap'n Proto does not check that Text is UTF-8: a lone byte that starts no sequence,
+            # a truncated sequence and an overlong one.
+            ( name = "bytes",
+              hyperdrive = (
+                designator = "pg-outbound",
+                database = "db-\xff",
+                user = "user-\xe2\x82",
+                password = "pw-\xc0\xafx",
+                scheme = "postgresql"
               )
             )
           ]
@@ -2704,6 +2721,8 @@ void testHyperdriveParity(bool rust) {
     bad this: TypeError: Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.
     assign: TypeError: Cannot assign to read only property 'port' of object '#<Hyperdrive>'
     distinct: true true
+    bytes: db-<U+fffd> user-<U+fffd> pw-<U+fffd><U+fffd>x
+    bytes: postgresql://user-<U+fffd>:pw-<U+fffd><U+fffd>x@HOST:5432/db-<U+fffd>?sslmode=disable
     socket: Socket true
   )"_blockquote);
 }

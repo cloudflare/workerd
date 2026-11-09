@@ -72,14 +72,15 @@ mod bridge {
     }
 
     extern "Rust" {
-        /// A new `Hyperdrive` for the binding whose subrequest channel is `channel`.
+        /// A new `Hyperdrive` for the binding whose subrequest channel is `channel`. The strings
+        /// are the config's bytes, which Cap'n Proto does not check are UTF-8.
         unsafe fn hyperdrive_new(
             isolate: *mut Isolate,
             channel: u32,
-            database: &str,
-            user: &str,
-            password: &str,
-            scheme: &str,
+            database: &[u8],
+            user: &[u8],
+            password: &[u8],
+            scheme: &[u8],
         ) -> MaybeLocal;
     }
 }
@@ -165,15 +166,25 @@ pub fn connect(
 unsafe fn hyperdrive_new(
     isolate: *mut bridge::Isolate,
     channel: u32,
-    database: &str,
-    user: &str,
-    password: &str,
-    scheme: &str,
+    database: &[u8],
+    user: &[u8],
+    password: &[u8],
+    scheme: &[u8],
 ) -> bridge::MaybeLocal {
+    // Each invalid sequence becomes U+FFFD, as it does where V8 makes a string of the C++
+    // Hyperdrive's bytes, so that both implementations accept the same configs and show them the
+    // same way.
+    let text = String::from_utf8_lossy;
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            let hyperdrive = crate::Hyperdrive::new(channel, database, user, password, scheme)?;
+            let hyperdrive = crate::Hyperdrive::new(
+                channel,
+                &text(database),
+                &text(user),
+                &text(password),
+                &text(scheme),
+            )?;
             jsg::Rc::new(lock, hyperdrive).to_js(lock)
         })
     }
