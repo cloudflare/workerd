@@ -1801,13 +1801,18 @@ module.exports = { Range };
 ```
 
 The module must be `require()`d by `main.ts` (directly or through another
-module) whatever the compatibility flags, which decide only whether `Range` is
-exposed: a reader can find only classes whose modules are loaded, and may have
-different flags from the writer. The export must be a data property, as
-`module.exports = { ... }` makes it: the deserializer can't call a getter, so
-data naming an accessor export is a `DataCloneError`. The `per_isolate@eslint`
-test rejects value exports (`export class`, `export function`), which
-TypeScript compiles to getters.
+module) while the bootstrap runs: a reader can find only classes whose modules
+are loaded. It finds any such class, whatever the compatibility flags expose, so
+data from an untrusted peer can make an instance of any class whose module is
+loaded. A reader may have different flags from the writer. If every reader must
+read `Range`, as when it replaces a C++ class under a flag, require its module
+whatever the flags. If only some flags expose `Range`, as for an experimental
+class, require its module only under those flags.
+
+The export must be a data property, as `module.exports = { ... }` makes it: the
+deserializer can't call a getter, so data naming an accessor export is a
+`DataCloneError`. The `per_isolate@eslint` test rejects value exports
+(`export class`, `export function`), which TypeScript compiles to getters.
 
 The deserializer finds the class by resolving `'module:Export'` among the
 bootstrap's loaded modules (`jsg::BootstrapModules`), so there is no registry.
@@ -1817,12 +1822,12 @@ error if the prototype inherits from `Error.prototype`), marks it with the
 class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
 value has been read. An error's `stack` is not part of its data: the serializer
 writes it, and the deserializer restores it as it does a native error's, when
-`preserveStackInErrors` is set or enhanced error serialization is off. The class
-that marked an instance decides how it is written, so an instance of a subclass
-is written as one of `Range`, and changing an instance's prototype does not
-change which `clone()` runs. A
-`deserializeInfo` is part of the format: like a tag, it must never change.
-`src/workerd/jsg/ser.h` describes the protocol in full.
+`preserveStackInErrors` is set or the writer was not using enhanced error
+serialization. The class that marked an instance decides how it is written, so
+an instance of a subclass is written as one of `Range`, and changing an
+instance's prototype does not change which `clone()` runs. A `deserializeInfo`
+is part of the format: like a tag, it must never change. `src/workerd/jsg/ser.h`
+describes the protocol in full.
 
 `src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. It is
 exposed as `CloneableTestBox` under the experimental

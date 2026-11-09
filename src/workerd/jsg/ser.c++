@@ -143,7 +143,9 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
 
 // The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
 constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
-constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS = JS_SERIALIZABLE_HAS_STACK;
+constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
+constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
+    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK;
 }  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
@@ -420,13 +422,16 @@ void Serializer::writeJsSerializable(
   auto data = check(clone.As<v8::Function>()->Call(context, js.undefined(), 1, &arg));
 
   // An error's stack is written as a native error's is, so that the deserializer, rather than the
-  // class, decides whether to keep it.
+  // class, decides whether to keep it. Without enhanced error serialization, a native error is
+  // written in V8's own format, which keeps its stack whatever the deserializer's options, so the
+  // flags say that this one keeps its stack too.
   uint32_t flags = 0;
   kj::Maybe<JsValue> stack;
   if (object->IsNativeError()) {
     v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
     if (check(object->HasOwnProperty(context, stackKey))) {
       flags |= JS_SERIALIZABLE_HAS_STACK;
+      if (!treatErrorsAsHostObjects) flags |= JS_SERIALIZABLE_KEEP_STACK;
       stack = JsValue(check(object->Get(context, stackKey)));
     }
   }
@@ -834,12 +839,12 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
     // until it is initialized.
     check(instance->Delete(context, js.strIntern("message"_kj)));
     check(instance->SetPrototype(context, prototype));
-    // The writer's stack replaces the one just captured, as for a native error. Without enhanced
-    // error serialization, native errors keep their stacks whatever the options say.
+    // The writer's stack replaces the one just captured, as for a native error. Like the captured
+    // one, it is not enumerable.
     KJ_IF_SOME(s, stack) {
-      if (preserveStackInErrors || !js.isUsingEnhancedErrorSerialization()) {
+      if (preserveStackInErrors || (flags & JS_SERIALIZABLE_KEEP_STACK)) {
         v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
-        check(instance->CreateDataProperty(context, stackKey, s));
+        check(instance->DefineOwnProperty(context, stackKey, s, v8::DontEnum));
       }
     }
   } else {

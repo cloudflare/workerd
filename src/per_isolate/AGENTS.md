@@ -94,9 +94,13 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   - `deserializeInfo` (`'module:Export'`) is stored in serialized data,
     Durable Object storage included, so it can never change. A renamed
     class keeps its old export as an alias.
-  - The module is required while the bootstrap runs whatever the
-    compatibility flags, which decide only what is exposed: a reader finds
-    only loaded modules, and may have different flags from the writer.
+  - The module is required while the bootstrap runs: a reader finds only
+    loaded modules, and any loaded class, whatever the compatibility flags
+    expose, so untrusted data can make an instance of it. A reader may have
+    different flags from the writer. Require the module whatever the flags
+    if every reader must read the class (it replaces a C++ class under a
+    flag); otherwise only under the flags that expose it (an experimental
+    class, such as `testing/cloneable-test-box.ts`).
   - The export is a data property of `module.exports = { ... }`. The
     `per_isolate@eslint` test rejects TypeScript value exports, which
     compile to getters the deserializer can't call.
@@ -114,8 +118,8 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
     may not have run yet.
   - An error class leaves `stack` to the runtime: the serializer writes it,
     and the deserializer restores it or not, as for a native error
-    (`preserveStackInErrors`, which has no effect without enhanced error
-    serialization).
+    (`preserveStackInErrors`, which has no effect on an error written
+    without enhanced error serialization).
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as

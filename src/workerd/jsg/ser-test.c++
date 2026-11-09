@@ -286,15 +286,17 @@ struct SerTestContext: public ContextGlobalObject {
   }
 
   // Writes `raw`, a RawJsSerializable, followed by `data` as its instance's data, and reads them
-  // back.
-  JsValue roundTripWithData(Lock& js, JsValue raw, JsValue data) {
+  // back, with preserveStackInErrors unless it is false.
+  JsValue roundTripWithData(
+      Lock& js, JsValue raw, JsValue data, jsg::Optional<bool> preserveStackInErrors) {
     auto content = ({
       Serializer ser(js);
       ser.write(js, raw);
       ser.write(js, data);
       ser.release();
     });
-    Deserializer deser(js, content);
+    Deserializer deser(js, content,
+        Deserializer::Options{.preserveStackInErrors = preserveStackInErrors.orDefault(true)});
     return deser.readValue(js);
   }
 
@@ -768,13 +770,14 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "`${err instanceof TestError} ${Object.prototype.toString.call(err)} ${err.message}`",
       "string", "true [object Error] boom");
 
-  // Its stack is written as a native error's is, and restored as an own data property: without
-  // enhanced error serialization, as here, whatever the options say.
+  // Its stack is written as a native error's is, and restored as an own data property that, like
+  // the stack it replaces, is not enumerable.
   expectEval("const e = new TestError('boom');\n"
              "e.stack = 'sender stack';\n"
              "const copy = roundTrip(e);\n"
-             "Object.getOwnPropertyDescriptor(copy, 'stack').value",
-      "string", "sender stack");
+             "const { value, enumerable } = Object.getOwnPropertyDescriptor(copy, 'stack');\n"
+             "`${value} ${enumerable} ${Object.keys(copy).includes('stack')}`",
+      "string", "sender stack false false");
   // Without one, it keeps the stack captured when it was made.
   expectEval("const e = new TestError('boom');\n"
              "delete e.stack;\n"
@@ -782,16 +785,26 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "`${typeof copy.stack} ${copy.stack.includes('sender')}`",
       "string", "string false");
 
-  // The record's flags say whether a stack follows. One of a class that doesn't inherit from
-  // Error is ignored, and flags this version doesn't know are rejected.
+  // The record's flags say whether a stack follows (1) and whether the writer was not using
+  // enhanced error serialization (2). Without preserveStackInErrors, the reader keeps the stack
+  // only with flag 2, whatever its own setting (off, here). A stack of a class that doesn't
+  // inherit from Error is ignored, and flags this version doesn't know are rejected.
   expectEval("const e = roundTripWithData(\n"
              "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm');\n"
+             "`${e.stack} ${e.message}`",
+      "string", "forged stack m");
+  expectEval("const e = roundTripWithData(\n"
+             "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm', false);\n"
+             "`${e.stack.includes('forged')} ${e.message}`",
+      "string", "false m");
+  expectEval("const e = roundTripWithData(\n"
+             "    new RawJsSerializable('test:TestError', 3, 'forged stack'), 'm', false);\n"
              "`${e.stack} ${e.message}`",
       "string", "forged stack m");
   expectEval("const p = roundTripWithData(new RawJsSerializable('test:Point', 1, 'stack'), 1);\n"
              "`${Object.hasOwn(p, 'stack')} ${p.x}`",
       "string", "false 2");
-  expectEval("try { roundTripWithData(new RawJsSerializable('test:Point', 2), 1); } catch (e) {\n"
+  expectEval("try { roundTripWithData(new RawJsSerializable('test:Point', 4), 1); } catch (e) {\n"
              "  `${e.name}: ${e.message}`\n"
              "}",
       "string",

@@ -12,6 +12,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <capnp/message.h>
+#include <kj/encoding.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -42,8 +43,10 @@ struct TestModules final: public jsg::BootstrapModules {
 };
 
 // Runs `body` as the body of a function of `helpers` (the exports of the bootstrap's serialization
-// module), `setTestExports` and `roundTrip(value, preserveStackInErrors)`, returning its result as
-// a string.
+// module), `setTestExports`, `roundTrip(value, preserveStackInErrors)`, `serialize(value)`, which
+// returns the serialized value in hex, and `deserialize(hex, preserveStackInErrors)`, returning
+// its result as a string. A script can pass what serialize() returns to another, so that one
+// isolate reads what another, with other compatibility flags, wrote.
 kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErrorSerialization) {
   // The bootstrap loads the serialization module whatever the compatibility flags are.
   capnp::MallocMessageBuilder message;
@@ -90,13 +93,32 @@ kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErro
       return deser.readValue(js);
     }));
 
-    auto code = kj::str("((helpers, setTestExports, roundTrip) => {", body, "})");
+    auto serialize = js.wrapReturningFunction(context,
+        Callback([](jsg::Lock& js,
+                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      jsg::Serializer ser(js);
+      ser.write(js, jsg::JsValue(info[0]));
+      return js.str(kj::encodeHex(ser.release().data));
+    }));
+
+    auto deserialize = js.wrapReturningFunction(context,
+        Callback([](jsg::Lock& js,
+                     const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+      auto data = kj::decodeHex(jsg::JsValue(info[0]).toString(js));
+      KJ_ASSERT(!data.hadErrors);
+      jsg::Deserializer deser(js, data, kj::none, kj::none,
+          jsg::Deserializer::Options{.preserveStackInErrors = info[1]->IsTrue()});
+      return deser.readValue(js);
+    }));
+
+    auto code =
+        kj::str("((helpers, setTestExports, roundTrip, serialize, deserialize) => {", body, "})");
     auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "serialization-test.js"_kj)
                                     .runAndReturn(js)
                                     .tryCast<jsg::JsFunction>());
-    result =
-        fn.call(js, js.undefined(), helpers, jsg::JsValue(setTestExports), jsg::JsValue(roundTrip))
-            .toString(js);
+    result = fn.call(js, js.undefined(), helpers, jsg::JsValue(setTestExports),
+                   jsg::JsValue(roundTrip), jsg::JsValue(serialize), jsg::JsValue(deserialize))
+                 .toString(js);
   });
   return result;
 }
@@ -179,6 +201,33 @@ KJ_TEST("An instance of a cloneable class inheriting from Error keeps a native e
   expectScript(KEEPS_STACKS, "true true,false false,true true"_kj, EnhancedErrorSerialization::YES);
   // Without enhanced error serialization, native errors keep their stacks whatever the options.
   expectScript(KEEPS_STACKS, "true true,true true,true true"_kj);
+}
+
+// An instance of TestError and a native error, each with the writer's stack, serialized in hex.
+constexpr kj::StringPtr WRITE_ERRORS = R"js(
+  const withStack = (error) => {
+    error.stack = 'sender stack';
+    return error;
+  };
+  return serialize([withStack(new TestError('boom')), withStack(new Error('boom'))]);
+)js"_kj;
+
+// Whether the errors that `data` (WRITE_ERRORS's result) holds keep the writer's stack when read
+// without preserveStackInErrors.
+kj::String keepsStacksScript(kj::StringPtr data) {
+  return kj::str(
+      "return deserialize('", data, "', false).map((e) => e.stack === 'sender stack').join();");
+}
+
+KJ_TEST("A cloneable error keeps a native error's stack across enhanced error serialization") {
+  // The writer's setting decides, not the reader's. A reader without enhanced error serialization
+  // drops both stacks that a writer with it wrote.
+  auto enhanced = runScript(kj::str(CLASSES, WRITE_ERRORS), EnhancedErrorSerialization::YES);
+  expectScript(keepsStacksScript(enhanced), "false,false"_kj);
+  // A reader with it keeps both stacks that a writer without it wrote, as V8's own format keeps a
+  // native error's.
+  auto legacy = runScript(kj::str(CLASSES, WRITE_ERRORS), EnhancedErrorSerialization::NO);
+  expectScript(keepsStacksScript(legacy), "true,true"_kj, EnhancedErrorSerialization::YES);
 }
 
 KJ_TEST("getOwnDataProperty() reads neither the prototype chain nor an accessor") {

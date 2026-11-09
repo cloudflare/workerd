@@ -19,11 +19,19 @@
 //   class's old export as an alias. The deserializer finds only modules
 //   already loaded, and can't load one (V8 runs no JavaScript while it
 //   reads), so the module must be required while the bootstrap runs, not
-//   lazily, and whatever the compatibility flags, which decide only what is
-//   exposed: data naming a class whose module isn't loaded can't be read,
-//   and a reader may have different flags from the writer. The export must
-//   be a data property, as `module.exports = { ... }` makes it: the
-//   deserializer can't call a getter, so data naming one can't be read.
+//   lazily. The export must be a data property, as
+//   `module.exports = { ... }` makes it: the deserializer can't call a
+//   getter, so data naming one can't be read.
+// - Whether the module is loaded, not what the compatibility flags expose,
+//   decides whether a reader can read the class: data naming a class whose
+//   module isn't loaded can't be read, and data from an untrusted source,
+//   such as an RPC peer, can make an instance of any class whose module is.
+//   A reader may have different flags from the writer. Load the module
+//   whatever the flags if every reader must read the class, as when it
+//   replaces a C++ class under a flag, so that data written either way can
+//   be read either way. Load the module of a class that only some flags
+//   expose, such as an experimental one, only under those flags, as main.ts
+//   does CloneableTestBox's.
 // - clone(instance) returns the instance's data: any serializable value,
 //   which may refer to the instance itself.
 // - deserialize(instance, data) initializes an instance from the data.

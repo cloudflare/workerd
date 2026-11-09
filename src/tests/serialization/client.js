@@ -96,6 +96,21 @@ export const externalsInData = {
   },
 };
 
+// A worker without the flag that exposes CloneableTestBox doesn't load its
+// module, so it can't be made to create one, even by a peer that has it.
+export const unexposedClass = {
+  async test(ctrl, env) {
+    await assert.rejects(
+      env.SERVER_WITHOUT_TEST_CLASS.describe(new CloneableTestBox('box', 1)),
+      {
+        name: 'DataCloneError',
+        message:
+          'Deserialization failed: unknown class implemented in JavaScript.',
+      }
+    );
+  },
+};
+
 // A value whose instance data holds an external can't be cloned outside
 // RPC.
 export const externalsOutsideRpc = {

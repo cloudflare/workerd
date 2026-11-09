@@ -3,9 +3,9 @@
 // Internal testing only: a cloneable class (see serialization.ts) holding a
 // label and any serializable value, which main.ts exposes as
 // CloneableTestBox under the expose_serialization_test_class flag, so that
-// tests can send one through structuredClone() and RPC. Unlike a production
-// cloneable class, it is loaded only under the flag, so a reader without
-// the flag can't read one.
+// tests can send one through structuredClone() and RPC. As for any class
+// that only some flags expose, it is loaded only under the flag, so a reader
+// without the flag can't read one.
 
 import type { SerializationHelpers } from '../serialization';
 
