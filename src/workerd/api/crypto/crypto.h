@@ -1005,10 +1005,20 @@ class Crypto: public jsg::Object {
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
 
   // Both Crypto and SubtleCrypto are stateless, so a worker started from a snapshot gets a fresh
-  // pair from the constructor above. Its `subtle` is a different object from the snapshot-restored
-  // wrapper of the original SubtleCrypto (if one was reachable): identity across the snapshot is
-  // not preserved, but both are functionally equivalent.
+  // pair from the constructor above. If the zygote's `subtle` had a wrapper, the restored Crypto
+  // then takes the restored SubtleCrypto behind it (snapshotRelink()), so that `crypto.subtle` is
+  // still the object the top level saw.
   static constexpr bool jsgSnapshotStateless = true;
+
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    return kj::arr(snapshotReferenceTo(*subtle));
+  }
+
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(restoredSubtle, snapshotRelinkedRef<SubtleCrypto>(restored[0])) {
+      subtle = kj::mv(restoredSubtle);
+    }
+  }
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 
