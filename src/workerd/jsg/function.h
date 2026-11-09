@@ -309,6 +309,14 @@ class Function<Ret(Args...)> {
     }
   }
 
+  // The `this` value a JS-backed function is called with, or none for a native function.
+  kj::Maybe<v8::Local<v8::Value>> tryGetReceiver(v8::Isolate* isolate) {
+    KJ_IF_SOME(i, impl.template tryGet<JsImpl>()) {
+      return i.receiver.getHandle(isolate);
+    }
+    return kj::none;
+  }
+
   // Visit underlying v8::Global handles for V8 snapshot creation. Only meaningful for JS-backed
   // functions.
   template <typename Fn>

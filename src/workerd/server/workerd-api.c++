@@ -267,6 +267,12 @@ const jsg::TypeHandler<api::BenchExportedHandler>& WorkerdApi::getBenchTypeHandl
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::BenchExportedHandler>();
 }
 
+kj::Maybe<const jsg::TypeHandler<Worker::Api::EventListenerCallback>&> WorkerdApi::
+    tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+  static_assert(kj::isSameType<EventListenerCallback, api::EventTarget::HandlerFunction>());
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<EventListenerCallback>();
+}
+
 jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
   return jsg::JsObject(

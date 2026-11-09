@@ -65,6 +65,40 @@ switch (MODE) {
       signal: new AbortController().signal,
     });
     break;
+  case 'passive':
+    // preventDefault() in a passive listener has no effect.
+    addEventListener(
+      'ping',
+      (event) => {
+        event.preventDefault();
+        calls.push('passive');
+      },
+      { passive: true }
+    );
+    break;
+  case 'replaced': {
+    // Code that wraps the global addEventListener, then replaces it with something that is not
+    // a function. The restored Worker must not call either.
+    const original = addEventListener;
+    globalThis.addEventListener = (type, listener, options) => {
+      calls.push('wrapper');
+      original.call(globalThis, type, listener, options);
+    };
+    addEventListener('ping', () => calls.push('wrapped'));
+    globalThis.addEventListener = 'not a function';
+    break;
+  }
+  case 'handleEvent': {
+    // An object listener's handleEvent is the one it had when it was registered.
+    const listener = {
+      handleEvent() {
+        calls.push('registered');
+      },
+    };
+    addEventListener('ping', listener);
+    listener.handleEvent = () => calls.push('reassigned');
+    break;
+  }
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -88,6 +122,15 @@ async function exercise() {
       removeEventListener('ping', first);
       dispatchEvent(new Event('ping'));
       dispatchEvent(new Event('fired'));
+      break;
+    case 'passive':
+      calls.push(
+        String(dispatchEvent(new Event('ping', { cancelable: true })))
+      );
+      break;
+    case 'replaced':
+    case 'handleEvent':
+      dispatchEvent(new Event('ping'));
       break;
     case 'error':
       reportError(new Error('boom'));
@@ -132,6 +175,9 @@ async function test(ctrl, env) {
       'second',
       'second',
     ],
+    passive: ['passive', 'true'],
+    replaced: ['wrapper', 'wrapped'],
+    handleEvent: ['registered'],
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top
   // level themselves.
