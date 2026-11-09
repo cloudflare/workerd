@@ -112,8 +112,9 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   objects cheap, so it is never an instance.
 //
 // An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
-// of flags, followed by the instance's own `stack` if it is a native error that has one (flag 1).
-// Flag 2 says that the writer was not using enhanced error serialization. A reader rejects flags
+// of flags, followed, if it is a native error, by its `message` if that is a string (flag 4) and
+// its own `stack` if it has one (flag 1). Flag 2 says that the writer was not using enhanced error
+// serialization. A reader rejects flags
 // it doesn't know, so that later versions can add fields. The instance's `data` follows the
 // top-level value (as in Node.js), so that it can refer back to the instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
@@ -126,7 +127,9 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 // stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
 // whenever the writer was not using enhanced error serialization (flag 2), as a native error that
 // such a writer writes in V8's own format does. Otherwise it keeps the stack captured when it was
-// made. Either way, `stack` is not enumerable. A class does not serialize `stack` itself.
+// made, whose first line gives the error's name and the writer's message, as a native error's
+// does. Either way, `stack` is not enumerable. The message is only for the stack: `deserialize`
+// sets the instance's `message`. A class does not serialize `stack` itself.
 //
 // A `deserializeInfo` is part of the format, which persisted data depends on.
 class Serializer final: v8::ValueSerializer::Delegate {

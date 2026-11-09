@@ -119,7 +119,9 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   - An error class leaves `stack` to the runtime: the serializer writes it,
     and the deserializer restores it or not, as for a native error
     (`preserveStackInErrors`, which has no effect on an error written
-    without enhanced error serialization).
+    without enhanced error serialization). A stack it does not restore
+    begins with the error's name and the writer's message, which the
+    serializer writes for that alone: `deserialize()` still sets `message`.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as

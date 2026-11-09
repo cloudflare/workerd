@@ -62,7 +62,10 @@
 //   run yet.
 // - Leave an error's `stack` out of the data, and don't set it in
 //   deserialize(). The serializer writes it, and the deserializer restores
-//   it or keeps the one it captured, as it does for a native error.
+//   it, as it does a native error's, or else keeps the stack it captured,
+//   which begins with the error's name and the writer's message. Still set
+//   `message` in deserialize(): the serializer writes the message only for
+//   the stack.
 
 const {
   ObjectFreeze,

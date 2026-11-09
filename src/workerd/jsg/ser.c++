@@ -144,8 +144,9 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
 // The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
 constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
 constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
+constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
 constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
-    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK;
+    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
 }  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
@@ -421,13 +422,20 @@ void Serializer::writeJsSerializable(
   v8::Local<v8::Value> arg = object;
   auto data = check(clone.As<v8::Function>()->Call(context, js.undefined(), 1, &arg));
 
-  // An error's stack is written as a native error's is, so that the deserializer, rather than the
-  // class, decides whether to keep it. Without enhanced error serialization, a native error is
-  // written in V8's own format, which keeps its stack whatever the deserializer's options, so the
-  // flags say that this one keeps its stack too.
+  // An error's message and stack are written as a native error's are, so that the deserializer,
+  // rather than the class, decides whether to keep the stack, and a stack it captures begins with
+  // the message. Without enhanced error serialization, a native error is written in V8's own
+  // format, which keeps its stack whatever the deserializer's options, so the flags say that this
+  // one keeps its stack too.
   uint32_t flags = 0;
+  kj::Maybe<JsValue> message;
   kj::Maybe<JsValue> stack;
   if (object->IsNativeError()) {
+    auto value = check(object->Get(context, js.strIntern("message"_kj)));
+    if (value->IsString()) {
+      flags |= JS_SERIALIZABLE_HAS_MESSAGE;
+      message = JsValue(value);
+    }
     v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
     if (check(object->HasOwnProperty(context, stackKey))) {
       flags |= JS_SERIALIZABLE_HAS_STACK;
@@ -439,6 +447,9 @@ void Serializer::writeJsSerializable(
   writeRawUint32(SERIALIZATION_TAG_JS_SERIALIZABLE);
   writeLengthDelimited(JsString(deserializeInfo.As<v8::String>()).toString(js));
   writeRawUint32(flags);
+  KJ_IF_SOME(m, message) {
+    write(js, m);
+  }
   KJ_IF_SOME(s, stack) {
     write(js, s);
   }
@@ -780,6 +791,15 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   auto flags = readRawUint32();
   JSG_REQUIRE((flags & ~JS_SERIALIZABLE_KNOWN_FLAGS) == 0, DOMDataCloneError,
       "Deserialization failed: unsupported object implemented in JavaScript.");
+  kj::Maybe<v8::Local<v8::String>> message;
+  if (flags & JS_SERIALIZABLE_HAS_MESSAGE) {
+    auto value = KJ_UNWRAP_OR(readValue(js).tryCast<JsString>(), {
+      JSG_FAIL_REQUIRE(DOMDataCloneError,
+          "Deserialization failed: message of an object implemented in JavaScript is not a "
+          "string.");
+    });
+    message = v8::Local<v8::String>(value);
+  }
   kj::Maybe<JsValue> stack;
   if (flags & JS_SERIALIZABLE_HAS_STACK) {
     stack = readValue(js);
@@ -834,7 +854,9 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
 
   v8::Local<v8::Object> instance;
   if (isError) {
-    instance = v8::Exception::Error(emptyString).As<v8::Object>();
+    // The message is what the stack just captured begins with, after the error's name, as for a
+    // native error.
+    instance = v8::Exception::Error(message.orDefault(emptyString)).As<v8::Object>();
     // Error() always gives the error an own `message`, which a class's instance does not have
     // until it is initialized.
     check(instance->Delete(context, js.strIntern("message"_kj)));

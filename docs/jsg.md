@@ -1823,15 +1823,18 @@ class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
 value has been read. An error's `stack` is not part of its data: the serializer
 writes it, and the deserializer restores it as it does a native error's, when
 `preserveStackInErrors` is set or the writer was not using enhanced error
-serialization. The class that marked an instance decides how it is written, so
-an instance of a subclass is written as one of `Range`, and changing an
-instance's prototype does not change which `clone()` runs. A `deserializeInfo`
-is part of the format: like a tag, it must never change. `src/workerd/jsg/ser.h`
-describes the protocol in full.
+serialization. Otherwise it keeps the stack it captured, which begins with the
+error's name and the writer's message, as a native error's does (the serializer
+writes the message for that alone: `deserialize()` still sets `message`). The
+class that marked an instance decides how it is written, so an instance of a
+subclass is written as one of `Range`, and changing an instance's prototype does
+not change which `clone()` runs. A `deserializeInfo` is part of the format: like
+a tag, it must never change. `src/workerd/jsg/ser.h` describes the protocol in
+full.
 
-`src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. It is
-exposed as `CloneableTestBox` under the experimental
-`expose_serialization_test_class` flag, for tests such as
+`src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. Its
+classes are exposed as `CloneableTestBox` and `CloneableTestError` under the
+experimental `expose_serialization_test_class` flag, for tests such as
 `src/tests/serialization/`, which sends instances over RPC.
 
 ### Versioning Serializable Types

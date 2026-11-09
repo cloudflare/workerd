@@ -5,3 +5,9 @@ wd_test(
     args = ["--experimental"],
     data = glob(["*.js"]),
 )
+
+wd_test(
+    src = "error-stacks.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
