@@ -813,7 +813,8 @@ namespace {
 // v8_flags.stack_trace_limit's default.
 constexpr int kDefaultStackTraceLimit = 10;
 
-// Fields of a DATA_DEFAULT property's entry in the record pinned into the snapshot.
+// Fields of a property's entry in the record pinned into the snapshot. A DATA_DEFAULT entry has
+// them all; a FAIL_CLOSED or TEMPORAL one only PRESENT.
 constexpr kj::StringPtr PRESENT = "present"_kj;
 constexpr kj::StringPtr VALUE = "value"_kj;
 constexpr kj::StringPtr WRITABLE = "writable"_kj;
@@ -824,11 +825,13 @@ constexpr RestoreTimeHolder ALL_HOLDERS[] = {
   RestoreTimeHolder::ERROR_CTOR,
   RestoreTimeHolder::ITERATOR_CTOR,
   RestoreTimeHolder::ITERATOR_PROTOTYPE,
+  RestoreTimeHolder::DATE_PROTOTYPE,
 };
 
 kj::Maybe<ContextDataSlot> slotFor(RestoreTimeHolder holder) {
   switch (holder) {
     case RestoreTimeHolder::GLOBAL:
+    case RestoreTimeHolder::DATE_PROTOTYPE:
       return kj::none;
     case RestoreTimeHolder::ERROR_CTOR:
       return ContextDataSlot::RESTORE_TIME_ERROR_CTOR;
@@ -848,6 +851,11 @@ v8::Local<v8::Object> getHolder(v8::Local<v8::Context> context, RestoreTimeHolde
     KJ_REQUIRE(!data.IsEmpty() && data->IsValue() && data.As<v8::Value>()->IsObject(),
         "the zygote never captured a restore-time holder", jsNameOf(holder));
     return data.As<v8::Value>().As<v8::Object>();
+  }
+  if (holder == RestoreTimeHolder::DATE_PROTOTYPE) {
+    // A new Date's prototype is the realm's %Date.prototype%, whatever globalThis.Date is now.
+    auto date = check(v8::Date::New(context, 0)).As<v8::Object>();
+    return date->GetPrototype().As<v8::Object>();
   }
   return context->Global();
 }
@@ -921,16 +929,24 @@ void recordAndRemove(Lock& js,
   record.set(js, entry.name, state);
 }
 
-// Removes the zygote's FAIL_CLOSED property. A property the top level put in its place, after
+// Removes the zygote's FAIL_CLOSED property and records in `record` whether the top level deleted
+// it, which the restored context replays. A property the top level put in its place, after
 // deleting the zygote's or by defining over it, is one V8 would add a duplicate of on restore.
 void removeFailClosed(Lock& js,
     v8::Local<v8::Context> context,
     v8::Local<v8::Object> holder,
-    const RestoreTimeGlobal& entry) {
+    const RestoreTimeGlobal& entry,
+    JsObject record) {
   auto isolate = js.v8Isolate;
   auto name = v8StrIntern(isolate, entry.name);
-  // Deleted by the top level: V8 adds it on restore.
-  if (!check(holder->HasOwnProperty(context, name))) return;
+  auto state = js.objNoProto();
+  record.set(js, entry.name, state);
+  // Deleted by the top level: V8 adds it on restore, and the restored context deletes it again.
+  if (!check(holder->HasOwnProperty(context, name))) {
+    state.set(js, PRESENT, js.boolean(false));
+    return;
+  }
+  state.set(js, PRESENT, js.boolean(true));
   // GetOwnPropertyDescriptor() reads a native data property through its getter, so the zygote's
   // own property throws, while a JavaScript accessor comes back as {get, set} without being
   // called and a data property as its value.
@@ -945,6 +961,17 @@ void removeFailClosed(Lock& js,
   KJ_REQUIRE(check(holder->Delete(context, name)));
 }
 
+// A TEMPORAL name in a context without Temporal must still be absent: V8 replaces whatever the
+// top level put there on restore, and newContext() then deletes it.
+void requireAbsent(Lock& js,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> holder,
+    const RestoreTimeGlobal& entry) {
+  KJ_REQUIRE(!check(holder->HasOwnProperty(context, v8StrIntern(js.v8Isolate, entry.name))),
+      "startup snapshot: top-level code defined a property that the snapshot's restore replaces",
+      jsNameOf(entry.holder), entry.name);
+}
+
 }  // namespace
 
 kj::StringPtr jsNameOf(RestoreTimeHolder holder) {
@@ -957,6 +984,8 @@ kj::StringPtr jsNameOf(RestoreTimeHolder holder) {
       return "Iterator"_kj;
     case RestoreTimeHolder::ITERATOR_PROTOTYPE:
       return "Iterator.prototype"_kj;
+    case RestoreTimeHolder::DATE_PROTOTYPE:
+      return "Date.prototype"_kj;
   }
   KJ_UNREACHABLE;
 }
@@ -981,8 +1010,10 @@ void IsolateBase::failClosed(const RestoreTimeGlobal& entry) {
           " cannot be used while preparing a startup snapshot")));
 }
 
-void IsolateBase::installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context) {
+void IsolateBase::installRestoreTimeGlobalsForZygote(
+    Lock& js, v8::Local<v8::Context> context, bool hasTemporal) {
   KJ_REQUIRE(isPreparingSnapshot());
+  zygoteHasTemporal = hasTemporal;
   JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
     auto isolate = js.v8Isolate;
     captureHolders(js, context);
@@ -1003,6 +1034,9 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Con
           KJ_REQUIRE(check(holder->CreateDataProperty(
               context, name, v8::Integer::New(isolate, kDefaultStackTraceLimit))));
           break;
+        case RestoreTimeKind::TEMPORAL:
+          if (!hasTemporal) break;
+          [[fallthrough]];
         case RestoreTimeKind::FAIL_CLOSED:
           // Non-enumerable, as V8 installs them.
           KJ_REQUIRE(check(holder->SetNativeDataProperty(context, name, &failClosedGetter,
@@ -1037,7 +1071,14 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
           recordAndRemove(js, context, holder, entry, record);
           break;
         case RestoreTimeKind::FAIL_CLOSED:
-          removeFailClosed(js, context, holder, entry);
+          removeFailClosed(js, context, holder, entry, record);
+          break;
+        case RestoreTimeKind::TEMPORAL:
+          if (zygoteHasTemporal) {
+            removeFailClosed(js, context, holder, entry, record);
+          } else {
+            requireAbsent(js, context, holder, entry);
+          }
           break;
       }
     }
@@ -1053,13 +1094,22 @@ void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Cont
       auto isolate = js.v8Isolate;
       auto record = extractOnceFromSnapshot(context, index);
       for (auto& entry: RESTORE_TIME_GLOBALS) {
-        if (entry.kind != RestoreTimeKind::DATA_DEFAULT) continue;
         auto holder = getHolder(context, entry.holder);
         auto name = v8StrIntern(isolate, entry.name);
-        auto state = check(record->Get(context, name)).As<v8::Object>();
+        auto stateValue = check(record->Get(context, name));
+        // A TEMPORAL entry in a context without Temporal records nothing.
+        if (stateValue->IsUndefined()) continue;
+        auto state = stateValue.As<v8::Object>();
         auto field = [&](kj::StringPtr key) {
           return check(state->Get(context, v8StrIntern(isolate, key)));
         };
+        if (entry.kind != RestoreTimeKind::DATA_DEFAULT) {
+          // What V8 added is what a normal context has, unless the top level deleted it.
+          if (!field(PRESENT)->IsTrue()) {
+            KJ_REQUIRE(check(holder->Delete(context, name)));
+          }
+          continue;
+        }
         if (field(PRESENT)->IsTrue()) {
           v8::PropertyDescriptor desc(field(VALUE), field(WRITABLE)->IsTrue());
           desc.set_enumerable(field(ENUMERABLE)->IsTrue());
