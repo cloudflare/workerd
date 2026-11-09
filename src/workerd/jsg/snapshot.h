@@ -65,11 +65,11 @@ class Wrappable;
 //   `moduleType` is a jsg::ModuleRegistry::Type (capnp ModuleType), `handleKind` a
 //   jsg::ModuleRegistry::SnapshotHandleKind.
 // * `listenerRecords` are the global scope's event listeners the zygote's top level registered
-//   via addEventListener(), one (type, once) -> context-level AddData index of the listener's
-//   identity object per listener, in per-type registration order. The fresh
-//   ServiceWorkerGlobalScope built by newContext() at load discards the zygote's listener map, so
-//   the loading worker registers each identity again through the global's addEventListener, which
-//   re-derives the callback the same way the zygote registration did.
+//   via addEventListener(), in per-type registration order: for each, its type, its `once` and
+//   `passive` options, and the context-level AddData indices of its identity object and of the
+//   callback and receiver its registration derived. The fresh ServiceWorkerGlobalScope built by
+//   newContext() at load discards the zygote's listener map, so the loading worker re-registers
+//   each listener in C++ (EventTarget::restoreSnapshotListener()), without running JavaScript.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -100,10 +100,16 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   };
   kj::Vector<ModuleRecord> moduleRecords;
 
+  // A listener the zygote's top level registered on the context global, re-registered as it was
+  // on load: the identity removeEventListener() matches, and the callback and receiver its
+  // registration derived (a handleEvent object's method is read once, at registration).
   struct ListenerRecord {
     kj::String type;
     size_t identityIndex;
+    size_t callbackIndex;
+    size_t receiverIndex;
     bool once;
+    bool passive;
   };
   kj::Vector<ListenerRecord> listenerRecords;
 

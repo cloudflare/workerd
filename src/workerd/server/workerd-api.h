@@ -70,6 +70,8 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const override;
+  kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&> tryGetEventListenerCallbackTypeHandler(
+      jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
   const jsg::IsolateObserver& getObserver() const override;

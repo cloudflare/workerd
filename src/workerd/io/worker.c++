@@ -1588,27 +1588,29 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           const auto& artifact = isolateBase.finalizedSnapshotArtifact();
 
-          // Re-register the zygote's top-level event listeners on the fresh global scope.
-          // Calling the baked addEventListener re-derives the callback (plain fn vs
-          // handleEvent, receiver binding, once) exactly as the zygote's registration did;
-          // the identity objects live in the snapshot heap, so their closures and module
-          // state stay shared with the baked module graph.
+          // Re-register the zygote's top-level event listeners on the fresh global scope, in
+          // C++ and as they were registered: the callback and receiver the zygote's registration
+          // derived, with its once and passive options. Nothing here runs JavaScript or reads
+          // the global's (possibly replaced) addEventListener. The identities and callbacks live
+          // in the snapshot heap, so their closures and module state stay shared with the baked
+          // module graph.
           if (!artifact.listenerRecords.empty()) {
+            auto& callbackHandler = KJ_ASSERT_NONNULL(
+                isolate->getApi().tryGetEventListenerCallbackTypeHandler(lock),
+                "START_FROM_SNAPSHOT: the snapshot has top-level listeners this Api cannot restore");
             JSG_WITHIN_CONTEXT_SCOPE(lock, context, ([&](jsg::Lock& js) {
-              auto global = context->Global();
-              auto addListenerVal = jsg::check(
-                  global->Get(context, jsg::v8StrIntern(js.v8Isolate, "addEventListener"_kj)));
-              KJ_REQUIRE(addListenerVal->IsFunction(),
-                  "START_FROM_SNAPSHOT: global addEventListener is not a function; it was "
-                  "replaced during zygote top-level execution");
-              auto addListener = addListenerVal.As<v8::Function>();
               for (auto& rec: artifact.listenerRecords) {
                 auto identity = isolateBase.extractOnceFromSnapshot(context, rec.identityIndex);
-                auto opts = v8::Object::New(js.v8Isolate);
-                jsg::check(opts->Set(context, jsg::v8StrIntern(js.v8Isolate, "once"_kj),
-                    v8::Boolean::New(js.v8Isolate, rec.once)));
-                v8::Local<v8::Value> args[] = {jsg::v8Str(js.v8Isolate, rec.type), identity, opts};
-                jsg::check(addListener->Call(context, global, kj::size(args), args));
+                auto callbackValue =
+                    isolateBase.extractValueOnceFromSnapshot(context, rec.callbackIndex);
+                auto receiver =
+                    isolateBase.extractValueOnceFromSnapshot(context, rec.receiverIndex);
+                auto callback = KJ_ASSERT_NONNULL(callbackHandler.tryUnwrap(js, callbackValue),
+                    "START_FROM_SNAPSHOT: a recorded listener callback is not a function",
+                    rec.type);
+                callback.setReceiver(js.v8Ref(receiver));
+                mContext->restoreSnapshotListener(js, rec.type, identity, kj::mv(callback),
+                    {.once = rec.once, .passive = rec.passive});
               }
             }));
           }
@@ -2664,15 +2666,24 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // Record the context global's JS event listeners. newContext() on load attaches a
         // *fresh* ServiceWorkerGlobalScope to the deserialized global proxy, discarding the
         // zygote's listener map, and clear() below drops the zygote global's listener map along
-        // with its identity handles. Pin each identity and record enough to re-register it on
-        // load (see the replay in the Script constructor).
+        // with its identity handles. Pin what each registration left (identity, callback,
+        // receiver) and its options, so that the replay in the Script constructor re-registers
+        // it as it was.
+        auto canRestoreListeners =
+            script->isolate->getApi().tryGetEventListenerCallbackTypeHandler(lock) != kj::none;
         (*jsContext)
             ->forEachSnapshotListener(
-                lock, [&](kj::StringPtr type, v8::Local<v8::Object> identity, bool once) {
+                lock, [&](const api::EventTarget::SnapshotListener& listener) {
+          KJ_REQUIRE(canRestoreListeners,
+              "startup snapshot: this Worker::Api cannot restore top-level event listeners",
+              listener.type);
           listenerRecords.add(jsg::SnapshotArtifact::ListenerRecord{
-            .type = kj::str(type),
-            .identityIndex = isolateBase.pinIntoSnapshot(context, identity),
-            .once = once,
+            .type = kj::str(listener.type),
+            .identityIndex = isolateBase.pinIntoSnapshot(context, listener.identity),
+            .callbackIndex = isolateBase.pinIntoSnapshot(context, listener.callback),
+            .receiverIndex = isolateBase.pinIntoSnapshot(context, listener.receiver),
+            .once = listener.once,
+            .passive = listener.passive,
           });
         });
 
