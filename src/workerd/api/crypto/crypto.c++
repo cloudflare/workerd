@@ -1159,15 +1159,24 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(jsg::Lock& js,
   return cryptoKey;
 }
 
-jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
+jsg::Promise<SubtleCrypto::ExportedKeyData> SubtleCrypto::exportKey(
     jsg::Lock& js, kj::String format, const CryptoKey& key) {
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, key.getAlgorithmName());
 
-  return js.evalNow([&] {
+  return js.evalNow([&]() -> ExportedKeyData {
     requireModernKeyFormat(js, format);
     key.impl->requireExportable();
 
-    return key.impl->exportKey(js, format);
+    auto exportedKey = key.impl->exportKey(js, format);
+    KJ_SWITCH_ONEOF(exportedKey) {
+      KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsArrayBuffer>) {
+        return kj::mv(buffer);
+      }
+      KJ_CASE_ONEOF(jwk, JsonWebKey) {
+        return ExportedJsonWebKey{kj::mv(jwk)};
+      }
+    }
+    KJ_UNREACHABLE;
   });
 }
 
