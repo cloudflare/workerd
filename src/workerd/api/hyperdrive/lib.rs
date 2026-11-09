@@ -27,7 +27,7 @@ pub use crate::ffi::Socket;
 const MYSQL_PORT: u16 = 3306;
 const POSTGRES_PORT: u16 = 5432;
 
-#[jsg_resource(name = "Hyperdrive")]
+#[jsg_resource(name = "Hyperdrive", memory_info)]
 pub struct Hyperdrive {
     /// The subrequest channel of the binding.
     channel: u32,
