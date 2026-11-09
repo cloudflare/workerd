@@ -397,6 +397,10 @@ class ErrorWorkerInterface final: public WorkerInterface {
     kj::throwException(kj::mv(exception));
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    kj::throwException(kj::mv(exception));
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     event->failed(exception);
     kj::throwException(kj::mv(exception));

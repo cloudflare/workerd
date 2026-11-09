@@ -65,6 +65,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   kj::Promise<void> runAlarm(RunAlarmContext context) override {
     throwUnsupported();
   }
+  kj::Promise<void> abandonAlarm(AbandonAlarmContext context) override {
+    throwUnsupported();
+  }
   kj::Promise<void> queue(QueueContext context) override {
     throwUnsupported();
   }
