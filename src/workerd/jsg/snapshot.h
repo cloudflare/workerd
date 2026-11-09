@@ -90,6 +90,11 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
 
   kj::Maybe<size_t> bootstrapStateIndex;
 
+  // The context-level AddData index of the state the context global's C++ object holds for its
+  // JavaScript (the process and Buffer values), when the zygote's top level left any. The
+  // restored Worker's fresh global object takes it over.
+  kj::Maybe<size_t> globalScopeStateIndex;
+
   kj::Maybe<size_t> restoreTimeGlobalsIndex;
 
   struct ModuleRecord {
