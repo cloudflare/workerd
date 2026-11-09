@@ -828,51 +828,69 @@ constexpr RestoreTimeHolder ALL_HOLDERS[] = {
   RestoreTimeHolder::DATE_PROTOTYPE,
 };
 
-kj::Maybe<ContextDataSlot> slotFor(RestoreTimeHolder holder) {
+// Key of the captured holders in the record pinned into the snapshot; not a table entry's name.
+constexpr kj::StringPtr HOLDERS = "holders"_kj;
+constexpr kj::StringPtr HOLDER_ERROR_CTOR = "Error"_kj;
+constexpr kj::StringPtr HOLDER_ITERATOR_CTOR = "Iterator"_kj;
+constexpr kj::StringPtr HOLDER_ITERATOR_PROTOTYPE = "Iterator.prototype"_kj;
+
+// The captured holders of one context: the zygote's (IsolateBase::zygoteRestoreTimeHolders), or
+// the ones the record carries into the restored context.
+struct Holders {
+  v8::Local<v8::Object> errorCtor;
+  v8::Local<v8::Object> iteratorCtor;
+  v8::Local<v8::Object> iteratorPrototype;
+};
+
+v8::Local<v8::Object> getHolder(
+    v8::Local<v8::Context> context, const Holders& holders, RestoreTimeHolder holder) {
   switch (holder) {
     case RestoreTimeHolder::GLOBAL:
-    case RestoreTimeHolder::DATE_PROTOTYPE:
-      return kj::none;
+      return context->Global();
     case RestoreTimeHolder::ERROR_CTOR:
-      return ContextDataSlot::RESTORE_TIME_ERROR_CTOR;
+      return holders.errorCtor;
     case RestoreTimeHolder::ITERATOR_CTOR:
-      return ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR;
+      return holders.iteratorCtor;
     case RestoreTimeHolder::ITERATOR_PROTOTYPE:
-      return ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE;
+      return holders.iteratorPrototype;
+    case RestoreTimeHolder::DATE_PROTOTYPE: {
+      // A new Date's prototype is the realm's %Date.prototype%, whatever globalThis.Date is now.
+      auto date = check(v8::Date::New(context, 0)).As<v8::Object>();
+      return date->GetPrototype().As<v8::Object>();
+    }
   }
   KJ_UNREACHABLE;
 }
 
-v8::Local<v8::Object> getHolder(v8::Local<v8::Context> context, RestoreTimeHolder holder) {
-  KJ_IF_SOME(slot, slotFor(holder)) {
-    KJ_REQUIRE(context->GetNumberOfEmbedderDataFields() > static_cast<int>(slot),
-        "the zygote never captured a restore-time holder", jsNameOf(holder));
-    auto data = getContextDataSlot(context, slot);
-    KJ_REQUIRE(!data.IsEmpty() && data->IsValue() && data.As<v8::Value>()->IsObject(),
-        "the zygote never captured a restore-time holder", jsNameOf(holder));
-    return data.As<v8::Value>().As<v8::Object>();
-  }
-  if (holder == RestoreTimeHolder::DATE_PROTOTYPE) {
-    // A new Date's prototype is the realm's %Date.prototype%, whatever globalThis.Date is now.
-    auto date = check(v8::Date::New(context, 0)).As<v8::Object>();
-    return date->GetPrototype().As<v8::Object>();
-  }
-  return context->Global();
-}
-
 // Captures the intrinsics before any JavaScript can rebind their global names.
-void captureHolders(Lock& js, v8::Local<v8::Context> context) {
+RestoreTimeHolderHandles captureHolders(Lock& js, v8::Local<v8::Context> context) {
   auto isolate = js.v8Isolate;
   auto get = [&](v8::Local<v8::Object> from, kj::StringPtr name) {
     return check(from->Get(context, v8StrIntern(isolate, name))).As<v8::Object>();
   };
   auto global = context->Global();
-  auto errorCtor = get(global, "Error"_kj);
   auto iteratorCtor = get(global, "Iterator"_kj);
-  auto iteratorPrototype = get(iteratorCtor, "prototype"_kj);
-  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ERROR_CTOR, errorCtor);
-  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR, iteratorCtor);
-  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE, iteratorPrototype);
+  return RestoreTimeHolderHandles{
+    .context = v8::Global<v8::Context>(isolate, context),
+    .errorCtor = v8::Global<v8::Object>(isolate, get(global, "Error"_kj)),
+    .iteratorCtor = v8::Global<v8::Object>(isolate, iteratorCtor),
+    .iteratorPrototype = v8::Global<v8::Object>(isolate, get(iteratorCtor, "prototype"_kj)),
+  };
+}
+
+// The zygote's captured holders, which must be those of `context`.
+Holders zygoteHolders(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    const kj::Maybe<RestoreTimeHolderHandles>& captured) {
+  auto& handles =
+      KJ_REQUIRE_NONNULL(captured, "the zygote never captured its restore-time holders");
+  bool sameContext = handles.context.Get(isolate) == context;
+  KJ_REQUIRE(sameContext, "restore-time holders were captured for another context");
+  return Holders{
+    .errorCtor = handles.errorCtor.Get(isolate),
+    .iteratorCtor = handles.iteratorCtor.Get(isolate),
+    .iteratorPrototype = handles.iteratorPrototype.Get(isolate),
+  };
 }
 
 // The table entry a FAIL_CLOSED property's callback data names.
@@ -884,8 +902,9 @@ const RestoreTimeGlobal& entryOf(v8::Local<v8::Data> data) {
 
 // v8::Object has no IsExtensible(), and user code can replace the JavaScript Object.isExtensible.
 // Adding a property to a non-extensible object fails without throwing.
-void requireExtensible(Lock& js, v8::Local<v8::Context> context, RestoreTimeHolder which) {
-  auto holder = getHolder(context, which);
+void requireExtensible(
+    Lock& js, v8::Local<v8::Context> context, const Holders& holders, RestoreTimeHolder which) {
+  auto holder = getHolder(context, holders, which);
   auto probe = v8::Symbol::New(js.v8Isolate);
   bool added = check(holder->DefineOwnProperty(context, probe, v8::Undefined(js.v8Isolate)));
   KJ_REQUIRE(added,
@@ -1016,7 +1035,8 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(
   zygoteHasTemporal = hasTemporal;
   JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
     auto isolate = js.v8Isolate;
-    captureHolders(js, context);
+    zygoteRestoreTimeHolders = captureHolders(js, context);
+    auto holders = zygoteHolders(isolate, context, zygoteRestoreTimeHolders);
 
     // The callbacks live in V8 AccessorInfo objects. Those go away with the properties before
     // CreateBlob(); registering the callbacks anyway turns one that stays reachable into an
@@ -1026,7 +1046,7 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(
 
     for (size_t index = 0; index < kj::size(RESTORE_TIME_GLOBALS); ++index) {
       auto& entry = RESTORE_TIME_GLOBALS[index];
-      auto holder = getHolder(context, entry.holder);
+      auto holder = getHolder(context, holders, entry.holder);
       auto name = v8StrIntern(isolate, entry.name);
       switch (entry.kind) {
         case RestoreTimeKind::DATA_DEFAULT:
@@ -1059,13 +1079,14 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
   }
 
   JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+    auto holders = zygoteHolders(js.v8Isolate, context, zygoteRestoreTimeHolders);
     for (auto holder: ALL_HOLDERS) {
-      requireExtensible(js, context, holder);
+      requireExtensible(js, context, holders, holder);
     }
 
     auto record = js.objNoProto();
     for (auto& entry: RESTORE_TIME_GLOBALS) {
-      auto holder = getHolder(context, entry.holder);
+      auto holder = getHolder(context, holders, entry.holder);
       switch (entry.kind) {
         case RestoreTimeKind::DATA_DEFAULT:
           recordAndRemove(js, context, holder, entry, record);
@@ -1082,9 +1103,17 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
           break;
       }
     }
+    // The restored context finds its holders here, as the zygote captured them.
+    auto captured = js.objNoProto();
+    captured.set(js, HOLDER_ERROR_CTOR, JsObject(holders.errorCtor));
+    captured.set(js, HOLDER_ITERATOR_CTOR, JsObject(holders.iteratorCtor));
+    captured.set(js, HOLDER_ITERATOR_PROTOTYPE, JsObject(holders.iteratorPrototype));
+    record.set(js, HOLDERS, captured);
     mutableSnapshotArtifact().restoreTimeGlobalsIndex =
         pinIntoSnapshot(context, v8::Local<v8::Object>(record));
   });
+  // CreateBlob() rejects live global handles.
+  zygoteRestoreTimeHolders = kj::none;
 }
 
 void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context) {
@@ -1093,8 +1122,16 @@ void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Cont
     JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
       auto isolate = js.v8Isolate;
       auto record = extractOnceFromSnapshot(context, index);
+      auto captured = check(record->Get(context, v8StrIntern(isolate, HOLDERS))).As<v8::Object>();
+      auto capturedHolder = [&](kj::StringPtr name) {
+        return check(captured->Get(context, v8StrIntern(isolate, name))).As<v8::Object>();
+      };
+      Holders holders;
+      holders.errorCtor = capturedHolder(HOLDER_ERROR_CTOR);
+      holders.iteratorCtor = capturedHolder(HOLDER_ITERATOR_CTOR);
+      holders.iteratorPrototype = capturedHolder(HOLDER_ITERATOR_PROTOTYPE);
       for (auto& entry: RESTORE_TIME_GLOBALS) {
-        auto holder = getHolder(context, entry.holder);
+        auto holder = getHolder(context, holders, entry.holder);
         auto name = v8StrIntern(isolate, entry.name);
         auto stateValue = check(record->Get(context, name));
         // A TEMPORAL entry in a context without Temporal records nothing.
@@ -1232,6 +1269,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
+    KJ_DEFER(zygoteRestoreTimeHolders = kj::none);
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.
