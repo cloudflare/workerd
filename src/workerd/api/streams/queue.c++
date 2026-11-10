@@ -488,6 +488,7 @@ bool ValueQueue::hasPartiallyFulfilledRead() {
 }
 
 void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {
+  // NOLINTNEXTLINE(jsg-shared-visit): the queue is impl's only owner; others hold kj::Weak.
   impl->visitForGc(visitor);
 }
 
@@ -1320,6 +1321,7 @@ size_t ByteQueue::getConsumerCount() {
 }
 
 void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {
+  // NOLINTNEXTLINE(jsg-shared-visit): the queue is impl's only owner; others hold kj::Weak.
   impl->visitForGc(visitor);
 }
 
