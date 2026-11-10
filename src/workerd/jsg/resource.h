@@ -1828,8 +1828,10 @@ struct NewContextOptions {
   v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
 
   // Same as the internal fields callback, but for objects that reference
-  // cppgc-managed objects.
-  v8::DeserializeAPIWrapperCallback apiWrapperDeserializer{};
+  // cppgc-managed objects. Its default constructor is explicit, so aggregate initialization that
+  // omits this member (e.g. `NewContextOptions{}`) needs the `{}` initializer.
+  v8::DeserializeAPIWrapperCallback
+      apiWrapperDeserializer{};  // NOLINT(readability-redundant-member-init)
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);

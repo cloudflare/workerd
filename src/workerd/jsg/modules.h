@@ -841,7 +841,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       Lock& js, kj::FunctionParam<void(kj::StringPtr specifier)> onMissing) override {
     uint materialized = 0;
     for (auto& row: snapshotSeeds) {
-      using Key = typename Entry::Key;
+      using Key = Entry::Key;
       auto specifier = row.key.specifier.toString(false);
       KJ_IF_SOME(entry, entries.find(Key(row.key.specifier, row.key.type))) {
         auto& seeds = row.value;
