@@ -61,9 +61,7 @@ class LoopbackServiceStub: public Fetcher {
 
   // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
   // so never transferred through a startup snapshot.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(LoopbackServiceStub, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Fetcher);
@@ -136,9 +134,7 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
 
   // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
   // so never transferred through a startup snapshot.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(LoopbackDurableObjectClass) {
     JSG_INHERIT(DurableObjectClass);
@@ -200,9 +196,7 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
 
   // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
   // so never transferred through a startup snapshot.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(LoopbackDurableObjectNamespace) {
     JSG_INHERIT(DurableObjectNamespace);
@@ -237,9 +231,7 @@ class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
 
   // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
   // so never transferred through a startup snapshot.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(LoopbackColoLocalActorNamespace) {
     JSG_INHERIT(ColoLocalActorNamespace);

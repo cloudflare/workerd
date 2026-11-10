@@ -133,9 +133,7 @@ class WorkerQueue: public jsg::Object {
   jsg::Promise<Metrics> metrics(jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler);
 
   // A binding transfers through a startup snapshot as its channel number.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return ownAsWrappable(kj::refcounted<WorkerQueue>(subrequestChannel));
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(WorkerQueue, CompatibilityFlags::Reader flags) {
     JSG_METHOD(metrics);

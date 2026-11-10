@@ -154,16 +154,7 @@ class KvNamespace: public jsg::Object {
 
   // A binding transfers through a startup snapshot as its channel number, name and headers. A
   // namespace carried as a capability belongs to one IoContext.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    KJ_IF_SOME(channel, subrequestChannel.tryGet<uint>()) {
-      auto headers = KJ_MAP(header, additionalHeaders) {
-        return AdditionalHeader{.name = kj::str(header.name), .value = kj::str(header.value)};
-      };
-      return ownAsWrappable(
-          kj::refcounted<KvNamespace>(kj::str(bindingName), kj::mv(headers), channel));
-    }
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(KvNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);

@@ -629,9 +629,7 @@ class ExtendedFetcher final: public Fetcher {
 
   // Minted by ctx.mapVirtualHost() for one Worker's global scope, whose connect override the
   // restored Worker's fresh global scope would lack.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(ExtendedFetcher) {
     JSG_INHERIT(Fetcher);
