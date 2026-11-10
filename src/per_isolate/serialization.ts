@@ -101,6 +101,7 @@ const {
   RegExp,
   Set,
   String,
+  SymbolToStringTag,
   TypedArrayPrototype,
   TypeError,
 } = primordials;
@@ -114,14 +115,10 @@ const kUncloneable = 0;
 
 // The prototypes of the built-ins that V8 serializes itself, never offering
 // an instance to the serializer, which would read its mark. SharedArrayBuffer
-// is not defined in every context the bootstrap runs in (not while it makes a
-// startup snapshot), and a class here can inherit from it only where it is.
+// is recognized by isSharedArrayBufferPrototype() instead.
 const kNativelySerializedPrototypes: readonly object[] = [
   Array.prototype,
   ArrayBuffer.prototype,
-  ...(typeof SharedArrayBuffer === 'function'
-    ? [SharedArrayBuffer.prototype]
-    : []),
   TypedArrayPrototype,
   DataView.prototype,
   Date.prototype,
@@ -169,6 +166,18 @@ function markCloneable<T extends object>(
   (instance as Record<symbol, unknown>)[kSerializeMode] = cloneable;
 }
 
+// Whether `proto` is SharedArrayBuffer.prototype, recognized by its own
+// @@toStringTag. Not by the SharedArrayBuffer global: a zygote preparing a
+// startup snapshot fails when the bootstrap touches it, as V8 adds it only
+// once the snapshot is restored, and a list built without it would be baked
+// into the snapshot.
+function isSharedArrayBufferPrototype(proto: object): boolean {
+  return (
+    ObjectGetOwnPropertyDescriptor(proto, SymbolToStringTag)?.value ===
+    'SharedArrayBuffer'
+  );
+}
+
 // Returns the Cloneable with which the constructor of `ctor` marks each
 // instance: see the top of this file. An instance of a subclass is
 // serialized as one of `ctor`. Throws if `ctor` inherits from a built-in that
@@ -184,7 +193,10 @@ function makeCloneable<T extends object>(
     proto !== null;
     proto = ObjectGetPrototypeOf(proto)
   ) {
-    if (ArrayPrototypeIncludes(kNativelySerializedPrototypes, proto)) {
+    if (
+      ArrayPrototypeIncludes(kNativelySerializedPrototypes, proto) ||
+      isSharedArrayBufferPrototype(proto)
+    ) {
       throw new TypeError(
         `${deserializeInfo} inherits from a built-in that V8 serializes ` +
           'itself, so it cannot be cloneable.'
