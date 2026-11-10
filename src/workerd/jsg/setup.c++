@@ -921,6 +921,7 @@ void removeFailClosed(Lock& js,
   // GetOwnPropertyDescriptor() reads a native data property through its getter, so the zygote's
   // own property throws, while a JavaScript accessor comes back as {get, set} without being
   // called and a data property as its value.
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): reset right after the probe it catches.
   v8::TryCatch tryCatch(isolate);
   v8::Local<v8::Value> descriptor;
   bool ours = !holder->GetOwnPropertyDescriptor(context, name).ToLocal(&descriptor);
@@ -998,16 +999,16 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Con
 
 void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8::Context> context) {
   KJ_REQUIRE(isPreparingSnapshot());
-  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
-    // Whatever became of the error the property threw: the top level ran a feature test, a
-    // polyfill or a save-and-restore against a context that lacks what the restored one has.
-    KJ_IF_SOME(entry, restoreTimeGlobalUsed) {
-      KJ_FAIL_REQUIRE(
-          "startup snapshot: top-level code used a property that exists only once the snapshot is "
-          "restored, and went on after the error",
-          jsNameOf(entry.holder), entry.name);
-    }
+  // Whatever became of the error the property threw: the top level ran a feature test, a
+  // polyfill or a save-and-restore against a context that lacks what the restored one has.
+  KJ_IF_SOME(entry, restoreTimeGlobalUsed) {
+    KJ_FAIL_REQUIRE(
+        "startup snapshot: top-level code used a property that exists only once the snapshot is "
+        "restored, and went on after the error",
+        jsNameOf(entry.holder), entry.name);
+  }
 
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
     for (auto holder: ALL_HOLDERS) {
       requireExtensible(js, context, holder);
     }
