@@ -1,6 +1,7 @@
 use std::future::pending;
 use std::io;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
 
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
@@ -8,6 +9,7 @@ use tokio::io::duplex;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::sleep;
 use tokio::time::timeout;
@@ -102,6 +104,126 @@ fn an_idle_connection_is_closed_after_the_idle_timeout() {
             .unwrap();
         assert!(rest.is_empty());
         assert!(idle_since.elapsed() >= idle_timeout);
+    });
+}
+
+/// The head of the next request on `io`, or `None` once the client has closed it.
+async fn read_head(io: &mut (impl AsyncRead + Unpin)) -> Option<String> {
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        if io.read(&mut byte).await.unwrap() == 0 {
+            return None;
+        }
+        head.push(byte[0]);
+    }
+    Some(String::from_utf8(head).unwrap())
+}
+
+/// Request lines an [`Origin`] received, each with the index of the connection it came on.
+type Received = Arc<Mutex<Vec<(usize, String)>>>;
+
+/// A peer whose first connection answers `answered` requests and then closes after reading the
+/// next one, as a server does when it closes an idle connection that the client has just
+/// reused. Connections after the first answer every request. They are dialed only once the
+/// first has closed, so the request that finds it closed has gone out on it.
+fn closing_origin(answered: usize) -> (ClientPool, Received) {
+    let received = Received::default();
+    let (closed, first_closed) = watch::channel(false);
+    let closed = Mutex::new(Some(closed));
+    let dials = AtomicUsize::new(0);
+    let log = Arc::clone(&received);
+    let pool = ClientPool::new(ClientSettings::default(), Peer::Origin, move || {
+        let index = dials.fetch_add(1, Ordering::Relaxed);
+        let (ours, mut theirs) = duplex(1 << 16);
+        let log = Arc::clone(&log);
+        let closed = closed.lock().unwrap().take().filter(|_| index == 0);
+        tokio::spawn(async move {
+            let mut count = 0;
+            while let Some(head) = read_head(&mut theirs).await {
+                let line = head.lines().next().unwrap().to_owned();
+                log.lock().unwrap().push((index, line));
+                if index == 0 && count == answered {
+                    drop(theirs);
+                    closed.unwrap().send_replace(true);
+                    return;
+                }
+                count += 1;
+                theirs
+                    .write_all(b"HTTP/1.1 204 No Content\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+        });
+        let mut first_closed = first_closed.clone();
+        async move {
+            if index > 0 {
+                first_closed.wait_for(|closed| *closed).await.unwrap();
+            }
+            Ok(Dialed::with_hangup(ours, Box::pin(pending())))
+        }
+    });
+    (pool, received)
+}
+
+async fn send(client: &Client<'_>, method: http::Method) -> Result<http::Response<Incoming>> {
+    let (uri, _) = client.target(b"/").unwrap();
+    let request = Client::request_of(method, uri, Head::empty(), ChannelBody::empty());
+    client.send(request).await
+}
+
+#[test]
+fn a_request_on_a_pooled_connection_the_peer_closed_is_sent_on_a_new_one() {
+    let table = HeaderTable::builtin();
+    runtime().block_on(async {
+        let (pool, received) = closing_origin(1);
+        let client = pool.client(&table);
+        let first = send(&client, http::Method::GET).await.unwrap();
+        assert_eq!(first.status(), http::StatusCode::NO_CONTENT);
+        drop(first);
+        let second = send(&client, http::Method::GET).await.unwrap();
+        assert_eq!(second.status(), http::StatusCode::NO_CONTENT);
+        // The retry's connection may be the one hyper dialed in the background when the second
+        // request asked for a connection, or one dialed for the retry itself.
+        let received = received.lock().unwrap().clone();
+        let get = "GET / HTTP/1.1";
+        assert_eq!(received.len(), 3, "{received:?}");
+        assert_eq!(received[0], (0, get.to_owned()));
+        assert_eq!(received[1], (0, get.to_owned()));
+        assert!(received[2].0 > 0 && received[2].1 == get, "{received:?}");
+    });
+}
+
+#[test]
+fn a_non_idempotent_request_is_not_sent_again() {
+    let table = HeaderTable::builtin();
+    runtime().block_on(async {
+        let (pool, received) = closing_origin(1);
+        let client = pool.client(&table);
+        drop(send(&client, http::Method::GET).await.unwrap());
+        let error = send(&client, http::Method::POST).await.unwrap_err();
+        assert!(
+            error
+                .description()
+                .contains("connection closed before message completed"),
+            "{}",
+            error.description()
+        );
+        assert_eq!(received.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+fn a_request_that_fails_on_a_new_connection_is_not_sent_again() {
+    let table = HeaderTable::builtin();
+    runtime().block_on(async {
+        let (pool, received) = closing_origin(0);
+        let client = pool.client(&table);
+        assert!(send(&client, http::Method::GET).await.is_err());
+        assert_eq!(
+            *received.lock().unwrap(),
+            [(0, "GET / HTTP/1.1".to_owned())]
+        );
     });
 }
 
