@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The test runs `workerd bench` with the inspector enabled. The worker is registered with the
+# inspector under its name; the startup group times throwaway copies of the worker, which share
+# that name and so are not registered.
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "bench-inspector-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "bench-inspector-test.js")],
+      compatibilityDate = "2024-01-01",
+    ),
+  )],
+);
