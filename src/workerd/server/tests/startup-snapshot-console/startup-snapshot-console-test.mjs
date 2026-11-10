@@ -63,7 +63,9 @@ test('top-level console output is printed once, snapshot used or not', async () 
   assertEachMarkOnce(output);
   const skipped = output.split(SKIPPED).length - 1;
   assert.strictEqual(skipped, 1, `expected one fallback:\n${output}`);
-  assert(output.includes('fallback'), output);
+  // The skip is logged for the `fallback` service, not for `used`.
+  const skippedLine = output.split('\n').find((line) => line.includes(SKIPPED));
+  assert(skippedLine?.includes('= fallback'), output);
 });
 
 test('with an inspector configured, the zygote does not run', async () => {
