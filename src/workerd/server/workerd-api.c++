@@ -7,12 +7,14 @@
 #include "workerd-api-isolate.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/hyperdrive/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
@@ -651,6 +653,16 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     case Global::HYPERDRIVE: {
       auto hyperdrive = global.getHyperdrive();
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_HYPERDRIVE)) {
+        auto bytes = [](capnp::Text::Reader text) {
+          auto data = text.asBytes();
+          return ::rust::Slice<const uint8_t>(data.begin(), data.size());
+        };
+        return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+            api::hyperdrive_new(lock.v8Isolate, hyperdrive.getChannel(),
+                bytes(hyperdrive.getDatabase()), bytes(hyperdrive.getUser()),
+                bytes(hyperdrive.getPassword()), bytes(hyperdrive.getScheme()))));
+      }
       return lock.wrap(context,
           lock.alloc<api::Hyperdrive>(hyperdrive.getChannel(), kj::str(hyperdrive.getDatabase()),
               kj::str(hyperdrive.getUser()), kj::str(hyperdrive.getPassword()),

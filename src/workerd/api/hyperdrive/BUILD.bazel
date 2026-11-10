@@ -1,0 +1,70 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Hyperdrive, the JavaScript API of a Hyperdrive binding, in Rust. C++ creates it for a Hyperdrive
+# binding when the RUST_HYPERDRIVE autogate is on; hyperdrive.c++ otherwise.
+wd_rust_crate(
+    name = "hyperdrive",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "lib-test.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp:ffi",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+    ],
+)
+
+# The C++ that the crate calls (ffi.h). Separate from the crate's bridge so that it can depend on
+# the API it binds.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/api:hyperdrive",
+        "//src/workerd/io",
+        "//src/workerd/util:entropy",
+    ],
+)
+
+# The Rust half of rtti-test.
+wd_rust_crate(
+    name = "rtti-test-bridge",
+    testonly = True,
+    srcs = ["rtti_test_bridge.rs"],
+    crate_root = "rtti_test_bridge.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "rtti_test_bridge.rs",
+    deps = [
+        ":hyperdrive",
+        "//src/rust/jsg",
+    ],
+)
+
+# The RTTI of the Rust Hyperdrive, compared with the C++ one's.
+kj_test(
+    src = "rtti-test.c++",
+    deps = [
+        ":rtti-test-bridge",
+        "//src/workerd/api:hyperdrive",
+        "//src/workerd/api:streams",
+        "//src/workerd/io",
+        "//src/workerd/jsg:rtti",
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
+)

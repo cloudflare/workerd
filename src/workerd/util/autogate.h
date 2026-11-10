@@ -123,7 +123,11 @@ namespace workerd::util {
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
-  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* A Hyperdrive binding is the Rust Hyperdrive (src/workerd/api/hyperdrive/) instead of the     \
+     C++ one (api/hyperdrive.h). Both connect through connectHyperdrive(). The C++                 \
+     implementation is retained for rollback. */                                                   \
+  V(RUST_HYPERDRIVE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
