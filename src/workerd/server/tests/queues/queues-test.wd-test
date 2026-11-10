@@ -1,0 +1,46 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "queues-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "queues-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "enable_ctx_exports", "rpc"],
+        bindings = [
+          ( name = "JOBS",
+            queue = ( name = "queues", props = ( json = "{\"queue\": \"jobs\"}" ) ) ),
+          ( name = "IDLE",
+            queue = ( name = "queues", props = ( json = "{\"queue\": \"idle\"}" ) ) ),
+          ( name = "BIG",
+            queue = ( name = "queues", props = ( json = "{\"queue\": \"big\"}" ) ) ),
+          ( name = "SERIAL",
+            queue = ( name = "queues", props = ( json = "{\"queue\": \"serial\"}" ) ) ),
+          ( name = "QUEUES", service = "queues" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Seen", uniqueKey = "queues-test-seen" ),
+        ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+      )
+    ),
+    # "jobs" retries once, then sends to "dead"; both deliver at once.
+    # "serial" delivers one batch of two at a time.
+    ( name = "queues",
+      worker = (
+        modules = [ ( name = "queues.js", bundled = "/workerd/queues.js" ) ],
+        compatibilityFlags = ["rpc", "service_binding_extra_handlers"],
+        bindings = [
+          ( name = "SHARD", durableObjectNamespace = "QueueShard" ),
+          ( name = "CONSUMERS", json = "{\"jobs\": {\"consumer\": \"test\", \"maxBatchSize\": 4, \"maxBatchTimeout\": 0, \"maxRetries\": 1, \"deadLetterQueue\": \"dead\"}, \"dead\": {\"consumer\": \"test\", \"maxBatchTimeout\": 0}, \"serial\": {\"consumer\": \"test\", \"maxBatchSize\": 2, \"maxBatchTimeout\": 60, \"maxConcurrency\": 1}}" ),
+          ( name = "test", service = "queues-test" ),
+          ( name = "TEST_CLOCK", json = "true" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "QueueShard", uniqueKey = "QueueShard", enableSql = true ),
+        ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+      )
+    ),
+  ],
+);
