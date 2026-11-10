@@ -162,11 +162,35 @@ uint32_t PyodideMetadataReader::read(
   return readToTarget(data, offset, buf);
 }
 
-uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
-  if (state->memorySnapshot == kj::none) {
-    return 0;
+namespace {
+
+class BytesMemorySnapshotSource final: public MemorySnapshotSource {
+ public:
+  explicit BytesMemorySnapshotSource(kj::Array<kj::byte> bytes): bytes(kj::mv(bytes)) {}
+
+  size_t size() override {
+    return bytes.size();
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
+
+  size_t read(size_t offset, kj::ArrayPtr<kj::byte> buf) override {
+    return readToTarget(bytes, offset, buf);
+  }
+
+ private:
+  kj::Array<kj::byte> bytes;
+};
+
+}  // namespace
+
+kj::Own<MemorySnapshotSource> MemorySnapshotSource::fromBytes(kj::Array<kj::byte> bytes) {
+  return kj::heap<BytesMemorySnapshotSource>(kj::mv(bytes));
+}
+
+uint32_t PyodideMetadataReader::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
+  KJ_IF_SOME(snapshot, state->memorySnapshot) {
+    return static_cast<uint32_t>(snapshot->read(offset, buf));
+  }
+  return 0;
 }
 
 uint32_t ArtifactBundler::readMemorySnapshot(uint64_t offset, kj::Array<kj::byte> buf) {
@@ -224,19 +248,17 @@ jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
   return obj;
 }
 
-PyodideMetadataReader::State::State(const State& other)
-    : mainModule(kj::str(other.mainModule)),
-      moduleInfo(other.moduleInfo.clone()),
-      pyodideVersion(kj::str(other.pyodideVersion)),
-      isWorkerdFlag(other.isWorkerdFlag),
-      isTracingFlag(other.isTracingFlag),
-      snapshotToDisk(other.snapshotToDisk),
-      createBaselineSnapshot(other.createBaselineSnapshot),
-      memorySnapshot(other.memorySnapshot.map(
-          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
-
 kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
-  return kj::heap<PyodideMetadataReader::State>(*this);
+  auto snapshotCopy = memorySnapshot.map([](kj::Own<MemorySnapshotSource>& snapshot) {
+    auto bytes = kj::heapArray<kj::byte>(snapshot->size());
+    KJ_ASSERT(snapshot->read(0, bytes) == bytes.size());
+    return MemorySnapshotSource::fromBytes(kj::mv(bytes));
+  });
+  auto moduleInfoCopy = moduleInfo.clone();
+  return kj::heap<PyodideMetadataReader::State>(kj::str(mainModule), kj::mv(moduleInfoCopy.names),
+      kj::mv(moduleInfoCopy.contents), kj::str(pyodideVersion), IsWorkerd(isWorkerdFlag),
+      IsTracing(isTracingFlag), SnapshotToDisk(snapshotToDisk),
+      CreateBaselineSnapshot(createBaselineSnapshot), kj::mv(snapshotCopy));
 }
 
 void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
