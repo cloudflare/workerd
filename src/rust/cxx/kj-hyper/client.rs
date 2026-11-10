@@ -10,7 +10,7 @@
 //! A peer may close a pooled connection while it sits idle, and hyper may not notice before it
 //! hands that connection to the next request. `hyper-util` sends the request again only if it
 //! had not yet been written. Once it was written, the failure comes back to us, and
-//! [`Client::send`] resends it once on a new connection when that is safe (see
+//! [`Client::send`] resends it, on a connection not yet tried, when that is safe (see
 //! [`replayable`]).
 //!
 //! Dropping a client request drops its connection (hyper's rule); the request body pump ends
@@ -582,24 +582,25 @@ impl Client<'_> {
         http::Request::from_parts(parts, body)
     }
 
-    /// Sends `request` and waits for the response head. If the request fails on a pooled
-    /// connection that its peer had closed, it is sent once more on a new connection, provided
-    /// it is [`replayable`].
+    /// Sends `request` and waits for the response head. While a [`replayable`] request fails on
+    /// a pooled connection that its peer had closed, it is sent again.
     async fn send(&self, request: http::Request<ChannelBody>) -> Result<http::Response<Incoming>> {
         let (parts, body) = request.into_parts();
-        let replay = replayable(&parts, &body)
-            .then(|| http::Request::from_parts(parts.clone(), body.ended()));
-        let sent = self
+        let replay = replayable(&parts, &body).then(|| (parts.clone(), body.ended()));
+        let mut sent = self
             .pool
             .inner
             .request(http::Request::from_parts(parts, body))
             .await;
-        let sent = match (sent, replay) {
-            (Err(e), Some(replay)) if closed_while_idle(&e) => {
-                self.pool.inner.request(replay).await
+        if let Some((parts, body)) = replay {
+            // A failed connection leaves the pool, so each resend gets a connection not yet
+            // tried: another pooled one or a new one. A new connection never counts as closed
+            // while idle, so the loop ends by the time the stale pooled connections run out.
+            while sent.as_ref().is_err_and(closed_while_idle) {
+                let again = http::Request::from_parts(parts.clone(), body.ended());
+                sent = self.pool.inner.request(again).await;
             }
-            (sent, _) => sent,
-        };
+        }
         let response = sent.map_err(|e| client_error(&e))?;
         if let Some(served) = response.extensions().get::<Served>() {
             served.mark();
