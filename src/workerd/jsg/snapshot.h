@@ -121,10 +121,8 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   };
   kj::Vector<ListenerRecord> listenerRecords;
 
-  ~SnapshotArtifact() noexcept(false) {
-    // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
-    delete[] blob.data;
-  }
+  // Out of line: destroying `liveWrappables` needs the complete Wrappable type.
+  ~SnapshotArtifact() noexcept(false);
 
   kj::Arc<SnapshotArtifact> addRef() const {
     return addRefToThis();
