@@ -16,6 +16,7 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
+import type { MemoryUsage } from 'node-internal:process';
 import { Buffer } from 'node-internal:internal_buffer';
 import { parseEnv } from 'node-internal:internal_utils';
 import { Writable } from 'node-internal:streams_writable';
@@ -281,21 +282,19 @@ export function getActiveResourcesInfo(): string[] {
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.getActiveResourcesInfo');
 }
 
-export function memoryUsage(): {
-  rss: number;
-  heapTotal: number;
-  heapUsed: number;
-  external: number;
-  arrayBuffers: number;
-} {
-  return {
-    rss: 0,
-    heapTotal: 0,
-    heapUsed: 0,
-    external: 0,
-    arrayBuffers: 0,
-  };
-}
+export const memoryUsage = Object.assign(
+  function memoryUsage(): MemoryUsage {
+    return processImpl.getMemoryUsage();
+  },
+  // Node.js attaches a `.rss()` helper method directly onto the
+  // `process.memoryUsage` function object:
+  // https://nodejs.org/api/process.html#processmemoryusagerss
+  {
+    rss(): number {
+      return processImpl.getMemoryUsage().rss;
+    },
+  }
+);
 
 export function resourceUsage(): {
   userCPUTime: number;

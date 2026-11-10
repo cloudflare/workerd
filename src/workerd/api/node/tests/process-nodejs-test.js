@@ -1172,3 +1172,36 @@ export const processGetReport = {
     assert.deepStrictEqual(process.report.getReport(), {});
   },
 };
+
+export const processMemoryUsage = {
+  test() {
+    assert.strictEqual(typeof process.memoryUsage, 'function');
+    assert.strictEqual(process.memoryUsage.name, 'memoryUsage');
+    assert.strictEqual(typeof process.memoryUsage.rss, 'function');
+    assert.strictEqual(process.memoryUsage.rss.name, 'rss');
+    assert.ok(process.memoryUsage.rss() > 0);
+
+    const usage = process.memoryUsage();
+    for (const value of Object.values(usage)) {
+      assert.ok(Number.isFinite(value));
+      assert.ok(value >= 0);
+    }
+    assert.ok(usage.heapTotal > 0, 'heapTotal should be > 0');
+    assert.ok(usage.heapUsed > 0, 'heapUsed should be > 0');
+    assert.ok(usage.heapUsed <= usage.heapTotal);
+    assert.strictEqual(usage.rss, usage.heapTotal + usage.external);
+  },
+};
+
+export const processMemoryUsageArrayBuffers = {
+  test() {
+    const size = 1024 * 1024;
+    const arrayBuffer = new ArrayBuffer(size);
+    const buffer = Buffer.alloc(size);
+    assert.ok(process.memoryUsage().arrayBuffers >= 2 * size);
+
+    // Keep both backing stores alive until after the measurement.
+    assert.strictEqual(arrayBuffer.byteLength, size);
+    assert.strictEqual(buffer.byteLength, size);
+  },
+};

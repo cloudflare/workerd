@@ -104,6 +104,8 @@ class V8System {
       JitCodeEventTracking);
 };
 
+class CountingArrayBufferAllocator;
+
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
 class IsolateBase {
@@ -366,6 +368,12 @@ class IsolateBase {
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Arc<const ExternalMemoryTarget> getExternalMemoryTarget();
 
+  // Bytes currently allocated through this isolate's ArrayBuffer allocator, reported as
+  // `arrayBuffers` by Node.js's `process.memoryUsage()`. Backing stores allocated elsewhere
+  // (wrapped native memory, resizable buffers, WebAssembly memory) are not counted. The value may
+  // lag allocations and frees that just completed on other threads.
+  size_t getArrayBufferAllocatedBytes() const;
+
   // Get an object that can be used to observe whether this isolate is still alive. The returned
   // reference stays valid (and reports the isolate as dead) even after the isolate is destroyed,
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
@@ -601,6 +609,12 @@ class IsolateBase {
   std::unique_ptr<class v8::CppHeap> cppHeap;
 
   kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
+
+  // Counts ArrayBuffer bytes for process.memoryUsage(); see CountingArrayBufferAllocator in
+  // setup.c++. A std::shared_ptr because V8's CreateParams::array_buffer_allocator_shared requires
+  // one: V8 keeps it alive while any backing store it allocated remains. Never null: it wraps
+  // any allocator the isolate's CreateParams supplied.
+  std::shared_ptr<CountingArrayBufferAllocator> arrayBufferAllocator;
 
   v8::Isolate* ptr;
   // Determines how the isolate was created:

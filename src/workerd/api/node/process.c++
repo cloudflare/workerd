@@ -10,6 +10,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 
 #include <kj/vector.h>
 
@@ -267,6 +268,22 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
 
 bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
   return FeatureFlags::get(js).getThrowOnNotImplementedTlsOptions();
+}
+
+ProcessModule::MemoryUsage ProcessModule::getMemoryUsage(jsg::Lock& js) {
+  v8::HeapStatistics stats;
+  js.v8Isolate->GetHeapStatistics(&stats);
+  return {
+    // Process-wide RSS includes other tenants. Approximate it using this isolate's
+    // allocated heap and external memory instead.
+    .rss =
+        static_cast<double>(stats.total_heap_size()) + static_cast<double>(stats.external_memory()),
+    .heapTotal = static_cast<double>(stats.total_heap_size()),
+    .heapUsed = static_cast<double>(stats.used_heap_size()),
+    .external = static_cast<double>(stats.external_memory()),
+    .arrayBuffers =
+        static_cast<double>(jsg::IsolateBase::from(js.v8Isolate).getArrayBufferAllocatedBytes()),
+  };
 }
 
 }  // namespace workerd::api::node
