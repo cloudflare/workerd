@@ -4,6 +4,79 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
+const claudePricing = {
+  type: 'tokens',
+  currency: 'USD',
+  unit: 'per million tokens',
+  input_tokens: 15,
+  output_tokens: 75,
+};
+
+const claudeModel = {
+  id: 'anthropic/claude',
+  name: 'Claude',
+  author: 'anthropic',
+  source: 'aig-catalog',
+  modality: 'text-generation',
+  tags: ['LLM'],
+  description: 'Claude language model',
+  properties: { contextLength: 200000, maxOutputTokens: 8192 },
+  pricing: claudePricing,
+  created_at: '2026-11-04T20:00:00Z',
+};
+
+const claudeProvider = {
+  id: 'anthropic',
+  name: 'Anthropic',
+  slug: 'anthropic',
+  is_default: true,
+  is_custom: false,
+  account_specific: false,
+  pricing: claudePricing,
+  supported_formats: ['anthropic-messages'],
+  capabilities: { streaming: true, tool_use: true },
+  performance: {
+    latency_ms: { avg: 234, p50: 198, p95: 456 },
+    uptime_percent_7d: 99.8,
+    sample_size: 145623,
+  },
+};
+
+const aliasModel = {
+  ...claudeModel,
+  id: 'custom/my-alias',
+  name: 'My alias',
+  author: 'custom',
+};
+
+const customProvider = {
+  ...claudeProvider,
+  id: 'custom',
+  name: 'Custom',
+  slug: 'custom',
+  is_custom: true,
+  account_specific: true,
+};
+
+const workersAiModel = {
+  ...claudeModel,
+  id: '@cf/meta/llama-3.1-8b-instruct',
+  name: 'Llama 3.1 8B Instruct',
+  author: 'workers-ai',
+  source: 'workers-ai',
+  task: 'text-generation',
+  pricing: { ...claudePricing, input_tokens: 5, output_tokens: 25 },
+};
+
+const workersAiProvider = {
+  ...claudeProvider,
+  id: 'workers-ai',
+  name: 'Workers AI',
+  slug: 'workers-ai',
+  pricing: workersAiModel.pricing,
+  supported_formats: ['openai-chat'],
+};
+
 export default class AiMock extends WorkerEntrypoint {
   async websearch({ gatewayId, provider, query, limit, byokAlias }, params) {
     if (typeof gatewayId !== 'string' || gatewayId.trim() === '') {
@@ -24,6 +97,64 @@ export default class AiMock extends WorkerEntrypoint {
 
   async fetch(request) {
     const url = new URL(request.url);
+
+    if (url.pathname === '/ai-api/catalog/models') {
+      return Response.json({
+        success: true,
+        result: [claudeModel],
+        result_info: { count: 1, page: 2, per_page: 1, total_count: 3 },
+        requestUrl: request.url,
+      });
+    }
+
+    if (url.pathname === '/ai-api/catalog/gateways/my-gateway/models') {
+      return Response.json({
+        success: true,
+        result: [aliasModel],
+        result_info: { count: 1, page: 1, per_page: 50, total_count: 1 },
+        requestUrl: request.url,
+      });
+    }
+
+    if (
+      url.pathname ===
+      '/ai-api/catalog/gateways/my-gateway/models/anthropic/claude'
+    ) {
+      return Response.json({
+        success: true,
+        result: { ...claudeModel, providers: [customProvider] },
+      });
+    }
+
+    if (url.pathname === '/ai-api/catalog/models/anthropic/claude') {
+      return Response.json({
+        success: true,
+        result: { ...claudeModel, providers: [claudeProvider] },
+      });
+    }
+
+    if (
+      [
+        '/ai-api/catalog/models/@cf%2Fmeta/llama-3.1-8b-instruct',
+        '/ai-api/catalog/models/%40cf%2Fmeta/llama-3.1-8b-instruct',
+      ].includes(url.pathname)
+    ) {
+      return Response.json({
+        success: true,
+        result: { ...workersAiModel, providers: [workersAiProvider] },
+      });
+    }
+
+    if (url.pathname === '/ai-api/catalog/models/anthropic/missing') {
+      return Response.json(
+        { success: false, errors: [{ message: 'Model not found' }] },
+        { status: 404 }
+      );
+    }
+
+    if (url.pathname.startsWith('/ai-api/catalog/')) {
+      throw new Error(`Unexpected catalog path: ${url.pathname}`);
+    }
 
     if (url.pathname === '/ai-api/models/search') {
       return Response.json({

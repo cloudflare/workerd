@@ -12553,6 +12553,110 @@ type AiModelsSearchObject = {
     value: string;
   }[];
 };
+type AiCatalogScope = {
+  /** Omit to use the account catalog. */
+  gatewayId?: string;
+};
+type AiCatalogListParams = AiCatalogScope & {
+  /** Page number, starting at 1. */
+  page?: number;
+  per_page?: number;
+  /** Filter by model name or identifier. */
+  search?: string;
+  modality?: string;
+};
+interface AiCatalogPricing {
+  type:
+    "tokens" | "images" | "video" | "audio-duration" | "requests" | "hybrid";
+  currency: "USD";
+  unit: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  input_cached_tokens?: number;
+  input_cache_creation_tokens?: number;
+  output_image_count?: number;
+  first_output_megapixel?: number;
+  subsequent_output_megapixel?: number;
+  input_megapixel?: number;
+  "720p"?: number;
+  "1080p"?: number;
+  "720p_audio"?: number;
+  "1080p_audio"?: number;
+  input_characters?: number;
+  input_audio_minutes?: number;
+  per_request?: number;
+}
+/** One model in the unified AI Gateway and Workers AI catalog. */
+interface AiCatalogModel {
+  /** Model identifier, such as `anthropic/claude` or `@cf/meta/llama`. */
+  id: string;
+  name: string;
+  /** Primary provider ID. */
+  author: string;
+  source: "aig-catalog" | "workers-ai";
+  modality: string;
+  /** Workers AI task, when applicable. */
+  task?: string;
+  tags: string[];
+  description: string;
+  external_info_url?: string;
+  cover_image_url?: string;
+  /** Modality-specific model properties may include additional keys. */
+  properties: {
+    contextLength?: number;
+    maxOutputTokens?: number;
+    [key: string]: unknown;
+  };
+  /** Lowest available price across providers. */
+  pricing: AiCatalogPricing;
+  /** Provider-level details are always present in `getModel()` responses. */
+  providers?: AiCatalogProvider[];
+  created_at: string;
+  updated_at?: string;
+}
+interface AiCatalogProvider {
+  id: string;
+  name: string;
+  slug: string;
+  is_default: boolean;
+  is_custom: boolean;
+  account_specific: boolean;
+  pricing: AiCatalogPricing;
+  base_url?: string;
+  supported_formats?: string[];
+  capabilities?: {
+    streaming?: boolean;
+    tool_use?: boolean;
+    vision?: boolean;
+    caching?: boolean;
+  };
+  /** Global performance over the last seven days, when available. */
+  performance?: {
+    latency_ms: {
+      avg: number;
+      p50: number;
+      p95: number;
+    };
+    uptime_percent_7d: number;
+    sample_size: number;
+  };
+}
+interface AiCatalogListResponse {
+  success: boolean;
+  result: AiCatalogModel[];
+  result_info: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+}
+interface AiCatalogDetailResponse {
+  success: boolean;
+  result: AiCatalogModel & {
+    providers: AiCatalogProvider[];
+  };
+}
 type ChatCompletionsBase = ChatCompletionsMessagesInput;
 type ChatCompletionsInput = ChatCompletionsMessagesInput;
 interface InferenceUpstreamError extends Error {}
@@ -12644,6 +12748,13 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  /** List catalog models for this account, optionally including a gateway's models. */
+  listModels(params?: AiCatalogListParams): Promise<AiCatalogListResponse>;
+  /** Get one account or gateway model with its available providers and their prices. */
+  getModel(
+    modelId: string,
+    scope?: AiCatalogScope,
+  ): Promise<AiCatalogDetailResponse>;
   toMarkdown(): ToMarkdownService;
   toMarkdown(
     files: MarkdownDocument[],

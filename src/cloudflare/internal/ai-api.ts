@@ -102,6 +102,106 @@ export type AiModelsSearchObject = {
   }[];
 };
 
+export type AiCatalogScope = {
+  /** Omit to use the account catalog. */
+  gatewayId?: string;
+};
+
+export type AiCatalogListParams = AiCatalogScope & {
+  page?: number;
+  per_page?: number;
+  search?: string;
+  modality?: string;
+};
+
+export type AiCatalogPricing = {
+  type:
+    | 'tokens'
+    | 'images'
+    | 'video'
+    | 'audio-duration'
+    | 'requests'
+    | 'hybrid';
+  currency: 'USD';
+  unit: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  input_cached_tokens?: number;
+  input_cache_creation_tokens?: number;
+  output_image_count?: number;
+  first_output_megapixel?: number;
+  subsequent_output_megapixel?: number;
+  input_megapixel?: number;
+  '720p'?: number;
+  '1080p'?: number;
+  '720p_audio'?: number;
+  '1080p_audio'?: number;
+  input_characters?: number;
+  input_audio_minutes?: number;
+  per_request?: number;
+};
+
+export type AiCatalogModel = {
+  id: string;
+  name: string;
+  author: string;
+  source: 'aig-catalog' | 'workers-ai';
+  modality: string;
+  task?: string;
+  tags: string[];
+  description: string;
+  external_info_url?: string;
+  cover_image_url?: string;
+  properties: {
+    contextLength?: number;
+    maxOutputTokens?: number;
+    [key: string]: unknown;
+  };
+  pricing: AiCatalogPricing;
+  providers?: AiCatalogProvider[];
+  created_at: string;
+  updated_at?: string;
+};
+
+export type AiCatalogProvider = {
+  id: string;
+  name: string;
+  slug: string;
+  is_default: boolean;
+  is_custom: boolean;
+  account_specific: boolean;
+  pricing: AiCatalogPricing;
+  base_url?: string;
+  supported_formats?: string[];
+  capabilities?: {
+    streaming?: boolean;
+    tool_use?: boolean;
+    vision?: boolean;
+    caching?: boolean;
+  };
+  performance?: {
+    latency_ms: { avg: number; p50: number; p95: number };
+    uptime_percent_7d: number;
+    sample_size: number;
+  };
+};
+
+export type AiCatalogListResponse = {
+  success: boolean;
+  result: AiCatalogModel[];
+  result_info: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+};
+
+export type AiCatalogDetailResponse = {
+  success: boolean;
+  result: AiCatalogModel & { providers: AiCatalogProvider[] };
+};
+
 export class InferenceUpstreamError extends Error {
   constructor(message: string, name = 'InferenceUpstreamError') {
     super(message);
@@ -428,6 +528,74 @@ export class Ai extends wrappedBinding.WrappedBinding {
         throw new AiInternalError(data.errors[0]?.message || 'Internal Error');
       }
     }
+  }
+
+  /** List catalog models for this account, optionally including a gateway's models. */
+  async listModels(
+    params: AiCatalogListParams = {}
+  ): Promise<AiCatalogListResponse> {
+    const { gatewayId, ...filters } = params;
+    const url = new URL(`${this.#endpointURL}${this.#catalogPath(gatewayId)}`);
+    for (const key of ['page', 'per_page', 'search', 'modality'] as const) {
+      const value = filters[key];
+      if (value !== undefined) url.searchParams.set(key, String(value));
+    }
+    return this.#readCatalog<AiCatalogListResponse>(url);
+  }
+
+  /** Get one account or gateway model with its available providers and their prices. */
+  async getModel(
+    modelId: string,
+    scope: AiCatalogScope = {}
+  ): Promise<AiCatalogDetailResponse> {
+    // Workers AI authors can contain a slash (e.g. @cf/meta); the final
+    // segment is the model name, and the author is a single encoded path segment.
+    const parts = modelId.split('/');
+    const model = parts.pop();
+    if (
+      !model ||
+      model === '.' ||
+      model === '..' ||
+      parts.length === 0 ||
+      parts.some((part) => !part || part === '.' || part === '..')
+    ) {
+      throw new TypeError('Model ID must be in author/model format');
+    }
+    const author = parts.join('/');
+    const url = new URL(
+      `${this.#endpointURL}${this.#catalogPath(scope.gatewayId)}/${encodeURIComponent(author)}/${encodeURIComponent(model)}`
+    );
+    return this.#readCatalog<AiCatalogDetailResponse>(url);
+  }
+
+  #catalogPath(gatewayId?: string): string {
+    // TODO(AIG-1911): Align these provisional paths with the SDK forwarding
+    // routes once the account and gateway catalog endpoints are implemented.
+    if (gatewayId === undefined) return '/ai-api/catalog/models';
+    if (
+      !gatewayId ||
+      gatewayId === '.' ||
+      gatewayId === '..' ||
+      gatewayId.includes('/')
+    ) {
+      throw new TypeError('Invalid gateway ID');
+    }
+    return `/ai-api/catalog/gateways/${encodeURIComponent(gatewayId)}/models`;
+  }
+
+  async #readCatalog<T>(url: URL): Promise<T> {
+    const res = await this.#fetcher.fetch(url, { method: 'GET' });
+    if (!res.ok) {
+      let message = `Catalog request failed (${res.status})`;
+      try {
+        const data = (await res.json()) as { errors?: { message: string }[] };
+        message = data.errors?.[0]?.message ?? message;
+      } catch {
+        // Keep the HTTP status when the upstream response is not JSON.
+      }
+      throw new AiInternalError(message);
+    }
+    return (await res.json()) as T;
   }
 
   toMarkdown(): ToMarkdownService;

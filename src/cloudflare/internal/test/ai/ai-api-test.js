@@ -7,6 +7,83 @@ import * as assert from 'node:assert';
 export const tests = {
   async test(_, env) {
     {
+      const page = await env.ai.listModels({
+        page: 2,
+        per_page: 1,
+        search: 'Claude',
+      });
+      assert.deepStrictEqual(
+        page.result.map(({ id, name }) => ({ id, name })),
+        [{ id: 'anthropic/claude', name: 'Claude' }]
+      );
+      assert.equal(page.result[0].author, 'anthropic');
+      assert.equal(page.result[0].source, 'aig-catalog');
+      assert.deepStrictEqual(page.result[0].pricing, {
+        type: 'tokens',
+        currency: 'USD',
+        unit: 'per million tokens',
+        input_tokens: 15,
+        output_tokens: 75,
+      });
+      assert.deepStrictEqual(page.result_info, {
+        count: 1,
+        page: 2,
+        per_page: 1,
+        total_count: 3,
+      });
+      assert.equal(
+        new URL(page.requestUrl).search,
+        '?page=2&per_page=1&search=Claude'
+      );
+
+      const detail = await env.ai.getModel('anthropic/claude');
+      assert.deepStrictEqual(
+        detail.result.providers[0].pricing,
+        page.result[0].pricing
+      );
+      assert.equal(detail.result.providers[0].name, 'Anthropic');
+      assert.equal(detail.result.providers[0].is_default, true);
+      assert.deepStrictEqual(
+        detail.result.providers[0].performance.latency_ms,
+        {
+          avg: 234,
+          p50: 198,
+          p95: 456,
+        }
+      );
+      const workersAiDetail = await env.ai.getModel(
+        '@cf/meta/llama-3.1-8b-instruct'
+      );
+      assert.equal(workersAiDetail.result.id, '@cf/meta/llama-3.1-8b-instruct');
+
+      const gatewayPage = await env.ai.listModels({
+        gatewayId: 'my-gateway',
+        page: 1,
+      });
+      assert.deepStrictEqual(
+        gatewayPage.result.map(({ id, name }) => ({ id, name })),
+        [{ id: 'custom/my-alias', name: 'My alias' }]
+      );
+      assert.equal(new URL(gatewayPage.requestUrl).search, '?page=1');
+      const gatewayDetail = await env.ai.getModel('anthropic/claude', {
+        gatewayId: 'my-gateway',
+      });
+      assert.equal(gatewayDetail.result.providers[0].id, 'custom');
+      assert.equal(gatewayDetail.result.providers[0].is_custom, true);
+
+      await assert.rejects(env.ai.getModel('anthropic/missing'), {
+        message: 'Model not found',
+      });
+      await assert.rejects(env.ai.getModel('../admin'), { name: 'TypeError' });
+      await assert.rejects(env.ai.getModel('anthropic//extra'), {
+        name: 'TypeError',
+      });
+      await assert.rejects(env.ai.listModels({ gatewayId: '../admin' }), {
+        name: 'TypeError',
+      });
+    }
+
+    {
       // Test ai run response is object
       const resp = await env.ai.run('testModel', { prompt: 'test' });
       assert.deepStrictEqual(resp, { response: 'model response' });
