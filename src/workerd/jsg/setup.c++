@@ -757,6 +757,12 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // consumes it.
   defaultContextHandle.Reset();
 
+  // 8. Reject a heap holding a suspended generator, such as an async function the top level left
+  // awaiting a promise: CreateBlob(kClear) discards the bytecode it would resume in. Checked last,
+  // when only what CreateBlob() serializes is left to reach it.
+  KJ_REQUIRE(!getSnapshotCreator()->HasSuspendedGenerators(),
+      "PREPARE_SNAPSHOT: a generator or async function is suspended in the zygote's heap");
+
   artifact.blob =
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 
