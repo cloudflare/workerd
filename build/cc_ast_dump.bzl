@@ -44,7 +44,12 @@ def _cc_ast_dump_impl(ctx):
 
     # Enable pipefail so that the action fails when there are e.g. missing include errors, otherwise
     # we'd just continue despite the error and end up with an incomplete AST.
-    command = " ".join(["set -euo pipefail;"] + [executable] + arguments + ["|", "gzip", "-3", "-", ">", ctx.outputs.out.path])
+    # Clang's JSON AST dumper recurses without the stack-growth guard that Sema uses, so dumping
+    # the whole API overflows the default 8 MiB stack of Apple clang's main thread (a segfault, with
+    # no preprocessed reproducer). The main thread's stack size follows the soft stack limit, so
+    # raise it to the hard limit first.
+    raise_stack_limit = 'ulimit -s "$(ulimit -H -s)" 2>/dev/null || true;'
+    command = " ".join(["set -euo pipefail;", raise_stack_limit] + [executable] + arguments + ["|", "gzip", "-3", "-", ">", ctx.outputs.out.path])
 
     # run_shell until https://github.com/bazelbuild/bazel/issues/5511 is fixed
     ctx.actions.run_shell(
