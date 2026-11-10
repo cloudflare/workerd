@@ -519,10 +519,9 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
   Until then the isolate still detaches wrappers and destroys the `CppgcShim`s that own
   `Wrappable`s, and no thread can ask whether it holds the lock of an isolate that may already be
   gone. Once the isolate is disposed, the kept references are released, and so are later drops.
-  Those releases only give back the counts, with no wrapper left to update, since a `Wrappable`
-  that teardown never wrapped may still point to the disposed isolate. No lock serializes them,
-  so they go through the queue, which one thread at a time drains; a clone is not serialized,
-  so a resource that outlives its isolate must be used by one thread at a time.
+  Those releases only give back the counts, with no wrapper left to update. No lock serializes
+  them, so they go through the queue, which one thread at a time drains; a clone is not
+  serialized, so a resource that outlives its isolate must be used by one thread at a time.
 
 ### Creating resources from C++
 
