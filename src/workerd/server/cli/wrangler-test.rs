@@ -604,6 +604,69 @@ fn a_queue_with_two_consumers_is_an_error() {
 }
 
 #[test]
+fn workflows_run_on_the_workflows_worker() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "workflows": [
+                   { "binding": "REPORTS", "name": "reports", "class_name": "Report" }] }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("workflows"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-workflows", "app-workflows-storage"]);
+    let worker = |i| {
+        let service::Which::Worker(w) = services.get(i).which().unwrap() else {
+            panic!("not a worker");
+        };
+        w.unwrap()
+    };
+    let app = worker(0);
+    let worker::binding::Which::Wrapped(wrapped) =
+        app.get_bindings().unwrap().get(0).which().unwrap()
+    else {
+        panic!("REPORTS is not wrapped");
+    };
+    let wrapped = wrapped.unwrap();
+    let module = wrapped.get_module_name().unwrap().to_str().unwrap();
+    assert_eq!(module, "cloudflare-internal:workflows-api");
+    let engine = app.get_workflows_engine().unwrap();
+    let class = engine.get_actor_class().unwrap();
+    assert_eq!(class.get_name().unwrap().to_str().unwrap(), "app-workflows");
+    assert_eq!(class.get_entrypoint().unwrap().to_str().unwrap(), "Engine");
+    let flow = engine.get_workflows().unwrap().get(0);
+    assert_eq!(flow.get_class_name().unwrap().to_str().unwrap(), "Report");
+    let binding = flow.get_binding_service().unwrap();
+    assert_eq!(
+        binding.get_entrypoint().unwrap().to_str().unwrap(),
+        "WorkflowBinding"
+    );
+    let instances = worker(1).get_bindings().unwrap().get(0);
+    assert_eq!(instances.get_name().unwrap().to_str().unwrap(), "reports");
+    let worker::binding::Which::DurableObjectNamespace(ns) = instances.which().unwrap() else {
+        panic!("reports is not a namespace");
+    };
+    let ns = ns.unwrap();
+    let class = ns.get_class_name().unwrap().to_str().unwrap();
+    assert_eq!(class, "miniflare-workflows-reports");
+    assert_eq!(ns.get_service_name().unwrap().to_str().unwrap(), "app");
+}
+
+#[test]
 fn unbundled_typescript_main_is_an_error() {
     let error = load_project(&[
         (
