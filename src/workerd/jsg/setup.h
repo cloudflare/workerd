@@ -675,11 +675,11 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
-  // Created by getJsSerializeModeKey() on first use.
+  // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
 
-  // Created by getErrorPrototype() on first use: a template of an object whose one property is
-  // its context's Error.prototype.
+  // A template of an object whose one property is its context's Error.prototype, which
+  // getErrorPrototype() reads.
   v8::Global<v8::ObjectTemplate> errorPrototypeTemplate;
 
   // Object used as the underlying storage for a workers environment.

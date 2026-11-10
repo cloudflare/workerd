@@ -310,6 +310,18 @@ struct SerTestContext: public ContextGlobalObject {
     return deser.readValue(js);
   }
 
+  // Writes `in`, cuts the last `drop` bytes off, and reads what is left, as a peer could send it.
+  JsValue roundTripTruncated(Lock& js, JsValue in, uint32_t drop) {
+    auto content = ({
+      Serializer ser(js);
+      ser.write(js, in);
+      ser.release();
+    });
+    KJ_REQUIRE(drop <= content.data.size());
+    Deserializer deser(js, content.data.first(content.data.size() - drop));
+    return deser.readValue(js);
+  }
+
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(modules.exports);
   }
@@ -408,6 +420,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(roundTripStrict);
     JSG_METHOD(roundTripTwo);
     JSG_METHOD(roundTripWithData);
+    JSG_METHOD(roundTripTruncated);
     JSG_METHOD(foreignRoundTrip);
     JSG_METHOD(foreignMatchesSerializer);
     JSG_METHOD(foreignToSerializer);
@@ -854,6 +867,23 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
       "DataCloneError: Deserialization failed: unsupported object implemented in "
       "JavaScript.");
 
+  // A record that ends too soon is a DataCloneError wherever it ends: in the flags, in the
+  // deserializeInfo, in its length, or in the tag before them. After the header and V8's host
+  // object tag, the record is its tag, the length 10, 'test:Point' and the flags, a byte each but
+  // the name. Cut off before V8's tag, it is V8's own error for malformed data.
+  for (auto drop: {1, 2, 12, 13}) {
+    expectEval(kj::str("try {\n"
+                       "  roundTripTruncated(new RawJsSerializable('test:Point', 0), ",
+                   drop,
+                   ");\n"
+                   "} catch (e) {\n"
+                   "  `${e.name}: ${e.message}`\n"
+                   "}"),
+        "string", "DataCloneError: Deserialization failed: the data is malformed.");
+  }
+  expectEval("roundTripTruncated(new RawJsSerializable('test:Point', 0), 14)", "throws",
+      "Error: Unable to deserialize cloned data.");
+
   // Instances serialize the same with class instances otherwise not serializable, as for RPC.
   expectEval("roundTripStrict(new Point(1)).x", "number", "2");
 
@@ -887,8 +917,11 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
       "string", "DataCloneError");
   // Nor is one whose descriptor lacks a clone function or a deserializeInfo string, or isn't
   // frozen, so that the serializer reads each descriptor once.
+  // Nor is a descriptor that is a workerd API object, whose interceptors could run code.
   for (auto mark: {"{}"_kj, "descriptor('test:Point')"_kj, "descriptor(1, () => 1)"_kj,
-         "{ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1 }"_kj}) {
+         "{ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1 }"_kj,
+         "Object.freeze(Object.assign(new Foo(1), { deserializeInfo: 'test:Point', clone: () => 1 "
+         "}))"_kj}) {
     expectEval(kj::str("const n = new NoDeserialize();\n"
                        "n[kMode] = ",
                    mark,
@@ -936,6 +969,19 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
                  "}"),
       "string",
       "DataCloneError: Deserialization failed: unknown class implemented in JavaScript. 0");
+
+  // Nor is one found through a workerd API object, as the module's exports or as the class's
+  // descriptor.
+  expectEval("setModule(Object.assign(new Foo(1), { Point }));\n"
+             "try { roundTrip(new Point(1)); } catch (e) { `${e.name}: ${e.message}` }",
+      "string", "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
+  expectEval("class Wrapped {}\n"
+             "Wrapped.prototype[kCloneable] = Object.assign(new Foo(1), { deserialize() {} });\n"
+             "setModule({ Wrapped });\n"
+             "try { roundTrip(new Forged('test:Wrapped')); } catch (e) {\n"
+             "  `${e.name}: ${e.message}`\n"
+             "}",
+      "string", "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
 
   // What a deserialize function throws reaches the caller, such as its rejection of data that
   // no instance of its class would have written.
@@ -1019,6 +1065,35 @@ KJ_TEST("serialization of classes implemented in JavaScript without bootstrap mo
                    "clearModules();\n"
                    "try { roundTrip(new Point(1)); } catch (e) { `${e.name}: ${e.message}` }"),
       "string", "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
+}
+
+KJ_TEST("a SharedArrayBuffer id that names no buffer is malformed data") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  e.run([&](jsg::Lock& js) {
+    auto released = ({
+      Serializer ser(js);
+      ser.write(js, JsValue(v8::SharedArrayBuffer::New(js.v8Isolate, 8)));
+      ser.release();
+    });
+    KJ_ASSERT(released.sharedArrayBuffers.size() == 1);
+
+    // With its buffer, the data is read.
+    {
+      Deserializer deser(js, released);
+      KJ_EXPECT(deser.readValue(js).isSharedArrayBuffer());
+    }
+
+    // Without it, the id names no buffer.
+    Deserializer deser(
+        js, released.data, kj::none, kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>());
+    JSG_TRY(js) {
+      deser.readValue(js);
+      KJ_FAIL_EXPECT("an id that names no buffer was accepted");
+    }
+    JSG_CATCH(exception) {
+      KJ_EXPECT(kj::str(exception.getHandle(js)) == "Error: Unable to deserialize cloned data.");
+    }
+  });
 }
 
 KJ_TEST("recursive structuredClone with transfer") {

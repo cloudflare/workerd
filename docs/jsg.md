@@ -1813,10 +1813,12 @@ read `Range`, as when it replaces a C++ class under a flag, require its module
 whatever the flags. If only some flags expose `Range`, as for an experimental
 class, require its module only under those flags.
 
-The export must be a data property, as `module.exports = { ... }` makes it: the
-deserializer can't call a getter, so data naming an accessor export is a
-`DataCloneError`. The `per_isolate@eslint` test rejects value exports
-(`export class`, `export function`), which TypeScript compiles to getters.
+The export must be a data property of an ordinary object, as
+`module.exports = { ... }` makes it: the deserializer can't call a getter, so
+data naming an accessor export is a `DataCloneError`, as is data naming a
+property of a workerd API object. The `per_isolate@eslint` test rejects value
+exports (`export class`, `export function`), which TypeScript compiles to
+getters.
 
 The deserializer finds the class by resolving `'module:Export'` among the
 bootstrap's loaded modules (`jsg::BootstrapModules`), so there is no registry.

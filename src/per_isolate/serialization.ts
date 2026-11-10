@@ -40,6 +40,10 @@
 // Either mark is ignored on an object whose prototype is Object.prototype or
 // null: to keep plain objects cheap, the serializer does not check them for
 // one. Mark instances of a class, or of a prototype of the runtime's own.
+// User code can give an instance either prototype, and so have it copied as a
+// plain object, with its own enumerable string-keyed properties. Keep an
+// instance's state out of those: in #private fields or a WeakMap for an
+// uncloneable class, and under private symbols for a cloneable one.
 // Either is ignored, too, on an instance of a built-in that V8 serializes
 // itself, even of a subclass: an Array, ArrayBuffer, SharedArrayBuffer,
 // typed array, DataView, Date, Map, Set, RegExp, or Boolean, Number or String
@@ -56,9 +60,16 @@
 //   (utils.getPrivateSymbol), not #private fields, which an instance made
 //   without the constructor lacks; and brand-check it the same way, not with
 //   `#field in`.
+// - Define the instance's other properties, such as an error's `message`,
+//   with ObjectDefineProperty(), not `=`, which calls any setter on the
+//   prototype chain, where user code may have installed one: on the class's
+//   prototype if user code can reach it, or on Error.prototype. Assigning
+//   with a private symbol is safe: V8 never looks one up the prototype chain.
 // - Validate the data completely: it may come from an untrusted source, such
-//   as an RPC peer, and need not be anything clone() returned. Don't keep
-//   anything derived from it that later reaches a native binding unchecked.
+//   as an RPC peer, and need not be anything clone() returned. Check the type
+//   of every value read from it: over RPC, a value in the data may be a stub,
+//   which reports every property as present. Don't keep anything derived from
+//   it that later reaches a native binding unchecked.
 // - Use primordials only: deserialize() runs on an instance whose prototype
 //   and globals user code may have changed. Read the data's properties with
 //   getOwnDataProperty(), not `data.x` or destructuring, which look a
@@ -190,7 +201,8 @@ function makeCloneable<T extends object>(
 // Returns the value of `data`'s own data property `key`, or undefined if it
 // has none, or has an accessor instead. Reads neither the prototype chain nor
 // the property descriptor's, and calls no getter. Runs no user code unless
-// `data` is a Proxy, which deserialized data never is.
+// `data` is a Proxy, which deserialized data never is. Over RPC, it can return
+// a stub whatever `key` is, so check the type of what it returns.
 function getOwnDataProperty(data: object, key: string): unknown {
   const descriptor = ObjectGetOwnPropertyDescriptor(data, key);
   if (descriptor === undefined || !ObjectHasOwn(descriptor, 'value')) {

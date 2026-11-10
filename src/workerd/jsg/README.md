@@ -442,6 +442,8 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | `write(js, JsValue)`                         | `readValue(js) → JsValue`                           |
 | `transfer(js, JsArrayBuffer)`                | `getVersion() → uint32_t`                           |
 
+A raw read past the end of the data throws DataCloneError.
+
 ### Rules
 
 - `JSG_SERIALIZABLE` MUST appear AFTER `JSG_RESOURCE_TYPE` block

@@ -141,10 +141,13 @@ struct OwnDataProperty {
 };
 
 // Returns `object`'s own data property `name`, or kj::none if it has none, or has an accessor
-// instead. Runs no JavaScript: it calls no Proxy trap or JavaScript accessor, and does not read
-// the prototype chain.
+// instead, or `object` is a workerd API object. Runs no JavaScript: it calls no Proxy trap or
+// JavaScript accessor, and does not read the prototype chain.
 kj::Maybe<OwnDataProperty> tryGetOwnDataProperty(
     Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
+  // GetOwnPropertyDescriptor() below calls an API object's interceptors and native accessors,
+  // which may run code. Anything this reads is an ordinary object.
+  if (object->InternalFieldCount() > 0) return kj::none;
   auto context = js.v8Context();
   v8::Local<v8::String> key = js.strIntern(name);
   // False for a Proxy, so the descriptor below is not a Proxy trap's.
@@ -176,6 +179,12 @@ constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
 constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
 constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
     JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
+
+// The message of the DataCloneError that a raw read throws when the data ends too soon. Like V8's
+// own error for malformed data, it is not an internal error: corrupt or crafted bytes are not a
+// bug in the reader.
+constexpr kj::StringPtr MALFORMED_DATA_MESSAGE =
+    "Deserialization failed: the data is malformed."_kj;
 }  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
@@ -704,19 +713,19 @@ JsValue Deserializer::readValue(Lock& js) {
 
 uint Deserializer::readRawUint32() {
   uint32_t result;
-  KJ_ASSERT(deser.ReadUint32(&result), "deserialization failure, possible corruption");
+  JSG_REQUIRE(deser.ReadUint32(&result), DOMDataCloneError, MALFORMED_DATA_MESSAGE);
   return result;
 }
 
 uint64_t Deserializer::readRawUint64() {
   uint64_t result;
-  KJ_ASSERT(deser.ReadUint64(&result), "deserialization failure, possible corruption");
+  JSG_REQUIRE(deser.ReadUint64(&result), DOMDataCloneError, MALFORMED_DATA_MESSAGE);
   return result;
 }
 
 kj::ArrayPtr<const kj::byte> Deserializer::readRawBytes(size_t size) {
   const void* data;
-  KJ_ASSERT(deser.ReadRawBytes(size, &data), "deserialization failure, possible corruption");
+  JSG_REQUIRE(deser.ReadRawBytes(size, &data), DOMDataCloneError, MALFORMED_DATA_MESSAGE);
   return kj::arrayPtr(reinterpret_cast<const kj::byte*>(data), size);
 }
 
@@ -734,9 +743,11 @@ kj::String Deserializer::readLengthDelimitedString() {
 
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
     v8::Isolate* isolate, uint32_t clone_id) {
+  // V8 reports the data as malformed if this returns nothing, as for an id that names no buffer.
   KJ_IF_SOME(backingStores, sharedBackingStores) {
-    KJ_ASSERT(clone_id < backingStores.size());
-    return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
+    if (clone_id < backingStores.size()) {
+      return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
+    }
   }
   return v8::MaybeLocal<v8::SharedArrayBuffer>();
 }

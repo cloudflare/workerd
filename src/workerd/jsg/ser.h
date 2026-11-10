@@ -98,11 +98,12 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 // * A cloneable class has a descriptor: an object with the own data properties `deserializeInfo`,
 //   `clone` and `deserialize`. `deserializeInfo` is a string "module:Export" naming the class's
 //   constructor among the exports of a loaded bootstrap module, which is how the deserializer finds
-//   the class: there is no registry. Only an own data property counts, as an export or in a
-//   descriptor: the deserializer can't call a getter, so it rejects an accessor. The deserializer
-//   cannot load a module, so it finds only classes whose modules were loaded while the bootstrap
-//   ran. It finds any such class, whether or not the compatibility flags expose it, so data from
-//   an untrusted source can make an instance of any class whose module is loaded.
+//   the class: there is no registry. Only an own data property of an ordinary object counts, as
+//   an export or in a descriptor: the deserializer can't call a getter, so it rejects an accessor,
+//   and it rejects any property of a workerd API object, whose interceptors could run code. The
+//   deserializer cannot load a module, so it finds only classes whose modules were loaded while
+//   the bootstrap ran. It finds any such class, whether or not the compatibility flags expose it,
+//   so data from an untrusted source can make an instance of any class whose module is loaded.
 //   `clone(instance)` returns the instance's data, any serializable value, and
 //   `deserialize(instance, data)` initializes an instance from it. The class's constructor's
 //   `prototype` holds the descriptor under JS_CLONEABLE_KEY. Its `clone` and `deserializeInfo`
@@ -415,11 +416,12 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // comment on Serializer).
   JsValue readValue(Lock& js);
 
+  // The raw reads throw DataCloneError if the data ends too soon.
   uint32_t readRawUint32();
   uint64_t readRawUint64();
 
   // Returns a view directly into the original buffer for the number of bytes requested. Always
-  // returns the exact amount; throws if not possible.
+  // returns the exact amount.
   kj::ArrayPtr<const kj::byte> readRawBytes(size_t size);
 
   // Reads a size (readRawUint64) followed by that many bytes.
