@@ -27,6 +27,8 @@ namespace {
 // 0 for a name that is written out, or the 1-based index of the name in ERROR_TYPES.
 constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
 constexpr uint32_t ERROR_TAG_UNKNOWN = 0;
+// The oldest version of V8's format that jsg::Serializer writes.
+constexpr uint32_t MIN_SERIALIZATION_VERSION = 13;
 
 struct ErrorType {
   kj::StringPtr name;
@@ -91,8 +93,22 @@ class Serializer final: public v8::ValueSerializer::Delegate {
       : isolate(isolate),
         errorsAreHostObjects(errorsAreHostObjects),
         sharedArrayBuffers(isolate),
-        ser(isolate, this) {
+        ser(isolate, this) {}
+
+  // Writes the header, of `version` if there is one, as jsg::Serializer does for its `version`
+  // option. Returns false, leaving a DataCloneError pending, if V8 can't write that version.
+  bool writeHeader(kj::Maybe<uint32_t> version) {
+    KJ_IF_SOME(v, version) {
+      // SetWriteVersion() fails a V8 check, rather than throwing, for a version it can't write.
+      if (v < MIN_SERIALIZATION_VERSION || v > v8::CurrentValueSerializerFormatVersion()) {
+        throwDataCloneError(isolate,
+            newString(isolate, kj::str("Serialization version ", v, " is not supported.")));
+        return false;
+      }
+      if (ser.SetWriteVersion(v).IsNothing()) return false;
+    }
     ser.WriteHeader();
+    return true;
   }
 
   // Returns false if serialization threw, leaving the exception pending.
@@ -302,9 +318,11 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
 bool local_serialize(Isolate* isolate,
     const Local& value,
     bool errors_are_host_objects,
+    kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result) {
   if (exceptionPending(isolate)) return false;
   Serializer serializer(isolate, errors_are_host_objects);
+  if (!serializer.writeHeader(version)) return false;
   if (!serializer.write(local_as_ref_from_ffi<v8::Value>(value))) return false;
   result = serializer.release();
   return true;

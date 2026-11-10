@@ -734,6 +734,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: &Local,
             errors_are_host_objects: bool,
+            version: KjMaybe<u32>,
             result: &mut Vec<u8>,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
