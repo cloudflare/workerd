@@ -273,6 +273,7 @@ wpt_test(
 
 wpt_test(
     name = "wasm/jsapi",
+    size = "large",
     config = "wasm/jsapi-test.ts",
     extra_wpt_directories = [
         "@wpt//:wasm/jsapi@module",
