@@ -602,6 +602,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       "operation within a handler. "
       "https://developers.cloudflare.com/workers/runtime-apis/handlers/"_kj;
 
+  // The message of the Error with which awaitJs() fails if JavaScript never settles the promise.
+  static constexpr kj::StringPtr NEVER_SETTLED_MESSAGE = "Promise will never complete."_kj;
+
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
 
@@ -2119,7 +2122,7 @@ class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
     } else {
       // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
       // this promise.
-      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, NEVER_SETTLED_MESSAGE));
     }
   }
 };

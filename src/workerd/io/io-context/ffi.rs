@@ -43,6 +43,8 @@ pub mod bridge {
         type IoOwnedObject;
 
         fn io_context_no_request_message() -> &'static str;
+        // TODO(soon): Define this message in Rust once C++ `IoContext::awaitJs()` is gone.
+        fn io_context_never_settled_message() -> &'static str;
         fn io_context_try_current_id() -> KjMaybe<u64>;
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;

@@ -59,6 +59,10 @@ void setTag(Span& span, Literal key, Value value) {
   return IoContext::NO_REQUEST_MESSAGE.cStr();
 }
 
+::rust::Str io_context_never_settled_message() {
+  return IoContext::NEVER_SETTLED_MESSAGE.cStr();
+}
+
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });

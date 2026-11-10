@@ -16,6 +16,7 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
@@ -57,6 +58,7 @@ mod ffi {
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
         type Isolate = jsg::v8::ffi::Isolate;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type Local = jsg::v8::ffi::Local;
     }
 
     /// How the last `await_released()` ends once its future has a value.
@@ -109,6 +111,17 @@ mod ffi {
         Terminate,
     }
 
+    /// How `await_js_start()` starts its wait.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AwaitJsStart {
+        /// Keeps the promise's resolver, for `settle_awaited_js()`.
+        KeepResolver,
+        /// Keeps nothing, so that the promise and its reactions are unreachable.
+        DropResolver,
+        /// Keeps the resolver, and races the wait with `cancel_awaited_js()`.
+        Cancellable,
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
@@ -149,6 +162,14 @@ mod ffi {
         pub unsafe fn new_gate(isolate: *mut Isolate) -> MaybeLocal;
         fn open_gate() -> bool;
         unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()>;
+
+        unsafe fn await_js_start(isolate: usize, start: AwaitJsStart) -> Result<()>;
+        unsafe fn settle_awaited_js(isolate: usize, fulfill: bool) -> Result<()>;
+        unsafe fn reject_awaited_js(isolate: usize, reason: Local) -> Result<()>;
+        fn forget_awaited_js_resolver();
+        fn cancel_awaited_js() -> bool;
+        fn awaited_js_outcome() -> String;
+        fn awaited_js_map_runs() -> u32;
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
@@ -776,6 +797,141 @@ unsafe fn await_and_record_async_context(isolate: usize) -> Result<()> {
             })
         })
         .map_err(|err| to_io(&err))
+}
+
+thread_local! {
+    /// The resolver of the promise the last `await_js_start()` waits for, if it kept it.
+    static AWAITED_JS_RESOLVER: RefCell<Option<v8::Global<v8::PromiseResolver>>> =
+        const { RefCell::new(None) };
+}
+
+/// How the wait of the last `await_js_start()` ended: "pending" until it does.
+static AWAITED_JS_OUTCOME: Mutex<String> = Mutex::new(String::new());
+/// How many times the conversion of the last `await_js_start()` ran.
+static AWAITED_JS_MAP_RUNS: AtomicU32 = AtomicU32::new(0);
+/// What cancels the wait of the last `await_js_start(Cancellable)`.
+static AWAITED_JS_CANCEL: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
+
+fn set_awaited_js_outcome(outcome: String) {
+    *AWAITED_JS_OUTCOME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = outcome;
+}
+
+/// The conversion of `await_js_start()`'s wait, which counts its runs.
+fn count_and_convert<'a>(
+    lock: &mut jsg::Lock<'a>,
+    value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    f64::from_js(lock, value)
+}
+
+/// In a request, `IoContext::await_js()`s a new promise as `start` says, and records how the
+/// wait ends from the callback of an `await_io_and_run()` of it.
+unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()> {
+    set_awaited_js_outcome("pending".to_owned());
+    AWAITED_JS_MAP_RUNS.store(0, Ordering::SeqCst);
+    AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
+    let (cancel, cancelled) = oneshot::channel::<()>();
+    // Without `Cancellable`, the future holds the sender, so that the wait is never cancelled.
+    let held_cancel = if start == ffi::AwaitJsStart::Cancellable {
+        *AWAITED_JS_CANCEL
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(cancel);
+        None
+    } else {
+        Some(cancel)
+    };
+
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    let resolver = v8::PromiseResolver::new(lock).map_err(|err| to_io(&err))?;
+    let wait = context
+        .await_js(lock, resolver.promise(), count_and_convert)
+        .map_err(|err| to_io(&err))?;
+    if start != ffi::AwaitJsStart::DropResolver {
+        let resolver = resolver.to_global(lock);
+        AWAITED_JS_RESOLVER.with(|cell| *cell.borrow_mut() = Some(resolver));
+    }
+    let future = async move {
+        let _held_cancel = held_cancel;
+        match futures::future::select(wait, cancelled).await {
+            futures::future::Either::Left((Ok(value), _)) => format!("fulfilled: {value}"),
+            futures::future::Either::Left((Err(err), _)) => {
+                format!("rejected: {}", err.description())
+            }
+            futures::future::Either::Right(_) => "cancelled".to_owned(),
+        }
+    };
+    context
+        .await_io_and_run(future, |_lock, outcome| {
+            set_awaited_js_outcome(outcome);
+            Ok(())
+        })
+        .map_err(|err| to_io(&err))
+}
+
+/// Fulfills the promise of the last `await_js_start()` with 42, or rejects it with a
+/// `TypeError`, from the request this is called in.
+unsafe fn settle_awaited_js(isolate: usize, fulfill: bool) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let resolver = AWAITED_JS_RESOLVER
+        .with(|cell| cell.borrow_mut().take())
+        .ok_or_else(|| std::io::Error::other("await_js_start() kept no resolver"))?
+        .as_local(lock);
+    if fulfill {
+        let value = 42.0_f64.to_js(lock).map_err(|err| to_io(&err))?;
+        resolver.resolve(lock, value)
+    } else {
+        let reason = lock
+            .exception(&jsg::Error::new_type_error("boom"))
+            .map_err(|err| to_io(&err))?;
+        resolver.reject(lock, reason)
+    }
+    .map_err(|err| to_io(&err))
+}
+
+/// Rejects the promise of the last `await_js_start()` with `reason`, a handle in the caller's
+/// scope.
+unsafe fn reject_awaited_js(isolate: usize, reason: v8::ffi::Local) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let reason = unsafe { v8::Local::<v8::Value>::from_ffi(reason) };
+    AWAITED_JS_RESOLVER
+        .with(|cell| cell.borrow_mut().take())
+        .ok_or_else(|| std::io::Error::other("await_js_start() kept no resolver"))?
+        .as_local(lock)
+        .reject(lock, reason)
+        .map_err(|err| to_io(&err))
+}
+
+/// Drops the resolver the last `await_js_start()` kept.
+fn forget_awaited_js_resolver() {
+    AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
+}
+
+/// Cancels the wait of the last `await_js_start(Cancellable)`; false if there was none.
+fn cancel_awaited_js() -> bool {
+    AWAITED_JS_CANCEL
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .is_some_and(|cancel| cancel.send(()).is_ok())
+}
+
+fn awaited_js_outcome() -> String {
+    AWAITED_JS_OUTCOME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+fn awaited_js_map_runs() -> u32 {
+    AWAITED_JS_MAP_RUNS.load(Ordering::SeqCst)
 }
 
 /// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the

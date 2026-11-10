@@ -20,6 +20,10 @@ namespace workerd::io_context {
 // The message of the error IoContext::current() throws outside a request.
 ::rust::Str io_context_no_request_message();
 
+// The message of the Error with which IoContext::awaitJs() fails if JavaScript never settles the
+// promise.
+::rust::Str io_context_never_settled_message();
+
 // IoContext::tryGetCurrentId(), as a uint64_t.
 kj::Maybe<uint64_t> io_context_try_current_id();
 

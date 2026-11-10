@@ -16,11 +16,13 @@ use std::ffi::CStr;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
 use std::task::Poll;
+use std::task::Waker;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -244,6 +246,83 @@ impl<'s> IoContext<'s> {
         })
     }
 
+    /// Waits for `promise` as part of this request, then resolves the returned future with what
+    /// `map` returns when called with the value it is fulfilled with, as C++
+    /// `IoContext::awaitJs(js, promise, func)` does. `map` runs in the reaction to the promise,
+    /// under the isolate lock. It is `Copy`, so that what it captures holds no GC references, and
+    /// `Send`, as the reactions' data must be.
+    ///
+    /// The future fails with the promise's rejection, or what JavaScript threw in `map`, as
+    /// [`jsg::Lock::exception_to_kj`] tunnels it, or with `map`'s own error, described as
+    /// `jsg.<name>: <message>`. If tunneling runs JavaScript that throws (a getter of the
+    /// rejection's `stack`, say), the reaction rejects with that exception, and the future fails
+    /// as for a promise that never settles, as in C++. As in C++, the promise must settle in
+    /// this request: its reactions are not run in another, and if the promise is
+    /// garbage-collected without settling, or this `IoContext` is destroyed first, the future
+    /// fails with an `Error` whose message is `Promise will never complete.`.
+    ///
+    /// The reactions hold the half of the wait that settles it through an [`IoOwned`], which
+    /// gives it the lifetime C++ gives `AwaitJsFulfiller` through `IoOwn`:
+    ///
+    /// - A reaction takes it only in the request that started the wait. In any other, taking it
+    ///   fails with the error C++ throws for an I/O object of another request, which rejects the
+    ///   promise the reaction returns, as in C++.
+    /// - Dropping the reactions' data drops it through C++ `IoOwn`, so at once if the request
+    ///   that owns it is current, and otherwise through the request's delete queue, the next time
+    ///   it runs. The request drops it when it is destroyed.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one, and with an
+    /// error for which [`jsg::Error::is_pending`] is true if V8 fails to register the reactions
+    /// or execution is terminating.
+    //
+    // TODO(soon): Log a rejection as an uncaught exception, join the wait with the request's
+    // abort, record it for async tracing, and choose the memory-limit error once the isolate is
+    // past its heap limit.
+    pub fn await_js<T, M>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+        map: M,
+    ) -> jsg::Result<AwaitJs<T>>
+    where
+        T: Send + 'static,
+        M: Copy
+            + Send
+            + 'static
+            + for<'a> Fn(&mut jsg::Lock<'a>, v8::Local<'a, v8::Value>) -> jsg::Result<T>,
+    {
+        if lock.is_execution_terminating() {
+            return Err(jsg::Error::pending());
+        }
+        let shared = Arc::new(AwaitJsShared(Mutex::new(AwaitJsState::Waiting(None))));
+        let sender = self.add_object(AwaitJsSender {
+            shared: Arc::clone(&shared),
+        })?;
+        promise.into().then_or_catch(
+            lock,
+            AwaitJsReaction { sender, map },
+            await_js_on_fulfilled::<T, M>,
+            await_js_on_rejected::<T, M>,
+        )?;
+        Ok(AwaitJs { shared })
+    }
+
+    /// [`await_js`](Self::await_js) for a value that converts with [`jsg::FromJS`].
+    ///
+    /// # Errors
+    /// As for `await_js`.
+    pub fn await_js_value<T>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<v8::Local<'s, v8::Promise>>,
+    ) -> jsg::Result<AwaitJs<T>>
+    where
+        T: for<'a> jsg::FromJS<'a, ResultType = T> + Send + 'static,
+    {
+        self.await_js(lock, promise, |lock, value| T::from_js(lock, value))
+    }
+
     /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
     /// dropped when the `IoContext` is destroyed, or when the returned handle is dropped, unless
     /// [`IoOwned::take`] has taken it. How the value is reached differs from C++; see
@@ -449,6 +528,187 @@ async fn catch_poll_panic<F: Future>(future: F) -> Result<F::Output, String> {
         ));
     }
     output
+}
+
+/// What a wait of [`IoContext::await_js`] has come to, shared by its [`AwaitJs`] and its
+/// [`AwaitJsSender`].
+enum AwaitJsState<T> {
+    /// Not settled. Holds the waker of the last poll, if any.
+    Waiting(Option<Waker>),
+    /// The promise was fulfilled with this value, converted.
+    Fulfilled(T),
+    /// The promise was rejected, or converting its value failed.
+    Rejected(cxx::KjError),
+    /// The sender was dropped without settling the wait.
+    NeverSettled,
+    /// The [`AwaitJs`] was dropped before the wait settled.
+    Cancelled,
+    /// The [`AwaitJs`] returned the outcome.
+    Done,
+}
+
+struct AwaitJsShared<T>(Mutex<AwaitJsState<T>>);
+
+impl<T> AwaitJsShared<T> {
+    // Nothing that holds the lock calls into V8 or panics, so it is never poisoned, and a drop
+    // in a GC finalizer cannot find it held by the code the finalizer interrupted.
+    fn lock(&self) -> MutexGuard<'_, AwaitJsState<T>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Settles the wait with `state` if it is waiting, then wakes its future.
+    fn settle(&self, state: AwaitJsState<T>) {
+        let waker = {
+            let mut current = self.lock();
+            let AwaitJsState::Waiting(waker) = &mut *current else {
+                return;
+            };
+            let waker = waker.take();
+            *current = state;
+            waker
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        matches!(*self.lock(), AwaitJsState::Cancelled)
+    }
+}
+
+/// The half of a wait of [`IoContext::await_js`] that settles it, which the request owns through
+/// an [`IoOwned`].
+struct AwaitJsSender<T> {
+    shared: Arc<AwaitJsShared<T>>,
+}
+
+impl<T> Drop for AwaitJsSender<T> {
+    /// Settles the wait as never settling, as `~AwaitJsFulfiller()` does, unless it has settled
+    /// or was cancelled.
+    ///
+    /// The reactions' data is dropped by the garbage collector once the promise is unreachable,
+    /// in a cppgc finalizer or the GC epilogue, so this must not enter V8, allocate on its heap,
+    /// or panic. It only sets the state and wakes the future, which builds the error once it is
+    /// polled.
+    fn drop(&mut self) {
+        self.shared.settle(AwaitJsState::NeverSettled);
+    }
+}
+
+/// A future for the outcome of a JavaScript promise, from [`IoContext::await_js`].
+///
+/// It is `Send`, and is polled without the isolate lock, like the futures that
+/// [`IoContext::await_io_and_run`] waits for. Dropping it before the promise settles cancels the
+/// wait: the conversion then does not run.
+pub struct AwaitJs<T> {
+    shared: Arc<AwaitJsShared<T>>,
+}
+
+impl<T> Future for AwaitJs<T> {
+    type Output = Result<T, cxx::KjError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let state = {
+            let mut state = self.shared.lock();
+            if let AwaitJsState::Waiting(waker) = &mut *state {
+                if waker.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+                    return Poll::Pending;
+                }
+                let replaced = waker.replace(cx.waker().clone());
+                // Dropping a waker runs code that is not ours, so not under the lock.
+                drop(state);
+                drop(replaced);
+                return Poll::Pending;
+            }
+            std::mem::replace(&mut *state, AwaitJsState::Done)
+        };
+        match state {
+            AwaitJsState::Waiting(_) => unreachable!("returned above"),
+            AwaitJsState::Fulfilled(value) => Poll::Ready(Ok(value)),
+            AwaitJsState::Rejected(err) => Poll::Ready(Err(err)),
+            AwaitJsState::NeverSettled => Poll::Ready(Err(cxx::KjError::new(
+                cxx::KjExceptionType::Failed,
+                format!("jsg.Error: {}", bridge::io_context_never_settled_message()),
+            ))),
+            AwaitJsState::Cancelled | AwaitJsState::Done => {
+                unreachable!("an AwaitJs polled after it returned its outcome")
+            }
+        }
+    }
+}
+
+impl<T> Drop for AwaitJs<T> {
+    fn drop(&mut self) {
+        let mut state = self.shared.lock();
+        if matches!(*state, AwaitJsState::Waiting(_)) {
+            let waiting = std::mem::replace(&mut *state, AwaitJsState::Cancelled);
+            // Its waker is dropped after the lock is released, as in `poll`.
+            drop(state);
+            drop(waiting);
+        }
+    }
+}
+
+/// The data of the reactions [`IoContext::await_js`] registers.
+struct AwaitJsReaction<T, M> {
+    sender: IoOwned<AwaitJsSender<T>>,
+    map: M,
+}
+
+// A `Copy` `map` holds no `jsg::Rc` or `TracedGlobal`, and an `IoOwned` holds no JavaScript
+// handles.
+jsg::jsg_traced!(<T, M: Copy> AwaitJsReaction<T, M>);
+
+/// The reaction to the fulfillment of the promise that [`IoContext::await_js`] waits for.
+fn await_js_on_fulfilled<'a, T, M>(
+    lock: &mut jsg::Lock<'a>,
+    reaction: &AwaitJsReaction<T, M>,
+    value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<v8::Local<'a, v8::Value>>
+where
+    T: Send + 'static,
+    M: for<'b> Fn(&mut jsg::Lock<'b>, v8::Local<'b, v8::Value>) -> jsg::Result<T>,
+{
+    let Some(sender) = reaction.sender.take(lock)? else {
+        unreachable!("only one reaction to a promise runs, once");
+    };
+    // As C++ does once the KJ promise is gone, `map` does not run for a cancelled wait.
+    if !sender.shared.is_cancelled() {
+        // Only the exceptions that JavaScript threw are caught here; `map`'s own error is
+        // tunneled as it is.
+        let outcome = lock.try_catch(|lock| match (reaction.map)(lock, value) {
+            Err(err) if err.is_pending() => Err(err),
+            outcome => Ok(outcome),
+        })?;
+        let state = match outcome {
+            Ok(Ok(value)) => AwaitJsState::Fulfilled(value),
+            Ok(Err(err)) => AwaitJsState::Rejected(kj_error_of(&err)),
+            Err(exception) => AwaitJsState::Rejected(lock.exception_to_kj(exception)?),
+        };
+        sender.shared.settle(state);
+    }
+    Ok(lock.undefined())
+}
+
+/// The reaction to the rejection of the promise that [`IoContext::await_js`] waits for.
+fn await_js_on_rejected<'a, T, M>(
+    lock: &mut jsg::Lock<'a>,
+    reaction: &AwaitJsReaction<T, M>,
+    reason: v8::Local<'a, v8::Value>,
+) -> jsg::Result<v8::Local<'a, v8::Value>> {
+    let Some(sender) = reaction.sender.take(lock)? else {
+        unreachable!("only one reaction to a promise runs, once");
+    };
+    let err = lock.exception_to_kj(reason)?;
+    sender.shared.settle(AwaitJsState::Rejected(err));
+    Ok(lock.undefined())
+}
+
+/// The exception for an error `map` returns, `jsg.<name>: <message>`, as C++ `JSG_REQUIRE()`
+/// throws one in the `func` of `IoContext::awaitJs()`.
+fn kj_error_of(err: &jsg::Error) -> cxx::KjError {
+    cxx::KjError::new(cxx::KjExceptionType::Failed, format!("jsg.{err}"))
 }
 
 /// A value an `IoContext` owns, from [`IoContext::add_object`].
