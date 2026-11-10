@@ -50,6 +50,7 @@ use crate::listen::TcpTls;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
+use crate::worker::WorkerService;
 
 /// The command line's choices for a run.
 #[derive(Default)]
@@ -536,9 +537,15 @@ pub async fn run(
     Ok(())
 }
 
-/// The entrypoints `workerd test` or `workerd bench` runs a handler of: the channel of each,
-/// and its name ("service" or "service:entrypoint").
-type Targets = Vec<(Rc<dyn Channel>, String)>;
+/// An entrypoint `workerd test` or `workerd bench` runs a handler of.
+struct Target {
+    channel: Rc<dyn Channel>,
+    /// "service" or "service:entrypoint".
+    name: String,
+    /// The entrypoint's service and its name.
+    service: (String, Rc<WorkerService>),
+}
+type Targets = Vec<Target>;
 
 /// Starts the server for `workerd test` or `workerd bench`, and selects the entrypoints that
 /// match the patterns (globs as the `glob` crate reads them, matched against the whole name) and
@@ -566,15 +573,20 @@ async fn start_local(
         let Some(worker) = service.as_worker() else {
             continue;
         };
+        let target = |channel: Rc<dyn Channel>, target_name: String| Target {
+            channel,
+            name: target_name,
+            service: (name.to_owned(), Rc::clone(worker)),
+        };
         if worker.has_handler(None, handler) && entrypoints.matches("default") {
-            targets.push((service.channel(), name.to_owned()));
+            targets.push(target(service.channel(), name.to_owned()));
         }
         for entrypoint in worker.entrypoint_names() {
             if entrypoints.matches(entrypoint)
                 && worker.has_handler(Some(entrypoint), handler)
                 && let Some(channel) = worker.entrypoint(Some(entrypoint), None, false)
             {
-                targets.push((channel, format!("{name}:{entrypoint}")));
+                targets.push(target(channel, format!("{name}:{entrypoint}")));
             }
         }
     }
@@ -641,7 +653,7 @@ pub async fn test(
     let (passed, failed) = running
         .alongside(async move {
             let (mut passed, mut failed) = (0u32, 0u32);
-            for (channel, name) in cases {
+            for Target { channel, name, .. } in cases {
                 if run_one(channel, name).await? {
                     passed += 1;
                 } else {
@@ -658,12 +670,17 @@ pub async fn test(
     Ok(Some(passed > 0 && failed == 0))
 }
 
-/// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns (see
-/// `start_local`), as `test()` runs `test()` handlers.
+/// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns.
 ///
-/// The handlers get `params`, an encoded `BenchParams` message (bench.capnp). Returns the
-/// report, with a group for each handler; `None` for a config `report` refuses, whose handlers
-/// do not run.
+/// The entrypoints are selected as in `start_local`, and their handlers run as `test()` runs
+/// `test()` handlers. Then the startup of each of their services' workers is timed in new
+/// isolates.
+///
+/// The handlers and the startup timing get `params`, an encoded `BenchParams` message
+/// (bench.capnp). Returns the report, with a group for each handler, then a startup group for
+/// each service; `None` for a config `report` refuses, whose handlers do not run. The startup
+/// groups go last so that the isolates they create and destroy don't disturb the handlers'
+/// measurements.
 pub async fn bench(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -683,11 +700,23 @@ pub async fn bench(
         return Ok(Some(bench::Report::new(0)));
     }
 
+    let mut services: Vec<(String, Rc<WorkerService>)> = Vec::new();
+    if !bench::skips_startup(&params)? {
+        for target in &targets {
+            if !services.iter().any(|(name, _)| *name == target.service.0) {
+                services.push(target.service.clone());
+            }
+        }
+    }
     let results = running
         .alongside(async move {
-            let mut results = bench::Report::new(len_u32(&targets));
-            for (channel, name) in targets {
+            let groups = len_u32(&targets) + len_u32(&services);
+            let mut results = bench::Report::new(groups);
+            for Target { channel, name, .. } in targets {
                 results.run_group(&*channel, &name, &params).await?;
+            }
+            for (name, worker) in services {
+                results.run_startup(&worker, &name, &params).await?;
             }
             Ok(results)
         })
