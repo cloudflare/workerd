@@ -718,7 +718,7 @@ class RpcStubDisposalGroup {
   void disposeAll();
 
   bool empty() {
-    return list.empty();
+    return list.empty() && collectedStubs.empty();
   }
 
   // When creating a disposal group representing an RPC response, we may also attach the
@@ -730,6 +730,9 @@ class RpcStubDisposalGroup {
 
  private:
   kj::List<JsRpcStub, &JsRpcStub::disposalGroupLink> list;
+  // Capabilities whose wrappers were collected before the group's disposal boundary. Disposal
+  // releases them; disowning the group defers them to the IoContext without making GC observable.
+  kj::Vector<IoOwn<rpc::JsRpcTarget::Client>> collectedStubs;
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> callPipeline;
   friend class JsRpcStub;
 };
