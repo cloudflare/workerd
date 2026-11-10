@@ -8,6 +8,8 @@
 #include "type-wrapper.h"
 
 #include <cacheTest/compile-cache-fixture.capnp.h>
+#include <cloudflare/cloudflare.capnp.h>
+#include <pyodide/pyodide_static.capnp.h>
 
 #include <kj/test.h>
 
@@ -20,6 +22,40 @@ struct CacheContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(CacheContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(CacheIsolate, CacheContext);
+
+KJ_TEST("builtin bundle caches accept the legacy and UTF-8 module source encodings") {
+  CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](CacheIsolate::Lock& js) {
+    Bundle::Reader bundles[] = {CLOUDFLARE_BUNDLE, PYODIDE_BUNDLE};
+    JSG_WITHIN_CONTEXT_SCOPE(js, js.newContext<CacheContext>().getHandle(js), [&](jsg::Lock& js) {
+      for (auto bundle: bundles) {
+        size_t checked = 0;
+        for (auto module: bundle.getModules()) {
+          if (module.which() != Module::SRC) continue;
+          js.withinHandleScope([&] {
+            auto embedded = module.getSrc().asChars();
+            // Legacy builtins use raw one-byte strings; the new registry decodes UTF-8.
+            auto content = newExternalString(js, StaticExternalStringSource(embedded));
+            KJ_EXPECT(content->StringEquals(js.str(embedded)), module.getName());
+            auto cache = module.getCompileCache();
+            KJ_ASSERT(cache.size() > 0, module.getName());
+            v8::ScriptOrigin origin(
+                js.str(module.getName()), 0, 0, false, -1, {}, false, false, true);
+            v8::ScriptCompiler::Source source(content, origin,
+                new v8::ScriptCompiler::CachedData(
+                    cache.begin(), cache.size(), v8::ScriptCompiler::CachedData::BufferNotOwned));
+            auto compiled = v8::ScriptCompiler::CompileModule(
+                js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
+            KJ_EXPECT(!compiled.IsEmpty(), module.getName());
+            KJ_EXPECT(!source.GetCachedData()->rejected, module.getName());
+            ++checked;
+          });
+        }
+        KJ_EXPECT(checked > 0);
+      }
+    });
+  });
+}
 
 KJ_TEST("embedded ESM caches accept ASCII, Latin-1 and UTF-16 source strings") {
   CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());

@@ -404,6 +404,8 @@ kj_test(
     deps = [
         ":compile-cache-fixture",
         ":jsg",
+        "//src/cloudflare",
+        "//src/pyodide:pyodide_static",
     ],
 )
 
