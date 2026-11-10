@@ -1593,7 +1593,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           // handleEvent, receiver binding, once) exactly as the zygote's registration did;
           // the identity objects live in the snapshot heap, so their closures and module
           // state stay shared with the baked module graph.
-          if (artifact.listenerRecords.size() > 0) {
+          if (!artifact.listenerRecords.empty()) {
             JSG_WITHIN_CONTEXT_SCOPE(lock, context, ([&](jsg::Lock& js) {
               auto global = context->Global();
               auto addListenerVal = jsg::check(

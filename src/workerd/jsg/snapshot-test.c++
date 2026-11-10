@@ -265,6 +265,7 @@ KJ_TEST("removal rejects a zygote whose top level went on after a fail-closed er
   {
     auto zygote = newZygote();
     inNewContext(*zygote, [&](Lock& js, v8::Local<v8::Context> context) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: reset right after the probe it catches.
       v8::TryCatch tryCatch(js.v8Isolate);
       KJ_EXPECT(
           context->Global()->Get(context, v8StrIntern(js.v8Isolate, "WebAssembly"_kj)).IsEmpty());
@@ -750,17 +751,17 @@ KJ_TEST("a cleanup callback that throws does not fail the zygote") {
       *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "fromCleanup.getValue()"_kj) == "3"_kj); });
 }
 
-KJ_TEST("verify() raises what the serializer callback could only record") {
+KJ_TEST("dropUnreachableWrappables() raises what the serializer callback could only record") {
   auto artifact = kj::atomicRefcounted<SnapshotArtifact>();
   {
     WrappablesSerializeMetadata metadata;
     metadata.unknownWrappersCount = 1;
-    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.verify(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.dropUnreachableWrappables(*artifact));
   }
   {
     WrappablesSerializeMetadata metadata;
     metadata.unclonable.add(kj::str("SomeType"));
-    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.verify(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.dropUnreachableWrappables(*artifact));
   }
 }
 

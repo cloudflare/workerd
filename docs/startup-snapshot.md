@@ -121,9 +121,9 @@ all of these hold:
    7. The default-context handle is reset and `SnapshotCreator::CreateBlob()` runs. V8 calls
       `serializeInternalFields()` for each wrapper's tag field and `serializeApiWrapperCallback()`
       for each wrapper's shim pointer; the latter writes the object's `liveWrappables` index as
-      the payload. Afterwards `WrappablesSerializeMetadata::verify()` raises what the callbacks
-      found (an unknown shim, a type with no transfer) and drops the clones of objects that were
-      recorded but not reachable at `CreateBlob()`.
+      the payload. Afterwards `WrappablesSerializeMetadata::dropUnreachableWrappables()` raises
+      what the callbacks found (an unknown shim, a type with no transfer) and drops the clones of
+      objects that were recorded but not reachable at `CreateBlob()`.
 7. Back in `factory_new_worker()`: if the zygote threw or reported errors, the artifact is
    discarded. Otherwise `extractSnapshotArtifact()` hands it over, the deferred console lines are
    printed, and the real isolate is created from it.
@@ -201,10 +201,11 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
-level leaves such an object reachable fall back; `verify()` names the type in the zygote's error
+level leaves such an object reachable fall back; `dropUnreachableWrappables()` names the type in
+the zygote's error
 (`live wrapper types that neither set jsgSnapshotStateless nor implement snapshotClone() ...`).
 
-A binding type's `snapshotClone()` copies the description the binding is (its channel number and
+A binding type's `snapshotClone()` copies the binding's description (its channel number and
 names) and returns none when the object is bound to one IoContext instead (a live channel or
 factory, a stub minted per request) or has registered a connect override on the zygote's global
 scope (`ctx.mapVirtualHost()`), which the restored Worker's fresh global scope would lack. A
@@ -267,7 +268,7 @@ once.
 
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `verify()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
+| `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `dropUnreachableWrappables()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
 | `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator` |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot, `signal` fallback      |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
