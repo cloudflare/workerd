@@ -124,7 +124,12 @@ all of these hold:
       template is pinned at isolate level and recorded, by position, in
       `artifact.constructorTemplateIndices`.
    6. Struct-type handles are reset.
-   7. The default-context handle is reset and `SnapshotCreator::CreateBlob()` runs. V8 calls
+   7. The default-context handle is reset. A heap that still holds a suspended generator, such
+      as an async function the top level left awaiting a promise, fails the zygote:
+      `CreateBlob(kClear)` discards the bytecode a generator resumes in, which is also why V8's
+      bytecode flushing never discards it. V8 patch 0054 adds
+      `SnapshotCreator::HasSuspendedGenerators()`, which looks for one among the objects
+      `CreateBlob()` would serialize. Then `SnapshotCreator::CreateBlob()` runs. V8 calls
       `serializeInternalFields()` for each wrapper's tag field and `serializeApiWrapperCallback()`
       for each wrapper's shim pointer; the latter writes the object's `liveWrappables` index as
       the payload. Afterwards `WrappablesSerializeMetadata::dropUnreachableWrappables()` raises
