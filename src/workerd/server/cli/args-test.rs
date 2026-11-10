@@ -24,6 +24,7 @@ fn wd_test_invocation() {
         "foo.wd-test",
         "--compat-date=2000-01-01",
         "-dTEST_TMPDIR=/tmp/x",
+        "--socket-addr=tcp=127.0.0.1:1234",
     ])
     .command
     else {
@@ -33,6 +34,13 @@ fn wd_test_invocation() {
     assert!(test.predictable);
     assert_eq!(test.compat_date.as_deref(), Some("2000-01-01"));
     assert_eq!(test.filter, None);
+    assert_eq!(
+        test.socket_addr_overrides,
+        [Override {
+            name: "tcp".into(),
+            value: "127.0.0.1:1234".into()
+        }]
+    );
     assert_eq!(
         serve_or_test.directory_overrides,
         [Override {
@@ -180,6 +188,7 @@ fn bench_invocation() {
         "--format=json",
         "--output=out.json",
         "--trace",
+        "--no-startup",
         "svc/case",
     ])
     .command
@@ -191,6 +200,7 @@ fn bench_invocation() {
     assert_eq!(bench.format, BenchFormat::Json);
     assert_eq!(bench.output.as_deref(), Some("out.json"));
     assert!(bench.trace);
+    assert!(bench.no_startup);
     assert_eq!(
         bench.filter.map(|f| f.case_pattern),
         Some(Some("case".into()))

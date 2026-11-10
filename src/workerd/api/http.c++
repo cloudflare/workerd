@@ -19,7 +19,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -1610,16 +1609,12 @@ template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A stub's own policy applies only when it was given one and the userland
-// retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
-// the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
-// a disabled rollout must never get that far.
+// actor call retries. A stub's own policy applies when it was given one. Otherwise the runtime's
+// default applies.
 kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
   if (!fetcher.supportsActorCallRetries()) return kj::none;
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
-      return ActorRetryPolicy::userDefined(userPolicy);
-    }
+  KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
+    return ActorRetryPolicy::userDefined(userPolicy);
   }
   return ActorRetryPolicy::systemDefault();
 }
@@ -2781,6 +2776,45 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   return throwOnError(js, "DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
 
+namespace {
+
+// Awaits an event sent through a service binding. With `rpc_dispose_cancels_call`, the returned
+// promise gets a `[Symbol.dispose]()` method, as a JSRPC call's promise has: disposing the promise
+// while the event is in flight cancels the event, and the promise rejects with an `AbortError`.
+// Disposing it once the event has finished does nothing. Either way it is a plain Promise.
+template <typename T, typename Func>
+auto awaitDisposableEvent(jsg::Lock& js,
+    IoContext& ioContext,
+    kj::StringPtr methodName,
+    kj::Promise<T> event,
+    Func&& func) {
+  if (!FeatureFlags::get(js).getRpcDisposeCancelsCall()) {
+    return ioContext.awaitIo(js, kj::mv(event), kj::fwd<Func>(func));
+  }
+
+  // The event holds its own reference, so collecting the promise doesn't cancel the event.
+  auto canceler = kj::rc<kj::Canceler>();
+  auto cancelable = canceler->wrap(kj::mv(event)).attach(canceler.addRef());
+  auto promise = ioContext.awaitIo(js, kj::mv(cancelable), kj::fwd<Func>(func));
+
+  promise.setDispose(js,
+      js.wrapSimpleFunction(js.v8Context(),
+          [canceler = ioContext.addObject(canceler.addRef().toOwn()), methodName](
+              jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    // `this` is the promise when it's called as `promise[Symbol.dispose]()`, as `using` does.
+    KJ_IF_SOME(self, jsg::JsValue(info.This()).tryCast<jsg::JsPromise>()) {
+      if (self.state() != jsg::PromiseState::PENDING) return;
+      // Nobody may be waiting for the rejection, as with a `using` declaration.
+      self.markAsHandled(js);
+    }
+    canceler->cancel(JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The ", methodName,
+        "() call was canceled because its promise was disposed."));
+  }));
+  return promise;
+}
+
+}  // namespace
+
 jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
     kj::String queueName,
     kj::Array<ServiceBindingQueueMessage> messages,
@@ -2826,7 +2860,8 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
 
   auto eventRef =
       kj::addRef(*event);  // attempt to work around windows-specific null pointer deref.
-  return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
+  return awaitDisposableEvent(js, ioContext, "queue"_kj,
+      worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
       [event = kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
     return Fetcher::QueueResult{
       .outcome = kj::str(result.outcome),
@@ -2854,7 +2889,7 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
     }
   }
 
-  return ioContext.awaitIo(js,
+  return awaitDisposableEvent(js, ioContext, "scheduled"_kj,
       worker->runScheduled(scheduledTime, cron).attach(kj::mv(worker), kj::mv(cron)),
       [](jsg::Lock& js, WorkerInterface::ScheduledResult result) {
     return Fetcher::ScheduledResult{

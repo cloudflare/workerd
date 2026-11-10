@@ -807,6 +807,17 @@ impl<T: PromiseValue> TracedPromise<T> {
     }
 }
 
+/// An edge to the promise in the V8 heap, as C++ reports a `jsg::Promise`.
+impl<T: PromiseValue> crate::MemoryInfo for TracedPromise<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        self.handle.track_as_field(tracker, edge_name);
+    }
+}
+
 impl<T: PromiseValue> Traced for TracedPromise<T> {
     fn trace(&self, visitor: &mut crate::GcVisitor) {
         self.handle.trace(visitor);
@@ -824,6 +835,17 @@ impl<T: PromiseValue> TracedPromiseResolver<T> {
     /// The resolver, in the scope of `lock`.
     pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> PromiseResolver<'s, T> {
         PromiseResolver::new(self.handle.as_local(lock))
+    }
+}
+
+/// An edge to the resolver in the V8 heap, as C++ reports a `jsg::Promise::Resolver`.
+impl<T: PromiseValue> crate::MemoryInfo for TracedPromiseResolver<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        self.handle.track_as_field(tracker, edge_name);
     }
 }
 

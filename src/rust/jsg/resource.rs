@@ -10,6 +10,7 @@
 use std::any::TypeId;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::hash::Hasher;
@@ -27,6 +28,8 @@ use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
+use crate::MemoryInfo;
+use crate::MemoryTracker;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
@@ -449,6 +452,22 @@ impl<R: Resource> Traced for Rc<R> {
 // Weak references don't keep the target alive and have no GC edges to trace.
 crate::jsg_traced!(<R: Resource> Weak<R>);
 
+/// The resource's node, as C++ reports a `jsg::Ref`; nothing for a resource of another isolate,
+/// whose wrapper the snapshot cannot read.
+impl<R: Resource> MemoryInfo for Rc<R> {
+    fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
+        if !tracker.can_track_object_of(&self.state) {
+            return;
+        }
+        self.wrappable.track(tracker, edge_name);
+    }
+}
+
+/// A weak reference retains nothing.
+impl<R: Resource> MemoryInfo for Weak<R> {
+    fn track_as_field(&self, _: &mut MemoryTracker<'_>, _: Option<&'static CStr>) {}
+}
+
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.
@@ -581,6 +600,10 @@ impl MemberRegistry for TemplateMembers {
     fn add(&mut self, member: impl MemberDefinition) {
         self.0.push(member.into_member());
     }
+
+    fn ts_override(&mut self, _ts_override: &'static str) {}
+
+    fn ts_define(&mut self, _ts_define: &'static str) {}
 }
 
 /// Builds a [`ResourceDescriptor`] from the members that `R`'s
@@ -930,6 +953,16 @@ impl Resources {
 /// `Registry` parameter of C++ `registerMembers`.
 pub trait MemberRegistry {
     fn add(&mut self, member: impl MemberDefinition);
+
+    /// Customizes the resource's generated TypeScript declaration, like C++
+    /// `JSG_TS_OVERRIDE`. Replaces any override registered earlier or given by
+    /// `#[jsg_resource(ts_override = "...")]`. Template creation ignores it.
+    fn ts_override(&mut self, ts_override: &'static str);
+
+    /// Emits TypeScript declarations next to the resource's declaration, like C++
+    /// `JSG_TS_DEFINE`. Replaces any definitions registered earlier or given by
+    /// `#[jsg_resource(ts_define = "...")]`. Template creation ignores it.
+    fn ts_define(&mut self, ts_define: &'static str);
 }
 
 /// A member that [`Resource::members`] can register: the result of a generated member factory,

@@ -23,13 +23,13 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
-use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
+use crate::utils::typescript_options;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -44,13 +44,18 @@ pub enum PropertyKind {
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
-    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+    if let Some(err) = validate_struct_args(attr.clone().into()) {
         return err.to_compile_error().into();
     }
 
-    // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
+    // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let ts_root = has_flag(&attr, "ts_root");
+    let typescript = typescript_options(attr.clone());
+    let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
+        Ok(generated) => generated,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let input = &input;
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -85,20 +90,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         }
     };
 
-    let gc_impl = quote! {
-        #[automatically_derived]
-        impl jsg::GarbageCollected for #name {
-            fn memory_name(&self) -> &'static ::std::ffi::CStr {
-                // from_bytes_with_nul on a concat!(name, "\0") literal is a
-                // compile-time constant expression — the compiler folds the
-                // unwrap and emits a direct pointer into the read-only data
-                // segment. The C++ side constructs a kj::StringPtr directly
-                // from data()+size() with no allocation.
-                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
-                    .unwrap()
-            }
-        }
-    };
+    let gc_impl = generate_gc_impl(&name, &name_str, &memory_info.gc_fn);
+    let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
         #input
@@ -118,7 +111,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+                cx.structure::<Self>(
+                    #class_name,
+                    #typescript,
+                    jsg::rtti::resource_members::<Self>,
+                )
             }
         }
 
@@ -160,6 +157,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #visit_for_memory_info_impl
     }
     .into()
 }
@@ -565,22 +563,97 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
-/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
-/// `nested_types(...)`, which belongs on the impl block.
-fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+/// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
+/// `memory_info` method or nothing.
+fn generate_gc_impl(
+    name: &syn::Ident,
+    name_str: &str,
+    memory_info_fn: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        #[automatically_derived]
+        impl jsg::GarbageCollected for #name {
+            fn memory_name(&self) -> &'static ::std::ffi::CStr {
+                // from_bytes_with_nul on a concat!(name, "\0") literal is a
+                // compile-time constant expression — the compiler folds the
+                // unwrap and emits a direct pointer into the read-only data
+                // segment. The C++ side constructs a kj::StringPtr directly
+                // from data()+size() with no allocation.
+                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
+                    .unwrap()
+            }
+
+            #memory_info_fn
+        }
+    }
+}
+
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
+/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
+/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
+/// the impl block.
+fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
+    const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
+                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `ts_define = \"...\"` on a #[jsg_resource] struct";
+
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
-        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
-    metas
-        .iter()
-        .find(|meta| meta.path().is_ident("nested_types"))
-        .map(|meta| {
-            syn::Error::new_spanned(
-                meta.path(),
-                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
-            )
-        })
+        match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
+            Ok(metas) => metas,
+            Err(err) => return Some(err),
+        };
+    metas.iter().enumerate().find_map(|(i, meta)| {
+        let path = meta.path();
+        if metas.iter().take(i).any(|earlier| earlier.path() == path) {
+            return Some(syn::Error::new_spanned(
+                path,
+                "a #[jsg_resource] struct flag can be given once",
+            ));
+        }
+        if path.is_ident("nested_types") || path.is_ident("custom_members") {
+            let flag = if path.is_ident("nested_types") {
+                "nested_types(...)"
+            } else {
+                "custom_members"
+            };
+            return Some(syn::Error::new_spanned(
+                path,
+                format!("`{flag}` belongs on the #[jsg_resource] impl block, not the struct"),
+            ));
+        }
+        match meta {
+            syn::Meta::Path(path)
+                if [
+                    "custom_trace",
+                    "memory_info",
+                    "custom_memory_info",
+                    "ts_root",
+                ]
+                .iter()
+                .any(|flag| path.is_ident(flag)) =>
+            {
+                None
+            }
+            syn::Meta::NameValue(syn::MetaNameValue {
+                path,
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(_),
+                        ..
+                    }),
+                ..
+            }) if path.is_ident("name") => None,
+            // `typescript_options` reports a value that is not a string literal.
+            syn::Meta::NameValue(syn::MetaNameValue { path, .. })
+                if path.is_ident("ts_override") || path.is_ident("ts_define") =>
+            {
+                None
+            }
+            _ => Some(syn::Error::new_spanned(meta, EXPECTED)),
+        }
+    })
 }
 
 /// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
@@ -690,8 +763,9 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
-                            the struct)";
+                            #[jsg_resource] impl block (`name`, `custom_trace`, `memory_info`, \
+                            `custom_memory_info`, `ts_root`, `ts_override` and `ts_define` \
+                            belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;

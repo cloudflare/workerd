@@ -55,6 +55,12 @@ TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
 struct to mark such a root, analogous to C++ `JSG_TS_ROOT`. Internal module
 registration alone does not make a type an ambient declaration.
 
+`ts_override = "..."` and `ts_define = "..."` on the same structs customize the generated
+declaration and add declarations next to it, analogous to C++ `JSG_TS_OVERRIDE` and
+`JSG_TS_DEFINE`. A resource's `Resource::members` can choose them by compatibility flag with
+`MemberRegistry::ts_override` and `ts_define`. There is no counterpart to
+`JSG_STRUCT_TS_OVERRIDE_DYNAMIC` for `#[jsg_struct]`.
+
 ## Core Types
 
 ### `Lock`
@@ -127,7 +133,9 @@ Two things break this:
   termination with the new exception, which JavaScript can catch. The Worker then keeps running.
 
 Creating strings, numbers, BigInts, symbols, plain objects and arrays, typed arrays, error objects
-and templates takes no context. It is fine at any time, also while execution is terminating.
+and templates takes no context. It is fine at any time, also while execution is terminating. A
+`DOMException` is not an error object in this sense: creating one instantiates a template in the
+current context.
 
 How the code keeps the rule:
 
@@ -246,7 +254,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG.
+workerd's API objects serialize, since their serializers are written against C++ JSG, and
+`newDOMException` in `workerd/jsg/dom-exception.h`, through which Rust creates DOMExceptions
+without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -487,6 +497,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
+- **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
@@ -938,6 +949,25 @@ match lock.try_catch(|lock| {
 }
 ```
 
+## Errors thrown from Rust
+
+An `Error`'s `name` is an `ErrorName`: a JavaScript error class (`TypeError`, `RangeError`,
+`ReferenceError`, `SyntaxError`, `Error`), or a `DOMException` with any name, as C++
+`JSG_REQUIRE(..., DOMAbortError, ...)` throws. The two are separate because `SyntaxError` is both.
+The `ExceptionType`s named after a DOMException (`OperationError`, `DataCloneError`, `AbortError`
+and the rest, for which `ExceptionType::is_dom_exception()` is true) are shorthands for that
+`DOMException`, as in `jsg_require!(..., AbortError, ...)`; `Error::new_dom_exception` takes any
+name, including `SyntaxError` and names that are no `ExceptionType`, such as `QuotaExceededError`.
+A C++ error that reaches Rust as a `kj::Exception` keeps its DOMException name, whatever it is, and
+`FromJS` for `Error` reads a JavaScript error as its class, even one whose `name` is a DOMException
+name. An `ErrorName` compares equal to the `ExceptionType` that is thrown the same way, so
+`err.name == ExceptionType::TypeError` works. `Lock::dom_exception` creates a `DOMException` with
+any name, as C++ `jsg::Lock::domException()` does. Both create it through `jsg::newDOMException()`
+(Safety rules, rule 3), which needs the current context: while an exception or a termination is
+pending, or if creating it throws, `Lock::dom_exception` and `Lock::exception` fail with a pending
+error, and `Lock::throw_exception` throws nothing, so the pending exception propagates. A fast
+callback never throws a `DOMException`, since only a method that returns no `Result` has one.
+
 ## Serialization
 
 `jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
@@ -945,7 +975,9 @@ of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default optio
 the same, and each reads what the other writes, so the two can share stored data. Native errors
 are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
 objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
-serialized. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
+serialized, and neither can instances of the runtime's classes implemented in JavaScript, which
+C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
+throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
 bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
 resolve, so data containing one can't be read back. Deserialization runs no JavaScript. Transfer
 lists, externals and the other options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
@@ -985,14 +1017,13 @@ and from that handle with `From`/`Into`. Like the handle, it cannot outlive its 
 explicit coercion of a `v8::Local<'s, v8::Value>`, call `to_js_string(lock)`.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
-and from a value converted to a number, which must be in range; whether a fraction just past a
-range limit (`255.5` or `-0.5` for `u8`) is truncated before that check, as Web IDL's
-`[EnforceRange]` does, or is out of range depends on the `JSG_INTEGER_ENFORCE_RANGE` autogate (see
-the module docs of `wrappable.rs`). `i64` and `u64` convert to a `BigInt`, like `int64_t` and
-`uint64_t`, and from a `BigInt` that fits, or any other value converted to a number, which must be
-finite and in range (the autogate does not apply), and truncates toward zero. An integer that stays
-on the V8 heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which
-accepts only an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
+and from a value converted to a number, which is truncated toward zero and must then be in range,
+as Web IDL's `[EnforceRange]` does, so a fraction just past a range limit (`255.5` or `-0.5` for
+`u8`) converts (see the module docs of `wrappable.rs`). `i64` and `u64` convert to a `BigInt`, like
+`int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted to a number,
+which must be finite and in range before it truncates toward zero. An integer that stays on the V8
+heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which accepts only
+an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
 `Local<Value>::int32_value`, `uint32_value` and `integer_value` convert any value with
 JavaScript's `ToInt32`, `ToUint32` and `ToInteger`, as the V8 methods of those names do.
 
@@ -1208,11 +1239,11 @@ harness.run_in_context(|lock, _ctx| {
 ```
 
 Autogates (`src/workerd/util/autogate.h`) are process-wide, not per harness.
-`jsg_test::set_autogates(&["jsg-integer-enforce-range"])` configures exactly the named gates
-(kebab-case, without the `workerd-autogate-` prefix) for as long as the returned guard lives, and
-an empty slice disables them all, whatever `WORKERD_ALL_AUTOGATES` says. Dropping the guard
-deinitializes the configuration, so the gates follow `WORKERD_ALL_AUTOGATES` again. The tests run
-serially, so a test holds the guard for its duration; the guards do not nest.
+`jsg_test::set_autogates(&["test-workerd"])` configures exactly the named gates (kebab-case,
+without the `workerd-autogate-` prefix) for as long as the returned guard lives, and an empty slice
+disables them all, whatever `WORKERD_ALL_AUTOGATES` says. Dropping the guard deinitializes the
+configuration, so the gates follow `WORKERD_ALL_AUTOGATES` again. The tests run serially, so a test
+holds the guard for its duration; the guards do not nest.
 
 Use `Harness::with_fast_api_and_flags()` to combine compatibility flags with V8 Fast API callbacks.
 
@@ -1499,10 +1530,9 @@ Each nested type's constructor is a property of the prototype, named after the t
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
-An integer argument reaches the callback as a `double` and converts with the slow path's checks,
-following the `JSG_INTEGER_ENFORCE_RANGE` autogate as the slow path does; an integer of up to 32
-bits returns as an `int32_t` or a `uint32_t`, while a method that returns an `i64` or a `u64` has
-no fast callback.
+An integer argument reaches the callback as a `double` and converts with the slow path's checks
+and truncation; an integer of up to 32 bits returns as an `int32_t` or a `uint32_t`, while a
+method that returns an `i64` or a `u64` has no fast callback.
 
 ## FFI Functions with Raw Pointers
 

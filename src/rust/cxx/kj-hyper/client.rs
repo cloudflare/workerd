@@ -1,11 +1,17 @@
 //! A pooled HTTP/1.1 client as a `kj::http::Service`, so C++ (a `WorkerInterface` for an
 //! external service, say) makes outbound requests through it.
 //!
-//! The pool, keep-alive, idle eviction, upgrades and retries of stale connections are
-//! `hyper-util`'s legacy client's; this module supplies the connector and the kj adaptation:
-//! request bodies pumped from kj streams, responses (bodies, `WebSocket`s, tunnels) written back
-//! into the kj `Response`. Connection tasks run on the current tokio runtime, so the transports a
-//! dialer produces must be `Send`.
+//! The pool, keep-alive, idle eviction and upgrades come from `hyper-util`'s legacy client. This
+//! module supplies the connector and the kj adaptation: request bodies are pumped from kj
+//! streams, and responses (bodies, `WebSocket`s, tunnels) are written back into the kj
+//! `Response`. Connection tasks run on the current tokio runtime, so the transports a dialer
+//! produces must be `Send`.
+//!
+//! A peer may close a pooled connection while it sits idle, and hyper may not notice before it
+//! hands that connection to the next request. `hyper-util` sends the request again only if it
+//! had not yet been written. Once it was written, the failure comes back to us, and
+//! [`Client::send`] resends it, on a connection not yet tried, when that is safe (see
+//! [`replayable`]).
 //!
 //! Dropping a client request drops its connection (hyper's rule); the request body pump ends
 //! with the exchange, as kj's adapter's does.
@@ -20,6 +26,8 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::str::from_utf8;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -27,12 +35,15 @@ use std::time::Duration;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
+use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::Either;
 use futures::future::Shared;
 use futures::future::select;
+use futures::stream::FuturesUnordered;
 use http::header::SEC_WEBSOCKET_ACCEPT;
 use http::header::UPGRADE;
+use http::request::Parts as RequestParts;
 use http::response::Parts;
 use http::uri::Authority;
 use http::uri::Scheme;
@@ -66,6 +77,7 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::net::lookup_host;
+use tokio::time::timeout;
 
 use crate::Result;
 use crate::body::BodyAbort;
@@ -103,7 +115,8 @@ fn disconnected(what: impl Display) -> KjError {
 }
 
 /// A request's failure: the I/O error behind it when there is one, else DISCONNECTED (hyper
-/// reports a connection that went away in several shapes).
+/// reports a connection that went away in several shapes). A DISCONNECTED message names every
+/// cause: on its own, `hyper-util`'s error says only `client error (SendRequest)`.
 fn client_error(error: &(dyn Error + 'static)) -> KjError {
     let mut source = Some(error);
     while let Some(e) = source {
@@ -112,7 +125,19 @@ fn client_error(error: &(dyn Error + 'static)) -> KjError {
         }
         source = e.source();
     }
-    disconnected(error)
+    disconnected(causes(error))
+}
+
+/// `error` and each of its sources, separated by colons.
+fn causes(error: &(dyn Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(e) = source {
+        message.push_str(": ");
+        message.push_str(&e.to_string());
+        source = e.source();
+    }
+    message
 }
 
 /// What every request is made with.
@@ -155,6 +180,23 @@ pub struct Dialed {
     io: Box<dyn Io + Send>,
     peer: Peer,
     hangup: Shared<Hangup>,
+    served: Served,
+}
+
+/// Set once a connection has delivered a response head. A request that fails on a connection
+/// with this set went out on one that waited in the pool, which its peer may have closed in the
+/// meantime.
+#[derive(Clone, Default)]
+struct Served(Arc<AtomicBool>);
+
+impl Served {
+    fn mark(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn get(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
 }
 
 trait Io: AsyncRead + AsyncWrite + Unpin {}
@@ -170,6 +212,7 @@ impl Dialed {
             io: Box::new(io),
             peer: Peer::Origin,
             hangup: hangup.shared(),
+            served: Served::default(),
         }
     }
 
@@ -183,7 +226,7 @@ impl Dialed {
         config: Arc<rustls::ClientConfig>,
         server_name: &str,
     ) -> io::Result<Self> {
-        let (peer, hangup) = (self.peer, self.hangup.clone());
+        let (peer, hangup, served) = (self.peer, self.hangup.clone(), self.served.clone());
         let stream = tls::connect(self, config, server_name)
             .await
             .map_err(|e| io::Error::other(e.description().to_owned()))?;
@@ -191,6 +234,7 @@ impl Dialed {
             io: Box::new(stream),
             peer,
             hangup,
+            served,
         })
     }
 
@@ -248,10 +292,12 @@ impl AsyncWrite for Dialed {
 impl Connection for Dialed {
     fn connected(&self) -> Connected {
         // hyper-util sends absolute-form request targets on a connection to a proxy, and puts
-        // the signal in the extensions of every response the connection carries.
+        // the extras (the hang-up signal, and whether the connection has served a response) in
+        // the extensions of every response the connection carries.
         Connected::new()
             .proxy(self.peer == Peer::Proxy)
             .extra(self.hangup.clone())
+            .extra(self.served.clone())
     }
 }
 
@@ -289,8 +335,15 @@ impl Internet {
     }
 }
 
+/// How long a connection attempt runs before the next address is tried too: RFC 8305's
+/// recommended Connection Attempt Delay.
+const CONNECTION_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+
 /// The usual `connect` of [`ClientPool::internet`]: resolves `host` and connects to the first address
 /// that `allow` admits and that accepts.
+///
+/// IPv4 addresses are tried first, matching KJ's `lookupHost` rather than RFC 8305's interleaving,
+/// and the attempts are raced: a refused connect can take seconds (about two on Windows).
 ///
 /// When none accepts, the error is the last connection failure, else `PermissionDenied` if
 /// `allow` refused an address, else `NotFound`.
@@ -299,21 +352,15 @@ pub async fn connect_allowed(
     port: u16,
     allow: impl Fn(&SocketAddr) -> bool,
 ) -> io::Result<TcpStream> {
-    let mut denied = false;
-    let mut last = None;
-    for addr in lookup_host((host, port)).await? {
-        if !allow(&addr) {
-            denied = true;
-            continue;
+    let (addrs, denied): (Vec<_>, Vec<_>) = lookup_host((host, port)).await?.partition(&allow);
+    let denied = !denied.is_empty();
+    let last = match race(addrs, CONNECTION_ATTEMPT_DELAY, TcpStream::connect).await {
+        Ok(stream) => {
+            let _ = stream.set_nodelay(true);
+            return Ok(stream);
         }
-        match TcpStream::connect(addr).await {
-            Ok(stream) => {
-                let _ = stream.set_nodelay(true);
-                return Ok(stream);
-            }
-            Err(e) => last = Some(e),
-        }
-    }
+        Err(last) => last,
+    };
     Err(last.unwrap_or_else(|| {
         if denied {
             io::Error::new(
@@ -327,6 +374,37 @@ pub async fn connect_allowed(
             )
         }
     }))
+}
+
+/// Connects to the first of `addrs` that accepts, IPv4 first, starting the next attempt when any
+/// running one fails or after `delay` (RFC 8305), and fails with the last failure (`None` when
+/// `addrs` is empty).
+async fn race<S, F>(
+    mut addrs: Vec<SocketAddr>,
+    delay: Duration,
+    connect: impl Fn(SocketAddr) -> F,
+) -> Result<S, Option<io::Error>>
+where
+    F: Future<Output = io::Result<S>>,
+{
+    addrs.sort_by_key(SocketAddr::is_ipv6);
+    let mut attempts = FuturesUnordered::new();
+    let mut last = None;
+    for addr in addrs {
+        attempts.push(connect(addr));
+        match timeout(delay, attempts.next()).await {
+            Ok(Some(Ok(stream))) => return Ok(stream),
+            Ok(Some(Err(e))) => last = Some(e),
+            Ok(None) | Err(_) => {}
+        }
+    }
+    while let Some(attempt) = attempts.next().await {
+        match attempt {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last)
 }
 
 impl tower_service::Service<http::Uri> for Connector {
@@ -504,12 +582,30 @@ impl Client<'_> {
         http::Request::from_parts(parts, body)
     }
 
+    /// Sends `request` and waits for the response head. While a [`replayable`] request fails on
+    /// a pooled connection that its peer had closed, it is sent again.
     async fn send(&self, request: http::Request<ChannelBody>) -> Result<http::Response<Incoming>> {
-        self.pool
+        let (parts, body) = request.into_parts();
+        let replay = replayable(&parts, &body).then(|| (parts.clone(), body.ended()));
+        let mut sent = self
+            .pool
             .inner
-            .request(request)
-            .await
-            .map_err(|e| client_error(&e))
+            .request(http::Request::from_parts(parts, body))
+            .await;
+        if let Some((parts, body)) = replay {
+            // A failed connection leaves the pool, so each resend gets a connection not yet
+            // tried: another pooled one or a new one. A new connection never counts as closed
+            // while idle, so the loop ends by the time the stale pooled connections run out.
+            while sent.as_ref().is_err_and(closed_while_idle) {
+                let again = http::Request::from_parts(parts.clone(), body.ended());
+                sent = self.pool.inner.request(again).await;
+            }
+        }
+        let response = sent.map_err(|e| client_error(&e))?;
+        if let Some(served) = response.extensions().get::<Served>() {
+            served.mark();
+        }
+        Ok(response)
     }
 
     /// Writes a response's head and body into the kj response.
@@ -669,6 +765,62 @@ fn is_websocket(headers: HeadersRef<'_>) -> bool {
     headers
         .get(HeaderId::UPGRADE)
         .is_some_and(|u| u.eq_ignore_ascii_case(b"websocket"))
+}
+
+/// Whether a request can be sent again exactly as it was. Its method must be idempotent, since
+/// RFC 9110 §9.2.2 permits automatic retries only of those, and its body must have put nothing
+/// on the wire. That covers an empty body, and a GET or HEAD body of unknown length with no
+/// framing headers, which hyper sends as no body at all.
+fn replayable(parts: &RequestParts, body: &ChannelBody) -> bool {
+    use http::Method;
+    use http::header::CONTENT_LENGTH;
+    use http::header::TRANSFER_ENCODING;
+    let idempotent = matches!(
+        parts.method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE | Method::PUT | Method::DELETE
+    );
+    let unsent = match http_body::Body::size_hint(body).exact() {
+        Some(length) => length == 0,
+        None => {
+            matches!(parts.method, Method::GET | Method::HEAD)
+                && !parts.headers.contains_key(CONTENT_LENGTH)
+                && !parts.headers.contains_key(TRANSFER_ENCODING)
+        }
+    };
+    idempotent && unsent
+}
+
+/// Whether `error` means the request went out on a connection the peer had already closed.
+/// That is, the connection had served a response before this request (so the pool had kept it),
+/// and it then closed or reset without answering. A connection that fails on its first request
+/// is not treated this way: there the failure is the peer's answer.
+fn closed_while_idle(error: &legacy::Error) -> bool {
+    let mut extras = http::Extensions::new();
+    if let Some(connected) = error.connect_info() {
+        connected.get_extras(&mut extras);
+    }
+    if !extras.get::<Served>().is_some_and(Served::get) {
+        return false;
+    }
+    let mut source = error.source();
+    while let Some(e) = source {
+        if e.downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_incomplete_message)
+        {
+            return true;
+        }
+        if let Some(io) = e.downcast_ref::<io::Error>() {
+            return matches!(
+                io.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::UnexpectedEof
+            );
+        }
+        source = e.source();
+    }
+    false
 }
 
 /// Pumps a kj request body into a hyper body until it ends; a failed read fails the request.

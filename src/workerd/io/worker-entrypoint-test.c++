@@ -655,30 +655,18 @@ constexpr kj::StringPtr RETRYABLE_FETCH_ACTOR_SOURCE = R"SCRIPT(
   export default Actor;
 )SCRIPT"_kj;
 
-IsRetryableHandler claimRetryableForMarkedFetch(kj::ArrayPtr<const kj::StringPtr> autogates) {
+KJ_TEST("a retryable() fetch claims as retryable") {
   auto observer = kj::refcounted<RetryClaimObserver>();
   auto params = recordingActorParams(*observer);
   params.mainModuleSource = RETRYABLE_FETCH_ACTOR_SOURCE;
   TestFixture fixture(kj::mv(params));
-  // Set after the fixture, which initializes autogates, and ignore the @all-autogates variant so the
-  // disabled case stays disabled.
-  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
   TestResponse response;
 
   KJ_EXPECT(sendFetch(fixture, response) == kj::none);
 
   KJ_EXPECT(response.statusCode == 200);
   KJ_EXPECT(observer->claimCount == 1);
-  return observer->retryableAtClaim;
-}
-
-KJ_TEST("a retryable() fetch claims as retryable when the userland gate is enabled") {
-  auto gates = kj::arr("durable-object-retries-userland"_kj);
-  KJ_EXPECT(claimRetryableForMarkedFetch(gates) == IsRetryableHandler::YES);
-}
-
-KJ_TEST("a retryable() fetch claims as not retryable when the userland gate is disabled") {
-  KJ_EXPECT(claimRetryableForMarkedFetch(nullptr) == IsRetryableHandler::NO);
+  KJ_EXPECT(observer->retryableAtClaim == IsRetryableHandler::YES);
 }
 
 KJ_TEST("a rejected actor fetch claim runs the constructor but not the handler") {

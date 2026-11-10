@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/jsg/memory.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/wrappable.h>
 
@@ -72,6 +73,7 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const override;
 
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
@@ -111,6 +113,43 @@ Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
 /// Makes a weak `v8::Global` strong again, if it is not empty. `global` points to the `ptr`
 /// field of the `ffi::Global`.
 void global_clear_weak(uintptr_t* global);
+
+// MemoryTracker
+// Heap snapshots: what a Rust value reports to `jsg::MemoryTracker`. A null `edge_name` is the
+// empty name C++ gives the elements of a container; a null `node_name` is none. V8 reads the names
+// after the snapshot's BuildEmbedderGraph callback returns, so they are string literals; see
+// `pushRetainer()` in workerd/jsg/memory.h.
+using MemoryTracker = ::workerd::jsg::MemoryTracker;
+// The edge name of a `memory_tracker_*` shim's `edge_name`: a null one is the empty name.
+inline kj::StringPtr memoryTrackerEdgeName(const char* edgeName) {
+  if (edgeName == nullptr) return nullptr;
+  return kj::StringPtr(edgeName);
+}
+// The isolate whose heap the snapshot is of.
+Isolate* memory_tracker_isolate(MemoryTracker& tracker);
+void memory_tracker_track_field_with_size(
+    MemoryTracker& tracker, const char* edge_name, size_t size, const char* node_name);
+// Tracks a Wrappable, as `trackField` tracks a `jsg::Ref` field.
+void memory_tracker_track_wrappable(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable);
+// Adds an edge to the JavaScript wrapper of a Wrappable of the tracker's isolate, or, if it has
+// none, a node of its name and size with nothing inside it, which is not deduplicated.
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable);
+// Adds an edge to the value of `global`, a handle of the tracker's isolate, unless it is empty.
+void memory_tracker_track_global(
+    MemoryTracker& tracker, const char* edge_name, const Global& global);
+// `address` and `type` identify the retainer; a null `address` identifies nothing.
+bool memory_tracker_push_retainer(MemoryTracker& tracker,
+    size_t address,
+    size_t type,
+    const char* name,
+    size_t size,
+    const char* edge_name);
+void memory_tracker_push_container(
+    MemoryTracker& tracker, const char* name, size_t size, const char* edge_name);
+void memory_tracker_pop_node(MemoryTracker& tracker);
+size_t memory_tracker_depth(const MemoryTracker& tracker);
 
 // Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
 // - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,
@@ -539,10 +578,6 @@ bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
 
-// Autogates
-// workerd::util::Autogate::isEnabled(AutogateKey::JSG_INTEGER_ENFORCE_RANGE).
-bool integer_enforce_range_autogate_enabled();
-
 // Serialization
 // In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
 // and the other way round; see ser.c++.
@@ -582,6 +617,12 @@ bool local_json_stringify(
 // A message longer than V8's string limit is cut to fit, so this never fails.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
+// Builds a DOMException named `name`, with a message read from raw bytes as
+// exception_create_from_bytes() reads it, through jsg::newDOMException(). Requires an entered
+// context. Returns none, leaving it pending, if an exception or a termination already was, or if
+// creating the DOMException threw.
+MaybeLocal dom_exception_create_from_bytes(
+    Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);

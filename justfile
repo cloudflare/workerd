@@ -188,6 +188,7 @@ eslint:
   just stream-test \
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
+    //src/per_isolate:per_isolate@eslint \
     //src/pyodide:pyodide_static@eslint \
     //src/pyodide/tools:patch_pyodide_asm_lib@eslint \
     //src/wpt:wpt-all@tsproject@eslint \

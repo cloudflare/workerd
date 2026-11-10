@@ -1,0 +1,81 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Errors thrown, returned and sent over RPC, and cloned, between workers with
+# and without enhanced error serialization: a native Error and a
+# CloneableTestError (under expose_serialization_test_class), which should
+# keep or lose their stacks alike. Each worker names its error serialization
+# flag, so that every variant tests the same pairs.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "client-enhanced",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "error-stacks-client.js"),
+          (name = "error-stacks-common", esModule = embed "error-stacks-common.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "enhanced_error_serialization",
+        ],
+        bindings = [
+          (name = "ENHANCED", json = "true"),
+          (name = "SERVER_ENHANCED", service = "server-enhanced"),
+          (name = "SERVER_LEGACY", service = "server-legacy"),
+        ],
+      )
+    ),
+    ( name = "client-legacy",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "error-stacks-client.js"),
+          (name = "error-stacks-common", esModule = embed "error-stacks-common.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "legacy_error_serialization",
+        ],
+        bindings = [
+          (name = "ENHANCED", json = "false"),
+          (name = "SERVER_ENHANCED", service = "server-enhanced"),
+          (name = "SERVER_LEGACY", service = "server-legacy"),
+        ],
+      )
+    ),
+    ( name = "server-enhanced",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "error-stacks-server.js"),
+          (name = "error-stacks-common", esModule = embed "error-stacks-common.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "enhanced_error_serialization",
+        ],
+      )
+    ),
+    ( name = "server-legacy",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "error-stacks-server.js"),
+          (name = "error-stacks-common", esModule = embed "error-stacks-common.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "legacy_error_serialization",
+        ],
+      )
+    ),
+  ],
+);

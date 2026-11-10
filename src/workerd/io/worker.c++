@@ -46,6 +46,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <v8-cppgc.h>
 #include <v8-inspector.h>
 #include <v8-metrics.h>
 #include <v8-profiler.h>
@@ -3296,6 +3297,11 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
         takeHeapSnapshot(*lock, cmd.getTakeHeapSnapshot().getParams());
         break;
       }
+      case cdp::Command::RUNTIME_GET_HEAP_USAGE: {
+        auto& lock = recordedLock.lock;
+        getHeapUsage(*lock, cmd.getRuntimeGetHeapUsage().initResult());
+        break;
+      }
     }
 
     if (!cmd.isUnknown()) {
@@ -3627,6 +3633,17 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
   };
 
   WebSocketIoHandler ioHandler;
+
+  void getHeapUsage(jsg::Lock& js, cdp::Runtime::Command::GetHeapUsage::Result::Builder result) {
+    v8::HeapStatistics stats;
+    js.v8Isolate->GetHeapStatistics(&stats);
+    result.setUsedSize(stats.used_heap_size());
+    result.setTotalSize(stats.total_heap_size());
+    result.setBackingStorageSize(stats.external_memory());
+    auto& cppHeap = KJ_ASSERT_NONNULL(js.v8Isolate->GetCppHeap());
+    auto cppStats = cppHeap.CollectStatistics(cppgc::HeapStatistics::DetailLevel::kBrief);
+    result.setEmbedderHeapUsedSize(cppStats.used_size_bytes);
+  }
 
   void takeHeapSnapshot(
       jsg::Lock& js, cdp::HeapProfiler::Command::TakeHeapSnapshot::Params::Reader params) {
@@ -5223,6 +5240,7 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface, public kj
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:
@@ -5457,6 +5475,10 @@ kj::Promise<WorkerInterface::ScheduledResult> Worker::Isolate::SubrequestClient:
 kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::runAlarm(
     kj::Date scheduledTime, uint32_t retryCount) {
   return inner->runAlarm(scheduledTime, retryCount);
+}
+kj::Promise<kj::Maybe<kj::Date>> Worker::Isolate::SubrequestClient::abandonAlarm(
+    kj::Date scheduledTime) {
+  return inner->abandonAlarm(scheduledTime);
 }
 kj::Promise<WorkerInterface::CustomEvent::Result> Worker::Isolate::SubrequestClient::customEvent(
     kj::Own<CustomEvent> event) {

@@ -10,6 +10,7 @@
 //! whole life, so connections are reused across events, and lends it to a `Client` per event,
 //! which borrows the factory's header table.
 
+pub mod bucket;
 pub mod disk;
 pub mod network;
 pub mod rewriter;

@@ -99,7 +99,7 @@ Arguments after the target go to `workerd bench`, which can also be run directly
 
 ```
 workerd bench config.wd-bench [filter] [--format=text|json] [--output=path] [--quick]
-    [--compat-date=date|latest] [--all-autogates] [--trace]
+    [--compat-date=date|latest] [--all-autogates] [--trace] [--no-startup]
 ```
 
 `--compat-date` requires the workers in the config to omit `compatibilityDate`.
@@ -110,6 +110,38 @@ maximum compatibility date if that's earlier. Without `--compat-date`, workers t
 The filter has `workerd test`'s format, optionally followed by `/<case-glob>`: for example
 `main:encoding/encode*`. `--quick` caps the budgets, to check that cases run rather than to
 measure them.
+
+## Startup
+
+After the cases, `workerd bench` times starting the Worker of each service that has a `bench()`
+handler it ran, unless given `--no-startup`. It starts copies of the Worker in new isolates, as a
+cold start does, and destroys each one after it starts. One untimed start goes first, then each
+start is a sample. Starts continue until there are 50 samples, or there are at least 5 and their
+`startup:total` times add up to the sampling budget (1s), so a slow Worker doesn't take minutes.
+Under `--quick` there is no untimed start and at most 5 samples.
+
+The report has a startup group for each service, shown as `<service> (startup)`, whose cases are
+the phases of starting:
+
+| Case              | Covers                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `startup:isolate` | Creating the isolate                                                                          |
+| `startup:script`  | Creating the context, running the per-isolate bootstrap (modules Workers), compiling modules  |
+| `startup:worker`  | Running the top-level code with the bindings (and, for service-worker syntax, the bootstrap)  |
+| `startup:total`   | Everything from the Worker's code being available to its handlers being found                 |
+
+`startup:total` also covers the steps between the phases, such as building the module registry
+and, behind the `STARTUP_SNAPSHOT` autogate, the snapshot. The case filter applies to the phases
+as to other cases. The prefix keeps a pattern meant for a handler's cases, such as `'*/encode*'`
+or `'*/w*'`, from selecting a phase; only a pattern that starts with a wildcard, such as
+`'*/*o*'`, can match both. `'*/startup:*'` times only startup.
+
+Since the per-isolate bootstrap runs in every new isolate, a benchmark of a Worker with little
+top-level code mostly times the runtime's own startup. Compare its `@all-compat-flags` variant to
+see the cost of bootstrap code behind compatibility flags.
+
+Startup groups run after every handler, so that the isolates they create and destroy don't
+disturb the cases' measurements. In the JSON report they are the groups with `startup` set.
 
 ## Reading the results
 
@@ -145,4 +177,6 @@ entrypoint, call it through a binding from a plain object's `bench` handler.
 See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js).
 [src/bench/streams/](../src/bench/streams/AGENTS.md) runs the same benchmarks against the C++ and
 TypeScript streams implementations, to compare them.
+[src/bench/serialization/](../src/bench/serialization/structured-clone.js) measures
+`structuredClone()` of object graphs, class instances, arrays and strings.
 

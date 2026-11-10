@@ -3,8 +3,8 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 # Each instance keeps its SQLite files on its own disk ("local", one directory per instance), and
-# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.wd-test) that the
-# test starts, whose address it passes in AWS_ENDPOINT_URL.
+# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.mjs) that the test
+# serves, whose address it passes in AWS_ENDPOINT_URL.
 
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -23,7 +23,8 @@ const shortStop :Workerd.Config = (
     bucketOptions = .bucketOptions,
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
-    stopTimeoutMs = 6000,
+    stopTimeoutMs = 4000,
+    unsafeTimeDivisor = 4,
   ),
 );
 
@@ -46,6 +47,12 @@ const services :List(Workerd.Service) = [
         ( name = "COUNTER", durableObjectNamespace = "Counter" ),
         ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
         ( name = "ON_HIBERNATE", service = "on-hibernate" ),
+        ( name = "KV",
+          kvNamespace = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ( name = "KV_WORKER",
+          service = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
       ],
       durableObjectNamespaces = [
         ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -53,6 +60,27 @@ const services :List(Workerd.Service) = [
       durableObjectStorage = ( localDisk = "local" ),
     )
   ),
+
+  # KV, whose large values are in the bucket at `services/kv/`, cached on
+  # each instance's disk.
+  ( name = "kv",
+    worker = (
+      modules = [ ( name = "kv.js", bundled = "/workerd/kv.js" ) ],
+      compatibilityDate = "2026-01-01",
+      bindings = [
+        ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),
+        ( name = "BLOBS", service = "kv-blobs" ),
+        ( name = "BLOB_CACHE", service = "local" ),
+        ( name = "CLUSTERED", json = "true" ),
+        ( name = "TEST_CLOCK", json = "true" ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "KVNamespace", uniqueKey = "kv", enableSql = true ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+    )
+  ),
+  ( name = "kv-blobs", bucket = ( path = "kv" ) ),
 
   ( name = "on-hibernate",
     worker = (
@@ -83,11 +111,14 @@ const bucketOptions :List(Text) = [
   "aws_secret_access_key=wdtest-secret",
 ];
 
-# The drain tests hold requests in flight for up to 8 s, within half of this stop timeout.
+# The drain tests hold requests in flight for up to 4 s, within half of this stop timeout. The
+# lease and the time a stopping instance accepts requests are a quarter of their defaults, for the
+# tests that wait them out (`TIME_DIVISOR` in cluster-test.mjs).
 const cluster :Workerd.ClusterConfig = (
   bucket = "s3://wdtest/cluster",
   bucketOptions = .bucketOptions,
   address = "127.0.0.1:0",
   key = "test-cluster-shared-secret-of-32-bytes",
-  stopTimeoutMs = 20000,
+  stopTimeoutMs = 10000,
+  unsafeTimeDivisor = 4,
 );

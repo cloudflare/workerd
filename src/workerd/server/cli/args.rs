@@ -274,6 +274,10 @@ is timed after `bench` returns:
         b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
       }
     }
+Then the startup of each of those services' workers is timed by starting copies of it in new \
+isolates, as a cold start does, unless --no-startup is given. The phases of starting are cases \
+named startup:isolate, startup:script, startup:worker and startup:total, which <case-pattern> \
+selects as it does other cases.
 Results are written to stdout as a table, or as JSON with --format=json.
 ";
 
@@ -533,6 +537,12 @@ pub struct TestArgs {
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 
+    /// Override the socket named <name> to bind to the address <addr> instead of the address
+    /// specified in the config file, as for `serve`. Lets a test listen on a port chosen when it
+    /// runs.
+    #[arg(short = 's', long = "socket-addr", value_name = "name>=<addr", value_parser = parse_override)]
+    pub socket_addr_overrides: Vec<Override>,
+
     #[arg(value_name = "filter", value_parser = parse_test_filter)]
     pub filter: Option<TestFilter>,
 }
@@ -572,6 +582,10 @@ pub struct BenchArgs {
     /// Run tail workers, which are otherwise skipped since they add their cost to every request.
     #[arg(long)]
     pub trace: bool,
+
+    /// Don't time starting the services' workers in new isolates.
+    #[arg(long)]
+    pub no_startup: bool,
 
     #[arg(value_name = "filter", value_parser = parse_bench_filter)]
     pub filter: Option<BenchFilter>,
@@ -741,6 +755,7 @@ impl BenchArgs {
             json: self.format == BenchFormat::Json,
             output: self.output.clone(),
             trace: self.trace,
+            no_startup: self.no_startup,
         }
     }
 }
