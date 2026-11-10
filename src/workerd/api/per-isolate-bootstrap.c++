@@ -969,9 +969,9 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
   KJ_IF_SOME(state,
       jsg::getAlignedPointerFromEmbedderData<BootstrapState>(
           context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
-    // The zygote's top-level evaluation has left its context scope; creating the objects and
-    // setting their properties needs the context entered.
-    JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+    // Defined outside JSG_WITHIN_CONTEXT_SCOPE: KJ_IF_SOME inside a macro argument trips
+    // clang's dangling-else diagnostic.
+    auto stash = [&](jsg::Lock& js) {
       KJ_REQUIRE(state.loading.size() == 0, "require() still in progress at snapshot time");
       // The cache is read now rather than when the bootstrap finished: a lazy require() during
       // the zygote's top-level evaluation grows it after main returned.
@@ -994,7 +994,10 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
       auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
       isolateBase.mutableSnapshotArtifact().bootstrapStateIndex =
           isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(bag));
-    });
+    };
+    // The zygote's top-level evaluation has left its context scope; creating the objects and
+    // setting their properties needs the context entered.
+    JSG_WITHIN_CONTEXT_SCOPE(js, context, stash);
   }
   // CreateBlob rejects live global handles: release the C++ state as for any context being
   // disposed.
