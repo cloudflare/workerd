@@ -5,7 +5,10 @@
 #include "ffi.h"
 
 #include <workerd/io/io-context/ffi.rs.h>
+#include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+
+#include <v8-inspector.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -214,6 +217,39 @@ void io_context_abort(uint64_t id, kj::Exception reason) {
 
 void io_context_abort_without_reason(uint64_t id) {
   currentWithId(id).abort(IoContext::abortWithoutReasonException());
+}
+
+bool io_context_should_log_uncaught_exceptions() {
+  return kj::_::Debug::shouldLog(kj::LogSeverity::INFO);
+}
+
+void io_context_log_uncaught_exception_stack(UncaughtExceptionSource source, ::rust::Str text) {
+  // Named as in Worker::Lock::logUncaughtException(), since KJ_LOG writes the names.
+  auto stack = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, stack);
+}
+
+void io_context_log_uncaught_exception_value(UncaughtExceptionSource source, ::rust::Str text) {
+  auto exception = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, exception);
+}
+
+bool io_context_send_exception_to_inspector(uint64_t id,
+    ::workerd::rust::jsg::Isolate* isolate,
+    UncaughtExceptionSource source,
+    ::workerd::rust::jsg::Local exception) {
+  auto& context = currentWithId(id);
+  KJ_IF_SOME(inspector, context.getWorker().getIsolate().tryGetV8Inspector()) {
+    // The calls below take the context.
+    if (::workerd::rust::jsg::exceptionPending(isolate)) return false;
+    auto value = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(exception));
+    // As jsg::sendExceptionToInspector() does for an exception without a v8::Message, such as one
+    // a promise rejected with. V8 creates a message from the current stack trace, or the one the
+    // error captured.
+    auto message = v8::Exception::CreateMessage(isolate, value);
+    return jsg::sendExceptionToInspector(isolate, inspector, kj::str(source), value, message);
+  }
+  return true;
 }
 
 // C++ JSG

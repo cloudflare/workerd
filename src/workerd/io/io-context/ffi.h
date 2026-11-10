@@ -118,4 +118,27 @@ bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise)
 // Logs `message` as an error, as KJ_LOG(ERROR) does.
 void io_context_log_error(::rust::Str message);
 
+// The parts of Worker::Lock::logUncaughtException(source, exception, message) that need C++, for
+// a JavaScript value and without a v8::Message. Rust reads the value's `stack` itself.
+
+// Whether KJ logs at INFO level (workerd --verbose), at which uncaught exceptions are logged.
+bool io_context_should_log_uncaught_exceptions();
+
+// KJ_LOG(INFO, "uncaught exception", source, stack), as an uncaught exception that is an object
+// whose `stack` is not undefined is logged.
+void io_context_log_uncaught_exception_stack(UncaughtExceptionSource source, ::rust::Str stack);
+
+// KJ_LOG(INFO, "uncaught exception", source, exception), as any other uncaught exception is logged.
+void io_context_log_uncaught_exception_value(UncaughtExceptionSource source, ::rust::Str exception);
+
+// If the isolate of the current IoContext has an inspector, reports `exception` to it as thrown,
+// as jsg::sendExceptionToInspector() does with no v8::Message: with a message V8 creates for the
+// value, and `source` as its text. If it has one, returns false, and reports nothing, if an
+// exception or a termination is pending, or if V8 fails to describe the message, leaving an
+// exception pending. Takes a handle in the scope of the caller's lock.
+bool io_context_send_exception_to_inspector(uint64_t id,
+    ::workerd::rust::jsg::Isolate* isolate,
+    UncaughtExceptionSource source,
+    ::workerd::rust::jsg::Local exception);
+
 }  // namespace workerd::io_context

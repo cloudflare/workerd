@@ -7,8 +7,8 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, the waitUntil call takes a V8 handle, and the trace span calls take \
-              literals that C++ does not copy"
+              set up, the waitUntil and inspector calls take V8 handles, and the trace span \
+              calls take literals that C++ does not copy"
 )]
 
 use std::any::Any;
@@ -26,7 +26,22 @@ pub mod bridge {
         include!("workerd/rust/jsg/ffi.h");
         include!("workerd/rust/jsg/v8.rs.h");
 
+        type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
+    }
+
+    /// C++ `UncaughtExceptionSource` (`workerd/util/uncaught-exception-source.h`).
+    #[namespace = "workerd"]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(i32)]
+    enum UncaughtExceptionSource {
+        INTERNAL,
+        INTERNAL_ASYNC,
+        ASYNC_TASK,
+        REQUEST_HANDLER,
+        TRACE_HANDLER,
+        ALARM_HANDLER,
+        ON_HIBERNATE_HANDLER,
     }
 
     #[namespace = "workerd"]
@@ -35,6 +50,7 @@ pub mod bridge {
 
         type SpanBuilder;
         type TraceContext;
+        type UncaughtExceptionSource;
     }
 
     unsafe extern "C++" {
@@ -114,6 +130,23 @@ pub mod bridge {
         fn trace_context_detach_async(context: Pin<&mut TraceContext>);
 
         fn io_context_log_error(message: &str);
+
+        fn io_context_should_log_uncaught_exceptions() -> bool;
+        fn io_context_log_uncaught_exception_stack(source: UncaughtExceptionSource, stack: &str);
+        fn io_context_log_uncaught_exception_value(
+            source: UncaughtExceptionSource,
+            exception: &str,
+        );
+        // Returns true if the isolate has no inspector. Otherwise, returns false when an
+        // exception or a termination is pending, or when V8 fails to
+        // describe the message, leaving an exception pending. The isolate is the caller's lock's,
+        // and the handle belongs to its scope.
+        unsafe fn io_context_send_exception_to_inspector(
+            id: u64,
+            isolate: *mut Isolate,
+            source: UncaughtExceptionSource,
+            exception: Local,
+        ) -> Result<bool>;
     }
 
     /// How `io_callback_run()` ended.
@@ -151,6 +184,23 @@ pub fn add_wait_until<'s>(
     // SAFETY: the handle belongs to the scope of `lock`, which is open throughout the call.
     let added = unsafe { bridge::io_context_add_wait_until(id, promise.into_ffi()) }?;
     pending_unless(added)
+}
+
+/// `io_context_send_exception_to_inspector()`, failing with [`jsg::Error::pending`] if the
+/// isolate has an inspector and an exception or a termination is pending.
+pub fn send_exception_to_inspector<'s>(
+    lock: &jsg::Lock<'s>,
+    id: u64,
+    source: bridge::UncaughtExceptionSource,
+    exception: v8::Local<'s, v8::Value>,
+) -> jsg::Result<()> {
+    let isolate = lock.isolate().as_ffi();
+    // SAFETY: `lock` keeps the isolate locked, with a context entered, and the handle belongs to
+    // its scope, which is open throughout the call.
+    let sent = unsafe {
+        bridge::io_context_send_exception_to_inspector(id, isolate, source, exception.into_ffi())
+    }?;
+    pending_unless(sent)
 }
 
 /// Aborts the `IoContext` that `id` identifies with `reason`, as [`jsg::Lock::exception_to_kj`]

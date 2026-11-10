@@ -35,6 +35,16 @@ constexpr kj::StringPtr SCENARIOS = R"SCRIPT(
 
   addEventListener("unhandledrejection", (e) => event(`unhandled ${e.reason}`));
 
+  // Has the request wait for `promise` through IoContext::awaitJs(), or Rust's await_js(). The
+  // C++ ExecutionContext has no method that only does that, so waitUntil() stands in for it.
+  function awaitJs(ctx, promise) {
+    if (globalThis.useRust) {
+      ctx.awaitJs(promise);
+    } else {
+      ctx.waitUntil(promise);
+    }
+  }
+
   function abortWith(abort) {
     event("before");
     try {
@@ -79,6 +89,14 @@ constexpr kj::StringPtr SCENARIOS = R"SCRIPT(
     waitUntilThrowingStackGetter(ctx) {
       // Logging the rejection reads its stack, which the request does at INFO.
       ctx.waitUntil(Promise.reject({ get stack() { throw new TypeError("from stack getter"); } }));
+      return new Response("ok");
+    },
+    awaitJsRejected(ctx) {
+      awaitJs(ctx, Promise.reject(new RangeError("rejected while awaited")));
+      return new Response("ok");
+    },
+    awaitJsThrowingStackGetter(ctx) {
+      awaitJs(ctx, Promise.reject({ get stack() { throw new TypeError("from stack getter"); } }));
       return new Response("ok");
     },
     waitUntilNeverSettles(ctx) {
@@ -485,6 +503,52 @@ KJ_TEST("what logging a waitUntil() rejection throws rejects unhandled, as in C+
   KJ_EXPECT(outcome.events == "unhandled TypeError: from stack getter", outcome.events);
   KJ_EXPECT(outcome.uncaughtExceptions.contains("Promise will never complete."),
       outcome.uncaughtExceptions);
+}
+
+// What a scenario that waits for a promise through awaitJs() lets the test observe: the events,
+// and the uncaught exceptions logged from awaiting it, "Uncaught (in promise)". The C++ scenario
+// also logs the failure of its waitUntil() task, which has no counterpart in Rust.
+struct AwaitedOutcome {
+  kj::String events;
+  kj::String inPromise;
+
+  kj::String toString() const {
+    return kj::str("events: ", events, "\nuncaught (in promise): ", inPromise);
+  }
+};
+
+AwaitedOutcome runAwaiting(kj::StringPtr scenario, Implementation implementation) {
+  UncaughtExceptionLog log;
+  ScenarioWorker worker(implementation);
+  KJ_EXPECT(worker.request(scenario) == 200);
+  worker.fixture.pollEventLoop();
+  kj::Vector<kj::StringPtr> inPromise;
+  for (auto& message: log.messages) {
+    if (message.contains("source = Uncaught (in promise)")) inPromise.add(message);
+  }
+  return {.events = readEvents(worker.fixture), .inPromise = kj::strArray(inPromise, " | ")};
+}
+
+AwaitedOutcome runAwaitingOnBoth(kj::StringPtr scenario) {
+  auto cpp = runAwaiting(scenario, Implementation::CPP);
+  auto rust = runAwaiting(scenario, Implementation::RUST);
+  KJ_EXPECT(cpp.toString() == rust.toString(), scenario, cpp.toString(), rust.toString());
+  return cpp;
+}
+
+KJ_TEST("await_js() logs a rejection as an uncaught exception, as C++ awaitJs() does") {
+  auto outcome = runAwaitingOnBoth("awaitJsRejected");
+  KJ_EXPECT(outcome.events == "", outcome.events);
+  KJ_EXPECT(outcome.inPromise.startsWith("uncaught exception; source = Uncaught (in promise); "
+                                         "stack = RangeError: rejected while awaited\n    at "),
+      outcome.inPromise);
+  KJ_EXPECT(!outcome.inPromise.contains(" | "), outcome.inPromise);
+}
+
+KJ_TEST("what logging an await_js() rejection throws rejects unhandled, as in C++") {
+  auto outcome = runAwaitingOnBoth("awaitJsThrowingStackGetter");
+  KJ_EXPECT(outcome.events == "unhandled TypeError: from stack getter", outcome.events);
+  KJ_EXPECT(outcome.inPromise == "", outcome.inPromise);
 }
 
 KJ_TEST("a waitUntil() promise that can never settle fails as in C++") {
