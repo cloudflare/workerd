@@ -660,7 +660,6 @@ void IsolateBase::settleFinalizationRegistriesForSnapshot(Lock& js) {
       js.runMicrotasks();
       ptr->ClearKeptObjects();
     }
-    KJ_LOG(INFO, "TEMP settle round", round, ranTask);
     if (!ranTask) return;
     KJ_REQUIRE(round < kMaxRounds,
         "PREPARE_SNAPSHOT: FinalizationRegistry cleanups did not settle; cleanup callbacks keep "
@@ -882,7 +881,7 @@ void requireExtensible(Lock& js, v8::Local<v8::Context> context, RestoreTimeHold
   auto probe = v8::Symbol::New(js.v8Isolate);
   bool added = check(holder->DefineOwnProperty(context, probe, v8::Undefined(js.v8Isolate)));
   KJ_REQUIRE(added,
-      "snapshot PoC: top-level code made an object non-extensible that V8 adds properties to "
+      "startup snapshot: top-level code made an object non-extensible that V8 adds properties to "
       "when the snapshot is restored",
       jsNameOf(which));
   check(holder->Delete(context, probe));
@@ -910,7 +909,7 @@ void recordAndRemove(Lock& js,
     bool configurable = field("configurable"_kj)->IsTrue();
     bool accessor = check(desc->HasOwnProperty(context, v8StrIntern(isolate, "get"_kj)));
     KJ_REQUIRE(configurable && !accessor,
-        "snapshot PoC: top-level code made a property non-configurable or an accessor that V8 "
+        "startup snapshot: top-level code made a property non-configurable or an accessor that V8 "
         "adds as a data property when the snapshot is restored",
         jsNameOf(entry.holder), entry.name, configurable, accessor);
     state.set(js, PRESENT, js.boolean(true));
@@ -940,7 +939,7 @@ void removeFailClosed(Lock& js,
   bool ours = !holder->GetOwnPropertyDescriptor(context, name).ToLocal(&descriptor);
   tryCatch.Reset();
   KJ_REQUIRE(ours,
-      "snapshot PoC: top-level code defined a property that V8 adds when the snapshot is restored",
+      "startup snapshot: top-level code defined a property that V8 adds when the snapshot is restored",
       jsNameOf(entry.holder), entry.name);
   KJ_REQUIRE(check(holder->Delete(context, name)));
 }
@@ -974,7 +973,7 @@ void IsolateBase::failClosedSetter(
 void IsolateBase::failClosed(const RestoreTimeGlobal& entry) {
   if (restoreTimeGlobalUsed == kj::none) restoreTimeGlobalUsed = entry;
   ptr->ThrowError(v8Str(ptr,
-      kj::str("snapshot PoC: ", jsNameOf(entry.holder), ".", entry.name,
+      kj::str("startup snapshot: ", jsNameOf(entry.holder), ".", entry.name,
           " cannot be used while preparing a startup snapshot")));
 }
 
@@ -1017,7 +1016,7 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
     // polyfill or a save-and-restore against a context that lacks what the restored one has.
     KJ_IF_SOME(entry, restoreTimeGlobalUsed) {
       KJ_FAIL_REQUIRE(
-          "snapshot PoC: top-level code used a property that exists only once the snapshot is "
+          "startup snapshot: top-level code used a property that exists only once the snapshot is "
           "restored, and went on after the error",
           jsNameOf(entry.holder), entry.name);
     }
