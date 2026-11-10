@@ -478,7 +478,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
     api::pyodide::SnapshotToDisk snapshotToDisk,
     api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
     PythonSnapshotRelease::Reader pythonRelease,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> maybeSnapshot,
     CompatibilityFlags::Reader featureFlags);
 
 jsg::Bundle::Reader retrievePyodideBundle(
@@ -500,7 +500,7 @@ void registerPythonCommonModules(jsg::Lock& lock,
     CompatibilityFlags::Reader featureFlags,
     jsg::Bundle::Reader pyodideBundle,
     const workerd::WorkerSource::ModulesSource& source,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> maybeSnapshot,
     api::pyodide::IsWorkerd isWorkerd,
     api::pyodide::IsTracing isTracing,
     api::pyodide::SnapshotToDisk snapshotToDisk,
@@ -613,7 +613,7 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(pythonConfig.createBaselineSnapshot);
   api::pyodide::SnapshotToDisk snapshotToDisk(
       pythonConfig.createSnapshot || createBaselineSnapshot);
-  kj::Maybe<kj::Array<kj::byte>> snapshot = kj::none;
+  kj::Maybe<kj::Own<api::pyodide::MemorySnapshotSource>> snapshot = kj::none;
   KJ_IF_SOME(snapshotName, pythonConfig.loadSnapshotFromDisk) {
     auto& root = KJ_REQUIRE_NONNULL(pythonConfig.snapshotDirectory);
     kj::Path path(snapshotName);
@@ -621,7 +621,8 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
     if (maybeFile == kj::none) {
       KJ_FAIL_REQUIRE("Expected to find", snapshotName, "in the package cache directory");
     }
-    snapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
+    snapshot = api::pyodide::MemorySnapshotSource::fromBytes(
+        KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes());
   }
 
   // Create disk cache module
