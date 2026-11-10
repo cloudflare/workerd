@@ -671,6 +671,34 @@ KJ_TEST("a type with no snapshot transfer does not matter once unreachable") {
 }
 
 // =======================================================================================
+// Generators. A suspended generator would resume in bytecode that CreateBlob(kClear) discards, so
+// one the snapshot would carry fails the zygote. A generator function, or a generator that has
+// finished, never resumes and is fine.
+
+KJ_TEST("an async function the top level left awaiting fails the zygote") {
+  // The awaited promise is kept on the global; its reaction holds the suspended function.
+  KJ_EXPECT_THROW_MESSAGE("a generator or async function is suspended",
+      bakeSnapshot("globalThis.gate = new Promise(() => {});"
+                   "(async () => { await gate; })();"_kj));
+}
+
+KJ_TEST("a generator created but not yet started fails the zygote") {
+  KJ_EXPECT_THROW_MESSAGE("a generator or async function is suspended",
+      bakeSnapshot("globalThis.it = (function*() { yield 1; })();"_kj));
+}
+
+KJ_TEST("a finished generator and a generator function survive a snapshot round trip") {
+  auto artifact = bakeSnapshot("globalThis.gen = function*() { yield 1; yield 2; };"
+                               "globalThis.done = gen();"
+                               "for (const _ of done) {}"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "[...gen()].join()"_kj) == "1,2"_kj);
+    KJ_EXPECT(eval(js, "done.next().done"_kj) == "true"_kj);
+  });
+}
+
+// =======================================================================================
 // FinalizationRegistry cleanups around the snapshot. A cleanup the top level leaves due runs in
 // the zygote before anything is recorded, so what the callback does is part of the snapshot; a
 // cleanup that becomes due only because the zygote's objects were destroyed is never run.
