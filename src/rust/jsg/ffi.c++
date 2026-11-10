@@ -1003,8 +1003,11 @@ const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
 
 // Uses V8's Array::Iterate(), which is faster than indexed access. Iterate() opens HandleScopes of
 // its own, so the handles it passes don't outlive it; the elements are held as Globals until it
-// returns, then opened in the caller's HandleScope.
-bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Local>& result) {
+// returns, then opened in the caller's HandleScope. For an array in dictionary mode, Iterate()
+// passes only the elements that exist, so holes are left to the caller, and the memory used here
+// is bounded by the elements V8 holds, whatever the array's length.
+bool local_array_iterate(
+    Isolate* isolate, Local value, ::rust::Vec<ArrayElement>& result, uint32_t& length) {
   if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
@@ -1015,26 +1018,34 @@ bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Local>& resu
   // Reserves for at most MAX_RESERVED elements up front: a sparse array's length can be more than
   // memory holds, and a getter can throw long before the end.
   constexpr uint32_t MAX_RESERVED = 4096;
+  struct Element {
+    uint32_t index;
+    v8::Global<v8::Value> value;
+  };
   struct Data {
     Isolate* isolate;
-    kj::Vector<v8::Global<v8::Value>> elements;
+    kj::Vector<Element> elements;
   };
-  Data data{isolate, kj::Vector<v8::Global<v8::Value>>(kj::min(arr->Length(), MAX_RESERVED))};
+  Data data{isolate, kj::Vector<Element>(kj::min(arr->Length(), MAX_RESERVED))};
 
   auto iterateResult = arr->Iterate(context,
       [](uint32_t index, v8::Local<v8::Value> element,
           void* userData) -> v8::Array::CallbackResult {
     auto* d = static_cast<Data*>(userData);
-    d->elements.add(d->isolate, element);
+    d->elements.add(Element{index, v8::Global<v8::Value>(d->isolate, element)});
     return v8::Array::CallbackResult::kContinue;
   },
       &data);
   // If a getter or Proxy trap on an element threw, the Globals are reset as `data` goes.
   if (iterateResult.IsNothing()) return false;
 
+  // A getter can shorten the array after its element was read; the elements read still count.
+  length = arr->Length();
+  if (!data.elements.empty()) length = kj::max(length, data.elements.back().index + 1);
   result.reserve(data.elements.size());
   for (auto& element: data.elements) {
-    result.push_back(to_ffi(element.Get(isolate)));
+    result.push_back(
+        ArrayElement{.index = element.index, .value = to_ffi(element.value.Get(isolate))});
   }
   return true;
 }

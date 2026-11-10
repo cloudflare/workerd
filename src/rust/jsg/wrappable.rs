@@ -1413,10 +1413,23 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             return Ok(None);
         };
 
-        let elements = array.iterate(lock)?;
-        let mut result = Self::with_capacity(elements.len());
-        for element in elements {
+        let v8::ArrayElements { length, elements } = array.iterate(lock)?;
+        // Script sets the length, and a sparse array's can be up to 2^32 - 1 with no elements, so
+        // a failure to allocate is an error, not an abort.
+        let mut result = Self::new();
+        result.try_reserve_exact(length).map_err(|_| {
+            Error::new_range_error(format!("Array of length {length} is too large to convert"))
+        })?;
+        for (index, element) in elements {
+            while result.len() < index {
+                let undefined = lock.undefined();
+                result.push(T::from_js(lock, undefined)?);
+            }
             result.push(T::from_js(lock, element)?);
+        }
+        while result.len() < length {
+            let undefined = lock.undefined();
+            result.push(T::from_js(lock, undefined)?);
         }
         Ok(Some(result))
     }

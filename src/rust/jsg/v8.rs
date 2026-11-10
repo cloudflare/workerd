@@ -85,6 +85,13 @@ pub mod ffi {
         ptr: usize,
     }
 
+    /// An element that exists in an array, and its index.
+    #[derive(Debug, Clone, Copy)]
+    struct ArrayElement {
+        index: u32,
+        value: Local,
+    }
+
     #[derive(Debug)]
     struct Global {
         /// Strong `v8::Global<v8::Value>` handle. Always valid when non-zero.
@@ -520,7 +527,8 @@ pub mod ffi {
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            result: &mut Vec<Local>,
+            result: &mut Vec<ArrayElement>,
+            length: &mut u32,
         ) -> Result<bool>;
 
         // Local<TypedArray>
@@ -2253,29 +2261,52 @@ impl<'s> Local<'s, Array> {
         })
     }
 
-    /// Reads every element, using V8's native `Array::Iterate()`, as a handle in the current scope.
+    /// Reads every element that exists, using V8's native `Array::Iterate()`, as a handle in the
+    /// current scope. Each index below [`ArrayElements::length`] without an element is a hole,
+    /// which reads as `undefined`.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, Value>>> {
+    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<ArrayElements<'s>> {
         call_into_js(lock, |lock| {
             let mut elements = Vec::new();
+            let mut length = 0;
             // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
             let ok = unsafe {
-                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut elements)
+                ffi::local_array_iterate(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    &mut elements,
+                    &mut length,
+                )
             }?;
-            Ok(ok.then(|| {
-                elements
+            Ok(ok.then(|| ArrayElements {
+                length: length as usize,
+                elements: elements
                     .into_iter()
-                    // SAFETY: the shim opened the elements in the current HandleScope.
-                    .map(|element| unsafe { Local::from_ffi(element) })
-                    .collect()
+                    .map(|element| {
+                        // SAFETY: the shim opened the elements in the current HandleScope.
+                        let value = unsafe { Local::from_ffi(element.value) };
+                        (element.index as usize, value)
+                    })
+                    .collect(),
             }))
         })
     }
+}
+
+/// The elements of an array, as [`Local::<Array>::iterate`] reads them.
+#[derive(Debug)]
+pub struct ArrayElements<'s> {
+    /// The number of elements the array converts to: its length, or more if a getter shortened
+    /// it after its element was read.
+    pub length: usize,
+    /// The elements that exist, with their indices, in index order. Each index below `length`
+    /// that isn't here is a hole.
+    pub elements: Vec<(usize, Local<'s, Value>)>,
 }
 
 // =============================================================================

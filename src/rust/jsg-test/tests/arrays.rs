@@ -529,6 +529,51 @@ fn vec_from_js_reads_getters_holes_and_inherited_elements() {
     });
 }
 
+/// Holes convert as `undefined` for an array in dictionary mode too, for which V8's
+/// `Array::Iterate()` passes only the elements that exist.
+#[test]
+fn vec_from_js_reads_holes_of_a_dictionary_array() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let strings: Vec<String> = ctx
+            .eval(
+                lock,
+                "const a = [1, , 3];
+                 Object.defineProperty(a, 0, { value: 1, enumerable: false });
+                 a",
+            )
+            .unwrap();
+        assert_eq!(strings, vec!["1", "undefined", "3"]);
+
+        let strings: Vec<String> = ctx.eval(lock, "const b = []; b[3000] = 1; b").unwrap();
+        assert_eq!(strings.len(), 3001);
+        assert!(strings[..3000].iter().all(|s| s == "undefined"));
+        assert_eq!(strings[3000], "1");
+
+        let strings: Vec<String> = ctx
+            .eval(lock, "const c = []; c[3000] = 1; c.length = 3005; c")
+            .unwrap();
+        assert_eq!(strings.len(), 3005);
+        assert_eq!(strings[3000], "1");
+        assert!(strings[3001..].iter().all(|s| s == "undefined"));
+
+        // Elements read before a getter shortened the array still convert.
+        let strings: Vec<String> = ctx
+            .eval(
+                lock,
+                "const d = [0, 1, 2, 3];
+                 Object.defineProperty(d, 1, {
+                     get() { d.length = 1; return 1; },
+                     configurable: true,
+                 });
+                 d",
+            )
+            .unwrap();
+        assert_eq!(strings, vec!["0", "1"]);
+        Ok(())
+    });
+}
+
 #[test]
 fn vec_empty_roundtrip() {
     let harness = crate::Harness::new();
