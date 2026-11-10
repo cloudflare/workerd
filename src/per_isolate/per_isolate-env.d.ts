@@ -189,9 +189,6 @@ declare const utils: {
   readableStreamState(
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
-  // TextEncoder.encode() for TextEncoderStream: a two-byte string goes
-  // through simdutf whatever the ENABLE_FAST_TEXTENCODER autogate says
-  // (api/encoding.h: encodeUtf8Chunk). Throws a TypeError for a non-string.
   encodeUtf8(str: string): Uint8Array;
 };
 

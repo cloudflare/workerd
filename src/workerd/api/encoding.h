@@ -177,10 +177,6 @@ class TextEncoder final: public jsg::Object {
   }
 };
 
-// Encodes a string as UTF-8, as TextEncoder.encode() does: a lone surrogate becomes U+FFFD.
-// Whatever the ENABLE_FAST_TEXTENCODER autogate says, a two-byte string is encoded with
-// simdutf, as the C++ TextEncoderStream encodes it; the TypeScript TextEncoderStream encodes
-// every chunk with it (utils.encodeUtf8).
 jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str);
 
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
