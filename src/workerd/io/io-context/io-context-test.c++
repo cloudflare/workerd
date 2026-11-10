@@ -932,6 +932,113 @@ KJ_TEST("an add_object() value can be used in place only while its IoContext is 
   fixture.drainAndDestroy(kj::mv(owner));
 }
 
+// A full garbage collection, in the request that `request` runs. It runs in an enterContext() of
+// its own, so that no handle in the frames of the one that created the objects keeps them alive.
+void collectGarbage(TestFixture& fixture, IoContext::IncomingRequest& request) {
+  fixture.enterContext(
+      request, [&](const TestFixture::Environment& env) { env.isolate->LowMemoryNotification(); });
+}
+
+// How the wait of the last await_js_start() ended.
+kj::String jsOutcome() {
+  return kj::str(awaited_js_outcome());
+}
+
+constexpr kj::StringPtr NEVER_SETTLED_OUTCOME =
+    "rejected: jsg.Error: Promise will never complete."_kj;
+
+KJ_TEST("await_js() resolves with the converted value") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "pending");
+
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "fulfilled: 42", jsOutcome());
+  KJ_EXPECT(awaited_js_map_runs() == 1);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() fails with the promise's rejection") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), false); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.TypeError: boom", jsOutcome());
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() fails as never settled if tunneling the rejection throws") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  // As in C++, what the `stack` getter throws rejects the reaction's promise, which drops the
+  // half of the wait that settles it.
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto reason = runScript(env, R"(
+      const error = new Error("boom");
+      Object.defineProperty(error, "stack", {
+        get() { throw new TypeError("from stack getter"); },
+      });
+      error
+    )");
+    reject_awaited_js(isolateOf(env), ::workerd::rust::jsg::to_ffi(kj::mv(reason)));
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() fails as never settled once GC collects the unsettled promise") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "pending");
+
+  // The reactions' data is dropped inside the collection, with the request current, so the wait
+  // settles there, as C++ awaitJs()'s does.
+  collectGarbage(fixture, *request);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a promise GC collects in another request settles the wait when its request next runs") {
+  TestFixture fixture;
+  auto owner = fixture.newIncomingRequest();
+  auto other = fixture.newIncomingRequest();
+  fixture.enterContext(*owner, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+
+  // The sender is queued for its own request to drop, as an IoOwn is.
+  collectGarbage(fixture, *other);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "pending");
+
+  fixture.enterContext(*owner, [&](const TestFixture::Environment&) {});
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
 KJ_TEST("a span given to its IoContext ends with it, though its handle outlives it") {
   auto records = kj::rc<RecordedSpans>();
   TestFixture fixture(recordingSpans(*records));
@@ -963,6 +1070,78 @@ KJ_TEST("a span given to its IoContext ends when its handle is dropped, once its
     KJ_EXPECT(KJ_ASSERT_NONNULL(records->find("owned_span")).ended);
   });
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a promise that is kept alive is not settled by GC") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  collectGarbage(fixture, *request);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "pending");
+
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "fulfilled: 42", jsOutcome());
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a cancelled await_js() does not run its conversion") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  // Once the wait is cancelled, the request has nothing else to wait for, and would be aborted
+  // as hung.
+  auto pendingEvent = context->registerPendingEvent();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::Cancellable);
+  });
+  KJ_EXPECT(cancel_awaited_js());
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+  pendingEvent = nullptr;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a cancelled await_js() whose promise GC collects drops its sender quietly") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  // As above.
+  auto pendingEvent = context->registerPendingEvent();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::Cancellable);
+  });
+  forget_awaited_js_resolver();
+  KJ_EXPECT(cancel_awaited_js());
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+  collectGarbage(fixture, *request);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+  pendingEvent = nullptr;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("destroying the IoContext drops an unsettled await_js() with its wait") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+  // The future and its callback went with the IoContext's tasks.
+  KJ_EXPECT(jsOutcome() == "pending");
+  forget_awaited_js_resolver();
 }
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
