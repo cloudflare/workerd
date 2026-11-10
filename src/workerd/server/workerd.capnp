@@ -272,6 +272,15 @@ struct ClusterConfig {
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+
+  unsafeTimeDivisor @7 :UInt32 = 1;
+  # For tests: divides by this the times that a takeover and a stop wait out, which tests would
+  # otherwise spend most of their time on. These are the 20-second lease, with the rounds that
+  # renew it and the bounds on them, the five seconds between rounds that adopt dead instances'
+  # alarms, and the five seconds a stopping instance accepts requests for at least.
+  # `stopTimeoutMs` is not divided. A divisor of 0, or one that rounds a time down to 0 (above
+  # 1000), fails the config. Bucket requests that stall past the shortened bounds fence the
+  # instance, so leave this at 1 outside tests.
 }
 
 struct LoggingOptions {

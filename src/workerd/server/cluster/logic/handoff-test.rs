@@ -8,7 +8,10 @@ use super::*;
 fn the_phases_of_a_stop_come_in_order_within_it() {
     let stops = (0..=1_000).chain([DEFAULT_STOP_MS, 600_000, u64::from(u32::MAX)]);
     for stop_ms in stops {
-        let budget = Budget { stop_ms };
+        let budget = Budget {
+            stop_ms,
+            ..Budget::default()
+        };
         assert!(budget.in_flight_ms() <= budget.handoff_ms(), "{budget:?}");
         assert!(budget.grace_ms() <= budget.handoff_ms(), "{budget:?}");
         assert!(budget.handoff_ms() <= budget.release_ms(), "{budget:?}");
@@ -26,7 +29,17 @@ fn the_phases_of_a_stop_come_in_order_within_it() {
         (4_000, 6_000, 6_600, 7_200)
     );
     assert_eq!(budget.grace_ms(), GRACE_MS);
-    assert_eq!(Budget { stop_ms: 4_000 }.grace_ms(), 3_000);
+    let stop_ms = 4_000;
+    assert_eq!(Budget { stop_ms, ..budget }.grace_ms(), 3_000);
+    let accept_ms = GRACE_MS / 4;
+    assert_eq!(
+        Budget {
+            accept_ms,
+            ..budget
+        }
+        .grace_ms(),
+        accept_ms
+    );
 }
 
 #[test]

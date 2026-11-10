@@ -38,6 +38,9 @@ pub const GRACE_MS: u64 = 5_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Budget {
     pub stop_ms: u64,
+    /// How long the instance accepts requests at least: `GRACE_MS`, unless
+    /// a test shortens it.
+    pub accept_ms: u64,
 }
 
 impl Budget {
@@ -64,8 +67,8 @@ impl Budget {
     #[must_use]
     pub const fn grace_ms(&self) -> u64 {
         let handoff = self.handoff_ms();
-        if GRACE_MS < handoff {
-            GRACE_MS
+        if self.accept_ms < handoff {
+            self.accept_ms
         } else {
             handoff
         }
@@ -83,6 +86,7 @@ impl Default for Budget {
     fn default() -> Self {
         Self {
             stop_ms: DEFAULT_STOP_MS,
+            accept_ms: GRACE_MS,
         }
     }
 }

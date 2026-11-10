@@ -3,8 +3,8 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 # Each instance keeps its SQLite files on its own disk ("local", one directory per instance), and
-# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.wd-test) that the
-# test starts, whose address it passes in AWS_ENDPOINT_URL.
+# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.mjs) that the test
+# serves, whose address it passes in AWS_ENDPOINT_URL.
 
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -23,7 +23,8 @@ const shortStop :Workerd.Config = (
     bucketOptions = .bucketOptions,
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
-    stopTimeoutMs = 6000,
+    stopTimeoutMs = 4000,
+    unsafeTimeDivisor = 4,
   ),
 );
 
@@ -110,11 +111,14 @@ const bucketOptions :List(Text) = [
   "aws_secret_access_key=wdtest-secret",
 ];
 
-# The drain tests hold requests in flight for up to 8 s, within half of this stop timeout.
+# The drain tests hold requests in flight for up to 4 s, within half of this stop timeout. The
+# lease and the time a stopping instance accepts requests are a quarter of their defaults, for the
+# tests that wait them out (`TIME_DIVISOR` in cluster-test.mjs).
 const cluster :Workerd.ClusterConfig = (
   bucket = "s3://wdtest/cluster",
   bucketOptions = .bucketOptions,
   address = "127.0.0.1:0",
   key = "test-cluster-shared-secret-of-32-bytes",
-  stopTimeoutMs = 20000,
+  stopTimeoutMs = 10000,
+  unsafeTimeDivisor = 4,
 );
