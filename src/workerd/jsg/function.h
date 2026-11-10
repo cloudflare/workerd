@@ -59,6 +59,14 @@ class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
 template <typename Signature, typename Impl>
 class WrappableFunctionImpl;
 
+// Whether a function can be carried through a startup snapshot (see snapshotClone() below).
+// A named concept rather than an inline requires-expression: Apple clang 21 crashes dumping the
+// AST of an instantiated requires-expression whose compound requirement failed substitution.
+template <typename Impl>
+concept SnapshotClonable = requires(const Impl& f) {
+  { f.clone() } -> std::same_as<Impl>;
+};
+
 template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Args...)> {
  public:
@@ -81,9 +89,7 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
   // isolate it was created in. Most functions capture handles, references or pointers into the
   // isolate, so copying them is not generally safe.
   kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override {
-    if constexpr (requires(const Impl& f) {
-                    { f.clone() } -> std::same_as<Impl>;
-                  }) {
+    if constexpr (SnapshotClonable<Impl>) {
       KJ_IF_SOME(f, func) {
         return kj::Own<Wrappable>(kj::refcounted<WrappableFunctionImpl>(f.clone()));
       }
