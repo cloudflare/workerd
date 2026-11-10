@@ -227,18 +227,26 @@ jobs:
         # The build `just generate-types` makes, on bazelflare, which the test-linux job's build
         # mostly shares. Without an OIDC token, as in a pull request from a fork, it builds on the
         # runner.
+        env:
+          REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+          REMOTE_CACHE_READ_ONLY: ${{ secrets.BAZEL_CACHE_KEY == '' }}
         run: |
           if [ "$BAZELFLARE" = true ]; then
             bazel build --config=bazelflare --config=ci --config=ci-bazelflare --config=ci-download-types //types
           else
-            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+            cache_args=(--remote_cache="$REMOTE_CACHE")
+            if [ "$REMOTE_CACHE_READ_ONLY" = true ]; then
+              cache_args+=(--noremote_upload_local_results)
+            fi
+            bazel build --strip=always "${cache_args[@]}" --config=ci --config=release_linux //types
           fi
       - name: Check snapshot diff
+        id: snapshot_diff
         run: |
           diff -r types/generated-snapshot bazel-bin/types/definitions > types.diff
           diff -r types/generated-snapshot/experimental bazel-bin/types/definitions/experimental >> types.diff
       - name: 'Put diff on the environment'
-        if: failure()
+        if: failure() && steps.snapshot_diff.outcome == 'failure'
         id: types_diff
         run: |
           {
@@ -252,7 +260,7 @@ jobs:
           name: generated-snapshot
           path: bazel-bin/types/definitions/
       - name: 'Comment on PR with error details'
-        if: failure()
+        if: failure() && steps.snapshot_diff.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
         with:
           message: |
