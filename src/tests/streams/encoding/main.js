@@ -116,3 +116,5 @@ export {
   patchedControllerEnqueueDoesNotRewriteOutput,
   internalDictionariesIgnorePollution,
 } from 'pollution';
+
+export { structuredCloneEncodingStreams } from 'transfer';

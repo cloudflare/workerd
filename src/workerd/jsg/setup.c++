@@ -459,6 +459,9 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
     return IsolateWithSnapshotCreator{v8::Isolate::New(group, params), kj::none};
   });
 }
+
+// The one property of IsolateBase::errorPrototypeTemplate's instances.
+constexpr kj::StringPtr ERROR_PROTOTYPE_KEY = "errorPrototype"_kj;
 }  // namespace
 
 v8::IsolateGroup newIsolateGroup() {
@@ -544,6 +547,14 @@ IsolateBase::IsolateBase(V8System& system,
       opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
+
+      jsSerializeModeKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
+
+      auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
+      errorPrototypeTemplate->SetIntrinsicDataProperty(
+          v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
+      this->errorPrototypeTemplate.Reset(ptr, errorPrototypeTemplate);
     }
   });
 }
@@ -586,6 +597,8 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // 2. Reset isolate level handles.
   opaqueTemplate.Reset();
+  jsSerializeModeKey.Reset();
+  errorPrototypeTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -639,6 +652,18 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
+v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->jsSerializeModeKey.Get(isolate);
+}
+
+v8::Local<v8::Value> IsolateBase::getErrorPrototype(
+    v8::Isolate* isolate, v8::Local<v8::Context> context) {
+  auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  auto holder = check(self.errorPrototypeTemplate.Get(isolate)->NewInstance(context));
+  return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -665,6 +690,8 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(jsSerializeModeKey.Reset());
+    KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
 

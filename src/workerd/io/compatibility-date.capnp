@@ -1819,7 +1819,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
   # event is in flight cancels the event and ends the callee's request.
 
-  outboundUdpSockets @205 :Bool
+  exposeSerializationTestClass @205 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
+  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
+  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
+  # RPC. This flag is intended for internal testing only and may never have its experimental
+  # annotation removed.
+
+  outboundUdpSockets @206 :Bool
       $compatEnableFlag("outbound_udp_sockets")
       $experimental;
   # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of

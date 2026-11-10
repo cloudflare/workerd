@@ -730,6 +730,14 @@ kj_test(
 )
 
 kj_test(
+    src = "serialization-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "request-io-test.c++",
     deps = [
         "//src/workerd/io",
