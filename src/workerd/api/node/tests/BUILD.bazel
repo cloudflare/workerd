@@ -15,7 +15,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "buffer-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["buffer-nodejs-test.js"],
