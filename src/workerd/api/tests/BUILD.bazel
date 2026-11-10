@@ -1302,6 +1302,9 @@ wd_test(
 # The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
 # the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
 wd_test(
+    # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
+    # timeout in loaded debug builds.
+    size = "large",
     src = "startup-snapshot-globals-test.wd-test",
     args = ["--experimental"],
     data = ["startup-snapshot-globals-test.js"],
