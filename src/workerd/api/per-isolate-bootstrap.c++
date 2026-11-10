@@ -882,8 +882,6 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
 void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFlags::Reader flags) {
-  auto context = js.v8Context();
-
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
   state->autogatesObj = buildAutogatesObject(js);
@@ -1010,8 +1008,9 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
       }
       auto bag = js.objNoProto();
       bag.set(js, STASH_REQUIRE, state.requireFn.getHandle(js));
-      KJ_IF_SOME(fn, state.embedderRequireFn) {
-        bag.set(js, STASH_EMBEDDER_REQUIRE, fn.getHandle(js));
+      if (state.embedderRequireFn != kj::none) {
+        bag.set(
+            js, STASH_EMBEDDER_REQUIRE, KJ_ASSERT_NONNULL(state.embedderRequireFn).getHandle(js));
       }
       bag.set(js, STASH_COMPAT_FLAGS, state.compatFlagsObj.getHandle(js));
       bag.set(js, STASH_AUTOGATES, state.autogatesObj.getHandle(js));
