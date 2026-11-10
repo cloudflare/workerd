@@ -1443,7 +1443,7 @@ class Object: private Wrappable {
     // A subclass would inherit the flag and be rebuilt as a fresh instance, losing its own state.
     static_assert(std::is_final_v<U>,
         "a type that sets jsgSnapshotStateless must be final: a subclass inherits the flag");
-    if constexpr (requires(Lock& lock) { U(lock); }) {
+    if constexpr (std::is_constructible_v<U, Lock&>) {
       return ownAsWrappable(kj::refcounted<U>(js));
     } else {
       return ownAsWrappable(kj::refcounted<U>());
