@@ -973,6 +973,9 @@ void IsolateBase::failClosedSetter(
 
 void IsolateBase::failClosed(const RestoreTimeGlobal& entry) {
   if (restoreTimeGlobalUsed == kj::none) restoreTimeGlobalUsed = entry;
+  // A throw would replace a pending termination (a startup limit) and let the top level run on.
+  // The recorded use still fails the zygote.
+  if (ptr->IsExecutionTerminating()) return;
   ptr->ThrowError(v8Str(ptr,
       kj::str("startup snapshot: ", jsNameOf(entry.holder), ".", entry.name,
           " cannot be used while preparing a startup snapshot")));
