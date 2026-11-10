@@ -76,6 +76,7 @@ PATCHES = [
     "0051-Gate-RacyDecodeEmbeddedFeedback-s-DISABLE_TSAN-on-THREAD_SANITIZER.patch",
     "0052-Keep-functions-created-by-v8-Function-New-in-the-context-snapshot.patch",
     "0053-Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum.patch",
+    "0054-Add-SnapshotCreator-HasSuspendedGenerators.patch",
 ]
 
 http_archive(
