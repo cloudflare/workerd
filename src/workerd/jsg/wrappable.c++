@@ -661,10 +661,10 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
   // Internal field 0 holds a marker identifying this as a workerd API object; see
-  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
+  // isWorkerdApiObject(). The marker's address is stored with the WRAPPABLE_MARKER_TAG type tag.
   auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(
+      WRAPPABLE_TAG_FIELD_INDEX, tagAddress, WRAPPABLE_MARKER_TAG);
 
   // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
   // with a per-type tag. There is deliberately no second pointer to the object in an internal
