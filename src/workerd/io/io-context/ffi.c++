@@ -7,8 +7,11 @@
 #include <workerd/io/io-context/ffi.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 
+#include <v8-inspector.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
+#include <kj/encoding.h>
 
 #include <bit>
 #include <type_traits>
@@ -214,6 +217,100 @@ void io_context_abort(uint64_t id, kj::Exception reason) {
 
 void io_context_abort_without_reason(uint64_t id) {
   currentWithId(id).abort(IoContext::abortWithoutReasonException());
+}
+
+bool io_context_should_log_uncaught_exceptions() {
+  return kj::_::Debug::shouldLog(kj::LogSeverity::INFO);
+}
+
+void io_context_log_uncaught_exception_stack(UncaughtExceptionSource source, ::rust::Str text) {
+  // Named as in Worker::Lock::logUncaughtException(), since KJ_LOG writes the names.
+  auto stack = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, stack);
+}
+
+void io_context_log_uncaught_exception_value(UncaughtExceptionSource source, ::rust::Str text) {
+  auto exception = kj::str(kj::arrayPtr(text.data(), text.size()));
+  KJ_LOG(INFO, "uncaught exception", source, exception);
+}
+
+namespace {
+
+// Text for the inspector, as jsg::toInspectorStringView() converts it: an 8-bit StringView is
+// Latin-1, so only ASCII is passed as it is, and anything else as UTF-16.
+class InspectorString {
+ public:
+  explicit InspectorString(kj::String text): text(kj::mv(text)) {
+    for (auto c: this->text) {
+      if (static_cast<kj::byte>(c) >= 0x80) {
+        utf16 = kj::encodeUtf16(this->text);
+        break;
+      }
+    }
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(InspectorString);
+
+  v8_inspector::StringView view() const {
+    if (utf16 != nullptr) {
+      return v8_inspector::StringView(
+          reinterpret_cast<const uint16_t*>(utf16.begin()), utf16.size());
+    }
+    return v8_inspector::StringView(text.asBytes().begin(), text.size());
+  }
+
+ private:
+  kj::String text;
+  // Empty unless `text` is not ASCII.
+  kj::Array<char16_t> utf16;
+};
+
+// `value` as C++ JSG describes a handle (kj::str(handle)): its detail string as UTF-8, up to its
+// first NUL. kj::none if V8 fails, leaving an exception pending.
+kj::Maybe<kj::String> describe(
+    v8::Isolate* isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
+  v8::Local<v8::String> detail;
+  if (!value->ToDetailString(context).ToLocal(&detail)) return kj::none;
+  v8::String::Utf8Value utf8(isolate, detail);
+  if (*utf8 == nullptr) return kj::str("(couldn't stringify)");
+  return kj::str(*utf8);
+}
+
+}  // namespace
+
+bool io_context_send_exception_to_inspector(uint64_t id,
+    ::workerd::rust::jsg::Isolate* isolate,
+    UncaughtExceptionSource source,
+    ::workerd::rust::jsg::Local exception) {
+  auto& context = currentWithId(id);
+  KJ_IF_SOME(inspector, context.getWorker().getIsolate().tryGetV8Inspector()) {
+    // The calls below take the context.
+    if (::workerd::rust::jsg::exceptionPending(isolate)) return false;
+    auto value = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(exception));
+    auto v8Context = isolate->GetCurrentContext();
+
+    // From here on, as jsg::sendExceptionToInspector() does for an exception without a
+    // v8::Message, such as one a promise rejected with. V8 creates a message from the current
+    // stack trace, or the one the error captured.
+    auto message = v8::Exception::CreateMessage(isolate, value);
+    auto stackTrace = message->GetStackTrace();
+    // The resource name is whatever the Script was compiled with, e.g. "worker.js".
+    KJ_IF_SOME(scriptResourceName, describe(isolate, v8Context, message->GetScriptResourceName())) {
+      KJ_IF_SOME(detailedMessage, describe(isolate, v8Context, message->Get())) {
+        auto lineNumber = message->GetLineNumber(v8Context).FromMaybe(0);
+        auto startColumn = message->GetStartColumn(v8Context).FromMaybe(0);
+        InspectorString sourceText(kj::str(source));
+        InspectorString detailedMessageText(kj::mv(detailedMessage));
+        InspectorString urlText(kj::mv(scriptResourceName));
+        // TODO(soon): EW-2636 Pass a real script ID as the last parameter instead of 0, here and
+        //   in jsg::sendExceptionToInspector().
+        inspector.exceptionThrown(v8Context, sourceText.view(), value, detailedMessageText.view(),
+            urlText.view(), lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
 }
 
 // C++ JSG

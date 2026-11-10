@@ -120,6 +120,20 @@ mod ffi {
         DropResolver,
         /// Keeps the resolver, and races the wait with `cancel_awaited_js()`.
         Cancellable,
+        /// Keeps the resolver, with a conversion that calls a function that throws a
+        /// `RangeError`.
+        MapThrows,
+        /// Keeps the resolver, with a conversion that returns a `RangeError`.
+        MapFails,
+        /// Keeps the resolver, with a conversion that returns an internal error.
+        MapFailsInternally,
+    }
+
+    /// The `UncaughtExceptionSource` that `log_uncaught_exception()` logs from.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum LogSource {
+        Internal,
+        InternalAsync,
     }
 
     unsafe extern "C++" {
@@ -170,6 +184,12 @@ mod ffi {
         fn cancel_awaited_js() -> bool;
         fn awaited_js_outcome() -> String;
         fn awaited_js_map_runs() -> u32;
+        fn awaited_js_detail_ids() -> Vec<u64>;
+        unsafe fn log_uncaught_exception(
+            isolate: usize,
+            source: LogSource,
+            exception: Local,
+        ) -> Result<()>;
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
@@ -809,6 +829,8 @@ thread_local! {
 static AWAITED_JS_OUTCOME: Mutex<String> = Mutex::new(String::new());
 /// How many times the conversion of the last `await_js_start()` ran.
 static AWAITED_JS_MAP_RUNS: AtomicU32 = AtomicU32::new(0);
+/// The ids of the details of the exception the wait of the last `await_js_start()` failed with.
+static AWAITED_JS_DETAIL_IDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
 /// What cancels the wait of the last `await_js_start(Cancellable)`.
 static AWAITED_JS_CANCEL: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
@@ -827,11 +849,48 @@ fn count_and_convert<'a>(
     f64::from_js(lock, value)
 }
 
+/// The conversion of `await_js_start(MapThrows)`'s wait: calls a function that throws.
+fn count_and_throw<'a>(
+    lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    let thrower = v8::Function::new(lock, (), |_lock, (), _args| {
+        Err(jsg::Error::new_range_error("thrown by JavaScript"))
+    })?;
+    thrower.call(lock, None, &[])?;
+    unreachable!("the function throws")
+}
+
+/// The conversion of `await_js_start(MapFails)`'s wait.
+fn count_and_fail<'a>(
+    _lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    Err(jsg::Error::new_range_error("the conversion failed"))
+}
+
+/// The conversion of `await_js_start(MapFailsInternally)`'s wait.
+fn count_and_fail_internally<'a>(
+    _lock: &mut jsg::Lock<'a>,
+    _value: v8::Local<'a, v8::Value>,
+) -> jsg::Result<f64> {
+    AWAITED_JS_MAP_RUNS.fetch_add(1, Ordering::SeqCst);
+    Err(jsg::Error::new_internal_error(
+        "the conversion failed internally",
+    ))
+}
+
 /// In a request, `IoContext::await_js()`s a new promise as `start` says, and records how the
 /// wait ends from the callback of an `await_io_and_run()` of it.
 unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()> {
     set_awaited_js_outcome("pending".to_owned());
     AWAITED_JS_MAP_RUNS.store(0, Ordering::SeqCst);
+    AWAITED_JS_DETAIL_IDS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
     AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
     let (cancel, cancelled) = oneshot::channel::<()>();
     // Without `Cancellable`, the future holds the sender, so that the wait is never cancelled.
@@ -848,9 +907,16 @@ unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()>
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
     let resolver = v8::PromiseResolver::new(lock).map_err(|err| to_io(&err))?;
-    let wait = context
-        .await_js(lock, resolver.promise(), count_and_convert)
-        .map_err(|err| to_io(&err))?;
+    let promise = resolver.promise();
+    let wait = match start {
+        ffi::AwaitJsStart::MapThrows => context.await_js(lock, promise, count_and_throw),
+        ffi::AwaitJsStart::MapFails => context.await_js(lock, promise, count_and_fail),
+        ffi::AwaitJsStart::MapFailsInternally => {
+            context.await_js(lock, promise, count_and_fail_internally)
+        }
+        _ => context.await_js(lock, promise, count_and_convert),
+    }
+    .map_err(|err| to_io(&err))?;
     if start != ffi::AwaitJsStart::DropResolver {
         let resolver = resolver.to_global(lock);
         AWAITED_JS_RESOLVER.with(|cell| *cell.borrow_mut() = Some(resolver));
@@ -860,6 +926,12 @@ unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()>
         match futures::future::select(wait, cancelled).await {
             futures::future::Either::Left((Ok(value), _)) => format!("fulfilled: {value}"),
             futures::future::Either::Left((Err(err), _)) => {
+                *AWAITED_JS_DETAIL_IDS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = err
+                    .details()
+                    .map(|details| details.iter().map(|(id, _)| *id).collect())
+                    .unwrap_or_default();
                 format!("rejected: {}", err.description())
             }
             futures::future::Either::Right(_) => "cancelled".to_owned(),
@@ -934,6 +1006,34 @@ fn awaited_js_map_runs() -> u32 {
     AWAITED_JS_MAP_RUNS.load(Ordering::SeqCst)
 }
 
+fn awaited_js_detail_ids() -> Vec<u64> {
+    AWAITED_JS_DETAIL_IDS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+/// In a request, `IoContext::log_uncaught_exception()`s `exception`, a handle in the caller's
+/// scope, as from `source`.
+unsafe fn log_uncaught_exception(
+    isolate: usize,
+    source: ffi::LogSource,
+    exception: v8::ffi::Local,
+) -> Result<()> {
+    let source = if source == ffi::LogSource::Internal {
+        io_context::UncaughtExceptionSource::Internal
+    } else {
+        io_context::UncaughtExceptionSource::InternalAsync
+    };
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let exception = unsafe { v8::Local::<v8::Value>::from_ffi(exception) };
+    IoContext::current(lock)
+        .and_then(|context| context.log_uncaught_exception(lock, source, exception))
+        .map_err(|err| to_io(&err))
+}
+
 /// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the
 /// resource macros expect the prelude's `Result`.
 mod execution_context {
@@ -960,6 +1060,25 @@ mod execution_context {
             promise: v8::VoidPromise<'s>,
         ) -> jsg::Result<()> {
             IoContext::current(lock)?.add_wait_until(lock, promise)
+        }
+
+        /// Has the request wait for `promise` through `IoContext::await_js()`, ignoring how the
+        /// wait ends. `ctx.waitUntil()`, which waits through C++ `IoContext::awaitJs()`, is its
+        /// counterpart in the C++ `ExecutionContext`.
+        #[jsg_method]
+        fn await_js<'s>(
+            &self,
+            lock: &mut jsg::Lock<'s>,
+            promise: v8::VoidPromise<'s>,
+        ) -> jsg::Result<()> {
+            let context = IoContext::current(lock)?;
+            let wait = context.await_js(lock, promise, |_lock, _value| Ok(()))?;
+            context.await_io_and_run(
+                async move {
+                    let _ = wait.await;
+                },
+                |_lock, ()| Ok(()),
+            )
         }
 
         #[jsg_method]

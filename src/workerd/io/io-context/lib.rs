@@ -252,9 +252,15 @@ impl<'s> IoContext<'s> {
     /// under the isolate lock. It is `Copy`, so that what it captures holds no GC references, and
     /// `Send`, as the reactions' data must be.
     ///
-    /// The future fails with the promise's rejection, or what JavaScript threw in `map`, as
-    /// [`jsg::Lock::exception_to_kj`] tunnels it, or with `map`'s own error, described as
-    /// `jsg.<name>: <message>`. If tunneling runs JavaScript that throws (a getter of the
+    /// The future fails with the promise's rejection, or with what `map` throws, as C++ fails
+    /// with what `func` throws: what JavaScript threw in `map`, or the exception that throwing
+    /// `map`'s own error would throw ([`jsg::Lock::throw_exception`]), as C++ converts a KJ
+    /// exception from `func` to JavaScript. An internal error is redacted and logged as
+    /// [`jsg::Lock::throw_internal_error`] does, rather than as C++ `jsg::exceptionToJs()` logs a
+    /// KJ exception, with its origin and for Sentry. The reaction first logs that value as an
+    /// uncaught exception from [`UncaughtExceptionSource::InternalAsync`], as
+    /// [`log_uncaught_exception`](Self::log_uncaught_exception) does, then tunnels it as
+    /// [`jsg::Lock::exception_to_kj`] does. If either runs JavaScript that throws (a getter of the
     /// rejection's `stack`, say), the reaction rejects with that exception, and the future fails
     /// as for a promise that never settles, as in C++. As in C++, the promise must settle in
     /// this request: its reactions are not run in another, and if the promise is
@@ -276,9 +282,8 @@ impl<'s> IoContext<'s> {
     /// error for which [`jsg::Error::is_pending`] is true if V8 fails to register the reactions
     /// or execution is terminating.
     //
-    // TODO(soon): Log a rejection as an uncaught exception, join the wait with the request's
-    // abort, record it for async tracing, and choose the memory-limit error once the isolate is
-    // past its heap limit.
+    // TODO(soon): Join the wait with the request's abort, record it for async tracing, and
+    // choose the memory-limit error once the isolate is past its heap limit.
     pub fn await_js<T, M>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -447,6 +452,54 @@ impl<'s> IoContext<'s> {
         }
     }
 
+    /// Logs `exception`, a value JavaScript threw or rejected a promise with, as an uncaught
+    /// exception from `source`, as C++ `IoContext::logUncaughtException(source, exception)` does
+    /// through `Worker::Lock::logUncaughtException()`:
+    ///
+    /// - If the isolate has an inspector, reports it to the inspector as thrown, with `source`'s
+    ///   text and a message that V8 creates for the value, so that it shows in the inspector's
+    ///   console.
+    /// - If KJ logs at INFO level (`workerd --verbose`), logs `uncaught exception` with `source`
+    ///   and the value's `stack`, if the value is an object whose `stack` is not `undefined`, or
+    ///   else the value itself, each as [`v8::Local::<v8::Value>::to_detail_string`] describes
+    ///   it, up to its first NUL.
+    ///
+    /// C++ also adds an uncaught exception to the request's tail-worker trace, but not one from
+    /// either [`UncaughtExceptionSource`]; see there.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one. Fails with
+    /// an error for which [`jsg::Error::is_pending`] is true:
+    ///
+    /// - if an exception or a termination is already pending, and the isolate has an inspector or
+    ///   KJ logs at INFO level;
+    /// - if reading `stack` runs JavaScript that throws (a getter, say), leaving that exception
+    ///   pending, as C++ throws `JsExceptionThrown` then. The inspector has been told of
+    ///   `exception` by then.
+    pub fn log_uncaught_exception(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        source: UncaughtExceptionSource,
+        exception: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        let source = source.into_ffi();
+        ffi::send_exception_to_inspector(lock, self.id, source, exception)?;
+        if !bridge::io_context_should_log_uncaught_exceptions() {
+            return Ok(());
+        }
+        if let Ok(object) = v8::Local::<v8::Object>::try_from(exception) {
+            let stack = object.get(lock, "stack")?;
+            if !stack.is_undefined() {
+                let stack = describe_for_log(lock, stack)?;
+                bridge::io_context_log_uncaught_exception_stack(source, &stack);
+                return Ok(());
+            }
+        }
+        let exception = describe_for_log(lock, exception)?;
+        bridge::io_context_log_uncaught_exception_value(source, &exception);
+        Ok(())
+    }
+
     /// Starts a span of internal tracing, as C++ `IoContext::makeTraceSpan()` does. It is a child
     /// of the span current in the async context frame, or of the request's span, and ends when
     /// the returned [`SpanBuilder`] is dropped. If the request is not traced, it records nothing.
@@ -467,6 +520,45 @@ impl<'s> IoContext<'s> {
     pub fn make_user_trace_span(&self, name: &'static CStr) -> jsg::Result<TraceContext> {
         TraceContext::start(self.id, name)
     }
+}
+
+/// Where an uncaught exception comes from, as C++ `UncaughtExceptionSource` says.
+///
+/// [`IoContext::log_uncaught_exception`] gives the inspector and the log the source's text, such
+/// as `Uncaught (in promise)`.
+///
+/// C++ has more sources, for the exceptions of handlers and tasks, whose uncaught exceptions it
+/// also adds to the request's tail-worker trace (`addExceptionToTrace()`). It adds none from these
+/// two, and `log_uncaught_exception` adds none at all, so only these two are offered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UncaughtExceptionSource {
+    /// `INTERNAL`, `Uncaught`.
+    Internal,
+    /// `INTERNAL_ASYNC`, `Uncaught (in promise)`: a JavaScript promise that the runtime waits
+    /// for rejected, as in [`IoContext::await_js`].
+    InternalAsync,
+}
+
+impl UncaughtExceptionSource {
+    const fn into_ffi(self) -> bridge::UncaughtExceptionSource {
+        match self {
+            Self::Internal => bridge::UncaughtExceptionSource::INTERNAL,
+            Self::InternalAsync => bridge::UncaughtExceptionSource::INTERNAL_ASYNC,
+        }
+    }
+}
+
+/// `value` as C++ JSG describes a handle in a log (`kj::str(handle)`): its detail string, up to
+/// its first NUL, since C++ copies it out of V8 as a C string.
+fn describe_for_log<'s>(
+    lock: &mut jsg::Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+) -> jsg::Result<String> {
+    let mut detail = value.to_detail_string(lock)?;
+    if let Some(nul) = detail.find('\0') {
+        detail.truncate(nul);
+    }
+    Ok(detail)
 }
 
 /// What the callback of [`IoContext::await_io`] returned, carried to the reaction that returns or
@@ -675,16 +767,11 @@ where
     };
     // As C++ does once the KJ promise is gone, `map` does not run for a cancelled wait.
     if !sender.shared.is_cancelled() {
-        // Only the exceptions that JavaScript threw are caught here; `map`'s own error is
-        // tunneled as it is.
-        let outcome = lock.try_catch(|lock| match (reaction.map)(lock, value) {
-            Err(err) if err.is_pending() => Err(err),
-            outcome => Ok(outcome),
-        })?;
-        let state = match outcome {
-            Ok(Ok(value)) => AwaitJsState::Fulfilled(value),
-            Ok(Err(err)) => AwaitJsState::Rejected(kj_error_of(&err)),
-            Err(exception) => AwaitJsState::Rejected(lock.exception_to_kj(exception)?),
+        // `map`'s own error is caught as the exception that throwing it throws, as C++
+        // `jsg::Lock::tryCatch()` converts a KJ exception from `func`.
+        let state = match lock.try_catch(|lock| (reaction.map)(lock, value))? {
+            Ok(value) => AwaitJsState::Fulfilled(value),
+            Err(exception) => AwaitJsState::Rejected(reject_with_js_exception(lock, exception)?),
         };
         sender.shared.settle(state);
     }
@@ -700,15 +787,25 @@ fn await_js_on_rejected<'a, T, M>(
     let Some(sender) = reaction.sender.take(lock)? else {
         unreachable!("only one reaction to a promise runs, once");
     };
-    let err = lock.exception_to_kj(reason)?;
+    let err = reject_with_js_exception(lock, reason)?;
     sender.shared.settle(AwaitJsState::Rejected(err));
     Ok(lock.undefined())
 }
 
-/// The exception for an error `map` returns, `jsg.<name>: <message>`, as C++ `JSG_REQUIRE()`
-/// throws one in the `func` of `IoContext::awaitJs()`.
-fn kj_error_of(err: &jsg::Error) -> cxx::KjError {
-    cxx::KjError::new(cxx::KjExceptionType::Failed, format!("jsg.{err}"))
+/// The exception a wait of [`IoContext::await_js`] fails with for `exception`, which the promise
+/// rejected with or `map` threw, as C++ `AwaitJsFulfiller::rejectWithJsException()` creates it:
+/// logs `exception` as uncaught, then tunnels it. Fails with what JavaScript that either runs
+/// throws, leaving it pending, before anything is tunneled.
+fn reject_with_js_exception<'a>(
+    lock: &mut jsg::Lock<'a>,
+    exception: v8::Local<'a, v8::Value>,
+) -> jsg::Result<cxx::KjError> {
+    IoContext::current(lock)?.log_uncaught_exception(
+        lock,
+        UncaughtExceptionSource::InternalAsync,
+        exception,
+    )?;
+    lock.exception_to_kj(exception)
 }
 
 /// A value an `IoContext` owns, from [`IoContext::add_object`].

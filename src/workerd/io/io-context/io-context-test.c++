@@ -9,16 +9,20 @@
 #include <workerd/io/io-context/ffi.h>
 #include <workerd/io/io-context/test-bridge-state.h>
 #include <workerd/io/io-context/test_bridge.rs.h>
+#include <workerd/jsg/inspector.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/rust/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
+
+#include <v8-inspector.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/test.h>
 
 #include <bit>
+#include <memory>
 
 namespace workerd::io_context::test {
 namespace {
@@ -1142,6 +1146,403 @@ KJ_TEST("destroying the IoContext drops an unsettled await_js() with its wait") 
   // The future and its callback went with the IoContext's tasks.
   KJ_EXPECT(jsOutcome() == "pending");
   forget_awaited_js_resolver();
+}
+
+// Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it
+// exists, and passes on other messages the log level allowed before, as in request-ops-test.c++.
+// Only INFO messages are recorded, so that a failed KJ_EXPECT that quotes one reaches the test.
+class UncaughtExceptionLog final: public kj::ExceptionCallback {
+ public:
+  UncaughtExceptionLog(): previousLevel(currentLogLevel()) {
+    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+  }
+  ~UncaughtExceptionLog() noexcept(false) {
+    kj::_::Debug::setLogLevel(previousLevel);
+  }
+
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    if (severity == kj::LogSeverity::INFO && text.contains("uncaught exception")) {
+      messages.add(kj::mv(text));
+    } else if (severity >= previousLevel) {
+      next.logMessage(severity, file, line, contextDepth, kj::mv(text));
+    }
+  }
+
+  // The messages recorded since the last call, separated by " | ".
+  kj::String take() {
+    auto result = kj::strArray(messages, " | ");
+    messages.clear();
+    return result;
+  }
+
+  kj::Vector<kj::String> messages;
+
+ private:
+  kj::LogSeverity previousLevel;
+
+  // KJ has no getter for the log level.
+  static kj::LogSeverity currentLogLevel() {
+    for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
+           kj::LogSeverity::FATAL}) {
+      if (kj::_::Debug::shouldLog(severity)) return severity;
+    }
+    return kj::LogSeverity::DBG;
+  }
+};
+
+// How an await_js() rejection is logged, up to what follows "stack = " or "exception = ".
+constexpr kj::StringPtr IN_PROMISE = "uncaught exception; source = Uncaught (in promise); "_kj;
+
+// Rejects the promise of the last await_js_start() with the value of `source`, a script.
+void rejectAwaitedJs(
+    TestFixture& fixture, IoContext::IncomingRequest& request, kj::StringPtr source) {
+  fixture.enterContext(request, [&](const TestFixture::Environment& env) {
+    reject_awaited_js(isolateOf(env), ::workerd::rust::jsg::to_ffi(runScript(env, source)));
+  });
+}
+
+KJ_TEST("await_js() logs a rejection as an uncaught exception, once, with its stack") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  UncaughtExceptionLog log;
+  rejectAwaitedJs(fixture, *request, R"((() => {
+    const error = new RangeError("boom");
+    error.stack = "the stack";
+    return error;
+  })())");
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.RangeError: boom", jsOutcome());
+  auto logged = log.take();
+  KJ_EXPECT(logged == kj::str(IN_PROMISE, "stack = the stack"), logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() logs a rejection with a value that has no stack as the value") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  UncaughtExceptionLog log;
+  rejectAwaitedJs(fixture, *request, R"("a string")");
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.Error: a string", jsOutcome());
+  auto logged = log.take();
+  KJ_EXPECT(logged == kj::str(IN_PROMISE, "exception = a string"), logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() logs what JavaScript throws in its conversion, once, then tunnels it") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::MapThrows);
+  });
+  UncaughtExceptionLog log;
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.RangeError: thrown by JavaScript", jsOutcome());
+  KJ_EXPECT(awaited_js_map_runs() == 1);
+  KJ_EXPECT(log.messages.size() == 1, kj::strArray(log.messages, " | "));
+  auto logged = log.take();
+  KJ_EXPECT(
+      logged.startsWith(kj::str(IN_PROMISE, "stack = RangeError: thrown by JavaScript")), logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() converts its conversion's own error, logs it and tunnels it as one thrown") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::MapFails);
+  });
+  UncaughtExceptionLog log;
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.RangeError: the conversion failed", jsOutcome());
+  // Tunneled as a JavaScript exception is, with the error serialized and its name and stack.
+  auto detailIds = awaited_js_detail_ids();
+  auto ids = kj::arrayPtr(detailIds.data(), detailIds.size());
+  KJ_EXPECT(ids.findFirst(jsg::TUNNELED_EXCEPTION_DETAIL_ID) != kj::none);
+  KJ_EXPECT(ids.findFirst(jsg::JS_EXCEPTION_METADATA_DETAIL_ID) != kj::none);
+  KJ_EXPECT(log.messages.size() == 1, kj::strArray(log.messages, " | "));
+  auto logged = log.take();
+  KJ_EXPECT(
+      logged.startsWith(kj::str(IN_PROMISE, "stack = RangeError: the conversion failed")), logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() redacts and logs its conversion's internal error, then tunnels it") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::MapFailsInternally);
+  });
+  UncaughtExceptionLog log;
+  {
+    KJ_EXPECT_LOG(ERROR, "internalMessage = the conversion failed internally");
+    fixture.enterContext(*request,
+        [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(
+      jsOutcome().startsWith("rejected: jsg.Error: internal error; reference = "), jsOutcome());
+  auto logged = log.take();
+  KJ_EXPECT(logged.startsWith(kj::str(IN_PROMISE, "stack = Error: internal error; reference = ")),
+      logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a fulfilled await_js() logs nothing") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  UncaughtExceptionLog log;
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "fulfilled: 42", jsOutcome());
+  auto logged = log.take();
+  KJ_EXPECT(logged == "", logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() logs a rejection before tunneling it, which then does not happen if logging "
+        "throws") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  UncaughtExceptionLog log;
+  // Tunneling reads `overloaded` first, and logging reads `stack`.
+  rejectAwaitedJs(fixture, *request, R"(({
+    get overloaded() { globalThis.tunneled = true; return false; },
+    get stack() { throw new TypeError("from stack getter"); },
+  }))");
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  KJ_EXPECT(evaluate(fixture, "String(globalThis.tunneled)") == "undefined");
+  auto logged = log.take();
+  KJ_EXPECT(!logged.contains("Uncaught (in promise)"), logged);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+// The notifications an inspector session sends, which InspectorChannel receives.
+class InspectorNotifications {
+ public:
+  void add(kj::String notification) {
+    notifications.add(kj::mv(notification));
+  }
+
+  // The notifications received since the last call, separated by " | ", with the values of the
+  // fields that differ from one report of an exception to that of the same exception, created by
+  // the same source in another script, replaced with `_`.
+  kj::String take() {
+    auto result = kj::strArray(KJ_MAP(notification, notifications) {
+      return withoutFields(
+          notification, {"timestamp"_kj, "exceptionId"_kj, "objectId"_kj, "scriptId"_kj});
+    }, " | ");
+    notifications.clear();
+    return result;
+  }
+
+ private:
+  kj::Vector<kj::String> notifications;
+
+  // `json` with the value of each field named in `names` replaced with `_`.
+  static kj::String withoutFields(kj::StringPtr json, std::initializer_list<kj::StringPtr> names) {
+    kj::String result = kj::str(json);
+    for (auto name: names) {
+      auto key = kj::str("\"", name, "\":");
+      kj::Vector<char> out;
+      kj::StringPtr rest = result;
+      while (true) {
+        KJ_IF_SOME(at, rest.find(key)) {
+          out.addAll(rest.first(at + key.size()));
+          rest = rest.slice(at + key.size());
+          size_t end = 0;
+          if (rest.startsWith("\"")) {
+            end = 1;
+            while (end < rest.size() && rest[end] != '"') {
+              end += rest[end] == '\\' ? 2 : 1;
+            }
+            ++end;
+          } else {
+            while (end < rest.size() && rest[end] != ',' && rest[end] != '}') ++end;
+          }
+          out.add('_');
+          rest = rest.slice(kj::min(end, rest.size()));
+        } else {
+          out.addAll(rest);
+          break;
+        }
+      }
+      out.add('\0');
+      result = kj::String(out.releaseAsArray());
+    }
+    return result;
+  }
+};
+
+class InspectorChannel final: public v8_inspector::V8Inspector::Channel {
+ public:
+  explicit InspectorChannel(InspectorNotifications& notifications): notifications(notifications) {}
+
+  void sendResponse(int, std::unique_ptr<v8_inspector::StringBuffer>) override {}
+  void sendNotification(std::unique_ptr<v8_inspector::StringBuffer> message) override {
+    notifications.add(kj::str(message->string()));
+  }
+  void flushProtocolNotifications() override {}
+
+ private:
+  InspectorNotifications& notifications;
+};
+
+// The parameters of a fixture whose isolate has an inspector, without a DevTools server.
+TestFixture::SetupParams inspectorParams(capnp::MallocMessageBuilder& flagsMessage) {
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setEnableNodeJsInspectorLocalDev(true);
+  return {.featureFlags = flags.asReader(), .useRealTimers = false};
+}
+
+// Connects a session to the inspector of the isolate of `env`, and enables its Runtime domain,
+// which reports exceptions. The session must be destroyed under the isolate lock.
+std::unique_ptr<v8_inspector::V8InspectorSession> connectInspector(
+    const TestFixture::Environment& env, InspectorChannel& channel) {
+  auto& inspector = KJ_ASSERT_NONNULL(env.context.getWorker().getIsolate().tryGetV8Inspector());
+  // Context group 1 is the worker's (setupContext() in worker.c++).
+  auto session = inspector.connect(
+      1, &channel, v8_inspector::StringView(), v8_inspector::V8Inspector::kFullyTrusted);
+  auto enable = R"({"id":1,"method":"Runtime.enable"})"_kj;
+  session->dispatchProtocolMessage(
+      v8_inspector::StringView(enable.asBytes().begin(), enable.size()));
+  return session;
+}
+
+KJ_TEST("log_uncaught_exception() reports to the inspector and logs as C++ logUncaughtException() "
+        "does") {
+  capnp::MallocMessageBuilder flagsMessage;
+  TestFixture fixture(inspectorParams(flagsMessage));
+  UncaughtExceptionLog log;
+  InspectorNotifications notifications;
+  InspectorChannel channel(notifications);
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto session = connectInspector(env, channel);
+    notifications.take();
+
+    struct Source {
+      UncaughtExceptionSource cpp;
+      LogSource rust;
+    };
+    for (auto source: {Source{UncaughtExceptionSource::INTERNAL, LogSource::Internal},
+           Source{UncaughtExceptionSource::INTERNAL_ASYNC, LogSource::InternalAsync}}) {
+      auto prefix = kj::str("uncaught exception; source = ", source.cpp, "; ");
+      for (auto script:
+          {
+            R"(new RangeError("boom"))"_kj,
+            R"((() => { const e = new Error("with\0nul"); e.stack = "before\0after"; return e; })())"_kj,
+            R"(new TypeError("caf\u00e9 \u{1F600}"))"_kj,
+            R"("a string")"_kj,
+            R"(({ stack: 42 }))"_kj,
+            R"(({}))"_kj,
+            R"(Symbol("symbol"))"_kj,
+            "undefined"_kj,
+            "null"_kj,
+          }) {
+        // Each implementation gets a value of its own, since reading an error's `stack` formats
+        // its stack trace, after which V8 no longer finds the location of the error in it.
+        auto cppValue = runScript(env, script);
+        auto rustValue = runScript(env, script);
+        env.context.logUncaughtException(source.cpp, jsg::JsValue(cppValue));
+        auto cppReport = notifications.take();
+        auto cppLog = log.take();
+
+        log_uncaught_exception(
+            isolateOf(env), source.rust, ::workerd::rust::jsg::to_ffi(kj::mv(rustValue)));
+        auto rustReport = notifications.take();
+        auto rustLog = log.take();
+
+        KJ_EXPECT(cppReport.contains(R"j("method":"Runtime.exceptionThrown")j"), script, cppReport);
+        KJ_EXPECT(rustReport == cppReport, script, rustReport, cppReport);
+        KJ_EXPECT(cppLog.startsWith(prefix), script, cppLog);
+        KJ_EXPECT(rustLog == cppLog, script, rustLog, cppLog);
+      }
+    }
+    // Disconnected under the isolate lock.
+    session = nullptr;
+  });
+}
+
+KJ_TEST("await_js() reports a rejection to the inspector once, without logging at INFO level") {
+  capnp::MallocMessageBuilder flagsMessage;
+  TestFixture fixture(inspectorParams(flagsMessage));
+  InspectorNotifications notifications;
+  InspectorChannel channel(notifications);
+  std::unique_ptr<v8_inspector::V8InspectorSession> session;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  // Once the wait ends, the request has nothing else to wait for, and would be aborted as hung
+  // before the session is disconnected.
+  auto pendingEvent = context->registerPendingEvent();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    session = connectInspector(env, channel);
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  notifications.take();
+  rejectAwaitedJs(fixture, *request, R"(new RangeError("boom"))");
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.RangeError: boom", jsOutcome());
+  auto reports = notifications.take();
+  KJ_EXPECT(reports.startsWith(R"j({"method":"Runtime.exceptionThrown")j"), reports);
+  KJ_EXPECT(reports.contains(R"j("text":"Uncaught RangeError: boom")j"), reports);
+  KJ_EXPECT(!reports.contains(" | "), reports);
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) { session = nullptr; });
+  pendingEvent = nullptr;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+enum class LogLevel { DEFAULT, INFO };
+
+// How many times the `stack` getter of a rejection runs while await_js() handles it, at `level`.
+kj::String stackReads(LogLevel level) {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  kj::Maybe<UncaughtExceptionLog> log;
+  if (level == LogLevel::INFO) log.emplace();
+  rejectAwaitedJs(fixture, *request, R"(({
+    get stack() {
+      globalThis.stackReads = (globalThis.stackReads ?? 0) + 1;
+      return "the stack";
+    },
+  }))");
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome().startsWith("rejected: "), jsOutcome());
+  auto reads = evaluate(fixture, "String(globalThis.stackReads)");
+  fixture.drainAndDestroy(kj::mv(request));
+  return reads;
+}
+
+KJ_TEST("await_js() reads a rejection's stack to log it only when KJ logs at INFO level") {
+  // Tunneling reads it too.
+  auto quiet = stackReads(LogLevel::DEFAULT);
+  auto verbose = stackReads(LogLevel::INFO);
+  auto quietReads = KJ_ASSERT_NONNULL(quiet.tryParseAs<int>(), quiet);
+  KJ_EXPECT(verbose == kj::str(quietReads + 1), quiet, verbose);
 }
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
