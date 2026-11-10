@@ -621,8 +621,8 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
         io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
     KJ_EXPECT_THROW_MESSAGE(
         "not the one of the current request", io_context_set_fail_open(firstId));
-    KJ_EXPECT_THROW_MESSAGE("not the one of the current request",
-        io_context_abort(firstId, ::workerd::rust::jsg::MaybeLocal{0}));
+    KJ_EXPECT_THROW_MESSAGE(
+        "not the one of the current request", io_context_abort_without_reason(firstId));
     KJ_EXPECT(!env.context.isFailOpen());
     KJ_EXPECT(env.context.getAbortReason() == kj::none);
   });
@@ -632,8 +632,8 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
     KJ_EXPECT_THROW_MESSAGE("there is no current request",
         io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
     KJ_EXPECT_THROW_MESSAGE("there is no current request", io_context_set_fail_open(firstId));
-    KJ_EXPECT_THROW_MESSAGE("there is no current request",
-        io_context_abort(firstId, ::workerd::rust::jsg::MaybeLocal{0}));
+    KJ_EXPECT_THROW_MESSAGE(
+        "there is no current request", io_context_abort_without_reason(firstId));
   });
 
   fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
