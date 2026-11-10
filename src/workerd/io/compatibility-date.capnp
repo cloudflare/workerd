@@ -1814,6 +1814,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # method's JavaScript is not interrupted, but a stateless Worker's pending I/O is canceled when
   # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
   # like a fetch handler whose client went away.
+  #
+  # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
+  # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
+  # event is in flight cancels the event and ends the callee's request.
 
   outboundUdpSockets @205 :Bool
       $compatEnableFlag("outbound_udp_sockets")

@@ -193,11 +193,13 @@ class EsModule final: public Module {
       Flags flags,
       kj::ArrayPtr<const char> source,
       kj::ArrayPtr<const kj::byte> compileCache = nullptr,
-      kj::Maybe<kj::String> bundleModuleName = kj::none)
+      kj::Maybe<kj::String> bundleModuleName = kj::none,
+      kj::Array<int> compileHints = nullptr)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         staticCompileCache(compileCache),
-        bundleModuleName(kj::mv(bundleModuleName)) {
+        bundleModuleName(kj::mv(bundleModuleName)),
+        compileHints(kj::mv(compileHints)) {
     KJ_DASSERT(isEsm());
   }
   explicit EsModule(Url id,
@@ -218,11 +220,13 @@ class EsModule final: public Module {
       Flags flags,
       kj::Arc<OwnedAscii> code,
       kj::Maybe<CodeCacheKey> codeCacheKey,
-      kj::Maybe<kj::String> bundleModuleName = kj::none)
+      kj::Maybe<kj::String> bundleModuleName = kj::none,
+      kj::Array<int> compileHints = nullptr)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(code)),
         codeCacheKey(codeCacheKey),
-        bundleModuleName(kj::mv(bundleModuleName)) {
+        bundleModuleName(kj::mv(bundleModuleName)),
+        compileHints(kj::mv(compileHints)) {
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -251,6 +255,7 @@ class EsModule final: public Module {
       });
     },
         {.embeddedCache = staticCompileCache,
+          .compileHints = compileHints,
           .bundleModuleName =
               bundleModuleName.map([](const kj::String& name) -> kj::StringPtr { return name; }),
           .sharedCache = sharedCompileCache});
@@ -337,6 +342,9 @@ class EsModule final: public Module {
 
   // Kept separately from the normalized URL so reports preserve the uploaded bundle name.
   kj::Maybe<kj::String> bundleModuleName;
+
+  // Owned positions remain valid after releasing the source bundle, across isolate replicas.
+  kj::Array<int> compileHints;
 
   // Replica-local compilation uses this slot when no process-wide store applies.
   SharedModuleCompilationCache sharedCompileCache;
@@ -2009,15 +2017,17 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(kj:
   return *this;
 }
 
-ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(kj::StringPtr name,
+    kj::ArrayPtr<const char> source,
+    Module::Flags flags,
+    kj::ArrayPtr<const int> compileHints) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), name = kj::str(name), source, flags, type = type()](
-          const ResolveContext& context) mutable
+      [url = url.clone(), name = kj::str(name), source, flags, type = type(),
+          compileHints = kj::heapArray(compileHints)](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod =
-        kj::heap<EsModule>(kj::mv(url), type, flags, source, nullptr, kj::mv(name));
+    kj::Own<Module> mod = kj::heap<EsModule>(
+        kj::mv(url), type, flags, source, nullptr, kj::mv(name), kj::mv(compileHints));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2026,14 +2036,16 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(kj::StringPtr name,
     kj::Arc<OwnedAscii> source,
     Module::Flags flags,
-    kj::Maybe<CodeCacheKey> codeCacheKey) {
+    kj::Maybe<CodeCacheKey> codeCacheKey,
+    kj::ArrayPtr<const int> compileHints) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), name = kj::str(name), source = kj::mv(source), flags, type = type(),
-          codeCacheKey](const ResolveContext& context) mutable
+          codeCacheKey,
+          compileHints = kj::heapArray(compileHints)](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod =
-        kj::heap<EsModule>(kj::mv(url), type, flags, kj::mv(source), codeCacheKey, kj::mv(name));
+    kj::Own<Module> mod = kj::heap<EsModule>(
+        kj::mv(url), type, flags, kj::mv(source), codeCacheKey, kj::mv(name), kj::mv(compileHints));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;

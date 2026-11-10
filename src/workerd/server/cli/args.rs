@@ -274,6 +274,10 @@ is timed after `bench` returns:
         b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
       }
     }
+Then the startup of each of those services' workers is timed by starting copies of it in new \
+isolates, as a cold start does, unless --no-startup is given. The phases of starting are cases \
+named startup:isolate, startup:script, startup:worker and startup:total, which <case-pattern> \
+selects as it does other cases.
 Results are written to stdout as a table, or as JSON with --format=json.
 ";
 
@@ -579,6 +583,10 @@ pub struct BenchArgs {
     #[arg(long)]
     pub trace: bool,
 
+    /// Don't time starting the services' workers in new isolates.
+    #[arg(long)]
+    pub no_startup: bool,
+
     #[arg(value_name = "filter", value_parser = parse_bench_filter)]
     pub filter: Option<BenchFilter>,
 }
@@ -747,6 +755,7 @@ impl BenchArgs {
             json: self.format == BenchFormat::Json,
             output: self.output.clone(),
             trace: self.trace,
+            no_startup: self.no_startup,
         }
     }
 }
