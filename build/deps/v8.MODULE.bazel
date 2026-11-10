@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.8.62.5"
+VERSION = "15.9.128"
 
-INTEGRITY = "sha256-8ZCLdqBpJMPk/ij2TxucDnaWv/dpweaIt/x46NNV0mo="
+INTEGRITY = "sha256-v4lT5EbEz5oPEfxothBxhveMQJXqG9F+qiCSVD+U1Zo="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -73,7 +73,8 @@ PATCHES = [
     "0048-Keep-v8_libshared-private-to-v8.patch",
     "0049-Build-Temporal-in-the-V8-Bazel-build.patch",
     "0050-Add-DisallowHeapAllocation-to-the-API.patch",
-    "0051-Gate-RacyDecodeEmbeddedFeedback-s-DISABLE_TSAN-on-THREAD_SANITIZER.patch",
+    "0051-Gate-RacyDecodeEmbeddedFeedback-s-DISABLE_TSAN-on-TH.patch",
+    "0052-Use-workerd-s-BoringSSL-repository-name.patch",
 ]
 
 http_archive(

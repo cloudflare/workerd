@@ -15,12 +15,12 @@ unchanged.
 See https://github.com/llvm/llvm-project/pull/156817.
 
 diff --git a/include/v8config.h b/include/v8config.h
-index b7aeeade6b81054edee802d058a2b944562a40d0..738d8d19e7615c7ae0e87e553540f73e66127792 100644
+index 3063b20885ceddbd82a1edd8218bf14768364fc6..623b66d43fdd93d294c59af2591595f56cc2a60e 100644
 --- a/include/v8config.h
 +++ b/include/v8config.h
-@@ -403,8 +403,13 @@ path. Add it with -I<path> to the command line
-          && !defined(_WIN32)))                         /* not on windows */    \
+@@ -404,8 +404,13 @@ path. Add it with -I<path> to the command line
       && !defined(COMPONENT_BUILD)                      /* no component build */\
+      && !defined(V8_DISABLE_PRESERVE_MOST)             /* embedder opt-out */  \
       && __clang_major__ >= 17                          /* clang >= 17 */
 +// Clang <= 21 can also overwrite a live preserved register in x86 function
 +// epilogues (https://github.com/llvm/llvm-project/pull/156817). This manifests

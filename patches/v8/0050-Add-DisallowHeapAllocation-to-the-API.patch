@@ -5,9 +5,10 @@ Subject: Add DisallowHeapAllocation to the API
 
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index 7e40f94e9ee8a63cdb8ad8a1089a6bb9a0ea5b8b..dc3b36c758999bc10579d54eae8e623a20acd9de 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -421,6 +421,24 @@ class V8_EXPORT Isolate {
+@@ -426,6 +426,24 @@ class V8_EXPORT Isolate {
      bool was_execution_allowed_;
    };
  
@@ -33,9 +34,10 @@ diff --git a/include/v8-isolate.h b/include/v8-isolate.h
     * Introduce exception to DisallowJavascriptExecutionScope.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
+index c9a9727497a5640f6d93c305cc46d6c740129a25..2ccb9e0fdfedd8bc2bce4db74ef970a17bcd2aaa 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -10576,6 +10576,15 @@ Isolate::DisallowJavascriptExecutionScope::~DisallowJavascriptExecutionScope() {
+@@ -10568,6 +10568,15 @@ Isolate::DisallowJavascriptExecutionScope::~DisallowJavascriptExecutionScope() {
    }
  }
  

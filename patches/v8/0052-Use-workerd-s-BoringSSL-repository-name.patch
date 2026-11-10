@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cloudflare Workers Team <workers@cloudflare.com>
+Date: Tue, 10 Nov 2026 18:00:00 +0000
+Subject: Use workerd's BoringSSL repository name
+
+V8's Bazel build now hashes with BoringSSL's SHA256() and depends on
+@boringssl//:crypto. workerd brings BoringSSL in as @ssl
+(bazel_dep(name = "boringssl", repo_name = "ssl")), and V8 is an
+http_archive that resolves repositories with workerd's root mapping,
+so point the dependency at @ssl instead.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 448171a20a769ac9076eb5c2ec8831ec90b64292..35487c012e67501ae8d934acfbd86bad323d2e6b 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -5085,7 +5085,7 @@ v8_library(
+         "@abseil-cpp//absl/container:flat_hash_map",
+         "@abseil-cpp//absl/container:flat_hash_set",
+         "@abseil-cpp//absl/functional:overload",
+-        "@boringssl//:crypto",
++        "@ssl//:crypto",
+         "@highway//:hwy",
+         "@fast_float",
+         "@simdutf",

@@ -10,7 +10,7 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index ed79e1aa7d3975ccf173e03ebea18de40ed5d75a..10ffc0d981dc80c315f4836689d7fd74fbd53406 100644
+index bbc61ce97d682517b57e9399a2a5873c653d8b7d..c9915027d6d7b5cdc85214c4c96a31623911a888 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -19,6 +19,7 @@ load(
@@ -50,7 +50,7 @@ index ed79e1aa7d3975ccf173e03ebea18de40ed5d75a..10ffc0d981dc80c315f4836689d7fd74
  )
  
  v8_mksnapshot(
-@@ -5084,7 +5083,6 @@ v8_binary(
+@@ -5085,7 +5084,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -59,7 +59,7 @@ index ed79e1aa7d3975ccf173e03ebea18de40ed5d75a..10ffc0d981dc80c315f4836689d7fd74
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 06ed05fa8b235de80c1fdb8715d3d0698ac175e4..f04144c5720382e2ea2c342a1173209a8efa03e5 100644
+index 53146515fa9a267bf206a330d1b4b7ea2848cc6d..ddc024aec8c95cb4e474b4e4e1ae0cfcfda56794 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -362,6 +362,15 @@ def v8_library(
@@ -75,29 +75,30 @@ index 06ed05fa8b235de80c1fdb8715d3d0698ac175e4..f04144c5720382e2ea2c342a1173209a
 +    # (once for exec and for target).
 +    return "target"
 +
- def _v8_target_cpu_transition_impl(settings,
-                                    attr, # @unused
-                                   ):
-@@ -432,13 +441,16 @@ _v8_mksnapshot = rule(
+ def _mksnapshot_transition_impl(settings, attr):
+     if settings["@v8//bazel/config:v8_target_cpu"] != "none":
+         return {}
+@@ -408,14 +417,17 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
 -            cfg = "exec",
 +            cfg = get_cfg(),
          ),
+         "default_target_cpu": attr.string(mandatory = True),
          "target_os": attr.string(mandatory = True),
          "prefix": attr.string(mandatory = True),
          "suffix": attr.string(mandatory = True),
      },
--    cfg = v8_target_cpu_transition,
-+    # This allows specifying a CPU architecture on the command line to be used when compiling
-+    # mksnapshot. Disable this functionality as we do not use it and it makes cfg changes more
-+    # difficult.
-+    # cfg = v8_target_cpu_transition,
+-    cfg = _mksnapshot_transition,
++    # This transition sets v8_target_cpu from the target platform when it is unset. Disable it:
++    # the v8_target_* settings already fall back to the platform's CPU, and the transition would
++    # build mksnapshot and its dependencies in a second configuration.
++    # cfg = _mksnapshot_transition,
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -883,3 +895,34 @@ def v8_build_config(name, arch):
+@@ -872,3 +884,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

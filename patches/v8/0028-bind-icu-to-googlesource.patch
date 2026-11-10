@@ -5,7 +5,7 @@ Subject: bind icu to googlesource
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 272863aa18fceaf6f6972912e7b4344c22d86129..53f3bce1624a3be511e9f148555ad34cc9973540 100644
+index 6aeb47af0be304afada9fbe50ed01731bb2d7524..1331540bedc7e198b4d9457331349d9ad86af92d 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4978,7 +4978,7 @@ v8_library(
@@ -17,7 +17,7 @@ index 272863aa18fceaf6f6972912e7b4344c22d86129..53f3bce1624a3be511e9f148555ad34c
      ] + select({
          ":is_v8_use_metagen": [
              ":icu/run_metagen_headers",
-@@ -5117,7 +5117,7 @@ v8_binary(
+@@ -5118,7 +5118,7 @@ v8_binary(
      ],
      deps = [
          ":v8_libbase",

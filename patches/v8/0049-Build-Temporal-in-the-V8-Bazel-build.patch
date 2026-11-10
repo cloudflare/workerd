@@ -14,10 +14,10 @@ ourselves, but this will make it easier to potentially upstream the
 patch to V8.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac86258798 100644
+index d5674d09a27cbb8b0789254bb8913393483cb96f..448171a20a769ac9076eb5c2ec8831ec90b64292 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -210,6 +210,20 @@ v8_flag(
+@@ -215,6 +215,20 @@ v8_flag(
  
  v8_flag(name = "v8_use_perfetto")
  
@@ -38,24 +38,24 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
  # Default setting for v8_enable_maglev
  selects.config_setting_group(
      name = "maglev_by_default",
-@@ -596,6 +610,7 @@ v8_config(
-         "v8_support_la57": "V8_SUPPORT_LA57",
+@@ -608,6 +622,7 @@ v8_config(
          "v8_enable_ecma402_icu4x": "V8_ENABLE_ECMA402_ICU4X",
+         "v8_enable_descriptor_array_lookup_table": "V8_ENABLE_DESCRIPTOR_ARRAY_LOOKUP_TABLE",
          "v8_use_perfetto": "V8_USE_PERFETTO",
 +        "v8_enable_temporal_support": "V8_TEMPORAL_SUPPORT",
          "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
-@@ -1354,8 +1369,6 @@ filegroup(
+@@ -1366,8 +1381,6 @@ filegroup(
+         "src/objects/js-regexp.tq",
+         "src/objects/js-regexp-string-iterator.tq",
          "src/objects/js-shadow-realm.tq",
-         "src/objects/js-shared-array.tq",
-         "src/objects/js-struct.tq",
 -        # Temporal is currently gn-only
 -        # "src/objects/js-temporal-objects.tq",
          "src/objects/js-weak-refs.tq",
          "src/objects/literal-objects.tq",
          "src/objects/managed.tq",
-@@ -1392,6 +1405,11 @@ filegroup(
+@@ -1404,6 +1417,11 @@ filegroup(
          "test/torque/test-torque.tq",
          "third_party/v8/builtins/array-sort.tq",
      ] + select({
@@ -67,7 +67,7 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
          ":is_v8_enable_webassembly": [
              "src/builtins/js-to-wasm.tq",
              "src/builtins/wasm.tq",
-@@ -1498,6 +1516,34 @@ filegroup(
+@@ -1510,6 +1528,34 @@ filegroup(
      }),
  )
  
@@ -102,9 +102,9 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
  filegroup(
      name = "v8_base_without_compiler_files",
      srcs = [
-@@ -1596,8 +1642,6 @@ filegroup(
+@@ -1606,8 +1652,6 @@ filegroup(
+         "src/builtins/builtins-sharedarraybuffer.cc",
          "src/builtins/builtins-string.cc",
-         "src/builtins/builtins-struct.cc",
          "src/builtins/builtins-symbol.cc",
 -        # Temporal is currently gn-only
 -        # "src/builtins/builtins-temporal.cc",
@@ -112,9 +112,9 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
          "src/builtins/builtins-typed-array.cc",
          "src/builtins/builtins-utils.h",
 @@ -2326,10 +2370,6 @@ filegroup(
-         "src/objects/js-shared-array.h",
-         "src/objects/js-struct.cc",
-         "src/objects/js-struct.h",
+         "src/objects/js-regexp-string-iterator-inl.h",
+         "src/objects/js-shadow-realm.h",
+         "src/objects/js-shadow-realm-inl.h",
 -        # Temporal is currently gn-only
 -        # "src/objects/js-temporal-objects.cc",
 -        # "src/objects/js-temporal-objects.h",
@@ -153,7 +153,7 @@ index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac
      }),
      deps = [
          ":lib_dragonbox",
-@@ -5047,6 +5093,9 @@ v8_library(
+@@ -5048,6 +5094,9 @@ v8_library(
      ] + select({
          ":is_v8_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
          "//conditions:default": [],

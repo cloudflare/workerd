@@ -14,7 +14,6 @@
 #include <cppgc/persistent.h>
 #include <v8-context.h>
 #include <v8-object.h>
-#include <v8-version.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -85,11 +84,9 @@ enum class ContextDataSlot : int {
   MAX_DATA_SLOT = CONSOLE_ORIGINAL_WARN,
 };
 
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
 // V8 does not grow a context's embedder-data array, so the V8 build must size it
 // (v8_embedder_data_array_size) to hold every slot.
 static_assert(static_cast<int>(ContextDataSlot::MAX_DATA_SLOT) < V8_EMBEDDER_DATA_ARRAY_SIZE);
-#endif
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
 // in kConsoleMethods order from CONSOLE_ORIGINAL_DEBUG.
@@ -100,11 +97,7 @@ constexpr ContextDataSlot consoleOriginalSlot(size_t i) {
 
 inline void setContextDataSlot(
     v8::Local<v8::Context> context, ContextDataSlot slot, v8::Local<v8::Data> value) {
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
   context->SetEmbedderDataV3(static_cast<int>(slot), value);
-#else
-  context->SetEmbedderDataV2(static_cast<int>(slot), value);
-#endif
 }
 
 inline v8::Local<v8::Data> getContextDataSlot(
@@ -118,13 +111,8 @@ inline void setAlignedPointerInEmbedderData(
   // type to avoid type confusion attacks.  We just use the slot index for now,
   // since we have a different pointer type for each slot.
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
-#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
   context->SetAlignedPointerInEmbedderDataV2(
       static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
-#else
-  context->SetAlignedPointerInEmbedderData(
-      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
-#endif
 }
 
 template <typename T>

@@ -8,6 +8,8 @@
 #include "modules-new.h"
 #include "script.h"
 
+#include <v8-version.h>
+
 #include <capnp/message.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
@@ -46,7 +48,15 @@ namespace {
 
 using CompatibilityCheckResult = v8::ScriptCompiler::CachedData::CompatibilityCheckResult;
 
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 9
+// V8's SerializedCodeData header starts with 32-bit magic, payload length, trusted payload length
+// and version words, followed by a 256-bit source hash and the 32-bit flags hash.
+constexpr size_t SOURCE_HASH_OFFSET = 4 * sizeof(uint32_t);
+#else
+// V8's SerializedCodeData header starts with 32-bit magic and version words, followed by a
+// 256-bit source hash and the 32-bit flags hash.
 constexpr size_t SOURCE_HASH_OFFSET = 2 * sizeof(uint32_t);
+#endif
 constexpr size_t FLAGS_HASH_OFFSET = SOURCE_HASH_OFFSET + 32;
 
 V8System v8System;
@@ -791,8 +801,6 @@ void expectRejected(kj::Function<CodeCacheStore::Bytes(kj::ArrayPtr<const kj::by
 }
 
 KJ_TEST("A cache whose flags hash differs is rejected before compilation") {
-  // V8's SerializedCodeData header starts with 32-bit magic and version words, followed by a
-  // 256-bit source hash and the 32-bit flags hash.
   expectRejected([](kj::ArrayPtr<const kj::byte> bytes) {
     auto copy = kj::heapArray(bytes);
     KJ_ASSERT(copy.size() > FLAGS_HASH_OFFSET);

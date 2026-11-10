@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "2a51536dfb3b448bdf3dae70c782ea2879c90904",
+    commit = "b09986242cfb165b9111ade98be6b042ef973b86",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -64,10 +64,10 @@ bazel_dep(name = "fast_float")
 archive_override(
     module_name = "fast_float",
     build_file_content = "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\ncc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
-    sha256 = "d64a4b24e582e28d5d8bd1d91cd048ab28a32f1719903267f225f975a043102b",
-    strip_prefix = "fastfloat-fast_float-42f2548",
+    sha256 = "c3b750e9790d79841658498ce31a54d950ca7e90224ba1254080e94a74a3e323",
+    strip_prefix = "fastfloat-fast_float-dbeabee",
     type = "tgz",
-    url = "https://github.com/fastfloat/fast_float/tarball/42f254836ee416ffcf2f4e6576260003ac33d48c",
+    url = "https://github.com/fastfloat/fast_float/tarball/dbeabeeb3e6791cb96994c2a7a084c36e62ccfb2",
 )
 
 # fp16

@@ -6,10 +6,10 @@ Subject: Update illegal invocation error message in v8
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 2900d2381fa3d9a6d0c1ded7dcfdae559d145064..e3b63554a796bcf261c083922bdc48d3eddd272b 100644
+index 13d9a3fe8b3957a2ce7db72d254351c77023d778..891cfd94622b87043742f4440e6358b8a2a10b4a 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
-@@ -123,7 +123,11 @@ namespace internal {
+@@ -121,7 +121,11 @@ namespace internal {
      "First argument to % must not be a regular expression")                    \
    T(FunctionBind, "Bind must be called on a function")                         \
    T(GeneratorRunning, "Generator is already running")                          \
@@ -23,7 +23,7 @@ index 2900d2381fa3d9a6d0c1ded7dcfdae559d145064..e3b63554a796bcf261c083922bdc48d3
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index a05627ed8634ef967c818e778d755561e664e617..6c0e0b20609fcd8452f4b727238715b6e86a84fd 100644
+index 3d1b030bf91408041587d9dbff228191a1f97850..e8607d020fd0fec2add8d557731fad1b571fe5a7 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
 @@ -232,6 +232,17 @@ THREADED_TEST(IsolateOfContext) {

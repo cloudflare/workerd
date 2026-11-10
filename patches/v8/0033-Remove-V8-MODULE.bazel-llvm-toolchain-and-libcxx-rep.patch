@@ -7,10 +7,10 @@ These reference third_party/ sources that are not present in the GitHub
 tarball. Workerd provides its own toolchain, so these are not needed.
 
 diff --git a/MODULE.bazel b/MODULE.bazel
-index 9f3b298b0b1b00d3d78cab00dd85a504ac90e5df..f66c1566f509a0ce8e3f3bba94906f05840aa4c6 100644
+index 7aea9f600d20d64fea30ec0be7b04eb0f0310c69..69298e3d373469d209f851d904d3f638612b8784 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
-@@ -22,169 +22,6 @@ pip.parse(
+@@ -23,169 +23,6 @@ pip.parse(
  )
  use_repo(pip, "v8_python_deps")
  

@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "963feda7dd144f6fde41e1dfc484639a8eb4d6d62d3f802b01152f22559cef7e",
+  "checksum": "d45d77f7d41fe5abd14a68e92a68961f80edc2d2fe56d2ae8d381088fbd6e822",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -2972,7 +2972,7 @@
             "target": "hyper_util"
           },
           {
-            "id": "icu_calendar 2.2.1",
+            "id": "icu_calendar 2.4.0",
             "target": "icu_calendar"
           },
           {
@@ -5301,7 +5301,7 @@
       ],
       "version": "0.1.21"
     },
-    "icu_calendar 2.2.1": {
+    "icu_calendar 2.4.0": {
       "common_attrs": {
         "crate_features": [
           "compiled_data"
@@ -5312,16 +5312,16 @@
             "target": "calendrical_calculations"
           },
           {
-            "id": "icu_calendar_data 2.2.0",
+            "id": "icu_calendar_data 2.4.0",
             "target": "icu_calendar_data"
-          },
-          {
-            "id": "icu_locale 2.2.0",
-            "target": "icu_locale"
           },
           {
             "id": "icu_locale_core 2.4.0",
             "target": "icu_locale_core"
+          },
+          {
+            "id": "icu_locale_fallback 2.4.0",
+            "target": "icu_locale_fallback"
           },
           {
             "id": "icu_provider 2.4.0",
@@ -5336,7 +5336,7 @@
             "target": "zerovec"
           }
         ],
-        "edition": "2021",
+        "edition": "2024",
         "proc_macro_deps": [
           {
             "id": "displaydoc 0.2.7",
@@ -5354,8 +5354,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "a2b2acc6263f494f1df50685b53ff8e57869e47d5c6fe39c23d518ae9a4f3e45",
-          "url": "https://static.crates.io/crates/icu_calendar/2.2.1/download"
+          "sha256": "a68ffb801cc7acb8dcae62da7c692c47934698d2dd4f479ddee1eb442763dea1",
+          "url": "https://static.crates.io/crates/icu_calendar/2.4.0/download"
         }
       },
       "targets": [
@@ -5366,12 +5366,12 @@
           }
         }
       ],
-      "version": "2.2.1"
+      "version": "2.4.0"
     },
-    "icu_calendar_data 2.2.0": {
+    "icu_calendar_data 2.4.0": {
       "build_script_attrs": {},
       "common_attrs": {
-        "edition": "2021",
+        "edition": "2024",
         "extra_deps": [
           ":build_script_build"
         ]
@@ -5386,8 +5386,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "118577bcf3a0fa7c6ac0a7d6e951814da84ee56b9b1f68fb4d8d10b08cefaf4d",
-          "url": "https://static.crates.io/crates/icu_calendar_data/2.2.0/download"
+          "sha256": "514da54e79efa36b5976232d5b3d1d8ee1b47b19ab658f1b1ebe39221696c2d8",
+          "url": "https://static.crates.io/crates/icu_calendar_data/2.4.0/download"
         }
       },
       "targets": [
@@ -5404,7 +5404,7 @@
           }
         }
       ],
-      "version": "2.2.0"
+      "version": "2.4.0"
     },
     "icu_collections 2.2.0": {
       "common_attrs": {
@@ -5456,67 +5456,6 @@
         {
           "Library": {
             "crate_name": "icu_collections",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "2.2.0"
-    },
-    "icu_locale 2.2.0": {
-      "common_attrs": {
-        "crate_features": [
-          "compiled_data"
-        ],
-        "deps": [
-          {
-            "id": "icu_collections 2.2.0",
-            "target": "icu_collections"
-          },
-          {
-            "id": "icu_locale_core 2.4.0",
-            "target": "icu_locale_core"
-          },
-          {
-            "id": "icu_locale_data 2.2.0",
-            "target": "icu_locale_data"
-          },
-          {
-            "id": "icu_provider 2.4.0",
-            "target": "icu_provider"
-          },
-          {
-            "id": "potential_utf 0.1.6",
-            "target": "potential_utf"
-          },
-          {
-            "id": "tinystr 0.8.5",
-            "target": "tinystr"
-          },
-          {
-            "id": "zerovec 0.11.9",
-            "target": "zerovec"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "icu_locale",
-      "license": "Unicode-3.0",
-      "license_file": "LICENSE",
-      "license_ids": [
-        "Unicode-3.0"
-      ],
-      "name": "icu_locale",
-      "package_url": "https://github.com/unicode-org/icu4x",
-      "repository": {
-        "Http": {
-          "sha256": "d5a396343c7208121dc86e35623d3dfe19814a7613cfd14964994cdc9c9a2e26",
-          "url": "https://static.crates.io/crates/icu_locale/2.2.0/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "icu_locale",
             "crate_root": "src/lib.rs"
           }
         }
@@ -5579,32 +5518,89 @@
       ],
       "version": "2.4.0"
     },
-    "icu_locale_data 2.2.0": {
-      "build_script_attrs": {},
+    "icu_locale_fallback 2.4.0": {
       "common_attrs": {
-        "edition": "2021",
-        "extra_deps": [
-          ":build_script_build"
-        ]
+        "crate_features": [
+          "compiled_data"
+        ],
+        "deps": [
+          {
+            "id": "icu_locale_core 2.4.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "icu_locale_fallback_data 2.4.0",
+            "target": "icu_locale_fallback_data"
+          },
+          {
+            "id": "icu_provider 2.4.0",
+            "target": "icu_provider"
+          },
+          {
+            "id": "potential_utf 0.1.6",
+            "target": "potential_utf"
+          },
+          {
+            "id": "tinystr 0.8.5",
+            "target": "tinystr"
+          },
+          {
+            "id": "zerovec 0.11.9",
+            "target": "zerovec"
+          }
+        ],
+        "edition": "2024"
       },
-      "library_target_name": "icu_locale_data",
+      "library_target_name": "icu_locale_fallback",
       "license": "Unicode-3.0",
       "license_file": "LICENSE",
       "license_ids": [
         "Unicode-3.0"
       ],
-      "name": "icu_locale_data",
+      "name": "icu_locale_fallback",
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "d5fdcc9ac77c6d74ff5cf6e65ef3181d6af32003b16fce3a77fb451d2f695993",
-          "url": "https://static.crates.io/crates/icu_locale_data/2.2.0/download"
+          "sha256": "406e9ae5b95d8aa37db6293405931b766a6172d1848daee22d70eb44aa78a43c",
+          "url": "https://static.crates.io/crates/icu_locale_fallback/2.4.0/download"
         }
       },
       "targets": [
         {
           "Library": {
-            "crate_name": "icu_locale_data",
+            "crate_name": "icu_locale_fallback",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "2.4.0"
+    },
+    "icu_locale_fallback_data 2.4.0": {
+      "build_script_attrs": {},
+      "common_attrs": {
+        "edition": "2024",
+        "extra_deps": [
+          ":build_script_build"
+        ]
+      },
+      "library_target_name": "icu_locale_fallback_data",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "icu_locale_fallback_data",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "3632ebbd0c5c3637ba1a40bdf8288f2cb9d2268e73441a69d5fc73d7cfbaa87c",
+          "url": "https://static.crates.io/crates/icu_locale_fallback_data/2.4.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "icu_locale_fallback_data",
             "crate_root": "src/lib.rs"
           }
         },
@@ -5615,7 +5611,7 @@
           }
         }
       ],
-      "version": "2.2.0"
+      "version": "2.4.0"
     },
     "icu_normalizer 2.2.0": {
       "common_attrs": {
@@ -12991,7 +12987,7 @@
             "target": "diplomat_runtime"
           },
           {
-            "id": "icu_calendar 2.2.1",
+            "id": "icu_calendar 2.4.0",
             "target": "icu_calendar"
           },
           {
@@ -13070,7 +13066,7 @@
             "target": "core_maths"
           },
           {
-            "id": "icu_calendar 2.2.1",
+            "id": "icu_calendar 2.4.0",
             "target": "icu_calendar"
           },
           {
@@ -15977,7 +15973,7 @@
     "httpdate 1.0.3",
     "hyper 1.12.0",
     "hyper-util 0.1.21",
-    "icu_calendar 2.2.1",
+    "icu_calendar 2.4.0",
     "ipnet 2.12.2",
     "libc 0.2.191",
     "libm 0.2.16",

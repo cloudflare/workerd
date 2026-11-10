@@ -6,7 +6,7 @@ Subject: Allow Windows builds under Bazel
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 2168c198c78365fd01a8b17dff7afafdbaa62193..ed79e1aa7d3975ccf173e03ebea18de40ed5d75a 100644
+index 15f74e3930932287e6858c6c9b9bbdf1f5b1bf55..bbc61ce97d682517b57e9399a2a5873c653d8b7d 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4218,6 +4218,8 @@ filegroup(
@@ -88,7 +88,7 @@ index 4d002e3659aabe48faf357ba07a3f6c689a30e67..c6741a87758ec3c88807800eca9dca17
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 3b9fc02feb41a2eb0814c8b8181ada287cd9a205..06ed05fa8b235de80c1fdb8715d3d0698ac175e4 100644
+index c2f7bf3fc832f69720837e9241b0baedf33c9990..53146515fa9a267bf206a330d1b4b7ea2848cc6d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -139,6 +139,24 @@ def _default_args():

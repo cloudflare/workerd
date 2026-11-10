@@ -6,7 +6,7 @@ Subject: Properly depend on llvm-libc
 Change-Id: I9858b147d027e67704c6ca84e0c42fab39a5c97a
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 895e191875bf3391b94462be846af570006e269f..141cf5203bd71a3505d505b2db3bb91302ba8ce3 100644
+index 980851dda14556b0ceb22526ebde3e5a21082aac..555dc05ab54f6ab2a87677aaea89af40e943cd1c 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4899,13 +4899,6 @@ cc_library(

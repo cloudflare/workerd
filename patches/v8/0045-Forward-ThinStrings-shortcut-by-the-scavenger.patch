@@ -12,10 +12,10 @@ Mark-compact and the scavenger's own ConsString shortcut both write the
 forwarding address. Do the same here.
 
 diff --git a/src/heap/scavenger.cc b/src/heap/scavenger.cc
-index 63169aa29d045d1552b2df6e066babb00e9fd27f..6507b1fd75a14d0ea729e94a6c73bf39947d99bf 100644
+index 6f7a34274a3c6812a0993264e27326e4163e90ae..b9aeb19903704e5f13bffeeb9b0f08aebf56fa7d 100644
 --- a/src/heap/scavenger.cc
 +++ b/src/heap/scavenger.cc
-@@ -2156,14 +2156,16 @@ SlotCallbackResult Scavenger::EvacuateThinString(
+@@ -2182,14 +2182,16 @@ SlotCallbackResult Scavenger::EvacuateThinString(
                      std::is_same_v<THeapObjectSlot, HeapObjectSlot>,
                  "Only FullHeapObjectSlot and HeapObjectSlot are expected here");
    if (shortcut_strings_) {

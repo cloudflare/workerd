@@ -8,7 +8,7 @@ implementation dependency of v8_libbase instead of inputs to every
 dependent's compiles.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 790d2fcc82ee19c428f23d699abd6899d27a43ca..e0360267ea0d9aad55b4ca292965a9a09cf6cb39 100644
+index b25cf2d4370c1ab52a4f3bb68100eeb7f5b520fe..e5b8f44a68fbacbc723d6ba7ce8d85ad3a83e925 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4934,8 +4934,10 @@ v8_library(

@@ -11,7 +11,7 @@ own toolchain that includes libc++.
 Author: Workerd Maintainers <workers-dev@cloudflare.com>
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 5e6a4ec75411305e96266ca93b790e6d131346b9..4fb746aaa6be07d40b98eab03e32e946f13a7234 100644
+index d465003ef25dfdf8f9dc886772fa4efae359c9ca..3dba7459c36eaf0151c6864d642242d9ca3bc07d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -110,7 +110,7 @@ v8_config = rule(
