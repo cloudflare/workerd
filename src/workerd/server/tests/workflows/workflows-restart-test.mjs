@@ -41,7 +41,10 @@ export default {
       return Response.json((await env.FLOW.create({ id, params })).id);
     }
     const instance = await env.FLOW.get(id);
-    if (url.pathname === '/pause') return Response.json(await instance.pause() ?? null);
+    if (url.pathname === '/pause') {
+      await instance.pause();
+      return Response.json(null);
+    }
     if (url.pathname === '/status') {
       return Response.json(await instance.status());
     }
@@ -102,8 +105,8 @@ const config :Workerd.Config = (
 );
 `;
 
-// Runs workerd on `dir`'s config. `ran` holds each step that logged it ran;
-// `get(path)` fetches from the app.
+// Runs workerd on `dir`'s config. `ran(n)` resolves to the steps that logged
+// they ran, once there are n; `get(path)` fetches from the app.
 function serve(dir) {
   const child = spawn(
     env.WORKERD_BINARY,
@@ -129,7 +132,18 @@ function serve(dir) {
     assert.strictEqual(r.status, 200, `${path}: ${r.status}`);
     return r.json();
   };
-  const ran = [];
+  const logged = [];
+  const waiters = new Set();
+  const ran = (n) =>
+    new Promise((resolve) => {
+      const check = () => {
+        if (logged.length < n) return;
+        waiters.delete(check);
+        resolve(logged);
+      };
+      waiters.add(check);
+      check();
+    });
   const read = (stream) => {
     let line = '';
     stream.setEncoding('utf8').on('data', (d) => {
@@ -138,8 +152,9 @@ function serve(dir) {
       line = lines.pop();
       for (const l of lines) {
         const m = l.match(/RAN (\S+)/);
-        if (m) ran.push(m[1]);
+        if (m) logged.push(m[1]);
       }
+      for (const check of waiters) check();
     });
   };
   read(child.stdout);
@@ -157,21 +172,21 @@ test('a restart goes on from a sleep, done steps not run again', async () => {
   try {
     await server.get('/create?id=nap');
     await server.get('/until?id=nap&type=sleep_started');
-    assert.deepEqual(server.ran, ['one']);
+    assert.deepEqual(await server.ran(1), ['one']);
     await server.stop('SIGKILL');
 
     server = serve(dir);
     await server.get('/clock?advance=60000', 'POST');
     const done = await server.get('/until?id=nap&type=workflow_completed');
     assert.strictEqual(done.output, 'done');
-    assert.deepEqual(server.ran, ['two']);
+    assert.deepEqual(await server.ran(1), ['two']);
   } finally {
     await server.stop();
     await rm(dir, { recursive: true });
   }
 });
 
-test('an attempt that ends the process fails, a pause waits no more', async () => {
+test('a crash fails a step at its limit and settles a pause', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workerd-workflows-'));
   await mkdir(join(dir, 'store'));
   await writeFile(join(dir, 'app.js'), WORKER);

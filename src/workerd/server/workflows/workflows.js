@@ -524,9 +524,7 @@ export class Engine extends DurableObject {
       }
       const failed = plain(failure);
       if (nonRetryable(failure) || attempt > cfg.retries.limit) {
-        if (!nonRetryable(failure)) {
-          this.#kv.put(key, { ...record, error: failed });
-        }
+        this.#kv.put(key, { ...record, error: failed });
         this.#log('attempt_errored', { stepName, attempt, error: failed });
         this.#log('step_errored', { stepName });
         throw failure;
@@ -938,7 +936,8 @@ export class WorkflowBinding extends WorkerEntrypoint {
   }
 
   // Creates `instances` in order. An id given twice, or that exists, is an
-  // error entry: reported with `errors`, else skipped.
+  // error entry: reported with `errors`, else skipped. Any other failure
+  // throws.
   async #createAll(instances, errors = false) {
     const out = { created: [], errors: [] };
     const seen = new Set();
@@ -958,7 +957,8 @@ export class WorkflowBinding extends WorkerEntrypoint {
       try {
         await this.create({ ...options, id });
         out.created.push({ id });
-      } catch {
+      } catch (e) {
+        if (!String(e?.message).includes('(instance.already_exists)')) throw e;
         out.errors.push({
           index,
           id,
