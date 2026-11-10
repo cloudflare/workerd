@@ -485,7 +485,6 @@ export declare const performance: Performance;
 export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
 export declare const navigator: Navigator;
-export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
@@ -505,6 +504,12 @@ export interface ExecutionContext<Props = unknown> {
   mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
+}
+export interface TestController {}
+export interface AlarmInvocationInfo {
+  readonly isRetry: boolean;
+  readonly retryCount: number;
+  readonly scheduledTime: number;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -584,11 +589,6 @@ export declare abstract class Navigator {
   readonly language: string;
   readonly languages: string[];
   readonly storage: StorageManager;
-}
-export interface AlarmInvocationInfo {
-  readonly isRetry: boolean;
-  readonly retryCount: number;
-  readonly scheduledTime: number;
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;

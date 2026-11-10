@@ -5,7 +5,7 @@
 from asyncio import sleep
 from urllib.parse import urlparse
 
-from js import Date
+from js import Date, Object
 from workers import DurableObject, FetchResponse, Request, Response, WorkerEntrypoint
 
 import pyodide
@@ -51,6 +51,12 @@ class DurableObjectExample(DurableObject, MixinTest):
             return Response("404")
 
     async def alarm(self, alarm_info):
+        # python_workers makes a runtime class's `prototype` read-only.
+        prototype = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(alarm_info).constructor, "prototype"
+        )
+        assert not prototype.writable
+        assert alarm_info.retryCount == 0
         self.alarm_triggered = True
 
     async def no_args_method(self):
