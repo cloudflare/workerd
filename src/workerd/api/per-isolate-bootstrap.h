@@ -93,4 +93,9 @@ kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr speci
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
     jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name);
 
+// Makes `exports` the exports of the bootstrap module `specifier`, as though the module had been
+// required, so that a test can define classes that the deserializer finds by their
+// deserializeInfo.
+void setBootstrapExportForTest(jsg::Lock& js, kj::StringPtr specifier, jsg::JsValue exports);
+
 }  // namespace workerd

@@ -442,6 +442,8 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | `write(js, JsValue)`                         | `readValue(js) → JsValue`                           |
 | `transfer(js, JsArrayBuffer)`                | `getVersion() → uint32_t`                           |
 
+A raw read past the end of the data throws DataCloneError.
+
 ### Rules
 
 - `JSG_SERIALIZABLE` MUST appear AFTER `JSG_RESOURCE_TYPE` block
@@ -451,6 +453,23 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
   runtime call-site label (defaults to `"unknown"`).
+
+### Classes Implemented in JavaScript
+
+The runtime's classes implemented in JavaScript (the per-isolate bootstrap's) have no
+`JSG_SERIALIZABLE`. They take part through V8-private properties that `src/per_isolate/serialization.ts`
+sets up: each instance is marked with its class's descriptor, and is written as
+`SERIALIZATION_TAG_JS_SERIALIZABLE` with a `"module:Export"` `deserializeInfo` naming the class,
+its data following the top-level value. The deserializer creates each instance without calling its
+constructor and initializes it once the whole value has been read, with JavaScript allowed.
+`ser.h` describes the protocol and the format; `docs/jsg.md` has a complete example.
+
+- A `deserializeInfo` MUST NOT change once data has been serialized
+- A value a `JSG_SERIALIZABLE` type's `deserialize()` reads with `readValue()` may contain such
+  instances before they are initialized: keep it as a `JsRef` rather than unwrapping it or reading
+  its properties, unless the type's own state, which can't contain one, produced it
+- A Serializer or Deserializer that writes to or reads for another delegate (`writeApiObject()`,
+  `readApiObject()`, as the Rust serializer uses) rejects such instances with DataCloneError
 
 ## Web IDL Union Validation Rules
 
