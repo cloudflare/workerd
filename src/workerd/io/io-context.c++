@@ -560,8 +560,12 @@ bool IoContext::hasOutputGate() {
 }
 
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
-  return actor.map(
-      [this](Worker::Actor& actor) { return actor.getOutputGate().wait(getCurrentTraceSpan()); });
+  KJ_IF_SOME(a, actor) {
+    auto& gate = a.getOutputGate();
+    if (gate.isIdle()) return kj::none;
+    return gate.wait(getCurrentTraceSpan());
+  }
+  return kj::none;
 }
 
 kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOwn() {

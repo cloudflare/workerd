@@ -804,5 +804,69 @@ KJ_TEST("OutputGate retains latest exception for future observers") {
   KJ_EXPECT_THROW_MESSAGE("second failure", gate.onBroken().wait(ws));
 }
 
+KJ_TEST("OutputGate isIdle tracks held locks") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  OutputGate gate;
+  KJ_EXPECT(gate.isIdle());
+
+  auto paf1 = kj::newPromiseAndFulfiller<void>();
+  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise), nullptr);
+  KJ_EXPECT(!gate.isIdle());
+
+  auto paf2 = kj::newPromiseAndFulfiller<void>();
+  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise), nullptr);
+
+  paf2.fulfiller->fulfill();
+  blocker2.wait(ws);
+  KJ_EXPECT(!gate.isIdle());
+
+  paf1.fulfiller->fulfill();
+  blocker1.wait(ws);
+  KJ_EXPECT(gate.isIdle());
+}
+
+KJ_TEST("OutputGate isIdle is false while an earlier wait is outstanding") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  OutputGate gate;
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = gate.lockWhile(kj::mv(paf.promise), nullptr);
+  auto earlier = gate.wait(nullptr);
+
+  paf.fulfiller->fulfill();
+  blocker.wait(ws);
+  KJ_EXPECT(!gate.isIdle());
+
+  earlier.wait(ws);
+  KJ_EXPECT(gate.isIdle());
+}
+
+KJ_TEST("OutputGate isIdle is false once broken, by rejection or cancellation") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  {
+    OutputGate gate;
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = gate.lockWhile(kj::mv(paf.promise), nullptr);
+    paf.fulfiller->reject(KJ_EXCEPTION(FAILED, "foo"));
+    KJ_EXPECT_THROW_MESSAGE("foo", blocker.wait(ws));
+    KJ_EXPECT(!gate.isIdle());
+    KJ_EXPECT_THROW_MESSAGE("foo", gate.wait(nullptr).wait(ws));
+  }
+
+  {
+    OutputGate gate;
+    auto blocker = gate.lockWhile(kj::Promise<void>(kj::NEVER_DONE), nullptr);
+    blocker = nullptr;
+    KJ_EXPECT(!gate.isIdle());
+    KJ_EXPECT_THROW_MESSAGE(
+        "output lock was canceled before completion", gate.wait(nullptr).wait(ws));
+  }
+}
+
 }  // namespace
 }  // namespace workerd
