@@ -33,6 +33,7 @@ wd_rust_crate(
         "//src/rust/kj",
         "//src/rust/worker",
         "//src/workerd/io:bench_capnp_rust",
+        "//src/workerd/io:outcome_capnp_rust",
         "//src/workerd/server:compiled-bindings_capnp_rust",
         "//src/workerd/server:workerd_capnp_rust",
         "//src/workerd/server/cluster",

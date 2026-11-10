@@ -27,12 +27,12 @@ def wd_rust_test(
             "RUST_TEST_THREADS": "1",
         } | env,
         experimental_use_cc_common_link = 1,
+        # linkopts_default limits linker parallelism to avoid resource exhaustion.
         link_deps = link_deps + [
             "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
         malloc = "//src/workerd/server:malloc",
-        # linkopts_default limits linker parallelism to avoid resource exhaustion.
-        tags = tags + ["no-coverage", "cpu:2"],
+        tags = tags + ["no-coverage"],
         **kwargs
     )

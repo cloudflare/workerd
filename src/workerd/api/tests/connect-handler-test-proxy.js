@@ -7,8 +7,10 @@ import { ok, strictEqual } from 'assert';
 
 export class ConnectProxy extends WorkerEntrypoint {
   async connect(socket) {
-    // proxy for ConnectEndpoint instance on port 8083.
-    const upstream = connect('localhost:8083');
+    // proxy for the ConnectEndpoint instance on the connect-endpoint socket.
+    const upstream = connect(
+      `${this.env.SIDECAR_HOSTNAME}:${this.env.CONNECT_ENDPOINT_PORT}`
+    );
     // The handler's socket is closed when the handler returns, so wait for the relay to finish.
     await socket.proxyTo(upstream);
   }

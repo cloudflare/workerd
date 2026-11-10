@@ -322,6 +322,9 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor);
+void stamp_current_actor_cause(RequestMetadata& metadata);
 
 // =======================================================================================
 
@@ -329,6 +332,12 @@ kj::Own<RequestMetadata> new_request_metadata(
     kj::Maybe<::rust::Str> cfBlobJson, kj::Maybe<::rust::Str> clientAddress);
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata);
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent);
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata);
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node);
+bool request_metadata_from_handoff(const RequestMetadata& metadata);
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata);
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy);
 void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     RequestMetadata& metadata,
     ::rust::Str uniqueKey,

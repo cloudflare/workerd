@@ -24,6 +24,14 @@ void TestCppGreeter::failWithTypeError() {
   JSG_FAIL_REQUIRE(TypeError, "thrown by C++ as a kj::Exception");
 }
 
+void TestCppGreeter::failWithQuotaExceededError() {
+  JSG_FAIL_REQUIRE(DOMQuotaExceededError, "thrown by C++ as a kj::Exception");
+}
+
+void TestCppGreeter::failWithDomSyntaxError() {
+  JSG_FAIL_REQUIRE(DOMSyntaxError, "thrown by C++ as a kj::Exception");
+}
+
 void TestCppGreeter::failWithJsError(::workerd::jsg::Lock& js) {
   js.throwException(js.rangeError("thrown by C++ as a JavaScript exception"));
 }
@@ -123,6 +131,20 @@ bool test_cpp_greeter_fail_with_type_error(v8::Isolate* isolate, const TestCppGr
 bool test_cpp_greeter_fail_with_js_error(v8::Isolate* isolate, const TestCppGreeter& greeter) {
   return jsg_cpp::callCpp(isolate,
       [&](::workerd::jsg::Lock& js) { const_cast<TestCppGreeter&>(greeter).failWithJsError(js); });
+}
+
+bool test_cpp_greeter_fail_with_quota_exceeded_error(
+    v8::Isolate* isolate, const TestCppGreeter& greeter) {
+  return jsg_cpp::callCpp(isolate, [&](::workerd::jsg::Lock&) {
+    const_cast<TestCppGreeter&>(greeter).failWithQuotaExceededError();
+  });
+}
+
+bool test_cpp_greeter_fail_with_dom_syntax_error(
+    v8::Isolate* isolate, const TestCppGreeter& greeter) {
+  return jsg_cpp::callCpp(isolate, [&](::workerd::jsg::Lock&) {
+    const_cast<TestCppGreeter&>(greeter).failWithDomSyntaxError();
+  });
 }
 
 bool test_cpp_base_kind(v8::Isolate* isolate, const TestCppBase& base, ::rust::String& result) {

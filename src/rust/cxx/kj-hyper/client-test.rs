@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
 use tokio::time::Instant;
+use tokio::time::sleep;
 use tokio::time::timeout;
 
 use super::*;
@@ -151,5 +152,96 @@ fn a_denied_peer_is_not_connected() {
             panic!("a denied peer was connected");
         };
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    });
+}
+
+fn addr(ip: &str, port: u16) -> SocketAddr {
+    SocketAddr::new(ip.parse().unwrap(), port)
+}
+
+#[test]
+fn ipv4_addresses_are_tried_first_and_the_last_failure_is_returned() {
+    runtime().block_on(async {
+        let addrs = vec![
+            addr("::1", 1),
+            addr("127.0.0.1", 2),
+            addr("::1", 3),
+            addr("127.0.0.1", 4),
+        ];
+        let tried = Mutex::new(Vec::new());
+        let connect = |a: SocketAddr| {
+            tried.lock().unwrap().push(a.port());
+            async move { Err::<(), _>(io::Error::other(a.port().to_string())) }
+        };
+        let last = race(addrs, Duration::ZERO, connect)
+            .await
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(tried.into_inner().unwrap(), [2, 4, 1, 3]);
+        assert_eq!(last.to_string(), "3");
+    });
+}
+
+#[test]
+fn no_addresses_fail_without_an_error() {
+    runtime().block_on(async {
+        let connect = |a: SocketAddr| async move { Ok(a.port()) };
+        let raced = race(Vec::new(), Duration::ZERO, connect).await;
+        assert!(raced.unwrap_err().is_none());
+    });
+}
+
+#[test]
+fn a_hanging_attempt_does_not_block_the_next() {
+    runtime().block_on(async {
+        let connect = |a: SocketAddr| async move {
+            if a.port() == 0 {
+                pending::<()>().await;
+            }
+            Ok(a.port())
+        };
+        let addrs = vec![addr("127.0.0.1", 0), addr("127.0.0.1", 1)];
+        assert_eq!(race(addrs, Duration::ZERO, connect).await.unwrap(), 1);
+    });
+}
+
+#[test]
+fn a_failed_attempt_starts_the_next_without_the_delay() {
+    runtime().block_on(async {
+        let connect = |a: SocketAddr| async move {
+            if a.port() == 0 {
+                return Err(io::Error::other("refused"));
+            }
+            Ok(a.port())
+        };
+        let addrs = vec![addr("127.0.0.1", 0), addr("127.0.0.1", 1)];
+        let raced = timeout(
+            Duration::from_secs(10),
+            race(addrs, Duration::from_hours(1), connect),
+        );
+        assert_eq!(raced.await.expect("waited for the delay").unwrap(), 1);
+    });
+}
+
+#[test]
+fn an_attempt_keeps_running_after_the_next_starts() {
+    runtime().block_on(async {
+        let connect = |a: SocketAddr| async move {
+            if a.port() == 0 {
+                sleep(Duration::from_millis(10)).await;
+            } else {
+                pending::<()>().await;
+            }
+            Ok(a.port())
+        };
+        let addrs = vec![addr("127.0.0.1", 0), addr("127.0.0.1", 1)];
+        let raced = timeout(
+            Duration::from_secs(10),
+            race(addrs, Duration::ZERO, connect),
+        );
+        assert_eq!(
+            raced.await.expect("the first attempt was dropped").unwrap(),
+            0
+        );
     });
 }

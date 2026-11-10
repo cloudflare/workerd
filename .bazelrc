@@ -12,10 +12,6 @@ build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.
 build:regenerate-snapshots --test_size_filters=small,medium,large,enormous
 build:regenerate-snapshots --//build/config:python_snapshots=false
-# Don't run tests that set up TCP sockets in parallel since they may try to use the same ports. This
-# is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
-# at the same time.
-test --local_resources=socket=1
 # Tests that start a wptserve sidecar (wpt_test with start_server = True) are tagged
 # "resources:wptserve:1", so that at most one wptserve runs at a time.
 test --local_resources=wptserve=1
@@ -257,6 +253,12 @@ build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-f
 build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 # Rust and C++ share Clang's sanitizer runtime, linked by the C++ driver.
 build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+# Optimize Rust like the C++ above. --copt does not reach rustc, which otherwise compiles at
+# opt-level 0: every local lives in memory, so the sanitizer checks every access to it, and under
+# TSan every call, however trivial, also calls into the runtime on entry and exit. rustc enables
+# debug assertions and overflow checks by default only at opt-level 0, so keep them on.
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Copt-level=1
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=on
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 #
@@ -306,9 +308,10 @@ build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
 build:tsan-common --test_timeout=30,150,600,2400
-# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
-# not currently derive these defines from the compiler's sanitizer flags.
-build:tsan-common --copt="-DV8_IS_TSAN"
+# Enable V8's TSan synchronization annotations. V8's Bazel build does not currently derive this
+# define from the compiler's sanitizer flags. V8_IS_TSAN, which would also make V8's generated code
+# call into TSan on every load and store, is left off: that costs V8-heavy tests about 20x the time
+# they take under ASan, to check races with V8's background compilers and marker.
 build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
 # Perfetto also requires this define to enable its shared-memory scraping annotations.
 build:tsan-common --per_file_copt='external/.*perfetto@-DTHREAD_SANITIZER'

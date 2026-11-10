@@ -27,10 +27,12 @@ use std::time::Duration;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
+use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::Either;
 use futures::future::Shared;
 use futures::future::select;
+use futures::stream::FuturesUnordered;
 use http::header::SEC_WEBSOCKET_ACCEPT;
 use http::header::UPGRADE;
 use http::response::Parts;
@@ -66,6 +68,7 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::net::lookup_host;
+use tokio::time::timeout;
 
 use crate::Result;
 use crate::body::BodyAbort;
@@ -289,8 +292,15 @@ impl Internet {
     }
 }
 
+/// How long a connection attempt runs before the next address is tried too: RFC 8305's
+/// recommended Connection Attempt Delay.
+const CONNECTION_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+
 /// The usual `connect` of [`ClientPool::internet`]: resolves `host` and connects to the first address
 /// that `allow` admits and that accepts.
+///
+/// IPv4 addresses are tried first, matching KJ's `lookupHost` rather than RFC 8305's interleaving,
+/// and the attempts are raced: a refused connect can take seconds (about two on Windows).
 ///
 /// When none accepts, the error is the last connection failure, else `PermissionDenied` if
 /// `allow` refused an address, else `NotFound`.
@@ -299,21 +309,15 @@ pub async fn connect_allowed(
     port: u16,
     allow: impl Fn(&SocketAddr) -> bool,
 ) -> io::Result<TcpStream> {
-    let mut denied = false;
-    let mut last = None;
-    for addr in lookup_host((host, port)).await? {
-        if !allow(&addr) {
-            denied = true;
-            continue;
+    let (addrs, denied): (Vec<_>, Vec<_>) = lookup_host((host, port)).await?.partition(&allow);
+    let denied = !denied.is_empty();
+    let last = match race(addrs, CONNECTION_ATTEMPT_DELAY, TcpStream::connect).await {
+        Ok(stream) => {
+            let _ = stream.set_nodelay(true);
+            return Ok(stream);
         }
-        match TcpStream::connect(addr).await {
-            Ok(stream) => {
-                let _ = stream.set_nodelay(true);
-                return Ok(stream);
-            }
-            Err(e) => last = Some(e),
-        }
-    }
+        Err(last) => last,
+    };
     Err(last.unwrap_or_else(|| {
         if denied {
             io::Error::new(
@@ -327,6 +331,37 @@ pub async fn connect_allowed(
             )
         }
     }))
+}
+
+/// Connects to the first of `addrs` that accepts, IPv4 first, starting the next attempt when any
+/// running one fails or after `delay` (RFC 8305), and fails with the last failure (`None` when
+/// `addrs` is empty).
+async fn race<S, F>(
+    mut addrs: Vec<SocketAddr>,
+    delay: Duration,
+    connect: impl Fn(SocketAddr) -> F,
+) -> Result<S, Option<io::Error>>
+where
+    F: Future<Output = io::Result<S>>,
+{
+    addrs.sort_by_key(SocketAddr::is_ipv6);
+    let mut attempts = FuturesUnordered::new();
+    let mut last = None;
+    for addr in addrs {
+        attempts.push(connect(addr));
+        match timeout(delay, attempts.next()).await {
+            Ok(Some(Ok(stream))) => return Ok(stream),
+            Ok(Some(Err(e))) => last = Some(e),
+            Ok(None) | Err(_) => {}
+        }
+    }
+    while let Some(attempt) = attempts.next().await {
+        match attempt {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last)
 }
 
 impl tower_service::Service<http::Uri> for Connector {

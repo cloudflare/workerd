@@ -35,6 +35,14 @@
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /hold-increment  Waits `ms` (default 1000), then increments.
+//   /chain?targets=T Waits `ms` (default 0), sends /chain with the rest of the
+//                    DO names `targets` lists, separated by commas, to the
+//                    first, then increments: a call through other DOs, or
+//                    itself, back to it. A target `name:ms` waits `ms` there.
+//   /poke?target=T   Calls /increment on the DO named `target`, `parallel` calls
+//                    at once (default 1), until `ms` (default 1000) have passed.
+//                    Returns each call's `{ status, nodeId, count }`, or
+//                    `{ error }` for one that threw.
 //   /break           Aborts the DO via ctx.abort(). The request fails.
 //   /set-alarm       Sets the DO's alarm `ms` (default 60000) from now.
 //   /alarms          Returns `fired`, the NODE_ID of each instance that ran the
@@ -75,6 +83,9 @@
 // flight on a node and SIGTERM that node while the request has not yet routed
 // to the DO's owner.
 //
+// Its /rpc-identity calls the DO's identity() method over JS RPC rather than
+// fetch(). A failure is reported with the error's `retryable`.
+//
 // Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
 
 import {
@@ -85,10 +96,31 @@ import {
 } from 'cloudflare:workers';
 
 export default {
+  // cluster-cron.wd-test's trigger: each occurrence logged by the node
+  // that runs it, its schedule's owner.
+  scheduled(controller) {
+    console.error(`TICK ${controller.scheduledTime}`);
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/cron-clock') {
+      return env.CRON.fetch(`http://cron/clock${url.search}`, {
+        method: 'POST',
+      });
+    }
     if (url.pathname.startsWith('/on-hibernate/')) {
       return env.ON_HIBERNATE.fetch(request);
+    }
+
+    if (url.pathname.startsWith('/kv/')) {
+      if (url.pathname === '/kv/clock') {
+        await env.KV_WORKER.fetch(`http://kv/clock${url.search}`, {
+          method: 'POST',
+        });
+        return Response.json({});
+      }
+      return kv(url, env.KV);
     }
 
     // The DO name to act on is given via the `name` query parameter (defaults
@@ -105,6 +137,17 @@ export default {
       await scheduler.wait(Number(delay));
     }
 
+    if (url.pathname === '/rpc-identity') {
+      try {
+        return Response.json(await stub.identity());
+      } catch (err) {
+        return Response.json(
+          { error: String(err), retryable: err.retryable },
+          { status: 500 }
+        );
+      }
+    }
+
     // Forward to the DO with the same path and query.
     const forwardUrl = new URL(url.pathname + url.search, 'http://do/');
     try {
@@ -117,6 +160,37 @@ export default {
     }
   },
 };
+
+// The KV binding, by query parameters: /kv/put?key=K&value=V (or &size=N
+// for N 'x's)[&metadata=JSON]
+// [&ttl=S], /kv/get?key=K[&cacheTtl=S], /kv/delete?key=K and /kv/list?prefix=P[&limit=N]
+// [&cursor=C]. Answers JSON.
+async function kv(url, ns) {
+  const q = Object.fromEntries(url.searchParams);
+  switch (url.pathname) {
+    case '/kv/put': {
+      const options = {};
+      if (q.metadata) options.metadata = JSON.parse(q.metadata);
+      if (q.ttl) options.expirationTtl = Number(q.ttl);
+      const value = q.size ? 'x'.repeat(Number(q.size)) : q.value;
+      await ns.put(q.key, value, options);
+      return Response.json({});
+    }
+    case '/kv/get': {
+      const options = q.cacheTtl ? { cacheTtl: Number(q.cacheTtl) } : {};
+      return Response.json(await ns.getWithMetadata(q.key, options));
+    }
+    case '/kv/delete':
+      await ns.delete(q.key);
+      return Response.json({});
+    case '/kv/list': {
+      const options = { prefix: q.prefix, cursor: q.cursor };
+      if (q.limit) options.limit = Number(q.limit);
+      return Response.json(await ns.list(options));
+    }
+  }
+  return Response.json({ error: 'no such path' }, { status: 404 });
+}
 
 // RpcTarget vended by Counter's [restore]() that mutates the counter's storage.
 // It runs in the Counter's context on whichever node owns the Counter.
@@ -335,6 +409,42 @@ export class Counter extends DurableObject {
       const count = ((await this.state.storage.get('count')) ?? 0) + 1;
       await this.state.storage.put('count', count);
       return Response.json({ count, nodeId, id: idHex });
+    } else if (url.pathname === '/chain') {
+      await scheduler.wait(Number(url.searchParams.get('ms') ?? '0'));
+      const [next, ...rest] = (url.searchParams.get('targets') ?? '')
+        .split(',')
+        .filter((t) => t !== '');
+      if (next !== undefined) {
+        const [target, ms = '0'] = next.split(':');
+        const stub = this.env.COUNTER.get(this.env.COUNTER.idFromName(target));
+        const response = await stub.fetch(
+          `http://do/chain?ms=${ms}&targets=${rest.join(',')}`
+        );
+        if (!response.ok) return response;
+      }
+      const count = ((await this.state.storage.get('count')) ?? 0) + 1;
+      await this.state.storage.put('count', count);
+      return Response.json({ count, nodeId, id: idHex });
+    } else if (url.pathname === '/poke') {
+      const target = url.searchParams.get('target');
+      const stub = this.env.COUNTER.get(this.env.COUNTER.idFromName(target));
+      const until = Date.now() + Number(url.searchParams.get('ms') ?? '1000');
+      const parallel = Number(url.searchParams.get('parallel') ?? '1');
+      const calls = [];
+      await Promise.all(
+        Array.from({ length: parallel }, async () => {
+          while (Date.now() < until) {
+            try {
+              const response = await stub.fetch('http://do/increment');
+              const body = await response.json();
+              calls.push({ status: response.status, ...body });
+            } catch (e) {
+              calls.push({ error: String(e) });
+            }
+          }
+        })
+      );
+      return Response.json({ nodeId, calls });
     } else if (url.pathname === '/set-alarm') {
       const ms = Number(url.searchParams.get('ms') ?? '60000');
       await this.state.storage.setAlarm(Date.now() + ms);

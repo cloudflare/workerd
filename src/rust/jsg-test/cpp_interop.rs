@@ -81,6 +81,14 @@ pub mod ffi {
             isolate: *mut Isolate,
             greeter: &TestCppGreeter,
         ) -> bool;
+        unsafe fn test_cpp_greeter_fail_with_quota_exceeded_error(
+            isolate: *mut Isolate,
+            greeter: &TestCppGreeter,
+        ) -> bool;
+        unsafe fn test_cpp_greeter_fail_with_dom_syntax_error(
+            isolate: *mut Isolate,
+            greeter: &TestCppGreeter,
+        ) -> bool;
         unsafe fn test_cpp_greeter_fail_with_js_error(
             isolate: *mut Isolate,
             greeter: &TestCppGreeter,
@@ -207,6 +215,23 @@ impl ffi::TestCppGreeter {
         })
     }
 
+    pub fn fail_with_quota_exceeded_error(
+        &self,
+        lock: &mut jsg::Lock<'_>,
+    ) -> Result<(), jsg::Error> {
+        // SAFETY: as in `greet`.
+        jsg_cpp::call_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_fail_with_quota_exceeded_error(isolate, self)
+        })
+    }
+
+    pub fn fail_with_dom_syntax_error(&self, lock: &mut jsg::Lock<'_>) -> Result<(), jsg::Error> {
+        // SAFETY: as in `greet`.
+        jsg_cpp::call_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_fail_with_dom_syntax_error(isolate, self)
+        })
+    }
+
     pub fn fail_with_js_error(&self, lock: &mut jsg::Lock<'_>) -> Result<(), jsg::Error> {
         // SAFETY: as in `greet`.
         jsg_cpp::call_cpp(lock, |isolate| unsafe {
@@ -242,7 +267,7 @@ thread_local! {
 }
 
 /// A Rust resource that uses C++ resources, as a ported `ExecutionContext` would.
-#[jsg_resource]
+#[jsg_resource(memory_info)]
 pub struct Host {
     pub label: String,
     /// A C++ resource, traced as a `jsg::Ref` field of a C++ resource is.
@@ -294,6 +319,24 @@ impl Host {
         greeter: jsg_cpp::Ref<ffi::TestCppGreeter>,
     ) -> Result<(), jsg::Error> {
         greeter.fail_with_type_error(lock)
+    }
+
+    #[jsg_method]
+    pub fn fail_with_quota_exceeded_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        greeter: jsg_cpp::Ref<ffi::TestCppGreeter>,
+    ) -> Result<(), jsg::Error> {
+        greeter.fail_with_quota_exceeded_error(lock)
+    }
+
+    #[jsg_method]
+    pub fn fail_with_dom_syntax_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        greeter: jsg_cpp::Ref<ffi::TestCppGreeter>,
+    ) -> Result<(), jsg::Error> {
+        greeter.fail_with_dom_syntax_error(lock)
     }
 
     #[jsg_method]

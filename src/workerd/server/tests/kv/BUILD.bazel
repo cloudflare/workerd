@@ -1,0 +1,19 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+# Moves 25 MiB values, which takes most of 15 s on ASan and debug builds.
+wd_test(
+    size = "large",
+    src = "kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-test.js"],
+)
+
+# `workerd serve` of a wrangler.jsonc's kv_namespaces.
+js_test(
+    name = "kv-wrangler-test",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "kv-wrangler-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

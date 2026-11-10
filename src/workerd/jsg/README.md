@@ -28,13 +28,12 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `nullptr`        | `v8::Null`      | `null`          | Via `kj::Maybe<T>`                         |
 | `nullptr`        | `v8::Undefined` | `undefined`     | Via `jsg::Optional<T>`                     |
 
-An integer of up to 32 bits is unwrapped with `ToNumber`, a range check and a truncating cast
-(`value.h`). NaN and the infinities are a `TypeError` for every type except `int`, which reads
-them as 0, and so is a value out of the type's range. Whether a fraction just past a range limit
-(`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned type) is out of range or is truncated first, as
-Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, depends on the
-`JSG_INTEGER_ENFORCE_RANGE` autogate (`util/autogate.h`). `int64_t` and `uint64_t` take a
-`BigInt` that fits, or any other value converted to a number that is finite and in range.
+An integer of up to 32 bits is unwrapped with `ToNumber`, truncation toward zero and a range
+check (`value.h`), in the order of Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API
+arguments, so a fraction just past a range limit (`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned
+type) converts. NaN and the infinities are a `TypeError` for every type except `int`, which reads
+them as 0, and so is a value out of the type's range. `int64_t` and `uint64_t` take a `BigInt`
+that fits, or any other value converted to a number that is finite and in range.
 
 ## Nullable/Optional Semantics
 
@@ -255,6 +254,11 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
+
+**Visit only what this object owns alone.** An object behind a `kj::Rc`, `kj::Arc`, or a
+`kj::Own` of a refcounted type can have other owners that visit it too, and a handle visited
+from two owners is strong or traced depending on which visited last. The `jsg-shared-visit`
+clang-tidy check flags such visits.
 
 ## Weak References
 

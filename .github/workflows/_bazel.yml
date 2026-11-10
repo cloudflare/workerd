@@ -196,7 +196,17 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
+      - name: Configure Docker daemon for IPv6
+        if: inputs.build_container_images
+        run: |
+          sudo mkdir -p /etc/docker
+          echo '{"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
       - name: Bazel build
+        # `bazel test` and `bazel coverage` build the targets they run, so a job testing the targets
+        # it builds skips this step. Each test then starts as soon as its own dependencies are
+        # built, rather than after the whole build.
+        if: ${{ !(inputs.run_tests || inputs.run_coverage) || inputs.build_target != inputs.test_target }}
         run: |
           bazel build ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.build_target }}
       - name: Check I/O backend dependency graph
@@ -204,12 +214,6 @@ jobs:
         if: inputs.check_io_backend_graph
         run: |
           bash build/rust_io_graph_check.sh ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }}
-      - name: Configure Docker daemon for IPv6
-        if: inputs.build_container_images
-        run: |
-          sudo mkdir -p /etc/docker
-          echo '{"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
       - name: Bazel test
         if: inputs.run_tests
         run: |
