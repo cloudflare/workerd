@@ -25,11 +25,18 @@ async fn round_trip(address: &str) {
     let channel = UdpEgress::connect(&listener.local_addr().unwrap().to_string(), &filter)
         .await
         .unwrap();
-    let mut buffer = vec![0; 65536];
+    // Some platforms default to send buffers smaller than the largest UDP payload. Size both
+    // sockets for the boundary test without relying on the host's defaults.
+    for socket in [&listener, &channel.socket] {
+        socket2::SockRef::from(socket)
+            .set_send_buffer_size(65_536)
+            .unwrap();
+    }
+    let mut buffer = vec![0; 65_536];
 
     // Empty packets, binary data and a maximum-sized packet retain their boundaries in both
     // directions. In particular, an empty packet is data rather than EOF.
-    for payload in [vec![], vec![0, 255, 32], vec![42; 1500], vec![123; 65507]] {
+    for payload in [vec![], vec![0, 255, 32], vec![42; 1500], vec![123; 65_507]] {
         channel.udp_send(&payload).await.unwrap();
         let (size, peer) = listener.recv_from(&mut buffer).await.unwrap();
         assert_eq!(&buffer[..size], payload);
@@ -66,7 +73,7 @@ fn oversized_payloads_are_rejected_without_sending_or_poisoning_the_transport() 
         let channel = UdpEgress::connect(&listener.local_addr().unwrap().to_string(), &filter)
             .await
             .unwrap();
-        for size in [65508, 131072] {
+        for size in [65_508, 131_072] {
             let error = channel.udp_send(&vec![42; size]).await.unwrap_err();
             assert!(
                 error
