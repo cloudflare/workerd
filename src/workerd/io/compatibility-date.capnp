@@ -1814,4 +1814,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # method's JavaScript is not interrupted, but a stateless Worker's pending I/O is canceled when
   # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
   # like a fetch handler whose client went away.
+  #
+  # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
+  # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
+  # event is in flight cancels the event and ends the callee's request.
+
+  exposeSerializationTestClass @205 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
+  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
+  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
+  # RPC. This flag is intended for internal testing only and may never have its experimental
+  # annotation removed.
 }

@@ -67,21 +67,18 @@
 //! `Integer::New`, as C++ JSG's do, and from JavaScript like C++ JSG's integers:
 //!
 //! - Non-finite values are a `TypeError`, except that `i32` reads them as `0`
-//! - Values out of the type's range are a `TypeError` (e.g., `256` for `u8`)
 //! - Other values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
+//! - Values out of the type's range after truncation are a `TypeError` (e.g., `256` for `u8`)
 //!
-//! Whether a fraction just past a range limit, such as `255.5` or `-0.5` for `u8`, is out of
-//! range depends on the `JSG_INTEGER_ENFORCE_RANGE` autogate: with it, the value is truncated
-//! before the range check, as Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API
-//! arguments do, so `255.5` is `255` and `-0.5` is `0`; without it, the range check sees the
-//! fraction and both are a `TypeError`.
+//! Truncating before the range check is what Web IDL's `[EnforceRange]` and V8's
+//! `kEnforceRangeBit` fast API arguments do, so a fraction just past a range limit converts:
+//! `255.5` is `255` and `-0.5` is `0` for `u8`.
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 //!
 //! `i64` and `u64` convert to a `BigInt`, and from JavaScript like C++ JSG's `int64_t` and
 //! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
-//! above, except that the range check always sees the untruncated value; the
-//! `JSG_INTEGER_ENFORCE_RANGE` autogate does not apply to them.
+//! above, except that the range check sees the untruncated value.
 
 use crate::Coercible;
 use crate::Dict;
@@ -708,33 +705,13 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
 // Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
 // to 32 bits is a number, made with `Integer::New` as in C++ JSG, and an i64 or
 // u64 is a BigInt. From JavaScript, a non-finite value is a TypeError, except
-// that i32 reads it as 0, and so is a value out of the type's range, which the
-// types of up to 32 bits check after `integer_part_for_range_check`. In-range
-// values truncate toward zero.
+// that i32 reads it as 0, and so is a value out of the type's range. Finite
+// values truncate toward zero, before the range check for the types of up to 32
+// bits and after it for the 64-bit types.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
     fn from_number(num: f64) -> Result<Self, Error>;
-}
-
-/// What `from_number` range-checks for a finite number, as C++ JSG's `integerPartForRangeCheck`
-/// (jsg/value.h) does: with the `JSG_INTEGER_ENFORCE_RANGE` autogate its integer part, so that a
-/// fraction just past a range limit converts as Web IDL's `[EnforceRange]` and V8's
-/// `kEnforceRangeBit` fast API arguments convert it (`2 ** 31 - 0.5` is `i32::MAX`, `-0.5` is `0`
-/// as an unsigned type); without it the number itself, so that such a fraction is out of range.
-/// The truncation is `f64::trunc`'s, toward zero. An integral value is returned as it is without
-/// reading the gate.
-#[expect(
-    clippy::float_cmp,
-    reason = "`trunc` is exact, so the comparison tells exactly whether `num` is integral"
-)]
-fn integer_part_for_range_check(num: f64) -> f64 {
-    let integer_part = num.trunc();
-    if integer_part != num && crate::ffi::integer_enforce_range_autogate_enabled() {
-        integer_part
-    } else {
-        num
-    }
 }
 
 macro_rules! impl_integer {
@@ -765,7 +742,7 @@ macro_rules! impl_integer {
                     if !num.is_finite() {
                         return $non_finite;
                     }
-                    let num = integer_part_for_range_check(num);
+                    let num = num.trunc();
                     if <$type>::MIN == 0 && num < 0.0 {
                         return Err(Error::new_type_error(
                             "The value cannot be converted because it is negative and this API \

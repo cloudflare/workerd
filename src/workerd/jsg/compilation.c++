@@ -160,7 +160,7 @@ v8::MaybeLocal<v8::Module> compileModule(Lock& js,
     return result;
   }
   KJ_IF_SOME(cache, options.sharedCache) {
-    return cache.compile(js, source, origin, observer);
+    return cache.compile(js, source, origin, observer, options.compileHints);
   }
   if (options.compileHints.size() > 0) {
     return compileModuleWithHints(js, source, origin, options.compileHints, observer);
@@ -172,7 +172,8 @@ v8::MaybeLocal<v8::Module> compileModule(Lock& js,
 v8::MaybeLocal<v8::Module> SharedModuleCompilationCache::compile(Lock& js,
     v8::Local<v8::String> source,
     const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer) const {
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> compileHints) const {
   v8::Local<v8::Module> module;
   bool needsCache = true;
   kj::Maybe<uint64_t> rejectedGeneration;
@@ -189,20 +190,26 @@ v8::MaybeLocal<v8::Module> SharedModuleCompilationCache::compile(Lock& js,
         LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module failed its compatibility check");
       }
     }
-    auto options = data == nullptr ? v8::ScriptCompiler::kNoCompileOptions
-                                   : v8::ScriptCompiler::kConsumeCodeCache;
-    v8::ScriptCompiler::Source compileSource(source, origin, data.release());
-    if (!v8::ScriptCompiler::CompileModule(js.v8Isolate, &compileSource, options)
-             .ToLocal(&module)) {
-      return {};
-    }
-    if (options == v8::ScriptCompiler::kConsumeCodeCache) {
-      if (compileSource.GetCachedData()->rejected) {
-        rejectedGeneration = lock->generation;
-        LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
-      } else {
-        needsCache = false;
-        observer.onCompileCacheFound(js.v8Isolate);
+    if (data == nullptr && compileHints.size() > 0) {
+      if (!compileModuleWithHints(js, source, origin, compileHints, observer).ToLocal(&module)) {
+        return {};
+      }
+    } else {
+      auto options = data == nullptr ? v8::ScriptCompiler::kNoCompileOptions
+                                     : v8::ScriptCompiler::kConsumeCodeCache;
+      v8::ScriptCompiler::Source compileSource(source, origin, data.release());
+      if (!v8::ScriptCompiler::CompileModule(js.v8Isolate, &compileSource, options)
+               .ToLocal(&module)) {
+        return {};
+      }
+      if (options == v8::ScriptCompiler::kConsumeCodeCache) {
+        if (compileSource.GetCachedData()->rejected) {
+          rejectedGeneration = lock->generation;
+          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
+        } else {
+          needsCache = false;
+          observer.onCompileCacheFound(js.v8Isolate);
+        }
       }
     }
   }

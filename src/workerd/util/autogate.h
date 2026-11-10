@@ -110,12 +110,6 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
-  /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
-     before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
-     arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
-     uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
-     fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
   /* Cross-context actions queued on an actor between events wait for its next request instead     \
      of aborting it, and IoContext::run() without a current request fails with a typed error.      \
      An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
@@ -135,7 +129,11 @@ namespace workerd::util {
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
-  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
+     external memory, so that the isolate's memory limit applies to them. See                      \
+     LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -17,6 +17,7 @@
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/util/autogate.h>
@@ -51,6 +52,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
   static const auto bundled = [] {
     kj::HashMap<kj::StringPtr, kj::StringPtr> map;
     map.insert("/workerd/kv.js"_kj, KV_JS);
+    map.insert("/workerd/cron.js"_kj, CRON_JS);
     return map;
   }();
   return bundled.find(name).map([](auto& source) { return source; });

@@ -245,6 +245,16 @@ pub mod ffi {
         v8_version: String,
     }
 
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/util/thread-scopes.h");
+
+        /// Whether the process runs `workerd bench`, which turns bench mode on before any worker
+        /// compiles.
+        #[cxx_name = "isBenchMode"]
+        fn is_bench_mode() -> bool;
+    }
+
     #[namespace = "kj_rs_tokio"]
     unsafe extern "C++" {
         include!("kj-rs-tokio/tokio-event-port.h");
@@ -358,6 +368,17 @@ pub mod ffi {
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
         ) -> Result<KjOwn<CompiledWorker>>;
+        /// Times starting the config's worker `services[config_service]`, which `spec` compiled,
+        /// for `workerd bench`: compiles and destroys throwaway copies of it in new isolates, as
+        /// `params` (an encoded `BenchParams` message, bench.capnp, in words) ask. Returns the
+        /// startup `BenchReport.Group` of the timings, encoded, without its name. A copy that
+        /// fails to start fails the group; an error means it could not be run at all.
+        async fn factory_bench_startup(
+            factory: &WorkerFactory,
+            spec: &WorkerSpec,
+            config_service: u32,
+            params: &[u64],
+        ) -> Result<Vec<u64>>;
 
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.

@@ -73,6 +73,7 @@ PATCHES = [
     "0048-Keep-v8_libshared-private-to-v8.patch",
     "0049-Build-Temporal-in-the-V8-Bazel-build.patch",
     "0050-Add-DisallowHeapAllocation-to-the-API.patch",
+    "0051-Gate-RacyDecodeEmbeddedFeedback-s-DISABLE_TSAN-on-THREAD_SANITIZER.patch",
 ]
 
 http_archive(

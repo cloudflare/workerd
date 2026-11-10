@@ -31,4 +31,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "delivery-shape", esModule = embed "delivery-shape.js"),
   (name = "gc-interplay", esModule = embed "gc-interplay.js"),
   (name = "pollution", esModule = embed "pollution.js"),
+  (name = "transfer", esModule = embed "transfer.js"),
 ];

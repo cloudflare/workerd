@@ -12,6 +12,33 @@
 
 namespace workerd::jsg {
 
+// The serialization tag of an instance of a class implemented in JavaScript (see Serializer).
+// Keep in sync with jsSerializable in worker-interface.capnp.
+constexpr uint32_t SERIALIZATION_TAG_JS_SERIALIZABLE = 23;
+
+// The names of the V8 private properties of the protocol by which classes implemented in
+// JavaScript are serialized (see Serializer). src/per_isolate/serialization.ts uses the same names.
+constexpr kj::StringPtr JS_SERIALIZE_MODE_KEY = "workerd:serializeMode"_kj;
+constexpr kj::StringPtr JS_CLONEABLE_KEY = "workerd:cloneable"_kj;
+
+// The runtime's internal JavaScript modules loaded in a context (the per-isolate bootstrap's, see
+// api/per-isolate-bootstrap.h), which the deserializer looks up classes implemented in JavaScript
+// among. Stored in the context's ContextPointerSlot::BOOTSTRAP_STATE slot, which, in a context
+// that runs the per-isolate bootstrap, nothing else may set: the bootstrap reads the slot back as
+// its own implementation.
+class BootstrapModules {
+ public:
+  // Returns the exports of the module named `specifier` if it has been loaded, or kj::none. Must
+  // not run JavaScript.
+  virtual kj::Maybe<JsValue> tryGetLoadedExports(Lock& js, kj::StringPtr specifier) = 0;
+
+ protected:
+  ~BootstrapModules() noexcept(false) = default;
+};
+
+// Returns the BootstrapModules of the current context, if any.
+kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
+
 // Wraps the v8::ValueSerializer and v8::ValueSerializer::Delegate implementation.
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
 // the stack.
@@ -57,6 +84,59 @@ namespace workerd::jsg {
 //   `const jsg::TypeHandler<SomeType>&`, which will automatically be filled in with the
 //   corresponding type handler. This is useful if the serializer wants to, say, assemble a
 //   JSG_STRUCT, convert it into an actual JS object, and serialize that.
+// * A value that `deserialize()` reads with `deserializer.readValue()` may contain instances of
+//   classes implemented in JavaScript (below) that are not yet initialized: their own
+//   `deserialize` runs only once the top-level value has been read, and no JavaScript can run
+//   before then. Keep such a value as it is, as a JsRef. Unwrap it as a particular type, or read
+//   its properties, only if `serialize()` wrote it from state that cannot contain such an
+//   instance.
+//
+// Classes implemented in JavaScript by the runtime itself (the per-isolate bootstrap's, see
+// src/per_isolate/serialization.ts) take part through a protocol modelled on Node.js's
+// js_transferable. Each part is a V8 private property, which only runtime code can name:
+//
+// * A cloneable class has a descriptor: an object with the own data properties `deserializeInfo`,
+//   `clone` and `deserialize`. `deserializeInfo` is a string "module:Export" naming the class's
+//   constructor among the exports of a loaded bootstrap module, which is how the deserializer finds
+//   the class: there is no registry. Only an own data property of an ordinary object counts, as
+//   an export or in a descriptor: the deserializer can't call a getter, so it rejects an accessor,
+//   and it rejects any property of a workerd API object, whose interceptors could run code. The
+//   deserializer cannot load a module, so it finds only classes whose modules were loaded while
+//   the bootstrap ran. It finds any such class, whether or not the compatibility flags expose it,
+//   so data from an untrusted source can make an instance of any class whose module is loaded.
+//   `clone(instance)` returns the instance's data, any serializable value, and
+//   `deserialize(instance, data)` initializes an instance from it. The class's constructor's
+//   `prototype` holds the descriptor under JS_CLONEABLE_KEY. Its `clone` and `deserializeInfo`
+//   are constants, neither writable nor configurable, as freezing it makes them.
+// * An instance carries a mark under JS_SERIALIZE_MODE_KEY. If the instance is cloneable, the mark
+//   is its class's descriptor, so the class that marked an instance decides how it is written,
+//   whatever its prototype is now. Any other mark makes serializing it throw DataCloneError,
+//   unless the ExternalHandler serializes it (trySerializeClassInstance()). An object whose
+//   prototype is Object.prototype or null is not checked for the property, which keeps plain
+//   objects cheap, so it is never an instance. Nor is an instance of a built-in that V8
+//   serializes itself, such as a Map, even of a subclass: V8 never offers it to the Serializer.
+//
+// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
+// of flags, followed, if it is a native error, by its `message` (flag 4) and its own `stack` (flag
+// 1), each if it is a string. Flag 2 says that the writer was not using enhanced error
+// serialization. A reader rejects flags it doesn't know, so that later versions can add fields.
+// The instance's `data` follows the top-level value (as in Node.js), so that it can refer back to
+// the instance.
+// V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
+// constructor's `prototype` without calling the constructor (as a native error if the prototype
+// inherits from Error.prototype), marks it with the descriptor, and calls `deserialize`, in the
+// order the instances were read, once the top-level value and every instance's `data` have been
+// read. The data may come from an untrusted source, so `deserialize` validates it.
+//
+// The deserializer, not the class, decides whether a native error made this way keeps the writer's
+// stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
+// whenever the writer was not using enhanced error serialization (flag 2), as a native error that
+// such a writer writes in V8's own format does. Otherwise it keeps the stack captured when it was
+// made, whose first line gives the error's name and the writer's message, as a native error's
+// does. Either way, `stack` is not enumerable. The message is only for the stack: `deserialize`
+// sets the instance's `message`. A class does not serialize `stack` itself.
+//
+// A `deserializeInfo` is part of the format, which persisted data depends on.
 class Serializer final: v8::ValueSerializer::Delegate {
  public:
   // "Externals" are values which can be serialized, but refer to some external resource, rather
@@ -90,12 +170,14 @@ class Serializer final: v8::ValueSerializer::Delegate {
     virtual void serializeProxy(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy);
 
-    // Offers the handler a class instance (an object whose prototype is not Object.prototype and
-    // which is not a JSG-wrapped host object) to serialize as an external. Returns true if the
-    // handler recognized the object and serialized it; false to fall through to the default
-    // behavior (DataCloneError). This is how objects implemented in JavaScript (e.g. the
-    // TypeScript-implemented stream classes, which have no JSG wrapper for the serializer to
-    // find) participate in external serialization: the handler recognizes them by brand check.
+    // Offers the handler an instance of a class implemented in JavaScript (an object with a
+    // JS_SERIALIZE_MODE_KEY mark, whatever the mark is) to serialize as an external. Returns true
+    // if the handler recognized the object and serialized it; false to fall through to the
+    // object's own serialization if it is cloneable, or else DataCloneError. This is how objects
+    // implemented in JavaScript (e.g. the TypeScript-implemented stream classes, which have no JSG
+    // wrapper for the serializer to find) participate in external serialization: the handler
+    // recognizes them by brand check. Only a marked object is offered, so a class whose instances
+    // a handler takes must mark each one, as the streams do with markUncloneable().
     virtual bool trySerializeClassInstance(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
       return false;
@@ -204,6 +286,26 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // serializable workerd API object, or else throws a DataCloneError.
   void writeApiObject(Lock& js, v8::Local<v8::Object> object);
 
+  // Returns the JS_SERIALIZE_MODE_KEY mark of `object`, if it is an instance of a class
+  // implemented in JavaScript.
+  kj::Maybe<v8::Local<v8::Value>> tryGetJsSerializeMark(Lock& js, v8::Local<v8::Object> object);
+
+  // Writes `object`, an instance of a class implemented in JavaScript with the given mark, and
+  // queues its data to follow the top-level value.
+  void writeJsSerializable(Lock& js, v8::Local<v8::Object> object, v8::Local<v8::Value> mark);
+
+  // A class implemented in JavaScript, as its descriptor describes it.
+  struct JsSerializableClass {
+    V8Ref<v8::Object> descriptor;
+    V8Ref<v8::Function> clone;
+    kj::String deserializeInfo;
+  };
+
+  // Returns the class that `mark`, the mark of `object`, describes, or throws DataCloneError for
+  // `object` if it describes none.
+  JsSerializableClass& getJsSerializableClass(
+      Lock& js, v8::Local<v8::Object> object, v8::Local<v8::Value> mark);
+
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
   // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
@@ -229,15 +331,26 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Vector<jsg::V8Ref<v8::ArrayBuffer>> arrayBuffersToDetach;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
+  // The data of the instances of classes implemented in JavaScript written by the current
+  // top-level write(), which it writes after the value.
+  kj::Vector<V8Ref<v8::Value>> pendingJsSerializableData;
+  // The classes that getJsSerializableClass() has found. A descriptor's properties can't change,
+  // so each is read once.
+  kj::Vector<JsSerializableClass> jsSerializableClasses;
+  // How many calls to write() are in progress: a type's serializer calls it for nested values.
+  uint writeDepth = 0;
   bool released = false;
   size_t dataCapacity = 0;
   bool treatClassInstancesAsPlainObjects;
   bool treatErrorsAsHostObjects = false;
 
-  // Initialized to point at the prototype of `Object` if and only if
-  // `treatClassInstancesAsPlainObjects` is false (in which case we will need to check against this
-  // prototype in IsHostObject()).
+  // The prototype of `Object`, which IsHostObject() checks objects against. Empty for a Serializer
+  // that writes to another delegate's serializer.
   v8::Local<v8::Value> prototypeOfObject;
+
+  // The JS_SERIALIZE_MODE_KEY private symbol, which IsHostObject() checks class instances for.
+  // Empty for a Serializer that writes to another delegate's serializer.
+  v8::Local<v8::Private> jsSerializeModeKey;
 
   // The actual ValueSerializer. Note that it's important to define this last because its
   // constructor will call back to the Delegate, which is this object, so we hope that this object
@@ -264,10 +377,12 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
     // When the enahnced error serialization feature is enabled, and we are deserializing
     // a serialized error, this option controls whether to include the serialized stack
-    // property in the deserialized error. If false, the stack property is not restored
+    // property in the deserialized error, including an instance of a class implemented in
+    // JavaScript that inherits from Error. If false, the stack property is not restored
     // and will instead be set to the captured stack at the time of deserialization.
-    // This flag has no effect if the enhanced error serialization feature is disabled,
-    // or the values being deserialized are not errors (or do not contain any error objects).
+    // This flag has no effect on errors that were serialized with the enhanced error
+    // serialization feature disabled, which keep their stacks, or if the values being
+    // deserialized are not errors (or do not contain any error objects).
     bool preserveStackInErrors = true;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
@@ -296,13 +411,17 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     return externalHandler;
   }
 
+  // Reads a value. Called from a type's `deserialize()` for a value nested in its own, it may
+  // return instances of classes implemented in JavaScript that are not yet initialized (see the
+  // comment on Serializer).
   JsValue readValue(Lock& js);
 
+  // The raw reads throw DataCloneError if the data ends too soon.
   uint32_t readRawUint32();
   uint64_t readRawUint64();
 
   // Returns a view directly into the original buffer for the number of bytes requested. Always
-  // returns the exact amount; throws if not possible.
+  // returns the exact amount.
   kj::ArrayPtr<const kj::byte> readRawBytes(size_t size);
 
   // Reads a size (readRawUint64) followed by that many bytes.
@@ -327,6 +446,28 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   // Reads the workerd API object that `tag` names through its type's deserializer.
   v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
 
+  // Reads an instance of a class implemented in JavaScript, which is created at once and
+  // initialized by finishJsSerializables().
+  v8::Local<v8::Object> readJsSerializable(Lock& js);
+
+  // A class implemented in JavaScript that readJsSerializable() found.
+  struct JsSerializableClass {
+    kj::String deserializeInfo;
+    V8Ref<v8::Object> prototype;
+    V8Ref<v8::Object> descriptor;
+    V8Ref<v8::Function> deserialize;
+    // Whether the prototype inherits from Error.prototype, so that its instances are native errors.
+    bool isError;
+  };
+
+  // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or
+  // throws DataCloneError if it names none.
+  size_t findJsSerializableClass(Lock& js, kj::String deserializeInfo);
+
+  // Reads the data of the instances that readJsSerializable() created during the current
+  // top-level readValue(), then initializes them with their classes' `deserialize` functions.
+  void finishJsSerializables(Lock& js);
+
   void init(Lock& js,
       kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
@@ -344,6 +485,23 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   v8::ValueDeserializer& deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
   bool preserveStackInErrors = true;
+
+  struct PendingJsSerializable {
+    V8Ref<v8::Object> instance;
+    // The instance's class in jsSerializableClasses.
+    size_t classIndex;
+  };
+  // The instances of classes implemented in JavaScript read by the current top-level readValue(),
+  // in the order they were read.
+  kj::Vector<PendingJsSerializable> pendingJsSerializables;
+  // How many calls to readValue() are in progress: a type's deserializer calls it for nested
+  // values.
+  uint readDepth = 0;
+  // Error.prototype of the current context, once findJsSerializableClass() needs it.
+  kj::Maybe<V8Ref<v8::Value>> errorPrototype;
+  // The classes that findJsSerializableClass() has found during the current top-level
+  // readValue(). No JavaScript runs while it reads, so none of them can change before it ends.
+  kj::Vector<JsSerializableClass> jsSerializableClasses;
 };
 
 // For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or

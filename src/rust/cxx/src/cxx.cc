@@ -1,5 +1,7 @@
 #include "../include/cxx.h"
 
+#include "simdutf.h"
+
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -35,6 +37,22 @@ void cxxbridge1$cxx_string$reserve_total(std::string &s,
 void cxxbridge1$cxx_string$push(std::string &s, const std::uint8_t *ptr,
                                 std::size_t len) noexcept {
   s.append(reinterpret_cast<const char *>(ptr), len);
+}
+
+// Latin-1 to UTF-8, for cxxbridge1$string$from_latin1 in rust_string.rs
+bool cxxbridge1$latin1$validate_ascii(const char *ptr,
+                                      std::size_t len) noexcept {
+  return simdutf::validate_ascii(ptr, len);
+}
+
+std::size_t cxxbridge1$latin1$utf8_length(const char *ptr,
+                                          std::size_t len) noexcept {
+  return simdutf::utf8_length_from_latin1(ptr, len);
+}
+
+std::size_t cxxbridge1$latin1$convert_to_utf8(const char *ptr, std::size_t len,
+                                              char *out) noexcept {
+  return simdutf::convert_latin1_to_utf8(ptr, len, out);
 }
 
 // rust::String

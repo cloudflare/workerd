@@ -167,8 +167,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, jsg::copyToArc(content.body), flags, builder.newCodeCacheKey(content.body));
+          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags,
+              builder.newCodeCacheKey(content.body), content.compileHints);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {

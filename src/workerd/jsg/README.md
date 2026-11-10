@@ -28,13 +28,12 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `nullptr`        | `v8::Null`      | `null`          | Via `kj::Maybe<T>`                         |
 | `nullptr`        | `v8::Undefined` | `undefined`     | Via `jsg::Optional<T>`                     |
 
-An integer of up to 32 bits is unwrapped with `ToNumber`, a range check and a truncating cast
-(`value.h`). NaN and the infinities are a `TypeError` for every type except `int`, which reads
-them as 0, and so is a value out of the type's range. Whether a fraction just past a range limit
-(`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned type) is out of range or is truncated first, as
-Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, depends on the
-`JSG_INTEGER_ENFORCE_RANGE` autogate (`util/autogate.h`). `int64_t` and `uint64_t` take a
-`BigInt` that fits, or any other value converted to a number that is finite and in range.
+An integer of up to 32 bits is unwrapped with `ToNumber`, truncation toward zero and a range
+check (`value.h`), in the order of Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API
+arguments, so a fraction just past a range limit (`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned
+type) converts. NaN and the infinities are a `TypeError` for every type except `int`, which reads
+them as 0, and so is a value out of the type's range. `int64_t` and `uint64_t` take a `BigInt`
+that fits, or any other value converted to a number that is finite and in range.
 
 ## Nullable/Optional Semantics
 
@@ -455,6 +454,8 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | `write(js, JsValue)`                         | `readValue(js) → JsValue`                           |
 | `transfer(js, JsArrayBuffer)`                | `getVersion() → uint32_t`                           |
 
+A raw read past the end of the data throws DataCloneError.
+
 ### Rules
 
 - `JSG_SERIALIZABLE` MUST appear AFTER `JSG_RESOURCE_TYPE` block
@@ -464,6 +465,23 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
   runtime call-site label (defaults to `"unknown"`).
+
+### Classes Implemented in JavaScript
+
+The runtime's classes implemented in JavaScript (the per-isolate bootstrap's) have no
+`JSG_SERIALIZABLE`. They take part through V8-private properties that `src/per_isolate/serialization.ts`
+sets up: each instance is marked with its class's descriptor, and is written as
+`SERIALIZATION_TAG_JS_SERIALIZABLE` with a `"module:Export"` `deserializeInfo` naming the class,
+its data following the top-level value. The deserializer creates each instance without calling its
+constructor and initializes it once the whole value has been read, with JavaScript allowed.
+`ser.h` describes the protocol and the format; `docs/jsg.md` has a complete example.
+
+- A `deserializeInfo` MUST NOT change once data has been serialized
+- A value a `JSG_SERIALIZABLE` type's `deserialize()` reads with `readValue()` may contain such
+  instances before they are initialized: keep it as a `JsRef` rather than unwrapping it or reading
+  its properties, unless the type's own state, which can't contain one, produced it
+- A Serializer or Deserializer that writes to or reads for another delegate (`writeApiObject()`,
+  `readApiObject()`, as the Rust serializer uses) rejects such instances with DataCloneError
 
 ## Web IDL Union Validation Rules
 
@@ -604,7 +622,7 @@ null. Builds without the sandbox store an ordinary pointer.
 | `CompilationObserver`       | `onCompileCacheRejected`          | Cached data rejected (version mismatch)   |
 | `CompilationObserver`       | `onCompileCacheGenerated`         | New cache data generated                  |
 | `CompilationObserver`       | `onCompileCacheGenerationFailed`  | Cache generation failed                   |
-| `CompilationObserver`       | `onCompileHintsConsumed`          | Legacy ESM compiled using function hints  |
+| `CompilationObserver`       | `onCompileHintsConsumed`          | Bundle ESM compiled using function hints  |
 | `ResolveObserver`           | `onResolveModule`                 | Module resolution begins                  |
 | `InternalExceptionObserver` | `reportInternalException`         | Internal exception for metrics            |
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |

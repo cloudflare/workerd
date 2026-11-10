@@ -16,6 +16,7 @@ use std::time::UNIX_EPOCH;
 use cluster_logic::lease;
 use cluster_logic::lease::Lease;
 use cluster_logic::lease::Step;
+use cluster_logic::lease::Timing;
 use tokio::time::timeout;
 
 use crate::Bucket;
@@ -53,7 +54,8 @@ pub struct Setup {
     pub node: String,
     /// Where peers reach this instance: `host:port`.
     pub address: String,
-    pub ttl_ms: u64,
+    /// This instance's lease: `Timing::DEFAULT`, unless a test shortens it.
+    pub timing: Timing,
     /// The cluster secret: MACs every peer call.
     pub key: Vec<u8>,
 }
@@ -97,13 +99,13 @@ impl Cluster {
             bucket.clone(),
             &setup.node,
             &setup.address,
-            setup.ttl_ms,
+            setup.timing.lease_ms,
         ));
         Rc::new(Self {
             alarms: Index::new(
                 bucket.clone(),
                 &setup.node,
-                2 * setup.ttl_ms,
+                2 * setup.timing.lease_ms,
                 ORPHANS_EVERY_MS,
             ),
             owners: Owners::new(bucket.clone()),
@@ -112,7 +114,7 @@ impl Cluster {
             registry,
             claims: RefCell::new(HashMap::new()),
             key: setup.key,
-            lease: RefCell::new(Lease::default()),
+            lease: RefCell::new(Lease::new(setup.timing)),
         })
     }
 
@@ -385,6 +387,7 @@ impl Cluster {
     /// Keeps this node's lease, until the node must stop
     /// serving: answers why. Runs for the life of the process.
     pub async fn maintain(&self) -> String {
+        let timing = self.lease.borrow().timing;
         loop {
             if self.lease.borrow().left {
                 std::future::pending::<()>().await;
@@ -395,7 +398,7 @@ impl Cluster {
             };
             let mut step = self.lease.borrow().before_renew(&observed);
             if step == Step::Renew {
-                let renew = timeout(ms(lease::RENEW_TIMEOUT_MS), self.renew(now_ms()));
+                let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
                 let result = match renew.await {
                     Ok(Ok(until)) => Ok(until),
                     Ok(Err(e)) => Err(e.to_string()),
@@ -412,13 +415,13 @@ impl Cluster {
                 Step::Fence(reason) => return reason,
                 Step::Retry(reason) => {
                     tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
-                    lease::RETRY_MS
+                    timing.retry_ms
                 }
-                Step::Renew => lease::INTERVAL_MS,
+                Step::Renew => timing.interval_ms,
             };
             // A stale listing only delays routing to a new peer: its
             // failure is logged, never fatal.
-            match timeout(ms(lease::LIST_TIMEOUT_MS), self.peers(now_ms())).await {
+            match timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
                 Err(_) => tracing::warn!("listing the cluster timed out"),
@@ -447,11 +450,12 @@ impl Cluster {
     /// object or alarm, and lists the peers, so that it chooses none that
     /// drains too. Peers that list it before learn of it from its answers.
     pub async fn announce_draining(&self) {
-        let renew = timeout(ms(lease::RENEW_TIMEOUT_MS), self.renew(now_ms()));
+        let timing = self.lease.borrow().timing;
+        let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
         if !matches!(renew.await, Ok(Ok(_))) {
             tracing::warn!("cluster: publishing the drain failed");
         }
-        let _ = timeout(ms(lease::LIST_TIMEOUT_MS), self.peers(now_ms())).await;
+        let _ = timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await;
     }
 
     /// Whether `start_draining` ran: this node claims nothing more.

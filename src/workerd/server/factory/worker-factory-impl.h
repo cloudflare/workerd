@@ -8,6 +8,7 @@
 
 #include "worker-factory.h"
 
+#include <workerd/api/bench.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -198,6 +199,9 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   kj::Maybe<jsg::V8Ref<v8::Object>> ctxExportsHandle;
 
   WorkerInfo info;
+  // How long the phases of compiling the worker took, which `workerd bench` reports for the
+  // throwaway copies `factory_bench_startup()` compiles.
+  api::WorkerStartupTiming startupTiming;
 
   const Worker& getWorker() const {
     return *KJ_ASSERT_NONNULL(worker);

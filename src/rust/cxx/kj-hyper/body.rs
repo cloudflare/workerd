@@ -221,6 +221,18 @@ impl ChannelBody {
             length,
         }
     }
+
+    /// A body with the same framing as this one but no data in it. A request whose body put
+    /// nothing on the wire is sent again with it.
+    #[must_use]
+    pub fn ended(&self) -> Self {
+        Self {
+            // A channel whose sender is already gone: the body ends on its first poll.
+            rx: self.rx.as_ref().map(|_| mpsc::channel(1).1),
+            abort: None,
+            length: self.length,
+        }
+    }
 }
 
 /// A body, the sink that feeds it, and the handle that fails it; `length` is the declared size,

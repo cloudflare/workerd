@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 //
-// Integration test for cluster mode. The test starts a fake S3 (fake-s3.js, in
-// a workerd of its own) and several workerd instances whose cluster state lives
-// in it, each with its SQLite files on a disk of its own, then exercises:
+// Integration test for cluster mode. The test serves a fake S3 (fake-s3.mjs)
+// and starts several workerd instances whose cluster state lives in it, each
+// with its SQLite files on a disk of its own, then exercises:
 //   1. Consistent DO state across instances (single-writer correctness).
 //   2. Transparent forwarding when a request arrives at the "wrong" instance.
 //   3. Takeover after a node is killed.
@@ -37,9 +37,12 @@
 //      paced by the nodes' readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
+//  14. A cron trigger runs once a minute, through its schedule owner's death
+//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
+//      a test clock moved to each minute.
 //
-// A takeover waits out a dead owner's 20 s lease, so each one here costs
-// that much: one test per mechanism. The simulations in ../../cluster
+// A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
+// costs that much: one test per mechanism. The simulations in ../../cluster
 // (alarms-test.rs, capture-test.rs, owner-test.rs) search the cases.
 // These run there, not here, so not through a real binary and SQLite
 // (`git log -S'facet clones survive'` has the tests that did):
@@ -58,6 +61,7 @@ import { env } from 'node:process';
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { FakeS3Server } from './fake-s3.mjs';
 
 assert(
   env.WORKERD_BINARY !== undefined,
@@ -67,20 +71,19 @@ assert(
   env.WD_TEST_CONFIG !== undefined,
   'You must set the WD_TEST_CONFIG environment variable.'
 );
-assert(
-  env.FAKE_S3_CONFIG !== undefined,
-  'You must set the FAKE_S3_CONFIG environment variable.'
-);
 
-// Bazel shards this file (`shard_count`): each shard runs every n-th test.
+// CLUSTER_TESTS, a regular expression, picks the tests a target runs, and
+// Bazel shards those (`shard_count`): each shard runs every n-th of them.
+const picked = new RegExp(env.CLUSTER_TESTS ?? '');
 const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
 const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
 if (env.TEST_SHARD_STATUS_FILE !== undefined) {
   await writeFile(env.TEST_SHARD_STATUS_FILE, '');
 }
 let testIndex = 0;
-function test(...args) {
-  if (testIndex++ % SHARDS === SHARD) nodeTest(...args);
+function test(name, ...rest) {
+  if (picked.test(name) && testIndex++ % SHARDS === SHARD)
+    nodeTest(name, ...rest);
 }
 
 const CONTROL_FD = 3;
@@ -89,6 +92,14 @@ const CONTROL_FD = 3;
 const SIGTERM_DRAINS = {
   skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
 };
+
+// cluster-test.wd-test divides the times that takeovers and stops wait out by
+// this (`unsafeTimeDivisor`).
+const TIME_DIVISOR = 4;
+// How long a node's lease lasts: a dead owner's DOs wait this long.
+const LEASE_MS = 20_000 / TIME_DIVISOR;
+// How long a stopping node accepts requests at least.
+const GRACE_MS = 5_000 / TIME_DIVISOR;
 
 // A minimal harness specialized for the cluster test. Unlike server-harness.mjs
 // it:
@@ -106,6 +117,7 @@ class ClusterNode {
   #clusterPort = null;
   #closed = null;
   #stderrBuffer = '';
+  #stderrWaiters = new Set();
   #extraArgs;
   #disk;
   #configName;
@@ -155,6 +167,24 @@ class ClusterNode {
     return this.#stderrBuffer;
   }
 
+  // Resolves once the node's stderr matches `re`, checked as it arrives.
+  waitForStderr(re, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#stderrWaiters.delete(check);
+        reject(new Error(`${this.#nodeId}: no ${re} within ${ms} ms`));
+      }, ms).unref();
+      const check = () => {
+        if (!re.test(this.#stderrBuffer)) return;
+        clearTimeout(timer);
+        this.#stderrWaiters.delete(check);
+        resolve();
+      };
+      this.#stderrWaiters.add(check);
+      check();
+    });
+  }
+
   async start() {
     assert.strictEqual(this.#child, null);
 
@@ -188,6 +218,7 @@ class ClusterNode {
     child.stderr.on('data', (data) => {
       const chunk = data.toString('utf8');
       this.#stderrBuffer += chunk;
+      for (const check of this.#stderrWaiters) check();
       // Mirror to our own stderr so test output remains useful.
       process.stderr.write(`[${this.#nodeId}] ${chunk}`);
     });
@@ -301,29 +332,23 @@ async function fetchJson(port, path, { timeoutMs } = {}) {
   return { status: res.status, body };
 }
 
-// The fake S3 the cluster's state lives in, in a workerd of its own.
-class FakeS3 {
-  #node;
+// The fake S3 the cluster's state lives in (fake-s3.mjs). The tests share
+// one, emptied for each.
+let fakeS3Server = null;
 
-  constructor() {
-    // A cluster node's harness starts any workerd; this one has no cluster.
-    this.#node = new ClusterNode({
-      binary: env.WORKERD_BINARY,
-      config: env.FAKE_S3_CONFIG,
-      nodeId: 's3',
-    });
+class FakeS3 {
+  // An empty bucket.
+  static async fresh() {
+    if (fakeS3Server === null) {
+      fakeS3Server = new FakeS3Server();
+      await fakeS3Server.listen();
+    }
+    fakeS3Server.reset();
+    return new FakeS3();
   }
 
   get port() {
-    return this.#node.httpPort;
-  }
-
-  start() {
-    return this.#node.start();
-  }
-
-  stop() {
-    return this.#node.stop({ timeoutMs: 5000 });
+    return fakeS3Server.port;
   }
 
   // The keys under `prefix` in the cluster's bucket, whose layout is under
@@ -368,7 +393,7 @@ class FakeS3 {
     return record === null ? null : JSON.parse(record).node;
   }
 
-  // Arms `faults` (fake-s3.js), each `prefix` a key in the cluster's layout,
+  // Arms `faults` (fake-s3.mjs), each `prefix` a key in the cluster's layout,
   // replacing those armed before.
   async setFaults(faults) {
     const armed = faults.map((f) => ({
@@ -435,44 +460,49 @@ async function withCluster(
   // Each test run gets its own bucket and disks, so state doesn't leak
   // between tests.
   const root = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
-  const bucket = new FakeS3();
+  const bucket = await FakeS3.fresh();
   const nodes = [];
   const nodeKeys = new Map();
   try {
-    await bucket.start();
     await before(bucket);
     for (let i = 0; i < numNodes; i++) {
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
-      const node = new ClusterNode({
-        binary: env.WORKERD_BINARY,
-        config,
-        configName,
-        localPath,
-        disk,
-        s3Port: bucket.port,
-        nodeId: `node${i}`,
-        extraArgs: await extraArgs(i),
-      });
-      await node.start();
-      nodes.push(node);
-
-      // A node writes its lease record in its first maintenance round. Since
-      // nodes start one at a time, the record that is new is this node's.
-      const known = new Set(nodeKeys.values());
-      const deadline = Date.now() + 10_000;
-      let fresh = [];
-      while (Date.now() < deadline) {
-        fresh = (await bucket.nodes()).filter((key) => !known.has(key));
-        if (fresh.length > 0) break;
-        await sleep(50);
-      }
-      assert.strictEqual(
-        fresh.length,
-        1,
-        `expected exactly one new lease record after starting ${node.nodeId}, got: [${fresh.join(', ')}]`
+      nodes.push(
+        new ClusterNode({
+          binary: env.WORKERD_BINARY,
+          config,
+          configName,
+          localPath,
+          disk,
+          s3Port: bucket.port,
+          nodeId: `node${i}`,
+          extraArgs: await extraArgs(i),
+        })
       );
-      nodeKeys.set(node.nodeId, fresh[0]);
+    }
+    await Promise.all(nodes.map((node) => node.start()));
+
+    // A node writes its lease record, with the address peers reach it at, in
+    // its first maintenance round.
+    const deadline = Date.now() + 10_000;
+    let keys = [];
+    while (Date.now() < deadline) {
+      keys = await bucket.nodes();
+      if (keys.length >= numNodes) break;
+      await sleep(50);
+    }
+    assert.strictEqual(
+      keys.length,
+      numNodes,
+      `expected one lease record per node, got: [${keys.join(', ')}]`
+    );
+    for (const key of keys) {
+      const { address } = JSON.parse(await bucket.get(`nodes/${key}.json`));
+      const node = nodes.find((n) => address.endsWith(`:${n.clusterPort}`));
+      assert(node !== undefined, `no node advertises ${address}`);
+      assert(!nodeKeys.has(node.nodeId), `${node.nodeId} has two records`);
+      nodeKeys.set(node.nodeId, key);
     }
     await fn({ nodes, bucket, nodeKeys });
   } finally {
@@ -484,7 +514,6 @@ async function withCluster(
         node.stop({ signal: 'SIGKILL', timeoutMs: 5000 }).catch(() => {})
       )
     );
-    await bucket.stop();
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -754,11 +783,11 @@ test(
       const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
       const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
 
-      // A slow request keeps the owner draining for longer than its lease
-      // would take to expire.
+      // A slow request keeps the owner draining for longer than the peer has
+      // to claim the DO in, half the owner's lease.
       const holding = fetchJson(
         owner.httpPort,
-        '/increment?name=hold&delay=12000',
+        `/increment?name=hold&delay=${LEASE_MS / 2 + 1_000}`,
         { timeoutMs: 20_000 }
       );
       await sleep(250);
@@ -775,7 +804,7 @@ test(
       assert.strictEqual(response.status, 200, JSON.stringify(response.body));
       assert.strictEqual(response.body.nodeId, peer.nodeId);
       assert.strictEqual(response.body.count, 2);
-      assert(Date.now() - drainedAt < 5_000);
+      assert(Date.now() - drainedAt < LEASE_MS / 2);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
     });
@@ -812,10 +841,11 @@ test(
       const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
       const drainMs = Date.now() - drainedAt;
       assert.deepStrictEqual(exit, { code: 0, signal: null });
-      assert(drainMs < 10_000, `the drain took ${drainMs} ms`);
+      // Not until the requests in flight are cancelled, 5 s in.
+      assert(drainMs < 4_000, `the drain took ${drainMs} ms`);
       const { status, ms } = await evicted;
       assert.strictEqual(status, 500);
-      assert(ms < 5_000, `the eviction failed after ${ms} ms`);
+      assert(ms < 4_000, `the eviction failed after ${ms} ms`);
     });
   }
 );
@@ -843,7 +873,7 @@ test(
           prefix: `${objectPrefix(first.body.id)}/`,
           except: '/own.json',
           method: 'GET',
-          delayMs: 3000,
+          delayMs: 1500,
           times: 1000,
         },
       ]);
@@ -1710,7 +1740,7 @@ test(
       // again on the node that takes the DO over.
       const inFlight = fetchJson(
         nodes[1].httpPort,
-        '/call-held-stub?name=holder&target=once&path=/hold-increment%3Fms%3D3000',
+        '/call-held-stub?name=holder&target=once&path=/hold-increment%3Fms%3D1500',
         { timeoutMs: 10_000 }
       );
       await sleep(500);
@@ -1857,9 +1887,9 @@ test(
           timeoutMs: 30_000,
         });
         assert.deepStrictEqual(exit, { code: 0, signal: null });
-        // Within the stop timeout of 6 s, with time for the process to start
+        // Within the stop timeout of 4 s, with time for the process to start
         // and exit.
-        assert(Date.now() - stoppedAt < 7_500, 'the drain took too long');
+        assert(Date.now() - stoppedAt < 5_500, 'the drain took too long');
         await sleep(1000);
 
         const result = await finish();
@@ -1890,7 +1920,7 @@ test(
       await fetchJson(nodes[0].httpPort, '/increment?name=waited');
       const held = fetchJson(
         nodes[0].httpPort,
-        '/hold-increment?name=waited&ms=8000',
+        '/hold-increment?name=waited&ms=2500',
         { timeoutMs: 20_000 }
       );
       await sleep(500);
@@ -1962,8 +1992,8 @@ test(
         assert.strictEqual(response.status, 200, JSON.stringify(response.body));
         assert.strictEqual(response.body.nodeId, nodes[0].nodeId);
       }
-      // Not held until the requests in flight are cancelled, 10 s in.
-      assert(Date.now() - startedAt < 6_000, 'a call waited on the handoff');
+      // Not held until the requests in flight are cancelled, 5 s in.
+      assert(Date.now() - startedAt < 4_500, 'a call waited on the handoff');
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
       for (const [name, count] of [
         ['self', 3],
@@ -2126,7 +2156,7 @@ test(
         nodes[i].stop({ signal: 'SIGTERM', timeoutMs: 20_000 })
       );
       // The stopping nodes keep accepting requests for a while.
-      await sleep(1000);
+      await sleep(GRACE_MS / 5);
       serving = [2];
       for (const exit of exits) {
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
@@ -2181,7 +2211,7 @@ test(
           '/increment?name=stuck'
         );
         assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
-        // The write that releases the DO stalls past the handoff's 4.5 s.
+        // The write that releases the DO stalls past the handoff's 3 s.
         await bucket.setFaults([
           {
             method: 'PUT',
@@ -2196,7 +2226,7 @@ test(
           timeoutMs: 20_000,
         });
         assert.deepStrictEqual(exit, { code: 0, signal: null });
-        assert(Date.now() - stoppedAt < 7_500, 'the drain took too long');
+        assert(Date.now() - stoppedAt < 5_500, 'the drain took too long');
         assert.deepStrictEqual(await bucket.faultHits(), [1]);
         const after = await fetchJson(
           nodes[1].httpPort,
@@ -2270,7 +2300,7 @@ test(
         assert(status === 503 || status === undefined, `status ${status}`);
         // As a load balancer would, a while after the node is not ready;
         // meanwhile it serves the requests it still gets.
-        await sleep(1000);
+        await sleep(GRACE_MS / 5);
         serving = serving.filter((n) => n !== i);
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
         await node.start();
@@ -2789,4 +2819,48 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
   } finally {
     await rm(project, { recursive: true, force: true });
   }
+});
+
+test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
+  await withCluster(3, async ({ nodes }) => {
+    // Once each node's cron Worker has armed, moves each node's cron clock
+    // alike; resolves to the last one's time, once each node's schedule is
+    // re-armed and any run has finished.
+    await Promise.all(
+      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+    );
+    const clock = async (ms) => {
+      let now;
+      for (const n of nodes) {
+        now = (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body
+          .now;
+      }
+      return now;
+    };
+    const to = async (t) => clock(t - (await clock(0)));
+    // The node that runs minute `t`: a real minute may run first.
+    const ran = (ns, t, ms) =>
+      Promise.any(
+        ns.map((n) =>
+          n.waitForStderr(new RegExp(`TICK ${t}`), ms).then(() => n)
+        )
+      );
+
+    const now = await clock(0);
+    const at = now - (now % 60_000) + 60_000;
+    await to(at - 1000);
+    const owner = await ran(nodes, at, 10_000);
+
+    // Killed 5 s before the next minute, which a survivor runs once it
+    // adopts the owner's alarm, after the owner's lease runs out.
+    await to(at + 55_000);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    const survivors = nodes.filter((n) => n !== owner);
+    await ran(survivors, at + 60_000, 60_000);
+    const seen = nodes
+      .flatMap((n) => [...n.stderr.matchAll(/TICK (\d+)/g)])
+      .map((m) => Number(m[1]))
+      .filter((t) => t >= at);
+    assert.deepStrictEqual(seen.sort(), [at, at + 60_000]);
+  });
 });
