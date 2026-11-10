@@ -3189,4 +3189,8 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Fetch API cannot load: ", url));
   }
 }
+kj::Maybe<kj::Own<jsg::Wrappable>> ExtendedFetcher::snapshotClone() const {
+  return kj::none;
+}
+
 }  // namespace workerd::api

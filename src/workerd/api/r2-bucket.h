@@ -98,12 +98,7 @@ class R2Bucket: public jsg::Object {
 
   // A binding transfers through a startup snapshot as its channel number and names. A bucket
   // carried as a capability belongs to one IoContext.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    KJ_IF_SOME(channel, clientChannel.tryGet<uint>()) {
-      return ownAsWrappable(kj::refcounted<R2Bucket>(snapshot_clone_tag_t{}, *this, channel));
-    }
-    return kj::none;
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   struct Range {
     jsg::Optional<double> offset;
