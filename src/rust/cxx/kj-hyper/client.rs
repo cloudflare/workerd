@@ -115,8 +115,8 @@ fn disconnected(what: impl Display) -> KjError {
 }
 
 /// A request's failure: the I/O error behind it when there is one, else DISCONNECTED (hyper
-/// reports a connection that went away in several shapes). The message names every cause: on
-/// its own, `hyper-util`'s error says only `client error (SendRequest)`.
+/// reports a connection that went away in several shapes). A DISCONNECTED message names every
+/// cause: on its own, `hyper-util`'s error says only `client error (SendRequest)`.
 fn client_error(error: &(dyn Error + 'static)) -> KjError {
     let mut source = Some(error);
     while let Some(e) = source {
