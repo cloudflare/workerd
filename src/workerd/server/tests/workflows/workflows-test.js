@@ -71,6 +71,14 @@ export class Flow extends WorkflowEntrypoint {
           ran.push(`${id}/boom`);
           throw new NonRetryableError('no');
         });
+      case 'caught': {
+        const boom = step.do('boom', async () => {
+          ran.push(`${id}/boom`);
+          throw new NonRetryableError('no');
+        });
+        await boom.catch(() => {});
+        return once('after');
+      }
       case 'rollback': {
         const rollback = async ({ output }) => ran.push(`${id}/undo ${output}`);
         await step.do('a', async () => 'A', { rollback });
@@ -253,6 +261,17 @@ export let failures = {
     assert.match(e.error.message, /no/);
     assert.deepEqual(ranBy('fatal'), ['fatal/boom']);
 
+    // Replayed, a caught NonRetryableError is rethrown without running again.
+    const caught = await create(env, 'caught', 'caught');
+    await until(caught, 'workflow_completed');
+    await caught.restart({ from: { name: 'after' } });
+    await until(caught, 'workflow_completed');
+    assert.deepEqual(ranBy('caught'), [
+      'caught/boom',
+      'caught/after',
+      'caught/after',
+    ]);
+
     const rollback = await create(env, 'rollback', 'rollback');
     await until(rollback, 'workflow_errored');
     await until(rollback, 'rollback_completed');
@@ -288,6 +307,11 @@ export let api = {
         [1, 10415],
         [2, 10405],
       ]
+    );
+    const retention = { successRetention: 'soon' };
+    await assert.rejects(
+      env.FLOW.createBatch({ instances: [{ id: 'b2', retention }] }),
+      /Invalid duration/
     );
     const deleted = await env.FLOW.deleteBatch(['b1', 'nope']);
     assert.deepEqual(deleted.deleted, [{ id: 'b1' }]);
