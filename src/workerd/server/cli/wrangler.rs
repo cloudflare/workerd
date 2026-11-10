@@ -630,7 +630,12 @@ fn queues_services(
         if let Some(dlq) = &c.dead_letter_queue {
             settings["deadLetterQueue"] = dlq.as_str().into();
         }
-        consumers.insert(c.queue.clone(), settings);
+        if consumers.insert(c.queue.clone(), settings).is_some() {
+            return Err(format!(
+                "queues: queue \"{}\" has more than one consumer",
+                c.queue
+            ));
+        }
     }
     let consumed = !consumers.is_empty();
     let flags = ["service_binding_extra_handlers"];

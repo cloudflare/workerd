@@ -26,7 +26,8 @@
 //              production's: `maxBatchSize` (10, at most 100),
 //              `maxBatchTimeout` (5 s, at most 60), `maxRetries` (3),
 //              `deadLetterQueue`, `retryDelay` (0 s) and `maxConcurrency`
-//              (0, no limit). A queue need not be listed to be sent to.
+//              (0, no limit; at most 1024). A queue need not be listed to
+//              be sent to.
 //   CLUSTERED  JSON `true` in a cluster (optional)
 //   TEST_CLOCK JSON `true` for tests (optional)
 //
@@ -125,7 +126,7 @@ function fnv(s) {
 function shard(queue) {
   const p = picks.get(queue) ?? { miss: 0 };
   picks.set(queue, p);
-  const n = consumers[queue]?.maxConcurrency || SHARDS;
+  const n = Math.min(consumers[queue]?.maxConcurrency || SHARDS, SHARDS);
   const name = `${queue}#${fnv(`${me()}/${queue}/${p.miss}`) % n}`;
   return { stub: env.SHARD.getByName(name), miss: () => p.miss++ };
 }

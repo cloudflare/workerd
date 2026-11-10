@@ -586,6 +586,24 @@ fn queues_run_on_the_queues_worker() {
 }
 
 #[test]
+fn a_queue_with_two_consumers_is_an_error() {
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "queues": { "consumers": [{ "queue": "jobs" }, { "queue": "jobs" }] } }"#,
+        ),
+        ("index.js", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(
+        error.contains(r#"queue "jobs" has more than one consumer"#),
+        "{error}"
+    );
+}
+
+#[test]
 fn unbundled_typescript_main_is_an_error() {
     let error = load_project(&[
         (
