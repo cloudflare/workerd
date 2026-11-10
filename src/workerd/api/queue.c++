@@ -906,4 +906,8 @@ kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
   return ackArray.finish();
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> WorkerQueue::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<WorkerQueue>(subrequestChannel));
+}
+
 }  // namespace workerd::api

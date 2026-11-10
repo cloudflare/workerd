@@ -32,9 +32,7 @@ class Hyperdrive: public jsg::Object {
   // random host name the constructor drew; the connect override is registered lazily, on the
   // first host/ip/connectionString read, which needs an IoContext and so never happens in the
   // zygote.
-  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return ownAsWrappable(kj::refcounted<Hyperdrive>(SnapshotCloneTag{}, *this));
-  }
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
   jsg::Ref<Socket> connect(jsg::Lock& js);
   kj::StringPtr getDatabase();
   kj::StringPtr getUser();
