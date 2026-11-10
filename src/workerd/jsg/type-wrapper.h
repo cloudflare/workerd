@@ -997,7 +997,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     ([&]<typename U>() {
       if constexpr (U::JSG_KIND == JsgKind::RESOURCE && requires { U::jsgSnapshotStateless; }) {
         if constexpr (U::jsgSnapshotStateless) {
-          static_assert(requires(Lock& lock) { U(lock); } || requires { U(); },
+          static_assert(std::is_constructible_v<U, Lock&> || std::is_default_constructible_v<U>,
               "a jsgSnapshotStateless type must be constructible from jsg::Lock& or default "
               "constructible: its snapshot recreate function calls one of those constructors");
           table[wrappableTagBucketIndex(static_cast<uint16_t>(wrappableTag<U>()))] =
