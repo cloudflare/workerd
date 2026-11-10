@@ -139,4 +139,12 @@ v8::MaybeLocal<v8::Object> newDOMException(
   }
 }
 
+kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMException(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  KJ_DASSERT(isolate->InContext(), "unwrapping a DOMException requires an entered context");
+  return Lock::from(isolate).tryUnwrapDOMException(value).map([](DOMException& exception) {
+    return DOMExceptionNameAndMessage{exception.getName(), exception.getMessage()};
+  });
+}
+
 }  // namespace workerd::jsg
