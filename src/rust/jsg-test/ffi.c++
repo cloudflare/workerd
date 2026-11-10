@@ -343,6 +343,16 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
+bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value));
+  try {
+    kj::throwFatalException(js.exceptionToKj(::workerd::jsg::JsValue(handle)));
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    return false;
+  }
+}
+
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }

@@ -357,6 +357,12 @@ pub mod ffi {
         // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
         // coercion threw, leaving the exception pending; see `call_into_js()`.
         pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
+        // Describe with `v8::Value::ToDetailString()`, which runs no JavaScript, or return an
+        // empty handle, leaving an exception pending; see `call_into_js()`.
+        pub unsafe fn local_value_to_detail_string(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -770,6 +776,21 @@ pub mod ffi {
             isolate: *mut Isolate,
             internal_message: &str,
         ) -> Local;
+        // Runs no JavaScript (see ffi.h). Infallible: the strings are made lossily.
+        pub unsafe fn local_dom_exception_name_and_message(
+            isolate: *mut Isolate,
+            value: &Local,
+            name: &mut String,
+            message: &mut String,
+        ) -> bool;
+        pub fn tunneled_exception_detail_id() -> u64;
+        pub fn tunneled_exception_enhanced_detail_id() -> u64;
+        pub fn js_exception_metadata_detail_id() -> u64;
+        pub fn tunneled_exception_serialization_version() -> u32;
+        pub fn js_exception_metadata_max_field_size() -> usize;
+        pub fn starts_with_tunneled_error_type(description: &str) -> bool;
+        pub fn tunneled_exception_file() -> &'static str;
+        pub fn tunneled_exception_line() -> u32;
 
         // TryCatch
         pub unsafe fn isolate_try_catch(
@@ -1944,6 +1965,26 @@ impl<'s, T> Local<'s, T> {
             // current HandleScope, and a non-empty result is a string in that scope.
             Ok(unsafe {
                 Local::from_ffi_maybe(ffi::local_value_to_string(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                ))
+            })
+        })
+    }
+
+    /// Describes the value as V8 does in its own messages, which runs no JavaScript: a
+    /// primitive as `String()` converts it, an error by its name and message, and another
+    /// object by its class, such as `#<Object>`. If an exception or a termination is already
+    /// pending, fails with an error for which [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::ToDetailString()`, with which C++ JSG stringifies a handle
+    /// (`kj::str(handle)`).
+    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> Result<Local<'s, String>, Error> {
+        call_into_js(lock, |lock| {
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope, and a non-empty result is a string in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_value_to_detail_string(
                     lock.isolate().as_ffi(),
                     self.into_ffi(),
                 ))

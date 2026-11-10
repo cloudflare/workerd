@@ -105,6 +105,26 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID = 0x
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 
+// The version of V8's serialization format in which addExceptionDetail() writes the value of a
+// tunneled exception. It is fixed so that we don't break compatibility if V8 introduces a new
+// version. It can be bumped to match the new version once all of production is updated to
+// understand it.
+constexpr uint32_t TUNNELED_EXCEPTION_SERIALIZATION_VERSION = 15;
+
+// The location of the kj::Exception that createTunneledException() and Lock::exceptionToKj()
+// create for a JavaScript exception (in ExceptionWrapper::tryUnwrap()). Rust JSG's
+// Lock::exception_to_kj() reports the same location, so that logs show both alike.
+constexpr const char* TUNNELED_EXCEPTION_FILE = __FILE__;
+constexpr int TUNNELED_EXCEPTION_LINE = __LINE__;
+
+// The longest error type or stack trace that addJsExceptionMetadata() keeps, in bytes.
+constexpr size_t JS_EXCEPTION_METADATA_MAX_FIELD_SIZE = 4096;
+
+// Whether `description`, an object's description by v8::Value::ToDetailString(), starts with the
+// name of an error type whose description createTunneledException() keeps as it is, after "jsg."
+// (JS_ERROR_TYPES and DOMException). The description of any other value follows "jsg.Error: ".
+bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description);
+
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
     0xb6e3c4156a4f9d22ull;

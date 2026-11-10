@@ -1446,16 +1446,10 @@ class ExceptionWrapper {
       KJ_IF_SOME(domException,
           wrapper.tryUnwrap(
               js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
-        return KJ_EXCEPTION(FAILED,
+        return kj::Exception(kj::Exception::Type::FAILED, TUNNELED_EXCEPTION_FILE,
+            TUNNELED_EXCEPTION_LINE,
             kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
       } else {
-
-        static const constexpr kj::StringPtr PREFIXES[] = {
-#define V(name, _) name##_kj,
-          JS_ERROR_TYPES(V)
-#undef V
-              "DOMException"_kj,
-        };
 
         kj::String reason;
         if (!handle->IsObject()) {
@@ -1463,22 +1457,16 @@ class ExceptionWrapper {
           reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
         } else {
           reason = kj::str(handle);
-          bool found = false;
           // If the error message starts with a platform error type that we tunnel,
-          // prefix it with "jsg."
-          for (const auto& name: PREFIXES) {
-            if (reason.startsWith(name)) {
-              reason = kj::str("jsg.", reason);
-              found = true;
-              break;
-            }
-          }
-          // Everything else should just come through as a normal error.
-          if (!found) {
+          // prefix it with "jsg."; everything else should just come through as a normal error.
+          if (startsWithTunneledErrorType(reason)) {
+            reason = kj::str("jsg.", reason);
+          } else {
             reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }
-        return kj::Exception(excType, __FILE__, __LINE__, kj::mv(reason));
+        return kj::Exception(
+            excType, TUNNELED_EXCEPTION_FILE, TUNNELED_EXCEPTION_LINE, kj::mv(reason));
       }
     }();
 

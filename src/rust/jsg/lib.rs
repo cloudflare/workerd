@@ -1176,6 +1176,154 @@ impl<'s> Lock<'s> {
         assert!(terminating, "V8 did not terminate execution when asked");
         Error::pending()
     }
+
+    /// The KJ exception that stands for `exception`, a value JavaScript threw or rejected a
+    /// promise with, as C++ `jsg::Lock::exceptionToKj()` (`jsg::createTunneledException()`)
+    /// creates it, so that C++ that receives it, and JavaScript it is converted back for, see
+    /// what they would see for one from C++:
+    ///
+    /// - **Type:** `Overloaded` if the value is an object whose `overloaded` property is truthy,
+    ///   or else `Disconnected` if its `retryable` property is, or else `Failed`. A
+    ///   `DOMException` is always `Failed`.
+    /// - **Description:** for a `DOMException`, `jsg.DOMException(<name>): <message>`, with the
+    ///   name and message it was created with. Otherwise the value as
+    ///   [`v8::Local::<v8::Value>::to_detail_string`] describes it, up to its first NUL, after
+    ///   `jsg.` if it is an object described as an error of a type that C++ JSG tunnels (the
+    ///   JavaScript error types and `DOMException`), or after `jsg.Error: `. C++ that throws the
+    ///   exception back to JavaScript then throws an error of that type, with that message.
+    /// - **Details:** the value serialized as `jsg::Serializer` writes it, in version 15 of
+    ///   V8's format, with a marker if errors were serialized as host objects (the
+    ///   `enhanced_error_serialization` compatibility flag), unless the value can't be
+    ///   serialized. Then, for an object, its `name` and `stack`, if they are strings, each up to
+    ///   its first NUL and cut to 4096 bytes, as a `JsExceptionMetadata` message
+    ///   (`workerd/jsg/exception-metadata.capnp`).
+    ///
+    /// The properties are read in that order, and reading them can run JavaScript (getters and
+    /// Proxy traps), as in C++. What serializing throws is caught: the exception then has no
+    /// serialized value.
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`Error::is_pending`] is true if reading `overloaded`,
+    /// `retryable`, `name` or `stack` throws, leaving the exception pending, as C++ throws
+    /// `JsExceptionThrown` then, and if an exception or a termination is already pending or
+    /// execution terminates.
+    pub fn exception_to_kj(&mut self, exception: v8::Local<'s, v8::Value>) -> Result<cxx::KjError> {
+        exception.debug_assert_isolate(self);
+        let object = v8::Local::<v8::Object>::try_from(exception).ok();
+        let mut exception_type = cxx::KjExceptionType::Failed;
+        if let Some(object) = object {
+            let overloaded = object.get(self, "overloaded")?;
+            if bool::from_js(self, overloaded)? {
+                exception_type = cxx::KjExceptionType::Overloaded;
+            } else {
+                let retryable = object.get(self, "retryable")?;
+                if bool::from_js(self, retryable)? {
+                    exception_type = cxx::KjExceptionType::Disconnected;
+                }
+            }
+        }
+
+        let description =
+            if let Some((name, message)) = dom_exception_name_and_message(self, exception) {
+                exception_type = cxx::KjExceptionType::Failed;
+                format!("jsg.DOMException({name}): {message}")
+            } else {
+                let detail = exception.to_detail_string(self)?.to_string(self);
+                // C++ copies the description out of V8 as a C string.
+                let detail = up_to_nul(&detail);
+                if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
+                    format!("jsg.{detail}")
+                } else {
+                    format!("jsg.Error: {detail}")
+                }
+            };
+
+        let mut details = Vec::new();
+        let options = ser::SerializeOptions {
+            version: Some(v8::ffi::tunneled_exception_serialization_version()),
+        };
+        if let Ok(data) =
+            self.try_catch(|lock| ser::serialize_with_options(lock, exception, options))?
+        {
+            details.push((v8::ffi::tunneled_exception_detail_id(), data));
+            if self.feature_flags().get_enhanced_error_serialization() {
+                details.push((v8::ffi::tunneled_exception_enhanced_detail_id(), vec![1]));
+            }
+        }
+        if let Some(object) = object {
+            details.push((
+                v8::ffi::js_exception_metadata_detail_id(),
+                exception_metadata(self, object)?,
+            ));
+        }
+
+        Ok(cxx::KjError::new(exception_type, description)
+            .with_details(details)
+            // Where C++ JSG creates the exceptions it tunnels, so that logs show both alike.
+            .with_location(
+                v8::ffi::tunneled_exception_file().to_owned(),
+                v8::ffi::tunneled_exception_line(),
+            ))
+    }
+}
+
+/// The name and message that `value` was created with, if it is a `DOMException`. Runs no
+/// JavaScript.
+#[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
+fn dom_exception_name_and_message<'s>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+) -> Option<(String, String)> {
+    let mut name = String::new();
+    let mut message = String::new();
+    // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active, and `value`
+    // belongs to its scope.
+    let found = unsafe {
+        v8::ffi::local_dom_exception_name_and_message(
+            lock.isolate().as_ffi(),
+            value.as_ffi(),
+            &mut name,
+            &mut message,
+        )
+    };
+    found.then_some((name, message))
+}
+
+/// `object`'s `name` and `stack`, as the `JsExceptionMetadata` message that C++
+/// `addJsExceptionMetadata()` writes.
+fn exception_metadata<'s>(
+    lock: &mut Lock<'s>,
+    object: v8::Local<'s, v8::Object>,
+) -> Result<Vec<u8>> {
+    let mut message = capnp::message::Builder::new_default();
+    let mut metadata =
+        message.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
+    let name = object.get(lock, "name")?;
+    if name.is_string() {
+        let name = String::from_js(lock, name)?;
+        metadata.set_error_type(capped(&name));
+    }
+    let stack = object.get(lock, "stack")?;
+    if stack.is_string() {
+        let stack = String::from_js(lock, stack)?;
+        metadata.set_stack_trace(capped(&stack));
+    }
+    Ok(capnp::serialize::write_message_to_words(&message))
+}
+
+/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to the length
+/// C++ `addJsExceptionMetadata()` keeps, in bytes, which, as in C++, can end in part of a
+/// character.
+fn capped(text: &str) -> capnp::text::Reader<'_> {
+    let bytes = up_to_nul(text).as_bytes();
+    let max = v8::ffi::js_exception_metadata_max_field_size();
+    capnp::text::Reader::from(&bytes[..bytes.len().min(max)])
+}
+
+/// `text` up to its first NUL.
+fn up_to_nul(text: &str) -> &str {
+    text.split_once('\0').map_or(text, |(head, _)| head)
 }
 
 /// Provides metadata about Rust types exposed to JavaScript.

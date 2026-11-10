@@ -121,6 +121,9 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
 // deserialization throws.
 ::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
+// comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
+bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);

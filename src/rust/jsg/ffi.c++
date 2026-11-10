@@ -326,6 +326,12 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
       local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
 }
 
+MaybeLocal local_value_to_detail_string(Isolate* isolate, Local value) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(
+      local_from_ffi<v8::Value>(kj::mv(value))->ToDetailString(isolate->GetCurrentContext()));
+}
+
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return Utf8Value{0};
@@ -1814,6 +1820,54 @@ v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalM
 
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
   return to_ffi(createInternalError(isolate, internalMessage));
+}
+
+bool local_dom_exception_name_and_message(
+    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message) {
+  // Finding the DOMException's wrapper uses the context.
+  if (exceptionPending(isolate)) return false;
+  KJ_IF_SOME(exception,
+      ::workerd::jsg::tryGetDOMException(isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    name = ::rust::String::lossy(exception.name.begin(), exception.name.size());
+    message = ::rust::String::lossy(exception.message.begin(), exception.message.size());
+    return true;
+  }
+  return false;
+}
+
+uint64_t tunneled_exception_detail_id() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_DETAIL_ID;
+}
+
+uint64_t tunneled_exception_enhanced_detail_id() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID;
+}
+
+uint64_t js_exception_metadata_detail_id() {
+  return ::workerd::jsg::JS_EXCEPTION_METADATA_DETAIL_ID;
+}
+
+uint32_t tunneled_exception_serialization_version() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_SERIALIZATION_VERSION;
+}
+
+size_t js_exception_metadata_max_field_size() {
+  return ::workerd::jsg::JS_EXCEPTION_METADATA_MAX_FIELD_SIZE;
+}
+
+::rust::Str tunneled_exception_file() {
+  // As the kj::Exception constructor records it.
+  auto file = kj::trimSourceFilename(::workerd::jsg::TUNNELED_EXCEPTION_FILE);
+  return ::rust::Str(file.begin(), file.size());
+}
+
+uint32_t tunneled_exception_line() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_LINE;
+}
+
+bool starts_with_tunneled_error_type(::rust::Str description) {
+  return ::workerd::jsg::startsWithTunneledErrorType(
+      kj::arrayPtr(description.data(), description.size()));
 }
 
 // TryCatch

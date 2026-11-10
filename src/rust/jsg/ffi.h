@@ -240,6 +240,11 @@ bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 // Coerce with ToString (v8::Value::ToString()), or return an empty handle if the coercion threw,
 // leaving the exception pending.
 MaybeLocal local_value_to_string(Isolate* isolate, Local value);
+// Describe with v8::Value::ToDetailString(), as C++ JSG stringifies a handle (kj::str(handle)).
+// It runs no JavaScript: an object is described by its class, or, for an error, by its name and
+// message. Returns an empty handle while an exception or a termination is pending, and if V8
+// throws, leaving the exception pending.
+MaybeLocal local_value_to_detail_string(Isolate* isolate, Local value);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -628,6 +633,26 @@ MaybeLocal dom_exception_create_from_bytes(
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
+// If `value` is a DOMException, or an instance of a subclass, stores the name and message it was
+// created with in `name` and `message` and returns true, through jsg::tryGetDOMException(); returns
+// false otherwise, and while an exception or a termination is pending. Requires an entered context.
+// Runs no JavaScript.
+bool local_dom_exception_name_and_message(
+    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
+// The ids of the details jsg::createTunneledException() gives a kj::Exception (util.h).
+uint64_t tunneled_exception_detail_id();
+uint64_t tunneled_exception_enhanced_detail_id();
+uint64_t js_exception_metadata_detail_id();
+// jsg::TUNNELED_EXCEPTION_SERIALIZATION_VERSION, jsg::JS_EXCEPTION_METADATA_MAX_FIELD_SIZE and
+// jsg::startsWithTunneledErrorType(), with which jsg::createTunneledException() serializes and
+// describes a value (util.h).
+uint32_t tunneled_exception_serialization_version();
+size_t js_exception_metadata_max_field_size();
+bool starts_with_tunneled_error_type(::rust::Str description);
+// jsg::TUNNELED_EXCEPTION_FILE and jsg::TUNNELED_EXCEPTION_LINE, where C++ JSG creates the
+// exceptions it tunnels (value.h).
+::rust::Str tunneled_exception_file();
+uint32_t tunneled_exception_line();
 
 // TryCatch
 // Decides what `tryCatch` caught as jsg::Lock::tryCatch() does: stores a catchable exception in

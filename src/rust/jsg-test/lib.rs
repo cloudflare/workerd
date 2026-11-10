@@ -160,6 +160,12 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
 
+        /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
+        /// `value`, or returns false if creating it threw, leaving the exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_exception_to_kj(isolate: *mut Isolate, value: Local) -> Result<bool>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -670,6 +676,24 @@ impl Harness {
                 ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
                     .expect("C++ JSG should deserialize the data"),
             )
+        }
+    }
+
+    /// The KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for `value`, to compare
+    /// with [`jsg::Lock::exception_to_kj`].
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`jsg::Error::is_pending`] is true if creating it threw,
+    /// leaving the exception pending.
+    pub fn cpp_exception_to_kj<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<cxx::KjError> {
+        // SAFETY: as for `cpp_serialize`.
+        match unsafe { ffi::cpp_exception_to_kj(lock.isolate().as_ffi(), value.into_ffi()) } {
+            Ok(_) => Err(jsg::Error::pending()),
+            Err(exception) => Ok(exception.into()),
         }
     }
 
