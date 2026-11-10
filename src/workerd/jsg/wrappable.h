@@ -8,6 +8,7 @@
 // This file defines basic helpers involved in wrapping C++ objects for JavaScript consumption,
 // including garbage-collecting those objects.
 
+#include <workerd/jsg/embedder-data-tag.h>
 #include <workerd/jsg/wrappable-tag.h>
 #include <workerd/util/strong-bool.h>
 
@@ -48,24 +49,6 @@ class Visitor;
 namespace workerd::jsg {
 
 WD_STRONG_BOOL(IsContextGlobal);
-
-// The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
-// storing pointers to various important objects.
-enum class ContextPointerSlot : int {
-  // Pointer slot 0 is special and should never be used by us.
-  RESERVED = 0,
-  MODULE_REGISTRY = 1,
-  EXTENDED_CONTEXT_WRAPPER = 2,
-  VIRTUAL_FILE_SYSTEM = 3,
-  BOOTSTRAP_STATE = 4,
-  // Keep the MAX_POINTER_SLOT as the last entry and always set to
-  // to the highest value of the other entries. We use this to
-  // ensure that the highest used index is always initialized in
-  // every context we create without having to update the specific
-  // callsites whenever we add a new slot. We can just make the
-  // change here.
-  MAX_POINTER_SLOT = BOOTSTRAP_STATE,
-};
 
 // Local<Data> embedder data slots, read and written by getContextDataSlot() and
 // setContextDataSlot() below — a distinct API from the slots above.
@@ -114,16 +97,15 @@ inline v8::Local<v8::Data> getContextDataSlot(
 
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
-  // The type tag is a small integer that should be different for every pointer
-  // type to avoid type confusion attacks.  We just use the slot index for now,
-  // since we have a different pointer type for each slot.
+  // Each slot holds a different pointer type, so its index doubles as the type tag; see
+  // EmbedderDataTag.
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
 #if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
   context->SetAlignedPointerInEmbedderDataV2(
-      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
+      static_cast<int>(slot), ptr, contextPointerSlotTag(slot));
 #else
   context->SetAlignedPointerInEmbedderData(
-      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
+      static_cast<int>(slot), ptr, contextPointerSlotTag(slot));
 #endif
 }
 
@@ -132,7 +114,7 @@ kj::Maybe<T&> getAlignedPointerFromEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot) {
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
   void* ptr = context->GetAlignedPointerFromEmbedderData(
-      static_cast<int>(slot), static_cast<v8::EmbedderDataTypeTag>(slot));
+      static_cast<int>(slot), contextPointerSlotTag(slot));
   if (ptr == nullptr) return kj::none;
   return *reinterpret_cast<T*>(ptr);
 }
@@ -226,10 +208,13 @@ class Wrappable: public kj::Refcounted {
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
   static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
+  // The embedder data type tag that pointer is stored with.
+  static constexpr v8::EmbedderDataTypeTag WRAPPABLE_MARKER_TAG =
+      embedderDataTag(EmbedderDataTag::WRAPPABLE_MARKER);
+
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
-    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,
-               static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
-        &WORKERD_WRAPPABLE_TAG;
+    return object->GetAlignedPointerFromInternalField(
+               WRAPPABLE_TAG_FIELD_INDEX, WRAPPABLE_MARKER_TAG) == &WORKERD_WRAPPABLE_TAG;
   }
 
   // Does a live JS wrapper currently exist for this Wrappable?
