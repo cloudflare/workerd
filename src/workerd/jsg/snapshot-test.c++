@@ -551,8 +551,10 @@ kj::Own<SnapshotArtifact> bakeSnapshot(kj::StringPtr topLevel) {
       kj::heap<IsolateObserver>(), defaultExternalStringAllocator(), v8::Isolate::CreateParams{},
       true, SnapshotConfig(MutableSnapshot{.artifact = kj::atomicRefcounted<SnapshotArtifact>()}));
   uint32_t badTagFieldsCount = 0;
-  WrappablesSerializeMetadata metadata;
   zygote->runInLockScope([&](SnapshotTransferIsolate::Lock& lock) {
+    // Inside the lock, as in Worker::Worker: its entries root cppgc shims, and a cppgc::Persistent
+    // must be released by the thread holding the isolate lock.
+    WrappablesSerializeMetadata metadata;
     auto& isolateBase = IsolateBase::from(lock.v8Isolate);
     v8::Global<v8::Context> contextHandle;
     lock.withinHandleScope([&] {
