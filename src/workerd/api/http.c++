@@ -423,6 +423,9 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(m, initDict.method) {
+          // The Fetch spec forbids CONNECT, in any case.
+          JSG_REQUIRE(
+              toUpper(m) != "CONNECT", TypeError, kj::str("Invalid HTTP method string: ", m));
           KJ_IF_SOME(code, tryParseHttpMethod(m)) {
             method = code;
           } else KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {

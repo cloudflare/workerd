@@ -852,6 +852,9 @@ impl Service for Client<'_> {
         mut request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
+        if method == Method::CONNECT {
+            return Err(failed("use connect() for CONNECT requests"));
+        }
         let (uri, host) = self.target(url)?;
         let mut head = Head::new(headers.as_ffi());
         if let Some(host) = host {
