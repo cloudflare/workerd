@@ -41,26 +41,74 @@ void HeapTracer::clearWrappers() {
   inCppgcShimDestructor = true;
   KJ_DEFER(inCppgcShimDestructor = false);
 
+  // Each Wrappable is unbound, i.e. its isolate pointer cleared, so that any code that later
+  // tries to use it (e.g., maybeDeferDestruction() or GcVisitor) will see that the isolate is gone
+  // and skip V8 operations. Without this, objects that outlive their isolate (like WebSockets
+  // stored in a HibernationManager), and the objects they or other C++ code hold Ref<T>s to,
+  // would have a dangling isolate pointer and crash when trying to check v8::Locker::IsLocked()
+  // or create V8 handles.
   while (!wrappers.empty()) {
     // Don't freelist the shim because we're shutting down anyway.
     auto& wrappable = wrappers.front();
+    // Detaching moves the Wrappable to `unwrapped`, and binds the children it visits.
     auto ownWrappable = wrappable.detachWrapper(false);
-    // Clear the isolate pointer so that any code that later tries to use it (e.g.,
-    // maybeDeferDestruction() or GcVisitor) will see that the isolate is gone and skip
-    // V8 operations. Without this, objects that outlive their isolate (like WebSockets
-    // stored in a HibernationManager) would have a dangling isolate pointer and crash
-    // when trying to check v8::Locker::IsLocked() or create V8 handles.
     if (ownWrappable.get() == nullptr) {
       // cppgc has cleared the weak shim but has not run its deferred destructor yet. The shim
       // will release the Wrappable later, after isolate teardown has unlinked it here.
       KJ_DASSERT(wrappable.isCondemned());
-      wrappers.remove(wrappable);
-      wrappable.isolate = nullptr;
-    } else {
-      ownWrappable->isolate = nullptr;
     }
+    // Unbound before `ownWrappable` may destroy it, as it is once the isolate is gone.
+    unbind(wrappable);
+  }
+  while (!unwrapped.empty()) {
+    unbind(unwrapped.front());
   }
   clearFreelistedShims();
+}
+
+void HeapTracer::addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
+  if (wrappable.link.isLinked()) {
+    KJ_DASSERT(!wrappable.linkedInWrappers);
+    unwrapped.remove(wrappable);
+  }
+  wrappers.add(wrappable);
+  wrappable.linkedInWrappers = true;
+}
+
+void HeapTracer::removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
+  moveToUnwrapped(wrappable);
+}
+
+void HeapTracer::addUnwrapped(kj::Badge<Wrappable>, Wrappable& wrappable) {
+  unwrapped.add(wrappable);
+}
+
+void HeapTracer::moveToUnwrapped(Wrappable& wrappable) {
+  KJ_DASSERT(wrappable.linkedInWrappers);
+  wrappers.remove(wrappable);
+  wrappable.linkedInWrappers = false;
+  unwrapped.add(wrappable);
+}
+
+void HeapTracer::unbind(Wrappable& wrappable) {
+  if (wrappable.link.isLinked()) {
+    (wrappable.linkedInWrappers ? wrappers : unwrapped).remove(wrappable);
+    wrappable.linkedInWrappers = false;
+  }
+  wrappable.isolate = nullptr;
+}
+
+void Wrappable::unlinkFromTracer() {
+  // Linked implies bound, and a bound Wrappable is destroyed under the lock of a live isolate.
+  // Ref<T> defers its destruction to that lock (maybeDeferDestruction()); a raw kj::Own to a
+  // Wrappable does not, so it must not be dropped without the lock. Unlinking without the lock
+  // would race the list, and throwing would leave this freed Wrappable linked, so abort.
+  if (!v8::Locker::IsLocked(isolate)) {
+    KJ_LOG(FATAL, "bound Wrappable destroyed without its isolate's lock");
+    abort();
+  }
+  auto& tracer = HeapTracer::getTracer(isolate);
+  (linkedInWrappers ? tracer.wrappers : tracer.unwrapped).remove(*this);
 }
 
 void HeapTracer::destroyLiveWrappableInstances() {
@@ -73,7 +121,7 @@ void HeapTracer::destroyLiveWrappableInstances() {
     auto own = wrappable.detachWrapper(true);
     if (own.get() == nullptr) {
       KJ_DASSERT(wrappable.isCondemned());
-      wrappers.remove(wrappable);
+      moveToUnwrapped(wrappable);
       continue;
     }
     // Detach the JS object from its CppgcShim: the serialized object must not point at C++. A
@@ -537,6 +585,8 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   KJ_REQUIRE(!hasWrapper());
   KJ_REQUIRE(strongWrapper.IsEmpty());
+  // A bound Wrappable is in its isolate's HeapTracer lists, so it can't be wrapped in another.
+  KJ_ASSERT(this->isolate == nullptr || this->isolate == isolate);
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
@@ -708,8 +758,10 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
     refParent = visitor.parent;
   }
 
-  if (isolate == nullptr) {
+  if (isolate == nullptr && visitor.parent.isolate != nullptr) {
+    // A Ref<T> to an unbound Wrappable implies it has no wrapper.
     isolate = visitor.parent.isolate;
+    HeapTracer::getTracer(isolate).addUnwrapped({}, *this);
   }
 
   // Make ref strength match the parent.
