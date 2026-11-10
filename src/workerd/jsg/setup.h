@@ -753,7 +753,8 @@ class IsolateBase {
   static void failClosedSetter(v8::Local<v8::Name> property,
       v8::Local<v8::Value> value,
       const v8::PropertyCallbackInfo<v8::Boolean>& info);
-  // Records the use of `entry` in `restoreTimeGlobalUsed` and throws a JavaScript error.
+  // Records the use of `entry` in `restoreTimeGlobalUsed` and throws a JavaScript error, unless
+  // execution is terminating (a throw would replace the termination).
   void failClosed(const RestoreTimeGlobal& entry);
 
   // The internals of a jsg::Ref<T> to be deleted.
