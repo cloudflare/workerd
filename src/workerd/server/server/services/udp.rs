@@ -70,3 +70,7 @@ impl UdpEgress {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "udp-test.rs"]
+mod tests;
