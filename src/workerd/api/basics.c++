@@ -121,7 +121,7 @@ void EventTarget::forEachSnapshotListener(jsg::Lock& js,
         if (identity == trampoline) continue;
       }
       KJ_REQUIRE(handler->abortHandler == kj::none,
-          "snapshot PoC: top-level addEventListener with a `signal` option is not supported",
+          "startup snapshot: top-level addEventListener with a `signal` option is not supported",
           entry.key);
       cb(entry.key, identity, handler->once);
     }

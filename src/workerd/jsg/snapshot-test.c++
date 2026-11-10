@@ -218,7 +218,7 @@ KJ_TEST("fail-closed properties exist in the zygote but throw when used") {
               "); } catch (e) { return String(e); } })()"));
     };
     KJ_EXPECT(attempt("typeof WebAssembly"_kj) ==
-        "Error: snapshot PoC: globalThis.WebAssembly cannot be used while preparing a startup "
+        "Error: startup snapshot: globalThis.WebAssembly cannot be used while preparing a startup "
         "snapshot"_kj);
     KJ_EXPECT(attempt("typeof SharedArrayBuffer"_kj)
                   .contains("globalThis.SharedArrayBuffer cannot be used"_kj));
