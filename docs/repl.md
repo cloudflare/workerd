@@ -69,9 +69,14 @@ reported like any failed input, and the REPL carries on with `s` unset.
 | `--experimental`       | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
 | `--compat-date=<date>` | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
 | `--compat-flag=<flag>` | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly.                                                      |
+| `--autogate=<name>`    | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
+| `--v8-flag=<flag>`     | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
 
 The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
 Workers use their own settings from the config.
+
+Autogates and V8 flags are set once for the process, so they apply to the REPL's JavaScript and to
+every config it loads.
 
 Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 
@@ -201,7 +206,8 @@ process. A config can be loaded more than once, and several configs can be loade
 - Outbound connections, such as those of a `network` or `external` service, reach the network as
   they do under `workerd serve`.
 - The config's `v8Flags` and `autogates` are ignored, with a warning: those are set once per
-  process, and the REPL has set them already.
+  process, and the REPL has set them already. Pass `--v8-flag` and `--autogate` to the REPL
+  instead.
 - The Workers' `console.log()` writes to stdout.
 
 `workerd.servers` lists the servers loaded and not yet closed. `workerd.version` is the version of

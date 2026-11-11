@@ -70,3 +70,45 @@ test('a config that does not load leaves the REPL running', async () => {
   assert(stdout.startsWith('Uncaught Error: no-such-config.capnp'), stdout);
   assert.deepStrictEqual(results.slice(-2), ["'undefined'", '2'], stdout);
 });
+
+test('--v8-flag passes a flag to V8, with or without `=`', async () => {
+  for (const args of [
+    ['--v8-flag=--expose-gc'],
+    ['--v8-flag', '--expose-gc'],
+  ]) {
+    const { code, results, stderr } = await repl(args, ['typeof gc']);
+    assert.strictEqual(code, 0, stderr);
+    assert.deepStrictEqual(results, ["'function'"]);
+  }
+});
+
+test('--v8-flag refuses a flag V8 does not know', async () => {
+  const { code, stderr } = await repl(['--v8-flag=--no-such-v8-flag'], []);
+  assert.strictEqual(code, 1, stderr);
+  assert(stderr.includes('unrecognized V8 flag'), stderr);
+  assert(stderr.includes('--no-such-v8-flag'), stderr);
+});
+
+test('--autogate enables an autogate', async () => {
+  const input = [
+    "(await import('workerd:unsafe')).default.isTestAutogateEnabled()",
+  ];
+  for (const [args, enabled] of [
+    [['--autogate=test-workerd'], 'true'],
+    [[], 'false'],
+  ]) {
+    const { code, results, stderr } = await repl(
+      ['--compat-flag=unsafe_module', ...args],
+      input
+    );
+    assert.strictEqual(code, 0, stderr);
+    assert.deepStrictEqual(results, [enabled]);
+  }
+});
+
+test('--autogate refuses a name that is not an autogate', async () => {
+  const { code, stderr } = await repl(['--autogate=no-such-gate'], []);
+  assert.strictEqual(code, 1, stderr);
+  assert(stderr.includes('No such autogate: no-such-gate.'), stderr);
+  assert(stderr.includes('test-workerd'), stderr);
+});

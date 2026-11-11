@@ -508,6 +508,18 @@ pub struct ReplArgs {
     #[arg(long = "compat-flag", value_name = "flag")]
     pub compat_flags: Vec<String>,
 
+    /// Enable this autogate, named as in `WORKERD_AUTOGATES` but in kebab-case (such as
+    /// `compression-rs`); repeat the option for more. The REPL and every config it loads share
+    /// the process's autogates; the configs' own `autogates` are ignored.
+    #[arg(long = "autogate", value_name = "name")]
+    pub autogates: Vec<String>,
+
+    /// Pass this flag to V8, such as `--v8-flag=--expose-gc`; repeat the option for more. The
+    /// REPL and every config it loads share the process's V8; the configs' own `v8Flags` are
+    /// ignored.
+    #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
+    pub v8_flags: Vec<String>,
+
     /// Enable experimental features. The repl command requires this flag.
     #[arg(long)]
     pub experimental: bool,

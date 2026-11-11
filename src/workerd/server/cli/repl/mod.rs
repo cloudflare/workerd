@@ -51,6 +51,8 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         compat_date: args.compat_date.unwrap_or_default(),
         compat_flags: args.compat_flags,
         experimental: args.experimental,
+        autogates: args.autogates,
+        v8_flags: args.v8_flags,
         colors: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
     };
     entry::without_config(verbose, move || {
