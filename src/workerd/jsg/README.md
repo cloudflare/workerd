@@ -632,6 +632,8 @@ null. Builds without the sandbox store an ordinary pointer.
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |
 
 `onXxxStart` methods return `kj::Own<void>` destroyed on completion (RAII timing).
+`reportInternalException` can be called without the isolate lock, so implementations must be
+thread-safe.
 Compilation `Option`: `BUNDLE` (user code) or `BUILTIN` (runtime modules).
 Resolve `Context`: `BUNDLE`, `BUILTIN`, `BUILTIN_ONLY`.
 Resolve `Source`: `STATIC_IMPORT`, `DYNAMIC_IMPORT`, `REQUIRE`, `INTERNAL`.

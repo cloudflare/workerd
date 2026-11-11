@@ -816,11 +816,13 @@ class Worker::Lock {
       const jsg::JsMessage& message = jsg::JsMessage(),
       kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
-  // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
+  // Logs a kj::Exception to the debug console only, leaving the trace to the caller, which can
+  // add the exception to it without holding the lock. `error` is how jsg::describeAsJsError()
+  // described the exception. If the exception has a serialized JS error attached as a detail, that
   // error may be extracted and used.
-  void logUncaughtException(UncaughtExceptionSource source,
+  void logUncaughtExceptionToConsole(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
+      const jsg::JsErrorDescription& error);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
@@ -864,6 +866,10 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
+
+  // The part of logUncaughtException() that reports to the debug console.
+  void logUncaughtExceptionToConsole(
+      UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message);
 
   Worker& worker;
   kj::Own<Impl> impl;
