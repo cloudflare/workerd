@@ -19,8 +19,10 @@ use super::editor::Terminal;
 
 /// The terminal in raw mode, while editing a line: input arrives a key at a time, without echo,
 /// and Ctrl+C, Ctrl+Z and Ctrl+S arrive as keys rather than as signals and flow control. Output
-/// is still processed, so a line break returns the carriage too. Dropping it restores the mode
-/// the terminal was in, so that Ctrl+C interrupts while input runs.
+/// is still processed, so a line break returns the carriage too. The terminal is also asked to
+/// mark pasted text (bracketed paste mode), which a terminal without the mode ignores. Dropping
+/// it restores the mode the terminal was in, so that Ctrl+C interrupts while input runs, and
+/// what an input prints, or a program after the REPL, is not marked as pasted.
 pub struct RawTerminal {
     saved: libc::termios,
 }
@@ -42,13 +44,19 @@ impl RawTerminal {
         raw.c_cc[libc::VTIME] = 0;
         // TCSADRAIN rather than TCSAFLUSH, which would discard what was typed while an input ran.
         set_mode(&raw)?;
-        Ok(Self { saved })
+        let mut terminal = Self { saved };
+        terminal.write(BRACKETED_PASTE_ON)?;
+        Ok(terminal)
     }
 }
+
+const BRACKETED_PASTE_ON: &str = "\x1b[?2004h";
+const BRACKETED_PASTE_OFF: &str = "\x1b[?2004l";
 
 impl Drop for RawTerminal {
     fn drop(&mut self) {
         // Nothing can be done about a terminal that refuses its own mode back.
+        let _ = self.write(BRACKETED_PASTE_OFF);
         let _ = set_mode(&self.saved);
     }
 }
