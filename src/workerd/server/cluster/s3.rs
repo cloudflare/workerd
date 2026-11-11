@@ -131,6 +131,7 @@ impl S3 {
 
 impl Dialect for SigV4 {
     const METADATA: &'static str = "x-amz-meta-";
+    const VERSION: &'static str = "ETag";
 
     fn version(response: &HttpResponse) -> &str {
         &response.etag

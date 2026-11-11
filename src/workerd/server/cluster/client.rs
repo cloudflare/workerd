@@ -32,7 +32,11 @@ pub trait Dialect {
     /// The prefix of the headers that carry an object's user metadata.
     const METADATA: &'static str;
 
-    /// The version of the object a successful read or write answers.
+    /// The name of the header that carries an object's version.
+    const VERSION: &'static str;
+
+    /// The version of the object a successful read or write answers, empty
+    /// when the answer has none.
     fn version(response: &HttpResponse) -> &str;
 
     /// The header that makes a write conditional on `guard`.
@@ -85,7 +89,7 @@ impl<D: Dialect> Store for Client<D> {
         let response = self.send("GET", key, &[], Vec::new(), none(), to).await?;
         match response.status {
             200 => {
-                let version = Version(D::version(&response).to_owned());
+                let version = version::<D>("GET", key, &response)?;
                 Ok(Some((response.body, version)))
             }
             404 => Ok(None),
@@ -107,13 +111,10 @@ impl<D: Dialect> Store for Client<D> {
             .collect();
         headers.extend(guard.as_ref().map(D::precondition));
         let response = self.send("PUT", key, &[], headers, body, None).await?;
-        match response.status {
-            200 => Ok(Some(Version(D::version(&response).to_owned()))),
-            // 412: the guard failed. 409: a concurrent conditional write to
-            // the same key won the race, which is the same answer.
-            409 | 412 => Ok(None),
-            _ => Err(failure("PUT", key, &response)),
+        if !written(key, &response, guard.is_some())? {
+            return Ok(None);
         }
+        Ok(Some(version::<D>("PUT", key, &response)?))
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
@@ -161,7 +162,7 @@ impl<D: Dialect> Client<D> {
             if response.status != 200 {
                 return Err(failure("LIST", prefix, &response));
             }
-            token = listing_page(&response.body, &mut entries, &mut prefixes);
+            token = listing_page(prefix, &response.body, &mut entries, &mut prefixes)?;
             if token.is_none() {
                 return Ok((entries, prefixes));
             }
@@ -270,7 +271,42 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 fn failure(call: &str, key: &str, response: &HttpResponse) -> Error {
     let body = String::from_utf8_lossy(&response.body);
     let code = elements(&body, "Code").next().unwrap_or("");
+    let code: String = code.chars().take(MAX_CODE).collect();
     Error::Http(format!("{call} {key}: {} {code}", response.status))
+}
+
+/// The most of an error answer's `Code` that goes into a message.
+const MAX_CODE: usize = 100;
+
+/// Whether a PUT's answer says it wrote the object, `false` when its guard
+/// failed and it wrote nothing. A 409 or 412 to a write without a guard is
+/// an error: `Store::put` answers `Ok(None)` only for a failed guard.
+fn written(key: &str, response: &HttpResponse, guarded: bool) -> Result<bool> {
+    match response.status {
+        200 => Ok(true),
+        // 412: the guard failed. 409: a concurrent conditional write to the
+        // same key won the race, which is the same answer.
+        409 | 412 if guarded => Ok(false),
+        _ => Err(failure("PUT", key, response)),
+    }
+}
+
+/// The version a successful `call` on `key` answered. An answer without one
+/// is an error: the version guards the next write, and an empty precondition
+/// is one a store may ignore. So it is for calls that discard the version
+/// (`Bucket::get_file`, `put`, `put_file`): a store that omits versions can
+/// fence nothing, and refusing every such answer has a node refuse it when
+/// it joins (`check_conditional_writes` fails), not partway through, at its
+/// first conditional write.
+fn version<D: Dialect>(call: &str, key: &str, response: &HttpResponse) -> Result<Version> {
+    match D::version(response) {
+        "" => Err(Error::Http(format!(
+            "{call} {key}: {} without a version ({})",
+            response.status,
+            D::VERSION
+        ))),
+        version => Ok(Version(version.to_owned())),
+    }
 }
 
 /// `SigV4` URI encoding: everything but unreserved characters, and `/` too
@@ -287,12 +323,15 @@ fn encode(value: &str, slash: bool) -> String {
 }
 
 /// Adds a `ListObjectsV2` answer's keys to `entries` and its common prefixes to
-/// `prefixes`; answers the continuation token when the listing goes on.
+/// `prefixes`; answers the continuation token when the listing of `prefix`
+/// goes on. A truncated answer without a token is an error: a listing that
+/// stopped there would look complete.
 fn listing_page(
+    prefix: &str,
     body: &[u8],
     entries: &mut Vec<Entry>,
     prefixes: &mut Vec<String>,
-) -> Option<String> {
+) -> Result<Option<String>> {
     let xml = String::from_utf8_lossy(body);
     for contents in elements(&xml, "Contents") {
         let key = elements(contents, "Key").next().map(unescape);
@@ -301,8 +340,15 @@ fn listing_page(
     for common in elements(&xml, "CommonPrefixes") {
         prefixes.extend(elements(common, "Prefix").next().map(unescape));
     }
-    let next = elements(&xml, "NextContinuationToken").next()?;
-    (elements(&xml, "IsTruncated").next() == Some("true")).then(|| unescape(next))
+    if elements(&xml, "IsTruncated").next() != Some("true") {
+        return Ok(None);
+    }
+    match elements(&xml, "NextContinuationToken").next() {
+        Some(next) if !next.is_empty() => Ok(Some(unescape(next))),
+        _ => Err(Error::Http(format!(
+            "LIST {prefix}: truncated without a continuation token"
+        ))),
+    }
 }
 
 /// How far this clock is outside the bucket's, from a response's `Date`

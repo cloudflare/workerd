@@ -32,7 +32,9 @@ pub trait Store {
     /// The object and its version; with `to`, the body goes to that file
     /// instead.
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>>;
-    /// `Ok(None)` when the guard failed and nothing was written.
+    /// `Ok(None)` when the guard failed and nothing was written. A write
+    /// without a guard never answers `Ok(None)`: the store refusing it is an
+    /// error.
     async fn put(
         &self,
         key: &str,

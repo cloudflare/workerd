@@ -47,6 +47,8 @@ pub mod compose;
 pub mod deploy;
 #[cfg(test)]
 mod dst;
+#[cfg(test)]
+mod fake_http;
 mod http;
 mod log;
 #[cfg(test)]
