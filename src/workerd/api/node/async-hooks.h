@@ -253,6 +253,9 @@ class AsyncHooksModule final: public jsg::Object {
   AsyncHooksModule() = default;
   AsyncHooksModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   JSG_RESOURCE_TYPE(AsyncHooksModule) {
     JSG_NESTED_TYPE(AsyncLocalStorage);
     JSG_NESTED_TYPE(AsyncResource);

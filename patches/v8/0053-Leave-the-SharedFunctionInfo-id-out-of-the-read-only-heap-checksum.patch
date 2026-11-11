@@ -1,0 +1,166 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Carney <dcarney@cloudflare.com>
+Date: Mon, 9 Nov 2026 12:00:00 +0000
+Subject: Leave the SharedFunctionInfo id out of the read-only heap checksum
+
+A read-only snapshot holds the next SharedFunctionInfo unique id of the
+isolate that took it. An embedder custom startup snapshot of the
+shared read-only heap therefore differs from the built-in one only in
+that id, yet:
+
+* DEBUG builds CHECK that every isolate of a group sets the read-only
+  heap up from a snapshot with the same checksum, which fails as soon as
+  isolates restored from the two kinds of snapshot share a group.
+* An isolate that joins an existing read-only heap takes its next id
+  from the snapshot that heap came from, so an isolate restored from a
+  snapshot whose isolate numbered more SharedFunctionInfos hands those
+  ids out a second time.
+
+Write the id first, as a fixed-width uint32 (it used to come last,
+before the padding, as a variable-length integer), leave it out of the
+checksum, and have an isolate joining an existing read-only heap
+continue past its own snapshot's id.
+
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -1880,6 +1880,17 @@
+     CHECK(successfully_exchanged);
+   }
+ 
++  // Raises the next unique id to `id` if it is lower. For an isolate whose
++  // startup snapshot was taken by an isolate that numbered more
++  // SharedFunctionInfos than the one the shared read-only heap came from.
++  void EnsureNextUniqueSfiIdAtLeast(uint32_t id) {
++    uint32_t current = next_unique_sfi_id_.load(std::memory_order_relaxed);
++    while (current < id && !next_unique_sfi_id_.compare_exchange_weak(
++                               current, id, std::memory_order_relaxed,
++                               std::memory_order_relaxed)) {
++    }
++  }
++
+ #ifdef V8_ENABLE_JAVASCRIPT_PROMISE_HOOKS
+   void SetHasContextPromiseHooks(bool context_promise_hook) {
+     promise_hook_flags_ = PromiseHookFields::HasContextPromiseHook::update(
+diff --git a/src/heap/read-only-heap.cc b/src/heap/read-only-heap.cc
+--- a/src/heap/read-only-heap.cc
++++ b/src/heap/read-only-heap.cc
+@@ -58,6 +58,11 @@
+       read_only_heap_created = true;
+     } else {
+       isolate->SetUpFromReadOnlyArtifacts(artifacts);
++      // The group's read-only heap may come from another snapshot than this
++      // isolate's, whose SharedFunctionInfos were numbered by the isolate that
++      // took it: continue past both so that no unique id is handed out twice.
++      isolate->EnsureNextUniqueSfiIdAtLeast(
++          ReadOnlyArtifacts::NextUniqueSfiIdOf(read_only_snapshot_data));
+ #ifdef V8_COMPRESS_POINTERS
+       isolate->external_pointer_table().SetUpFromReadOnlyArtifacts(
+           isolate->heap()->read_only_external_pointer_space(), artifacts);
+diff --git a/src/heap/read-only-spaces.cc b/src/heap/read-only-spaces.cc
+--- a/src/heap/read-only-spaces.cc
++++ b/src/heap/read-only-spaces.cc
+@@ -72,10 +72,31 @@
+   read_only_heap_ = std::move(read_only_heap);
+ }
+ 
++namespace {
++// The checksum of the read-only heap image a read-only snapshot holds: its payload without the
++// leading SharedFunctionInfo id, which is the serializing isolate's and not heap content.
++uint32_t ReadOnlyHeapImageChecksum(SnapshotData* read_only_snapshot_data) {
++  base::Vector<const uint8_t> payload = read_only_snapshot_data->Payload();
++  CHECK_GE(payload.size(), ReadOnlyArtifacts::kNextUniqueSfiIdSize);
++  return Checksum(
++      payload.SubVector(ReadOnlyArtifacts::kNextUniqueSfiIdSize, payload.size()));
++}
++}  // namespace
++
++// static
++uint32_t ReadOnlyArtifacts::NextUniqueSfiIdOf(
++    SnapshotData* read_only_snapshot_data) {
++  base::Vector<const uint8_t> payload = read_only_snapshot_data->Payload();
++  CHECK_GE(payload.size(), kNextUniqueSfiIdSize);
++  uint32_t id;
++  memcpy(&id, payload.begin(), kNextUniqueSfiIdSize);
++  return id;
++}
++
+ void ReadOnlyArtifacts::InitializeChecksum(
+     SnapshotData* read_only_snapshot_data) {
+ #ifdef DEBUG
+-  read_only_blob_checksum_ = Checksum(read_only_snapshot_data->Payload());
++  read_only_blob_checksum_ = ReadOnlyHeapImageChecksum(read_only_snapshot_data);
+ #endif  // DEBUG
+ }
+ 
+@@ -85,7 +106,8 @@
+   if (read_only_blob_checksum_) {
+     // The read-only heap was set up from a snapshot. Make sure it's the always
+     // the same snapshot.
+-    uint32_t snapshot_checksum = Checksum(read_only_snapshot_data->Payload());
++    uint32_t snapshot_checksum =
++        ReadOnlyHeapImageChecksum(read_only_snapshot_data);
+     CHECK_WITH_MSG(snapshot_checksum,
+                    "Attempt to create the read-only heap after already "
+                    "creating from a snapshot.");
+diff --git a/src/heap/read-only-spaces.h b/src/heap/read-only-spaces.h
+--- a/src/heap/read-only-spaces.h
++++ b/src/heap/read-only-spaces.h
+@@ -82,6 +82,13 @@
+  public:
+   ReadOnlyArtifacts() = default;
+ 
++  // A read-only snapshot starts with the next SharedFunctionInfo unique id of the isolate that
++  // serialized it (ReadOnlyHeapImageSerializer, a fixed-width uint32). Snapshots of the same
++  // read-only heap taken by different isolates, e.g. an embedder's custom startup snapshot and the
++  // built-in one, differ only there.
++  static constexpr size_t kNextUniqueSfiIdSize = sizeof(uint32_t);
++  static uint32_t NextUniqueSfiIdOf(SnapshotData* read_only_snapshot_data);
++
+   ~ReadOnlyArtifacts();
+ 
+   // Initialize the ReadOnlyArtifacts from an Isolate that has just been created
+diff --git a/src/snapshot/read-only-deserializer.cc b/src/snapshot/read-only-deserializer.cc
+--- a/src/snapshot/read-only-deserializer.cc
++++ b/src/snapshot/read-only-deserializer.cc
+@@ -34,6 +34,8 @@
+       : source_(source), isolate_(isolate) {}
+ 
+   void DeserializeImpl() {
++    // See ReadOnlyHeapImageSerializer::SerializeImpl().
++    const uint32_t next_unique_sfi_id = source_->GetUint32();
+     while (true) {
+       int bytecode_as_int = source_->Get();
+       DCHECK_LT(bytecode_as_int, ro::kNumberOfBytecodes);
+@@ -53,7 +55,7 @@
+           DeserializeReadOnlyRootsTable();
+           break;
+         case Bytecode::kFinalizeReadOnlySpace:
+-          ro_space()->FinalizeSpaceForDeserialization(source_->GetUint30());
++          ro_space()->FinalizeSpaceForDeserialization(next_unique_sfi_id);
+           return;
+       }
+     }
+diff --git a/src/snapshot/read-only-serializer.cc b/src/snapshot/read-only-serializer.cc
+--- a/src/snapshot/read-only-serializer.cc
++++ b/src/snapshot/read-only-serializer.cc
+@@ -390,6 +390,10 @@
+   void SerializeImpl() {
+     DCHECK_EQ(sink_->Position(), 0);
+ 
++    // First and fixed-width, so that ReadOnlyArtifacts can find it and leave it out of the
++    // read-only heap's checksum: it is the serializing isolate's counter, not heap content.
++    sink_->PutUint32(isolate_->next_unique_sfi_id(), "shared function info ID");
++
+     ReadOnlySpace* ro_space = isolate_->read_only_heap()->read_only_space();
+ 
+     // Allocate all pages first s.t. the deserializer can easily handle forward
+@@ -405,7 +409,7 @@
+ 
+     EmitReadOnlyRootsTable();
+     sink_->Put(Bytecode::kFinalizeReadOnlySpace, "space end");
+-    sink_->PutUint30(isolate_->next_unique_sfi_id(), "shared function info ID");
++
+   }
+ 
+   uint32_t IndexOf(const ReadOnlyPage* page) {

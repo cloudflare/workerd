@@ -406,6 +406,38 @@ class EventTarget: public jsg::Object {
 
   static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
+  // A listener as recorded for a startup snapshot: its identity, and the callback and receiver
+  // its registration derived from it.
+  struct SnapshotListener {
+    kj::StringPtr type;
+    v8::Local<v8::Object> identity;
+    v8::Local<v8::Function> callback;
+    v8::Local<v8::Value> receiver;
+    bool once;
+    bool passive;
+  };
+
+  // Enumerates JS-registered listeners for the startup snapshot's PREPARE pass, in per-type
+  // insertion order. Internally-registered listeners (the on<type> attribute trampolines) are
+  // skipped: their identity is a synthesized object owned by the C++ attribute state. Throws for a
+  // listener registered with a `signal`, whose abort algorithm lives on the signal.
+  void forEachSnapshotListener(
+      jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb);
+
+  // Re-registers a listener forEachSnapshotListener() recorded, on the fresh global scope of a
+  // Worker started from the snapshot. Unlike addEventListener(), it runs no JavaScript and reads
+  // nothing from `identity`: `callback` already carries the receiver the original registration
+  // gave it.
+  struct SnapshotListenerOptions {
+    bool once = false;
+    bool passive = false;
+  };
+  void restoreSnapshotListener(jsg::Lock& js,
+      kj::StringPtr type,
+      v8::Local<v8::Object> identity,
+      HandlerFunction callback,
+      SnapshotListenerOptions options);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:

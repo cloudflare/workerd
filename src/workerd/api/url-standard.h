@@ -159,7 +159,10 @@ private:
 class URL: public jsg::Object {
 public:
   URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base = kj::none);
+  explicit URL(jsg::Url inner): inner(kj::mv(inner)) {}
   ~URL() noexcept(false) override;
+
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   static jsg::Ref<URL> constructor(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base);
 
