@@ -8,7 +8,9 @@
 //   1. Consistent DO state across instances (single-writer correctness).
 //   2. Transparent forwarding when a request arrives at the "wrong" instance.
 //   3. Takeover after a node is killed.
-//   4. Each running instance holds a lease record in the bucket.
+//   4. Each running instance holds a lease record in the bucket, and keeps
+//      it through a renewal whose write the bucket, S3 or Cloud Storage,
+//      stalls.
 //   5. Storing/loading a DO stub without calling it claims nothing.
 //   6. A broken DO does not stay stuck while stubs still pin it: it can be
 //      re-instantiated instead of hanging requests.
@@ -1349,6 +1351,53 @@ test('cluster: each running instance holds a lease record', async () => {
     }
   });
 });
+
+// On S3 and on Cloud Storage, whose writes are guarded by another header.
+for (const dialect of ['s3', 'gcs']) {
+  test(`cluster: a lease write the ${dialect} bucket stalls is sent again, and the node serves on`, async () => {
+    // As `GCS`, with tokens from the fake metadata server.
+    const options =
+      dialect === 'gcs'
+        ? { configName: 'gcs', dialect, nodeEnv: (bucket) => bucket.gcsEnv }
+        : {};
+    await withCluster(
+      1,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const [node] = nodes;
+        const key = nodeKeys.get(node.nodeId);
+        const resent =
+          /PUT \S*nodes\/\S+\.json had no answer in \d+ ms; sending it again/;
+        // What the node logs from here on.
+        const armed = node.stderr.length;
+        // Longer than a renewal round may take: unanswered, it would time the
+        // round out.
+        await bucket.setFaults([
+          {
+            method: 'PUT',
+            prefix: `nodes/${key}.json`,
+            delayMs: 3000,
+            times: 1,
+          },
+        ]);
+        await node.waitForStderr(resent, 5000);
+        // Until the stalled write has been answered, and a few rounds past it.
+        await sleep(4000);
+        assert.deepStrictEqual(await bucket.faultHits(), [1]);
+        const since = node.stderr.slice(armed);
+        assert.match(since, resent);
+        assert.doesNotMatch(since, /renewing the cluster lease failed/);
+        const record = JSON.parse(await bucket.get(`nodes/${key}.json`));
+        assert(record.expires_ms > Date.now(), `lease of ${key} has expired`);
+        const { status, body } = await fetchJson(
+          node.httpPort,
+          '/increment?name=stalled-lease'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+      },
+      options
+    );
+  });
+}
 
 test("cluster: an alarm runs once on its object's owner", async () => {
   await withCluster(2, async ({ nodes }) => {
