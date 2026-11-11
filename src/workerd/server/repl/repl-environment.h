@@ -32,7 +32,7 @@ struct ReplEnvironmentOptions {
   kj::Array<kj::String> compatibilityFlags;
 
   // `--experimental`: lets the compatibility flags and the loaded configs use experimental
-  // features.
+  // features, and adds `service_binding_extra_handlers` to the flags.
   bool experimental = false;
 
   // Render results with ANSI colors.

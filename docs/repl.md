@@ -64,11 +64,11 @@ A `<config-file>` is loaded into the global `s`, as
 REPL shows that input at its first prompt and prints its result. A config that fails to load is
 reported like any failed input, and the REPL carries on with `s` unset.
 
-| Option                 | Effect                                                                                                                                                                |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--experimental`       | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`.                                         |
-| `--compat-date=<date>` | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.      |
-| `--compat-flag=<flag>` | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly. |
+| Option                 | Effect                                                                                                                                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--experimental`       | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
+| `--compat-date=<date>` | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
+| `--compat-flag=<flag>` | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly.                                                      |
 
 The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
 Workers use their own settings from the config.
@@ -220,6 +220,16 @@ workerd.
 
 `service()` reaches any service in the config, not only a Worker, as a binding to it would. It
 throws if the config has no such service, or the Worker has no such entrypoint.
+
+The REPL's JavaScript has the `service_binding_extra_handlers` flag, so a `Fetcher` from
+`service()` also runs the Worker's `scheduled()` and `queue()` handlers:
+
+```
+> await s.service('main').scheduled({ cron: '*/5 * * * *' })
+{ outcome: 'ok', noRetry: false }
+> (await s.service('main').queue('jobs', [{ id: '1', timestamp: new Date(), attempts: 1, body: { n: 1 } }])).outcome
+'ok'
+```
 
 `socket()` takes HTTP sockets only, not HTTPS, TCP or UDP ones, and its `Fetcher` supports only
 `fetch()`. The request goes through the socket as a client's would: the URL's host becomes the
