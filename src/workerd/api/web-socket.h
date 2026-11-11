@@ -734,6 +734,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
     kj::WebSocket::Message message;
     size_t pendingAutoResponses = 0;
+    // See chargeOutgoing().
+    kj::Maybe<jsg::ExternalMemoryAdjustment> memory;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
 
@@ -820,6 +822,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   void tryReleaseNative(jsg::Lock& js);
 
+  // Returns an adjustment that counts a message queued by send() with a payload of `payloadBytes`
+  // as isolate external memory. The queue lives outside the V8 heap, so without this a peer that
+  // never reads, or a WebSocketPair end that is never returned in a Response, lets it grow without
+  // the isolate's memory limit seeing it.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> chargeOutgoing(size_t payloadBytes);
+
   // ---------------------------------------------------------------------------
   // Members retained by the legacy adapter while the EW-10817 refactor is incomplete.
   // ---------------------------------------------------------------------------
@@ -872,6 +880,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // If any error has occurred.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> error;
+
+  // The isolate's external memory, to which queued outgoing messages are charged.
+  kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> outgoingMemory;
 
   // Queue of messages to be sent. Wrapped in an IoOwn so the pump loop can safely access
   // the map without locking the isolate.

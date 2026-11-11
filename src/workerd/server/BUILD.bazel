@@ -251,7 +251,9 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
+        "//src/workerd/server/cron:cron-js",
         "//src/workerd/server/kv:kv-js",
+        "//src/workerd/server/queues:queues-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
     ] + select({

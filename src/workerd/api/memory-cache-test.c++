@@ -387,5 +387,37 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
       describe());
 }
 
+KJ_TEST("the spans of a fallback that never settles end with its request") {
+  // V8 owns the continuations attached to the fallback's Promise, and destroys them only when it
+  // collects them, which this fixture does not do on its own.
+  MemoryCacheProvider provider;
+  auto spans = recordSpans(R"SCRIPT(
+      export default {
+        async fetch() {
+          let fallbackStarted;
+          const started = new Promise(resolve => fallbackStarted = resolve);
+          globalThis.CACHE.read("key", () => {
+            fallbackStarted();
+            return new Promise(() => {});
+          });
+          await started;
+          return new Response("ok");
+        }
+      };
+    )SCRIPT"_kj,
+      cppCache(provider, testLimits()));
+
+  for (auto name: {"memory_cache_read <- "_kj, "memory_cache_fallback <- "_kj}) {
+    bool found = false;
+    for (auto& span: spans) {
+      if (span.startsWith(name)) {
+        found = true;
+        KJ_EXPECT(!span.endsWith("(open)"), span);
+      }
+    }
+    KJ_EXPECT(found, name, kj::strArray(spans, "\n"));
+  }
+}
+
 }  // namespace
 }  // namespace workerd::api

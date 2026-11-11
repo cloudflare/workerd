@@ -581,6 +581,12 @@ enum SerializationTag {
 
   r2ObjectBody @22;
   # R2 object metadata with a transferred body stream.
+
+  jsSerializable @23;
+  # An instance of a class implemented in JavaScript by the runtime: its "module:Export"
+  # deserializeInfo, flags and, for an error, stack, with its data following the top-level value.
+  # Keep in sync with jsg::SERIALIZATION_TAG_JS_SERIALIZABLE in /src/workerd/jsg/ser.h, which
+  # describes the format.
 }
 
 enum StreamEncoding {

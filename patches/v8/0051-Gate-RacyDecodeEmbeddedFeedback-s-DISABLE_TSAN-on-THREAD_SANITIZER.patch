@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dlapid@cloudflare.com>
+Date: Mon, 9 Nov 2026 18:00:00 +0000
+Subject: Gate RacyDecodeEmbeddedFeedback's DISABLE_TSAN on THREAD_SANITIZER
+
+RacyDecodeEmbeddedFeedback is the only place in V8 where DISABLE_TSAN
+is gated behind V8_IS_TSAN, so a TSan build without V8_IS_TSAN loses
+it. Gate it on THREAD_SANITIZER instead, which such a build still
+defines.
+
+diff --git a/src/interpreter/bytecode-decoder.cc b/src/interpreter/bytecode-decoder.cc
+--- a/src/interpreter/bytecode-decoder.cc
++++ b/src/interpreter/bytecode-decoder.cc
+@@ -75,7 +75,7 @@ uint32_t BytecodeDecoder::DecodeUnsignedOperand(Address operand_start,
+ }
+ 
+ // static
+-#ifdef V8_IS_TSAN
++#ifdef THREAD_SANITIZER
+ V8_NOINLINE
+ 
+ DISABLE_TSAN

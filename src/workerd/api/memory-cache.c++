@@ -317,6 +317,21 @@ static kj::Array<kj::byte> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue
   }
 }
 
+namespace {
+
+// The spans of a read() whose fallback runs. The JavaScript continuations of the fallback's promise
+// use them, but V8 owns those continuations: if the promise never settles, V8 destroys them only
+// when it collects them, on whichever thread then holds the isolate lock. A span reports to its
+// request's observer, whose state belongs to the request's thread, so the spans are owned by the
+// IoContext, which ends them no later than it ends itself.
+struct FallbackSpans {
+  // Declared first, so that it ends after its child.
+  SpanBuilder read;
+  SpanBuilder fallback;
+};
+
+}  // namespace
+
 jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     jsg::NonCoercible<kj::String> key,
     jsg::Optional<FallbackFunction> optionalFallback) {
@@ -354,50 +369,46 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
               auto& context = IoContext::current();
               auto heapCallback = kj::heap(kj::mv(callback));
 
-              // Create a span for the fallback execution
               auto fallbackSpan = readSpan.newChild("memory_cache_fallback"_kjc);
               fallbackSpan.setTag("key"_kjc, key.asPtr());
-
-              // Refcount the spans so they can be shared between then/catch.
-              auto fallbackSpanRc = kj::rc<SpanBuilder>(kj::mv(fallbackSpan));
-              auto readSpanRc = kj::rc<SpanBuilder>(kj::mv(readSpan));
+              auto spans = kj::heap<FallbackSpans>(kj::mv(readSpan), kj::mv(fallbackSpan));
 
               return js.evalNow([&]() { return fallback(js, kj::mv(key)); })
                   .then(js,
                       [callback = context.addObject(*heapCallback),
-                          fallbackSpan = fallbackSpanRc.addRef(),
-                          readSpan = readSpanRc.addRef()](jsg::Lock& js,
+                          spans = context.addObject(*spans)](jsg::Lock& js,
                           CacheValueProduceResult result) mutable -> jsg::JsRef<jsg::JsValue> {
-                // NOTE: `callback` is IoPtr, not IoOwn. The catch block gets the IoOwn, which
-                //   ensures the object still exists at this point.
+                // NOTE: `callback` and `spans` are IoPtrs, not IoOwns. The catch block gets the
+                //   IoOwns, which ensures the objects still exist at this point.
+                auto& fallbackSpan = spans->fallback;
                 auto serialized = hackySerialize(js, result.value);
-                fallbackSpan->setTag(
+                fallbackSpan.setTag(
                     "fallback_result_size"_kjc, static_cast<double>(serialized.size()));
 
                 KJ_IF_SOME(expiration, result.expiration) {
                   JSG_REQUIRE(
                       !kj::isNaN(expiration), TypeError, "Expiration time must not be NaN.");
-                  fallbackSpan->setTag("has_expiration"_kjc, true);
+                  fallbackSpan.setTag("has_expiration"_kjc, true);
                 } else {
-                  fallbackSpan->setTag("has_expiration"_kjc, false);
+                  fallbackSpan.setTag("has_expiration"_kjc, false);
                 }
                 // Only now, so that the catch block, which handles what this throws, does not
                 // overwrite it.
-                fallbackSpan->setTag("fallback_success"_kjc, true);
+                fallbackSpan.setTag("fallback_success"_kjc, true);
                 (*callback)(MemoryCacheUse::FallbackResult{kj::mv(serialized), result.expiration},
-                    *fallbackSpan);
+                    fallbackSpan);
                 return kj::mv(result.value);
               })
                   .catch_(js,
                   JSG_VISITABLE_LAMBDA(
                       (self = kj::mv(self), callback = context.addObject(kj::mv(heapCallback)),
-                          fallbackSpan = fallbackSpanRc.addRef(), readSpan = readSpanRc.addRef()),
+                          spans = context.addObject(kj::mv(spans))),
                       (self),
                       (jsg::Lock & js, jsg::Value&& exception) mutable->jsg::JsRef<jsg::JsValue> {
-                        fallbackSpan->setTag("fallback_success"_kjc, false);
-                        fallbackSpan->setTag(
-                            "fallback_error"_kjc, kj::str(exception.getHandle(js)));
-                        (*callback)(kj::none, *fallbackSpan);
+                        auto& fallbackSpan = spans->fallback;
+                        fallbackSpan.setTag("fallback_success"_kjc, false);
+                        fallbackSpan.setTag("fallback_error"_kjc, kj::str(exception.getHandle(js)));
+                        (*callback)(kj::none, fallbackSpan);
                         js.throwException(kj::mv(exception));
                       }));
             }

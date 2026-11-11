@@ -199,6 +199,9 @@ class Wrappable: public kj::Refcounted {
     KJ_IF_SOME(a, weakRefAnchor) {
       a->invalidate();
     }
+    if (link.isLinked()) {
+      unlinkFromTracer();
+    }
   }
 
   enum InternalFields : int {
@@ -247,13 +250,13 @@ class Wrappable: public kj::Refcounted {
   // reference to it, and the shim's destructor is only deferred, not cancelled.
   //
   // A Wrappable is a member of HeapTracer::wrappers exactly between attachWrapper() and
-  // detachWrapper(), so being linked while having no wrapper isolates precisely the case where
-  // cppgc nulled `weakShim` behind our back. That link test is load-bearing, because a null
-  // `weakShim` has two producers: cppgc on major GC (this case), and detachWrapper() itself --
-  // including the minor-GC path, where V8 drops a droppable wrapper while the Wrappable lives
+  // detachWrapper(), so being in that list while having no wrapper isolates precisely the case
+  // where cppgc nulled `weakShim` behind our back. That membership test is load-bearing, because
+  // a null `weakShim` has two producers: cppgc on major GC (this case), and detachWrapper() itself
+  // -- including the minor-GC path, where V8 drops a droppable wrapper while the Wrappable lives
   // on.
   bool isCondemned() const {
-    return link.isLinked() && !hasWrapper();
+    return linkedInWrappers && !hasWrapper();
   }
 
   // Invalidate all outstanding jsg::WeakRef<T>s pointing at this Wrappable. Called lazily from
@@ -291,7 +294,7 @@ class Wrappable: public kj::Refcounted {
   // zapped handle.
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
 
-  // The isolate a wrapper was last attached in, or null if none ever was or that isolate is gone.
+  // The isolate this Wrappable is bound to (see `isolate`), or null if it is unbound.
   v8::Isolate* getIsolate() const {
     return isolate;
   }
@@ -454,7 +457,9 @@ class Wrappable: public kj::Refcounted {
   // handle, to force the wrapper to stay alive. Otherwise, `strongWrapper` is empty.
   v8::Global<v8::Object> strongWrapper;
 
-  // Will be non-null if a wrapper has ever been attached.
+  // The isolate this Wrappable is bound to: set when a wrapper is first attached, or when a
+  // parent bound to an isolate first visits a Ref<T> to it, and cleared by isolate teardown. A
+  // bound Wrappable must be destroyed under the isolate lock (see maybeDeferDestruction()).
   v8::Isolate* isolate = nullptr;
 
   // How many strong Ref<T>s point at this Wrappable, forcing its wrapper to stay alive even if
@@ -470,8 +475,16 @@ class Wrappable: public kj::Refcounted {
   // before and after. In other words, a wrapper can only be condemned while strongRefcount == 0.
   uint strongRefcount = 0;
 
-  // While a wrapper is attached, the Wrappable is a member of the list `HeapTracer::wrappers`.
+  // Whether `link` is in `HeapTracer::wrappers` rather than `HeapTracer::unwrapped`.
+  bool linkedInWrappers = false;
+
+  // While bound to an isolate, the Wrappable is a member of one of its HeapTracer's lists:
+  // `wrappers` from attachWrapper() to detachWrapper(), and `unwrapped` otherwise, so that
+  // isolate teardown can unbind every Wrappable that outlives it.
   kj::ListLink<Wrappable> link;
+
+  // Removes this Wrappable from its HeapTracer's list. Called by the destructor.
+  void unlinkFromTracer();
 
   // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for Wrappables that never
   // have weak references taken. Created on first call to getOrCreateWeakRefAnchor().
@@ -516,12 +529,15 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // object, which implies that we are collecting unreachable objects.
   static bool isInCppgcDestructor();
 
-  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
-    wrappers.add(wrappable);
-  }
-  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
-    wrappers.remove(wrappable);
-  }
+  // Move `wrappable`, which is bound to this tracer's isolate, between `wrappers` and
+  // `unwrapped`. addWrapper() also takes a Wrappable that is in neither list yet.
+  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable);
+  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable);
+  // Adds a Wrappable that a GC visit has just bound to this tracer's isolate to `unwrapped`.
+  void addUnwrapped(kj::Badge<Wrappable>, Wrappable& wrappable);
+
+  // Detaches every wrapper, and unbinds every Wrappable from the isolate, so that one that
+  // outlives the isolate does not use it. Call under the isolate lock when shutting it down.
   void clearWrappers();
 
   // Detach the V8 wrapper from every live Wrappable and release the wrapper's ownership share,
@@ -585,6 +601,14 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // List of all Wrappables for which a JavaScript wrapper exists.
   kj::List<Wrappable, &Wrappable::link> wrappers;
 
+  // List of all other Wrappables bound to this isolate: those whose wrapper was detached, and
+  // those that a GC visit bound without a wrapper.
+  kj::List<Wrappable, &Wrappable::link> unwrapped;
+
+  // Removes `wrappable` from whichever list it is in, and clears its `isolate`.
+  void unbind(Wrappable& wrappable);
+  void moveToUnwrapped(Wrappable& wrappable);
+
   // Freelists of shim objects for wrappers that were collected during a minor GC. The shim
   // objects can be reused for future allocations before the next major GC.
   //
@@ -611,7 +635,7 @@ class HeapTracer: public v8::EmbedderRootsHandler {
 
 inline void Wrappable::condemn() {
   // Only reachable from isCondemned() returning true, which implies this Wrappable is still
-  // linked into HeapTracer::wrappers, which implies attachWrapper() set `isolate`.
+  // linked into HeapTracer::wrappers, which implies it is bound.
   KJ_DASSERT(isolate != nullptr);
   ++HeapTracer::getTracer(isolate).condemnedWrapperCount;
   invalidateWeakRefs();

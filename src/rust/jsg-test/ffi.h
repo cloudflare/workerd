@@ -127,6 +127,12 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 ::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
     Isolate* isolate, ::workerd::rust::jsg::Local exception);
 
+// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which is its
+// class's descriptor if it is cloneable (see jsg::Serializer). Throws a KJ exception if it is not
+// an object.
+void mark_js_serializable(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 

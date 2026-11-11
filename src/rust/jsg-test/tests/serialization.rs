@@ -299,6 +299,72 @@ fn unserializable_values_throw_data_clone_error() {
 }
 
 #[test]
+fn classes_implemented_in_javascript_throw_data_clone_error() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        // Whatever the instance's mark, and even if it is a native error.
+        let cloneable = "({ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1, \
+                         deserialize: () => {} })";
+        for (expr, mark, class) in [
+            ("new (class Point {})()", cloneable, "Point"),
+            ("new (class Opaque {})()", "0", "Opaque"),
+            (
+                "new (class TestError extends Error {})('e')",
+                cloneable,
+                "TestError",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            let mark = eval(lock, ctx, mark);
+            Harness::mark_js_serializable(lock, value, mark);
+            ctx.set_global(lock, "instance", value);
+            let exception = serialize_exception(lock, ctx, "[instance]");
+            assert_error(
+                lock,
+                ctx,
+                exception,
+                "DataCloneError",
+                &format!(
+                    "Could not serialize object of type \"{class}\". This type does not support \
+                     serialization."
+                ),
+            );
+        }
+
+        // A mark on an object whose prototype is Object.prototype or null is ignored, as by
+        // jsg::Serializer.
+        for (expr, check) in [
+            ("({ a: 1 })", "v.a === 1"),
+            (
+                "Object.create(null)",
+                "Object.getPrototypeOf(v) === Object.prototype",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            let mark = eval(lock, ctx, "0");
+            Harness::mark_js_serializable(lock, value, mark);
+            ctx.set_global(lock, "instance", value);
+            assert_round_trip(lock, ctx, "instance", check);
+        }
+
+        // What C++ JSG writes for one: V8's tag for a host object, jsg::Serializer's tag for an
+        // instance of a class implemented in JavaScript, its length-delimited deserializeInfo, and
+        // its flags.
+        let mut data = header(lock);
+        data.extend_from_slice(b"\\\x17\x0atest:Point\x00");
+        let exception = deserialize_exception(lock, &data);
+        assert_error(
+            lock,
+            ctx,
+            exception,
+            "DataCloneError",
+            "This deserializer does not support objects implemented in JavaScript.",
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn what_serialization_runs_throws_stays_pending() {
     Harness::new().run_in_context(|lock, ctx| {
         let exception = serialize_exception(

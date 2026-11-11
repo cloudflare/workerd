@@ -53,7 +53,9 @@ const AggregateErrorCtor = AggregateError;
 const ArrayCtor = Array;
 const ArrayBufferCtor = ArrayBuffer;
 const BigIntCtor = BigInt;
+const BooleanCtor = Boolean;
 const DataViewCtor = DataView;
+const DateCtor = Date;
 const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
@@ -64,6 +66,7 @@ const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
 const RegExpCtor = RegExp;
 const SetCtor = Set;
+const StringCtor = String;
 const SymbolCtor = Symbol;
 const TypeErrorCtor = TypeError;
 const Uint8ArrayCtor = Uint8Array;
@@ -85,6 +88,7 @@ const ObjectDefineProperty = Object.defineProperty;
 const ObjectDefineProperties = Object.defineProperties;
 const ObjectFreeze = Object.freeze;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectHasOwn = Object.hasOwn;
 const ObjectKeys = Object.keys;
 const ObjectGetPrototypeOf = Object.getPrototypeOf;
 const ObjectSetPrototypeOf = Object.setPrototypeOf;
@@ -679,7 +683,9 @@ module.exports = ObjectFreeze({
   Array: ArrayCtor,
   ArrayBuffer: ArrayBufferCtor,
   BigInt: BigIntCtor,
+  Boolean: BooleanCtor,
   DataView: DataViewCtor,
+  Date: DateCtor,
   Error: ErrorCtor,
   EventTarget: EventTargetCtor,
   FinalizationRegistry: FinalizationRegistryCtor,
@@ -691,6 +697,7 @@ module.exports = ObjectFreeze({
   RangeError: RangeErrorCtor,
   RegExp: RegExpCtor,
   Set: SetCtor,
+  String: StringCtor,
   Symbol: SymbolCtor,
   TextDecoder: TextDecoderCtor,
   TextEncoder: TextEncoderCtor,
@@ -712,6 +719,7 @@ module.exports = ObjectFreeze({
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  ObjectHasOwn,
   ObjectKeys,
   ObjectGetPrototypeOf,
   ObjectSetPrototypeOf,
@@ -802,6 +810,7 @@ module.exports = ObjectFreeze({
   ArrayBufferPrototypeDetachedGet,
 
   // TypedArray
+  TypedArrayPrototype,
   TypedArrayPrototypeSet,
   TypedArrayPrototypeSlice,
   TypedArrayPrototypeSubarray,

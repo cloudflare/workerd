@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "f71e2df3c9aef5ba9da16402b46afbdffabfcca3ee6b73ce667a7147b780a453",
+  "checksum": "963feda7dd144f6fde41e1dfc484639a8eb4d6d62d3f802b01152f22559cef7e",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -155,7 +155,7 @@
       "build_script_attrs": {
         "deps": [
           {
-            "id": "cc 1.11.0",
+            "id": "cc 1.11.1",
             "target": "cc"
           },
           {
@@ -542,7 +542,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -1236,7 +1236,7 @@
       ],
       "version": "0.27.0"
     },
-    "capnp-rpc 0.27.3": {
+    "capnp-rpc 0.27.4": {
       "common_attrs": {
         "deps": [
           {
@@ -1264,8 +1264,8 @@
       "package_url": "https://github.com/capnproto/capnproto-rust",
       "repository": {
         "Http": {
-          "sha256": "629b0af76bb3b4073694783338d1844d993b13848d9b8618f67e2ed39870b4ca",
-          "url": "https://static.crates.io/crates/capnp-rpc/0.27.3/download"
+          "sha256": "6c2602b800d0dc9bef21495af8566a6a88e70ad5df46fbdf588b9cc12a20b707",
+          "url": "https://static.crates.io/crates/capnp-rpc/0.27.4/download"
         }
       },
       "targets": [
@@ -1276,7 +1276,7 @@
           }
         }
       ],
-      "version": "0.27.3"
+      "version": "0.27.4"
     },
     "capnpc 0.27.0": {
       "common_attrs": {
@@ -1357,7 +1357,7 @@
       ],
       "version": "0.2.4"
     },
-    "cc 1.11.0": {
+    "cc 1.11.1": {
       "common_attrs": {
         "crate_features": [
           "parallel"
@@ -1417,8 +1417,8 @@
       "package_url": "https://github.com/rust-lang/cc-rs",
       "repository": {
         "Http": {
-          "sha256": "375989decec1a0fa424442bed520fa12ede43a48475ce8c7417d2c69b32b5f6b",
-          "url": "https://static.crates.io/crates/cc/1.11.0/download"
+          "sha256": "4ff2a8126fff0f8c839080d619675a585e61720bb12d2baceae45769fd66f155",
+          "url": "https://static.crates.io/crates/cc/1.11.1/download"
         }
       },
       "targets": [
@@ -1429,7 +1429,7 @@
           }
         }
       ],
-      "version": "1.11.0"
+      "version": "1.11.1"
     },
     "cfg-if 1.0.5": {
       "common_attrs": {
@@ -1488,7 +1488,7 @@
       ],
       "version": "0.2.2"
     },
-    "clang-ast 0.1.35": {
+    "clang-ast 0.1.36": {
       "common_attrs": {
         "deps": [
           {
@@ -1513,8 +1513,8 @@
       "package_url": "https://github.com/dtolnay/clang-ast",
       "repository": {
         "Http": {
-          "sha256": "2d76fac0a007075fa8d38a6ec08df340bea2035cc0a6e9b0f6594bff1627692b",
-          "url": "https://static.crates.io/crates/clang-ast/0.1.35/download"
+          "sha256": "0616f43c2ab967f27d2dc2a5daff5e105d965200b4464a95071999be40564c33",
+          "url": "https://static.crates.io/crates/clang-ast/0.1.36/download"
         }
       },
       "targets": [
@@ -1525,7 +1525,7 @@
           }
         }
       ],
-      "version": "0.1.35"
+      "version": "0.1.36"
     },
     "clap 4.6.7": {
       "common_attrs": {
@@ -1639,7 +1639,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -1788,7 +1788,7 @@
             "target": "cfg_if"
           },
           {
-            "id": "itoa 1.0.18",
+            "id": "itoa 1.0.19",
             "target": "itoa"
           },
           {
@@ -1842,7 +1842,7 @@
             "target": "cfg_if"
           },
           {
-            "id": "itoa 1.0.18",
+            "id": "itoa 1.0.19",
             "target": "itoa"
           },
           {
@@ -2314,7 +2314,7 @@
             "target": "dtoa_short"
           },
           {
-            "id": "itoa 1.0.18",
+            "id": "itoa 1.0.19",
             "target": "itoa"
           },
           {
@@ -2322,7 +2322,7 @@
             "target": "phf"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           }
         ],
@@ -2366,7 +2366,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -2440,7 +2440,7 @@
             "target": "serde"
           },
           {
-            "id": "uuid 1.29.0",
+            "id": "uuid 1.29.2",
             "target": "uuid"
           }
         ],
@@ -2757,7 +2757,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -2833,7 +2833,7 @@
             "target": "serde"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           },
           {
@@ -2841,7 +2841,7 @@
             "target": "strck"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -2896,7 +2896,7 @@
             "target": "capnp"
           },
           {
-            "id": "capnp-rpc 0.27.3",
+            "id": "capnp-rpc 0.27.4",
             "target": "capnp_rpc"
           },
           {
@@ -2904,11 +2904,11 @@
             "target": "capnpc"
           },
           {
-            "id": "cc 1.11.0",
+            "id": "cc 1.11.1",
             "target": "cc"
           },
           {
-            "id": "clang-ast 0.1.35",
+            "id": "clang-ast 0.1.36",
             "target": "clang_ast"
           },
           {
@@ -2932,7 +2932,7 @@
             "target": "encoding_rs"
           },
           {
-            "id": "flate2 1.1.10",
+            "id": "flate2 1.1.11",
             "target": "flate2"
           },
           {
@@ -3000,7 +3000,7 @@
             "target": "nix"
           },
           {
-            "id": "notify 8.2.1",
+            "id": "notify 8.2.2",
             "target": "notify"
           },
           {
@@ -3161,7 +3161,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -3680,7 +3680,7 @@
       ],
       "version": "0.4.7"
     },
-    "flate2 1.1.10": {
+    "flate2 1.1.11": {
       "common_attrs": {
         "crate_features": [
           "any_impl",
@@ -3712,8 +3712,8 @@
       "package_url": "https://github.com/rust-lang/flate2-rs",
       "repository": {
         "Http": {
-          "sha256": "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb",
-          "url": "https://static.crates.io/crates/flate2/1.1.10/download"
+          "sha256": "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4",
+          "url": "https://static.crates.io/crates/flate2/1.1.11/download"
         }
       },
       "targets": [
@@ -3724,7 +3724,7 @@
           }
         }
       ],
-      "version": "1.1.10"
+      "version": "1.1.11"
     },
     "foldhash 0.2.0": {
       "common_attrs": {
@@ -4099,7 +4099,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -4932,7 +4932,7 @@
             "target": "bytes"
           },
           {
-            "id": "itoa 1.0.18",
+            "id": "itoa 1.0.19",
             "target": "itoa"
           }
         ],
@@ -5158,7 +5158,7 @@
             "target": "httpdate"
           },
           {
-            "id": "itoa 1.0.18",
+            "id": "itoa 1.0.19",
             "target": "itoa"
           },
           {
@@ -5166,7 +5166,7 @@
             "target": "pin_project_lite"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           },
           {
@@ -5636,7 +5636,7 @@
             "target": "icu_provider"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           },
           {
@@ -5884,7 +5884,7 @@
             "target": "idna_adapter"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           },
           {
@@ -6238,7 +6238,7 @@
       ],
       "version": "0.14.0"
     },
-    "itoa 1.0.18": {
+    "itoa 1.0.19": {
       "common_attrs": {
         "edition": "2021"
       },
@@ -6253,8 +6253,8 @@
       "package_url": "https://github.com/dtolnay/itoa",
       "repository": {
         "Http": {
-          "sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
-          "url": "https://static.crates.io/crates/itoa/1.0.18/download"
+          "sha256": "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4",
+          "url": "https://static.crates.io/crates/itoa/1.0.19/download"
         }
       },
       "targets": [
@@ -6265,7 +6265,7 @@
           }
         }
       ],
-      "version": "1.0.18"
+      "version": "1.0.19"
     },
     "ixdtf 0.6.7": {
       "common_attrs": {
@@ -6957,7 +6957,7 @@
             "target": "memchr"
           },
           {
-            "id": "mime 0.3.17",
+            "id": "mime 0.3.18",
             "target": "mime"
           },
           {
@@ -7097,7 +7097,7 @@
       ],
       "version": "2.8.3"
     },
-    "mime 0.3.17": {
+    "mime 0.3.18": {
       "common_attrs": {
         "edition": "2015"
       },
@@ -7112,8 +7112,8 @@
       "package_url": "https://github.com/hyperium/mime",
       "repository": {
         "Http": {
-          "sha256": "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a",
-          "url": "https://static.crates.io/crates/mime/0.3.17/download"
+          "sha256": "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1",
+          "url": "https://static.crates.io/crates/mime/0.3.18/download"
         }
       },
       "targets": [
@@ -7124,7 +7124,7 @@
           }
         }
       ],
-      "version": "0.3.17"
+      "version": "0.3.18"
     },
     "miniz_oxide 0.9.1": {
       "common_attrs": {
@@ -7374,7 +7374,7 @@
       ],
       "version": "0.31.3"
     },
-    "notify 8.2.1": {
+    "notify 8.2.2": {
       "common_attrs": {
         "crate_features": [
           "default",
@@ -7394,7 +7394,7 @@
               "target": "log"
             },
             {
-              "id": "notify-types 2.2.0",
+              "id": "notify-types 2.3.0",
               "target": "notify_types"
             },
             {
@@ -7469,8 +7469,8 @@
       "package_url": "https://github.com/notify-rs/notify.git",
       "repository": {
         "Http": {
-          "sha256": "82f812702fbc75d35416d3f884e04925be7e9498f4eceea2e24ba34559284674",
-          "url": "https://static.crates.io/crates/notify/8.2.1/download"
+          "sha256": "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab",
+          "url": "https://static.crates.io/crates/notify/8.2.2/download"
         }
       },
       "targets": [
@@ -7481,9 +7481,9 @@
           }
         }
       ],
-      "version": "8.2.1"
+      "version": "8.2.2"
     },
-    "notify-types 2.2.0": {
+    "notify-types 2.3.0": {
       "common_attrs": {
         "deps": [
           {
@@ -7504,8 +7504,8 @@
       "package_url": "https://github.com/notify-rs/notify.git",
       "repository": {
         "Http": {
-          "sha256": "0a437a9308232ce794b1e7fdf540d38ea37efc3c73492640c13b4c8568b8f108",
-          "url": "https://static.crates.io/crates/notify-types/2.2.0/download"
+          "sha256": "8c491a384baf9fec20df565cdb8138a12809d4c7439763b566eb8114c5d59979",
+          "url": "https://static.crates.io/crates/notify-types/2.3.0/download"
         }
       },
       "targets": [
@@ -7516,7 +7516,7 @@
           }
         }
       ],
-      "version": "2.2.0"
+      "version": "2.3.0"
     },
     "num-bigint 0.4.8": {
       "common_attrs": {
@@ -9240,7 +9240,7 @@
       "build_script_attrs": {
         "deps": [
           {
-            "id": "cc 1.11.0",
+            "id": "cc 1.11.1",
             "target": "cc"
           }
         ],
@@ -10479,7 +10479,7 @@
             "target": "servo_arc"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.5",
             "target": "smallvec"
           }
         ],
@@ -10701,7 +10701,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -10744,7 +10744,7 @@
         "deps": {
           "common": [
             {
-              "id": "itoa 1.0.18",
+              "id": "itoa 1.0.19",
               "target": "itoa"
             },
             {
@@ -11215,7 +11215,7 @@
       ],
       "version": "0.4.12"
     },
-    "smallvec 1.16.4": {
+    "smallvec 1.16.5": {
       "common_attrs": {
         "crate_features": [
           "const_generics",
@@ -11234,8 +11234,8 @@
       "package_url": "https://github.com/servo/rust-smallvec",
       "repository": {
         "Http": {
-          "sha256": "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8",
-          "url": "https://static.crates.io/crates/smallvec/1.16.4/download"
+          "sha256": "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46",
+          "url": "https://static.crates.io/crates/smallvec/1.16.5/download"
         }
       },
       "targets": [
@@ -11246,7 +11246,7 @@
           }
         }
       ],
-      "version": "1.16.4"
+      "version": "1.16.5"
     },
     "socket2 0.6.5": {
       "common_attrs": {
@@ -11641,7 +11641,7 @@
             "target": "swc_atoms"
           },
           {
-            "id": "swc_sourcemap 10.0.2",
+            "id": "swc_sourcemap 10.0.3",
             "target": "swc_sourcemap"
           },
           {
@@ -12611,7 +12611,7 @@
       ],
       "version": "1.0.1"
     },
-    "swc_sourcemap 10.0.2": {
+    "swc_sourcemap 10.0.3": {
       "common_attrs": {
         "deps": [
           {
@@ -12670,8 +12670,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "0c421e5e39e43a4b1b70c07922d7bffd5c22e8eff1340c0b15d0bfd0328822ee",
-          "url": "https://static.crates.io/crates/swc_sourcemap/10.0.2/download"
+          "sha256": "df9ce7c46dc9730284761c88b34d15a8cfbaf40884705f3deec65b9493765ac8",
+          "url": "https://static.crates.io/crates/swc_sourcemap/10.0.3/download"
         }
       },
       "targets": [
@@ -12682,7 +12682,7 @@
           }
         }
       ],
-      "version": "10.0.2"
+      "version": "10.0.3"
     },
     "swc_ts_fast_strip 59.0.2": {
       "common_attrs": {
@@ -12849,7 +12849,7 @@
       ],
       "version": "2.0.119"
     },
-    "syn 3.0.9": {
+    "syn 3.0.10": {
       "common_attrs": {
         "crate_features": [
           "clone-impls",
@@ -12891,8 +12891,8 @@
       "package_url": "https://github.com/dtolnay/syn",
       "repository": {
         "Http": {
-          "sha256": "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b",
-          "url": "https://static.crates.io/crates/syn/3.0.9/download"
+          "sha256": "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79",
+          "url": "https://static.crates.io/crates/syn/3.0.10/download"
         }
       },
       "targets": [
@@ -12903,7 +12903,7 @@
           }
         }
       ],
-      "version": "3.0.9"
+      "version": "3.0.10"
     },
     "synstructure 0.14.0": {
       "common_attrs": {
@@ -12921,7 +12921,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -13226,7 +13226,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -14188,7 +14188,7 @@
       ],
       "version": "1.0.0"
     },
-    "uuid 1.29.0": {
+    "uuid 1.29.2": {
       "common_attrs": {
         "crate_features": [
           "default",
@@ -14207,8 +14207,8 @@
       "package_url": "https://github.com/uuid-rs/uuid",
       "repository": {
         "Http": {
-          "sha256": "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514",
-          "url": "https://static.crates.io/crates/uuid/1.29.0/download"
+          "sha256": "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c",
+          "url": "https://static.crates.io/crates/uuid/1.29.2/download"
         }
       },
       "targets": [
@@ -14219,7 +14219,7 @@
           }
         }
       ],
-      "version": "1.29.0"
+      "version": "1.29.2"
     },
     "version_check 0.9.5": {
       "common_attrs": {
@@ -14549,7 +14549,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           },
           {
@@ -15439,7 +15439,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           },
           {
@@ -15621,7 +15621,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           },
           {
@@ -15799,7 +15799,7 @@
             "target": "quote"
           },
           {
-            "id": "syn 3.0.9",
+            "id": "syn 3.0.10",
             "target": "syn"
           }
         ],
@@ -15958,16 +15958,16 @@
     "base64 0.23.1",
     "bytes 1.12.1",
     "capnp 0.27.3",
-    "capnp-rpc 0.27.3",
+    "capnp-rpc 0.27.4",
     "capnpc 0.27.0",
-    "cc 1.11.0",
-    "clang-ast 0.1.35",
+    "cc 1.11.1",
+    "clang-ast 0.1.36",
     "clap 4.6.7",
     "codespan-reporting 0.13.1",
     "data-encoding 2.11.1",
     "dns-lookup 4.0.2",
     "encoding_rs 0.8.44",
-    "flate2 1.1.10",
+    "flate2 1.1.11",
     "foldhash 0.2.0",
     "futures 0.3.34",
     "glob 0.3.4",
@@ -15984,7 +15984,7 @@
     "libz-rs-sys 0.6.8",
     "lol_html_c_api 1.4.0",
     "nix 0.31.3",
-    "notify 8.2.1",
+    "notify 8.2.2",
     "percent-encoding 2.3.2",
     "pico-args 0.5.0",
     "proc-macro2 1.0.107",

@@ -1,36 +1,41 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
-# Two takeovers wait out a dead owner's 20 s lease. Downstream caps
-# "eternal" at 240 s; add takeovers to the simulations instead. The drain
-# tests wait out stop deadlines, so the tests run in shards that each stay
-# well under that.
-js_test(
-    name = "cluster-test",
+# One suite, split by test name: cluster-test, and cluster-cron-test, which
+# waits real minutes. cluster-test runs in shards, each of which should stay
+# well under 60 s: each test starts a cluster of its own, which takes a
+# second under TSan, the takeovers wait out a dead owner's lease, a quarter
+# of the default in cluster-test.wd-test, and the drain tests wait out stop
+# deadlines. Add takeovers to the simulations instead.
+[js_test(
+    name = name,
     size = "large",
     timeout = "eternal",
     data = [
         ":cluster-broken-deployments.wd-test",
         ":cluster-broken-node.wd-test",
+        ":cluster-cron.wd-test",
         ":cluster-deployment.wd-test",
         ":cluster-node.wd-test",
         ":cluster-on-hibernate-worker.js",
         ":cluster-router.js",
         ":cluster-test.wd-test",
         ":cluster-worker.js",
-        ":fake-s3.js",
-        ":fake-s3.wd-test",
+        ":fake-s3.mjs",
         "//src/workerd/server:workerd",
     ],
     entry_point = "cluster-test.mjs",
     env = {
+        "CLUSTER_TESTS": tests,
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
-        "WD_TEST_CONFIG": "$(rootpath :cluster-test.wd-test)",
-        "FAKE_S3_CONFIG": "$(rootpath :fake-s3.wd-test)",
+        "WD_TEST_CONFIG": "$(rootpath :%s)" % config,
         "NODE_CONFIG": "$(rootpath :cluster-node.wd-test)",
         "DEPLOYMENT_CONFIG": "$(rootpath :cluster-deployment.wd-test)",
         "BROKEN_NODE_CONFIG": "$(rootpath :cluster-broken-node.wd-test)",
         "BROKEN_DEPLOYMENTS_CONFIG": "$(rootpath :cluster-broken-deployments.wd-test)",
     },
-    shard_count = 3,
+    shard_count = shards,
     tags = ["js-test"],
-)
+) for name, tests, config, shards in [
+    ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 5),
+    ("cluster-cron-test", "^cluster: a cron", "cluster-cron.wd-test", 1),
+]]

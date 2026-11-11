@@ -224,6 +224,11 @@ class WorkerTracer final: public BaseTracer {
 
   void markUnused() override;
 
+  // Whether this invocation's events are streamed to tail workers.
+  bool hasTailStreamWriter() const {
+    return maybeTailStreamWriter != kj::none;
+  }
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;

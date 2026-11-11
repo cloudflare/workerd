@@ -356,6 +356,17 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   }
 }
 
+void mark_js_serializable(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(object));
+  KJ_REQUIRE(handle->IsObject());
+  auto key = v8::Private::ForApi(
+      isolate, ::workerd::jsg::v8StrIntern(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY));
+  ::workerd::jsg::check(handle.As<v8::Object>()->SetPrivate(
+      js.v8Context(), key, ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(mark))));
+}
+
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }

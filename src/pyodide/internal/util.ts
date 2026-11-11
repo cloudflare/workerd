@@ -135,7 +135,7 @@ export function unreachable(obj: never, msg?: string): never {
 }
 
 /**
- * Loads a Python source file (bundled as a Uint8Array) into a fresh anonymous
+ * Loads a Python source file (bundled as an ArrayBuffer) into a fresh anonymous
  * module and returns it. This is used for internal Python helpers that need to
  * be invoked from JS but should not pollute the global namespace.
  *
@@ -145,7 +145,7 @@ export function unreachable(obj: never, msg?: string): never {
 export function loadPythonMod(
   pyodide: Pyodide,
   moduleName: string,
-  source: Uint8Array
+  source: ArrayBuffer
 ): { __dict__: PyDict } {
   const mod = pyodide.runPython(
     `from types import ModuleType; ModuleType('${moduleName}')`

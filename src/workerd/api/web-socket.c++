@@ -307,6 +307,13 @@ kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> checkNonHibernatableWebSocketLi
   return kj::none;
 }
 
+kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> getOutgoingMemoryTarget(jsg::Lock& js) {
+  if (util::Autogate::isEnabled(util::AutogateKey::WEBSOCKET_OUTGOING_QUEUE_MEMORY)) {
+    return js.getExternalMemoryTarget();
+  }
+  return kj::none;
+}
+
 }  // namespace
 
 IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoContext& ioContext,
@@ -339,6 +346,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
           kj::mv(ws),
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
           package.closedOutgoingConnection)),
+      outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(ioContext.createObject<OutgoingMessagesMap>()),
       autoResponseStatusOwner(ioContext.createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
@@ -357,6 +365,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
+      outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
       autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
@@ -372,6 +381,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js, WebSocket& shell, 
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
+      outgoingMemory(getOutgoingMemoryTarget(js)),
       outgoingMessages(IoContext::current().createObject<OutgoingMessagesMap>()),
       autoResponseStatusOwner(IoContext::current().createObject<AutoResponse>()),
       autoResponseStatus(*autoResponseStatusOwner) {
@@ -985,6 +995,8 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
       "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
 
+  auto memory = chargeOutgoing(message.is<kj::String>() ? message.get<kj::String>().size()
+                                                        : message.get<kj::Array<byte>>().size());
   auto maybeOutputLock = IoContext::current().waitForOutputLocksIfNecessary();
   auto msg = [&]() -> kj::WebSocket::Message {
     KJ_SWITCH_ONEOF(message) {
@@ -1008,8 +1020,8 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
     KJ_UNREACHABLE;
   }();
 
-  outgoingMessages->insert(
-      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), getPendingAutoResponseCount()});
+  outgoingMessages->insert(GatedMessage{
+    kj::mv(maybeOutputLock), kj::mv(msg), getPendingAutoResponseCount(), kj::mv(memory)});
 
   ensurePumping(js);
 }
@@ -1358,8 +1370,10 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
     native.isPumping = false;
 
     // Either we were already through all our outgoing messages or we experienced failure/
-    // cancellation and cannot send these anyway.
-    outgoingMessages.clear();
+    // cancellation and cannot send these anyway. Replace the table rather than clearing it, which
+    // would keep its storage: after a burst, that storage could be large, and it is no longer
+    // charged once its messages are gone (see chargeOutgoing()).
+    outgoingMessages = OutgoingMessagesMap();
 
     autoResponse.isPumping = false;
 
@@ -1462,6 +1476,14 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
   } while (outgoingMessages.size() > 0);
 
   completed = true;
+}
+
+kj::Maybe<jsg::ExternalMemoryAdjustment> LegacyWebSocketAdapter::chargeOutgoing(
+    size_t payloadBytes) {
+  KJ_IF_SOME(target, outgoingMemory) {
+    return target->getAdjustment(payloadBytes + sizeof(GatedMessage));
+  }
+  return kj::none;
 }
 
 size_t LegacyWebSocketAdapter::getPendingAutoResponseCount() {

@@ -43,3 +43,5 @@ export {
   sizeIsReceiverAgnostic,
   initGetterReentersConstructor,
 } from 'reentrancy';
+
+export { structuredCloneStrategies } from 'transfer';

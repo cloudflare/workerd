@@ -1277,7 +1277,23 @@ extern "C" const char *cxx_run_test() noexcept {
             kj::arrayPtr(expected));
   KJ_ASSERT(rust::String::latin1("", 0).empty());
 
-  // ASCII prefixes around the 32-byte scan chunk.
+  {
+    std::string every_byte, want;
+    for (int b = 0; b <= 0xff; ++b) {
+      every_byte.push_back(static_cast<char>(b));
+      if (b < 0x80) {
+        want.push_back(static_cast<char>(b));
+      } else {
+        want.push_back(static_cast<char>(0xc0 | (b >> 6)));
+        want.push_back(static_cast<char>(0x80 | (b & 0x3f)));
+      }
+    }
+    rust::String converted =
+        rust::String::latin1(every_byte.data(), every_byte.size());
+    KJ_ASSERT(std::string(converted) == want);
+  }
+
+  // Non-ASCII bytes after ASCII prefixes around SIMD block sizes.
   for (size_t prefix : {0, 1, 31, 32, 33, 64, 100}) {
     std::string head(prefix, 'a'), tail(40, 'b');
     std::string input = head + "\xe9z\xff" + tail;

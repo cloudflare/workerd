@@ -1028,6 +1028,12 @@ wd_test(
 )
 
 wd_test(
+    src = "service-binding-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = ["service-binding-dispose-cancels-test.js"],
+)
+
+wd_test(
     src = "js-rpc-dispose-cancels-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -1855,6 +1861,25 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+# Checks that `workerd bench` runs its startup group with the inspector enabled.
+wd_cli_test(
+    name = "bench-inspector-test",
+    src = "bench-inspector-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "bench",
+        "$(location bench-inspector-test.wd-bench)",
+        "--quick",
+        # Port 0 binds an ephemeral port, so parallel runs do not collide.
+        "--inspector-addr=127.0.0.1:0",
+    ],
+    data = [
+        "bench-inspector-test.js",
+        "bench-inspector-test.wd-bench",
         "//src/workerd/server:workerd",
     ],
 )

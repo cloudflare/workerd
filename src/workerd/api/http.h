@@ -425,6 +425,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<QueueResult> queue(jsg::Lock& js,
       kj::String queueName,
       kj::Array<ServiceBindingQueueMessage> messages,
@@ -444,6 +446,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, noRetry);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);

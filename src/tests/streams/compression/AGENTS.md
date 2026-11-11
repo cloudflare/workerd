@@ -201,6 +201,7 @@ pedantic branches shifting anything the suite pins.
 | `pipe-integration.js` | compress→decompress chains from user and TransformStream sources; through IdentityTransformStream; bad-data propagation through both transform kinds |
 | `body-integration.js` | direct `Response(cs.readable)` body (same object, unlocked; byte-exact local arrayBuffer round trip); SELF-loopback HTTP: response-body decompression, multi-transform chain with completing pipeTo, compression/decompression pipelines into internal response bodies |
 | `unhandled-rejection.js` | #6061: no spurious unhandledrejection with Array.fromAsync |
+| `transfer.js` | structuredClone() rejects DataCloneError for both streams (parity) |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors

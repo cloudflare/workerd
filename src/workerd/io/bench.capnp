@@ -22,7 +22,12 @@ struct BenchParams {
   # Short budgets, for checking that benchmarks run rather than measuring them.
 
   defaults @2 :CaseOptions;
-  # Defaults for options that a case doesn't set.
+  # Defaults for options that a case doesn't set. `minTimeNs` and `samples` also bound a startup
+  # group (see `BenchReport.Group.startup`).
+
+  skipStartup @3 :Bool;
+  # Whether to leave out the startup groups (`--no-startup`). Read by `workerd bench` itself, which
+  # then doesn't time startup; `bench()` handlers don't see it.
 }
 
 struct CaseOptions {
@@ -66,18 +71,37 @@ struct BenchReport {
   }
 
   struct Group {
-    # The cases registered by one `bench()` handler.
+    # The cases registered by one `bench()` handler, or the startup of one service's Worker.
 
     name @0 :Text;
-    # "service" or "service:entrypoint".
+    # "service" or "service:entrypoint"; for a startup group, "service".
 
     error @1 :Text;
-    # Set if `bench()` itself failed.
+    # Set if `bench()` itself failed, or for a startup group, if the Worker failed to start.
 
     cases @2 :List(Case);
 
     overhead @3 :Overhead;
-    # The runner's own cost per call, which has been subtracted from the cases' samples.
+    # The runner's own cost per call, which has been subtracted from the cases' samples. Not set
+    # for a startup group, from which nothing is subtracted.
+
+    startup @4 :Bool;
+    # The group times starting the service's Worker in a new isolate, as a cold start does, rather
+    # than running a `bench()` handler. Each sample is one start. Starts continue until there are
+    # `samples` of them, or there are at least 5 and their "startup:total" times add up to the
+    # sampling budget (`minTimeNs`), whichever comes first.
+    #
+    # The cases are the phases of starting, named with a "startup:" prefix so that a case filter
+    # meant for a handler's cases doesn't select them:
+    #
+    # - "startup:isolate": creating the isolate.
+    # - "startup:script": compiling the script: creating the context and, for a modules Worker,
+    #   running the per-isolate bootstrap, then compiling the modules.
+    # - "startup:worker": constructing the Worker: running the top-level code with its bindings
+    #   and, for a service-worker-syntax Worker, the per-isolate bootstrap first.
+    # - "startup:total": everything from the Worker's code being available to its handlers being
+    #   found, including the steps between the phases above, such as building the module
+    #   registry.
   }
 
   struct Overhead {
