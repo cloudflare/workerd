@@ -57,10 +57,13 @@ pub enum Command {
         long_about = "Serve requests based on a config.",
         after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
             Cluster mode (`Config.cluster`, with --experimental): instances that share an \
-            S3-compatible bucket serve Durable Objects together. Each `cluster.bucketOptions` \
-            setting falls back to an environment variable: AWS_ENDPOINT_URL, AWS_REGION, \
-            AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or \
-            AWS_CREDENTIALS_FILE. The cluster port must stay on a private network; see \
+            S3-compatible (s3://) or Google Cloud Storage (gs://) bucket serve Durable Objects \
+            together. For an s3:// bucket, each `cluster.bucketOptions` setting falls back to an \
+            environment variable: AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, \
+            AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
+            takes no settings: its tokens come from the service account key \
+            GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
+            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
             --cluster-addr."
     )]
     Serve {
@@ -213,12 +216,16 @@ Publishing the version already selected by the catalog leaves the catalog unchan
 an earlier version rolls the deployment back to that version. The command prints the deployment \
 version and catalog revision.
 
-Bucket credentials use the same environment variables as the instances:
+Bucket credentials use the same environment variables as the instances. For an s3:// bucket:
     - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, plus AWS_SESSION_TOKEN for temporary credentials; or
     - AWS_CREDENTIALS_FILE.
+For a gs:// bucket:
+    - GOOGLE_APPLICATION_CREDENTIALS, a service account key; or
+    - the metadata server of the GCE VM or GKE pod the command runs on.
 
-See `bucketOptions` in workerd.capnp for credential details. --endpoint uses AWS_ENDPOINT_URL \
-when the flag is absent. --region uses AWS_REGION, then defaults to us-east-1.
+See `bucket` and `bucketOptions` in workerd.capnp for credential details. For an s3:// bucket, \
+--endpoint uses AWS_ENDPOINT_URL when the flag is absent, and --region uses AWS_REGION, then \
+defaults to us-east-1. A gs:// bucket refuses --endpoint and --region.
 
 Instances read the catalog only at startup. Restart each instance to serve a published catalog \
 revision. See `ClusterConfig` in workerd.capnp.
@@ -434,17 +441,18 @@ pub struct DeployArgs {
     #[arg(long, value_name = "name")]
     pub name: Option<String>,
 
-    /// Store the deployment in this cluster bucket: s3://<bucket>[/<prefix>]. This value matches
-    /// `cluster.bucket` in each instance's config.
+    /// Store the deployment in this cluster bucket: s3://<bucket>[/<prefix>] or
+    /// gs://<bucket>[/<prefix>]. This value matches `cluster.bucket` in each instance's config.
     #[arg(long, value_name = "url", value_parser = parse_bucket)]
     pub bucket: String,
 
-    /// Use this S3-compatible endpoint for the bucket. This value matches the instances'
+    /// Use this S3-compatible endpoint for an s3:// bucket. This value matches the instances'
     /// `aws_endpoint` setting.
     #[arg(long, value_name = "url", value_parser = parse_endpoint)]
     pub endpoint: Option<String>,
 
-    /// Use this region for the bucket. This value matches the instances' `aws_region` setting.
+    /// Use this region for an s3:// bucket. This value matches the instances' `aws_region`
+    /// setting.
     #[arg(long, value_name = "region")]
     pub region: Option<String>,
 
@@ -464,23 +472,38 @@ pub struct DeployArgs {
 }
 
 impl DeployArgs {
-    /// Build the bucket options used by the instances' `cluster.bucketOptions` setting.
-    pub fn bucket_options(&self) -> Vec<String> {
+    /// Build the bucket options used by the instances' `cluster.bucketOptions` setting. A gs://
+    /// bucket takes none, so it refuses `--endpoint` and `--region`.
+    pub fn bucket_options(&self) -> Result<Vec<String>, String> {
+        if self.bucket.starts_with("gs://") {
+            let set = [
+                ("--endpoint", self.endpoint.is_some()),
+                ("--region", self.region.is_some()),
+            ];
+            if let Some((flag, _)) = set.iter().find(|(_, set)| *set) {
+                return Err(format!(
+                    "{flag} is for an s3:// bucket. Remove it for the gs:// bucket."
+                ));
+            }
+        }
         let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
         let region = self.region.iter().map(|r| format!("aws_region={r}"));
-        endpoint.chain(region).collect()
+        Ok(endpoint.chain(region).collect())
     }
 }
 
-/// Parse `--bucket` as `s3://<bucket>[/<prefix>]`. The bucket client uses the same format for
-/// `cluster.bucket`.
+/// Parse `--bucket` as `s3://<bucket>[/<prefix>]` or `gs://<bucket>[/<prefix>]`. The bucket
+/// client uses the same format for `cluster.bucket`.
 fn parse_bucket(param: &str) -> Result<String, &'static str> {
     let rest = param
         .strip_prefix("s3://")
-        .ok_or("expected s3://<bucket>[/<prefix>]")?;
+        .or_else(|| param.strip_prefix("gs://"))
+        .ok_or("expected s3://<bucket>[/<prefix>] or gs://<bucket>[/<prefix>]")?;
     let (bucket, _) = rest.split_once('/').unwrap_or((rest, ""));
     if bucket.is_empty() || bucket.contains(char::is_whitespace) {
-        return Err("expected a bucket name in s3://<bucket>[/<prefix>]");
+        return Err(
+            "expected a bucket name in s3://<bucket>[/<prefix>] or gs://<bucket>[/<prefix>]",
+        );
     }
     Ok(param.to_owned())
 }

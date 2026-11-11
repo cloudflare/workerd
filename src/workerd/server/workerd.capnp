@@ -216,8 +216,9 @@ struct ClusterConfig {
   # setting not given falls back to an environment variable: `AWS_ENDPOINT_URL`, `AWS_REGION`,
   # `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CREDENTIALS_FILE`.
   #
-  # A `gs://` bucket takes no settings: any setting is an error that stops the instance. The
-  # `AWS_*` environment variables do not apply to it.
+  # A `gs://` bucket takes no settings: any setting is an error that stops the instance, as
+  # `workerd deploy --endpoint` or `--region` is for the command. The `AWS_*` environment
+  # variables do not apply to it.
   #
   # For either scheme, an entry without `=` is ignored.
 
