@@ -1218,10 +1218,13 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // thread, and v8::Isolate::Dispose() refuses to run on an entered isolate. Destroying the
     // SnapshotCreator exits the isolate; it does not dispose it, since we allocated the isolate.
     snapshotCreator = kj::none;
+    if (disposeHook != nullptr) {
+      disposeHook(disposeHookData, DisposeStage::DISPOSING);
+    }
     ptr->Dispose();
     ptr = nullptr;
     if (disposeHook != nullptr) {
-      disposeHook(disposeHookData);
+      disposeHook(disposeHookData, DisposeStage::DISPOSED);
     }
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();

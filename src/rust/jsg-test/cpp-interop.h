@@ -116,6 +116,10 @@ class TestCppHolder final: public jsg::Object {
 
 // How many TestCppHolders have been destroyed.
 uint32_t holdersDestroyedForTest();
+// How many TestCppHolders have been destroyed on this thread, and how many of those while an
+// isolate was entered, as one is under its lock and not once it is disposed.
+uint32_t holdersDestroyedOnThisThreadForTest();
+uint32_t holdersDestroyedOnThisThreadInAnIsolateForTest();
 
 }  // namespace workerd::cpp_interop_test
 
@@ -151,10 +155,15 @@ bool test_cpp_base_kind(v8::Isolate* isolate, const TestCppBase& base, ::rust::S
 // The base of the current simulated request, as `Worker::Api::getCtxCacheProperty()` returns the
 // `CacheContext` of the current request: during one, a new TestCppDerived; otherwise none.
 bool test_cpp_current_base(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);
+// A new TestCppHolder that has no wrapper, so its Wrappable has no isolate.
+bool test_cpp_holder_new_unwrapped(
+    v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result);
 
 // Test controls and constructors, called from Rust tests.
 void test_cpp_set_in_request(bool inRequest);
 uint32_t test_cpp_holders_destroyed();
+uint32_t test_cpp_holders_destroyed_on_this_thread();
+uint32_t test_cpp_holders_destroyed_on_this_thread_in_an_isolate();
 jsg_cpp::MaybeLocal test_cpp_greeter_new(v8::Isolate* isolate, ::rust::Str greeting);
 jsg_cpp::MaybeLocal test_cpp_derived_new(v8::Isolate* isolate);
 jsg_cpp::MaybeLocal test_cpp_holder_new(v8::Isolate* isolate);

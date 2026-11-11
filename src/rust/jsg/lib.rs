@@ -17,6 +17,7 @@ pub mod feature_flags;
 mod isolate_state;
 pub mod json;
 pub mod lenient;
+mod lock_guarded;
 pub mod macros;
 mod memory;
 pub mod modules;
@@ -45,6 +46,7 @@ pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use lock_guarded::LockGuarded;
 pub use memory::MemoryInfo;
 pub use memory::MemoryRetainer;
 pub use memory::MemoryTracker;
@@ -138,11 +140,16 @@ mod ffi {
         /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
         unsafe fn realm_drain_awaiting_lock(isolate: *mut Isolate);
 
+        /// Records that the isolate is about to be disposed; see
+        /// `IsolateState::isolate_disposing`. `~IsolateBase` calls it just before
+        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
+        /// reference to the state that `realm_detach` was given.
+        unsafe fn isolate_disposing(state: *const IsolateState);
+
         /// Frees the slots of `TracedGlobal`s, and releases the references of `Rc`s and
         /// `Weak`s, dropped after the Realm; see `IsolateState::isolate_disposed`.
-        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the hook that
-        /// `realm_detach` installs, with the reference to the state that `realm_detach` was
-        /// given.
+        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
+        /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
@@ -161,9 +168,9 @@ mod ffi {
         /// Stores `realm` in the isolate's data slot and installs the deferred action hook
         /// that calls `realm_drain_awaiting_lock`.
         pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
-        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
-        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
-        /// the isolate is disposed.
+        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that passes
+        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposing` just
+        /// before the isolate is disposed, then hands it to `isolate_disposed` once it is.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
     }
 }
@@ -1502,6 +1509,18 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
     // lives in the `Box` until `Realm::drop` detaches it.
     unsafe { ffi::realm_attach(isolate, &mut realm) };
     realm
+}
+
+/// See the bridge declaration.
+#[expect(
+    unsafe_code,
+    reason = "borrows the reference to the state that C++ holds"
+)]
+unsafe fn isolate_disposing(state: *const IsolateState) {
+    // SAFETY: `state` comes from `Arc::into_raw` in `Realm::drop`, and C++ holds it until it
+    // hands it to `isolate_disposed`, after this call.
+    let state = unsafe { &*state };
+    state.isolate_disposing();
 }
 
 /// See the bridge declaration.
