@@ -1,0 +1,109 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Top-level addEventListener() on the global scope across a startup snapshot. The runner's test()
+# fetches every case service and asserts its report; see startup-snapshot-listeners-test.js. The
+# @all-autogates variant turns the startup-snapshot autogate on, so every service here goes through
+# the zygote; the @ variant runs them as plain Workers.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "control", service = "control"),
+          (name = "error", service = "error"),
+          (name = "rejections", service = "rejections"),
+          (name = "listeners", service = "listeners"),
+          (name = "signal", service = "signal"),
+          (name = "passive", service = "passive"),
+          (name = "replaced", service = "replaced"),
+          (name = "handleEvent", service = "handleEvent"),
+        ],
+      )
+    ),
+    ( name = "control",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"control\""),
+        ],
+      )
+    ),
+    ( name = "error",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"error\""),
+        ],
+      )
+    ),
+    ( name = "rejections",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"rejections\""),
+        ],
+      )
+    ),
+    ( name = "listeners",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"listeners\""),
+        ],
+      )
+    ),
+    ( name = "signal",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"signal\""),
+        ],
+      )
+    ),
+    ( name = "passive",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"passive\""),
+        ],
+      )
+    ),
+    ( name = "replaced",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"replaced\""),
+        ],
+      )
+    ),
+    ( name = "handleEvent",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"handleEvent\""),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

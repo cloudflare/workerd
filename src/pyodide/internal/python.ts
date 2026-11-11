@@ -16,7 +16,7 @@ import {
   type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
 import {
-  entropyMountFiles,
+  entropyModuleFiles,
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
   getRandomValues,
@@ -41,6 +41,7 @@ import {
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
+import { default as introspectionSource } from 'pyodide-internal:introspection.py';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
@@ -79,6 +80,46 @@ function prepareWasmLinearMemory(
   }
   if (Module.API.version !== PyodideVersion.V0_26_0a2) {
     finalizeBootstrap(Module, customSerializedObjects);
+  }
+}
+
+// Used to hash files to ensure we don't import the wrong version of a module
+// This function is used to create a unique name for a Python module
+// that is bundled into the dedicated snapshot.
+// If the source changes, the hash will change and the module will be re-imported.
+// It may run on every startup, so it has to be cheap.
+// https://www.rfc-editor.org/rfc/rfc9923.html
+function fnv1aHash(bytes: Uint8Array): string {
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash = Math.imul(hash ^ byte, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+const INTROSPECTION_FILE_NAME = `introspection_${fnv1aHash(
+  new Uint8Array(introspectionSource)
+)}`;
+export const INTROSPECTION_MODULE = `_cloudflare.${INTROSPECTION_FILE_NAME}`;
+
+/**
+ * Writes the runtime's own Python modules as the `_cloudflare` package in the global
+ * site-packages, so they are imported like any other module. The file system isn't part of a
+ * memory snapshot, so this runs whether or not one is restored; a module imported before a snapshot
+ * was collected comes from `sys.modules` after it is restored, without reading its file.
+ */
+function mountCloudflarePackage(Module: Module): void {
+  const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
+  Module.FS.mkdir(cloudflareDir);
+  const files: [string, ArrayBuffer][] = [
+    ['__init__.py', new ArrayBuffer(0)],
+    [`${INTROSPECTION_FILE_NAME}.py`, introspectionSource],
+    ...entropyModuleFiles(),
+  ];
+  for (const [name, contents] of files) {
+    Module.FS.writeFile(`${cloudflareDir}/${name}`, new Uint8Array(contents), {
+      canOwn: true,
+    });
   }
 }
 
@@ -241,7 +282,7 @@ export async function loadPyodide(
       clearInterval
     );
 
-    entropyMountFiles(Module);
+    mountCloudflarePackage(Module);
     enterJaegerSpan('load_packages', () => {
       // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
       // preloadDynamicLibs.

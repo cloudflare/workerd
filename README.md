@@ -112,9 +112,9 @@ For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
 config. `main` is bundled with esbuild, as Wrangler does. The supported fields
 are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `durable_objects`, `exports`, `migrations`, `no_bundle`, `$schema` and, with
-`--experimental`, `kv_namespaces` and `triggers.crons`; any other field is an
-error. Each KV namespace is one Durable Object, so its throughput is that of
-one object.
+`--experimental`, `kv_namespaces`, `triggers.crons` and `queues`; any other
+field is an error. Each KV namespace is one Durable Object, so its throughput
+is that of one object.
 
 A simple "Hello World!" config file might look like:
 

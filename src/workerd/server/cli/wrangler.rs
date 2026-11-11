@@ -10,8 +10,8 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `triggers` (`crons`), `no_bundle` and `$schema`. Any other field is an error rather than
-//! silently ignored.
+//! `triggers` (`crons`), `queues`, `no_bundle` and `$schema`. Any other field is an error rather
+//! than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
@@ -20,14 +20,17 @@
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
 //! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `triggers.crons`,
 //! also `--experimental`, are the schedule of the Worker `<name>-cron` (the bundled module
-//! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. The server listens
+//! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. `queues`, also
+//! `--experimental`, are served by the Worker `<name>-queues` (the bundled module
+//! `/workerd/queues.js`): each producer is a `queue` binding to it, and each consumer delivers to
+//! this Worker; its messages are in `.wrangler/state/workerd/queues/`. The server listens
 //! on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
-//! each node's own config defines. A deployment cannot have `kv_namespaces` or
-//! `triggers.crons` yet.
+//! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`
+//! or `queues` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -73,7 +76,45 @@ struct Wrangler {
     #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
+    queues: Queues,
+    #[serde(default)]
     no_bundle: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Queues {
+    #[serde(default)]
+    producers: Vec<Producer>,
+    #[serde(default)]
+    consumers: Vec<Consumer>,
+}
+
+impl Queues {
+    fn is_empty(&self) -> bool {
+        self.producers.is_empty() && self.consumers.is_empty()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Producer {
+    binding: String,
+    queue: String,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Consumer {
+    queue: String,
+    max_batch_size: Option<u32>,
+    max_batch_timeout: Option<u32>,
+    max_retries: Option<u32>,
+    dead_letter_queue: Option<String>,
+    retry_delay: Option<u32>,
+    max_concurrency: Option<u32>,
 }
 
 #[derive(Default, Deserialize)]
@@ -271,29 +312,17 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     if serving && !classes.is_empty() {
         fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
     }
-    let kv = !wrangler.kv_namespaces.is_empty();
-    let crons = &wrangler.triggers.crons;
-
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
-    let mut services = conf
-        .reborrow()
-        .init_services(1 + do_storage + 3 * u32::from(kv) + 2 * u32::from(!crons.is_empty()));
-    // Named after the worker, so they cannot collide with it.
-    let kv_service = format!("{name}-kv");
-    if kv {
-        kv_services(
-            &mut services,
-            1 + do_storage,
-            &kv_service,
-            &storage.join("kv"),
-        )?;
-    }
-    if !crons.is_empty() {
-        let at = 1 + do_storage + 3 * u32::from(kv);
-        cron_services(&mut services, at, &name, &storage.join("cron"), crons)?;
-    }
+    let mut services = conf.reborrow().init_services(
+        1 + do_storage
+            + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
+            + 2 * u32::from(!wrangler.triggers.crons.is_empty())
+            + 2 * u32::from(!wrangler.queues.is_empty()),
+    );
+    let (kv_service, queues_service) =
+        bundled_services(&mut services, 1 + do_storage, &name, &storage, &wrangler)?;
 
     let mut service = services.reborrow().get(0);
     service.set_name(&name);
@@ -304,7 +333,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         .map_err(|e| e.to_string())?;
 
     set_modules(worker.reborrow(), &sources)?;
-    set_bindings(worker.reborrow(), &wrangler, &kv_service);
+    set_bindings(worker.reborrow(), &wrangler, &kv_service, &queues_service);
 
     if !classes.is_empty() {
         let mut ns = worker
@@ -322,11 +351,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             worker
                 .init_durable_object_storage()
                 .set_local_disk(&storage_service);
-            let mut disk_service = services.get(1);
-            disk_service.set_name(&storage_service);
-            let mut disk = disk_service.init_disk();
-            disk.set_path(storage.to_string_lossy());
-            disk.set_writable(true);
+            disk_service(services.get(1), &storage_service, &storage);
         } else {
             worker
                 .init_durable_object_storage()
@@ -366,12 +391,13 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces` and `triggers.crons` need `--experimental`, and a deployment cannot have them
-/// yet.
+/// `kv_namespaces`, `triggers.crons` and `queues` need `--experimental`, and a deployment cannot
+/// have them yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
         (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
+        (!wrangler.queues.is_empty(), "queues"),
     ] {
         match target {
             _ if !used => {}
@@ -390,6 +416,33 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
     Ok(())
 }
 
+/// The KV, cron and Queues Workers `wrangler` asks for, with their disks under `storage`, from
+/// `services[at]`; returns the names of the KV and Queues services.
+fn bundled_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    mut at: u32,
+    name: &str,
+    storage: &Path,
+    wrangler: &Wrangler,
+) -> Result<(String, String), String> {
+    // Named after the worker, so they cannot collide with it.
+    let kv = format!("{name}-kv");
+    if !wrangler.kv_namespaces.is_empty() {
+        kv_services(services, at, &kv, &storage.join("kv"))?;
+        at += 3;
+    }
+    let crons = &wrangler.triggers.crons;
+    if !crons.is_empty() {
+        cron_services(services, at, name, &storage.join("cron"), crons)?;
+        at += 2;
+    }
+    if !wrangler.queues.is_empty() {
+        let dir = storage.join("queues");
+        queues_services(services, at, name, &dir, &wrangler.queues)?;
+    }
+    Ok((kv, format!("{name}-queues")))
+}
+
 /// The KV Worker `name` at `services[at]`, then its disks under `dir`.
 fn kv_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
@@ -399,41 +452,65 @@ fn kv_services(
 ) -> Result<(), String> {
     let blobs = dir.join("blobs");
     fs::create_dir_all(&blobs).map_err(|e| format!("{}: {e}", blobs.display()))?;
-    for (i, what, path) in [(at + 1, "storage", dir), (at + 2, "blobs", &blobs)] {
-        let mut disk_service = services.reborrow().get(i);
-        disk_service.set_name(format!("{name}-{what}"));
-        let mut disk = disk_service.init_disk();
-        disk.set_path(path.to_string_lossy());
-        disk.set_writable(true);
-    }
-    kv_worker(services.reborrow().get(at), name);
-    Ok(())
-}
-
-/// The KV Worker `name`, over the disks `<name>-storage` and `<name>-blobs`.
-fn kv_worker(mut service: service::Builder<'_>, name: &str) {
-    service.set_name(name);
-    let mut w = service.init_worker();
-    let mut module = w.reborrow().init_modules(1).get(0);
-    module.set_name("kv.js");
-    module.set_bundled("/workerd/kv.js");
-    w.set_compatibility_date("2026-01-01");
-    let mut class = w.reborrow().init_durable_object_namespaces(1).get(0);
-    class.set_class_name("KVNamespace");
-    class.set_unique_key("KVNamespace");
-    class.set_enable_sql(true);
-    w.reborrow()
-        .init_durable_object_storage()
-        .set_local_disk(format!("{name}-storage"));
-    let mut bindings = w.init_bindings(2);
-    let mut shard = bindings.reborrow().get(0);
-    shard.set_name("SHARD");
-    shard
-        .init_durable_object_namespace()
-        .set_class_name("KVNamespace");
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    disk_service(
+        services.reborrow().get(at + 2),
+        &format!("{name}-blobs"),
+        &blobs,
+    );
+    let service = services.reborrow().get(at);
+    let bindings = bundled_worker(service, name, "kv.js", &[], ("SHARD", "KVNamespace"), 2);
     let mut blobs = bindings.get(1);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(format!("{name}-blobs"));
+    Ok(())
+}
+
+/// A writable disk service `name` at `path`.
+fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
+    service.set_name(name);
+    let mut disk = service.init_disk();
+    disk.set_path(path.to_string_lossy());
+    disk.set_writable(true);
+}
+
+/// The Worker `name` of the bundled module `/workerd/<module>`, with `flags` and the
+/// SQLite-backed Durable Object class `class` on the disk `<name>-storage`, bound as `binding`:
+/// the first of its `n` bindings, all returned.
+fn bundled_worker<'a>(
+    mut service: service::Builder<'a>,
+    name: &str,
+    module: &str,
+    flags: &[&str],
+    (binding, class): (&str, &str),
+    n: u32,
+) -> capnp::struct_list::Builder<'a, worker::binding::Owned> {
+    service.set_name(name);
+    let mut w = service.init_worker();
+    let mut m = w.reborrow().init_modules(1).get(0);
+    m.set_name(module);
+    m.set_bundled(format!("/workerd/{module}"));
+    w.set_compatibility_date("2026-01-01");
+    let mut list = w.reborrow().init_compatibility_flags(flags.len() as u32);
+    for (i, flag) in (0u32..).zip(flags) {
+        list.set(i, flag);
+    }
+    let mut ns = w.reborrow().init_durable_object_namespaces(1).get(0);
+    ns.set_class_name(class);
+    ns.set_unique_key(class);
+    ns.set_enable_sql(true);
+    w.reborrow()
+        .init_durable_object_storage()
+        .set_local_disk(format!("{name}-storage"));
+    let mut bindings = w.init_bindings(n);
+    let mut b = bindings.reborrow().get(0);
+    b.set_name(binding);
+    b.init_durable_object_namespace().set_class_name(class);
+    bindings
 }
 
 /// The cron Worker `<target>-cron` at `services[at]`, running `crons` on the Worker `target`,
@@ -453,34 +530,15 @@ fn cron_services(
     }
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-cron");
-    let mut disk_service = services.reborrow().get(at + 1);
-    disk_service.set_name(format!("{name}-storage"));
-    let mut disk = disk_service.init_disk();
-    disk.set_path(dir.to_string_lossy());
-    disk.set_writable(true);
-    let mut service = services.reborrow().get(at);
-    service.set_name(&name);
-    let mut w = service.init_worker();
-    let mut module = w.reborrow().init_modules(1).get(0);
-    module.set_name("cron.js");
-    module.set_bundled("/workerd/cron.js");
-    w.set_compatibility_date("2026-01-01");
-    w.reborrow()
-        .init_compatibility_flags(1)
-        .set(0, "service_binding_extra_handlers");
-    let mut class = w.reborrow().init_durable_object_namespaces(1).get(0);
-    class.set_class_name("Schedule");
-    class.set_unique_key("Schedule");
-    class.set_enable_sql(true);
-    w.reborrow()
-        .init_durable_object_storage()
-        .set_local_disk(format!("{name}-storage"));
-    let mut bindings = w.init_bindings(3);
-    let mut schedule = bindings.reborrow().get(0);
-    schedule.set_name("SCHEDULE");
-    schedule
-        .init_durable_object_namespace()
-        .set_class_name("Schedule");
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    let flags = ["service_binding_extra_handlers"];
+    let service = services.reborrow().get(at);
+    let class = ("SCHEDULE", "Schedule");
+    let mut bindings = bundled_worker(service, &name, "cron.js", &flags, class, 3);
     let mut list = bindings.reborrow().get(1);
     list.set_name("CRONS");
     list.set_json(serde_json::json!({ target: crons }).to_string());
@@ -490,13 +548,20 @@ fn cron_services(
     Ok(())
 }
 
-fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, kv_service: &str) {
+fn set_bindings(
+    worker: worker::Builder<'_>,
+    wrangler: &Wrangler,
+    kv_service: &str,
+    queues_service: &str,
+) {
     let kv = &wrangler.kv_namespaces;
+    let producers = &wrangler.queues.producers;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
-    let mut bs = worker.init_bindings((wrangler.vars.len() + do_bindings.len() + kv.len()) as u32);
+    let n = wrangler.vars.len() + do_bindings.len() + kv.len();
+    let mut bs = worker.init_bindings((n + producers.len()) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -522,6 +587,71 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, kv_service: &s
         let props = serde_json::json!({ "namespace": id });
         designator.init_props().set_json(props.to_string());
     }
+    for (i, p) in producers.iter().enumerate() {
+        let mut b = bs.reborrow().get((n + i) as u32);
+        b.set_name(&p.binding);
+        let mut designator = b.init_queue();
+        designator.set_name(queues_service);
+        let props = serde_json::json!({ "queue": p.queue });
+        designator.init_props().set_json(props.to_string());
+    }
+}
+
+/// The Queues Worker `<target>-queues` at `services[at]`, then its disk under `dir`. Its
+/// consumers deliver to `target`, bound as `worker`.
+fn queues_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    target: &str,
+    dir: &Path,
+    queues: &Queues,
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let name = format!("{target}-queues");
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    let mut consumers = serde_json::Map::new();
+    for c in &queues.consumers {
+        let mut settings = serde_json::json!({ "consumer": "worker" });
+        for (key, v) in [
+            ("maxBatchSize", c.max_batch_size),
+            ("maxBatchTimeout", c.max_batch_timeout),
+            ("maxRetries", c.max_retries),
+            ("retryDelay", c.retry_delay),
+            ("maxConcurrency", c.max_concurrency),
+        ] {
+            if let Some(v) = v {
+                settings[key] = v.into();
+            }
+        }
+        if let Some(dlq) = &c.dead_letter_queue {
+            settings["deadLetterQueue"] = dlq.as_str().into();
+        }
+        if consumers.insert(c.queue.clone(), settings).is_some() {
+            return Err(format!(
+                "queues: queue \"{}\" has more than one consumer",
+                c.queue
+            ));
+        }
+    }
+    let consumed = !consumers.is_empty();
+    let flags = ["service_binding_extra_handlers"];
+    let service = services.reborrow().get(at);
+    let class = ("SHARD", "QueueShard");
+    let n = 2 + u32::from(consumed);
+    let mut bindings = bundled_worker(service, &name, "queues.js", &flags, class, n);
+    let mut list = bindings.reborrow().get(1);
+    list.set_name("CONSUMERS");
+    list.set_json(serde_json::Value::Object(consumers).to_string());
+    if consumed {
+        let mut binding = bindings.get(2);
+        binding.set_name("worker");
+        binding.init_service().set_name(target);
+    }
+    Ok(())
 }
 
 type Source = (String, Kind, Vec<u8>);

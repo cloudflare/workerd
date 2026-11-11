@@ -581,6 +581,22 @@ constructor and initializes it once the whole value has been read, with JavaScri
 Internal fields: slot 0 = `WORKERD_WRAPPABLE_TAG`, slot 1 = `Wrappable*` pointer.
 Check: `jsg::Wrappable::isWorkerdApiObject(object)`.
 
+## Startup Snapshot
+
+A zygote isolate (built by a `v8::SnapshotCreator`) evaluates a Worker's top level and
+serializes its context; the Worker's own isolate is created from the blob and skips evaluation.
+Guide: [docs/startup-snapshot.md](../../../docs/startup-snapshot.md). Declarations:
+`snapshot.h` (`SnapshotArtifact`, serializer callbacks) and the snapshot section of `setup.h`.
+
+| Declaration on a resource type | Meaning |
+| --- | --- |
+| `static constexpr bool jsgSnapshotStateless = true;` | Any fresh instance is interchangeable: the snapshot records only the wrapper's tag, and the restored wrapper gets an instance from the type's `Lock&` (or default) constructor |
+| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles, `jsg::Ref` or IoContext); called in the zygote on the original and again per started worker on the stored copy |
+| neither | Not transferable: a Worker whose top level leaves an instance reachable starts without a snapshot |
+
+Both run outside any IoContext and must not throw. `IsolateBase::isPreparingSnapshot()` and
+`isStartingFromSnapshot()` tell which side of the pipeline code is on.
+
 ## BackingStore Factory Methods
 
 | Method                                             | Template Param  | Description                                       |

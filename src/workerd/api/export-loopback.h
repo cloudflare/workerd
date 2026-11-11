@@ -59,6 +59,10 @@ class LoopbackServiceStub: public Fetcher {
   // Fetcher. We want people to explicitly specialize the entrypoint with props before sending
   // it off to other services.
 
+  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
+  // so never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(LoopbackServiceStub, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Fetcher);
 
@@ -128,6 +132,10 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
   // Create a specialized DurableObjectClass which can be passed over RPC.
   jsg::Ref<DurableObjectClass> call(jsg::Lock& js, Options options);
 
+  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
+  // so never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(LoopbackDurableObjectClass) {
     JSG_INHERIT(DurableObjectClass);
     JSG_CALLABLE(call);
@@ -186,6 +194,10 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
   // serializing the loopback namespace would mean serializing the namespace stub, *not* the
   // class stub. They are different things, and you might want to serialize either one.
 
+  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
+  // so never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(LoopbackDurableObjectNamespace) {
     JSG_INHERIT(DurableObjectNamespace);
     JSG_CALLABLE(call);
@@ -216,6 +228,10 @@ class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
   jsg::Ref<DurableObjectClass> call(jsg::Lock& js, LoopbackDurableObjectClass::Options options) {
     return loopbackClass->call(js, kj::mv(options));
   }
+
+  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
+  // so never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(LoopbackColoLocalActorNamespace) {
     JSG_INHERIT(ColoLocalActorNamespace);

@@ -41,4 +41,20 @@ jsg::Ref<DurableObjectClass> LoopbackDurableObjectClass::call(jsg::Lock& js, Opt
   return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channelObj)));
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackServiceStub::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectClass::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectNamespace::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackColoLocalActorNamespace::snapshotClone() const {
+  return kj::none;
+}
+
 }  // namespace workerd::api

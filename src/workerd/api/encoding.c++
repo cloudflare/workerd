@@ -498,18 +498,38 @@ jsg::JsString TextDecoder::decode(jsg::Lock& js,
     jsg::Optional<DecodeOptions> maybeOptions) {
   auto options = maybeOptions.orDefault(DEFAULT_OPTIONS);
   auto& input = maybeInput.orDefault(EMPTY);
+  midStream = options.stream;
   return JSG_REQUIRE_NONNULL(
       getImpl().decode(js, input, !options.stream), TypeError, "Failed to decode input.");
 }
 
 kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
     jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush) {
+  midStream = !flush;
   KJ_SWITCH_ONEOF(decoder) {
     KJ_CASE_ONEOF(dec, LegacyDecoder) {
       return dec.decode(js, buffer, flush);
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
       return dec.decode(js, buffer, flush);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> TextDecoder::snapshotClone() const {
+  if (midStream) return kj::none;
+  KJ_SWITCH_ONEOF(decoder) {
+    KJ_CASE_ONEOF(dec, LegacyDecoder) {
+      return ownAsWrappable(kj::refcounted<TextDecoder>(
+          LegacyDecoder(dec.getEncoding(), DecoderFatal(ctorOptions.fatal)), ctorOptions));
+    }
+    KJ_CASE_ONEOF(dec, IcuDecoder) {
+      KJ_IF_SOME(fresh,
+          IcuDecoder::create(dec.getEncoding(), ctorOptions.fatal, ctorOptions.ignoreBOM)) {
+        return ownAsWrappable(kj::refcounted<TextDecoder>(kj::mv(fresh), ctorOptions));
+      }
+      return kj::none;
     }
   }
   KJ_UNREACHABLE;

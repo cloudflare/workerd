@@ -18,6 +18,8 @@
 
 #include <kj/function.h>
 
+#include <concepts>
+
 namespace workerd::jsg {
 
 template <typename Signature>
@@ -57,6 +59,14 @@ class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
 template <typename Signature, typename Impl>
 class WrappableFunctionImpl;
 
+// Whether a function can be carried through a startup snapshot (see snapshotClone() below).
+// A named concept rather than an inline requires-expression: Apple clang 21 crashes dumping the
+// AST of an instantiated requires-expression whose compound requirement failed substitution.
+template <typename Impl>
+concept SnapshotClonable = requires(const Impl& f) {
+  { f.clone() } -> std::same_as<Impl>;
+};
+
 template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Args...)> {
  public:
@@ -72,6 +82,19 @@ class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Ar
     // Moving out of a kj::Maybe leaves it empty, so `taken` becomes the only owner.
     kj::Maybe<Impl> taken = kj::mv(func);
     return require(taken)(js, kj::fwd<Args>(args)...);
+  }
+
+  // A startup snapshot can carry the function only if the function opts in by providing
+  // `Impl clone() const`, which copies its state without referring to anything specific to the
+  // isolate it was created in. Most functions capture handles, references or pointers into the
+  // isolate, so copying them is not generally safe.
+  kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override {
+    if constexpr (SnapshotClonable<Impl>) {
+      KJ_IF_SOME(f, func) {
+        return kj::Own<Wrappable>(kj::refcounted<WrappableFunctionImpl>(f.clone()));
+      }
+    }
+    return kj::none;
   }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
@@ -292,6 +315,24 @@ class Function<Ret(Args...)> {
     }
   }
 
+  // The `this` value a JS-backed function is called with, or none for a native function.
+  kj::Maybe<v8::Local<v8::Value>> tryGetReceiver(v8::Isolate* isolate) {
+    KJ_IF_SOME(i, impl.template tryGet<JsImpl>()) {
+      return i.receiver.getHandle(isolate);
+    }
+    return kj::none;
+  }
+
+  // Visit underlying v8::Global handles for V8 snapshot creation. Only meaningful for JS-backed
+  // functions.
+  template <typename Fn>
+  inline void visitHandlesForSnapshot(Fn&& fn) {
+    KJ_IF_SOME(js, impl.template tryGet<JsImpl>()) {
+      js.receiver.visitHandle(fn);
+      js.handle.visitHandle(fn);
+    }
+  }
+
   JSG_MEMORY_INFO(Function) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(ref, Ref<NativeFunction>) {
@@ -403,10 +444,16 @@ class FunctionWrapper {
       //   but I'd like to do it as a separate commit which can be reverted. We also currently fail
       //   to set this on constructors and methods (see resource.h). Remember not to count
       //   injected parameters!
+      // The trampolines end up in the heap as the function's C++ callback; a startup snapshot
+      // can only serialize them if they are in the isolate's external-reference table.
       using Callback = FunctorCallback<TypeWrapper, Signature>;
       if (once) {
+        isolateRegisterExternalReference(
+            isolate, reinterpret_cast<intptr_t>(&Callback::template callback<true>));
         return check(v8::Function::New(context, &Callback::template callback<true>, data));
       }
+      isolateRegisterExternalReference(
+          isolate, reinterpret_cast<intptr_t>(&Callback::template callback<false>));
       return check(v8::Function::New(context, &Callback::template callback<false>, data));
     });
   }
