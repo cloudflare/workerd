@@ -6,6 +6,9 @@
 //! requests one at a time, and the config loading the session calls back into.
 
 use std::path::Path;
+use std::pin::Pin;
+use std::pin::pin;
+use std::task::Poll;
 
 use kj_rs::KjOwn;
 use tokio::sync::mpsc;
@@ -26,10 +29,12 @@ const MAX_COMPLETIONS: usize = 200;
 
 /// What the console asks of the session.
 pub enum Request {
-    /// The text to print for `input`; an error if the session failed to evaluate it.
+    /// What became of `input`; an error if the session failed to evaluate it. A send on `abandon`
+    /// while the input awaits abandons it.
     Evaluate {
         input: String,
-        reply: oneshot::Sender<Result<String, String>>,
+        abandon: oneshot::Receiver<()>,
+        reply: oneshot::Sender<Result<Evaluated, String>>,
     },
     /// Tab completion in `line` with the cursor at byte offset `cursor`.
     Complete {
@@ -37,6 +42,14 @@ pub enum Request {
         cursor: usize,
         reply: oneshot::Sender<Completion>,
     },
+}
+
+/// What became of an input.
+pub enum Evaluated {
+    /// The text to print: the rendered result, or "Uncaught " followed by the exception.
+    Printed(String),
+    /// The session stopped awaiting the input. Its promise and what the input started go on.
+    Abandoned,
 }
 
 /// Serves `requests` until the console drops its sender, then drains the session.
@@ -47,9 +60,12 @@ pub async fn serve(
     while let Some(request) = requests.recv().await {
         // A console that gave up on the reply has ended; its next `recv` sees that.
         match request {
-            Request::Evaluate { input, reply } => {
-                let result = bridge::evaluate(session.as_mut(), input::candidates(&input)).await;
-                let _ = reply.send(result.map_err(|error| error.description().to_owned()));
+            Request::Evaluate {
+                input,
+                abandon,
+                reply,
+            } => {
+                let _ = reply.send(evaluate(session.as_mut(), &input, abandon).await);
             }
             Request::Complete {
                 line,
@@ -64,12 +80,38 @@ pub async fn serve(
     bridge::drain(session).await
 }
 
+/// Evaluates `input`, unless abandoned first. Abandoning drops the evaluation, which stops awaiting
+/// the input's promise.
+async fn evaluate(
+    session: Pin<&mut ReplSession>,
+    input: &str,
+    abandon: oneshot::Receiver<()>,
+) -> Result<Evaluated, String> {
+    let mut evaluation = pin!(bridge::evaluate(session, input::candidates(input)));
+    // None once the console has dropped its sender without sending: it never abandons then.
+    let mut abandon = Some(abandon);
+    std::future::poll_fn(|cx| {
+        if let Poll::Ready(result) = evaluation.as_mut().poll(cx) {
+            return Poll::Ready(
+                result
+                    .map(Evaluated::Printed)
+                    .map_err(|error| error.description().to_owned()),
+            );
+        }
+        if let Some(receiver) = abandon.as_mut() {
+            match Pin::new(receiver).poll(cx) {
+                Poll::Ready(Ok(())) => return Poll::Ready(Ok(Evaluated::Abandoned)),
+                Poll::Ready(Err(_)) => abandon = None,
+                Poll::Pending => {}
+            }
+        }
+        Poll::Pending
+    })
+    .await
+}
+
 /// The global or property names that complete the name before the cursor.
-async fn complete(
-    session: std::pin::Pin<&mut ReplSession>,
-    line: &str,
-    cursor: usize,
-) -> Completion {
+async fn complete(session: Pin<&mut ReplSession>, line: &str, cursor: usize) -> Completion {
     let Some(target) = input::completion_target(line, cursor) else {
         return Completion {
             start: cursor,

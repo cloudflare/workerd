@@ -28,6 +28,9 @@ use super::editor::Line;
 #[cfg(unix)]
 use super::history::HistoryFile;
 use super::input::Scanner;
+#[cfg(unix)]
+use super::interrupt::AbandonOnInterrupt;
+use super::session::Evaluated;
 use super::session::Request;
 
 const PROMPT: &str = "> ";
@@ -63,7 +66,8 @@ does not; assign instead, as in `({ a } = await f())`.
 Up and Down recall earlier lines, which are saved in ~/.workerd_repl_history. Set
 WORKERD_REPL_HISTORY to save them in another file, or to the empty string not to save them.
 
-Ctrl+C abandons the input being typed. While an input runs, Ctrl+C ends the REPL.
+Ctrl+C abandons the input being typed. On Unix, while an input awaits, Ctrl+C stops awaiting
+it; while JavaScript runs without awaiting, as a loop does, press Ctrl+C twice to end the REPL.
 ";
 
 /// Whether to edit lines on a terminal: stdin and stderr, where the editor draws, are both
@@ -231,18 +235,30 @@ impl Console {
     /// Prints what the session makes of `input`. The console ends if the session has.
     fn evaluate(&self, input: String) -> Next {
         let (reply, result) = oneshot::channel();
-        if self
-            .requests
-            .send(Request::Evaluate { input, reply })
-            .is_err()
-        {
+        let (abandon, abandoned) = oneshot::channel();
+        // On Unix, Ctrl+C abandons the input while it awaits. Elsewhere it ends the REPL.
+        #[cfg(unix)]
+        let _interrupt = AbandonOnInterrupt::new(abandon);
+        #[cfg(not(unix))]
+        drop(abandon);
+        let request = Request::Evaluate {
+            input,
+            abandon: abandoned,
+            reply,
+        };
+        if self.requests.send(request).is_err() {
             return Next::Exit;
         }
         match result.blocking_recv() {
-            Ok(Ok(text)) => {
+            Ok(Ok(Evaluated::Printed(text))) => {
                 let mut stdout = io::stdout().lock();
                 // A closed stdout leaves nothing to print to; the inputs may still have effects.
                 let _ = writeln!(stdout, "{text}").and_then(|()| stdout.flush());
+            }
+            Ok(Ok(Evaluated::Abandoned)) => {
+                eprintln!(
+                    "Interrupted: no longer awaiting the input, whose promise may still settle."
+                );
             }
             Ok(Err(error)) => eprintln!("Error: {error}"),
             Err(_) => return Next::Exit,

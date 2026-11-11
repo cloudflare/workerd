@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { env } from 'node:process';
+import { env, platform } from 'node:process';
 import { test } from 'node:test';
 import assert from 'node:assert';
 
@@ -139,12 +139,18 @@ function startRepl(args) {
   });
   const exited = new Promise((resolve, reject) => {
     child.on('error', reject);
-    child.on('close', (code) => resolve(code));
+    child.on('close', (code, signal) => resolve({ code, signal }));
   });
   return {
     output,
+    // Resolves to the exit status and the signal that ended the REPL, if one did.
+    exited,
     send(line) {
       child.stdin.write(`${line}\n`);
+    },
+    // Presses Ctrl+C, as the terminal would signal it.
+    interrupt() {
+      child.kill('SIGINT');
     },
     // Resolves once `until(output)` holds.
     waitFor(until) {
@@ -154,9 +160,9 @@ function startRepl(args) {
       });
     },
     // Ends the input; the exit status.
-    end() {
+    async end() {
       child.stdin.end();
-      return exited;
+      return (await exited).code;
     },
   };
 }
@@ -206,3 +212,33 @@ test('a watched config reloads when its file changes', async () => {
 
   assert.strictEqual(await repl.end(), 0, repl.output.stderr);
 });
+
+const unixOnly = {
+  skip: platform === 'win32' && 'Ctrl+C abandons an input only on Unix',
+};
+
+test('Ctrl+C stops awaiting an input', unixOnly, async () => {
+  const repl = startRepl([]);
+  repl.send("console.log('awaiting'); await new Promise(() => {})");
+  await repl.waitFor(({ stdout }) => stdout.includes('awaiting'));
+  repl.interrupt();
+  await repl.waitFor(({ stderr }) => stderr.includes('Interrupted: '));
+  repl.send('1 + 1');
+  await repl.waitFor(({ stdout }) => stdout.endsWith('2\n'));
+  assert.strictEqual(await repl.end(), 0, repl.output.stderr);
+});
+
+test(
+  'a second Ctrl+C ends the REPL while an input runs without awaiting',
+  unixOnly,
+  async () => {
+    const repl = startRepl([]);
+    repl.send("console.log('spinning'); while (true) {}");
+    await repl.waitFor(({ stdout }) => stdout.includes('spinning'));
+    // Signals that arrive together are taken as one, so this signals until the REPL ends.
+    const interrupting = setInterval(() => repl.interrupt(), 10);
+    const exit = await repl.exited;
+    clearInterval(interrupting);
+    assert.deepStrictEqual(exit, { code: null, signal: 'SIGINT' });
+  }
+);
