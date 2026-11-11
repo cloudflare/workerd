@@ -20,6 +20,7 @@
 #include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
+#include <workerd/server/queues/queues_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -53,6 +54,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     kj::HashMap<kj::StringPtr, kj::StringPtr> map;
     map.insert("/workerd/kv.js"_kj, KV_JS);
     map.insert("/workerd/cron.js"_kj, CRON_JS);
+    map.insert("/workerd/queues.js"_kj, QUEUES_JS);
     return map;
   }();
   return bundled.find(name).map([](auto& source) { return source; });

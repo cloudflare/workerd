@@ -536,6 +536,74 @@ fn triggers_crons_run_on_the_cron_worker() {
 }
 
 #[test]
+fn queues_run_on_the_queues_worker() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "queues": {
+                   "producers": [{ "binding": "JOBS", "queue": "jobs" }],
+                   "consumers": [{ "queue": "jobs", "max_batch_size": 4,
+                                   "dead_letter_queue": "dead" }] } }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("queues"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-queues", "app-queues-storage"]);
+    let bindings_of = |i| {
+        let service::Which::Worker(w) = services.get(i).which().unwrap() else {
+            panic!("not a worker");
+        };
+        w.unwrap().get_bindings().unwrap()
+    };
+    let worker::binding::Which::Queue(queue) = bindings_of(0).get(0).which().unwrap() else {
+        panic!("JOBS is not a queue");
+    };
+    let queue = queue.unwrap();
+    assert_eq!(queue.get_name().unwrap().to_str().unwrap(), "app-queues");
+    let worker::binding::Which::Json(consumers) = bindings_of(1).get(1).which().unwrap() else {
+        panic!("CONSUMERS is not JSON");
+    };
+    assert_eq!(
+        consumers.unwrap().to_str().unwrap(),
+        r#"{"jobs":{"consumer":"worker","deadLetterQueue":"dead","maxBatchSize":4}}"#
+    );
+    let worker = bindings_of(1).get(2);
+    assert_eq!(worker.get_name().unwrap().to_str().unwrap(), "worker");
+}
+
+#[test]
+fn a_queue_with_two_consumers_is_an_error() {
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "queues": { "consumers": [{ "queue": "jobs" }, { "queue": "jobs" }] } }"#,
+        ),
+        ("index.js", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(
+        error.contains(r#"queue "jobs" has more than one consumer"#),
+        "{error}"
+    );
+}
+
+#[test]
 fn unbundled_typescript_main_is_an_error() {
     let error = load_project(&[
         (
