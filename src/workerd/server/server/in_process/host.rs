@@ -23,6 +23,7 @@ use std::rc::Weak;
 use std::time::SystemTime;
 
 use futures::future::Either;
+use futures::future::LocalBoxFuture;
 use kj_rs::KjOwn;
 use tokio::sync::Notify;
 use worker::AlarmResult;
@@ -203,6 +204,18 @@ impl Channel for HostChannel {
             events: self.events,
         }
         .into_kj())
+    }
+
+    fn evict_for_test(&self, hibernate: bool) -> LocalBoxFuture<'_, Result<()>> {
+        let inner = self
+            .live
+            .borrow()
+            .as_ref()
+            .map(|live| Rc::clone(&live.inner));
+        Box::pin(async move {
+            let inner = inner.ok_or_else(|| self.revocation.error())?;
+            self.revocation.guard(inner.evict_for_test(hibernate)).await
+        })
     }
 
     fn require_allows_transfer(&self) -> Result<()> {

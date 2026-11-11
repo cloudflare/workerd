@@ -30,6 +30,29 @@ jsg::Ref<api::Fetcher> ReplServer::socket(jsg::Lock& js, kj::String name) {
   return js.alloc<api::Fetcher>(IoContext::current().addObject(host->socket(name)));
 }
 
+namespace {
+ReplActorAddress actorAddress(
+    kj::StringPtr service, kj::StringPtr className, const ReplServer::DurableObjectKey& key) {
+  ReplActorAddress address{.service = service, .className = className};
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(name, kj::String) {
+      address.name = name;
+    }
+    KJ_CASE_ONEOF(names, ReplServer::DurableObjectName) {
+      address.name = names.name;
+      address.id = names.id;
+    }
+  }
+  return address;
+}
+}  // namespace
+
+jsg::Ref<api::Fetcher> ReplServer::durableObject(
+    jsg::Lock& js, kj::String service, kj::String className, DurableObjectKey key) {
+  auto channel = host->durableObject(actorAddress(service, className, key));
+  return js.alloc<api::Fetcher>(IoContext::current().addObject(kj::mv(channel)));
+}
+
 jsg::Promise<jsg::Ref<ReplServer>> ReplServer::reload(jsg::Lock& js) {
   // Like closing, reloading starts and ends isolates, on the event loop.
   return IoContext::current().awaitIo(
@@ -55,6 +78,12 @@ jsg::Promise<jsg::Ref<ReplServer>> ReplControl::loadConfig(
     self->servers.add(handle.addRef());
     return handle;
   });
+}
+
+jsg::Promise<void> ReplControl::evict(jsg::Lock& js,
+    jsg::Ref<api::Fetcher> stub,
+    jsg::Optional<api::UnsafeModule::EvictOptions> options) {
+  return js.alloc<api::UnsafeModule>()->evict(js, kj::mv(stub), kj::mv(options));
 }
 
 kj::Array<jsg::Ref<ReplServer>> ReplControl::getServers() {

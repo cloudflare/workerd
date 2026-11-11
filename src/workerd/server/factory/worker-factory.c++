@@ -1293,6 +1293,13 @@ kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex) {
       kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none)));
 }
 
+kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromName(kj::str(name)));
+}
+kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromString(kj::str(hex)));
+}
+
 // =======================================================================================
 // CompiledWorker
 

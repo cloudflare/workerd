@@ -129,6 +129,8 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
       kj::Maybe<kj::StringPtr> entrypoint,
       kj::Maybe<Frankenvalue> props) override;
   kj::Rc<IoChannelFactory::SubrequestChannel> socket(kj::StringPtr name) override;
+  kj::Rc<IoChannelFactory::SubrequestChannel> durableObject(
+      const ReplActorAddress& address) override;
   kj::Promise<void> reload() override;
   kj::Promise<void> close() override;
 

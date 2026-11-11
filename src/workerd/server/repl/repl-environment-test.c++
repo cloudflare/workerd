@@ -114,6 +114,47 @@ kj::String configAnswering(kj::StringPtr text) {
 ))");
 }
 
+// A config whose worker exports a Durable Object class, Counter, stored in `storageDir`, and an
+// ephemeral one, Scratch.
+kj::String durableObjectsConfig(kj::StringPtr storageDir) {
+  return kj::str(R"((
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [
+          ( name = "worker.js",
+            esModule =
+              `import { DurableObject } from "cloudflare:workers";
+              `export class Counter extends DurableObject {
+              `  hits = 0;
+              `  async increment() {
+              `    const total = ((await this.ctx.storage.get("total")) ?? 0) + 1;
+              `    await this.ctx.storage.put("total", total);
+              `    return `${++this.hits}/${total}`;
+              `  }
+              `  id() { return this.ctx.id.toString(); }
+              `}
+              `export class Scratch extends DurableObject {
+              `  hits = 0;
+              `  hit() { return ++this.hits; }
+              `}
+              `export default { fetch() { return new Response("ok"); } };
+          ),
+        ],
+        durableObjectNamespaces = [
+          (className = "Counter", uniqueKey = "counter"),
+          (className = "Scratch", ephemeralLocal = void),
+        ],
+        durableObjectStorage = (localDisk = "storage"),
+      ),
+    ),
+    (name = "storage", disk = (path = ")",
+      storageDir, R"(", writable = true)),
+  ],
+))");
+}
+
 // A ReplEnvironment on the test thread's event loop, whose configs are the texts above by name.
 // Its loader's watches report a change when the test calls changeWatchedFiles().
 struct Fixture final: public ReplConfigLoader {
@@ -473,6 +514,61 @@ KJ_TEST("REPL revokes what a closed server handed out") {
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await main.fetch('http://x/')"), closed);
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await api.add(1, 2)"), closed);
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('main')"), closed);
+}
+
+KJ_TEST("REPL reaches a config's Durable Objects and evicts them") {
+  // For the ephemeral class.
+  Fixture fixture({.experimental = true});
+  const char* tmpdir = getenv("TEST_TMPDIR");
+  auto storageDir = kj::str(tmpdir == nullptr ? "/tmp" : tmpdir, "/repl-durable-objects");
+  auto storagePath = fixture.fs->getCurrentPath().evalNative(storageDir);
+  // Without what a run before this one stored.
+  fixture.fs->getRoot().tryRemove(storagePath);
+  fixture.fs->getRoot().openSubdir(
+      storagePath, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
+  fixture.setConfig("durable-objects.capnp", durableObjectsConfig(storageDir));
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("s = await workerd.loadConfig('durable-objects.capnp')"), "ReplServer");
+
+  fixture.eval("alice = s.durableObject('main', 'Counter', 'alice')");
+  KJ_EXPECT(fixture.evalAwait("await alice.increment()") == "'1/1'");
+  KJ_EXPECT(fixture.evalAwait("await alice.increment()") == "'2/2'");
+  // The same object, by name or by id; another name names another.
+  KJ_EXPECT(
+      fixture.evalAwait(
+          "await s.durableObject('main', 'Counter', { name: 'alice' }).increment()") == "'3/3'");
+  KJ_EXPECT(fixture.evalAwait("await s.durableObject('main', 'Counter', "
+                              "{ id: await alice.id() }).increment()") == "'4/4'");
+  KJ_EXPECT(
+      fixture.evalAwait("await s.durableObject('main', 'Counter', 'bob').increment()") == "'1/1'");
+
+  // Evicted, the object starts again from its storage.
+  KJ_EXPECT(fixture.evalAwait("await workerd.evict(alice)") == "undefined");
+  KJ_EXPECT(fixture.evalAwait("await alice.increment()") == "'1/5'");
+  KJ_EXPECT(
+      fixture.evalAwait("await workerd.evict(alice, { webSockets: 'close' })") == "undefined");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.evict(alice)"), "Uncaught Error:");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.evict(s.service('main'))"),
+      "Uncaught Error: evict() can only be used on a Durable Object stub.");
+
+  // An ephemeral object has a name and no id.
+  KJ_EXPECT(fixture.evalAwait("await s.durableObject('main', 'Scratch', 'x').hit()") == "1");
+  KJ_EXPECT(fixture.evalAwait("await s.durableObject('main', 'Scratch', 'x').hit()") == "2");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('main', 'Scratch', { id: 'x' })"),
+      "Uncaught TypeError: The objects of the ephemeral Durable Object class \"Scratch\" have "
+      "names, not ids.");
+
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('main', 'Counter', { id: 'x' })"),
+      "Uncaught TypeError: Invalid Durable Object ID: must be 64 hex digits");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('main', 'Counter', {})"),
+      "Uncaught TypeError: A Durable Object is named by one of a name and an id.");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('main', 'Nope', 'x')"),
+      "Uncaught Error: Worker does not export a Durable Object class named \"Nope\"");
+
+  fixture.evalAwait("await s.close()");
+  auto closed = "Uncaught Error: The server for durable-objects.capnp was closed."_kj;
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await alice.increment()"), closed);
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.evict(alice)"), closed);
 }
 
 constexpr kj::StringPtr FETCH_MAIN = "await (await s.service('main').fetch('http://x/')).text()"_kj;

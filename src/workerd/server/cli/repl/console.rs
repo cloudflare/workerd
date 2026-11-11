@@ -49,6 +49,8 @@ The `workerd` global loads configs and reaches their services:
   await r.text()
   await s.service('main').scheduled({ cron: '* * * * *' })  // and queue(name, messages)
   await s.socket('http').fetch('http://x/')       // a request to an http socket of the config
+  c = s.durableObject('main', 'Counter', 'alice') // a Durable Object, or by { id }
+  await workerd.evict(c)                          // restart it on its next request
   await s.reload()                                // serve the config as it is now
   await s.close()
 

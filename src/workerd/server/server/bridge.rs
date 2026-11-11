@@ -493,6 +493,14 @@ pub mod ffi {
         fn actor_id_from_name(name: &str) -> KjOwn<ActorIdHandle>;
         /// The id of a durable namespace, from its hex text (a debug-port request).
         fn actor_id_from_hex(hex: &str) -> Result<KjOwn<ActorIdHandle>>;
+        /// The id `idFromName(name)` gives in the durable namespace `unique_key`.
+        fn actor_id_from_durable_name(unique_key: &str, name: &str) -> KjOwn<ActorIdHandle>;
+        /// The id `idFromString(hex)` gives in the durable namespace `unique_key`: an error if
+        /// `hex` is not an id of that namespace.
+        fn actor_id_from_durable_string(
+            unique_key: &str,
+            hex: &str,
+        ) -> Result<KjOwn<ActorIdHandle>>;
 
         /// The storage of one actor namespace: its directory on disk (or none for in-memory
         /// storage), the SQLite VFS over it, and its alarm scheduler.
@@ -843,10 +851,20 @@ pub mod ffi {
             entrypoint: KjMaybe<&str>,
             props: KjMaybe<KjOwn<Frankenvalue>>,
         ) -> Result<Box<SubrequestChannel>>;
+        /// The object of the config's service `service`'s Durable Object class `class_name`
+        /// named by `name` (as `idFromName()` names it) or by `id` (as `idFromString()` does),
+        /// one of which is given.
+        fn actor(
+            self: &InProcessServer,
+            service: &str,
+            class_name: &str,
+            name: KjMaybe<&str>,
+            id: KjMaybe<&str>,
+        ) -> Result<Box<SubrequestChannel>>;
         /// HTTP requests to the config's http socket `name`, as a client of it would send them.
         fn socket(self: &InProcessServer, name: &str) -> Result<Box<SubrequestChannel>>;
-        /// Revokes, with `reason` (what failed requests say), every channel `service` and
-        /// `socket` handed out. The first reason stands.
+        /// Revokes, with `reason` (what failed requests say), every channel `service`, `actor`
+        /// and `socket` handed out. The first reason stands.
         fn revoke(self: &InProcessServer, reason: &str);
         /// Drains and awaits the run `start` started, then ends the server's tasks and drops the
         /// factory, logging an error if a service still holds it.
