@@ -52,7 +52,7 @@ function prelude(imports: string[]): string {
   return `
   import {
     ${imports.join(',\n') + ','}
-  } from "pyodide-internal:pool/builtin_wrappers";
+  } from "pyodide-internal:builtin_wrappers";
   `;
 }
 

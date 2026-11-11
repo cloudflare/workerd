@@ -1,23 +1,23 @@
-/**
- * This file is intended to be executed in the Python pool (once it exists). As such, it cannot
- * import anything that transitively uses C++ extension modules. It has to work in a vanilla v8
- * isolate. Also, we will have to bundle this file and all of its transitive imports into a single
- * js file.
- */
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 
 /**
- * _createPyodideModule and pyodideWasmModule together are produced by the
- * Emscripten linker
+ * Instantiates the Emscripten module from the patched `pyodide.asm` glue in the Pyodide bundle.
+ *
+ * This file is part of `pyodide_static`. The bundle provides only the Emscripten glue, so behavior
+ * implemented here changes with the binary rather than requiring a bundle upload.
  */
-import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
+
+import { _createPyodideModule } from 'pyodideRuntime-internal:pyodide.asm';
 
 import {
   setGetRandomValues,
   setSetTimeout,
   finishSetup,
-} from 'pyodide-internal:pool/builtin_wrappers';
+} from 'pyodide-internal:builtin_wrappers';
 
-import { getJsvErrorImport } from 'pyodide-internal:pool/sentinel';
+import { getJsvErrorImport } from 'pyodide-internal:sentinel';
 
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
@@ -243,9 +243,9 @@ export async function instantiateEmscriptenModule(
   for (const _ of featureDetectionMonkeyPatchesContextManager()) {
     // Ignore the returned promise, it won't resolve until we're done preloading dynamic
     // libraries.
-    void _createPyodideModule(emscriptenSettings).catch((e) =>
-      emscriptenSettings.rejectReadyPromise(e)
-    );
+    void _createPyodideModule(emscriptenSettings).catch((e: unknown) => {
+      emscriptenSettings.rejectReadyPromise(e);
+    });
   }
 
   // Wait until we've executed all the preRun hooks before proceeding

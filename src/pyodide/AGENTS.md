@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitute adding memory snapshot support. TS+Python; modules registered as `pyodide-internal:*` BUILTIN modules. `pool/emscriptenSetup.ts` runs in vanilla V8 isolate -- CANNOT import C++ extension modules.
+Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitute adding memory snapshot support. TS+Python; modules registered as `pyodide-internal:*` BUILTIN modules. The per-version Pyodide bundle built by `bundle/` contains only the patched Emscripten glue; its `pyodide-internal:*` imports resolve against `pyodide_static` at runtime.
 
 ## KEY COMPONENTS
 
@@ -15,7 +15,8 @@ Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitut
 | `internal/tarfs.ts`                           | Read-only Emscripten filesystem backing site-packages / dynlib mounts                                 |
 | `bundle/`                                     | Builds the per-version Pyodide bundle: `python_bundles.bzl`, `patch_pyodide_asm.ts`, `pack_python_packages.py` (stdlib wheels → `PythonPackages` message per `python_packages.capnp`), `python-lock/` |
 | `internal/topLevelEntropy/`                   | TS+Python: patches `getRandomValues` with deterministic entropy during import, reseeds before request |
-| `internal/pool/`                              | Emscripten setup in plain V8 isolate; `emscriptenSetup.ts` has NO access to C++ extensions            |
+| `internal/emscriptenSetup.ts`                 | Instantiates the Emscripten module from the bundle's `pyodideRuntime-internal:pyodide.asm`            |
+| `internal/builtin_wrappers.ts`                | Functions the patched Emscripten glue imports; released bundles import these by name                  |
 | `internal/workers-api/`                       | Python SDK package (frozen)                                            |
 | `scripts/`                                    | Standalone dev/CI scripts (not used by bazel): `make_snapshots.py`, `upload_bundles.py`, `create_vendor_zip.py` |
 | `internal/metadata.ts`                        | Config flags: `IS_WORKERD`, `MAIN_MODULE_NAME`, etc.                                                  |
