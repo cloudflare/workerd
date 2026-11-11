@@ -1,0 +1,162 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+#pragma once
+
+// The JavaScript API of `workerd repl`: the `workerd` global (ReplControl) and the handle it
+// returns for each config it loads (ReplServer).
+//
+// The types are in the workerd API isolate's type list (workerd-api-isolate.h), so the REPL's
+// isolate can wrap them, but only the REPL's isolate has a `workerd` global through which to reach
+// them. They are not in api/rtti.c++: they are not part of the Workers API and have no TypeScript
+// types.
+//
+// workerd-api depends on this header, and the REPL's implementation depends on workerd-api, so the
+// types reach that implementation through the abstract ReplHost and ReplServerHost.
+
+#include <workerd/api/http.h>
+#include <workerd/io/frankenvalue.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/jsg/jsg.h>
+
+#include <kj/async.h>
+
+namespace workerd::server {
+
+// A config the REPL loaded and serves in-process (repl-server.h). Shared between the REPL and the
+// JavaScript handles to it; closing the server, not the last handle's garbage collection, ends it.
+class ReplServerHost {
+ public:
+  virtual ~ReplServerHost() noexcept(false) = default;
+
+  virtual kj::Own<ReplServerHost> addRef() = 0;
+
+  // The config file, as the user named it.
+  virtual kj::StringPtr getPath() const = 0;
+  virtual bool isClosed() const = 0;
+  // The warnings the server reported as it loaded the config.
+  virtual kj::ArrayPtr<const kj::String> getWarnings() const = 0;
+
+  // A channel to the config's service `name`: its `entrypoint` (the default if none), with `props`
+  // if given. Requests through the channel fail once the server is closed. Throws a JSG error if
+  // there is no such service or entrypoint, or the server is closed.
+  virtual kj::Rc<IoChannelFactory::SubrequestChannel> service(
+      kj::StringPtr name, kj::Maybe<kj::StringPtr> entrypoint, kj::Maybe<Frankenvalue> props) = 0;
+
+  // A channel that sends HTTP requests to the config's socket `name`, as a client connecting to it
+  // would. Throws a JSG error if there is no such socket, or the server is closed.
+  virtual kj::Rc<IoChannelFactory::SubrequestChannel> socket(kj::StringPtr name) = 0;
+
+  // Drains the server and takes it apart. Idempotent.
+  virtual kj::Promise<void> close() = 0;
+};
+
+// What the `workerd` global asks of the REPL. Outlives every JavaScript object in the REPL's
+// isolate.
+class ReplHost {
+ public:
+  virtual ~ReplHost() noexcept(false) = default;
+
+  // Loads the config at `path` (a Cap'n Proto config, or a `wrangler.json` / `wrangler.jsonc`),
+  // relative to the working directory, and starts serving it. `constName` names the constant that
+  // holds a Cap'n Proto config, as for `workerd serve`. Rejects with a JSG error, listing the
+  // config errors, if the config does not load or has errors.
+  virtual kj::Promise<kj::Own<ReplServerHost>> loadConfig(
+      kj::String path, kj::Maybe<kj::String> constName) = 0;
+};
+
+// A config the REPL serves: `await workerd.loadConfig(path)`.
+class ReplServer final: public jsg::Object {
+ public:
+  explicit ReplServer(kj::Own<ReplServerHost> host): host(kj::mv(host)) {}
+
+  struct ServiceOptions {
+    jsg::Optional<kj::String> entrypoint;
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+
+    JSG_STRUCT(entrypoint, props);
+  };
+
+  kj::StringPtr getPath() {
+    return host->getPath();
+  }
+  bool getClosed() {
+    return host->isClosed();
+  }
+  kj::Array<kj::String> getWarnings();
+
+  // A Fetcher for the config's service `name`, for `fetch()` and RPC.
+  jsg::Ref<api::Fetcher> service(
+      jsg::Lock& js, kj::String name, jsg::Optional<ServiceOptions> options);
+
+  // A Fetcher whose `fetch()` sends the request to the config's socket `name`. Sockets listen on
+  // in-process names rather than on their addresses.
+  jsg::Ref<api::Fetcher> socket(jsg::Lock& js, kj::String name);
+
+  jsg::Promise<void> close(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ReplServer) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(path, getPath);
+    JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
+    JSG_READONLY_PROTOTYPE_PROPERTY(warnings, getWarnings);
+    JSG_METHOD(service);
+    JSG_METHOD(socket);
+    JSG_METHOD(close);
+  }
+
+  bool isClosed() const {
+    return host->isClosed();
+  }
+
+ private:
+  kj::Own<ReplServerHost> host;
+};
+
+// The `workerd` global of the REPL.
+class ReplControl final: public jsg::Object {
+ public:
+  ReplControl(ReplHost& host, kj::StringPtr version): host(host), version(version) {}
+
+  struct LoadConfigOptions {
+    jsg::Optional<kj::String> constName;
+
+    JSG_STRUCT(constName);
+  };
+
+  jsg::Promise<jsg::Ref<ReplServer>> loadConfig(
+      jsg::Lock& js, kj::String path, jsg::Optional<LoadConfigOptions> options);
+
+  // The servers loaded in this session and not yet closed.
+  kj::Array<jsg::Ref<ReplServer>> getServers();
+
+  kj::StringPtr getVersion() {
+    return version;
+  }
+
+  JSG_RESOURCE_TYPE(ReplControl) {
+    JSG_METHOD(loadConfig);
+    JSG_READONLY_PROTOTYPE_PROPERTY(servers, getServers);
+    JSG_READONLY_PROTOTYPE_PROPERTY(version, getVersion);
+  }
+
+ private:
+  ReplHost& host;
+  kj::StringPtr version;
+
+  // Every server loadConfig() returned and not yet seen closed. Closed ones are dropped as
+  // getServers() finds them.
+  kj::Vector<jsg::Ref<ReplServer>> servers;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    for (auto& server: servers) {
+      visitor.visit(server);
+    }
+  }
+};
+
+#define EW_REPL_ISOLATE_TYPES                                                                      \
+  workerd::server::ReplControl, workerd::server::ReplControl::LoadConfigOptions,                   \
+      workerd::server::ReplServer, workerd::server::ReplServer::ServiceOptions
+
+}  // namespace workerd::server

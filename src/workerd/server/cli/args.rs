@@ -116,6 +116,12 @@ pub enum Command {
         #[command(flatten)]
         deploy: DeployArgs,
     },
+
+    #[command(override_help = help::REPL)]
+    Repl {
+        #[command(flatten)]
+        repl: ReplArgs,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -232,6 +238,18 @@ pub struct DeployArgs {
 
     #[arg(short, long)]
     pub binary: bool,
+
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ReplArgs {
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    #[arg(long = "compat-flag", value_name = "flag")]
+    pub compat_flags: Vec<String>,
 
     #[arg(long)]
     pub experimental: bool,

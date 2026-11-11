@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+#include "repl-api.h"
+
+#include <workerd/io/io-context.h>
+
+namespace workerd::server {
+
+kj::Array<kj::String> ReplServer::getWarnings() {
+  return KJ_MAP(warning, host->getWarnings()) { return kj::str(warning); };
+}
+
+jsg::Ref<api::Fetcher> ReplServer::service(
+    jsg::Lock& js, kj::String name, jsg::Optional<ServiceOptions> options) {
+  kj::Maybe<kj::String> entrypoint;
+  kj::Maybe<Frankenvalue> props;
+  KJ_IF_SOME(o, options) {
+    entrypoint = kj::mv(o.entrypoint);
+    KJ_IF_SOME(p, o.props) {
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
+    }
+  }
+  auto channel = host->service(name, entrypoint, kj::mv(props));
+  return js.alloc<api::Fetcher>(IoContext::current().addObject(kj::mv(channel)));
+}
+
+jsg::Ref<api::Fetcher> ReplServer::socket(jsg::Lock& js, kj::String name) {
+  return js.alloc<api::Fetcher>(IoContext::current().addObject(host->socket(name)));
+}
+
+jsg::Promise<void> ReplServer::close(jsg::Lock& js) {
+  // Closing runs on the event loop: it ends the server's isolates, which must not be locked while
+  // this isolate is.
+  return IoContext::current().awaitIo(js, host->close());
+}
+
+jsg::Promise<jsg::Ref<ReplServer>> ReplControl::loadConfig(
+    jsg::Lock& js, kj::String path, jsg::Optional<LoadConfigOptions> options) {
+  kj::Maybe<kj::String> constName;
+  KJ_IF_SOME(o, options) {
+    constName = kj::mv(o.constName);
+  }
+  return IoContext::current().awaitIo(js, host.loadConfig(kj::mv(path), kj::mv(constName)),
+      [self = JSG_THIS](jsg::Lock& js, kj::Own<ReplServerHost> server) mutable {
+    auto handle = js.alloc<ReplServer>(kj::mv(server));
+    self->servers.add(handle.addRef());
+    return handle;
+  });
+}
+
+kj::Array<jsg::Ref<ReplServer>> ReplControl::getServers() {
+  kj::Vector<jsg::Ref<ReplServer>> open(servers.size());
+  for (auto& server: servers) {
+    if (!server->isClosed()) {
+      open.add(server.addRef());
+    }
+  }
+  servers = kj::mv(open);
+  return KJ_MAP(server, servers) { return server.addRef(); };
+}
+
+}  // namespace workerd::server

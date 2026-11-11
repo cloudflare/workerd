@@ -168,6 +168,7 @@ Usage:
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
+  workerd repl                       Evaluate JavaScript (experimental)
   workerd <command> -h               Its options, as in workerd serve -h
 
 Quick start:
@@ -375,6 +376,27 @@ Cap'n Proto configs:
   <const> names its constant.
   -b, --binary                       [project] is an encoded config; - is stdin
   -I, --import-path <dir>            Search dir for imports that start /
+";
+
+pub const REPL: &str = "\
+workerd repl: evaluate JavaScript in a Worker (experimental).
+
+Usage:
+  workerd repl --experimental [options]
+
+Prints the result of each input. The workerd global loads configs, as
+serve does, and calls their services and sockets; type .help in the
+REPL for more. This is a tool for developing workerd, and may change
+or go away in any release.
+
+Options:
+      --compat-date <date>           The REPL's compat date; default: today
+      --compat-flag <flag>           Enable a compat flag; repeat for more
+      --experimental                 Required
+      --verbose                      Log to stderr
+  -h, --help                         Print this help
+  nodejs_compat is on unless a --compat-flag turns it or
+  nodejs_compat_v2 on or off.
 ";
 
 pub const COMPILED: &str = concat!(

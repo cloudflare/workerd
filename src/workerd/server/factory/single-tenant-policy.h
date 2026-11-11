@@ -5,7 +5,8 @@
 #pragma once
 
 // The policy objects of a single-tenant runtime: no limits, and the clock JavaScript sees. The
-// worker factory gives them to every worker it compiles; the production runtime supplies its own.
+// worker factory gives them to every worker it compiles; `workerd repl` gives them to the isolate
+// it evaluates input in. The production runtime supplies its own.
 
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/io-channels.h>
