@@ -1467,23 +1467,25 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
-      uint32_t badTagFieldsCount = 0;
       WrappableDeserializeMetadata metadata;
+      kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
         options.internalFieldsDeserializer =
-            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
             v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
+        abortOnGc.emplace(v8Isolate, metadata);
       }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      abortOnGc = kj::none;
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      KJ_REQUIRE(badTagFieldsCount == 0,
+      KJ_REQUIRE(metadata.badTagFieldsCount == 0,
           "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
           "wrapper markers",
-          badTagFieldsCount);
+          metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.finishWrappableDeserializeMetadata(metadata);
       }
