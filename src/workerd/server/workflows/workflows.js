@@ -32,11 +32,14 @@
 // and its history for `subscribe()` (`l:<id>`). `run()` runs once per
 // instance in memory: a step that waits (a sleep, a retry's delay, an event)
 // waits there, and the instance's alarm, set for the earliest wait, ends it.
-// After a crash, or a restart of the instance, `run()` runs again from the
-// start: a step that completed returns its result without running again, a
-// wait keeps its deadline. While user code runs, the alarm is a heartbeat
-// (`HEARTBEAT_MS`), so a crash runs it again soon after. A finished instance
-// is deleted after its retention.
+// A sleep or event wait longer than `REST_MS` ends the `run()` in memory
+// instead (its step throws `WorkflowAbortedError`), and `run()` runs again at
+// the deadline or when an event comes. Whenever `run()` runs again, after
+// a crash, a long wait, or a restart of the instance, it runs from the start:
+// a step that completed returns its result without running again, a wait
+// keeps its deadline. While user code runs, the alarm is set no later than
+// `WATCH_MS` ahead (an attempt's, its timeout), so a crash runs it again by
+// then. A finished instance is deleted after its retention.
 //
 // With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock; an
 // instance acts on it at its next call or alarm.
@@ -48,7 +51,8 @@ import {
   env,
 } from 'cloudflare:workers';
 
-const HEARTBEAT_MS = 5_000;
+const REST_MS = 60 * 1000;
+const WATCH_MS = 10 * 60 * 1000;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BATCH = 100;
 const STEP_LIMIT = 10_000;
@@ -106,7 +110,7 @@ const workflowError = (code, message) =>
 const fatalError = (message) => error('WorkflowFatalError', message);
 // What a step of a `run()` that may no longer take steps throws.
 const aborted = () =>
-  error('WorkflowAbortedError', 'The instance has finished or restarted');
+  error('WorkflowAbortedError', 'This run of the instance has ended');
 const notFound = () =>
   workflowError('instance.not_found', 'Instance does not exist');
 const plain = (e) => ({
@@ -189,7 +193,7 @@ class Subscription extends RpcTarget {
 // One instance of the Workflow `ctx.props.workflowName`.
 export class Engine extends DurableObject {
   #kv = this.ctx.storage.kv;
-  // The generation whose `run()` is in memory, else null.
+  // The `run()` in memory, `{generation}`, else null. Its steps hold it.
   #drive = null;
   // Step callbacks of that `run()` executing.
   #busy = 0;
@@ -211,6 +215,11 @@ export class Engine extends DurableObject {
   #live(generation) {
     const m = this.#meta;
     return m?.generation === generation && LIVE.has(m.status);
+  }
+
+  // Whether `run` is the `run()` in memory and may take steps.
+  #owns(run) {
+    return this.#drive === run && this.#live(run.generation);
   }
 
   #log(type, fields = {}) {
@@ -261,11 +270,11 @@ export class Engine extends DurableObject {
     for (const w of waiters) w.wake();
   }
 
-  // Whether the step may go on: false once the instance has finished or
-  // restarted; while it is paused, once it resumes.
-  async #enter(generation) {
+  // Whether the step may go on: false once its run has ended (the instance
+  // finished, restarted or rests); while it is paused, once it resumes.
+  async #enter(run) {
     for (;;) {
-      if (!this.#live(generation)) return false;
+      if (!this.#owns(run)) return false;
       const { status } = this.#meta;
       if (status !== 'paused' && status !== 'waitingForPause') return true;
       if (!this.#gate) {
@@ -288,8 +297,10 @@ export class Engine extends DurableObject {
     return p;
   }
 
-  // Moves between running, waiting and pausing as steps start and wait.
+  // Moves between running, waiting and pausing as the steps of the `run()`
+  // in memory start and wait.
   #settle() {
+    if (!this.#drive) return;
     const { status } = this.#meta ?? {};
     const idle = this.#busy === 0;
     if (status === 'waitingForPause' && idle) {
@@ -312,7 +323,7 @@ export class Engine extends DurableObject {
       return this.#arm();
     }
     // What the process was doing when it went away.
-    if (this.#drive !== m.generation) {
+    if (this.#drive?.generation !== m.generation) {
       if (m.status === 'waitingForPause')
         this.#set('paused', { pausedAt: now });
       if (m.status === 'rollingBack') {
@@ -326,23 +337,25 @@ export class Engine extends DurableObject {
         this.#waiters.delete(w);
         w.wake(TIMEOUT);
       }
-      if (this.#drive !== m.generation) this.#run(m);
+      const resting = m.dormant > now;
+      if (this.#drive?.generation !== m.generation && !resting) this.#run(m);
     }
     this.#arm();
   }
 
-  // The alarm: at the earliest wait, a heartbeat while user code runs, now
-  // when `run()` should be in memory and is not, and a finished instance's
-  // expiry. None while paused.
+  // The alarm: at the earliest wait, within `WATCH_MS` while user code runs,
+  // now when `run()` should be in memory and is not (at the deadline when it
+  // rests), and a finished instance's expiry. None while paused.
   #arm() {
     const m = this.#meta;
     let next = Infinity;
     if (m && TERMINAL.has(m.status)) {
       next = m.expires;
     } else if (m && m.status !== 'paused') {
-      if (this.#drive !== m.generation) next = clock();
+      if (this.#drive?.generation !== m.generation)
+        next = m.dormant > clock() ? m.dormant : clock();
       for (const w of this.#waiters) next = Math.min(next, w.at);
-      if (m.status !== 'waiting') next = Math.min(next, clock() + HEARTBEAT_MS);
+      if (m.status !== 'waiting') next = Math.min(next, clock() + WATCH_MS);
     }
     // A stale alarm costs one wake. One already set no later stays: setting a
     // due alarm again defers it.
@@ -360,7 +373,7 @@ export class Engine extends DurableObject {
 
   // Runs `run()` for the instance's generation, from the start.
   #run(m) {
-    const generation = (this.#drive = m.generation);
+    const run = (this.#drive = { generation: m.generation });
     this.#busy = 0;
     this.#counts = new Map();
     this.#rollbacks = [];
@@ -369,13 +382,12 @@ export class Engine extends DurableObject {
       this.#kv.put('meta', { ...m, started: true });
       this.#log('workflow_started', { params: m.params });
     }
-    if (m.status === 'queued') this.#set('running');
+    if (m.status === 'queued' || m.dormant !== undefined)
+      this.#set('running', { dormant: undefined });
     const step = new Step({
-      do: (...args) => this.#do(generation, ...args),
-      sleep: (name, duration, until) =>
-        this.#sleep(generation, name, duration, until),
-      waitForEvent: (name, options) =>
-        this.#waitForEvent(generation, name, options),
+      do: (...args) => this.#do(run, ...args),
+      sleep: (name, duration, until) => this.#sleep(run, name, duration, until),
+      waitForEvent: (name, options) => this.#waitForEvent(run, name, options),
     });
     const done = (async () => {
       let output, failure;
@@ -384,7 +396,7 @@ export class Engine extends DurableObject {
       } catch (e) {
         failure = e;
       }
-      if (!this.#live(generation)) return;
+      if (!this.#owns(run)) return;
       const { status } = this.#meta;
       // A pause asked for before `run()` returned wins: it runs again on
       // resume, and returns then.
@@ -437,7 +449,7 @@ export class Engine extends DurableObject {
     return { key, count, record: this.#kv.get(key) ?? fresh() };
   }
 
-  async #do(generation, name, config, callback, rollback) {
+  async #do(run, name, config, callback, rollback) {
     if (typeof config === 'function') {
       [config, callback, rollback] = [{}, config, callback];
     }
@@ -455,7 +467,7 @@ export class Engine extends DurableObject {
           'sleeping-and-retrying/'
       );
     }
-    if (!(await this.#enter(generation))) throw aborted();
+    if (!(await this.#enter(run))) throw aborted();
     const limit = this.#config.steps ?? STEP_LIMIT;
     if (++this.#steps > limit) {
       throw fatalError(
@@ -489,7 +501,7 @@ export class Engine extends DurableObject {
       if (record.retryAt > clock()) {
         await this.#wait(record.retryAt);
       }
-      if (!(await this.#enter(generation))) throw aborted();
+      if (!(await this.#enter(run))) throw aborted();
       // An attempt that ended the process failed.
       if (record.attempts > cfg.retries.limit) {
         const e = error(
@@ -522,9 +534,9 @@ export class Engine extends DurableObject {
         failure = e;
       } finally {
         timeout.cancel();
-        if (this.#drive === generation) this.#busy--;
+        if (this.#drive === run) this.#busy--;
       }
-      if (!this.#live(generation)) throw aborted();
+      if (!this.#owns(run)) throw aborted();
       this.#settle();
       if (failure === undefined) {
         try {
@@ -590,8 +602,8 @@ export class Engine extends DurableObject {
     return base;
   }
 
-  async #sleep(generation, name, duration, until) {
-    if (!(await this.#enter(generation))) throw aborted();
+  async #sleep(run, name, duration, until) {
+    if (!(await this.#enter(run))) throw aborted();
     const { key, count, record } = this.#record('sleep', name);
     if (record.done) return;
     const stepName = `${name}-${count}`;
@@ -610,14 +622,15 @@ export class Engine extends DurableObject {
         durationMs: record.deadline - now,
       });
     }
+    if (this.#rest(run, record.deadline)) throw aborted();
     await this.#wait(record.deadline);
-    if (!(await this.#enter(generation))) throw aborted();
+    if (!(await this.#enter(run))) throw aborted();
     this.#kv.put(key, { ...record, done: true });
     this.#log('sleep_completed', { stepName });
   }
 
-  async #waitForEvent(generation, name, { type, timeout = '24 hours' } = {}) {
-    if (!(await this.#enter(generation))) throw aborted();
+  async #waitForEvent(run, name, { type, timeout = '24 hours' } = {}) {
+    if (!(await this.#enter(run))) throw aborted();
     const { key, count, record } = this.#record('waitForEvent', name);
     if (record.done) return record.value;
     if (record.error) throw error(record.error.name, record.error.message);
@@ -628,7 +641,7 @@ export class Engine extends DurableObject {
       this.#log('wait_started', { stepName, eventType: type });
     }
     for (;;) {
-      if (!(await this.#enter(generation))) throw aborted();
+      if (!(await this.#enter(run))) throw aborted();
       // Taken and recorded in one turn, so a crash keeps one or the other.
       const event = this.#take(type);
       if (event) {
@@ -636,8 +649,9 @@ export class Engine extends DurableObject {
         this.#log('wait_completed', { stepName });
         return event;
       }
+      if (this.#rest(run, record.deadline)) throw aborted();
       if ((await this.#wait(record.deadline, type)) !== TIMEOUT) continue;
-      if (!(await this.#enter(generation))) throw aborted();
+      if (!(await this.#enter(run))) throw aborted();
       const e = error(
         'WorkflowTimeoutError',
         `Execution timed out after ${ms(timeout)}ms`
@@ -646,6 +660,20 @@ export class Engine extends DurableObject {
       this.#log('wait_timed_out', { stepName });
       throw e;
     }
+  }
+
+  // Ends `run` rather than wait in it until `at`, when that is more than
+  // `REST_MS` away and nothing else of it runs or waits: `run()` runs again
+  // at `at`, or when an event comes.
+  #rest(run, at) {
+    if (at - clock() <= REST_MS || this.#busy > 0 || this.#waiters.size > 0)
+      return false;
+    this.#drive = null;
+    if (this.#meta.status === 'waiting')
+      this.#kv.put('meta', { ...this.#meta, dormant: at });
+    else this.#set('waiting', { dormant: at });
+    this.#arm();
+    return true;
   }
 
   // The oldest event of `type` sent and not yet taken.
@@ -815,7 +843,13 @@ export class Engine extends DurableObject {
         if (r.retryAt !== undefined) r.retryAt += shift;
         this.#kv.put(key, r);
       }
-      this.#set(this.#drive === m.generation ? 'running' : 'queued');
+      const status =
+        this.#drive?.generation === m.generation
+          ? 'running'
+          : m.dormant !== undefined
+            ? 'waiting'
+            : 'queued';
+      this.#set(status, m.dormant && { dormant: m.dormant + shift });
     } else {
       throw workflowError(
         'instance.cannot_resume',
@@ -901,6 +935,8 @@ export class Engine extends DurableObject {
       w.wake();
       break;
     }
+    if (m.dormant !== undefined)
+      this.#kv.put('meta', { ...this.#meta, dormant: undefined });
     this.#wake();
   }
 

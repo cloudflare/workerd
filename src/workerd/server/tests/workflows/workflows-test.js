@@ -65,6 +65,14 @@ export class Flow extends WorkflowEntrypoint {
         await once('a');
         await step.sleep('nap', '1 hour');
         return once('b');
+      case 'rest': {
+        await once('a');
+        await step.sleep('nap', '1 hour').catch((e) => {
+          signal(`${id}/rested`).resolve(e.message);
+          throw e;
+        });
+        return once('b');
+      }
       case 'event': {
         const options = { type: 'ping', timeout: '1 minute' };
         return (await step.waitForEvent('ping', options)).payload;
@@ -199,7 +207,10 @@ export let recreate = {
     const instance = await create(env, 'held', 'event');
     await until(instance, 'wait_started');
     signal('held/held').resolve('old');
-    assert.match(await signal('held/ended').promise, /finished or restarted/);
+    assert.match(
+      await signal('held/ended').promise,
+      /run of the instance has ended/
+    );
     await instance.sendEvent({ type: 'ping', payload: 'new' });
     await until(instance, 'workflow_completed');
     assert.strictEqual((await instance.status()).output, 'new');
@@ -228,6 +239,22 @@ export let sleepPauseResumeTerminate = {
     assert.strictEqual((await other.status()).status, 'terminated');
     await assert.rejects(other.terminate(), /cannot_terminate/);
     await assert.rejects(other.resume(), /cannot_resume/);
+  },
+};
+
+// A long sleep ends `run()` in memory; it runs again at the deadline.
+export let rest = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'rest', 'rest');
+    await until(instance, 'workflow_waiting');
+    assert.strictEqual((await instance.status()).status, 'waiting');
+    await advance(env, instance, 60 * 60 * 1000);
+    await until(instance, 'workflow_completed');
+    assert.deepEqual(ranBy('rest'), ['rest/a', 'rest/b']);
+    assert.match(
+      await signal('rest/rested').promise,
+      /run of the instance has ended/
+    );
   },
 };
 
