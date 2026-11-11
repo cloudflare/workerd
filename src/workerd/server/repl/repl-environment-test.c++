@@ -96,8 +96,27 @@ constexpr kj::StringPtr PROCESS_WIDE_CONFIG = R"((
   services = [ (name = "main", external = (address = "localhost:1")) ],
 ))"_kj;
 
+// A config whose worker answers every fetch with `text`.
+kj::String configAnswering(kj::StringPtr text) {
+  return kj::str(R"((
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [
+          ( name = "worker.js",
+            esModule = "export default { fetch() { return new Response(')",
+      text, R"('); } };" ),
+        ],
+      ),
+    ),
+  ],
+))");
+}
+
 // A ReplEnvironment on the test thread's event loop, whose configs are the texts above by name.
-struct Fixture {
+// Its loader's watches report a change when the test calls changeWatchedFiles().
+struct Fixture final: public ReplConfigLoader {
   kj::AsyncIoContext io = kj::setupAsyncIo();
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   TestEntropySource entropySource;
@@ -109,27 +128,69 @@ struct Fixture {
     .entropySource = entropySource,
     .fs = *fs,
   };
-  kj::HashMap<kj::StringPtr, kj::StringPtr> configs;
+  kj::HashMap<kj::String, kj::String> configs;
+  // The change the last watch a server waits on would report, and the test waiting for a server to
+  // wait on one.
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> change;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> watchAwaited;
   ReplEnvironment environment;
 
   explicit Fixture(ReplEnvironmentOptions options = {})
-      : environment(resources, KJ_BIND_METHOD(*this, loadConfig), kj::mv(options)) {
-    configs.insert("worker.capnp"_kj, WORKER_CONFIG);
-    configs.insert("no-sockets.capnp"_kj, NO_SOCKETS_CONFIG);
-    configs.insert("broken.capnp"_kj, BROKEN_CONFIG);
-    configs.insert("process-wide.capnp"_kj, PROCESS_WIDE_CONFIG);
+      : environment(resources, *this, kj::mv(options)) {
+    setConfig("worker.capnp", WORKER_CONFIG);
+    setConfig("no-sockets.capnp", NO_SOCKETS_CONFIG);
+    setConfig("broken.capnp", BROKEN_CONFIG);
+    setConfig("process-wide.capnp", PROCESS_WIDE_CONFIG);
   }
 
   ~Fixture() noexcept(false) {
     environment.drain().wait(io.waitScope);
   }
 
-  kj::Array<capnp::word> loadConfig(
-      kj::StringPtr path, kj::Maybe<kj::StringPtr> constName, bool experimental) {
-    auto text = JSG_REQUIRE_NONNULL(configs.find(path), Error, path, ": No such file.");
+  void setConfig(kj::StringPtr path, kj::StringPtr text) {
+    configs.upsert(kj::str(path), kj::str(text));
+  }
+
+  kj::Array<capnp::word> load(kj::StringPtr path,
+      kj::Maybe<kj::StringPtr> constName,
+      bool experimental,
+      kj::Maybe<ReplConfigWatch&> watch) override {
+    auto& text = JSG_REQUIRE_NONNULL(configs.find(path), Error, path, ": No such file.");
     capnp::MallocMessageBuilder message;
     capnp::TextCodec().decode(text, message.initRoot<config::Config>());
     return capnp::messageToFlatArray(message);
+  }
+
+  class Watch final: public ReplConfigWatch {
+   public:
+    explicit Watch(Fixture& fixture): fixture(fixture) {}
+
+    kj::Promise<void> whenChanged() override {
+      auto paf = kj::newPromiseAndFulfiller<void>();
+      fixture.change = kj::mv(paf.fulfiller);
+      KJ_IF_SOME(awaited, fixture.watchAwaited) {
+        awaited->fulfill();
+      }
+      return kj::mv(paf.promise);
+    }
+
+   private:
+    Fixture& fixture;
+  };
+
+  kj::Own<ReplConfigWatch> newWatch() override {
+    return kj::heap<Watch>(*this);
+  }
+
+  // Reports a change to the files of the watched config, and waits for the reload it causes to
+  // be done: the server then waits on the watch the reload made.
+  void changeWatchedFiles() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    watchAwaited = kj::mv(paf.fulfiller);
+    KJ_ASSERT_NONNULL(change, "no server waits on a watch")->fulfill();
+    change = kj::none;
+    paf.promise.wait(io.waitScope);
+    watchAwaited = kj::none;
   }
 
   // Evaluates `input` as it is.
@@ -287,9 +348,15 @@ KJ_TEST("REPL rejects invalid compatibility settings") {
     .entropySource = entropySource,
     .fs = *fs,
   };
-  auto loader = [](kj::StringPtr, kj::Maybe<kj::StringPtr>, bool) -> kj::Array<capnp::word> {
-    KJ_UNREACHABLE;
-  };
+  struct: public ReplConfigLoader {
+    kj::Array<capnp::word> load(
+        kj::StringPtr, kj::Maybe<kj::StringPtr>, bool, kj::Maybe<ReplConfigWatch&>) override {
+      KJ_UNREACHABLE;
+    }
+    kj::Own<ReplConfigWatch> newWatch() override {
+      KJ_UNREACHABLE;
+    }
+  } loader;
   KJ_EXPECT_THROW_MESSAGE("Invalid compatibility flags",
       ReplEnvironment(resources, loader, {.compatibilityFlags = kj::arr(kj::str("no_such_flag"))}));
   KJ_EXPECT_THROW_MESSAGE("Invalid compatibility flags",
@@ -322,7 +389,12 @@ KJ_TEST("REPL lists property names for completion") {
 KJ_TEST("REPL loads a config and calls its services and sockets") {
   Fixture fixture;
   KJ_EXPECT(fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')") ==
-      "ReplServer { path: 'worker.capnp', closed: false, warnings: [ [length]: 0 ] }");
+      "ReplServer {\n"
+      "  path: 'worker.capnp',\n"
+      "  closed: false,\n"
+      "  watching: false,\n"
+      "  warnings: [ [length]: 0 ]\n"
+      "}");
   KJ_EXPECT(fixture.eval("workerd.servers.length") == "1");
 
   // Headers cross in both directions, though the REPL and the server key them differently.
@@ -401,6 +473,69 @@ KJ_TEST("REPL revokes what a closed server handed out") {
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await main.fetch('http://x/')"), closed);
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await api.add(1, 2)"), closed);
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('main')"), closed);
+}
+
+constexpr kj::StringPtr FETCH_MAIN = "await (await s.service('main').fetch('http://x/')).text()"_kj;
+
+KJ_TEST("REPL reloads a config in place") {
+  Fixture fixture;
+  fixture.setConfig("reload.capnp", configAnswering("one"));
+  KJ_EXPECT(
+      fixture.evalAwait("(s = await workerd.loadConfig('reload.capnp')).watching") == "false");
+  fixture.eval("main = s.service('main')");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'one'");
+
+  fixture.setConfig("reload.capnp", configAnswering("two"));
+  KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+  KJ_EXPECT(fixture.eval("workerd.servers.length") == "1");
+  // What the replaced server handed out fails.
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await main.fetch('http://x/')"),
+      "Uncaught Error: The server for reload.capnp was reloaded.");
+
+  // A config that no longer loads leaves the server as it was.
+  fixture.setConfig("reload.capnp", BROKEN_CONFIG);
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("await s.reload()"), "Uncaught Error: Failed to load reload.capnp:");
+  fixture.configs.erase("reload.capnp"_kj);
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("await s.reload()"), "Uncaught Error: reload.capnp: No such file.");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+
+  fixture.evalAwait("await s.close()");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await s.reload()"),
+      "Uncaught Error: The server for reload.capnp was closed.");
+}
+
+KJ_TEST("REPL reloads a watched config when a file it was loaded from changes") {
+  Fixture fixture;
+  fixture.setConfig("reload.capnp", configAnswering("one"));
+  KJ_EXPECT(
+      fixture.evalAwait(
+          "(s = await workerd.loadConfig('reload.capnp', { watch: true })).watching") == "true");
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'one'");
+  fixture.setConfig("reload.capnp", configAnswering("two"));
+  fixture.changeWatchedFiles();
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+
+  // A change that breaks the config leaves the server running, and the change that fixes it
+  // reloads it.
+  fixture.setConfig("reload.capnp", BROKEN_CONFIG);
+  fixture.changeWatchedFiles();
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
+  fixture.setConfig("reload.capnp", configAnswering("three"));
+  fixture.changeWatchedFiles();
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'three'");
+
+  // A reload asked for by hand watches on.
+  fixture.setConfig("reload.capnp", configAnswering("four"));
+  fixture.evalAwait("await s.reload()");
+  fixture.setConfig("reload.capnp", configAnswering("five"));
+  fixture.changeWatchedFiles();
+  KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'five'");
+
+  fixture.evalAwait("await s.close()");
+  KJ_EXPECT(fixture.eval("s.watching") == "false");
 }
 
 KJ_TEST("REPL reports configs that do not load") {

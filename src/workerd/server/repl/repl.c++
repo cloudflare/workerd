@@ -72,20 +72,53 @@ void initAutogates(kj::ArrayPtr<const kj::String> names) {
   util::Autogate::initAutogate(gates.getReader());
 }
 
-// Loads a config as `workerd serve` does (cli/repl/session.rs).
-kj::Array<capnp::word> loadConfig(
-    kj::StringPtr path, kj::Maybe<kj::StringPtr> constName, bool experimental) {
-  ::rust::Vec<uint64_t> words;
-  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
-    words = repl_load_config(path.as<kj_rs::RustUncheckedUtf8>(),
-        constName.orDefault(""_kj).as<kj_rs::RustUncheckedUtf8>(), experimental);
-  })) {
-    JSG_FAIL_REQUIRE(Error, e.getDescription());
+// The files a config was loaded from, watched by the CLI's watcher (cli/watch.rs).
+class ConfigWatch final: public ReplConfigWatch {
+ public:
+  explicit ConfigWatch(::rust::Box<ReplWatch> watch): watch(kj::mv(watch)) {}
+
+  kj::Promise<void> whenChanged() override {
+    return watch->changed();
   }
-  auto config = kj::heapArray<capnp::word>(words.size());
-  memcpy(config.begin(), words.data(), words.size() * sizeof(uint64_t));
-  return config;
-}
+
+  ReplWatch& getRust() {
+    return *watch;
+  }
+
+ private:
+  ::rust::Box<ReplWatch> watch;
+};
+
+// Loads configs as `workerd serve` does (cli/repl/session.rs).
+class ConfigLoader final: public ReplConfigLoader {
+ public:
+  kj::Array<capnp::word> load(kj::StringPtr path,
+      kj::Maybe<kj::StringPtr> constName,
+      bool experimental,
+      kj::Maybe<ReplConfigWatch&> watch) override {
+    auto rustPath = path.as<kj_rs::RustUncheckedUtf8>();
+    auto rustConstName = constName.orDefault(""_kj).as<kj_rs::RustUncheckedUtf8>();
+    ::rust::Vec<uint64_t> words;
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+      KJ_IF_SOME(w, watch) {
+        // Every watch this loader is given came from its newWatch().
+        words = kj::downcast<ConfigWatch>(w).getRust().load_config(
+            rustPath, rustConstName, experimental);
+      } else {
+        words = repl_load_config(rustPath, rustConstName, experimental);
+      }
+    })) {
+      JSG_FAIL_REQUIRE(Error, e.getDescription());
+    }
+    auto config = kj::heapArray<capnp::word>(words.size());
+    memcpy(config.begin(), words.data(), words.size() * sizeof(uint64_t));
+    return config;
+  }
+
+  kj::Own<ReplConfigWatch> newWatch() override {
+    return kj::heap<ConfigWatch>(repl_watch_new());
+  }
+};
 
 }  // namespace
 
@@ -111,7 +144,7 @@ class ReplSession::Impl {
               .entropySource = entropySource,
               .fs = *fs,
             },
-            loadConfig,
+            configLoader,
             toEnvironmentOptions(options)) {}
 
   ReplEnvironment& getEnvironment() {
@@ -128,6 +161,7 @@ class ReplSession::Impl {
   kj::Own<v8::Platform> platform;
   WorkerdPlatform v8Platform;
   jsg::V8System v8System;
+  ConfigLoader configLoader;
   ReplEnvironment environment;
 
   // Autogates are process-wide and set before V8 starts.

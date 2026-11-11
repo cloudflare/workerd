@@ -43,11 +43,13 @@ const HELP: &str = "\
 .exit     Exit the REPL (also Ctrl+D)
 
 The `workerd` global loads configs and reaches their services:
-  s = await workerd.loadConfig('config.capnp')    // { constName } picks the constant
+  s = await workerd.loadConfig('config.capnp')    // { constName } picks the constant, and
+                                                  // { watch: true } reloads it when it changes
   r = await s.service('main').fetch('http://x/')  // { entrypoint, props } pick an entrypoint
   await r.text()
   await s.service('main').scheduled({ cron: '* * * * *' })  // and queue(name, messages)
   await s.socket('http').fetch('http://x/')       // a request to an http socket of the config
+  await s.reload()                                // serve the config as it is now
   await s.close()
 
 In an input that awaits at top level, a `const`, `let` or `var` declaration of a single name

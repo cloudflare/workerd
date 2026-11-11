@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import { spawn } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { env } from 'node:process';
 import { test } from 'node:test';
 import assert from 'node:assert';
@@ -111,4 +114,95 @@ test('--autogate refuses a name that is not an autogate', async () => {
   assert.strictEqual(code, 1, stderr);
   assert(stderr.includes('No such autogate: no-such-gate.'), stderr);
   assert(stderr.includes('test-workerd'), stderr);
+});
+
+// Starts `workerd repl --experimental ...args` for a test to give input to as it goes.
+function startRepl(args) {
+  const child = spawn(env.WORKERD_BINARY, ['repl', '--experimental', ...args], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...env, WORKERD_REPL_HISTORY: '' },
+  });
+  const output = { stdout: '', stderr: '' };
+  let waiting = [];
+  const check = () => {
+    waiting = waiting.filter(
+      ({ until, resolve }) => !(until(output) && (resolve(), true))
+    );
+  };
+  child.stdout.on('data', (data) => {
+    output.stdout += data;
+    check();
+  });
+  child.stderr.on('data', (data) => {
+    output.stderr += data;
+    check();
+  });
+  const exited = new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => resolve(code));
+  });
+  return {
+    output,
+    send(line) {
+      child.stdin.write(`${line}\n`);
+    },
+    // Resolves once `until(output)` holds.
+    waitFor(until) {
+      return new Promise((resolve) => {
+        waiting.push({ until, resolve });
+        check();
+      });
+    },
+    // Ends the input; the exit status.
+    end() {
+      child.stdin.end();
+      return exited;
+    },
+  };
+}
+
+// A config whose worker answers every fetch with `text`.
+function configAnswering(text) {
+  return `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [
+          ( name = "worker.js",
+            esModule = "export default { fetch() { return new Response('${text}'); } };" ),
+        ],
+      ),
+    ),
+  ],
+);
+`;
+}
+
+test('a watched config reloads when its file changes', async () => {
+  const dir = await mkdtemp(join(env.TEST_TMPDIR ?? tmpdir(), 'repl-watch-'));
+  const config = join(dir, 'config.capnp');
+  await writeFile(config, configAnswering('one'));
+  const fetchMain = "await (await s.service('main').fetch('http://x/')).text()";
+
+  const repl = startRepl([]);
+  repl.send(
+    `s = await workerd.loadConfig(${JSON.stringify(config)}, { watch: true })`
+  );
+  repl.send(fetchMain);
+  await repl.waitFor(({ stdout }) => stdout.includes("'one'"));
+
+  await writeFile(config, configAnswering('two'));
+  await repl.waitFor(({ stderr }) => stderr.includes('Reloaded '));
+  repl.send(fetchMain);
+  await repl.waitFor(({ stdout }) => stdout.includes("'two'"));
+
+  // A change that breaks the config leaves the server running.
+  await writeFile(config, 'not a config');
+  await repl.waitFor(({ stderr }) => stderr.includes('did not reload'));
+  repl.send(fetchMain);
+  await repl.waitFor(({ stdout }) => stdout.split("'two'").length === 3);
+
+  assert.strictEqual(await repl.end(), 0, repl.output.stderr);
 });

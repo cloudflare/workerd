@@ -16,7 +16,9 @@ use std::pin::Pin;
 
 use kj_rs::KjOwn;
 
+pub use super::session::ReplWatch;
 pub use super::session::repl_load_config;
+pub use super::session::repl_watch_new;
 
 #[cxx::bridge(namespace = "workerd::server::repl")]
 pub mod ffi {
@@ -86,6 +88,23 @@ pub mod ffi {
         /// not empty) or a `wrangler.json(c)`, as an encoded `Config` message. The error lists
         /// every problem.
         fn repl_load_config(path: &str, const_name: &str, experimental: bool) -> Result<Vec<u64>>;
+
+        /// Files configs were loaded from, watched for changes (cli/watch.rs).
+        type ReplWatch;
+
+        /// A watch of no files yet.
+        fn repl_watch_new() -> Result<Box<ReplWatch>>;
+
+        /// `repl_load_config`, watching each file the load reads, whether or not it succeeds.
+        fn load_config(
+            self: &ReplWatch,
+            path: &str,
+            const_name: &str,
+            experimental: bool,
+        ) -> Result<Vec<u64>>;
+
+        /// Resolves once a watched file has changed and changes have settled.
+        async unsafe fn changed<'a>(self: &'a ReplWatch) -> Result<()>;
     }
 }
 
