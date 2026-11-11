@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { Buffer } from 'node:buffer';
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -47,7 +48,11 @@ export const getPutDelete = {
 export const streamedPut = {
   async test(ctrl, env) {
     for (const size of [1000, 70_000, 2 * 1024 * 1024]) {
-      const value = Uint8Array.from({ length: size }, (_, i) => i % 251);
+      // A loop and Buffer.equals() rather than Uint8Array.from()'s callback
+      // and assert.deepStrictEqual(), which walks the array's own keys: at
+      // 2 MiB those take 20 s in debug builds.
+      const value = new Uint8Array(size);
+      for (let i = 0; i < size; i++) value[i] = i % 251;
       let sent = 0;
       const stream = new ReadableStream({
         pull(c) {
@@ -57,7 +62,8 @@ export const streamedPut = {
       });
       await env.KV.put(`stream/${size}`, stream);
       const got = await env.KV.get(`stream/${size}`, 'arrayBuffer');
-      assert.deepStrictEqual(new Uint8Array(got), value);
+      assert.strictEqual(got.byteLength, size);
+      assert.ok(Buffer.from(got).equals(value), `stream/${size} differs`);
     }
   },
 };
