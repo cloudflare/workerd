@@ -55,6 +55,7 @@ const REST_MS = 60 * 1000;
 const WATCH_MS = 10 * 60 * 1000;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BATCH = 100;
+const DELAY_FN_MS = 5_000;
 const STEP_LIMIT = 10_000;
 const DEFAULTS = {
   retries: { limit: 5, delay: 10_000, backoff: 'exponential' },
@@ -141,6 +142,15 @@ function nonRetryableError(e, attempt) {
 }
 // The instance's error when `run()` throws `e`.
 const failureOf = (e) => (nonRetryable(e) ? nonRetryableError(e) : plain(e));
+
+// `ms(d)`, or NaN if `d` is not a duration.
+function duration(d) {
+  try {
+    return ms(d);
+  } catch {
+    return NaN;
+  }
+}
 
 // Milliseconds: a number, or "<n> <unit>[s]".
 function ms(d) {
@@ -581,21 +591,25 @@ export class Engine extends DurableObject {
         return value;
       }
       const failed = plain(failure);
-      if (nonRetryable(failure) || attempt > cfg.retries.limit) {
-        this.#kv.put(key, { ...record, error: failed });
+      // The step fails with `thrown`, its attempt with `failure`.
+      const fail = (thrown) => {
+        this.#kv.put(key, { ...record, error: plain(thrown) });
         const logged = nonRetryable(failure)
           ? nonRetryableError(failure, true)
           : failed;
         this.#log('attempt_errored', { stepName, attempt, error: logged });
         this.#log('step_errored', { stepName });
-        throw failure;
+        return thrown;
+      };
+      if (nonRetryable(failure) || attempt > cfg.retries.limit) {
+        throw fail(failure);
       }
-      const retryDelayMs = await this.#delay(
-        cfg,
-        failure,
-        ctx(attempt),
-        attempt
-      );
+      let retryDelayMs;
+      try {
+        retryDelayMs = await this.#delay(cfg, failure, ctx(attempt), attempt);
+      } catch (e) {
+        throw fail(e);
+      }
       record.retryAt = clock() + retryDelayMs;
       this.#kv.put(key, record);
       this.#log('attempt_errored', {
@@ -607,18 +621,35 @@ export class Engine extends DurableObject {
     }
   }
 
+  // The delay before the retry after `attempt`. A delay function has
+  // `DELAY_FN_MS` to return a duration.
   async #delay(cfg, failure, ctx, attempt) {
     const { delay, backoff } = cfg.retries;
     if (typeof delay === 'function') {
       const step = `${ctx.step.name}-${ctx.step.count}`;
-      try {
-        return ms(await delay({ ctx, error: failure }));
-      } catch (e) {
-        throw error(
+      const fail = (message) =>
+        error(
           'NonRetryableDelayError',
-          `The delay function for step "${step}" threw an error: ${e.message}`
+          `The delay function for step "${step}" ${message}`
+        );
+      const timeout = this.#wait(clock() + DELAY_FN_MS);
+      let d;
+      try {
+        d = await Promise.race([delay({ ctx, error: failure }), timeout]);
+      } catch (e) {
+        throw fail(`threw an error: ${e.message}`);
+      } finally {
+        timeout.cancel();
+      }
+      if (d === TIMEOUT) throw fail('did not return within 5 seconds');
+      const value = typeof d === 'string' ? duration(d) : d;
+      if (!Number.isFinite(value) || value < 0) {
+        throw fail(
+          'returned an invalid delay value (expected a number of ms or a ' +
+            'duration string like "30 seconds")'
         );
       }
+      return value;
     }
     const base = ms(delay);
     if (backoff === 'linear') return base * attempt;
@@ -809,7 +840,14 @@ export class Engine extends DurableObject {
             this.#log('rollback_step_errored', { stepName, error });
             return false;
           }
-          const retryDelayMs = await this.#delay(cfg, e, undo.ctx, attempt);
+          let retryDelayMs;
+          try {
+            retryDelayMs = await this.#delay(cfg, e, undo.ctx, attempt);
+          } catch (d) {
+            this.#log('rollback_attempt_errored', { stepName, attempt, error });
+            this.#log('rollback_step_errored', { stepName, error: plain(d) });
+            return false;
+          }
           const fields = { stepName, attempt, retryDelayMs, error };
           this.#log('rollback_attempt_errored', fields);
           await this.#wait(clock() + retryDelayMs);

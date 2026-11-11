@@ -45,6 +45,20 @@ export class Flow extends WorkflowEntrypoint {
           return ctx.attempt;
         });
       }
+      case 'delay-hang':
+      case 'delay-bad':
+      case 'delay-throw': {
+        const delay = {
+          'delay-hang': () => new Promise(() => {}),
+          'delay-bad': () => 'soon',
+          'delay-throw': () => {
+            throw new Error('nope');
+          },
+        }[event.payload.kind];
+        return step.do('flaky', { retries: { limit: 1, delay } }, () => {
+          throw new Error('fail');
+        });
+      }
       case 'slow': {
         const config = { retries: { limit: 0, delay: 0 }, timeout: '1 minute' };
         return step.do('slow', config, () => signal(`${id}/slow`).promise);
@@ -221,6 +235,27 @@ export let delays = {
     await advance(env, backoff, 2000);
     await until(backoff, 'workflow_completed');
     assert.strictEqual((await backoff.status()).output, 2);
+
+    // A delay function that fails fails the step: it runs no more.
+    const failing = [
+      ['delay-hang', 'did not return within 5 seconds'],
+      ['delay-bad', 'returned an invalid delay value'],
+      ['delay-throw', 'threw an error: nope'],
+    ];
+    for (const [kind, message] of failing) {
+      const instance = await create(env, kind, kind);
+      if (kind === 'delay-hang') {
+        await until(instance, 'workflow_waiting');
+        await advance(env, instance, 5000);
+      }
+      const { error } = await until(instance, 'workflow_errored');
+      assert.match(error.message, new RegExp(message));
+      const steps = ['attempt_errored', 'step_errored'];
+      assert.deepEqual(await history(instance, steps), [
+        ['attempt_errored', 'flaky-1', 1],
+        ['step_errored', 'flaky-1'],
+      ]);
+    }
 
     const slow = await create(env, 'slow', 'slow');
     await until(slow, 'attempt_started');
