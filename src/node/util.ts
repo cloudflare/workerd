@@ -16,6 +16,7 @@ import {
   validateString,
   validateBoolean,
   validateOneOf,
+  validateNumber,
 } from 'node-internal:validators';
 
 import { debuglog } from 'node-internal:debuglog';
@@ -25,7 +26,13 @@ export { debuglog };
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
+import {
+  getErrorMap,
+  getErrorMessage,
+  getErrorName,
+} from 'node-internal:internal_uv';
 
 import {
   inspect,
@@ -298,16 +305,25 @@ export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
   return _isDeepStrictEqual(a, b);
 }
 
-export function getSystemErrorMap(): void {
-  throw new Error('node:util getSystemErrorMap is not implemented');
+export function getSystemErrorMap(): Map<number, [string, string]> {
+  return getErrorMap();
 }
 
-export function getSystemErrorName(): void {
-  throw new Error('node:util getSystemErrorName is not implemented');
+function validateSystemError(err: unknown): asserts err is number {
+  validateNumber(err, 'err');
+  if (err >= 0 || !Number.isSafeInteger(err)) {
+    throw new ERR_OUT_OF_RANGE('err', 'a negative integer', err);
+  }
 }
 
-export function getSystemErrorMessage(): void {
-  throw new Error('node:util getSystemErrorMessage is not implemented');
+export function getSystemErrorName(err: unknown): string {
+  validateSystemError(err);
+  return getErrorName(err);
+}
+
+export function getSystemErrorMessage(err: unknown): string {
+  validateSystemError(err);
+  return getErrorMessage(err);
 }
 
 function escapeStyleCode(code: number | undefined): string {

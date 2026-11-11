@@ -5981,6 +5981,77 @@ export const testParseEnv = {
   },
 };
 
+// Ported from Node.js test/parallel/test-uv-errno.js and test-uv-errmap.js.
+export const testGetSystemError = {
+  test() {
+    const { getSystemErrorMap, getSystemErrorName, getSystemErrorMessage } =
+      util;
+
+    const errMap = getSystemErrorMap();
+    assert.ok(errMap instanceof Map);
+    assert.notStrictEqual(getSystemErrorMap(), errMap);
+    assert.strictEqual(errMap.size, 85);
+    for (const [errno, [name, message]] of errMap) {
+      assert.strictEqual(getSystemErrorName(errno), name);
+      assert.strictEqual(getSystemErrorMessage(errno), message);
+      assert.notStrictEqual(message, `Unknown system error ${errno}`);
+    }
+
+    // The Linux values, which is what Node.js reports on Linux.
+    assert.deepStrictEqual(errMap.get(-2), [
+      'ENOENT',
+      'no such file or directory',
+    ]);
+    assert.deepStrictEqual(errMap.get(-111), [
+      'ECONNREFUSED',
+      'connection refused',
+    ]);
+    assert.deepStrictEqual(errMap.get(-3008), [
+      'EAI_NONAME',
+      'unknown node or service',
+    ]);
+    assert.deepStrictEqual(errMap.get(-4095), ['EOF', 'end of file']);
+    assert.strictEqual(getSystemErrorName(-13), 'EACCES');
+    assert.strictEqual(getSystemErrorMessage(-13), 'permission denied');
+
+    // Mutating a returned map does not affect later calls.
+    errMap.delete(-2);
+    assert.strictEqual(getSystemErrorName(-2), 'ENOENT');
+    assert.ok(getSystemErrorMap().has(-2));
+
+    assert.strictEqual(
+      getSystemErrorName(-111111),
+      'Unknown system error -111111'
+    );
+    assert.strictEqual(
+      getSystemErrorMessage(-111111),
+      'Unknown system error -111111'
+    );
+
+    for (const fn of [getSystemErrorName, getSystemErrorMessage]) {
+      for (const err of ['test', {}, []]) {
+        assert.throws(() => fn(err), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+          message:
+            'The "err" argument must be of type number.' +
+            invalidArgTypeHelper(err),
+        });
+      }
+      for (const err of [0, 1, Infinity, -Infinity, NaN, -1.5]) {
+        assert.throws(() => fn(err), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+          message:
+            'The value of "err" is out of range. ' +
+            'It must be a negative integer. ' +
+            `Received ${err}`,
+        });
+      }
+    }
+  },
+};
+
 export const testNotImplemented = {
   async test() {
     for (const method of ['_errnoException', '_exceptionWithHostPort']) {
