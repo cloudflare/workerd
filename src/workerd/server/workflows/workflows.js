@@ -56,6 +56,9 @@ const WATCH_MS = 10 * 60 * 1000;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BATCH = 100;
 const DELAY_FN_MS = 5_000;
+// A stream a step returns is stored as rows of `CHUNK` bytes.
+const CHUNK = 256 * 1024;
+const PREVIEW = 1024;
 const STEP_LIMIT = 10_000;
 const DEFAULTS = {
   retries: { limit: 5, delay: 10_000, backoff: 'exponential' },
@@ -116,6 +119,27 @@ const DELETED = 'The Workflow instance was deleted';
 let skew = 0;
 const clock = () => Date.now() + skew;
 const pad = (n) => String(n).padStart(12, '0');
+// What the logs show of a stored stream, from its first chunk.
+function preview(head, bytes) {
+  const shown = head.subarray(0, PREVIEW * 4);
+  const cut = bytes > shown.byteLength;
+  try {
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const text = decoder.decode(shown, { stream: cut });
+    if (!cut && text.length <= PREVIEW) return text;
+    return text.slice(0, PREVIEW) + '[truncated output]';
+  } catch {
+    return `[ReadableStream (binary): ${bytes} bytes]`;
+  }
+}
+
+// A step's stream, stored.
+class Stored {
+  constructor(fields) {
+    Object.assign(this, fields);
+  }
+}
+
 // Releases a step result, an RPC result with its stubs.
 const dispose = (v) => v?.[Symbol.dispose]?.();
 
@@ -259,6 +283,8 @@ class Subscription extends RpcTarget {
 // One instance of the Workflow `ctx.props.workflowName`.
 export class Engine extends DurableObject {
   #kv = this.ctx.storage.kv;
+  #table = false;
+
   // The `run()` in memory, `{generation}`, else null. Its steps hold it.
   #drive = null;
   // Step callbacks of that `run()` executing.
@@ -515,6 +541,104 @@ export class Engine extends DurableObject {
     return { key, count, record: this.#kv.get(key) ?? fresh() };
   }
 
+  // The rows of the streams steps returned.
+  get #sql() {
+    const sql = this.ctx.storage.sql;
+    this.#table ||= !!sql.exec(
+      'CREATE TABLE IF NOT EXISTS chunks (key TEXT, attempt INTEGER, ' +
+        'i INTEGER, chunk BLOB, PRIMARY KEY (key, attempt, i)) WITHOUT ROWID'
+    );
+    return sql;
+  }
+
+  // Stores `stream`, which `attempt` of the step at `key` returned, until
+  // `reading.cancelled` is set.
+  async #store(key, attempt, stream, reading) {
+    const reader = stream.getReader();
+    if (reading.cancelled) return reader.cancel(reading.cancelled);
+    reading.cancel = (e) => reader.cancel(e).catch(() => {});
+    const sql = this.#sql;
+    sql.exec('DELETE FROM chunks WHERE key = ?', key);
+    const buf = new Uint8Array(CHUNK);
+    let fill = 0;
+    let chunks = 0;
+    let bytes = 0;
+    let head;
+    const flush = () => {
+      const chunk = buf.slice(0, fill);
+      head ??= chunk;
+      sql.exec(
+        'INSERT INTO chunks VALUES (?, ?, ?, ?)',
+        key,
+        attempt,
+        chunks++,
+        chunk.buffer
+      );
+      bytes += fill;
+      fill = 0;
+    };
+    for (;;) {
+      let r;
+      try {
+        r = await reader.read();
+      } catch (e) {
+        if (reading.cancelled) throw reading.cancelled;
+        throw error(
+          'InvalidStepReadableStreamError',
+          `Failed to read from step ReadableStream output. ${e?.message ?? e}`
+        );
+      }
+      if (reading.cancelled) throw reading.cancelled;
+      if (r.done) break;
+      let v = r.value;
+      while (v.byteLength > 0) {
+        const n = Math.min(CHUNK - fill, v.byteLength);
+        buf.set(v.subarray(0, n), fill);
+        fill += n;
+        v = v.subarray(n);
+        if (fill === CHUNK) flush();
+      }
+    }
+    if (fill > 0) flush();
+    const shown = preview(head ?? new Uint8Array(), bytes);
+    return new Stored({ attempt, chunks, bytes, preview: shown });
+  }
+
+  // The stream of a stored step's output, read a row at a time.
+  #replayStream(key, stepName, { attempt, chunks, bytes }) {
+    const sql = this.#sql;
+    const [row] = sql
+      .exec(
+        'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(chunk)), 0) AS size ' +
+          'FROM chunks WHERE key = ? AND attempt = ?',
+        key,
+        attempt
+      )
+      .toArray();
+    if (row.n !== chunks || row.size !== bytes) {
+      throw error(
+        'WorkflowInternalError',
+        `Stored output for ${stepName} is corrupt or incomplete.`
+      );
+    }
+    let i = 0;
+    return new ReadableStream({
+      type: 'bytes',
+      pull(c) {
+        if (i === chunks) return c.close();
+        const [{ chunk }] = sql
+          .exec(
+            'SELECT chunk FROM chunks WHERE key = ? AND attempt = ? AND i = ?',
+            key,
+            attempt,
+            i++
+          )
+          .toArray();
+        c.enqueue(new Uint8Array(chunk));
+      },
+    });
+  }
+
   async #do(run, name, config, callback, rollback) {
     if (typeof config === 'function') {
       [config, callback, rollback] = [{}, config, callback];
@@ -549,9 +673,10 @@ export class Engine extends DurableObject {
     const undo =
       rollback && undoOf(rollback, name, ctx(record.attempts ?? 1), record);
     if (undo) this.#rollbacks.push(undo);
+    const stepName = `${name}-${count}`;
+    if (record.stream) return this.#replayStream(key, stepName, record.stream);
     if (record.done) return record.value;
     if (record.error) throw error(record.error.name, record.error.message);
-    const stepName = `${name}-${count}`;
     if (record.attempts === undefined) {
       record.attempts = 0;
       if (rollback) record.hasRollback = true;
@@ -596,7 +721,10 @@ export class Engine extends DurableObject {
       this.#settle();
       const limit = ms(cfg.timeout);
       const timeout = this.#wait(clock() + limit);
-      const result = Promise.resolve(callback(ctx(attempt)));
+      const reading = {};
+      const result = Promise.resolve(callback(ctx(attempt))).then((v) =>
+        v instanceof ReadableStream ? this.#store(key, attempt, v, reading) : v
+      );
       let value, failure;
       try {
         value = await Promise.race([
@@ -610,6 +738,8 @@ export class Engine extends DurableObject {
         ]);
       } catch (e) {
         failure = e;
+        reading.cancelled = e;
+        reading.cancel?.(e);
         result.then(dispose, () => {});
       } finally {
         timeout.cancel();
@@ -617,11 +747,14 @@ export class Engine extends DurableObject {
       }
       if (!this.#owns(run)) throw aborted();
       this.#settle();
+      let stream;
       if (failure === undefined) {
         const live = value;
+        if (live instanceof Stored) stream = { ...live };
         try {
-          value = structuredClone(live);
-          this.#kv.put(key, { ...record, done: true, value });
+          value = stream ? undefined : structuredClone(live);
+          this.#kv.put(key, { ...record, done: true, value, stream });
+          if (stream) value = this.#replayStream(key, stepName, stream);
         } catch (e) {
           // Storage takes up to 8 MiB a value; the message is production's.
           if (String(e?.message).includes('SQLITE_TOOBIG')) {
@@ -647,12 +780,34 @@ export class Engine extends DurableObject {
         }
       }
       if (failure === undefined) {
-        if (undo) undo.output = value;
+        if (undo) {
+          undo.output = stream
+            ? this.#replayStream(key, stepName, stream)
+            : value;
+        }
         this.#log('attempt_completed', { stepName, attempt });
-        const output = cfg.sensitive === 'output' ? '[REDACTED]' : value;
+        const shown = stream ? stream.preview : value;
+        const output = cfg.sensitive === 'output' ? '[REDACTED]' : shown;
         const fields = output === undefined ? {} : { output };
         this.#log('step_completed', { stepName, ...fields });
         return value;
+      }
+      // A stream that fails to read ends the instance.
+      if (failure?.name === 'InvalidStepReadableStreamError') {
+        const failed = plain(fatalError(failure.message));
+        this.#kv.put(key, { ...record, error: failed });
+        this.#log('attempt_errored', { stepName, attempt, error: failed });
+        this.#log('step_errored', { stepName });
+        this.#finish('errored', {
+          error: plain(
+            fatalError(
+              'The execution of the Workflow instance was terminated, as the ' +
+                `step "${name}" returned an invalid ReadableStream output. ` +
+                failure.message
+            )
+          ),
+        });
+        throw aborted();
       }
       const failed = plain(failure);
       // The step fails with `thrown`, its attempt with `failure`.
@@ -923,6 +1078,7 @@ export class Engine extends DurableObject {
 
   #destroy() {
     this.ctx.storage.deleteAll();
+    this.#table = false;
     this.ctx.storage.deleteAlarm();
     this.#drive = null;
     this.#alarm = null;
@@ -1055,7 +1211,10 @@ export class Engine extends DurableObject {
     const kept = steps.slice(0, keep).map(([, r]) => `${r.name}-${r.count}`);
     const keeps = (e) =>
       from && (START.has(e.type) || (e.stepName && kept.includes(e.stepName)));
-    for (const [key] of steps.slice(keep)) this.#kv.delete(key);
+    for (const [key] of steps.slice(keep)) {
+      this.#kv.delete(key);
+      this.#sql.exec('DELETE FROM chunks WHERE key = ?', key);
+    }
     for (const [key] of [...this.#kv.list({ prefix: 'e:' })]) {
       this.#kv.delete(key);
     }

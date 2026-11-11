@@ -48,6 +48,34 @@ export class Flow extends WorkflowEntrypoint {
           ctx.attempt === 1 ? 'x'.repeat(9 * 1024 * 1024) : 'ok'
         );
       }
+      case 'stream-text':
+      case 'stream-binary':
+      case 'stream-error':
+      case 'stream-hang': {
+        const kind = event.payload.kind;
+        const chunks = {
+          'stream-text': ['a'.repeat(300 * 1024), 'end'],
+          'stream-binary': [new Uint8Array([0xff, 0xfe])],
+          'stream-hang': [new Uint8Array([1])],
+        }[kind];
+        const encode = (c) =>
+          typeof c === 'string' ? new TextEncoder().encode(c) : c;
+        const retries = { limit: 0, delay: 0 };
+        const config = { retries, timeout: '1 second' };
+        const s = await step.do('s', config, async () => {
+          ran.push(`${id}/s`);
+          return new ReadableStream({
+            start(c) {
+              if (kind === 'stream-error') return c.error(new Error('broke'));
+              for (const chunk of chunks) c.enqueue(encode(chunk));
+              if (kind !== 'stream-hang') c.close();
+            },
+          });
+        });
+        const text = await new Response(s).text();
+        await step.sleep('nap', '1 hour');
+        return `${text.length}:${text.slice(-3)}`;
+      }
       case 'void':
         return step.do('v', async () => {});
       case 'dispose':
@@ -210,6 +238,34 @@ export let bigOutput = {
     });
     await until(instance, 'workflow_completed');
     assert.strictEqual((await instance.status()).output, 'ok');
+  },
+};
+
+// A step's stream is stored, shown in the logs, and replayed from storage.
+export let streams = {
+  async test(ctrl, env) {
+    const text = await create(env, 'stream', 'stream-text');
+    const { output } = await until(text, 'step_completed');
+    assert.strictEqual(output, 'a'.repeat(1024) + '[truncated output]');
+    await until(text, 'workflow_waiting');
+    await advance(env, text, 60 * 60 * 1000);
+    await until(text, 'workflow_completed');
+    assert.strictEqual((await text.status()).output, `${300 * 1024 + 3}:end`);
+    assert.deepEqual(ranBy('stream'), ['stream/s']);
+
+    const binary = await create(env, 'binary', 'stream-binary');
+    const shown = await until(binary, 'step_completed');
+    assert.strictEqual(shown.output, '[ReadableStream (binary): 2 bytes]');
+
+    const broken = await create(env, 'broken', 'stream-error');
+    const { error } = await until(broken, 'workflow_errored');
+    assert.match(error.message, /returned an invalid ReadableStream output/);
+
+    const hang = await create(env, 'hang', 'stream-hang');
+    await until(hang, 'attempt_started');
+    await advance(env, hang, 1000);
+    const errored = await until(hang, 'attempt_errored');
+    assert.strictEqual(errored.error.name, 'WorkflowTimeoutError');
   },
 };
 

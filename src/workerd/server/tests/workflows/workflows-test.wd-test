@@ -14,7 +14,7 @@ const unitTests :Workerd.Config = (
     ( name = "workflows-test",
       worker = (
         modules = [ ( name = "worker", esModule = embed "workflows-test.js" ) ],
-        compatibilityFlags = ["nodejs_compat", "rpc"],
+        compatibilityFlags = ["nodejs_compat", "rpc", "streams_enable_constructors"],
         bindings = [
           ( name = "FLOW",
             wrapped = (
@@ -34,7 +34,7 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           ( name = "workflows.js", bundled = "/workerd/workflows.js" ) ],
-        compatibilityFlags = ["rpc"],
+        compatibilityFlags = ["rpc", "streams_enable_constructors"],
         bindings = [
           ( name = "flow",
             durableObjectNamespace = (
