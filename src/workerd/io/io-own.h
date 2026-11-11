@@ -96,11 +96,10 @@ class DeleteQueue: public kj::AtomicRefcounted {
   // events: on its thread, under the isolate lock, an actor's input lock and the current
   // IncomingRequest, whose limits it counts toward.
   //
-  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, an action queued while there is no request (an
-  // actor between events), or whose run loses its request while waiting for a lock, waits for the
-  // next one; without it, the context is aborted. A stateless context gets no next request, so
-  // its actions wait until it is destroyed. An actor's onHibernate event drops the actions queued
-  // before it (see Worker::Actor::runOnHibernate()).
+  // An action queued while there is no request (an actor between events), or whose run loses its
+  // request while waiting for a lock, waits for the next one. A stateless context gets no next
+  // request, so its actions wait until it is destroyed. An actor's onHibernate event drops the
+  // actions queued before it (see Worker::Actor::runOnHibernate()).
   //
   // Only the isolate's memory limit bounds the queue, and only through what the actions keep
   // alive on its heap, so coalesce actions holding just a weak reference, and count native copies

@@ -53,8 +53,7 @@ namespace workerd {
 constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
 // Marks the exception IoContext::run() fails with when there is no current IncomingRequest, e.g.
-// in an actor between events (only with the DEFER_CROSS_CONTEXT_ACTIONS autogate). Not transient:
-// a retry needs the context to get another request.
+// in an actor between events. Not transient: a retry needs the context to get another request.
 constexpr kj::Exception::DetailTypeId NO_CURRENT_INCOMING_REQUEST_DETAIL_ID = 0x68a64a728b1be5c9ull;
 
 // This wishes it were IoContext::Runnable::Exceptional.
@@ -155,9 +154,9 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   //
   // If delivered() is never called, then drain() need not be called.
   //
-  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, if the actor had no current request, this also
-  // runs the cross-context actions queued meanwhile (see DeleteQueue::scheduleAction()) as a
-  // waitUntil task of this request, or drops them if `dropQueuedActions` is YES.
+  // If the actor had no current request, this also runs the cross-context actions queued meanwhile
+  // (see DeleteQueue::scheduleAction()) as a waitUntil task of this request, or drops them if
+  // `dropQueuedActions` is YES.
   void delivered(kj::SourceLocation = kj::SourceLocation());
   // As delivered(), naming the event type (e.g. "fetch", "alarm") for async tracing. Without it,
   // the request's async trace resource is named after the delivering function.
@@ -554,11 +553,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // IoChannelFactory's timer, the request's metrics) before the callback runs. An IoContext can
   // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
   // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
-  // the work rather than call this and fault.
+  // the work rather than call this and fail.
   //
-  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate enabled, the callback doesn't run without a
-  // request: run() throws, or rejects if the request ends while it waits for the locks, with
-  // NO_CURRENT_INCOMING_REQUEST_DETAIL_ID. An aborted context fails with its abort reason instead.
+  // Without a request, the callback doesn't run: run() throws, or rejects if the request ends
+  // while it waits for the locks, with NO_CURRENT_INCOMING_REQUEST_DETAIL_ID. An aborted context
+  // fails with its abort reason instead.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -1503,9 +1502,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
 
   // Throws a JavaScript Error carrying NO_CURRENT_INCOMING_REQUEST_DETAIL_ID if there is no
-  // current IncomingRequest and the DEFER_CROSS_CONTEXT_ACTIONS autogate is enabled. If `report`
-  // is YES, also logs the miss, at most once an hour, as a possible bug. An aborted context throws
-  // its abort exception instead, without logging.
+  // current IncomingRequest. If `report` is YES, also logs the miss, at most once an hour, as a
+  // possible bug. An aborted context throws its abort exception instead, without logging.
   void requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report);
 
   // Internal implementation of run(), always invoked with a single-arg callback. `report` is
@@ -1619,9 +1617,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // the run loses its request while waiting for a lock, they stay queued; other failures abort.
   kj::Promise<void> runQueuedActions();
 
-  // Called by IncomingRequest::delivered() when an actor gets a request after having none. With
-  // the DEFER_CROSS_CONTEXT_ACTIONS autogate, runs the cross-context actions queued meanwhile as a
-  // waitUntil task of the request, or drops them.
+  // Called by IncomingRequest::delivered() when an actor gets a request after having none. Runs
+  // the cross-context actions queued meanwhile as a waitUntil task of the request, or drops them.
   void handleActionsQueuedWhileIdle(kj::StringPtr eventType, DropQueuedCrossContextActions drop);
 
   friend class Finalizeable;
