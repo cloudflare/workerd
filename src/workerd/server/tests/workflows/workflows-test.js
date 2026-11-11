@@ -39,6 +39,27 @@ export class Flow extends WorkflowEntrypoint {
         return;
       case 'void':
         return step.do('v', async () => {});
+      case 'dispose':
+      case 'late-result': {
+        // The disposer tells the instance, which waits for it.
+        const tell = async () =>
+          (await this.env.FLOW.get(id)).sendEvent({ type: 'disposed' });
+        const result = { [Symbol.dispose]: () => this.ctx.waitUntil(tell()) };
+        if (event.payload.kind === 'dispose') {
+          await step.do('d', async () => result);
+        } else {
+          // Its only attempt times out; the result comes after.
+          const late = async () => {
+            await until(await this.env.FLOW.get(id), 'step_errored');
+            return result;
+          };
+          const retries = { limit: 0, delay: 0 };
+          const config = { retries, timeout: '1 second' };
+          await step.do('late', config, late).catch(() => {});
+        }
+        const wait = { type: 'disposed', timeout: '30 seconds' };
+        return step.waitForEvent('disposed', wait);
+      }
       case 'backoff': {
         const delay = ({ ctx }) => ctx.attempt * 2000;
         const retries = { limit: 1, delay };
@@ -95,8 +116,10 @@ export class Flow extends WorkflowEntrypoint {
         });
         return once('b');
       }
-      case 'event': {
-        const options = { type: 'ping', timeout: '1 minute' };
+      case 'event':
+      case 'long-event': {
+        const long = event.payload.kind === 'long-event';
+        const options = { type: 'ping', timeout: long ? '1 hour' : '1 minute' };
         return (await step.waitForEvent('ping', options)).payload;
       }
       case 'fatal':
@@ -174,6 +197,21 @@ export let voidStep = {
     const instance = await create(env, 'void', 'void');
     const event = await until(instance, 'step_completed');
     assert.ok(!('output' in event));
+  },
+};
+
+// A step's result is released once stored, and a timed-out attempt's
+// result when it comes.
+// A step's result is released once stored, and a timed-out attempt's
+// result when it comes.
+export let disposeResults = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'dispose', 'dispose');
+    await until(instance, 'workflow_completed');
+    const late = await create(env, 'late-result', 'late-result');
+    await until(late, 'attempt_started');
+    await advance(env, late, 1000);
+    await until(late, 'workflow_completed');
   },
 };
 
@@ -352,6 +390,13 @@ export let events = {
     await early.sendEvent({ type: 'ping', payload: 'first' });
     await until(early, 'workflow_completed');
     assert.strictEqual((await early.status()).output, 'first');
+
+    // Sent while the instance rests.
+    const rested = await create(env, 'rested', 'long-event');
+    await until(rested, 'workflow_waiting');
+    await rested.sendEvent({ type: 'ping', payload: 'woke' });
+    await until(rested, 'workflow_completed');
+    assert.strictEqual((await rested.status()).output, 'woke');
 
     const late = await create(env, 'late', 'event');
     await until(late, 'wait_started');

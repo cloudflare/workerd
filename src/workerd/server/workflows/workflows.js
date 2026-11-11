@@ -115,6 +115,8 @@ const TIMEOUT = Symbol('timeout');
 let skew = 0;
 const clock = () => Date.now() + skew;
 const pad = (n) => String(n).padStart(12, '0');
+// Releases a step result, an RPC result with its stubs.
+const dispose = (v) => v?.[Symbol.dispose]?.();
 
 const error = (name, message) => Object.assign(new Error(message), { name });
 const workflowError = (code, message) =>
@@ -593,10 +595,11 @@ export class Engine extends DurableObject {
       this.#settle();
       const limit = ms(cfg.timeout);
       const timeout = this.#wait(clock() + limit);
+      const result = Promise.resolve(callback(ctx(attempt)));
       let value, failure;
       try {
         value = await Promise.race([
-          callback(ctx(attempt)),
+          result,
           timeout.then(() => {
             throw error(
               'WorkflowTimeoutError',
@@ -606,6 +609,7 @@ export class Engine extends DurableObject {
         ]);
       } catch (e) {
         failure = e;
+        result.then(dispose, () => {});
       } finally {
         timeout.cancel();
         if (this.#drive === run) this.#busy--;
@@ -613,7 +617,9 @@ export class Engine extends DurableObject {
       if (!this.#owns(run)) throw aborted();
       this.#settle();
       if (failure === undefined) {
+        const live = value;
         try {
+          value = structuredClone(live);
           this.#kv.put(key, { ...record, done: true, value });
         } catch {
           this.#finish('errored', {
@@ -626,6 +632,8 @@ export class Engine extends DurableObject {
             ),
           });
           throw aborted();
+        } finally {
+          dispose(live);
         }
         if (undo) undo.output = value;
         this.#log('attempt_completed', { stepName, attempt });
