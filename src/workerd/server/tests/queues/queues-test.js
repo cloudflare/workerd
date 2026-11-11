@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import { DurableObject } from 'cloudflare:workers';
+import unsafe from 'workerd:unsafe';
 import assert from 'node:assert';
 
 // Every delivery, in order.
@@ -131,6 +132,28 @@ export let leaseExpiry = {
       [1, 1, 2, 2]
     );
     await seen(ctx).release();
+  },
+};
+
+// A delivery holds its shard in memory: evicting the shard waits for it,
+// and the message is acked once.
+export let evictionWaitsForDelivery = {
+  async test(ctrl, env, ctx) {
+    const before = (await seen(ctx).entries()).length;
+    await env.HELD.send('hang', { contentType: 'text' });
+    await until(ctx, before + 1);
+    const evicted = unsafe.evict(env.SHARD.getByName('held#0'));
+    await seen(ctx).release();
+    await evicted;
+    await env.HELD.send('next', { contentType: 'text' });
+    const log = (await until(ctx, before + 2)).slice(before);
+    assert.deepEqual(
+      log.map((e) => [e.body, e.attempts]),
+      [
+        ['hang', 1],
+        ['next', 1],
+      ]
+    );
   },
 };
 

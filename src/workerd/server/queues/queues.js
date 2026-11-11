@@ -50,10 +50,11 @@
 // Metrics, from `metrics()` and with each send or batch, are the shard's,
 // not the queue's.
 //
-// Delivery runs on the object's alarm, set for the next batch deadline,
-// lease expiry, dead letter send or retention sweep, so a survivor adopting a
-// dead instance's shards delivers their messages. A full batch is delivered
-// at once, without waiting for the alarm.
+// Delivery runs in the object's alarm, set for the next batch deadline,
+// lease expiry, dead letter send or retention sweep, or for the present when
+// a batch is due. The alarm waits for the deliveries it starts, so a survivor
+// adopting a dead instance's shards runs it again and delivers their
+// messages.
 //
 // With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock;
 // a shard acts on it at its next call or alarm, and alarms keep the real
@@ -76,6 +77,12 @@ const RETRY_MS = 10_000;
 // A delivery outlasting its lease is taken to have failed: past a consumer
 // invocation's 15 minutes.
 const LEASE_MS = 16 * 60 * 1000;
+// An alarm starts deliveries for this long, then ends once they have: each
+// has at least the rest of the alarm's 15 minutes.
+const START_MS = 5 * 60 * 1000;
+// Rather than end, an alarm waits for a batch falling due this soon: setting
+// the alarm again costs a commit in a cluster.
+const LINGER_MS = 2_000;
 // Production's default retention.
 const RETENTION_MS = 4 * 24 * 60 * 60 * 1000;
 const FORMATS = ['v8', 'text', 'json', 'bytes'];
@@ -195,6 +202,7 @@ const VISIBLE = 'lease IS NULL AND dead = 0';
 // A retried message waits for its delay, not for the batch timeout again.
 const RETRIED = `SELECT min(visible_at) AS t FROM messages
   WHERE ${VISIBLE} AND attempts > 0`;
+const READY = `${VISIBLE} AND visible_at <= ? ORDER BY visible_at, seq LIMIT ?`;
 const inOrder = (a, b) => a.visible_at - b.visible_at || a.seq - b.seq;
 
 export class QueueShard extends DurableObject {
@@ -205,8 +213,14 @@ export class QueueShard extends DurableObject {
   // Each delivery's generation and when its lease ends: one past it no
   // longer counts against the limit.
   #leases = new Map();
+  // What the running alarm waits for: each delivery, by generation, and the
+  // dead letter send, as `bury`.
+  #flight = new Map();
+  // Wakes the running alarm, null with none running.
+  #kick = null;
   // When the dead letter send out ends, 0 with none.
   #burying = 0;
+  // The alarm set, in real time, null with none.
   #alarm = null;
   #name;
 
@@ -280,14 +294,44 @@ export class QueueShard extends DurableObject {
     } else if (op !== '/metrics') {
       return reply(404, 'Not Found');
     }
-    this.#pump();
+    // A running alarm sweeps and delivers; else the alarm is set for it.
+    if (this.#kick) this.#kick();
+    else this.#pump(false);
     const metrics = this.#metrics();
     return reply(200, op === '/metrics' ? metrics : { metadata: { metrics } });
   }
 
+  // Delivers: starts batches as they fall due for `START_MS`, waits for
+  // them and for batches due within `LINGER_MS`, then sets the alarm for
+  // what is next. The alarm is the deliveries' request, so the object stays
+  // in memory while they run, and it is not moved meanwhile, so an instance
+  // adopting the object runs it again at once. Past `START_MS` only a
+  // delivery ending, a send or a lease expiring wakes it.
   async alarm() {
     this.#alarm = null;
-    this.#pump();
+    this.#kick = () => {};
+    const end = Date.now() + START_MS;
+    try {
+      for (;;) {
+        const deliver = Date.now() < end;
+        const next = this.#pump(deliver);
+        const soon = deliver && next - clock() <= LINGER_MS;
+        if (this.#flight.size === 0 && !soon) break;
+        let timer;
+        const wake = new Promise((resolve) => {
+          this.#kick = resolve;
+          const wait = next - clock();
+          if (wait < Infinity && (deliver || wait > 0)) {
+            timer = setTimeout(resolve, wait);
+          }
+        });
+        await Promise.race([wake, ...this.#flight.values()]);
+        clearTimeout(timer);
+      }
+    } finally {
+      this.#kick = null;
+    }
+    this.#pump(false);
   }
 
   #insert(m, body) {
@@ -347,88 +391,101 @@ export class QueueShard extends DurableObject {
     return { generation, until, rows: rows.sort(inOrder) };
   }
 
-  // Sweeps, delivers what is due and sets the alarm for what is next.
-  #pump() {
+  // Sweeps and, with `deliver`, starts what is due; returns when the next
+  // thing falls due. Outside an alarm, sets the alarm for it.
+  #pump(deliver) {
     const now = clock();
-    const sql = this.#sql;
     this.#delete('timestamp <= ?', now - RETENTION_MS);
-    const c = this.#consumer;
-    if (c === undefined) return this.#arm(now, null);
-    this.#fail(now, 'lease IS NOT NULL AND leased_until <= ?', now);
-    for (const [g, until] of this.#leases) {
-      if (until <= now) this.#leases.delete(g);
+    const c = this.#consumer ?? null;
+    if (c !== null) {
+      this.#fail(now, 'lease IS NOT NULL AND leased_until <= ?', now);
+      for (const [g, until] of this.#leases) {
+        if (until > now) continue;
+        this.#leases.delete(g);
+        this.#flight.delete(g);
+      }
+      if (deliver) {
+        this.#bury(now, c);
+        while (this.#due(now, c)) this.#start(now, c);
+      }
     }
-    this.#bury(now, c);
-    const limit = c.maxConcurrency ? 1 : IN_FLIGHT;
-    const ready =
-      `${VISIBLE} AND visible_at <= ? ` + 'ORDER BY visible_at, seq LIMIT ?';
-    while (this.#leases.size < limit) {
-      const head = sql
-        .exec(
-          `SELECT visible_at FROM messages WHERE ${ready}`,
-          now,
-          c.maxBatchSize
-        )
-        .toArray();
-      if (head.length === 0) break;
-      const due = Math.min(
-        head[0].visible_at + c.maxBatchTimeout * 1000,
-        this.#min(RETRIED)
-      );
-      if (head.length < c.maxBatchSize && due > now) break;
-      const lease = this.#lease(ready, now, c.maxBatchSize);
-      const { generation } = lease;
-      this.#leases.set(generation, lease.until);
-      const delivery = this.#deliver(c, generation, lease.rows).catch((e) => {
-        console.error(`queue "${this.#queue}": delivery failed: ${e}`);
-        this.#fail(clock(), 'lease = ?', generation);
-      });
-      this.ctx.waitUntil(
-        delivery.finally(() => {
-          this.#leases.delete(generation);
-          this.#pump();
-        })
-      );
-    }
-    this.#arm(now, c);
+    const next = this.#next(now, c);
+    if (this.#kick === null) this.#arm(next);
+    return next;
   }
 
-  // Sets the alarm to the earliest of the batch deadline, a lease's expiry,
-  // a dead letter's next send and the next retention sweep.
-  #arm(now, c) {
+  // Whether a batch may start: under the limit, and full or due.
+  #due(now, c) {
+    if (this.#leases.size >= (c.maxConcurrency ? 1 : IN_FLIGHT)) return false;
+    const head = this.#sql
+      .exec(
+        `SELECT visible_at FROM messages WHERE ${READY}`,
+        now,
+        c.maxBatchSize
+      )
+      .toArray();
+    if (head.length === 0) return false;
+    const due = Math.min(
+      head[0].visible_at + c.maxBatchTimeout * 1000,
+      this.#min(RETRIED)
+    );
+    return head.length === c.maxBatchSize || due <= now;
+  }
+
+  #start(now, c) {
+    const { generation, until, rows } = this.#lease(READY, now, c.maxBatchSize);
+    this.#leases.set(generation, until);
+    const done = this.#deliver(c, generation, rows)
+      .catch((e) => {
+        console.error(`queue "${this.#queue}": delivery failed: ${e}`);
+        this.#fail(clock(), 'lease = ?', generation);
+      })
+      .finally(() => {
+        this.#leases.delete(generation);
+        this.#flight.delete(generation);
+      });
+    this.#flight.set(generation, done);
+  }
+
+  // The earliest of a batch falling due, a lease's expiry, a dead letter's
+  // next send and the next retention sweep.
+  #next(now, c) {
     const min = (q) => this.#min(q);
     let next = min('SELECT min(timestamp) AS t FROM messages') + RETENTION_MS;
-    if (c !== null) {
-      // At the limit, the next delivery starts as one finishes.
-      if (this.#leases.size < (c.maxConcurrency ? 1 : IN_FLIGHT)) {
-        const visible = min(
-          `SELECT min(visible_at) AS t FROM messages WHERE ${VISIBLE}`
-        );
-        const due = visible + c.maxBatchTimeout * 1000;
-        next = Math.min(next, due, min(RETRIED));
-      }
+    if (c === null) return next;
+    if (this.#due(now, c)) return now;
+    // At the limit, the next delivery starts as one finishes.
+    if (this.#leases.size < (c.maxConcurrency ? 1 : IN_FLIGHT)) {
+      const visible = min(
+        `SELECT min(visible_at) AS t FROM messages WHERE ${VISIBLE}`
+      );
+      next = Math.min(next, visible + c.maxBatchTimeout * 1000, min(RETRIED));
+    }
+    next = Math.min(
+      next,
+      min('SELECT min(leased_until) AS t FROM messages WHERE lease IS NOT NULL')
+    );
+    if (c.deadLetterQueue && this.#burying <= now) {
       next = Math.min(
         next,
         min(
-          'SELECT min(leased_until) AS t FROM messages WHERE lease IS NOT NULL'
+          'SELECT min(visible_at) AS t FROM messages ' +
+            'WHERE lease IS NULL AND dead = 1'
         )
       );
-      if (c.deadLetterQueue && this.#burying <= now) {
-        next = Math.min(
-          next,
-          min(
-            'SELECT min(visible_at) AS t FROM messages ' +
-              'WHERE lease IS NULL AND dead = 1'
-          )
-        );
-      }
     }
-    // A stale alarm costs one pump.
-    if (next === Infinity) return;
-    if (this.#alarm === null || next < this.#alarm || this.#alarm <= now) {
-      this.ctx.storage.setAlarm(next - skew);
-      this.#alarm = next;
+    return next;
+  }
+
+  // Sets the alarm unless it is set no later: setting it again, even when
+  // due, delays it. A stale alarm costs one pump.
+  #arm(next) {
+    const at = next - skew;
+    if (next === Infinity || (this.#alarm !== null && this.#alarm <= at)) {
+      return;
     }
+    this.ctx.storage.setAlarm(at);
+    this.#alarm = at;
   }
 
   // Sends spent messages to the dead letter queue in two phases: leased,
@@ -464,9 +521,9 @@ export class QueueShard extends DurableObject {
       })
       .finally(() => {
         if (this.#burying === until) this.#burying = 0;
-        this.#pump();
+        this.#flight.delete('bury');
       });
-    this.ctx.waitUntil(done);
+    this.#flight.set('bury', done);
   }
 
   #min(q) {
