@@ -155,6 +155,21 @@ kj::String durableObjectsConfig(kj::StringPtr storageDir) {
 ))");
 }
 
+// The candidates the REPL makes of an input that mentions `await`: the input as it is, then an
+// async function returning its value, then an async function's statements (cli/repl/input.rs,
+// without its rewriting of declarations).
+struct TestCandidateSource final: public ReplEnvironment::CandidateSource {
+  kj::Array<ReplEnvironment::Candidate> candidates(kj::StringPtr input) override {
+    auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);
+    candidates.add(ReplEnvironment::Candidate{.source = kj::str(input), .awaited = false});
+    candidates.add(ReplEnvironment::Candidate{
+      .source = kj::str("(async () => {return (", input, "\n)})()"), .awaited = true});
+    candidates.add(ReplEnvironment::Candidate{
+      .source = kj::str("(async () => {", input, "\n})()"), .awaited = true});
+    return candidates.finish();
+  }
+};
+
 // A ReplEnvironment on the test thread's event loop, whose configs are the texts above by name.
 // Its loader's watches report a change when the test calls changeWatchedFiles().
 struct Fixture final: public ReplConfigLoader {
@@ -174,10 +189,11 @@ struct Fixture final: public ReplConfigLoader {
   // wait on one.
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> change;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> watchAwaited;
+  TestCandidateSource candidateSource;
   ReplEnvironment environment;
 
   explicit Fixture(ReplEnvironmentOptions options = {})
-      : environment(resources, *this, kj::mv(options)) {
+      : environment(resources, *this, candidateSource, kj::mv(options)) {
     setConfig("worker.capnp", WORKER_CONFIG);
     setConfig("no-sockets.capnp", NO_SOCKETS_CONFIG);
     setConfig("broken.capnp", BROKEN_CONFIG);
@@ -249,17 +265,9 @@ struct Fixture final: public ReplConfigLoader {
     return environment.evaluate(candidates.finish()).wait(io.waitScope);
   }
 
-  // Evaluates `input` as the REPL does an input that mentions `await`: as it is, then as an async
-  // function returning its value, then as an async function's statements (cli/repl/input.rs,
-  // without its rewriting of declarations).
+  // Evaluates `input` as the REPL does an input that mentions `await` (TestCandidateSource).
   kj::String evalCandidates(kj::StringPtr input) {
-    auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);
-    candidates.add(ReplEnvironment::Candidate{.source = kj::str(input), .awaited = false});
-    candidates.add(ReplEnvironment::Candidate{
-      .source = kj::str("(async () => {return (", input, "\n)})()"), .awaited = true});
-    candidates.add(ReplEnvironment::Candidate{
-      .source = kj::str("(async () => {", input, "\n})()"), .awaited = true});
-    return environment.evaluate(candidates.finish()).wait(io.waitScope);
+    return environment.evaluate(candidateSource.candidates(input)).wait(io.waitScope);
   }
 
   kj::Array<kj::String> propertyNames(kj::StringPtr base) {
@@ -398,10 +406,12 @@ KJ_TEST("REPL rejects invalid compatibility settings") {
       KJ_UNREACHABLE;
     }
   } loader;
+  TestCandidateSource candidates;
   KJ_EXPECT_THROW_MESSAGE("Invalid compatibility flags",
-      ReplEnvironment(resources, loader, {.compatibilityFlags = kj::arr(kj::str("no_such_flag"))}));
+      ReplEnvironment(
+          resources, loader, candidates, {.compatibilityFlags = kj::arr(kj::str("no_such_flag"))}));
   KJ_EXPECT_THROW_MESSAGE("Invalid compatibility flags",
-      ReplEnvironment(resources, loader, {.compatibilityDate = kj::str("not-a-date")}));
+      ReplEnvironment(resources, loader, candidates, {.compatibilityDate = kj::str("not-a-date")}));
 }
 
 KJ_TEST("REPL lists property names for completion") {
@@ -569,6 +579,48 @@ KJ_TEST("REPL reaches a config's Durable Objects and evicts them") {
   auto closed = "Uncaught Error: The server for durable-objects.capnp was closed."_kj;
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await alice.increment()"), closed);
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await workerd.evict(alice)"), closed);
+}
+
+KJ_TEST("REPL starts environments with compatibility settings of their own") {
+  Fixture fixture({.compatibilityDate = kj::str("2025-01-01")});
+  // `navigator` came with 2022-03-21.
+  fixture.evalAwait("old = await workerd.environment({ compatibilityDate: '2022-01-01' })");
+  KJ_EXPECT(fixture.eval("old") ==
+      "ReplEnvironmentHandle {\n"
+      "  compatibilityDate: '2022-01-01',\n"
+      "  compatibilityFlags: [ [length]: 0 ],\n"
+      "  closed: false\n"
+      "}");
+  KJ_EXPECT(fixture.evalAwait("await old.eval('typeof navigator')") == "\"'undefined'\"");
+  KJ_EXPECT(fixture.eval("typeof navigator") == "'object'");
+
+  // Flags as well, and inputs that await; an environment keeps its state between inputs.
+  fixture.evalAwait("flagged = await workerd.environment({ compatibilityDate: '2022-01-01', "
+                    "compatibilityFlags: ['global_navigator'] })");
+  KJ_EXPECT(
+      fixture.evalAwait("await flagged.eval('x = await Promise.resolve(typeof navigator)')") ==
+      "\"'object'\"");
+  KJ_EXPECT(fixture.evalAwait("await flagged.eval('x')") == "\"'object'\"");
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await flagged.eval('throw new TypeError(`no`)')"),
+      "'Uncaught TypeError: no");
+
+  // Today's date without one.
+  fixture.evalAwait("today = await workerd.environment()");
+  KJ_EXPECT(
+      fixture.eval("today.compatibilityDate === new Date().toISOString().slice(0, 10)") == "true");
+
+  KJ_EXPECT_STARTS_WITH(
+      fixture.evalAwait("await workerd.environment({ compatibilityFlags: ['no_such_flag'] })"),
+      "Uncaught Error: Invalid compatibility flags:");
+
+  // An evaluation the close cuts short fails, and so does every later one.
+  fixture.eval("pending = old.eval('await new Promise(() => {})')");
+  KJ_EXPECT(fixture.evalAwait("await old.close()") == "undefined");
+  KJ_EXPECT(fixture.eval("old.closed") == "true");
+  auto closed = "Uncaught Error: The environment was closed."_kj;
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await pending"), closed);
+  KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await old.eval('1')"), closed);
+  KJ_EXPECT(fixture.evalAwait("await old.close()") == "undefined");
 }
 
 constexpr kj::StringPtr FETCH_MAIN = "await (await s.service('main').fetch('http://x/')).text()"_kj;

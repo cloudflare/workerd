@@ -203,9 +203,11 @@ void ReplEnvironment::ErrorReporter::check(kj::StringPtr what) {
 
 ReplEnvironment::ReplEnvironment(const ReplServerResources& resources,
     ReplConfigLoader& configLoader,
+    CandidateSource& candidateSource,
     ReplEnvironmentOptions optionsParam)
     : resources(resources),
       configLoader(configLoader),
+      candidateSource(candidateSource),
       options(kj::mv(optionsParam)),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
@@ -438,20 +440,102 @@ kj::Promise<kj::Array<kj::String>> ReplEnvironment::propertyNames(kj::String bas
   co_return names.releaseAsArray();
 }
 
-kj::Promise<void> ReplEnvironment::drain() {
-  // A server that fails to close does not keep the others open or the request undrained.
-  kj::Maybe<kj::Exception> failure;
-  for (auto& server: servers) {
-    KJ_TRY {
-      co_await server->close();
+// An environment another started with compatibility settings of its own.
+class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refcounted {
+ public:
+  Nested(kj::Own<ReplEnvironment> environment,
+      kj::String compatibilityDate,
+      kj::Array<kj::String> compatibilityFlags)
+      : environment(kj::mv(environment)),
+        compatibilityDate(kj::mv(compatibilityDate)),
+        compatibilityFlags(kj::mv(compatibilityFlags)) {}
+
+  kj::Own<ReplEnvironmentHost> addRef() override {
+    return kj::addRef(*this);
+  }
+  kj::StringPtr getCompatibilityDate() const override {
+    return compatibilityDate;
+  }
+  kj::ArrayPtr<const kj::String> getCompatibilityFlags() const override {
+    return compatibilityFlags;
+  }
+  bool isClosed() const override {
+    return closing != kj::none;
+  }
+
+  kj::Promise<kj::String> evaluate(kj::String input) override {
+    auto& open = requireOpen();
+    // Closing cancels it, before the environment is taken apart.
+    return canceler.wrap(evaluateLater(open, open.candidateSource.candidates(input)));
+  }
+
+  kj::Promise<void> close() override {
+    // What waits for the close keeps the environment until it is done, as for a server.
+    KJ_IF_SOME(c, closing) {
+      return c.addBranch().attach(kj::addRef(*this));
     }
-    KJ_CATCH(exception) {
-      if (failure == kj::none) {
-        failure = kj::mv(exception);
-      }
+    return closing.emplace(closeEnvironment().fork()).addBranch().attach(kj::addRef(*this));
+  }
+
+ private:
+  // None once closing has begun.
+  kj::Maybe<kj::Own<ReplEnvironment>> environment;
+  kj::String compatibilityDate;
+  kj::Array<kj::String> compatibilityFlags;
+  kj::Maybe<kj::ForkedPromise<void>> closing;
+  // Declared after `environment`, so that what it wraps is canceled before that is destroyed.
+  kj::Canceler canceler;
+
+  ReplEnvironment& requireOpen() {
+    KJ_IF_SOME(e, environment) {
+      if (!isClosed()) return *e;
+    }
+    JSG_FAIL_REQUIRE(Error, "The environment was closed.");
+  }
+
+  static kj::Promise<kj::String> evaluateLater(
+      ReplEnvironment& open, kj::Array<Candidate> candidates) {
+    // Asked for under the REPL's isolate lock; the input runs under the environment's own.
+    co_await kj::yield();
+    co_return co_await open.evaluate(kj::mv(candidates));
+  }
+
+  kj::Promise<void> closeEnvironment() {
+    // Asked for under the REPL's isolate lock; the environment's isolate is torn down without it.
+    co_await kj::yield();
+    canceler.cancel(JSG_KJ_EXCEPTION(FAILED, Error, "The environment was closed."));
+    auto closed = kj::mv(KJ_ASSERT_NONNULL(environment));
+    environment = kj::none;
+    co_await closed->drain();
+  }
+};
+
+namespace {
+// Awaits `closing`, keeping its failure in `failure` unless that holds one already.
+kj::Promise<void> closeKeepingFailure(
+    kj::Promise<void> closing, kj::Maybe<kj::Exception>& failure) {
+  KJ_TRY {
+    co_await closing;
+  }
+  KJ_CATCH(exception) {
+    if (failure == kj::none) {
+      failure = kj::mv(exception);
     }
   }
+}
+}  // namespace
+
+kj::Promise<void> ReplEnvironment::drain() {
+  // What fails to close does not keep the rest open or the request undrained.
+  kj::Maybe<kj::Exception> failure;
+  for (auto& server: servers) {
+    co_await closeKeepingFailure(server->close(), failure);
+  }
   servers.clear();
+  for (auto& environment: environments) {
+    co_await closeKeepingFailure(environment->close(), failure);
+  }
+  environments.clear();
 
   KJ_IF_SOME(request, incomingRequest) {
     auto draining = kj::mv(request);
@@ -485,6 +569,38 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
   open.add(kj::addRef(*server));
   servers = kj::mv(open);
   co_return server;
+}
+
+kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
+    ReplEnvironmentSettings settings) {
+  // JavaScript asked for it under the REPL's isolate lock; starting an isolate locks it.
+  co_await kj::yield();
+  auto date = kj::mv(settings.compatibilityDate).orDefault([]() { return currentDateStr(); });
+  kj::Own<ReplEnvironment> environment;
+  KJ_TRY {
+    environment = kj::heap<ReplEnvironment>(resources, configLoader, candidateSource,
+        ReplEnvironmentOptions{
+          .compatibilityDate = kj::str(date),
+          .compatibilityFlags = KJ_MAP(flag, settings.compatibilityFlags) { return kj::str(flag); },
+          .experimental = options.experimental,
+          // The rendering is a string in the REPL that started it, where escapes would show.
+          .colors = false,
+        });
+  }
+  KJ_CATCH(exception) {
+    // The settings' problems, which are the user's.
+    JSG_FAIL_REQUIRE(Error, exception.getDescription());
+  }
+  auto nested = kj::refcounted<Nested>(
+      kj::mv(environment), kj::mv(date), kj::mv(settings.compatibilityFlags));
+  // Drop the environments that were closed since the last one started.
+  kj::Vector<kj::Own<Nested>> open(environments.size() + 1);
+  for (auto& e: environments) {
+    if (!e->isClosed()) open.add(kj::mv(e));
+  }
+  open.add(kj::addRef(*nested));
+  environments = kj::mv(open);
+  co_return nested;
 }
 
 kj::String ReplEnvironment::render(jsg::Lock& js, const jsg::JsValue& value) {

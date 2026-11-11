@@ -89,6 +89,23 @@ class ConfigWatch final: public ReplConfigWatch {
   ::rust::Box<ReplWatch> watch;
 };
 
+kj::Array<ReplEnvironment::Candidate> toCandidates(::rust::Vec<ReplCandidate> candidates) {
+  return KJ_MAP(candidate, candidates) {
+    return ReplEnvironment::Candidate{
+      .source = kj::str(kj::from<kj_rs::Rust>(candidate.source)),
+      .awaited = candidate.awaited,
+    };
+  };
+}
+
+// Compiles input as the console does (cli/repl/input.rs).
+class CandidateSource final: public ReplEnvironment::CandidateSource {
+ public:
+  kj::Array<ReplEnvironment::Candidate> candidates(kj::StringPtr input) override {
+    return toCandidates(repl_candidates(input.as<kj_rs::RustUncheckedUtf8>()));
+  }
+};
+
 // Loads configs as `workerd serve` does (cli/repl/session.rs).
 class ConfigLoader final: public ReplConfigLoader {
  public:
@@ -145,6 +162,7 @@ class ReplSession::Impl {
               .fs = *fs,
             },
             configLoader,
+            candidateSource,
             toEnvironmentOptions(options)) {}
 
   ReplEnvironment& getEnvironment() {
@@ -162,6 +180,7 @@ class ReplSession::Impl {
   WorkerdPlatform v8Platform;
   jsg::V8System v8System;
   ConfigLoader configLoader;
+  CandidateSource candidateSource;
   ReplEnvironment environment;
 
   // Autogates are process-wide and set before V8 starts.
@@ -181,13 +200,8 @@ kj::Own<ReplSession> repl_session_new(
 
 kj::Promise<::rust::String> repl_evaluate(
     ReplSession& session, ::rust::Vec<ReplCandidate> candidates) {
-  auto converted = KJ_MAP(candidate, candidates) {
-    return ReplEnvironment::Candidate{
-      .source = kj::str(kj::from<kj_rs::Rust>(candidate.source)),
-      .awaited = candidate.awaited,
-    };
-  };
-  auto result = co_await session.getImpl().getEnvironment().evaluate(kj::mv(converted));
+  auto result =
+      co_await session.getImpl().getEnvironment().evaluate(toCandidates(kj::mv(candidates)));
   // Rendered from JavaScript strings, which convert to valid UTF-8.
   co_return result.as<kj_rs::RustUncheckedUtf8>();
 }

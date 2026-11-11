@@ -62,8 +62,19 @@ class ReplEnvironment final: public ReplHost {
     bool awaited;
   };
 
+  // Makes the candidates of an input, as the console makes those of what is typed.
+  class CandidateSource {
+   public:
+    virtual kj::Array<Candidate> candidates(kj::StringPtr input) = 0;
+
+   protected:
+    ~CandidateSource() noexcept(false) = default;
+  };
+
+  // `candidateSource` makes the candidates of what environments this one starts evaluate.
   ReplEnvironment(const ReplServerResources& resources,
       ReplConfigLoader& configLoader,
+      CandidateSource& candidateSource,
       ReplEnvironmentOptions options);
   ~ReplEnvironment() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ReplEnvironment);
@@ -80,15 +91,19 @@ class ReplEnvironment final: public ReplHost {
   // identifier chain, its evaluation throws, or its value is null or undefined.
   kj::Promise<kj::Array<kj::String>> propertyNames(kj::String base);
 
-  // Closes every loaded config's server, then ends the session's IoContext once its waitUntil()
-  // tasks are done. Must complete before destruction; nothing else may be called afterwards.
-  // Rejects with the first server's failure to close, if any, once all of that is done.
+  // Closes every loaded config's server and every environment this one started, then ends the
+  // session's IoContext once its waitUntil() tasks are done. Must complete before destruction;
+  // nothing else may be called afterwards. Rejects with the first failure to close, if any, once
+  // all of that is done.
   kj::Promise<void> drain();
 
   kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) override;
+  kj::Promise<kj::Own<ReplEnvironmentHost>> newEnvironment(
+      ReplEnvironmentSettings settings) override;
 
  private:
   class ChannelFactory;
+  class Nested;
 
   struct ErrorReporter final: public Worker::ValidationErrorReporter {
     kj::Vector<kj::String> errors;
@@ -111,6 +126,7 @@ class ReplEnvironment final: public ReplHost {
 
   ReplServerResources resources;
   ReplConfigLoader& configLoader;
+  CandidateSource& candidateSource;
   ReplEnvironmentOptions options;
 
   capnp::ByteStreamFactory byteStreamFactory;
@@ -153,6 +169,8 @@ class ReplEnvironment final: public ReplHost {
 
   // The servers of the configs loaded and not yet closed.
   kj::Vector<kj::Own<ReplConfigServer>> servers;
+  // The environments started and not yet closed.
+  kj::Vector<kj::Own<Nested>> environments;
 
   void compileWorker();
   void startSession();
