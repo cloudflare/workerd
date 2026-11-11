@@ -1569,9 +1569,40 @@ bool hasWasmModules(const WorkerSource& source) {
   return false;
 }
 
-bool supportsStartupSnapshot(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
-  return !featureFlags.getPythonWorkers() && !featureFlags.getNewModuleRegistry() &&
-      !source.variant.is<WorkerSource::ScriptSource>() && !hasWasmModules(source);
+// Whether a Worker's top level can be evaluated in a zygote isolate and baked into a startup
+// snapshot. Only the TypeScript streams implementation qualifies: with the C++ implementation a
+// stream whose pull() or start() is still pending when top-level evaluation ends leaves a C++
+// promise continuation reachable from the context (a v8::Function whose callback is an
+// unregistered template instantiation and whose FunctionTemplateInfo data is a JS object), which
+// CreateBlob() cannot serialize. The TypeScript implementation keeps those continuations in
+// JavaScript, so a pending pull transfers with the context.
+//
+// Every binding must be of a kind that transfers through the snapshot
+// (WorkerdApi::isBindingTransferableThroughSnapshot()): the zygote compiles the real bindings
+// into `env`, and the Worker started from the snapshot takes `env` out of it complete. `globals`
+// is the Worker's encoded Globals message; a dynamic Worker has none (its `env` arrives as
+// capabilities rather than channel numbers) and never qualifies.
+bool supportsStartupSnapshot(kj::StringPtr name,
+    CompatibilityFlags::Reader featureFlags,
+    const WorkerSource& source,
+    kj::Maybe<kj::ArrayPtr<const uint64_t>> globals) {
+  if (!featureFlags.getTypeScriptImplementedStreams() || featureFlags.getPythonWorkers() ||
+      featureFlags.getNewModuleRegistry() || source.variant.is<WorkerSource::ScriptSource>() ||
+      hasWasmModules(source)) {
+    return false;
+  }
+  KJ_IF_SOME(words, globals) {
+    capnp::FlatArrayMessageReader reader(asWords(words), CONFIG_READER_OPTIONS);
+    for (auto global: reader.getRoot<Globals>().getGlobals()) {
+      if (!WorkerdApi::isBindingTransferableThroughSnapshot(global)) {
+        KJ_LOG(INFO, "startup snapshot skipped: a binding of this kind cannot be transferred", name,
+            global.getName(), static_cast<uint>(global.which()));
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 // `factory_new_worker()`, which records the timing of each phase in the worker's
@@ -1688,11 +1719,27 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
+  // With the inspector enabled it is always fully trusted.
+  auto inspectorPolicy = registrar == kj::none
+      ? Worker::Isolate::InspectorPolicy::DISALLOW
+      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code
   // to produce a V8 startup snapshot of it.
+  // Not when an inspector is configured, by the server (--inspector-addr) or
+  // by the Worker's flags (node:inspector): the inspector attaches to the
+  // Worker's isolate, and top-level code must run there for DevTools to see its console output
+  // and stop at its breakpoints.
+  bool inspectorConfigured = inspectorPolicy != Worker::Isolate::InspectorPolicy::DISALLOW ||
+      featureFlags.getEnableNodeJsInspectorLocalDev();
+  kj::Maybe<kj::ArrayPtr<const uint64_t>> envGlobals;
+  if (!impl->isDynamic) envGlobals = kj::from<Rust>(spec.globals);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
-  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
-      supportsStartupSnapshot(featureFlags, workerSource)) {
+  // Not with a module fallback service either: the zygote has none, so a top level that tolerates
+  // a failed import (`try { await import(x) } catch {}`) would bake the failure in.
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) && !inspectorConfigured &&
+      moduleFallback == kj::none &&
+      supportsStartupSnapshot(impl->name, featureFlags, workerSource, envGlobals)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
     ErrorReporter zygoteErrors;
@@ -1700,26 +1747,36 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         makeIsolate(kj::str(impl->name, "-snapshot"), Worker::Isolate::InspectorPolicy::DISALLOW,
             jsg::SnapshotConfig(
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
-    auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
-        IsolateObserver::StartType::COLD, SpanParent(nullptr),
-        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
-        api::pyodide::ArtifactBundler::makeDisabledBundler());
-    // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
-    // zygote isolate breaks snapshot creation.
-    auto zygote =
-        kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
-            [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
-                v8::Local<v8::Object>) { compileBindings(lock, api, target); },
-            IsolateObserver::StartType::COLD, SpanParent(nullptr),
-            Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
-    if (zygoteErrors.errors.empty()) {
+    // Anything the zygote throws while compiling, evaluating or serializing only means this
+    // Worker starts without a snapshot and evaluates its top level itself, printing what the
+    // zygote's run only deferred.
+    kj::Maybe<kj::Own<Worker>> zygote;
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
+          IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
+          api::pyodide::ArtifactBundler::makeDisabledBundler());
+      // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
+      // zygote isolate breaks snapshot creation.
+      zygote =
+          kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+              [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+                  v8::Local<v8::Object>) { compileBindings(lock, api, target); },
+              IsolateObserver::StartType::COLD, SpanParent(nullptr),
+              Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
+    })) {
+      KJ_LOG(INFO, "startup snapshot skipped: the zygote Worker threw", impl->name,
+          exception.getDescription());
+    } else if (zygoteErrors.errors.empty()) {
       kj::Own<jsg::SnapshotArtifact> artifact;
       zygoteIsolate->runInLockScope(
           Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
         artifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
       });
-      // TODO(soon): start the Worker from the snapshot artifact.
-      (void)artifact;
+      snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = artifact->addRef()});
+      // The zygote's run is the one that counts: what its top level wrote to the console is
+      // printed now.
+      zygoteIsolate->flushDeferredConsoleOutput();
     } else {
       auto errors = kj::strArray(zygoteErrors.errors, "\n");
       KJ_LOG(
@@ -1727,10 +1784,6 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     }
   }
 
-  // With the inspector enabled it is always fully trusted.
-  auto inspectorPolicy = registrar == kj::none
-      ? Worker::Isolate::InspectorPolicy::DISALLOW
-      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   auto isolateStart = api::BenchTiming::now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = api::BenchTiming::now() - isolateStart;
@@ -1790,7 +1843,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {
     impl->ctxExportsHandle = lock.v8Ref(ctxExports);
-    compileBindings(lock, api, target);
+    // A Worker started from a startup snapshot takes `env` out of the snapshot complete with the
+    // bindings the zygote compiled into it.
+    if (!jsg::IsolateBase::from(lock.v8Isolate).isStartingFromSnapshot()) {
+      compileBindings(lock, api, target);
+    }
   },
       IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);

@@ -12,7 +12,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -685,8 +684,7 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
 }
 
 void IoContext::requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report) {
-  if (incomingRequests.empty() &&
-      util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+  if (incomingRequests.empty()) {
     // As in runSingle(), the abort explains the failure better.
     KJ_IF_SOME(ex, abortException) {
       kj::throwException(ex.clone());
@@ -2059,22 +2057,6 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // end. On each iteration of the loop we wait for the delete queue's cross
   // thread signal, then run the queued actions.
   try {
-    if (!util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-      // Without the autogate, every wake runs the actions, aborting the IoContext if that fails.
-      for (;;) {
-        co_await context->deleteQueue.queue->resetCrossThreadSignal();
-        co_await context->run([](auto& lock) {
-          auto& context = IoContext::current();
-          auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-          auto& state = KJ_ASSERT_NONNULL(*l);
-          for (auto& action: state.actions) {
-            action(lock);
-          }
-          state.actions.clear();
-        });
-      }
-    }
-
     auto& queue = *context->deleteQueue.queue;
     auto signal = queue.resetCrossThreadSignal();
     for (;;) {
@@ -2130,9 +2112,6 @@ kj::Promise<void> IoContext::runQueuedActions() {
 
 void IoContext::handleActionsQueuedWhileIdle(
     kj::StringPtr eventType, DropQueuedCrossContextActions drop) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-    return;
-  }
   if (drop) {
     // Destroyed at the end of this scope, without the queue's lock held.
     auto dropped = deleteQueue.queue->takeActions();

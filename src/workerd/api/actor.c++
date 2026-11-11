@@ -492,4 +492,33 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
   JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be deserialized in this context.");
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> ColoLocalActorNamespace::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<ColoLocalActorNamespace>(channel));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectId::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<DurableObjectId>(id->clone()));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObject::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectNamespace::snapshotClone() const {
+  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+    KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
+      return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
+          channelNumber, kj::mv(factory), actorCallRetriesAllowed, persistent));
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectClass::snapshotClone() const {
+  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+    return ownAsWrappable(kj::refcounted<DurableObjectClass>(channelNumber));
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api

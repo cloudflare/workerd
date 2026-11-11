@@ -75,6 +75,16 @@ class ActorIdFactory {
   virtual bool matchesJurisdiction(const ActorId& id) = 0;
   virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(
       kj::Maybe<kj::StringPtr> maybeJurisdiction) = 0;
+
+  // A copy of this factory for a Worker started from a startup snapshot, in which the
+  // DurableObjectNamespace binding that holds this factory is rebuilt from a copy made in the
+  // zygote (see DurableObjectNamespace::snapshotClone()). The copy must be plain data: it is
+  // made and used outside any isolate or IoContext, and its IDs must be interchangeable with the
+  // original's, including the sequence newUniqueId() continues in predictable mode. A factory
+  // whose state is not copyable returns none, and the Worker starts without a snapshot.
+  virtual kj::Maybe<kj::Own<ActorIdFactory>> cloneForSnapshot() const {
+    return kj::none;
+  }
 };
 
 }  // namespace workerd

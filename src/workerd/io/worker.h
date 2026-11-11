@@ -44,6 +44,7 @@ WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
+class Event;
 class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
@@ -467,6 +468,20 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // worker instance.
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
 
+  // A line that a PREPARE_SNAPSHOT zygote's top-level code wrote to the console. Whether the
+  // zygote's run counts is known only once its snapshot is accepted, so under ConsoleMode::STDOUT
+  // the zygote's lines wait here instead of going to stdout/stderr: the owner flushes them when
+  // the snapshot is used, and drops them with the isolate when the Worker starts without one and
+  // evaluates the top level itself.
+  struct DeferredConsoleLine {
+    kj::String text;
+    bool toStderr;
+  };
+  void deferConsoleLine(DeferredConsoleLine line) const;
+
+  // Writes the deferred lines to stdout/stderr in order and clears them.
+  void flushDeferredConsoleOutput();
+
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
 
@@ -557,6 +572,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void()>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Vector<DeferredConsoleLine>> deferredConsoleLines;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 
@@ -692,6 +708,17 @@ class Worker::Api {
   // Only `workerd bench` delivers the bench event, so the default implementation throws.
   virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const;
+
+  // An event listener's callback (api::EventTarget::HandlerFunction).
+  using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
+
+  // Unwraps the callbacks of the top-level event listeners a Worker started from a startup
+  // snapshot re-registers. An Api without it (the default) keeps a zygote whose top level
+  // registered a global listener from producing a snapshot.
+  virtual kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&>
+  tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+    return kj::none;
+  }
 
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.

@@ -110,14 +110,6 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
-  /* Cross-context actions queued on an actor between events wait for its next request instead     \
-     of aborting it, and IoContext::run() without a current request fails with a typed error.      \
-     An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
-     actor's onHibernate event drops the actions queued before it. Also counts the copies of an    \
-     abort's reason its queued deliveries share as external memory, and queues at most one         \
-     request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
-     actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

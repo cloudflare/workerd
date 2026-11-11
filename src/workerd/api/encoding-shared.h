@@ -71,7 +71,7 @@ enum class Encoding {
 class Decoder {
  public:
   virtual ~Decoder() noexcept(true) {}
-  virtual Encoding getEncoding() = 0;
+  virtual Encoding getEncoding() const = 0;
   virtual kj::Maybe<jsg::JsString> decode(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush = false) = 0;
 
