@@ -529,16 +529,18 @@ pub fn now_ms() -> u64 {
 /// Refuse a store that ignores write preconditions: fencing and the
 /// deployment catalog rest on them. GCS's S3 API, for one, ignores
 /// `If-Match` on a PUT. `key` is an object only this check writes. Each
-/// write's body differs, so that no two writes could share an S3 `ETag`.
+/// write's body differs, so that no two writes could share an S3 `ETag`,
+/// and so that what the object holds says which write an unknown outcome
+/// was (`Bucket::put_if_settled`).
 pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
-    let created = bucket.put_if(key, b"1".to_vec(), Guard::Absent).await?;
-    let again = bucket.put_if(key, b"2".to_vec(), Guard::Absent).await?;
+    let put = |body: &[u8], guard| bucket.put_if_settled(key, body.to_vec(), guard);
+    let created = put(b"1", Guard::Absent).await?;
+    let again = put(b"2", Guard::Absent).await?;
     let (replaced, stale) = match &created {
         Some(first) => {
-            let replaced = bucket.put_if(key, b"3".to_vec(), Guard::Match(first.clone()));
-            let replaced = replaced.await?;
-            let stale = bucket.put_if(key, b"4".to_vec(), Guard::Match(first.clone()));
-            (replaced, stale.await?)
+            let replaced = put(b"3", Guard::Match(first.clone())).await?;
+            let stale = put(b"4", Guard::Match(first.clone())).await?;
+            (replaced, stale)
         }
         None => (None, None),
     };
