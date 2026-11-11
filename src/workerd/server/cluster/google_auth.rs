@@ -24,6 +24,18 @@
 //! metadata server of a new GKE pod may refuse requests for its first
 //! seconds.
 //!
+//! Off Google Cloud, the metadata server is not there: when nothing suggests
+//! that it is (`google_cloud`), the first request for a first token from it
+//! is preceded by a connection to it, and when that is refused or does not
+//! connect within a second, the request gives up at once, saying how to
+//! provide credentials, instead of retrying. At the default address, on
+//! Google Cloud or off it, an answer without Google's `Metadata-Flavor:
+//! Google` header is from another server there, such as another cloud's
+//! metadata server, unless its status says to try again (429, 5xx): a first
+//! token is given up on at once in the same way, and any other request
+//! fails. A metadata server `GCE_METADATA_HOST` names, such as a proxy or an
+//! emulator, need not send the header.
+//!
 //! A token the bucket refuses (401) is dropped, and the next call requests
 //! another, once, even during a pause after a failed request; a failure is
 //! not retried but starts the usual pause. When a second token is refused
@@ -146,8 +158,14 @@ enum Source {
         key: Box<RsaKeyPair>,
         token_uri: String,
     },
-    /// The metadata server's token endpoint.
-    Metadata { url: String },
+    /// The metadata server's token endpoint; with `probe`, its `host:port`,
+    /// which may have nothing there. With `flavor`, an answer that is not
+    /// to be retried must carry `Metadata-Flavor: Google`.
+    Metadata {
+        url: String,
+        probe: Option<String>,
+        flavor: bool,
+    },
     /// Answers in place of a token endpoint.
     #[cfg(test)]
     Test(TestEndpoint),
@@ -159,6 +177,20 @@ type TestEndpoint = Arc<
         + Send
         + Sync,
 >;
+
+/// A failed token request.
+struct Failure {
+    text: String,
+    /// Another request may answer differently; `false` for an answer that
+    /// says the source is not there.
+    retry: bool,
+}
+
+impl From<String> for Failure {
+    fn from(text: String) -> Self {
+        Self { text, retry: true }
+    }
+}
 
 /// Ends its request when dropped, as failed unless it recorded an answer
 /// (`recorded`), and wakes the calls waiting for it. Once the answer is
@@ -243,9 +275,10 @@ impl Credentials {
         Ok(Self::over(parse_file(text)?, http, Timing::default()))
     }
 
-    /// The metadata server at `host`, `host[:port]`.
-    pub fn metadata(host: &str, http: Http) -> Self {
-        Self::over(metadata_source(host), http, Timing::default())
+    /// The metadata server at `named`, `host[:port]` from
+    /// `GCE_METADATA_HOST`, else at `METADATA_HOST` (`metadata_server`).
+    pub fn metadata(named: Option<&str>, on_google: bool, http: Http) -> Self {
+        Self::over(metadata_server(named, on_google), http, Timing::default())
     }
 
     fn over(source: Source, http: Http, timing: Timing) -> Self {
@@ -355,7 +388,7 @@ impl Shared {
         let got = if first {
             self.first_token().await
         } else {
-            self.fetch(self.timing.attempt).await
+            self.fetch(self.timing.attempt).await.map_err(|f| f.text)
         };
         self.record(&mut self.lock(), got);
         ending.recorded = true;
@@ -408,8 +441,16 @@ impl Shared {
 
     /// Requests a token until one is had or `timing.budget` is spent: no
     /// request starts after that, but each has all of `timing.attempt`, so
-    /// that the error is that of a whole request.
+    /// that the error is that of a whole request. An answer saying that the
+    /// source is not there ends the requests at once.
     async fn first_token(&self) -> std::result::Result<Token, String> {
+        if let Source::Metadata {
+            probe: Some(address),
+            ..
+        } = &self.source
+        {
+            probe(address).await?;
+        }
         let start = Instant::now();
         let deadline = start + self.timing.budget;
         let mut pause = self.timing.pause;
@@ -418,7 +459,10 @@ impl Shared {
             attempts += 1;
             let error = match self.fetch(self.timing.attempt).await {
                 Ok(token) => return Ok(token),
-                Err(error) => error,
+                Err(Failure { text, retry: false }) => {
+                    return Err(format!("no credentials found: {text}. {HINT}"));
+                }
+                Err(Failure { text, .. }) => text,
             };
             if Instant::now() + pause >= deadline {
                 let spent = start.elapsed().as_secs_f64();
@@ -433,7 +477,7 @@ impl Shared {
     fn describe(&self) -> String {
         match &self.source {
             Source::ServiceAccount { email, .. } => format!("service account {email}"),
-            Source::Metadata { url } => format!("metadata server {url}"),
+            Source::Metadata { url, .. } => format!("metadata server {url}"),
             #[cfg(test)]
             Source::Test(_) => "test endpoint".into(),
         }
@@ -441,16 +485,16 @@ impl Shared {
 
     /// One token request, of at most `timeout` from connecting to the end
     /// of the answer.
-    async fn fetch(&self, timeout: Duration) -> std::result::Result<Token, String> {
+    async fn fetch(&self, timeout: Duration) -> std::result::Result<Token, Failure> {
         tokio::time::timeout(timeout, self.fetch_once(timeout))
             .await
             .unwrap_or_else(|_| {
                 let timeout = timeout.as_secs_f64();
-                Err(format!("no answer within {timeout:.1} s"))
+                Err(format!("no answer within {timeout:.1} s").into())
             })
     }
 
-    async fn fetch_once(&self, timeout: Duration) -> std::result::Result<Token, String> {
+    async fn fetch_once(&self, timeout: Duration) -> std::result::Result<Token, Failure> {
         let form = || {
             let content_type = "application/x-www-form-urlencoded";
             vec!["content-type".to_owned(), content_type.to_owned()]
@@ -469,25 +513,37 @@ impl Shared {
                 ]);
                 ("POST", token_uri.clone(), form(), body)
             }
-            Source::Metadata { url } => (
+            Source::Metadata { url, .. } => (
                 "GET",
                 url.clone(),
                 vec!["metadata-flavor".into(), "Google".into()],
                 String::new(),
             ),
             #[cfg(test)]
-            Source::Test(answer) => return answer().await,
+            Source::Test(answer) => return Ok(answer().await?),
         };
         let body = Payload::Bytes(body.into_bytes().into());
         let response = self
             .http
             .send(method.into(), url, headers, body, None, (timeout, timeout))
             .await?;
+        let retryable = response.status == 429 || response.status >= 500;
+        let flavor = matches!(self.source, Source::Metadata { flavor: true, .. });
+        if flavor && !retryable && response.metadata_flavor != "Google" {
+            return Err(Failure {
+                text: format!(
+                    "the {} answer is not from Google's metadata server, having no \
+                     `Metadata-Flavor: Google` header",
+                    response.status
+                ),
+                retry: false,
+            });
+        }
         if response.status != 200 {
             let detail = error_text(&response.body);
-            return Err(format!("{} {detail}", response.status));
+            return Err(format!("{} {detail}", response.status).into());
         }
-        parse_token(&response.body, Instant::now())
+        Ok(parse_token(&response.body, Instant::now())?)
     }
 
     fn error(&self, detail: &str) -> Error {
@@ -561,9 +617,83 @@ fn is_loopback(host: &str) -> bool {
             .is_ok_and(|ip| ip.is_loopback())
 }
 
-fn metadata_source(host: &str) -> Source {
+/// The metadata server at `named`, which `GCE_METADATA_HOST` names, else at
+/// `METADATA_HOST`, where an answer without `Metadata-Flavor: Google` is from
+/// something else. Unless `on_google`, which says the process runs on Google
+/// Cloud, a first token is not waited for when nothing is there.
+fn metadata_server(named: Option<&str>, on_google: bool) -> Source {
+    let mut source = metadata_source(named.unwrap_or(METADATA_HOST), on_google);
+    if let Source::Metadata { flavor, .. } = &mut source {
+        *flavor = named.is_none();
+    }
+    source
+}
+
+/// The metadata server at `host`, as at the default address.
+fn metadata_source(host: &str, on_google: bool) -> Source {
     let url = format!("http://{host}/computeMetadata/v1/instance/service-accounts/default/token");
-    Source::Metadata { url }
+    let probe = (!on_google).then(|| {
+        let port = if host.rsplit_once(':').is_some_and(|(_, p)| !p.contains(']')) {
+            ""
+        } else {
+            ":80"
+        };
+        format!("{host}{port}")
+    });
+    Source::Metadata {
+        url,
+        probe,
+        flavor: true,
+    }
+}
+
+/// How long a connection to a metadata server that may not be there has.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How to provide credentials, for an error that finds none.
+const HINT: &str =
+    "Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on Compute Engine or GKE";
+
+/// Connects to the metadata server at `address`, `host:port`, which may not
+/// be there: an error when nothing answers within `PROBE_TIMEOUT`.
+async fn probe(address: &str) -> std::result::Result<(), String> {
+    let connected = tokio::time::timeout(PROBE_TIMEOUT, tokio::net::TcpStream::connect(address));
+    let problem = match connected.await {
+        Ok(Ok(_)) => return Ok(()),
+        Ok(Err(e)) => e.to_string(),
+        Err(_) => format!("no connection within {} s", PROBE_TIMEOUT.as_secs()),
+    };
+    Err(format!(
+        "no credentials found: nothing is at the metadata server {address} ({problem}). {HINT}"
+    ))
+}
+
+/// Variables that suggest Google Cloud when set: `GCE_METADATA_HOST`,
+/// Kubernetes', and those of Cloud Run services and jobs, Cloud Run functions
+/// and App Engine.
+const GOOGLE_CLOUD_VARIABLES: [&str; 8] = [
+    "GCE_METADATA_HOST",
+    "KUBERNETES_SERVICE_HOST",
+    "K_SERVICE",
+    "CLOUD_RUN_JOB",
+    "FUNCTION_TARGET",
+    "FUNCTION_NAME",
+    "GAE_ENV",
+    "GAE_SERVICE",
+];
+
+/// Whether the process runs on Google Cloud, where a metadata server may
+/// refuse connections for a pod's first seconds: one of
+/// `GOOGLE_CLOUD_VARIABLES` is set, or the machine's DMI product name,
+/// `dmi_product`, is Google's.
+pub fn google_cloud(env: &dyn Fn(&str) -> Option<String>, dmi_product: Option<&str>) -> bool {
+    let set = |name| env(name).is_some_and(|value| !value.is_empty());
+    GOOGLE_CLOUD_VARIABLES.into_iter().any(set)
+        || dmi_product.is_some_and(|name| name.trim().starts_with("Google"))
+}
+
+/// The DMI product name of the machine, where Linux shows it.
+pub fn dmi_product() -> Option<String> {
+    std::fs::read_to_string("/sys/class/dmi/id/product_name").ok()
 }
 
 /// A token endpoint's answer, received at `now`.

@@ -90,6 +90,11 @@ impl Server {
         Self { host, received }
     }
 
+    /// The requests received so far.
+    pub fn received(&self) -> Vec<Request> {
+        self.received.lock().unwrap().clone()
+    }
+
     /// The requests received since the last call.
     pub fn take(&self) -> Vec<Request> {
         std::mem::take(&mut self.received.lock().unwrap())

@@ -44,6 +44,9 @@ pub struct HttpResponse {
     pub generation: String,
     /// The `Date` header, the bucket's clock.
     pub date: String,
+    /// The `Metadata-Flavor` header, which Google's metadata server sets to
+    /// `Google`.
+    pub metadata_flavor: String,
     /// Empty when a 2xx body went to a file.
     pub body: Vec<u8>,
 }
@@ -109,6 +112,7 @@ impl Http {
         };
         let (status, etag, date) = (response.status().as_u16(), header("etag"), header("date"));
         let generation = header("x-goog-generation");
+        let metadata_flavor = header("metadata-flavor");
         let mut incoming = response.into_body();
         let to = to
             .filter(|_| (200..300).contains(&status))
@@ -156,6 +160,7 @@ impl Http {
             etag,
             generation,
             date,
+            metadata_flavor,
             body,
         })
     }

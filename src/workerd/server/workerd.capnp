@@ -198,9 +198,22 @@ struct ClusterConfig {
   # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
   # from the metadata server of the Compute Engine VM or GKE pod the instance runs on, which under
   # GKE Workload Identity answers the token of the pod's Kubernetes service account.
-  # `GCE_METADATA_HOST` names another metadata server. The identity needs to read, write, list
-  # and delete the bucket's objects, as `roles/storage.objectUser` grants: replacing an object
-  # requires permission to delete it.
+  # `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
+  # 169.254.169.254, needs it set to `[fd20:ce::254]`.
+  # A first token, from any source, is retried, as a new GKE pod's metadata server may refuse
+  # requests at first: attempts start for up to 30 s and each has 10 s, so the wait can reach
+  # about 40 s. But when nothing suggests the instance runs on Google Cloud (none of
+  # `GCE_METADATA_HOST`, `KUBERNETES_SERVICE_HOST`, Cloud Run's `K_SERVICE` and `CLOUD_RUN_JOB`,
+  # Cloud Run functions' `FUNCTION_TARGET` and `FUNCTION_NAME`, or App Engine's `GAE_ENV` and
+  # `GAE_SERVICE` is set, and the machine's DMI product name is not Google's), a metadata server
+  # that refuses the connection, or does not connect within a second, fails it at once, with an
+  # error that says how to provide credentials. On a Kubernetes cluster outside Google Cloud
+  # whose network drops packets to 169.254.169.254, that error comes only after the 40 s. At the
+  # default address, an answer without the `Metadata-Flavor: Google` header of Google's metadata
+  # server, on Google Cloud or off it, fails it at once too, unless its status is 429 or 5xx; a
+  # metadata server `GCE_METADATA_HOST` names, such as a proxy or an emulator, need not send the
+  # header. The identity needs to read, write, list and delete the bucket's objects, as
+  # `roles/storage.objectUser` grants: replacing an object requires permission to delete it.
   # Without Workload Identity, a GCE VM or GKE node's default access scopes are often read-only
   # for storage, which shows up as a 403 when the instance starts.
   # For tests, `STORAGE_EMULATOR_HOST` (`host:port` or a URL) sends the requests to an emulator

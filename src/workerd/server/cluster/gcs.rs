@@ -49,14 +49,18 @@ impl Gcs {
     /// A `gs://` bucket takes no options: credentials come from the
     /// environment (`google_auth.rs`).
     pub fn new(url: &str, options: &[(String, String)]) -> Result<(Self, String)> {
-        Self::with_env(url, options, &|name| std::env::var(name).ok())
+        let dmi_product = google_auth::dmi_product();
+        let env = |name: &str| std::env::var(name).ok();
+        Self::with_env(url, options, &env, dmi_product.as_deref())
     }
 
-    /// As `new`, with `env` for the environment.
+    /// As `new`, with `env` for the environment and `dmi_product` for the
+    /// machine's DMI product name.
     pub(crate) fn with_env(
         url: &str,
         options: &[(String, String)],
         env: &dyn Fn(&str) -> Option<String>,
+        dmi_product: Option<&str>,
     ) -> Result<(Self, String)> {
         let (bucket, prefix) = parse_url(url)?;
         if let Some((name, _)) = options.first() {
@@ -73,7 +77,8 @@ impl Gcs {
             Some(path) => Some(Credentials::from_file(&PathBuf::from(path), http.clone())?),
             None if emulator.is_some() && metadata.is_none() => None,
             None => Some(Credentials::metadata(
-                metadata.as_deref().unwrap_or(google_auth::METADATA_HOST),
+                metadata.as_deref(),
+                google_auth::google_cloud(&env, dmi_product),
                 http.clone(),
             )),
         };

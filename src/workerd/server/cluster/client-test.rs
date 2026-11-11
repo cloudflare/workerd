@@ -102,6 +102,7 @@ fn error_codes_are_capped() {
         etag: String::new(),
         generation: String::new(),
         date: String::new(),
+        metadata_flavor: String::new(),
         body: long.into_bytes(),
     };
     let Err(Error::Http(message)) = written("k", &response, false) else {
@@ -274,7 +275,7 @@ fn an_anonymous_cloud_storage_emulator_end_to_end() {
         let (server, queue) = fake().await;
         let host = server.host.clone();
         let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
-        let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env).unwrap();
+        let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
         let bucket = Bucket::new(gcs, &prefix);
         let wire = (("x-goog-generation", "17"), "x-goog-meta-", false);
         end_to_end::<Google>(bucket, &server, &queue, wire).await;

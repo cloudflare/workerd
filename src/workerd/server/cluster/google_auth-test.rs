@@ -11,6 +11,7 @@ use tokio::task::JoinSet;
 use super::*;
 use crate::fake_http::Answer;
 use crate::fake_http::Server;
+use crate::fake_http::reply;
 
 const TEST_KEY: &str = include_str!("google_auth-test.pem");
 
@@ -715,9 +716,25 @@ fn google(status: u16, body: &str) -> Answer {
     }
 }
 
+/// The metadata server's token `t<n>`.
+fn token(n: usize) -> Answer {
+    let token = serde_json::json!({ "access_token": format!("t{n}"), "expires_in": 3600 });
+    google(200, &token.to_string())
+}
+
+/// A metadata server that answers `script` in turn, then `token(n)` to its
+/// `n`th request.
+async fn tokens_after(script: Vec<Answer>) -> Server {
+    Server::serving(move |_, n| script.get(n - 1).cloned().unwrap_or_else(|| token(n))).await
+}
+
 /// The tokens of the metadata server at `server`, as on Google Cloud.
 fn metadata(server: &Server, timing: Timing) -> Credentials {
-    Credentials::over(metadata_source(&server.host), Http::new().unwrap(), timing)
+    Credentials::over(
+        metadata_source(&server.host, true),
+        Http::new().unwrap(),
+        timing,
+    )
 }
 
 /// Short limits, for tests that wait through them on a real socket.
@@ -770,6 +787,104 @@ fn an_error_answer_names_its_status() {
 }
 
 #[test]
+fn signs_of_google_cloud() {
+    let env = |vars: &'static [(&'static str, &'static str)]| {
+        move |name: &str| {
+            vars.iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    };
+    assert!(!google_cloud(&env(&[]), None));
+    assert!(!google_cloud(&env(&[]), Some("Virtual Machine\n")));
+    assert!(!google_cloud(&env(&[("GCE_METADATA_HOST", "")]), None));
+    assert!(google_cloud(&env(&[]), Some("Google Compute Engine\n")));
+    assert!(google_cloud(&env(&[]), Some("Google")));
+    assert!(google_cloud(&env(&[("GCE_METADATA_HOST", "h:1")]), None));
+    assert!(google_cloud(
+        &env(&[("KUBERNETES_SERVICE_HOST", "10.0.0.1")]),
+        None
+    ));
+    // Cloud Run services, jobs and functions, and App Engine.
+    assert!(google_cloud(&env(&[("K_SERVICE", "svc")]), None));
+    assert!(google_cloud(&env(&[("CLOUD_RUN_JOB", "job")]), None));
+    assert!(google_cloud(&env(&[("FUNCTION_TARGET", "main")]), None));
+    assert!(google_cloud(&env(&[("FUNCTION_NAME", "f")]), None));
+    assert!(google_cloud(&env(&[("GAE_ENV", "standard")]), None));
+    assert!(google_cloud(&env(&[("GAE_SERVICE", "default")]), None));
+    // Only a metadata server off Google Cloud is probed first.
+    let Source::Metadata { probe, .. } = metadata_source("169.254.169.254", false) else {
+        panic!("expected a metadata server");
+    };
+    assert_eq!(probe.as_deref(), Some("169.254.169.254:80"));
+    for (host, address) in [
+        ("h:8080", "h:8080"),
+        ("[::1]", "[::1]:80"),
+        ("[::1]:9", "[::1]:9"),
+    ] {
+        let Source::Metadata { probe, .. } = metadata_source(host, false) else {
+            panic!("expected a metadata server");
+        };
+        assert_eq!(probe.as_deref(), Some(address));
+    }
+    let Source::Metadata { probe, .. } = metadata_source("169.254.169.254", true) else {
+        panic!("expected a metadata server");
+    };
+    assert_eq!(probe, None);
+}
+
+#[test]
+fn nothing_at_the_metadata_server_fails_at_once() {
+    runtime().block_on(async {
+        // Nothing listens on port 1. The pauses are an hour: a retry would
+        // outlast the test.
+        let source = metadata_source("127.0.0.1:1", false);
+        let credentials = Credentials::over(source, Http::new().unwrap(), patient());
+        let Ok(Err(Error::Http(message))) = tokio::time::timeout(PATIENCE, credentials.token()).await
+        else {
+            panic!("expected an error");
+        };
+        let prefix = "token from metadata server \
+                      http://127.0.0.1:1/computeMetadata/v1/instance/service-accounts/default/token: \
+                      no credentials found: nothing is at the metadata server 127.0.0.1:1 (";
+        assert!(message.starts_with(prefix), "{message}");
+        assert!(
+            message.ends_with(
+                "). Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
+                 Compute Engine or GKE"
+            ),
+            "{message}"
+        );
+    });
+}
+
+#[test]
+fn a_metadata_server_that_is_there_is_retried() {
+    runtime().block_on(async {
+        // It accepts connections, then refuses requests in each way a new
+        // GKE pod's might.
+        let refused = |status| google(status, r#"{"error": "nope"}"#);
+        let script = vec![refused(503), Answer::Close, google(429, ""), refused(403)];
+        let endpoint = tokens_after(script).await;
+        let source = metadata_source(&endpoint.host, false);
+        let timing = Timing {
+            attempt: Duration::from_secs(5),
+            ..patient()
+        };
+        let credentials = Credentials::over(source, Http::new().unwrap(), timing);
+        let token = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        assert_eq!(token.unwrap().unwrap(), "t5");
+        let path = "/computeMetadata/v1/instance/service-accounts/default/token";
+        let received = endpoint.received();
+        assert_eq!(received.len(), 5);
+        for request in received {
+            assert_eq!(request.path, path);
+            assert_eq!(request.header("metadata-flavor"), Some("Google"));
+        }
+    });
+}
+
+#[test]
 fn a_closed_connection_is_retried() {
     runtime().block_on(async {
         let endpoint = Server::serving(|_, _| Answer::Close).await;
@@ -788,5 +903,103 @@ fn a_closed_connection_is_retried() {
         assert!(!message.contains("no credentials found"), "{message}");
         assert!(message.contains(" attempts in "), "{message}");
         assert!(endpoint.requests() >= 2, "{message}");
+    });
+}
+
+#[test]
+fn an_answer_that_is_not_googles_fails_at_once() {
+    runtime().block_on(async {
+        // Another cloud's metadata server, at the same address: on Google
+        // Cloud or off it, its answers, a token among them, are not taken
+        // and not retried.
+        let token = r#"{"access_token":"x","expires_in":60}"#;
+        for (status, body, on_google) in [
+            (404, "<html>Not Found</html>", false),
+            (401, "", true),
+            (200, token, true),
+        ] {
+            let endpoint = Server::serving(move |_, _| reply(status, body)).await;
+            let source = metadata_source(&endpoint.host, on_google);
+            let credentials = Credentials::over(source, Http::new().unwrap(), patient());
+            let Ok(Err(Error::Http(message))) =
+                tokio::time::timeout(PATIENCE, credentials.token()).await
+            else {
+                panic!("expected an error for {status}");
+            };
+            let expected = format!(
+                "token from metadata server http://{}/computeMetadata/v1/instance/\
+                 service-accounts/default/token: no credentials found: the {status} answer is \
+                 not from Google's metadata server, having no `Metadata-Flavor: Google` \
+                 header. Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
+                 Compute Engine or GKE",
+                endpoint.host
+            );
+            assert_eq!(message, expected);
+            assert_eq!(endpoint.requests(), 1);
+        }
+    });
+}
+
+#[test]
+fn a_headerless_answer_that_says_to_retry_is_retried() {
+    runtime().block_on(async {
+        // At the default address, a 429 or 5xx without the header may be a
+        // proxy's or a load balancer's: it is retried as Google's are.
+        let script = vec![reply(503, ""), reply(429, ""), reply(500, "")];
+        let endpoint = tokens_after(script).await;
+        let source = metadata_source(&endpoint.host, true);
+        let timing = Timing {
+            attempt: Duration::from_secs(5),
+            ..patient()
+        };
+        let credentials = Credentials::over(source, Http::new().unwrap(), timing);
+        let token = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        assert_eq!(token.unwrap().unwrap(), "t4");
+        assert_eq!(endpoint.requests(), 4);
+    });
+}
+
+#[test]
+fn a_named_metadata_server_needs_no_header() {
+    runtime().block_on(async {
+        // GCE_METADATA_HOST names it: a proxy or an emulator that sends no
+        // `Metadata-Flavor` is taken at its word, errors and tokens alike.
+        let token = r#"{"access_token":"x","expires_in":60}"#;
+        let endpoint =
+            Server::serving(move |_, n| reply(if n == 1 { 404 } else { 200 }, token)).await;
+        let source = metadata_server(Some(&endpoint.host), true);
+        let timing = Timing {
+            attempt: Duration::from_secs(5),
+            ..patient()
+        };
+        let credentials = Credentials::over(source, Http::new().unwrap(), timing);
+        let token = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        assert_eq!(token.unwrap().unwrap(), "x");
+        assert_eq!(endpoint.requests(), 2);
+        // Without a name, the default address requires the header.
+        let Source::Metadata { flavor, .. } = metadata_server(None, true) else {
+            panic!("expected a metadata server");
+        };
+        assert!(flavor);
+    });
+}
+
+#[test]
+fn a_replacement_that_is_not_googles_fails() {
+    runtime().block_on(async {
+        let endpoint = Server::serving(|_, _| reply(404, "")).await;
+        let credentials = metadata(&endpoint, patient());
+        cache_due(&credentials, "old");
+        assert_eq!(credentials.token().await.unwrap(), "old");
+        until("the request to fail", || !requesting(&credentials)).await;
+        let error = credentials.shared.lock().error.clone();
+        assert_eq!(
+            error.as_deref(),
+            Some(
+                "the 404 answer is not from Google's metadata server, having no \
+                 `Metadata-Flavor: Google` header"
+            )
+        );
+        assert_eq!(endpoint.requests(), 1);
     });
 }

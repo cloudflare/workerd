@@ -40,7 +40,8 @@ fn urls() {
 fn a_gs_bucket_takes_no_options() {
     for option in ["aws_endpoint", "aws_region", "aws_access_key_id"] {
         let options = [(option.to_owned(), "x".to_owned())];
-        let Err(Error::Config(message)) = Gcs::with_env("gs://b/p", &options, &env(&[])) else {
+        let Err(Error::Config(message)) = Gcs::with_env("gs://b/p", &options, &env(&[]), None)
+        else {
             panic!("{option} was accepted");
         };
         assert!(message.contains(option), "{message}");
@@ -49,7 +50,7 @@ fn a_gs_bucket_takes_no_options() {
 
 #[test]
 fn where_requests_and_tokens_go() {
-    let open = |vars: &[(&str, &str)]| Gcs::with_env("gs://b/p", &[], &env(vars)).unwrap().0;
+    let open = |vars: &[(&str, &str)]| Gcs::with_env("gs://b/p", &[], &env(vars), None).unwrap().0;
     let describe = |gcs: &Gcs| {
         gcs.dialect()
             .credentials
@@ -90,7 +91,7 @@ fn where_requests_and_tokens_go() {
 
     let vars = env(&[("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/key.json")]);
     assert!(matches!(
-        Gcs::with_env("gs://b/p", &[], &vars),
+        Gcs::with_env("gs://b/p", &[], &vars, None),
         Err(Error::Config(_))
     ));
 }
@@ -121,6 +122,7 @@ fn versions_are_generations() {
         etag: "\"e\"".into(),
         generation: generation.into(),
         date: String::new(),
+        metadata_flavor: String::new(),
         body: Vec::new(),
     };
     assert_eq!(Google::version(&response("17")), "17");
@@ -167,7 +169,7 @@ async fn client(fake: &Arc<Mutex<Fake>>) -> (Bucket, Server) {
         ("STORAGE_EMULATOR_HOST", &server.host),
         ("GCE_METADATA_HOST", &server.host),
     ]);
-    let (gcs, prefix) = Gcs::with_env("gs://bkt/pre", &[], &vars).unwrap();
+    let (gcs, prefix) = Gcs::with_env("gs://bkt/pre", &[], &vars, None).unwrap();
     (Bucket::new(gcs, &prefix), server)
 }
 
