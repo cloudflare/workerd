@@ -14,6 +14,21 @@ const config :Workerd.Config = (
   cluster = .cluster,
 );
 
+# As `config`, with the cluster's state in a Cloud Storage bucket: a fake (fake-s3.mjs in its GCS
+# dialect) whose address the test passes in STORAGE_EMULATOR_HOST, as it passes where tokens come
+# from.
+const gcs :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucket = "gs://wdtest/cluster",
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 10000,
+    unsafeTimeDivisor = 4,
+  ),
+);
+
 # As `config`, with a stop timeout short enough for a test to wait out.
 const shortStop :Workerd.Config = (
   services = .services,
