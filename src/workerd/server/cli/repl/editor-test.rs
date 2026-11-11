@@ -291,3 +291,78 @@ fn common_prefixes() {
     assert_eq!(common_prefix("πa", "πb"), "π");
     assert_eq!(common_prefix("a", "b"), "");
 }
+
+#[test]
+fn takes_pasted_text_as_text() {
+    let mut editor = Editor::new();
+    let mut terminal = FakeTerminal::new(&[b"\x1b[200~if (a)\t{ b\x03\x04\x1b[A\x7f }\x1b[201~\r"]);
+    let mut complete = |_: &str, _: usize| -> Completion {
+        panic!("a pasted tab completed");
+    };
+    assert_eq!(
+        editor
+            .read_line(&mut terminal, "> ", &mut complete)
+            .unwrap(),
+        submitted("if (a)\t{ b }")
+    );
+
+    // Keys after the paste are keys again.
+    let mut terminal = FakeTerminal::new(&[b"\x1b[200~ab\x1b[201~\x02x\r"]);
+    assert_eq!(
+        editor
+            .read_line(&mut terminal, "> ", &mut no_completion)
+            .unwrap(),
+        submitted("axb")
+    );
+}
+
+#[test]
+fn ends_a_line_at_each_pasted_line_break() {
+    let mut editor = Editor::new();
+    // A paste can span lines, and its end can come in a line of its own.
+    assert_eq!(
+        lines(
+            &mut editor,
+            &[
+                b"x\x1b[200~one\r\ntwo\rthree\nfour",
+                b"\r",
+                b"\nfive\x1b[201~\r"
+            ]
+        ),
+        vec![
+            submitted("xone"),
+            submitted("two"),
+            submitted("three"),
+            submitted("four"),
+            submitted("five"),
+        ]
+    );
+    // A CR at the end of a read waits for what follows, which may be an LF.
+    let mut editor = Editor::new();
+    let mut terminal = FakeTerminal::new(&[b"\x1b[200~a\r", b"\x1b[201~\r"]);
+    let mut read = || {
+        editor
+            .read_line(&mut terminal, "> ", &mut no_completion)
+            .unwrap()
+    };
+    assert_eq!(read(), submitted("a"));
+    assert_eq!(read(), submitted(""));
+}
+
+#[test]
+fn draws_each_line_it_ends() {
+    // Lines that arrive at once, as a paste's do, are drawn although nothing is drawn between
+    // their keys.
+    let mut editor = Editor::new();
+    let mut terminal = FakeTerminal::new(&[b"ab\x02\rc\x03"]);
+    for _ in 0..2 {
+        editor
+            .read_line(&mut terminal, "> ", &mut no_completion)
+            .unwrap();
+    }
+    // The first prompt is drawn before any input arrives.
+    assert_eq!(
+        terminal.output,
+        "\r> \x1b[K\r> ab\x1b[K\r\n\r> c\x1b[K^C\r\n"
+    );
+}

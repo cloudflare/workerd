@@ -168,6 +168,11 @@ inherited, of the value before it (an identifier chain such as `s.service`); wit
 the global scope's. Completing evaluates that chain, so it can run property getters. Tab inserts as
 much as the candidates have in common; when there is nothing more to insert, it lists them.
 
+Pasted text is taken as text in a terminal that marks pastes (bracketed paste mode, which most
+terminals support): its tabs are inserted rather than completing, and its other control characters
+and escape sequences are dropped. Each line of a paste is submitted as Enter submits a line, so a
+pasted multi-line input runs once its last line is in.
+
 ### Interrupting
 
 On Unix, Ctrl+C while an input awaits stops awaiting it, whether or not input comes from a
@@ -315,7 +320,7 @@ loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 ## Limitations
 
 - Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
-  wide characters, such as CJK, or a line longer than the terminal is wide.
+  wide characters, such as CJK, or tabs, or a line longer than the terminal is wide.
 - Only an input that awaits can be [interrupted](#interrupting) without ending the REPL.
 - A Durable Object's alarm runs when it is due, and not before: an alarm runs only at the time it
   is set for, which only the object can change.

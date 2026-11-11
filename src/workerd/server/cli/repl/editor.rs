@@ -9,7 +9,13 @@
 //! and then redraws the line once, so a paste costs one redraw per read rather than one per
 //! character. What it reads past the end of a line stays queued for the next line. It edits
 //! characters, not bytes, and takes each to be one column wide, so the cursor is drawn in the
-//! wrong place on a line with wide characters (such as CJK) or one longer than the terminal.
+//! wrong place on a line with wide characters (such as CJK) or tabs, or one longer than the
+//! terminal.
+//!
+//! A terminal in bracketed paste mode marks where pasted text starts and ends. Pasted text is
+//! text, not keys: its tabs are inserted rather than completing, its other control characters
+//! and escape sequences are dropped, and each of its line breaks (CR, LF or CRLF) ends a line as
+//! Enter does.
 
 use std::collections::VecDeque;
 use std::io;
@@ -76,6 +82,10 @@ enum Key {
     KillWord,
     /// Ctrl+L.
     ClearScreen,
+    /// The start of pasted text.
+    PasteStart,
+    /// The end of pasted text.
+    PasteEnd,
     /// A control character or escape sequence the editor does not bind.
     Ignored,
 }
@@ -122,6 +132,8 @@ impl Edit {
 pub struct Editor {
     history: Vec<String>,
     queued: VecDeque<u8>,
+    /// Whether the queued input is pasted text, until the paste's end. A paste can span lines.
+    pasting: bool,
 }
 
 impl Editor {
@@ -129,6 +141,7 @@ impl Editor {
         Self {
             history: Vec::new(),
             queued: VecDeque::new(),
+            pasting: false,
         }
     }
 
@@ -159,15 +172,29 @@ impl Editor {
         loop {
             let mut partial = false;
             while !self.queued.is_empty() {
-                let Decoded::Key(key, length) = decode(self.queued.make_contiguous()) else {
+                let bytes = self.queued.make_contiguous();
+                let decoded = if self.pasting {
+                    decode_pasted(bytes)
+                } else {
+                    decode(bytes)
+                };
+                let Decoded::Key(key, length) = decoded else {
                     partial = true;
                     break;
                 };
                 self.queued.drain(..length);
-                if let Some(line) = self.handle(key, &mut edit, terminal, prompt, complete)? {
-                    return Ok(line);
+                match key {
+                    Key::PasteStart => self.pasting = true,
+                    Key::PasteEnd => self.pasting = false,
+                    _ => {
+                        if let Some(line) =
+                            self.handle(key, &mut edit, terminal, prompt, complete)?
+                        {
+                            return Ok(line);
+                        }
+                        changed = true;
+                    }
                 }
-                changed = true;
             }
             if changed {
                 terminal.write(&render(prompt, &edit))?;
@@ -207,12 +234,13 @@ impl Editor {
     ) -> io::Result<Option<Line>> {
         match key {
             Key::Char(c) => edit.insert(c),
+            // The line is drawn first: from queued input, such as a paste, it has not been yet.
             Key::Enter => {
-                terminal.write("\r\n")?;
+                terminal.write(&format!("{}\r\n", render_ended(prompt, edit)))?;
                 return Ok(Some(Line::Submitted(edit.line())));
             }
             Key::Interrupt => {
-                terminal.write("^C\r\n")?;
+                terminal.write(&format!("{}^C\r\n", render_ended(prompt, edit)))?;
                 return Ok(Some(Line::Canceled));
             }
             Key::EndOfInput if edit.text.is_empty() => {
@@ -256,7 +284,8 @@ impl Editor {
             }
             Key::ClearScreen => terminal.write("\x1b[2J\x1b[3J\x1b[H")?,
             Key::Tab => Self::complete(edit, terminal, prompt, complete)?,
-            Key::Ignored => {}
+            // read_line() takes these.
+            Key::PasteStart | Key::PasteEnd | Key::Ignored => {}
         }
         Ok(None)
     }
@@ -364,6 +393,8 @@ fn decode_escape(bytes: &[u8]) -> Decoded {
                 (_, b'H') | (b"1" | b"7", b'~') => Key::Home,
                 (_, b'F') | (b"4" | b"8", b'~') => Key::End,
                 (b"3", b'~') => Key::Delete,
+                (b"200", b'~') => Key::PasteStart,
+                (b"201", b'~') => Key::PasteEnd,
                 _ => Key::Ignored,
             };
             Decoded::Key(key, 3 + length)
@@ -371,6 +402,28 @@ fn decode_escape(bytes: &[u8]) -> Decoded {
         // Alt with a key, which nothing binds.
         Some(_) => Decoded::Key(Key::Ignored, 2),
     }
+}
+
+/// The first key in pasted `bytes`, which is not empty: a character, a line break, or the paste's
+/// end. Anything else is ignored.
+fn decode_pasted(bytes: &[u8]) -> Decoded {
+    let key = match bytes {
+        // A CR may be the start of a CRLF. The paste's end comes after it, so more will come.
+        [b'\r'] => return Decoded::Partial,
+        [b'\r', b'\n', ..] => return Decoded::Key(Key::Enter, 2),
+        [b'\r' | b'\n', ..] => Key::Enter,
+        [b'\t', ..] => Key::Char('\t'),
+        [ESCAPE, ..] => {
+            return match decode_escape(bytes) {
+                Decoded::Key(Key::PasteEnd, length) => Decoded::Key(Key::PasteEnd, length),
+                Decoded::Key(_, length) => Decoded::Key(Key::Ignored, length),
+                Decoded::Partial => Decoded::Partial,
+            };
+        }
+        [byte, ..] if *byte < 0x20 || *byte == 0x7f => Key::Ignored,
+        _ => return decode_char(bytes),
+    };
+    Decoded::Key(key, 1)
 }
 
 /// A UTF-8 character; U+FFFD for each byte of an invalid sequence.
@@ -409,6 +462,11 @@ fn render(prompt: &str, edit: &Edit) -> String {
     } else {
         format!("\r{prompt}{text}\x1b[K\x1b[{back}D")
     }
+}
+
+/// The line drawn over the terminal's current line, with the cursor at its end.
+fn render_ended(prompt: &str, edit: &Edit) -> String {
+    format!("\r{prompt}{}\x1b[K", edit.line())
 }
 
 /// The candidates in columns, on the lines below the edited line.
