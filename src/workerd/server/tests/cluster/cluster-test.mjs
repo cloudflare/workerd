@@ -3031,7 +3031,8 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
       }
       return now;
     };
-    const to = async (t) => clock(t - (await clock(0)));
+    // Moves the clocks forward to `t`, unless they are past it already.
+    const to = async (t) => clock(Math.max(0, t - (await clock(0))));
     // The node that runs minute `t`: a real minute may run first.
     const ran = (ns, t, ms) =>
       Promise.any(
