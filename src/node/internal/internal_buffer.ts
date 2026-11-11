@@ -453,7 +453,7 @@ function alloc(size: number, fill?: FillValue, encoding?: string): Buffer {
     if (encoding !== undefined) {
       validateString(encoding, 'encoding');
     }
-    return buffer.fill(fill as any, encoding);
+    return buffer.fill(fill as any, 0, buffer.length, encoding);
   }
   return buffer;
 }
