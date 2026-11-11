@@ -39,7 +39,7 @@ const shortStop :Workerd.Config = (
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
     stopTimeoutMs = 4000,
-    unsafeTimeDivisor = 4,
+    unsafeTimeDivisor = 2,
   ),
 );
 
@@ -127,13 +127,13 @@ const bucketOptions :List(Text) = [
 ];
 
 # The drain tests hold requests in flight for up to 4 s, within half of this stop timeout. The
-# lease and the time a stopping instance accepts requests are a quarter of their defaults, for the
-# tests that wait them out (`TIME_DIVISOR` in cluster-test.mjs).
+# lease and the time a stopping instance accepts requests are half of their defaults, giving
+# instrumented startup enough time to renew (`TIME_DIVISOR` in cluster-test.mjs).
 const cluster :Workerd.ClusterConfig = (
   bucket = "s3://wdtest/cluster",
   bucketOptions = .bucketOptions,
   address = "127.0.0.1:0",
   key = "test-cluster-shared-secret-of-32-bytes",
   stopTimeoutMs = 10000,
-  unsafeTimeDivisor = 4,
+  unsafeTimeDivisor = 2,
 );
