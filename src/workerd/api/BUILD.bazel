@@ -2,6 +2,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_serde_capnp_library.bzl", "wd_rust_serde_capnp_library")
 load("//:build/wd_test.bzl", "wd_test")
 
 filegroup(
@@ -558,6 +559,16 @@ wd_cc_library(
 )
 
 wd_capnp_library(src = "r2-api.capnp")
+
+# For //src/rust/capnp-serde/tests, which checks r2-api-serde against the C++ JSON codec.
+exports_files(["r2-api.capnp"])
+
+# The R2 binding's JSON messages as Rust types (crate `r2_api_serde`).
+wd_rust_serde_capnp_library(
+    name = "r2-api-serde",
+    srcs = ["r2-api.capnp"],
+    visibility = ["//visibility:public"],
+)
 
 wd_capnp_library(src = "analytics-engine.capnp")
 

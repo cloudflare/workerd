@@ -1,0 +1,11 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# The Cap'n Proto compiler plugin behind wd_rust_serde_capnp_library().
+wd_rust_binary(
+    name = "capnpc-rust-serde",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:capnp",
+    ],
+)
