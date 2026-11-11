@@ -39,7 +39,8 @@
 //      bucket and cached on each node's disk, and it survives its owner.
 //  14. A cron trigger runs once a minute, through its schedule owner's death
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
-//      a test clock moved to each minute.
+//      a test clock moved to each minute, and an occurrence does not run
+//      again on a new owner whose clock lags the old one's.
 //  15. A cluster on a Cloud Storage bucket (gs://, fake-s3.mjs in its GCS
 //      dialect): requests are forwarded, a lease renewal refused by a
 //      generation precondition renews over the new generation, KV keeps a
@@ -3055,5 +3056,50 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
       .map((m) => Number(m[1]))
       .filter((t) => t >= at);
     assert.deepStrictEqual(seen.sort(), [at, at + 60_000]);
+  });
+});
+
+test('cluster: a cron occurrence does not run again on an owner whose clock lags', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    await Promise.all(
+      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+    );
+    // Moves one node's cron clock by `ms`: its time, once its schedule is
+    // re-armed.
+    const clock = async (n, ms) =>
+      (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body.now;
+    const now = await clock(nodes[0], 0);
+    let at = now - (now % 60_000) + 60_000;
+    if (at - now < 2000) at += 60_000;
+    for (const n of nodes) await clock(n, at - 1000 - (await clock(n, 0)));
+    const owner = await Promise.any(
+      nodes.map((n) =>
+        n.waitForStderr(new RegExp(`TICK ${at}`), 10_000).then(() => n)
+      )
+    );
+    const survivor = nodes.find((n) => n !== owner);
+    // The owner has stored its next alarm once an arm returns. The survivor's
+    // clock then falls 15 s behind, as it takes the schedule over.
+    await clock(owner, 0);
+    await clock(survivor, -15_000);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    // Its arm fails until it has taken the schedule over, then plans on its
+    // own clock.
+    let behind;
+    for (const deadline = Date.now() + 30_000; behind === undefined;) {
+      try {
+        behind = await clock(survivor, 0);
+      } catch (e) {
+        if (Date.now() > deadline) throw e;
+        await sleep(250);
+      }
+    }
+    assert(behind < at, `the survivor's clock is not behind: ${behind}`);
+    // Past the time the occurrence would run again, on the survivor's clock.
+    await sleep(at - behind + 2000);
+    const runs = [owner, survivor].flatMap(
+      (n) => n.stderr.match(new RegExp(`TICK ${at}`, 'g')) ?? []
+    );
+    assert.strictEqual(runs.length, 1);
   });
 });

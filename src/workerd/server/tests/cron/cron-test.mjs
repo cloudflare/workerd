@@ -4,14 +4,16 @@
 //
 // `workerd serve` of the cron module (`/workerd/cron.js`): armed at startup
 // with no request or socket, a failed occurrence retried with the same
-// scheduledTime and not dropped by a restart; a bad expression, or no
-// --experimental, refused.
+// scheduledTime and not dropped by a restart, an occurrence that ran not
+// run again behind a clock stepped back, also by a schedule stored before
+// it recorded that; a bad expression, or no --experimental, refused.
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from 'node:process';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import assert from 'node:assert';
 
@@ -28,9 +30,19 @@ export default {
 };
 `;
 
+// Fails every attempt at one expression, and runs the others.
+const FAILING = '0-59 * * * *';
+const ONE_FAILS = `export default {
+  async scheduled({ cron, scheduledTime: at }) {
+    console.log('SCHEDULED ' + JSON.stringify({ cron, at }));
+    if (cron === ${JSON.stringify(FAILING)}) throw new Error('it fails');
+  },
+};
+`;
+
 const config = (
   dir,
-  expression
+  expressions
 ) => `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
@@ -48,7 +60,7 @@ const config :Workerd.Config = (
         compatibilityFlags = [ "service_binding_extra_handlers" ],
         bindings = [
           ( name = "SCHEDULE", durableObjectNamespace = "Schedule" ),
-          ( name = "CRONS", json = "{\\"app\\": [\\"${expression}\\"]}" ),
+          ( name = "CRONS", json = ${JSON.stringify(JSON.stringify({ app: expressions }))} ),
           ( name = "app", service = "app" ),
           ( name = "TEST_CLOCK", json = "true" ),
         ],
@@ -63,12 +75,23 @@ const config :Workerd.Config = (
 );
 `;
 
-async function project(expression = '* * * * *') {
+async function project(expressions = ['* * * * *'], worker = WORKER) {
   const dir = await mkdtemp(join(tmpdir(), 'workerd-cron-'));
   await mkdir(join(dir, 'store'));
-  await writeFile(join(dir, 'app.js'), WORKER);
-  await writeFile(join(dir, 'config.capnp'), config(dir, expression));
+  await writeFile(join(dir, 'app.js'), worker);
+  await writeFile(join(dir, 'config.capnp'), config(dir, expressions));
   return dir;
+}
+
+// Deletes `key` from the schedule's storage, of a server that is not running.
+async function forget(dir, key) {
+  const files = await readdir(join(dir, 'store'), { recursive: true });
+  const [file] = files.filter(
+    (f) => f.endsWith('.sqlite') && !f.endsWith('metadata.sqlite')
+  );
+  const db = new DatabaseSync(join(dir, 'store', file));
+  db.prepare('DELETE FROM _cf_KV WHERE key = ?').run(key);
+  db.close();
 }
 
 // Runs workerd on `dir`'s config. `calls` holds each scheduled() call so far;
@@ -168,6 +191,63 @@ test('a failed occurrence is retried, and a restart does not drop it', async () 
   }
 });
 
+test('a clock stepped back does not run an occurrence again', async () => {
+  const dir = await project();
+  const server = serve(dir, ['--experimental']);
+  try {
+    // A second before a minute at least two seconds away, so that the clock
+    // moves forward; a real minute may run first.
+    const now = await server.clock(0);
+    let at = now - (now % 60_000) + 60_000;
+    if (at - now < 2000) at += 60_000;
+    const runs = () => server.calls.filter((c) => c.at === at);
+    await server.clock(at - 1000 - now);
+    // The first attempt fails, and its retry runs the occurrence.
+    await server.until(() => runs().length >= 2, 15_000);
+    // Back to before the occurrence, which the schedule does not arm again.
+    await server.clock(at - 1000 - (await server.clock(0)));
+    await assert.rejects(server.until(() => runs().length > 2, 3000));
+    assert.deepStrictEqual(
+      runs().map(({ n }) => n),
+      [1, 2]
+    );
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true });
+  }
+});
+
+test('a schedule stored without its last occurrence keeps its retry', async () => {
+  const dir = await project(['* * * * *', FAILING], ONE_FAILS);
+  let server = serve(dir, ['--experimental']);
+  try {
+    const now = await server.clock(0);
+    let at = now - (now % 60_000) + 60_000;
+    if (at - now < 2000) at += 60_000;
+    const runs = (cron) =>
+      server.calls.filter((c) => c.at === at && c.cron === cron);
+    await server.clock(at - 1000 - now);
+    // Its third attempt leaves the failing expression a retry 8 s away,
+    // stored once the run is over, which an arm waits out.
+    await server.until(() => runs(FAILING).length >= 3, 20_000);
+    await server.clock(0);
+    await server.stop('SIGKILL');
+    // As a schedule stored before `fired` was: the retry alone records the
+    // occurrence.
+    await forget(dir, 'fired');
+    server = serve(dir, ['--experimental']);
+    // Short of the occurrence again: the retry is kept, and the expression
+    // that ran does not run again.
+    await server.clock(at - 500 - (await server.clock(0)));
+    await assert.rejects(
+      server.until(() => runs('* * * * *').length > 0, 3000)
+    );
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true });
+  }
+});
+
 for (const [name, expression, args, error] of [
   [
     'a bad expression fails the config',
@@ -178,7 +258,7 @@ for (const [name, expression, args, error] of [
   ['cron triggers need --experimental', '* * * * *', [], /experimental/],
 ]) {
   test(name, async () => {
-    const dir = await project(expression);
+    const dir = await project([expression]);
     const server = serve(dir, args);
     try {
       assert.notStrictEqual(await server.exited, 0);

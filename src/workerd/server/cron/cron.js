@@ -310,33 +310,46 @@ export default {
   },
 };
 
-// What a schedule stores: its `name`; `at`, its alarm's time; and `owed`,
-// what a retry runs, `{occurrence, due, retry}`, null when the alarm is an
-// occurrence. A retry survives an eviction and a restart.
+// What a schedule stores: its `name`; `at`, its alarm's time; `owed`, what
+// a retry runs, `{occurrence, due, retry}`, null when the alarm is an
+// occurrence; and `fired`, the last occurrence that ran. A retry survives an
+// eviction and a restart.
 export class Schedule extends DurableObject {
   // The run in progress, which an arm waits out rather than race.
   #running = null;
 
   // Arms the plan's deadline, or retires the object when nothing matches.
-  async #arm(name, p, owed = null) {
+  // `fired` is the occurrence that just ran, if any.
+  async #arm(name, p, owed = null, fired) {
     const storage = this.ctx.storage;
     if (p.armAt === null) {
       await storage.deleteAlarm();
+      // `fired` stays: a schedule added back plans from it too.
       await storage.delete(['name', 'at', 'owed']);
       return;
     }
-    await storage.put({ name, at: p.armAt, owed: p.armIsRetry ? owed : null });
+    const entries = { name, at: p.armAt, owed: p.armIsRetry ? owed : null };
+    if (fired !== undefined) entries.fired = fired;
+    await storage.put(entries);
     await storage.setAlarm(p.armAt - skew);
   }
 
   async arm(name) {
     await this.#running?.catch(() => {});
-    const p = plan(crons(name), undefined, clock(), 0, false);
+    // Planned from the last occurrence that ran at the earliest: a clock
+    // behind it, stepped back or another node's, would arm it again. A
+    // schedule stored without `fired` has the occurrence its retry owes.
+    const stored = await this.ctx.storage.get(['fired', 'owed']);
+    const fired =
+      stored.get('fired') ?? stored.get('owed')?.occurrence ?? -Infinity;
+    const now = Math.max(clock(), fired);
+    const p = plan(crons(name), undefined, now, 0, false);
     // An alarm no later than the plan's, a retry or a missed occurrence, is
     // kept.
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm !== null && p.armAt !== null && alarm + skew <= p.armAt) return;
-    await this.#arm(name, p);
+    // Written back, so the occurrence a cleared retry owed stays recorded.
+    await this.#arm(name, p, null, fired === -Infinity ? undefined : fired);
   }
 
   alarm() {
@@ -363,7 +376,8 @@ export class Schedule extends DurableObject {
     const failed = due.filter((_, i) => !ok[i]);
     // A schedule no longer in the config has no expressions, and retires.
     const p = plan(schedule, occurrence, clock(), retry, failed.length > 0);
-    await this.#arm(name, p, { occurrence, due: failed, retry: retry + 1 });
+    const owed = { occurrence, due: failed, retry: retry + 1 };
+    await this.#arm(name, p, owed, occurrence);
   }
 
   // Runs one expression's occurrence: whether it needs no retry.
