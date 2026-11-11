@@ -58,7 +58,9 @@ using ReplConfigLoader = kj::Function<kj::Array<capnp::word>(
 class ReplEnvironment final: public ReplHost {
  public:
   // One way to compile an input. The REPL tries an input's candidates in order and evaluates the
-  // first that compiles; if none does, the first candidate's syntax error is the result.
+  // first that compiles; if none does, the first candidate's syntax error is the result. A
+  // candidate that isn't awaited and uses `await` as a name, as `await (x)` does in a script, is
+  // evaluated only if no later candidate compiles: an input that says `await` means to await.
   struct Candidate {
     kj::String source;
     // The completion value is a promise the REPL awaits, rendering what it settles to: the input

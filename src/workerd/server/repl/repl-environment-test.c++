@@ -128,6 +128,19 @@ struct Fixture {
     return environment.evaluate(candidates.finish()).wait(io.waitScope);
   }
 
+  // Evaluates `input` as the REPL does an input that mentions `await`: as it is, then as an async
+  // function returning its value, then as an async function's statements (cli/repl/input.rs,
+  // without its rewriting of declarations).
+  kj::String evalCandidates(kj::StringPtr input) {
+    auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);
+    candidates.add(ReplEnvironment::Candidate{.source = kj::str(input), .awaited = false});
+    candidates.add(ReplEnvironment::Candidate{
+      .source = kj::str("(async () => {return (", input, "\n)})()"), .awaited = true});
+    candidates.add(ReplEnvironment::Candidate{
+      .source = kj::str("(async () => {", input, "\n})()"), .awaited = true});
+    return environment.evaluate(candidates.finish()).wait(io.waitScope);
+  }
+
   kj::Array<kj::String> propertyNames(kj::StringPtr base) {
     return environment.propertyNames(kj::str(base)).wait(io.waitScope);
   }
@@ -184,6 +197,26 @@ KJ_TEST("REPL tries candidates in order and awaits the awaited ones") {
   KJ_EXPECT(
       fixture.evalAwait("await new Promise(resolve => setTimeout(() => resolve('later'), 1))") ==
       "'later'");
+}
+
+KJ_TEST("REPL awaits an input that a script would read as using a name `await`") {
+  Fixture fixture;
+  KJ_EXPECT(fixture.evalCandidates("await (Promise.resolve(1))") == "1");
+  KJ_EXPECT(fixture.evalCandidates("await [Promise.resolve(2)]") == "[ Promise { 2 } ]");
+  KJ_EXPECT(fixture.evalCandidates("await - 3") == "-3");
+  KJ_EXPECT(fixture.evalCandidates("if (true) { x = await (Promise.resolve(4)) }") == "undefined");
+  KJ_EXPECT(fixture.eval("x") == "4");
+
+  // An input that awaits only in async functions runs as it is, so its declarations are global.
+  KJ_EXPECT(fixture.evalCandidates("async function f() { return await (Promise.resolve(5)) }") ==
+      "undefined");
+  KJ_EXPECT(fixture.evalAwait("await f()") == "5");
+  KJ_EXPECT(
+      fixture.evalCandidates("const g = async () => await (Promise.resolve(6))") == "undefined");
+  KJ_EXPECT(fixture.evalAwait("await g()") == "6");
+
+  // An input that declares a name `await` runs as it is: nothing that awaits compiles.
+  KJ_EXPECT(fixture.evalCandidates("var await = (n) => n + 1; await (6)") == "7");
 }
 
 KJ_TEST("REPL enables nodejs_compat unless the flags take a position on it") {

@@ -232,7 +232,9 @@ session loop (`cli/repl/session.rs`), which runs on the event loop's thread and 
 sends an input, the console works out without a parser (`cli/repl/input.rs`) whether the input is
 finished, and a few _candidates_: ways to compile it, such as a plain script or, for an input that
 awaits at top level, an async function that returns its last statement's value. The session
-evaluates the first candidate that compiles.
+evaluates the first candidate that compiles, except that it passes over the plain script if the
+script uses `await` as a name: a script reads `await (x)` as a call to a function named `await`.
+Compiling the script in a class static block, where `await` can't be a name, tells.
 
 **The environment.** `ReplEnvironment` (`repl/repl-environment.h`) is a Worker that never receives
 an event, compiled on the REPL's isolate under the new module registry. One `IoContext` serves the
