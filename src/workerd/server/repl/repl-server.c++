@@ -251,10 +251,12 @@ void ReplConfigServer::watchFor(kj::Own<ReplConfigWatch> watch) {
 }
 
 kj::Promise<void> ReplConfigServer::close() {
+  // What waits for the close keeps the server until it is done: the REPL lets go of a server once
+  // closing begins, and the JavaScript handles may be collected.
   KJ_IF_SOME(c, closing) {
-    return c.addBranch();
+    return c.addBranch().attach(kj::addRef(*this));
   }
-  return closing.emplace(closeServer().fork()).addBranch();
+  return closing.emplace(closeServer().fork()).addBranch().attach(kj::addRef(*this));
 }
 
 kj::Promise<void> ReplConfigServer::closeServer() {
