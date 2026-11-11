@@ -62,7 +62,7 @@ Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 
 ## Typing input
 
-An input runs once it is finished. While a string, template literal, comment or bracket is still
+An input runs once it is finished. While a bracket, a template literal or a `/* */` comment is still
 open, Enter continues the input on the next line, at a `...` prompt:
 
 ```
@@ -73,6 +73,9 @@ undefined
 > f()
 42
 ```
+
+Enter also continues the input after a line that ends inside a string with a backslash. A string
+left open at the end of any other line is a syntax error, as it is in JavaScript.
 
 The REPL decides this without parsing JavaScript, so it can misjudge a `/` that could start either
 a regular expression or a division: it takes a `/` after `}` to start a regular expression, and
