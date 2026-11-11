@@ -54,6 +54,8 @@ The `workerd` global loads configs and reaches their services:
   await s.socket('http').fetch('http://x/')       // a request to an http socket of the config
   c = s.durableObject('main', 'Counter', 'alice') // a Durable Object, or by { id }
   await workerd.evict(c)                          // restart it on its next request
+  e = await workerd.environment({ compatibilityDate: '2022-01-01' })  // { compatibilityFlags }
+  await e.eval('typeof navigator')                // what the REPL would print there
   await s.reload()                                // serve the config as it is now
   await s.close()
 

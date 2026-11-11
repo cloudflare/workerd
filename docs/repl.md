@@ -317,6 +317,35 @@ every later use of a `Fetcher`, RPC stub or unread response body from that serve
 `Error: The server for <path> was closed.` Quitting the REPL closes every server that is still
 loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 
+## Other compatibility settings
+
+The REPL's JavaScript has the compatibility date and flags given on the command line.
+`await workerd.environment({ compatibilityDate, compatibilityFlags })` starts another environment
+like the REPL's, in an isolate of its own, with the date and flags given instead: today's date
+without one, and `nodejs_compat` unless the flags take a position on it, as for the REPL. Its
+handle's `eval(input)` evaluates `input` there, as the REPL evaluates a line typed at it, and
+resolves to what the REPL would print for it, as a string:
+
+```
+> old = await workerd.environment({ compatibilityDate: '2022-01-01' })
+ReplEnvironmentHandle {
+  compatibilityDate: '2022-01-01',
+  compatibilityFlags: [ [length]: 0 ],
+  closed: false
+}
+> await old.eval('typeof navigator')
+"'undefined'"
+> typeof navigator
+'object'
+```
+
+An environment keeps its globals from one input to the next, and has a `workerd` global of its own,
+so it can load configs too. Only the rendering crosses between environments, not values.
+`compatibilityDate` and `compatibilityFlags` are the settings given, `closed` whether `close()`
+has been called. `close()` closes the environment's servers and ends its JavaScript; the
+evaluations in progress fail with `Error: The environment was closed.` Quitting the REPL closes
+every environment still open.
+
 ## Limitations
 
 - Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
@@ -357,6 +386,11 @@ does all of that again and swaps the new `InProcessServer` in before closing the
 config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
 text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
 `repl_load_config` registers each file it reads with.
+
+**Other environments.** `workerd.environment()` constructs another `ReplEnvironment`, held by the
+one whose JavaScript asked for it and closed when that one drains. The candidates of what its
+`eval()` is given come from the console's rules (`repl_candidates`, `cli/repl/input.rs`), and the
+input runs on the event loop, under that environment's isolate lock rather than the REPL's.
 
 **Host channels.** `service()` and `socket()` are the in-process server's host channels
 (`server/in_process/host.rs`). The REPL's `IoContext` keys headers by its own

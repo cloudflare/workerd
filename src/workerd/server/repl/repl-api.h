@@ -4,8 +4,9 @@
 
 #pragma once
 
-// The JavaScript API of `workerd repl`: the `workerd` global (ReplControl) and the handle it
-// returns for each config it loads (ReplServer).
+// The JavaScript API of `workerd repl`: the `workerd` global (ReplControl), the handle it
+// returns for each config it loads (ReplServer), and the handle of each environment it starts
+// (ReplEnvironmentHandle).
 //
 // The types are in the workerd API isolate's type list (workerd-api-isolate.h), so the REPL's
 // isolate can wrap them, but only the REPL's isolate has a `workerd` global through which to reach
@@ -13,7 +14,8 @@
 // types.
 //
 // workerd-api depends on this header, and the REPL's implementation depends on workerd-api, so the
-// types reach that implementation through the abstract ReplHost and ReplServerHost.
+// types reach that implementation through the abstract ReplHost, ReplServerHost and
+// ReplEnvironmentHost.
 
 #include <workerd/api/http.h>
 #include <workerd/api/unsafe.h>
@@ -88,6 +90,37 @@ struct ReplConfigSource {
   bool watch = false;
 };
 
+// Another environment like the REPL's, with compatibility settings of its own, which
+// `workerd.environment()` started. Shared between the REPL and the JavaScript handles to it;
+// closing it, not the last handle's garbage collection, ends it.
+class ReplEnvironmentHost {
+ public:
+  virtual ~ReplEnvironmentHost() noexcept(false) = default;
+
+  virtual kj::Own<ReplEnvironmentHost> addRef() = 0;
+
+  // The compatibility date the environment has, today's if none was given.
+  virtual kj::StringPtr getCompatibilityDate() const = 0;
+  // The compatibility flags it was given.
+  virtual kj::ArrayPtr<const kj::String> getCompatibilityFlags() const = 0;
+  virtual bool isClosed() const = 0;
+
+  // Evaluates `input` there as the REPL evaluates a line typed at it: what the REPL would print,
+  // the rendered result or "Uncaught " and the exception. Rejects with a JSG error if the
+  // environment is closed, or closes meanwhile.
+  virtual kj::Promise<kj::String> evaluate(kj::String input) = 0;
+
+  // Closes the environment's servers and ends its JavaScript. Idempotent.
+  virtual kj::Promise<void> close() = 0;
+};
+
+// The compatibility settings of an environment to start.
+struct ReplEnvironmentSettings {
+  // Today if none.
+  kj::Maybe<kj::String> compatibilityDate;
+  kj::Array<kj::String> compatibilityFlags;
+};
+
 // What the `workerd` global asks of the REPL. Outlives every JavaScript object in the REPL's
 // isolate.
 class ReplHost {
@@ -97,6 +130,11 @@ class ReplHost {
   // Loads the config `source` names and starts serving it. Rejects with a JSG error, listing the
   // config errors, if the config does not load or has errors.
   virtual kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) = 0;
+
+  // Starts an environment with compatibility settings of its own. Rejects with a JSG error if the
+  // settings are not valid.
+  virtual kj::Promise<kj::Own<ReplEnvironmentHost>> newEnvironment(
+      ReplEnvironmentSettings settings) = 0;
 };
 
 // A config the REPL serves: `await workerd.loadConfig(path)`.
@@ -172,6 +210,36 @@ class ReplServer final: public jsg::Object {
   kj::Own<ReplServerHost> host;
 };
 
+// An environment the REPL started: `await workerd.environment({ compatibilityDate })`.
+class ReplEnvironmentHandle final: public jsg::Object {
+ public:
+  explicit ReplEnvironmentHandle(kj::Own<ReplEnvironmentHost> host): host(kj::mv(host)) {}
+
+  kj::StringPtr getCompatibilityDate() {
+    return host->getCompatibilityDate();
+  }
+  kj::Array<kj::String> getCompatibilityFlags();
+  bool getClosed() {
+    return host->isClosed();
+  }
+
+  // What the REPL would print for `input` typed at it, evaluated in this environment.
+  jsg::Promise<kj::String> eval(jsg::Lock& js, kj::String input);
+
+  jsg::Promise<void> close(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ReplEnvironmentHandle) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(compatibilityDate, getCompatibilityDate);
+    JSG_READONLY_PROTOTYPE_PROPERTY(compatibilityFlags, getCompatibilityFlags);
+    JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
+    JSG_METHOD(eval);
+    JSG_METHOD(close);
+  }
+
+ private:
+  kj::Own<ReplEnvironmentHost> host;
+};
+
 // The `workerd` global of the REPL.
 class ReplControl final: public jsg::Object {
  public:
@@ -191,6 +259,18 @@ class ReplControl final: public jsg::Object {
   // The servers loaded in this session and not yet closed.
   kj::Array<jsg::Ref<ReplServer>> getServers();
 
+  struct EnvironmentOptions {
+    jsg::Optional<kj::String> compatibilityDate;
+    jsg::Optional<kj::Array<kj::String>> compatibilityFlags;
+
+    JSG_STRUCT(compatibilityDate, compatibilityFlags);
+  };
+
+  // Starts an environment like the REPL's, in an isolate of its own, with the compatibility
+  // settings `options` gives rather than the REPL's.
+  jsg::Promise<jsg::Ref<ReplEnvironmentHandle>> environment(
+      jsg::Lock& js, jsg::Optional<EnvironmentOptions> options);
+
   // Evicts the Durable Object behind `stub` (from a server's durableObject()) as
   // `cloudflare:unsafe`'s evict() does.
   jsg::Promise<void> evict(jsg::Lock& js,
@@ -203,6 +283,7 @@ class ReplControl final: public jsg::Object {
 
   JSG_RESOURCE_TYPE(ReplControl) {
     JSG_METHOD(loadConfig);
+    JSG_METHOD(environment);
     JSG_METHOD(evict);
     JSG_READONLY_PROTOTYPE_PROPERTY(servers, getServers);
     JSG_READONLY_PROTOTYPE_PROPERTY(version, getVersion);
@@ -226,6 +307,7 @@ class ReplControl final: public jsg::Object {
 #define EW_REPL_ISOLATE_TYPES                                                                      \
   workerd::server::ReplControl, workerd::server::ReplControl::LoadConfigOptions,                   \
       workerd::server::ReplServer, workerd::server::ReplServer::ServiceOptions,                    \
-      workerd::server::ReplServer::DurableObjectName
+      workerd::server::ReplServer::DurableObjectName, workerd::server::ReplEnvironmentHandle,      \
+      workerd::server::ReplControl::EnvironmentOptions
 
 }  // namespace workerd::server

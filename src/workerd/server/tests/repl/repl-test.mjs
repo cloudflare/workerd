@@ -242,3 +242,23 @@ test(
     assert.deepStrictEqual(exit, { code: null, signal: 'SIGINT' });
   }
 );
+
+test('an environment evaluates input as the console does', async () => {
+  const { code, results, stderr } = await repl(
+    ['--compat-date=2025-01-01'],
+    [
+      "e = await workerd.environment({ compatibilityDate: '2022-01-01' })",
+      "await e.eval('typeof navigator')",
+      // A declaration in an input that awaits outlives the input there too.
+      "await e.eval('const y = await Promise.resolve(1)')",
+      "await e.eval('y + 1')",
+      'typeof y',
+    ]
+  );
+  assert.strictEqual(code, 0, stderr);
+  assert.deepStrictEqual(
+    results.slice(-4),
+    [`"'undefined'"`, "'1'", "'2'", "'undefined'"],
+    results.join('\n')
+  );
+});

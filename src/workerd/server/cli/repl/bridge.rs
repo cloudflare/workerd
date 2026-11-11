@@ -4,7 +4,7 @@
 
 //! The FFI between `workerd repl`'s console and its C++ half (repl/repl.h): the session that owns
 //! V8 and evaluates input. C++ calls back into [`repl_load_config`] to load a config as `workerd
-//! serve` does.
+//! serve` does, and into [`repl_candidates`] to compile input as the console does.
 
 #![allow(
     unsafe_code,
@@ -16,6 +16,7 @@ use std::pin::Pin;
 
 use kj_rs::KjOwn;
 
+pub use super::input::candidates as repl_candidates;
 pub use super::session::ReplWatch;
 pub use super::session::repl_load_config;
 pub use super::session::repl_watch_new;
@@ -84,6 +85,10 @@ pub mod ffi {
     }
 
     extern "Rust" {
+        /// The candidates of `input`, as the console makes them of an input typed at it
+        /// (input.rs): what `workerd.environment()`'s environments evaluate.
+        fn repl_candidates(input: &str) -> Vec<ReplCandidate>;
+
         /// Loads the config at `path`, a Cap'n Proto config (with the constant `const_name`, if
         /// not empty) or a `wrangler.json(c)`, as an encoded `Config` message. The error lists
         /// every problem.

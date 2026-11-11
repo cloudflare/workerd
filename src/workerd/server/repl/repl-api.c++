@@ -80,6 +80,32 @@ jsg::Promise<jsg::Ref<ReplServer>> ReplControl::loadConfig(
   });
 }
 
+kj::Array<kj::String> ReplEnvironmentHandle::getCompatibilityFlags() {
+  return KJ_MAP(flag, host->getCompatibilityFlags()) { return kj::str(flag); };
+}
+
+jsg::Promise<kj::String> ReplEnvironmentHandle::eval(jsg::Lock& js, kj::String input) {
+  // The input runs under the environment's isolate lock, on the event loop.
+  return IoContext::current().awaitIo(js, host->evaluate(kj::mv(input)));
+}
+
+jsg::Promise<void> ReplEnvironmentHandle::close(jsg::Lock& js) {
+  return IoContext::current().awaitIo(js, host->close());
+}
+
+jsg::Promise<jsg::Ref<ReplEnvironmentHandle>> ReplControl::environment(
+    jsg::Lock& js, jsg::Optional<EnvironmentOptions> options) {
+  ReplEnvironmentSettings settings;
+  KJ_IF_SOME(o, options) {
+    settings.compatibilityDate = kj::mv(o.compatibilityDate);
+    settings.compatibilityFlags = kj::mv(o.compatibilityFlags).orDefault({});
+  }
+  return IoContext::current().awaitIo(js, host.newEnvironment(kj::mv(settings)),
+      [](jsg::Lock& js, kj::Own<ReplEnvironmentHost> environment) {
+    return js.alloc<ReplEnvironmentHandle>(kj::mv(environment));
+  });
+}
+
 jsg::Promise<void> ReplControl::evict(jsg::Lock& js,
     jsg::Ref<api::Fetcher> stub,
     jsg::Optional<api::UnsafeModule::EvictOptions> options) {
