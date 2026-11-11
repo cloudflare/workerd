@@ -13,6 +13,7 @@ import {
   ServiceStub,
 } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
+import { inspect } from 'node:util';
 
 try {
   waitUntil(null);
@@ -156,9 +157,14 @@ let globalRpcPromise;
 // Promise initialized by testWaitUntil() and then resolved shortly later, in a waitUntil task.
 let globalWaitUntilPromise;
 
+// How many MyService entrypoints this isolate has constructed: one per call through
+// MyServiceLocal.
+let myServiceConstructions = 0;
+
 export class MyService extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
+    ++myServiceConstructions;
 
     assert.strictEqual(this.ctx, ctx);
     assert.strictEqual(this.env, env);
@@ -2031,6 +2037,13 @@ export let logging = {
     assert.strictEqual(await stub.increment(1), 2);
     console.log(stub);
     assert.strictEqual(await stub.increment(1), 3);
+
+    // A ServiceStub's RPC wildcard makes every property look like a method, `entries` included.
+    // Inspecting the stub must not call it.
+    const constructions = myServiceConstructions;
+    inspect(env.MyServiceLocal);
+    assert.strictEqual(await env.MyServiceLocal.oneArgMethod(1), 12);
+    assert.strictEqual(myServiceConstructions, constructions + 1);
   },
 };
 
