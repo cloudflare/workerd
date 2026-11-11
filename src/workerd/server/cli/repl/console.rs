@@ -46,6 +46,7 @@ The `workerd` global loads configs and reaches their services:
   s = await workerd.loadConfig('config.capnp')    // { constName } picks the constant
   r = await s.service('main').fetch('http://x/')  // { entrypoint, props } pick an entrypoint
   await r.text()
+  await s.service('main').scheduled({ cron: '* * * * *' })  // and queue(name, messages)
   await s.socket('http').fetch('http://x/')       // a request to an http socket of the config
   await s.close()
 

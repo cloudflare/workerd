@@ -102,19 +102,29 @@ bool usesAwaitAsName(jsg::Lock& js, kj::StringPtr source, kj::StringPtr name) {
   }, [](jsg::Value) -> bool { return true; });
 }
 
-// The compatibility flags of the REPL's JavaScript: `nodejs_compat` unless the user's flags take a
-// position on it, so that `await import('node:assert')` works.
-kj::Array<kj::String> replCompatibilityFlags(kj::ArrayPtr<const kj::String> userFlags) {
-  kj::Vector<kj::String> flags(userFlags.size() + 1);
+// The compatibility flags of the REPL's JavaScript: the user's, `nodejs_compat` unless they take a
+// position on it, so that `await import('node:assert')` works, and with `--experimental`,
+// `service_binding_extra_handlers`, so that a loaded config's services take `scheduled()` and
+// `queue()` calls. The latter lets JavaScript reach the V8 deserializer through `queue()`'s
+// `serializedBody`, which is why it is experimental; the REPL's user runs any code they like.
+kj::Array<kj::String> replCompatibilityFlags(const ReplEnvironmentOptions& options) {
+  auto userFlags = options.compatibilityFlags.asPtr();
+  kj::Vector<kj::String> flags(userFlags.size() + 2);
   bool nodejsCompatChosen = false;
+  bool extraHandlersChosen = false;
   for (auto& flag: userFlags) {
     nodejsCompatChosen = nodejsCompatChosen || flag == "nodejs_compat"_kj ||
         flag == "no_nodejs_compat"_kj || flag == "nodejs_compat_v2"_kj ||
         flag == "no_nodejs_compat_v2"_kj;
+    // Naming a flag twice is an error.
+    extraHandlersChosen = extraHandlersChosen || flag == "service_binding_extra_handlers"_kj;
     flags.add(kj::str(flag));
   }
   if (!nodejsCompatChosen) {
     flags.add(kj::str("nodejs_compat"));
+  }
+  if (options.experimental && !extraHandlersChosen) {
+    flags.add(kj::str("service_binding_extra_handlers"));
   }
   return flags.releaseAsArray();
 }
@@ -216,8 +226,8 @@ ReplEnvironment::ReplEnvironment(const ReplServerResources& resources,
   auto date = options.compatibilityDate.map([](const kj::String& date) {
     return date.asPtr();
   }).orDefault(today);
-  compileCompatibilityFlags(date, replCompatibilityFlags(options.compatibilityFlags), flags,
-      errorReporter, options.experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+  compileCompatibilityFlags(date, replCompatibilityFlags(options), flags, errorReporter,
+      options.experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
   // Rendering results needs the new module registry's internal modules.
   flags.setNewModuleRegistry(true);
   featureFlags = flags.asReader();

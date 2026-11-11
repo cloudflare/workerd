@@ -35,8 +35,8 @@ class TestEntropySource final: public kj::EntropySource {
   }
 };
 
-// A config with a worker that answers fetches with what it was asked, an entrypoint with props,
-// and an http socket in front of the worker.
+// A config with a worker that answers fetches with what it was asked, takes scheduled and queue
+// events, has an entrypoint with props, and an http socket in front of it.
 constexpr kj::StringPtr WORKER_CONFIG = R"((
   services = [
     ( name = "main",
@@ -53,6 +53,8 @@ constexpr kj::StringPtr WORKER_CONFIG = R"((
               `    return new Response(`${env.GREETING} ${request.method} ${url.pathname} ${header}`,
               `        { headers: { "x-reply": "yes" } });
               `  },
+              `  scheduled(controller) {},
+              `  queue(batch) { batch.ackAll(); },
               `};
               `export class Api extends WorkerEntrypoint {
               `  add(a, b) { return a + b; }
@@ -342,6 +344,34 @@ KJ_TEST("REPL loads a config and calls its services and sockets") {
   KJ_EXPECT_STARTS_WITH(
       fixture.eval("s.socket('nope')"), "Uncaught Error: The config has no socket named \"nope\".");
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('nope')"), "Uncaught Error:");
+}
+
+KJ_TEST("REPL calls a service's scheduled() and queue() handlers with --experimental") {
+  {
+    Fixture fixture({.experimental = true});
+    fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')");
+    KJ_EXPECT(fixture.evalAwait(
+                  "(await s.service('main').scheduled({ cron: '* * * * *' })).outcome") == "'ok'");
+    KJ_EXPECT(
+        fixture.evalAwait(
+            "(await s.service('main').queue('q', "
+            "[{ id: 'm', timestamp: new Date(), attempts: 1, body: 'hi' }])).ackAll") == "true");
+  }
+  {
+    // Naming the flag as well is not naming it twice.
+    Fixture fixture({.compatibilityFlags = kj::arr(kj::str("service_binding_extra_handlers")),
+      .experimental = true});
+    fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')");
+    KJ_EXPECT(fixture.evalAwait(
+                  "(await s.service('main').scheduled({ cron: '* * * * *' })).outcome") == "'ok'");
+  }
+  {
+    Fixture fixture;
+    fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')");
+    // Without the flag, `scheduled` is an RPC call to the handler, which returns nothing.
+    KJ_EXPECT(fixture.evalAwait("await s.service('main').scheduled({ cron: '* * * * *' })") ==
+        "undefined");
+  }
 }
 
 KJ_TEST("REPL calls the services of a config with no sockets") {
