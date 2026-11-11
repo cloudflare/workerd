@@ -245,8 +245,14 @@ export let bigOutput = {
 export let streams = {
   async test(ctrl, env) {
     const text = await create(env, 'stream', 'stream-text');
+    // A subscriber gets the stream; the logs show a preview.
     const { output } = await until(text, 'step_completed');
-    assert.strictEqual(output, 'a'.repeat(1024) + '[truncated output]');
+    assert.strictEqual(
+      (await new Response(output).text()).length,
+      300 * 1024 + 3
+    );
+    const [shown] = (await text.status()).__LOCAL_DEV_STEP_OUTPUTS;
+    assert.strictEqual(shown, 'a'.repeat(1024) + '[truncated output]');
     await until(text, 'workflow_waiting');
     await advance(env, text, 60 * 60 * 1000);
     await until(text, 'workflow_completed');
@@ -254,8 +260,10 @@ export let streams = {
     assert.deepEqual(ranBy('stream'), ['stream/s']);
 
     const binary = await create(env, 'binary', 'stream-binary');
-    const shown = await until(binary, 'step_completed');
-    assert.strictEqual(shown.output, '[ReadableStream (binary): 2 bytes]');
+    await until(binary, 'step_completed');
+    assert.deepEqual((await binary.status()).__LOCAL_DEV_STEP_OUTPUTS, [
+      '[ReadableStream (binary): 2 bytes]',
+    ]);
 
     const broken = await create(env, 'broken', 'stream-error');
     const { error } = await until(broken, 'workflow_errored');

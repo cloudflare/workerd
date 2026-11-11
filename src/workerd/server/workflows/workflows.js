@@ -865,9 +865,12 @@ export class Engine extends DurableObject {
             : value;
         }
         this.#log('attempt_completed', { stepName, attempt });
+        const sensitive = cfg.sensitive === 'output';
         const shown = stream ? stream.preview : value;
-        const output = cfg.sensitive === 'output' ? '[REDACTED]' : shown;
+        const output = sensitive ? '[REDACTED]' : shown;
         const fields = output === undefined ? {} : { output };
+        // A subscriber gets the stream itself.
+        if (stream && !sensitive) fields.stream = key;
         this.#log('step_completed', { stepName, ...fields });
         return value;
       }
@@ -1539,7 +1542,12 @@ export class Engine extends DurableObject {
           cursor = event.eventId;
           done = FINAL.has(event.type);
           if (!filter || filter.includes(event.type)) {
-            return { done: false, value: event };
+            const { stream: key, ...value } = event;
+            const stored = key && this.#kv.get(key)?.stream;
+            if (stored) {
+              value.output = this.#replayStream(key, event.stepName, stored);
+            }
+            return { done: false, value };
           }
           continue;
         }
