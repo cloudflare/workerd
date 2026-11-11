@@ -45,9 +45,24 @@ Load a config and call its Workers:
 > await s.close()
 ```
 
+Or name the config on the command line, and the REPL loads it into `s` before the first prompt:
+
+```sh
+bazel-bin/src/workerd/server/workerd repl --experimental config.capnp
+```
+
 Press Ctrl+D, or type `.exit`, to quit.
 
 ## Command line
+
+```
+workerd repl --experimental [options] [<config-file> [<const-name>]]
+```
+
+A `<config-file>` is loaded into the global `s`, as
+`s = await workerd.loadConfig('<config-file>', { constName: '<const-name>' })` would load it. The
+REPL shows that input at its first prompt and prints its result. A config that fails to load is
+reported like any failed input, and the REPL carries on with `s` unset.
 
 | Option                 | Effect                                                                                                                                                                |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

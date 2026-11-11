@@ -43,6 +43,10 @@ use crate::args::ReplArgs;
 
 /// Runs the REPL until its input ends; the exit status.
 pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
+    let first_input = args
+        .config_file
+        .as_deref()
+        .map(|path| load_config_input(path, args.const_name.as_deref()));
     let options = bridge::ffi::ReplOptions {
         compat_date: args.compat_date.unwrap_or_default(),
         compat_flags: args.compat_flags,
@@ -61,7 +65,7 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         let (requests, received) = mpsc::unbounded_channel();
         let console = std::thread::Builder::new()
             .name("repl-console".to_owned())
-            .spawn(move || console::run(requests))
+            .spawn(move || console::run(requests, first_input))
             .map_err(|error| {
                 cxx::KjError::new(
                     cxx::KjExceptionType::Failed,
@@ -85,6 +89,20 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
     })
 }
 
+/// The input that loads the command line's config into the global `s`.
+fn load_config_input(path: &str, const_name: Option<&str>) -> String {
+    // A JSON string is a JavaScript string literal.
+    let quote = |text: &str| serde_json::Value::from(text).to_string();
+    match const_name {
+        Some(name) => format!(
+            "s = await workerd.loadConfig({}, {{ constName: {} }})",
+            quote(path),
+            quote(name)
+        ),
+        None => format!("s = await workerd.loadConfig({})", quote(path)),
+    }
+}
+
 /// Ends the process with `code` at once, as `workerd serve` does, unless `KJ_CLEAN_SHUTDOWN` asks
 /// for everything to be destroyed first; then `code`.
 fn exit(code: i32) -> i32 {
@@ -93,3 +111,7 @@ fn exit(code: i32) -> i32 {
     }
     code
 }
+
+#[cfg(test)]
+#[path = "mod-test.rs"]
+mod tests;

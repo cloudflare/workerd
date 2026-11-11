@@ -441,3 +441,18 @@ fn help_pages_are_complete() {
     compiled.build();
     check(&mut compiled, "compiled");
 }
+
+#[test]
+fn repl_config_to_load() {
+    let repl = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl
+    };
+    let none = repl(&["repl", "--experimental"]);
+    assert_eq!(none.config_file, None);
+    let config = repl(&["repl", "--experimental", "config.capnp", "dev"]);
+    assert_eq!(config.config_file.as_deref(), Some("config.capnp"));
+    assert_eq!(config.const_name.as_deref(), Some("dev"));
+}

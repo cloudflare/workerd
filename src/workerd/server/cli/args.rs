@@ -245,6 +245,12 @@ pub struct DeployArgs {
 
 #[derive(Args, Debug)]
 pub struct ReplArgs {
+    #[arg(value_name = "config")]
+    pub config_file: Option<String>,
+
+    #[arg(value_name = "const", requires = "config_file")]
+    pub const_name: Option<String>,
+
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 

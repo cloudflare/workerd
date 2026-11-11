@@ -168,7 +168,7 @@ Usage:
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
-  workerd repl                       Evaluate JavaScript (experimental)
+  workerd repl [config]              Evaluate JavaScript (experimental)
   workerd <command> -h               Its options, as in workerd serve -h
 
 Quick start:
@@ -382,11 +382,13 @@ pub const REPL: &str = "\
 workerd repl: evaluate JavaScript in a Worker (experimental).
 
 Usage:
-  workerd repl --experimental [options]
+  workerd repl --experimental [options] [config] [const]
 
 Prints the result of each input. The workerd global loads configs, as
 serve does, and calls their services and sockets; type .help in the
-REPL for more.
+REPL for more. [config], a wrangler.json, wrangler.jsonc or .capnp
+config as for serve, is loaded into the global s before the first
+prompt; [const] names the constant of a .capnp config.
 
 On a terminal, the lines typed are saved in ~/.workerd_repl_history;
 WORKERD_REPL_HISTORY names another file, or, set to the empty string,
