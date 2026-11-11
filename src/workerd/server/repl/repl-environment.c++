@@ -64,6 +64,19 @@ bool isIdentifierChain(kj::StringPtr text) {
   return !atNameStart;
 }
 
+// Whether `source`, a script that compiles, uses `await` as a name outside the async functions in
+// it, as `await (x)` does: a script reads that as a call to a function named `await`. In a class
+// static block, `await` is neither a name nor an operator except in the functions the block
+// holds, so the script does not compile in one if it does. The block is strict mode code, so a
+// script only sloppy mode accepts counts as one that does.
+bool usesAwaitAsName(jsg::Lock& js, kj::StringPtr source, kj::StringPtr name) {
+  return js.tryCatch([&]() -> bool {
+    // The line break keeps a line comment that ends the script from swallowing the block's end.
+    jsg::NonModuleScript::compile(js, kj::str("(class { static {", source, "\n} })"), name);
+    return false;
+  }, [](jsg::Value) -> bool { return true; });
+}
+
 // The compatibility flags of the REPL's JavaScript: `nodejs_compat` unless the user's flags take a
 // position on it, so that `await import('node:assert')` works.
 kj::Array<kj::String> replCompatibilityFlags(kj::ArrayPtr<const kj::String> userFlags) {
@@ -312,14 +325,24 @@ kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
 ReplEnvironment::Compiled ReplEnvironment::compile(
     jsg::Lock& js, kj::ArrayPtr<const Candidate> candidates) {
   if (candidates.size() > 1) {
+    kj::Maybe<Compiled> passedOver;
     for (auto& candidate: candidates) {
       auto compiled = js.tryCatch([&]() -> kj::Maybe<Compiled> {
         return Compiled{.script = jsg::NonModuleScript::compile(js, candidate.source, inputName),
           .awaited = candidate.awaited};
       }, [](jsg::Value) -> kj::Maybe<Compiled> { return kj::none; });
       KJ_IF_SOME(c, compiled) {
-        return kj::mv(c);
+        if (c.awaited || !usesAwaitAsName(js, candidate.source, inputName)) {
+          return kj::mv(c);
+        }
+        if (passedOver == kj::none) {
+          passedOver = kj::mv(c);
+        }
       }
+    }
+    // Nothing later compiles, as for an input that declares a name `await` and uses it.
+    KJ_IF_SOME(c, passedOver) {
+      return kj::mv(c);
     }
   }
   // None compiles, so the first one's syntax error is thrown.

@@ -258,7 +258,9 @@ fn is_word_byte(byte: u8) -> bool {
 /// The ways the REPL may compile `input`, in the order to try them: as it is, then, if it may
 /// await at top level, wrapped in an async function, first returning the value of its last
 /// statement ([`returning_last_statement`]) and then as statements whose result is `undefined`.
-/// See [`rewrite_declarations`] for what the wrappings do to declarations.
+/// See [`rewrite_declarations`] for what the wrappings do to declarations. The session passes over
+/// the input as it is when it uses `await` as a name, as `await (x)` does in a script
+/// (`ReplEnvironment::compile`).
 pub fn candidates(input: &str) -> Vec<ReplCandidate> {
     let mut candidates = vec![ReplCandidate {
         source: input.to_owned(),
