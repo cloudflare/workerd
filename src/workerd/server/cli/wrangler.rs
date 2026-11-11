@@ -26,7 +26,9 @@
 //! this Worker; its messages are in `.wrangler/state/workerd/queues/`. `workflows`, also
 //! `--experimental`, run on the Worker `<name>-workflows` (the bundled module
 //! `/workerd/workflows.js`), the engine of this Worker's `workflowsEngine`; each binding is the
-//! Workflow API over it, and its instances are in `.wrangler/state/workerd/workflows/`. The
+//! Workflow API over it, and its instances are in `.wrangler/state/workerd/workflows/`.
+//! `limits.steps` and `default_retention` apply; `concurrency` and `jurisdiction` are ignored;
+//! `schedules`, and a `script_name` other than this Worker, are errors. The
 //! server listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>`
 //! overrides it.
 //!
@@ -95,6 +97,27 @@ struct Workflow {
     binding: String,
     name: String,
     class_name: String,
+    script_name: Option<String>,
+    limits: Option<WorkflowLimits>,
+    #[serde(rename = "concurrency")]
+    _concurrency: Option<serde_json::Value>,
+    schedules: Option<serde_json::Value>,
+    default_retention: Option<WorkflowRetention>,
+    #[serde(rename = "jurisdiction")]
+    _jurisdiction: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowLimits {
+    steps: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowRetention {
+    success_retention: Option<serde_json::Value>,
+    error_retention: Option<serde_json::Value>,
 }
 
 #[derive(Default, Deserialize)]
@@ -680,9 +703,33 @@ fn workflows_services(
         &format!("{name}-storage"),
         dir,
     );
+    let mut config = serde_json::Map::new();
+    for w in workflows {
+        let unsupported = |field| {
+            Err(format!(
+                "workflows: \"{}\": {field} is not supported",
+                w.name
+            ))
+        };
+        if w.script_name.as_ref().is_some_and(|s| s != target) {
+            return unsupported("script_name");
+        }
+        if w.schedules.is_some() {
+            return unsupported("schedules");
+        }
+        let mut settings = serde_json::json!({});
+        if let Some(steps) = w.limits.as_ref().and_then(|l| l.steps) {
+            settings["steps"] = steps.into();
+        }
+        if let Some(r) = &w.default_retention {
+            settings["retention"] =
+                serde_json::json!({ "success": r.success_retention, "error": r.error_retention });
+        }
+        config.insert(w.name.clone(), settings);
+    }
     let service = services.reborrow().get(at);
     let n = workflows.len() as u32;
-    let mut bindings = bundled_worker(service, &name, "workflows.js", &[], None, n);
+    let mut bindings = bundled_worker(service, &name, "workflows.js", &[], None, n + 1);
     for (i, w) in (0u32..).zip(workflows) {
         let mut b = bindings.reborrow().get(i);
         b.set_name(&w.name);
@@ -690,6 +737,9 @@ fn workflows_services(
         ns.set_class_name(workflow_namespace_key(&w.name));
         ns.set_service_name(target);
     }
+    let mut b = bindings.get(n);
+    b.set_name("WORKFLOWS");
+    b.set_json(serde_json::Value::Object(config).to_string());
     Ok(())
 }
 

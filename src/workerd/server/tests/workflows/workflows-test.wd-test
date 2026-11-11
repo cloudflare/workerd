@@ -41,6 +41,8 @@ const unitTests :Workerd.Config = (
               className = "miniflare-workflows-flow",
               serviceName = "workflows-test",
             ) ),
+          ( name = "WORKFLOWS",
+            json = "{\"flow\": {\"steps\": 3, \"retention\": {\"success\": \"2 days\"}}}" ),
           ( name = "TEST_CLOCK", json = "true" ),
         ],
         durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),

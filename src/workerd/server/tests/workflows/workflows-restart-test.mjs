@@ -14,8 +14,9 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 
 // `/create?id=&kind=`, `/until?id=&type=&n=` (once the instance's history
-// has n events of \`type\`), `/pause?id=`, `/status?id=` and
-// `/clock?advance=<ms>`. A \`hang\` step never returns.
+// has n events of \`type\`), `/pause?id=`, `/terminate?id=` (with its
+// rollbacks), `/status?id=` and `/clock?advance=<ms>`. A \`hang\` step never
+// returns.
 const WORKER = `import { WorkflowEntrypoint } from 'cloudflare:workers';
 export class Flow extends WorkflowEntrypoint {
   async run(event, step) {
@@ -25,7 +26,8 @@ export class Flow extends WorkflowEntrypoint {
       return step.do('crash', { retries }, hang);
     }
     if (event.payload === 'hang') return step.do('hang', hang);
-    await step.do('one', async () => console.log('RAN one'));
+    const rollback = async () => console.log('RAN undo');
+    await step.do('one', async () => console.log('RAN one'), { rollback });
     await step.sleep('nap', '1 minute');
     await step.do('two', async () => console.log('RAN two'));
     return 'done';
@@ -43,6 +45,10 @@ export default {
     const instance = await env.FLOW.get(id);
     if (url.pathname === '/pause') {
       await instance.pause();
+      return Response.json(null);
+    }
+    if (url.pathname === '/terminate') {
+      await instance.terminate({ rollback: true });
       return Response.json(null);
     }
     if (url.pathname === '/status') {
@@ -211,6 +217,30 @@ test('a crash fails a step at its limit and settles a pause', async () => {
     server = serve(dir);
     const { error } = await server.get('/until?id=crash&type=workflow_errored');
     assert.match(error.message, /Attempt 2 of step "crash" did not finish/);
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true });
+  }
+});
+
+test('terminate after a restart rolls back the steps done before', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workerd-workflows-'));
+  await mkdir(join(dir, 'store'));
+  await writeFile(join(dir, 'app.js'), WORKER);
+  await writeFile(join(dir, 'config.capnp'), config(dir));
+  let server = serve(dir);
+  try {
+    await server.get('/create?id=undo');
+    await server.get('/until?id=undo&type=sleep_started');
+    await server.get('/pause?id=undo');
+    await server.stop('SIGKILL');
+
+    // Paused, so no \`run()\` replays the steps on its own.
+    server = serve(dir);
+    await server.get('/terminate?id=undo');
+    await server.get('/until?id=undo&type=rollback_completed');
+    assert.deepEqual(await server.ran(1), ['undo']);
+    assert.strictEqual((await server.get('/status?id=undo')).status, 'terminated');
   } finally {
     await server.stop();
     await rm(dir, { recursive: true });

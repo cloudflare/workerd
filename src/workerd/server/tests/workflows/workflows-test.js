@@ -32,6 +32,9 @@ export class Flow extends WorkflowEntrypoint {
     switch (event.payload.kind) {
       case 'steps':
         return (await once('a', 1)) + (await once('b', 2));
+      case 'many':
+        for (const name of ['a', 'b', 'c', 'd']) await once(name);
+        return;
       case 'backoff': {
         const delay = ({ ctx }) => ctx.attempt * 2000;
         const retries = { limit: 1, delay };
@@ -259,6 +262,12 @@ export let failures = {
     const fatal = await create(env, 'fatal', 'fatal');
     const e = await until(fatal, 'workflow_errored');
     assert.match(e.error.message, /no/);
+
+    // The Workflow's step limit is 3.
+    const many = await create(env, 'many', 'many');
+    const { error } = await until(many, 'workflow_errored');
+    assert.match(error.message, /limit of 3 steps/);
+    assert.deepEqual(ranBy('many'), ['many/a', 'many/b', 'many/c']);
     assert.deepEqual(ranBy('fatal'), ['fatal/boom']);
 
     // Replayed, a caught NonRetryableError is rethrown without running again.
@@ -320,20 +329,29 @@ export let api = {
       [['nope', 10400]]
     );
     await assert.rejects(env.FLOW.get('b1'), /instance.not_found/);
+    const clock = 'http://w/clock?advance=soon';
+    const r = await env.WORKFLOWS.fetch(clock, { method: 'POST' });
+    assert.strictEqual(r.status, 400);
   },
 };
 
-// A finished instance is deleted after its retention.
+// A finished instance is deleted after its retention: a terminated one
+// after its success retention, and one that sets none after the Workflow's
+// (2 days).
 export let retention = {
   async test(ctrl, env) {
-    const successRetention = '1 day';
-    const instance = await create(env, 'kept', 'steps', {
-      retention: { successRetention },
-    });
-    await until(instance, 'workflow_completed');
-    await assert.rejects(
-      advance(env, instance, 24 * 60 * 60 * 1000),
-      /instance.not_found/
-    );
+    const day = 24 * 60 * 60 * 1000;
+    const retention = { successRetention: '1 day' };
+    const kept = await create(env, 'kept', 'steps', { retention });
+    await until(kept, 'workflow_completed');
+    const ended = await create(env, 'ended', 'sleep', { retention });
+    await until(ended, 'sleep_started');
+    await ended.terminate();
+    const defaulted = await create(env, 'defaulted', 'steps');
+    await until(defaulted, 'workflow_completed');
+    await assert.rejects(advance(env, kept, day), /instance.not_found/);
+    await assert.rejects(ended.status(), /instance.not_found/);
+    assert.strictEqual((await defaulted.status()).status, 'complete');
+    await assert.rejects(advance(env, defaulted, day), /instance.not_found/);
   },
 };

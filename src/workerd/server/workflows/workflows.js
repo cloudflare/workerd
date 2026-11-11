@@ -20,6 +20,10 @@
 //   <name>     for each Workflow, its instances: `durableObjectNamespace =
 //              (className = "miniflare-workflows-<name>", serviceName =
 //              "<app>")`
+//   WORKFLOWS  JSON, by Workflow name: `steps`, its step limit (default
+//              10,000), and `retention`, `{success, error}` as
+//              `WorkflowInstanceCreateOptions.retention` takes, for instances
+//              that do not set their own (optional)
 //   TEST_CLOCK JSON `true` for tests (optional)
 //
 // An instance is one Durable Object, named by its id. Its storage holds the
@@ -123,6 +127,28 @@ function ms(d) {
   return Number(m[1]) * unit;
 }
 
+const stepConfig = (config) => ({
+  ...DEFAULTS,
+  ...config,
+  retries: { ...DEFAULTS.retries, ...config?.retries },
+});
+
+// A step's config as its callbacks see it: without a delay function.
+function shownConfig(cfg) {
+  const shown = { ...cfg, retries: { ...cfg.retries } };
+  if (typeof cfg.retries.delay === 'function') delete shown.retries.delay;
+  return shown;
+}
+
+// What rolling back the step `name` runs.
+const undoOf = (rollback, name, ctx, record) => ({
+  name,
+  fn: rollback.rollback.dup?.() ?? rollback.rollback,
+  config: rollback.rollbackConfig,
+  ctx,
+  output: record.value,
+});
+
 // The steps `run()` takes, each a call into the engine instance that made it.
 class Step extends RpcTarget {
   #step;
@@ -216,7 +242,7 @@ export class Engine extends DurableObject {
 
   #finish(status, fields = {}) {
     const { retention } = this.#meta;
-    const keep = status === 'complete' ? retention.success : retention.error;
+    const keep = status === 'errored' ? retention.error : retention.success;
     this.#set(status, { ...fields, expires: clock() + keep });
     this.#release();
     this.#arm();
@@ -318,13 +344,13 @@ export class Engine extends DurableObject {
       for (const w of this.#waiters) next = Math.min(next, w.at);
       if (m.status !== 'waiting') next = Math.min(next, clock() + HEARTBEAT_MS);
     }
-    // A stale alarm costs one wake.
-    if (next === Infinity) return;
-    const now = clock();
-    if (this.#alarm === null || next < this.#alarm || this.#alarm <= now) {
-      this.ctx.storage.setAlarm(next - skew);
-      this.#alarm = next;
-    }
+    // A stale alarm costs one wake. One already set no later stays: setting a
+    // due alarm again defers it.
+    const at = next - skew;
+    if (next === Infinity || (this.#alarm !== null && this.#alarm <= at))
+      return;
+    this.ctx.storage.setAlarm(at);
+    this.#alarm = at;
   }
 
   async alarm() {
@@ -344,12 +370,6 @@ export class Engine extends DurableObject {
       this.#log('workflow_started', { params: m.params });
     }
     if (m.status === 'queued') this.#set('running');
-    const event = {
-      payload: m.params,
-      timestamp: new Date(m.created),
-      instanceId: m.id,
-      workflowName: this.ctx.props.workflowName,
-    };
     const step = new Step({
       do: (...args) => this.#do(generation, ...args),
       sleep: (name, duration, until) =>
@@ -360,7 +380,7 @@ export class Engine extends DurableObject {
     const done = (async () => {
       let output, failure;
       try {
-        output = await this.ctx.props.workflowClass.run(event, step);
+        output = await this.#call(m, step);
       } catch (e) {
         failure = e;
       }
@@ -378,6 +398,20 @@ export class Engine extends DurableObject {
       await this.#undo('errored', { error: plain(failure) }, failure);
     })();
     this.ctx.waitUntil(done);
+  }
+
+  #call(m, step) {
+    const event = {
+      payload: m.params,
+      timestamp: new Date(m.created),
+      instanceId: m.id,
+      workflowName: this.ctx.props.workflowName,
+    };
+    return this.ctx.props.workflowClass.run(event, step);
+  }
+
+  get #config() {
+    return env.WORKFLOWS?.[this.ctx.props.workflowName] ?? {};
   }
 
   #record(type, name) {
@@ -422,33 +456,24 @@ export class Engine extends DurableObject {
       );
     }
     if (!(await this.#enter(generation))) throw aborted();
-    if (++this.#steps > STEP_LIMIT) {
+    const limit = this.#config.steps ?? STEP_LIMIT;
+    if (++this.#steps > limit) {
       throw fatalError(
-        `The limit of ${STEP_LIMIT} steps has been reached. This limit can ` +
+        `The limit of ${limit} steps has been reached. This limit can ` +
           'be changed in your worker configuration.'
       );
     }
-    const cfg = {
-      ...DEFAULTS,
-      ...config,
-      retries: { ...DEFAULTS.retries, ...config.retries },
-    };
+    const cfg = stepConfig(config);
     const dynamic = typeof cfg.retries.delay === 'function';
-    const shown = { ...cfg, retries: { ...cfg.retries } };
-    if (dynamic) delete shown.retries.delay;
+    const shown = shownConfig(cfg);
     const { key, count, record } = this.#record('do', name);
     const ctx = (attempt) => ({
       step: { name, count },
       attempt,
       config: shown,
     });
-    const undo = rollback && {
-      name,
-      fn: rollback.rollback.dup?.() ?? rollback.rollback,
-      config: rollback.rollbackConfig,
-      ctx: ctx(record.attempts ?? 1),
-      output: record.value,
-    };
+    const undo =
+      rollback && undoOf(rollback, name, ctx(record.attempts ?? 1), record);
     if (undo) this.#rollbacks.push(undo);
     if (record.done) return record.value;
     if (record.error) throw error(record.error.name, record.error.message);
@@ -632,6 +657,45 @@ export class Engine extends DurableObject {
     }
   }
 
+  // The rollbacks of the steps the instance reached: `run()` again, with
+  // steps that only read their records, up to the first it did not reach.
+  async #replay(m) {
+    const counts = new Map();
+    const rollbacks = [];
+    const read = (type, name) => {
+      const k = `${type}:${name}`;
+      const count = (counts.get(k) ?? 0) + 1;
+      counts.set(k, count);
+      return { count, record: this.#kv.get(`s:${type}:${count}:${name}`) };
+    };
+    const end = () => error('WorkflowReplayEnd', 'Replayed every step reached');
+    const result = (record) => {
+      if (record?.done) return record.value;
+      if (record?.error) throw error(record.error.name, record.error.message);
+      throw end();
+    };
+    const step = new Step({
+      do: (name, config, callback, rollback) => {
+        if (typeof config === 'function') [config, rollback] = [{}, callback];
+        const { count, record } = read('do', name);
+        if (record?.attempts === undefined) throw end();
+        if (rollback) {
+          const ctx = {
+            step: { name, count },
+            attempt: record.attempts || 1,
+            config: shownConfig(stepConfig(config)),
+          };
+          rollbacks.push(undoOf(rollback, name, ctx, record));
+        }
+        return result(record);
+      },
+      sleep: (name) => result(read('sleep', name).record),
+      waitForEvent: (name) => result(read('waitForEvent', name).record),
+    });
+    await this.#call(m, step).catch(() => {});
+    return rollbacks;
+  }
+
   // Rolls back the steps that registered a rollback, then finishes as
   // `status`. Those are the steps this `run()` reached: after a crash, the
   // ones it reached again.
@@ -651,11 +715,7 @@ export class Engine extends DurableObject {
     for (const undo of this.#rollbacks.toReversed()) {
       const stepName = undo.name;
       this.#log('rollback_step_started', { stepName });
-      const cfg = {
-        ...DEFAULTS,
-        ...undo.config,
-        retries: { ...DEFAULTS.retries, ...undo.config?.retries },
-      };
+      const cfg = stepConfig(undo.config);
       for (let attempt = 1; ; attempt++) {
         if (this.#meta?.status !== 'rollingBack') return false;
         try {
@@ -700,6 +760,7 @@ export class Engine extends DurableObject {
         `Workflow instance with id "${id}" already exists`
       );
     }
+    const keep = this.#config.retention ?? {};
     this.#kv.put('meta', {
       id,
       params,
@@ -707,8 +768,10 @@ export class Engine extends DurableObject {
       status: 'queued',
       generation: crypto.randomUUID(),
       retention: {
-        success: ms(retention?.successRetention ?? RETENTION_MS),
-        error: ms(retention?.errorRetention ?? RETENTION_MS),
+        success: ms(
+          retention?.successRetention ?? keep.success ?? RETENTION_MS
+        ),
+        error: ms(retention?.errorRetention ?? keep.error ?? RETENTION_MS),
       },
     });
     this.#log('workflow_queued');
@@ -774,6 +837,10 @@ export class Engine extends DurableObject {
       );
     }
     if (options.rollback && m.status !== 'rollingBack') {
+      // The `run()` in memory, if any, may not have reached them all yet.
+      const rollbacks = await this.#replay(m);
+      if (!this.#live(m.generation)) return;
+      this.#rollbacks = rollbacks;
       const e = error('Terminated', 'Instance terminated during rollback');
       return this.#undo('terminated', {}, e);
     }
@@ -1054,7 +1121,9 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (env.TEST_CLOCK && url.pathname === '/clock') {
-      skew += Number(url.searchParams.get('advance'));
+      const advance = Number(url.searchParams.get('advance'));
+      if (!Number.isFinite(advance)) return new Response(null, { status: 400 });
+      skew += advance;
       return Response.json({ now: clock() });
     }
     return new Response('Not Found', { status: 404 });

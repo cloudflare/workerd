@@ -667,6 +667,56 @@ fn workflows_run_on_the_workflows_worker() {
 }
 
 #[test]
+fn workflow_settings_reach_the_engine() {
+    let project = |extra: &str| {
+        load_project(&[
+            (
+                "wrangler.jsonc",
+                &format!(
+                    r#"{{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                         "no_bundle": true, "workflows": [{{ "binding": "R", "name": "reports",
+                         "class_name": "Report", {extra} }}] }}"#
+                ),
+            ),
+            ("index.js", ""),
+        ])
+    };
+    let config = project(
+        r#""script_name": "app", "limits": { "steps": 50 }, "concurrency": { "limit": 2 },
+           "default_retention": { "success_retention": "1 day" }, "jurisdiction": "eu""#,
+    );
+    let message = read(config.unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let service::Which::Worker(w) = services.get(1).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let binding = w.unwrap().get_bindings().unwrap().get(1);
+    assert_eq!(binding.get_name().unwrap().to_str().unwrap(), "WORKFLOWS");
+    let worker::binding::Which::Json(json) = binding.which().unwrap() else {
+        panic!("WORKFLOWS is not JSON");
+    };
+    let json: serde_json::Value = serde_json::from_str(json.unwrap().to_str().unwrap()).unwrap();
+    let want = serde_json::json!({
+        "reports": { "steps": 50, "retention": { "success": "1 day", "error": null } }
+    });
+    assert_eq!(json, want);
+    for (extra, field) in [
+        (r#""schedules": "0 * * * *""#, "schedules"),
+        (r#""script_name": "other""#, "script_name"),
+    ] {
+        let error = project(extra).err().unwrap();
+        assert!(
+            error.contains(&format!("{field} is not supported")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn unbundled_typescript_main_is_an_error() {
     let error = load_project(&[
         (
