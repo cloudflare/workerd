@@ -10,7 +10,7 @@ namespace workerd::api {
 
 namespace {
 
-constexpr size_t RELAY_BUFFER_SIZE = 16384;
+constexpr size_t RELAY_BUFFER_SIZE = 65536;
 
 // One direction of a relay. Its writes can be held back while the stream it writes to changes
 // underneath it.
