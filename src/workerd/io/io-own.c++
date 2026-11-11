@@ -3,7 +3,6 @@
 #include "io-context.h"
 
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 namespace workerd {
@@ -136,8 +135,7 @@ DeleteQueuePtr::~DeleteQueuePtr() noexcept(false) {
       }
       *lock = kj::none;
     }
-    if (droppedActions > 0 &&
-        util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+    if (droppedActions > 0) {
       LOG_PERIODICALLY(WARNING,
           "NOSENTRY IoContext dropped queued cross-context actions when destroyed", droppedActions);
     }

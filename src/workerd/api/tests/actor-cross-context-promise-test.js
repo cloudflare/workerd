@@ -5,9 +5,8 @@
 // Tests for promises that an actor event creates and another IoContext settles later. The
 // settlement runs back in the actor's IoContext, which outlives each event's IncomingRequest, and
 // needs one: the continuations use timers and storage. Each case settles while the actor has a
-// request, so it behaves the same with or without the DEFER_CROSS_CONTEXT_ACTIONS autogate, which
-// the @all-autogates variant enables. Settlements on an idle actor are tested in io-own-test.c++,
-// where a test can make an actor idle at a known point.
+// request. Settlements on an idle actor are tested in io-own-test.c++, where a test can make an
+// actor idle at a known point.
 
 import { DurableObject } from 'cloudflare:workers';
 import { deepStrictEqual, strictEqual } from 'node:assert';
