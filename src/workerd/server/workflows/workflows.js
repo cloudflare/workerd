@@ -100,6 +100,16 @@ const FINAL = new Set([
   'workflow_terminated',
 ]);
 const START = new Set(['workflow_queued', 'workflow_started']);
+const EVENT_TYPES = new Set([
+  ...Object.values(EVENTS),
+  ...['workflow_started', 'rollback_completed', 'rollback_errored'],
+  ...['step', 'attempt', 'rollback_step', 'rollback_attempt'].flatMap((t) =>
+    ['started', 'completed', 'errored'].map((e) => `${t}_${e}`)
+  ),
+  ...['sleep_started', 'sleep_completed'],
+  ...['wait_started', 'wait_completed', 'wait_timed_out'],
+]);
+const BACKOFF = new Set(['constant', 'linear', 'exponential']);
 const TIMEOUT = Symbol('timeout');
 
 let skew = 0;
@@ -150,6 +160,29 @@ function duration(d) {
   } catch {
     return NaN;
   }
+}
+
+const span = (d) =>
+  (typeof d === 'number' && d >= 0) ||
+  (typeof d === 'string' && duration(d) >= 0);
+
+// Whether `c` is a step config: only these keys, with these values.
+function validConfig(c) {
+  if (c === undefined) return true;
+  if (typeof c !== 'object' || c === null) return false;
+  const { retries: r, timeout, sensitive, ...rest } = c;
+  if (Object.keys(rest).length > 0) return false;
+  if (sensitive !== undefined && sensitive !== 'output') return false;
+  if (timeout !== undefined && (!span(timeout) || timeout === 0)) return false;
+  if (r === undefined) return true;
+  const { limit, delay, backoff, ...other } = r;
+  return (
+    Object.keys(other).length === 0 &&
+    Number.isInteger(limit) &&
+    limit >= 0 &&
+    (typeof delay === 'function' || span(delay)) &&
+    (backoff === undefined || BACKOFF.has(backoff))
+  );
 }
 
 // Milliseconds: a number, or "<n> <unit>[s]".
@@ -486,11 +519,7 @@ export class Engine extends DurableObject {
     if (typeof callback !== 'function') {
       throw fatalError(`Step "${name}" requires a callback function`);
     }
-    const r = config?.retries;
-    if (
-      (r && (r.limit === undefined || r.delay === undefined)) ||
-      config?.timeout === 0
-    ) {
+    if (!validConfig(config)) {
       throw fatalError(
         `Step config for "${name}" is in a invalid format. See ` +
           'https://developers.cloudflare.com/workflows/build/' +
@@ -1068,6 +1097,52 @@ export class Engine extends DurableObject {
 }
 
 const body = (message) => workflowError('body', message);
+const LOCATIONS = [
+  'wnam',
+  'weur',
+  'enam',
+  'eeur',
+  'apac',
+  'apac-ne',
+  'apac-se',
+  'oc',
+  'sam',
+  'afr',
+  'me',
+];
+const positive = (d) =>
+  (Number.isInteger(d) && d > 0) || (typeof d === 'string' && duration(d) > 0);
+
+// Checks an entry of an object-form batch.
+function checkEntry(e) {
+  if (typeof e !== 'object' || e === null || Array.isArray(e)) {
+    const type = Array.isArray(e) ? 'array' : e === null ? 'null' : typeof e;
+    throw body(`Invalid input: expected object, received ${type}`);
+  }
+  const { successRetention: ok, errorRetention: failed } = e.retention ?? {};
+  if ([ok, failed].some((d) => d !== undefined && !positive(d))) {
+    throw body(
+      "Duration must be a number or a string in format '{{number}} " +
+        "{{unit}}' where unit is second(s), minute(s), etc."
+    );
+  }
+  if (e.locationHint !== undefined && !LOCATIONS.includes(e.locationHint)) {
+    const names = LOCATIONS.map((l) => `"${l}"`).join('|');
+    throw body(`Invalid option: expected one of ${names}`);
+  }
+}
+
+// Whether `o` are `subscribe()` options.
+function validSubscription(o) {
+  if (typeof o !== 'object' || o === null || Array.isArray(o)) return false;
+  const { cursor, filter, ...rest } = o;
+  return (
+    Object.keys(rest).length === 0 &&
+    (cursor === undefined || (Number.isSafeInteger(cursor) && cursor >= 0)) &&
+    (filter === undefined ||
+      (Array.isArray(filter) && filter.every((t) => EVENT_TYPES.has(t))))
+  );
+}
 const invalidId = () =>
   workflowError('instance.invalid_id', 'Instance ID is invalid');
 const valid = (id) => typeof id === 'string' && id.length <= 100 && ID.test(id);
@@ -1112,7 +1187,9 @@ export class WorkflowBinding extends WorkerEntrypoint {
           'WorkflowError: batchCreate only supports 100 instances at a time'
         );
       }
-      const { created } = await this.#createAll(options);
+      // As Miniflare does, this form ignores retention and location hints.
+      const entries = options.map(({ retention, locationHint, ...o }) => o);
+      const { created } = await this.#createAll(entries);
       return created;
     }
     let instances = options?.instances;
@@ -1124,12 +1201,14 @@ export class WorkflowBinding extends WorkerEntrypoint {
       if (count > MAX_BATCH) {
         throw body('batchCreate only supports 100 instances at a time');
       }
+      checkEntry({ retention });
       instances = Array.from({ length: count }, () => ({ params, retention }));
     } else if (!Array.isArray(instances)) {
       throw body('Provided argument is invalid');
     } else if (instances.length === 0 || instances.length > MAX_BATCH) {
       throw body('Batch size exceeds maximum allowed');
     }
+    for (const e of instances) checkEntry(e);
     return this.#createAll(instances, true);
   }
 
@@ -1139,9 +1218,16 @@ export class WorkflowBinding extends WorkerEntrypoint {
   async #createAll(instances, errors = false) {
     const out = { created: [], errors: [] };
     const seen = new Set();
+    const ids = instances.map((o) => o.id ?? crypto.randomUUID());
+    for (const id of ids) {
+      if (!valid(id) || (errors && reserved(id))) {
+        throw errors
+          ? invalidId()
+          : error('WorkflowError', 'Workflow instance has invalid id');
+      }
+    }
     for (const [index, options] of instances.entries()) {
-      const id = options.id ?? crypto.randomUUID();
-      if (!valid(id) || (errors && reserved(id))) throw invalidId();
+      const id = ids[index];
       if (seen.has(id)) {
         out.errors.push({
           index,
@@ -1236,15 +1322,11 @@ export class WorkflowBinding extends WorkerEntrypoint {
   }
 
   async subscribe(id, options = {}) {
-    const { cursor, filter } = options;
-    if (
-      Object.keys(options).some((k) => k !== 'cursor' && k !== 'filter') ||
-      (cursor !== undefined && !(Number.isInteger(cursor) && cursor >= 0)) ||
-      (filter !== undefined && !Array.isArray(filter))
-    ) {
+    const instance = await this.#get(id);
+    if (!validSubscription(options)) {
       throw new Error('Invalid Workflow subscription options');
     }
-    return (await this.#get(id)).subscribe(options);
+    return instance.subscribe(options);
   }
 }
 

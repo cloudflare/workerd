@@ -59,6 +59,10 @@ export class Flow extends WorkflowEntrypoint {
           throw new Error('fail');
         });
       }
+      case 'bad-config': {
+        const retries = { limit: 1, delay: '1 second', trains: true };
+        return step.do('x', { retries }, async () => 1);
+      }
       case 'slow': {
         const config = { retries: { limit: 0, delay: 0 }, timeout: '1 minute' };
         return step.do('slow', config, () => signal(`${id}/slow`).promise);
@@ -462,7 +466,7 @@ export let api = {
     const retention = { successRetention: 'soon' };
     await assert.rejects(
       env.FLOW.createBatch({ instances: [{ id: 'b2', retention }] }),
-      /Invalid duration/
+      /Duration must be a number/
     );
     const deleted = await env.FLOW.deleteBatch(['b1', 'nope']);
     assert.deepEqual(deleted.deleted, [{ id: 'b1' }]);
@@ -471,6 +475,41 @@ export let api = {
       [['nope', 10400]]
     );
     await assert.rejects(env.FLOW.get('b1'), /instance.not_found/);
+    // Every entry of a batch is checked before any is created.
+    const invalid = [
+      [{ instances: [[]] }, /expected object, received array/],
+      [{ instances: [{ locationHint: 'mars' }] }, /expected one of "wnam"/],
+      ...[-1, 0, 0.5, '0 days', '-1 day'].map((successRetention) => [
+        { instances: [{ retention: { successRetention } }] },
+        /Duration must be a number/,
+      ]),
+    ];
+    for (const [options, message] of invalid) {
+      await assert.rejects(env.FLOW.createBatch(options), message);
+    }
+    await assert.rejects(
+      env.FLOW.createBatch([{ id: 'good' }, { id: '#invalid!' }]),
+      /Workflow instance has invalid id/
+    );
+    await assert.rejects(env.FLOW.get('good'), /instance.not_found/);
+    // The array form ignores retention.
+    const loose = { id: 'loose', params: { kind: 'steps' } };
+    const soon = { successRetention: 'soon' };
+    await env.FLOW.createBatch([{ ...loose, retention: soon }]);
+
+    const config = await create(env, 'bad-config', 'bad-config');
+    const { error } = await until(config, 'workflow_errored');
+    assert.match(error.message, /Step config for "x" is in a invalid format/);
+
+    for (const options of [null, [], { filter: ['internal'] }]) {
+      await assert.rejects(
+        config.subscribe(options),
+        /Invalid Workflow subscription options/
+      );
+    }
+    const big = { cursor: Number.MAX_SAFE_INTEGER + 1 };
+    await assert.rejects(config.subscribe(big), /subscription options/);
+
     const clock = 'http://w/clock?advance=soon';
     const r = await env.WORKFLOWS.fetch(clock, { method: 'POST' });
     assert.strictEqual(r.status, 400);
