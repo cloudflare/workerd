@@ -390,10 +390,10 @@ kj::Promise<void> ReplEnvironment::drain() {
   // A server that fails to close does not keep the others open or the request undrained.
   kj::Maybe<kj::Exception> failure;
   for (auto& server: servers) {
-    try {
+    KJ_TRY {
       co_await server->close();
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
+    }
+    KJ_CATCH(exception) {
       if (failure == kj::none) {
         failure = kj::mv(exception);
       }
