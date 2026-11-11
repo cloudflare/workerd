@@ -9,6 +9,8 @@ import assert from 'node:assert';
 const ran = [];
 const ranBy = (id) => ran.filter((r) => r.startsWith(`${id}/`));
 
+const branched = new Set();
+
 // Promises a test and a Flow share, by name.
 const signals = new Map();
 function signal(name) {
@@ -97,6 +99,14 @@ export class Flow extends WorkflowEntrypoint {
           throw new NonRetryableError('b failed');
         });
       }
+      case 'branchy': {
+        // Only the first run registers the rollback.
+        const first = !branched.has(id);
+        branched.add(id);
+        const rollback = async () => ran.push(`${id}/undo`);
+        await step.do('setup', async () => 1, first ? { rollback } : {});
+        return step.sleep('nap', '1 hour');
+      }
       case 'undo': {
         const rollback = async ({ output }) => ran.push(`${id}/undo ${output}`);
         await step.do('a', async () => 'A', { rollback });
@@ -104,6 +114,19 @@ export class Flow extends WorkflowEntrypoint {
         return once('b');
       }
     }
+  }
+}
+
+// The finished instance's history: `[type, stepName, ...]` of the events of
+// `types`.
+async function history(instance, types) {
+  const subscription = await instance.subscribe({ filter: types });
+  const events = [];
+  for (;;) {
+    const { done, value } = await subscription.next();
+    if (done) return events;
+    const { type, stepName, attempt, error } = value;
+    events.push([type, stepName, attempt ?? error?.name].filter(Boolean));
   }
 }
 
@@ -312,6 +335,31 @@ export let failures = {
     await until(rollback, 'workflow_errored');
     await until(rollback, 'rollback_completed');
     assert.deepEqual(ranBy('rollback'), ['rollback/undo A']);
+    const rollbacks = [
+      'rollback_step_started',
+      'rollback_attempt_started',
+      'rollback_attempt_completed',
+      'rollback_step_completed',
+      'rollback_completed',
+    ];
+    assert.deepEqual(await history(rollback, rollbacks), [
+      ['rollback_step_started', 'a-1'],
+      ['rollback_attempt_started', 'a-1', 1],
+      ['rollback_attempt_completed', 'a-1', 1],
+      ['rollback_step_completed', 'a-1'],
+      ['rollback_completed'],
+    ]);
+
+    // A rollback that replay does not register again is missing.
+    const branchy = await create(env, 'branchy', 'branchy');
+    await until(branchy, 'workflow_waiting');
+    await branchy.terminate({ rollback: true });
+    const errored = ['rollback_step_errored', 'rollback_errored'];
+    assert.deepEqual(await history(branchy, errored), [
+      ['rollback_step_errored', 'setup-1', 'RollbackMissing'],
+      ['rollback_errored'],
+    ]);
+    assert.deepEqual(ranBy('branchy'), []);
 
     // Terminated with its rollbacks, the sleep never ends.
     const undo = await create(env, 'undo', 'undo');

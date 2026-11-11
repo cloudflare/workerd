@@ -492,6 +492,7 @@ export class Engine extends DurableObject {
     const stepName = `${name}-${count}`;
     if (record.attempts === undefined) {
       record.attempts = 0;
+      if (rollback) record.hasRollback = true;
       this.#kv.put(key, record);
       const logged = { ...shown, retries: { ...shown.retries } };
       if (dynamic) logged.retries.delay = '[dynamic]';
@@ -685,16 +686,24 @@ export class Engine extends DurableObject {
     }
   }
 
-  // The rollbacks of the steps the instance reached: `run()` again, with
-  // steps that only read their records, up to the first it did not reach.
+  // The step records, in the order the steps were first reached.
+  #history() {
+    const records = [...this.#kv.list({ prefix: 's:' })];
+    return records.sort((a, b) => a[1].ord - b[1].ord);
+  }
+
+  // The rollbacks of the steps the instance reached that registered one:
+  // `run()` again, with steps that only read their records, up to the first
+  // it did not reach. One that replay did not register again is missing.
   async #replay(m) {
     const counts = new Map();
-    const rollbacks = [];
+    const rollbacks = new Map();
     const read = (type, name) => {
       const k = `${type}:${name}`;
       const count = (counts.get(k) ?? 0) + 1;
       counts.set(k, count);
-      return { count, record: this.#kv.get(`s:${type}:${count}:${name}`) };
+      const key = `s:${type}:${count}:${name}`;
+      return { key, count, record: this.#kv.get(key) };
     };
     const end = () => error('WorkflowReplayEnd', 'Replayed every step reached');
     const result = (record) => {
@@ -705,7 +714,7 @@ export class Engine extends DurableObject {
     const step = new Step({
       do: (name, config, callback, rollback) => {
         if (typeof config === 'function') [config, rollback] = [{}, callback];
-        const { count, record } = read('do', name);
+        const { key, count, record } = read('do', name);
         if (record?.attempts === undefined) throw end();
         if (rollback) {
           const ctx = {
@@ -713,7 +722,7 @@ export class Engine extends DurableObject {
             attempt: record.attempts || 1,
             config: shownConfig(stepConfig(config)),
           };
-          rollbacks.push(undoOf(rollback, name, ctx, record));
+          rollbacks.set(key, undoOf(rollback, name, ctx, record));
         }
         return result(record);
       },
@@ -721,7 +730,12 @@ export class Engine extends DurableObject {
       waitForEvent: (name) => result(read('waitForEvent', name).record),
     });
     await this.#call(m, step).catch(() => {});
-    return rollbacks;
+    return this.#history()
+      .filter(([, r]) => r.hasRollback)
+      .map(([key, { name, count }]) => {
+        const missing = { name, ctx: { step: { name, count } }, missing: true };
+        return rollbacks.get(key) ?? missing;
+      });
   }
 
   // Rolls back the steps that registered a rollback, then finishes as
@@ -741,28 +755,41 @@ export class Engine extends DurableObject {
   // Runs the rollbacks newest first: whether all of them succeeded.
   async #rollback(failure) {
     for (const undo of this.#rollbacks.toReversed()) {
-      const stepName = undo.name;
-      this.#log('rollback_step_started', { stepName });
+      const { name, count } = undo.ctx.step;
+      const stepName = `${name}-${count}`;
       const cfg = stepConfig(undo.config);
+      this.#log('rollback_step_started', {
+        stepName,
+        config: shownConfig(cfg),
+      });
+      if (undo.missing) {
+        const error = {
+          name: 'RollbackMissing',
+          message: 'Rollback function not available in registry',
+        };
+        this.#log('rollback_step_errored', { stepName, error });
+        return false;
+      }
       for (let attempt = 1; ; attempt++) {
         if (this.#meta?.status !== 'rollingBack') return false;
+        this.#log('rollback_attempt_started', { stepName, attempt });
         try {
-          await undo.fn({
-            ctx: undo.ctx,
-            error: failure,
-            output: undo.output,
-            stepName,
-          });
+          const { ctx, output } = undo;
+          await undo.fn({ ctx, error: failure, output, stepName });
+          this.#log('rollback_attempt_completed', { stepName, attempt });
           this.#log('rollback_step_completed', { stepName });
           break;
         } catch (e) {
+          const error = plain(e);
           if (nonRetryable(e) || attempt > cfg.retries.limit) {
-            this.#log('rollback_step_errored', { stepName, error: plain(e) });
+            this.#log('rollback_attempt_errored', { stepName, attempt, error });
+            this.#log('rollback_step_errored', { stepName, error });
             return false;
           }
-          await this.#wait(
-            clock() + (await this.#delay(cfg, e, undo.ctx, attempt))
-          );
+          const retryDelayMs = await this.#delay(cfg, e, undo.ctx, attempt);
+          const fields = { stepName, attempt, retryDelayMs, error };
+          this.#log('rollback_attempt_errored', fields);
+          await this.#wait(clock() + retryDelayMs);
         }
       }
     }
@@ -884,8 +911,7 @@ export class Engine extends DurableObject {
   restart({ from } = {}) {
     const m = this.#meta;
     if (!m) throw notFound();
-    const steps = [...this.#kv.list({ prefix: 's:' })];
-    steps.sort((a, b) => a[1].ord - b[1].ord);
+    const steps = this.#history();
     let keep = 0;
     if (from) {
       const type = from.type ?? 'do';
