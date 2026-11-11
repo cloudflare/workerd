@@ -248,7 +248,8 @@ jobs:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
-        if: always() && runner.os != 'Windows'
+        # Bazel info can wait on a command interrupted by cancellation.
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         shell: bash
         run: |
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
@@ -261,7 +262,7 @@ jobs:
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
       - name: Report disk usage (in MB)
-        if: always() && runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           function Get-SizeMB($path) {
@@ -313,7 +314,7 @@ jobs:
           fi
 
       - name: Bazel shutdown
-        if: always()
+        if: ${{ !cancelled() }}
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
       - name: Drop unused bazelflare cache entries
