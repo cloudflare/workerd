@@ -3,12 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! A bucket's HTTP client, the calls the cluster makes (`Store`), in the
-//! dialect of the bucket's API (`Dialect`): S3's (`s3.rs`). Requests use
-//! path-style URLs, `/<bucket>/<key>`. The dialect authorizes each request
-//! and names the headers of versions, preconditions and metadata; the client
-//! sends the requests, retries those the bucket refused under load, bounds
-//! how long each takes, reads `ListObjectsV2` listings and measures this
-//! node's clock against the bucket's.
+//! dialect of the bucket's API (`Dialect`): S3's (`s3.rs`) or Cloud
+//! Storage's XML API (`gcs.rs`). Requests use path-style URLs,
+//! `/<bucket>/<key>`. The dialect authorizes each request and names the
+//! headers of versions, preconditions and metadata; the client sends the
+//! requests, retries those the bucket refused under load, bounds how long
+//! each takes, reads `ListObjectsV2` listings and measures this node's
+//! clock against the bucket's.
 
 use std::cell::Cell;
 use std::fmt::Write;
@@ -39,11 +40,19 @@ pub trait Dialect {
     /// when the answer has none.
     fn version(response: &HttpResponse) -> &str;
 
-    /// The header that makes a write conditional on `guard`.
-    fn precondition(guard: &Guard) -> (String, String);
+    /// The header that makes a write conditional on `guard`; an error for a
+    /// version this store cannot have answered.
+    fn precondition(guard: &Guard) -> std::result::Result<(String, String), String>;
 
-    /// Adds the headers that authorize `request`.
-    fn authorize(&self, request: &mut Request<'_>) -> impl Future<Output = Result<()>>;
+    /// Adds the headers that authorize `request`; answers the credential
+    /// they carry, if `refused` is to hear of it.
+    fn authorize(&self, request: &mut Request<'_>) -> impl Future<Output = Result<Option<String>>>;
+
+    /// Drops `credential`, which the bucket refused (401). Answers whether
+    /// to send the request again, with another.
+    fn refused(&self, _credential: &str) -> bool {
+        false
+    }
 }
 
 /// A request, as its dialect authorizes it.
@@ -72,7 +81,7 @@ pub struct Client<D> {
 }
 
 impl<D> Client<D> {
-    pub(crate) fn with_dialect(dialect: D, http: Http, endpoint: &str, bucket: &str) -> Self {
+    pub fn with_dialect(dialect: D, http: Http, endpoint: &str, bucket: &str) -> Self {
         Self {
             dialect,
             http,
@@ -80,6 +89,17 @@ impl<D> Client<D> {
             bucket: bucket.to_owned(),
             skew_ms: Cell::new(None),
         }
+    }
+}
+
+#[cfg(test)]
+impl<D> Client<D> {
+    pub const fn dialect(&self) -> &D {
+        &self.dialect
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
     }
 }
 
@@ -109,7 +129,11 @@ impl<D: Dialect> Store for Client<D> {
             .iter()
             .map(|(name, value)| (format!("{}{name}", D::METADATA), value.clone()))
             .collect();
-        headers.extend(guard.as_ref().map(D::precondition));
+        if let Some(guard) = &guard {
+            let header =
+                D::precondition(guard).map_err(|e| Error::Http(format!("PUT {key}: {e}")))?;
+            headers.push(header);
+        }
         let response = self.send("PUT", key, &[], headers, body, None).await?;
         if !written(key, &response, guard.is_some())? {
             return Ok(None);
@@ -175,7 +199,9 @@ impl<D: Dialect> Client<D> {
     /// an owner record is written twice in a row when an object reclaims:
     /// under a 10,000-object kill, four reclaims failed that way and dropped
     /// their objects. A refused request did nothing, conditional or not, so
-    /// it is retried after a pause.
+    /// it is retried after a pause. So is a request refused as
+    /// unauthenticated, once, when the dialect has another credential for
+    /// it.
     async fn send(
         &self,
         method: &str,
@@ -202,6 +228,7 @@ impl<D: Dialect> Client<D> {
             format!("{}{path}?{query}", self.endpoint)
         };
         let mut pause = Duration::from_millis(250);
+        let mut reauthorized = false;
         loop {
             let mut request = Request {
                 method,
@@ -210,10 +237,19 @@ impl<D: Dialect> Client<D> {
                 query: &query,
                 headers: headers.clone(),
             };
-            self.dialect.authorize(&mut request).await?;
+            let credential = self.dialect.authorize(&mut request).await?;
             let response = self
                 .send_once(method, key, &url, request.headers, body.clone(), to)
                 .await?;
+            // A refused credential is dropped even when the request is not
+            // sent again, so that no later request carries it.
+            if response.status == 401
+                && credential.is_some_and(|c| self.dialect.refused(&c))
+                && !reauthorized
+            {
+                reauthorized = true;
+                continue;
+            }
             if !matches!(response.status, 429 | 503) || pause > Duration::from_secs(2) {
                 return Ok(response);
             }
@@ -311,7 +347,7 @@ fn version<D: Dialect>(call: &str, key: &str, response: &HttpResponse) -> Result
 
 /// `SigV4` URI encoding: everything but unreserved characters, and `/` too
 /// unless the value is a path.
-fn encode(value: &str, slash: bool) -> String {
+pub fn encode(value: &str, slash: bool) -> String {
     value.bytes().fold(String::new(), |mut out, byte| {
         if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) || (byte == b'/' && !slash) {
             out.push(char::from(byte));

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http_body::Frame;
@@ -35,11 +36,24 @@ impl Request {
 /// What the server does with a request.
 #[derive(Clone, Debug)]
 pub enum Answer {
+    /// Closes the connection without answering.
+    Close,
+    /// The head of a 200 answer, then a byte of its body every 20 ms.
+    Dribble,
     Reply {
         status: u16,
         headers: Vec<(&'static str, String)>,
         body: String,
     },
+}
+
+/// `status` with `body` and no other headers.
+pub fn reply(status: u16, body: &str) -> Answer {
+    Answer::Reply {
+        status,
+        headers: Vec::new(),
+        body: body.to_owned(),
+    }
 }
 
 type Handler = dyn Fn(&Request, usize) -> Answer + Send + Sync;
@@ -66,7 +80,7 @@ impl Server {
                 let (stream, _) = listener.accept().await.unwrap();
                 let (handler, log) = (handler.clone(), log.clone());
                 let service = hyper::service::service_fn(move |request| {
-                    std::future::ready(Ok::<_, Infallible>(answer(request, &*handler, &log)))
+                    std::future::ready(answer(request, &*handler, &log))
                 });
                 let connection = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service);
@@ -80,13 +94,17 @@ impl Server {
     pub fn take(&self) -> Vec<Request> {
         std::mem::take(&mut self.received.lock().unwrap())
     }
+
+    pub fn requests(&self) -> usize {
+        self.received.lock().unwrap().len()
+    }
 }
 
 fn answer(
     request: http::Request<hyper::body::Incoming>,
     handler: &Handler,
     log: &Mutex<Vec<Request>>,
-) -> http::Response<Body> {
+) -> Result<http::Response<Body>, &'static str> {
     // The clients' requests here have no body.
     let (head, _) = request.into_parts();
     let request = Request {
@@ -100,6 +118,14 @@ fn answer(
         log.len()
     };
     match handler(&request, n) {
+        // hyper closes the connection on a service's error.
+        Answer::Close => Err("close"),
+        Answer::Dribble => Ok(http::Response::builder()
+            .header("content-length", "100000")
+            .body(Body::Dribble(tokio::time::interval(Duration::from_millis(
+                20,
+            ))))
+            .unwrap()),
         Answer::Reply {
             status,
             headers,
@@ -111,13 +137,14 @@ fn answer(
             }
             let date = httpdate::fmt_http_date(std::time::SystemTime::now());
             let body = Body::Full(Some(Bytes::from(body)));
-            response.header("date", date).body(body).unwrap()
+            Ok(response.header("date", date).body(body).unwrap())
         }
     }
 }
 
 enum Body {
     Full(Option<Bytes>),
+    Dribble(tokio::time::Interval),
 }
 
 impl http_body::Body for Body {
@@ -126,10 +153,13 @@ impl http_body::Body for Body {
 
     fn poll_frame(
         self: Pin<&mut Self>,
-        _: &mut Context<'_>,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
         match self.get_mut() {
             Self::Full(bytes) => Poll::Ready(bytes.take().map(|b| Ok(Frame::data(b)))),
+            Self::Dribble(interval) => interval
+                .poll_tick(cx)
+                .map(|_| Some(Ok(Frame::data(Bytes::from_static(b" "))))),
         }
     }
 }

@@ -36,10 +36,12 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-/// A bucket response: only the parts the S3 client reads.
+/// A bucket response: only the parts the bucket clients read.
 pub struct HttpResponse {
     pub status: u16,
     pub etag: String,
+    /// The `x-goog-generation` header: an object's version on Cloud Storage.
+    pub generation: String,
     /// The `Date` header, the bucket's clock.
     pub date: String,
     /// Empty when a 2xx body went to a file.
@@ -62,6 +64,8 @@ pub const MAX_BODY: usize = 16 << 20;
 /// Error text for a response body larger than [`MAX_BODY`].
 pub const TOO_LARGE: &str = "response body too large";
 
+/// Clones share the connection pool.
+#[derive(Clone)]
 pub struct Http {
     client: legacy::Client<Connector, Body>,
 }
@@ -104,6 +108,7 @@ impl Http {
             value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
         };
         let (status, etag, date) = (response.status().as_u16(), header("etag"), header("date"));
+        let generation = header("x-goog-generation");
         let mut incoming = response.into_body();
         let to = to
             .filter(|_| (200..300).contains(&status))
@@ -149,6 +154,7 @@ impl Http {
         Ok(HttpResponse {
             status,
             etag,
+            generation,
             date,
             body,
         })

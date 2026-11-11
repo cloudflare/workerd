@@ -12,6 +12,8 @@ use super::*;
 use crate::Bucket;
 use crate::fake_http::Answer;
 use crate::fake_http::Server;
+use crate::gcs::Gcs;
+use crate::gcs::Google;
 use crate::s3::S3;
 use crate::s3::SigV4;
 
@@ -98,6 +100,7 @@ fn error_codes_are_capped() {
     let response = HttpResponse {
         status: 500,
         etag: String::new(),
+        generation: String::new(),
         date: String::new(),
         body: long.into_bytes(),
     };
@@ -262,5 +265,18 @@ fn an_s3_bucket_end_to_end() {
         let bucket = Bucket::new(s3, &prefix);
         let wire = (("etag", "\"e\""), "x-amz-meta-", true);
         end_to_end::<SigV4>(bucket, &server, &queue, wire).await;
+    });
+}
+
+#[test]
+fn an_anonymous_cloud_storage_emulator_end_to_end() {
+    runtime().block_on(async {
+        let (server, queue) = fake().await;
+        let host = server.host.clone();
+        let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
+        let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env).unwrap();
+        let bucket = Bucket::new(gcs, &prefix);
+        let wire = (("x-goog-generation", "17"), "x-goog-meta-", false);
+        end_to_end::<Google>(bucket, &server, &queue, wire).await;
     });
 }

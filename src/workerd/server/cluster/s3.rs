@@ -137,14 +137,14 @@ impl Dialect for SigV4 {
         &response.etag
     }
 
-    fn precondition(guard: &Guard) -> (String, String) {
-        match guard {
+    fn precondition(guard: &Guard) -> std::result::Result<(String, String), String> {
+        Ok(match guard {
             Guard::Absent => ("if-none-match".into(), "*".into()),
             Guard::Match(Version(etag)) => ("if-match".into(), etag.clone()),
-        }
+        })
     }
 
-    async fn authorize(&self, request: &mut Request<'_>) -> Result<()> {
+    async fn authorize(&self, request: &mut Request<'_>) -> Result<Option<String>> {
         let Request {
             method,
             host,
@@ -200,7 +200,7 @@ impl Dialect for SigV4 {
                 credentials.key_id
             ),
         ));
-        Ok(())
+        Ok(None)
     }
 }
 

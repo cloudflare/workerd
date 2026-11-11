@@ -1,11 +1,13 @@
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
-# Durable Objects whose shared state is an S3-compatible bucket. Pure Rust:
-# the server (//src/workerd/server/server) drives it.
+# Durable Objects whose shared state is a bucket, S3-compatible or Cloud
+# Storage. Pure Rust: the server (//src/workerd/server/server) drives it.
 wd_rust_crate(
     name = "cluster",
     proc_macro_deps = ["@crates_vendor//:async-trait"],
+    # A throwaway service account key, for the Cloud Storage client's tests.
+    test_compile_data = ["google_auth-test.pem"],
     # The capture's tests drive a real SQLite; the bucket client's tests
     # talk to a hyper server.
     test_deps = [

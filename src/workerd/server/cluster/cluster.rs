@@ -28,6 +28,7 @@ use crate::Registry;
 use crate::Result;
 use crate::alarms::Adopted;
 use crate::alarms::Index;
+use crate::gcs::Gcs;
 use crate::hmac_sha256;
 use crate::namespace_hash;
 use crate::owner::Layout;
@@ -45,9 +46,9 @@ const FRESH_ATTEMPTS: usize = 3;
 const ORPHANS_EVERY_MS: u64 = 60 * 60 * 1000;
 
 pub struct Setup {
-    /// `s3://<bucket>/<prefix>`.
+    /// `s3://<bucket>/<prefix>` or `gs://<bucket>/<prefix>`.
     pub url: String,
-    /// `name=value` bucket options (see `S3::new`).
+    /// `name=value` bucket options (see `S3::new` and `Gcs::new`).
     pub options: Vec<String>,
     /// This instance's identity, fresh per process.
     pub node: String,
@@ -483,15 +484,26 @@ const TIER_INTERVAL: Duration = Duration::from_secs(2);
 /// How often a release checks whether an object's eviction ended.
 const BUSY_POLL: Duration = Duration::from_millis(10);
 
-/// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
-/// under the layout's version: what every key of the layout is relative to.
-/// `options` are `name=value` (see `S3::new`).
+/// The cluster's part of the bucket `url` names, under the layout's version.
+///
+/// `url` is `s3://<bucket>/<prefix>` (`s3.rs`) or `gs://<bucket>/<prefix>`
+/// (`gcs.rs`); every key of the layout is relative to what this answers.
+/// `options` are `name=value` (see `S3::new` and `Gcs::new`).
 pub fn open_bucket(url: &str, options: &[String]) -> Result<Bucket> {
     let options: Vec<_> = options
         .iter()
         .filter_map(|option| option.split_once('='))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
         .collect();
+    if url.starts_with("gs://") {
+        let (gcs, prefix) = Gcs::new(url, &options)?;
+        return Ok(Bucket::new(gcs, &format!("{prefix}/{FORMAT}")));
+    }
+    if !url.starts_with("s3://") {
+        return Err(Error::Config(format!(
+            "{url}: expected s3://<bucket>/<prefix> or gs://<bucket>/<prefix>"
+        )));
+    }
     let (s3, prefix) = S3::new(url, &options)?;
     Ok(Bucket::new(s3, &format!("{prefix}/{FORMAT}")))
 }
@@ -533,7 +545,9 @@ pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Resu
     bucket.delete(key).await?;
     if again.is_some() || stale.is_some() {
         return Err(Error::Config(
-            "the bucket ignores conditional writes (If-None-Match, If-Match)".into(),
+            "the bucket ignores conditional writes (If-None-Match and If-Match on S3, \
+             x-goog-if-generation-match on Cloud Storage)"
+                .into(),
         ));
     }
     // A store that compares versions as it should, but answers ones that

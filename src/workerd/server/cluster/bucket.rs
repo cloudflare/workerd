@@ -9,7 +9,8 @@ use crate::Result;
 pub use crate::http::Payload;
 
 /// The identity of one stored version of an object: what a conditional
-/// write names to replace exactly that version. An S3 `ETag`.
+/// write names to replace exactly that version: an S3 `ETag`, a Cloud
+/// Storage generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version(pub(crate) String);
 
@@ -26,7 +27,8 @@ pub struct Entry {
     pub key: String,
 }
 
-/// An object store: S3's semantics for the calls the cluster makes.
+/// An object store: the calls the cluster makes, with the semantics S3 and
+/// Cloud Storage share.
 #[async_trait::async_trait(?Send)]
 pub trait Store {
     /// The object and its version; with `to`, the body goes to that file
@@ -119,7 +121,7 @@ impl Bucket {
         self.store.put(&self.key(key), body, Some(guard), &[]).await
     }
 
-    /// Write `body` unconditionally, with `x-amz-meta-*` metadata.
+    /// Write `body` unconditionally, with user metadata.
     pub async fn put(&self, key: &str, body: Vec<u8>, metadata: &[(&str, String)]) -> Result<()> {
         let key = self.key(key);
         let body = Payload::Bytes(body.into());
@@ -132,7 +134,7 @@ impl Bucket {
         Ok(got.is_some())
     }
 
-    /// Writes the file `from` unconditionally, with `x-amz-meta-*` metadata.
+    /// Writes the file `from` unconditionally, with user metadata.
     pub async fn put_file(
         &self,
         key: &str,
