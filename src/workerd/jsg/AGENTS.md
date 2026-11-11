@@ -161,6 +161,16 @@ These rules MUST be followed when writing or modifying JSG code:
     `jsg::Ref` asserts instead). The `jsg-shared-visit` clang-tidy check flags such
     visits; a deliberate one carries `// NOLINT(jsg-shared-visit)` with the reason.
 
+15. **A `Wrappable` bound to an isolate MUST be destroyed under that isolate's lock.**
+    It is bound when a wrapper is attached, or when a bound parent first visits a
+    `Ref<T>` to it (`visitRef`). Until it is destroyed or isolate teardown unbinds it,
+    it stays in one of its `HeapTracer`'s lists and is wrapped only in that isolate;
+    since teardown unbinds it, it may outlive the isolate. `Ref<T>` defers its
+    destruction to the lock (`maybeDeferDestruction()`); a raw `kj::Own` to a
+    `Wrappable` does not. Breaking either rule would corrupt the `HeapTracer`'s lists,
+    so destroying a bound Wrappable off the lock aborts, and wrapping it in another
+    isolate throws.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
