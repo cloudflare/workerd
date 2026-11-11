@@ -91,6 +91,9 @@ pub enum Error {
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),
+    /// A bucket request failed to connect, so it did nothing.
+    #[error("bucket: {0}")]
+    NotSent(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
     /// Another writer kept winning the conditional write.
