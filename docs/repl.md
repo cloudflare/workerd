@@ -88,9 +88,11 @@ what that function's last statement evaluates to, once it settles. The event loo
 while the REPL waits, so timers, `fetch()` and the loaded servers all make progress.
 
 A declaration inside an async function would be local to it. So in an input that awaits at top
-level, a `const`, `let` or `var` declaration of a single name becomes an assignment to a global,
-which later inputs can see. A destructuring declaration does not: assign instead, as in
-`({ a } = await f())`.
+level, a `const`, `let` or `var` declaration at the input's top level (not in a block) that gives
+each of its names a value, such as `const x = await f()`, becomes an assignment to a global, which
+later inputs can see. Other declarations stay local to the input: one with a destructuring pattern
+(assign instead, as in `({ a } = await f())`), one with a name it gives no value, such as
+`let x;`, one in a block, and a function or class declaration.
 
 An input that doesn't await at top level runs as a script. A promise it produces prints as a
 promise; `await` it to see what it settles to.

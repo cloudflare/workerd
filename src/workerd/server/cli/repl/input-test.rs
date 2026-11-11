@@ -89,6 +89,16 @@ fn rewrites_top_level_declarations() {
         rewrite_declarations("let a=1; var b = 2"),
         "    a=1;     b = 2"
     );
+    // Every name has an initializer; the commas in brackets are not the declaration's.
+    assert_eq!(
+        rewrite_declarations("let a = f(1, 2), b = { c: 3, d }, e = (g, h) => g"),
+        "    a = f(1, 2), b = { c: 3, d }, e = (g, h) => g"
+    );
+    // A declaration ends at its `;`.
+    assert_eq!(
+        rewrite_declarations("let a = 1, b; const c = 2, d = 3"),
+        "let a = 1, b;       c = 2, d = 3"
+    );
 }
 
 #[test]
@@ -97,6 +107,9 @@ fn keeps_other_declarations() {
         "const { a } = await f()",
         "let [a] = await f()",
         "let x",
+        "let a = await f(), b",
+        "var a = 1, [b] = c",
+        "let a = await f()\nb, c",
         "if (y) { const x = await f() }",
         "f(() => { let x = 1 })",
         "x.let = 1",

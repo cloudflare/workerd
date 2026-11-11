@@ -80,6 +80,7 @@ impl Default for Scanner {
 }
 
 /// A token of code the scanner reports.
+#[derive(Clone, Copy)]
 enum Token {
     /// A word: its byte range in the piece scanned, and whether it is at the top level of the
     /// input and not a property name.
@@ -90,6 +91,8 @@ enum Token {
     },
     /// A `;` at the top level of the input, and its offset in the piece scanned.
     Semicolon(usize),
+    /// A `,` at the top level of the input, and its offset in the piece scanned.
+    Comma(usize),
 }
 
 impl Scanner {
@@ -136,8 +139,12 @@ impl Scanner {
                         i = end;
                         continue;
                     }
-                    if byte == b';' && self.open.is_empty() {
-                        on_token(Token::Semicolon(i));
+                    if self.open.is_empty() {
+                        match byte {
+                            b';' => on_token(Token::Semicolon(i)),
+                            b',' => on_token(Token::Comma(i)),
+                            _ => {}
+                        }
                     }
                     self.scan_code(byte, next, &mut i);
                 }
@@ -310,26 +317,38 @@ fn returning_last_statement(source: &str) -> String {
     }
 }
 
-/// Turns the top-level `const`, `let` and `var` declarations of single names in `source` into
-/// assignments, by blanking the keyword: `const x = await f()` becomes `      x = await f()`.
-/// A declaration in the async function that lets an input await would end with the function;
-/// the assignment makes a global that later inputs see, as Node's REPL does. Destructuring
-/// declarations, declarations without an initializer and declarations inside brackets are kept.
+/// Turns the top-level `const`, `let` and `var` declarations in `source` that give each of their
+/// names an initializer into assignments, by blanking the keyword: `const x = await f()` becomes
+/// `      x = await f()`. A declaration in the async function that lets an input await would end
+/// with the function; the assignment makes a global that later inputs see, as Node's REPL does.
+/// Declarations with a destructuring pattern or a name without an initializer (in `let a = 1, b`,
+/// the assignment would leave `b` an undefined name) are kept, as are declarations inside
+/// brackets. A declaration is taken to end at the next top-level `;`, so one that a line break
+/// ends is kept if a top-level `,` after it is not followed by a name and `=`.
 pub fn rewrite_declarations(source: &str) -> String {
     let bytes = source.as_bytes();
+    let mut tokens = Vec::new();
+    Scanner::default().scan_tokens(bytes, |token| tokens.push(token));
     let mut blanked = Vec::new();
-    Scanner::default().scan_tokens(bytes, |token| {
+    for (i, token) in tokens.iter().enumerate() {
         if let Token::Word {
             start,
             end,
             top_level: true,
-        } = token
+        } = *token
             && matches!(&bytes[start..end], b"const" | b"let" | b"var")
-            && declares_single_name(&bytes[end..])
+            && starts_initialized_name(&bytes[end..])
+            && tokens[i + 1..]
+                .iter()
+                .take_while(|token| !matches!(token, Token::Semicolon(_)))
+                .all(|token| match *token {
+                    Token::Comma(at) => starts_initialized_name(&bytes[at + 1..]),
+                    _ => true,
+                })
         {
             blanked.push(start..end);
         }
-    });
+    }
     let mut rewritten = source.to_owned();
     for range in blanked {
         // The keywords are ASCII, so blanking them keeps the string valid and every column put.
@@ -338,9 +357,9 @@ pub fn rewrite_declarations(source: &str) -> String {
     rewritten
 }
 
-/// Whether `rest`, what follows a declaration keyword, starts with a name and then `=` (and not
-/// `==` or `=>`).
-fn declares_single_name(rest: &[u8]) -> bool {
+/// Whether `rest`, what follows a declaration keyword or the `,` before a declaration's next name,
+/// starts with a name and then `=` (and not `==` or `=>`).
+fn starts_initialized_name(rest: &[u8]) -> bool {
     let rest = trim_start(rest);
     let name_length = rest.iter().take_while(|&&b| is_word_byte(b)).count();
     if name_length == 0 || rest[0].is_ascii_digit() {
