@@ -73,8 +73,6 @@ namespace workerd::util {
   V(V8_FAST_API)                                                                                   \
   /* Enable refactor used to consolidate the different tail worker stream implementations. */      \
   V(TAIL_STREAM_REFACTOR)                                                                          \
-  /* Enable fast TextEncoder implementation using simdutf */                                       \
-  V(ENABLE_FAST_TEXTENCODER)                                                                       \
   /* When enabled, reject startTls calls that pass the expectedServerHostname option,              \
     which is not currently supported. When disabled, log the usage instead. */                     \
   V(STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)                                                      \
@@ -110,6 +108,9 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
+  /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
+     (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
+  V(TS_URL)                                                                                        \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

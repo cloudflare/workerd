@@ -15,7 +15,6 @@ use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::hash::Hasher;
 use std::mem::ManuallyDrop;
-use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -51,12 +50,21 @@ use crate::v8::ffi::Wrappable;
 /// Like `std::rc::Rc`, cloning is cheap (increments a refcount). Unlike `std::rc::Rc`,
 /// the destructor also notifies the GC so JavaScript wrappers can be collected.
 ///
+/// **The isolate lock:** the resource's state and both reference counts are guarded only by the
+/// lock of the isolate the resource was created in. So [`get`](Self::get),
+/// [`clone`](Self::clone) and [`downgrade`](Self::downgrade) take a [`Lock`] of that isolate,
+/// and panic for another isolate's, or once the isolate's `Realm` is dropped. Dropping needs
+/// none (see below), and neither do equality, ordering, hashing and `Debug`, which use only the
+/// address or the type.
+/// An `Rc` may be held where no lock is, such as in a future that `IoContext` polls, which can
+/// then do nothing with it but drop it.
+///
 /// Each `Rc<R>` holds:
 /// - An `std::rc::Rc<R>` for Rust-side shared ownership (enables `Weak`)
 /// - A [`v8::WrappableRc`] for `kj::Rc` refcounting and GC integration
 ///
 /// **GC integration:**
-/// - On `Clone`, calls `wrappable_add_strong_ref` (C++ `addStrongRef`).
+/// - On [`clone`](Self::clone), calls `wrappable_add_strong_ref` (C++ `addStrongRef`).
 /// - On `Drop`, hands its `std::rc::Rc<R>` and `WrappableRc`, with its current `strong` flag,
 ///   to the [`IsolateState`] of the isolate the resource was created in. Under that isolate's
 ///   lock they are released at once: `wrappable_remove_strong_ref` (C++ `removeStrongRef`) if
@@ -152,6 +160,11 @@ impl<R: Resource> Rc<R> {
         );
     }
 
+    /// The state of the resource's isolate.
+    pub(crate) fn isolate_state(&self) -> &IsolateState {
+        &self.state
+    }
+
     /// Makes this `Rc` strong again and forgets its parent, as moving a C++ `jsg::Ref` does; see
     /// [`v8::GcVisitor::is_detaching`].
     pub(crate) fn detach(&self) {
@@ -162,15 +175,58 @@ impl<R: Resource> Rc<R> {
         self.parent.set(None);
     }
 
+    /// Borrows the resource, for no longer than `lock`'s scope.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    #[inline]
+    pub fn get<'a, 's: 'a>(&'a self, lock: &Lock<'s>) -> &'a R {
+        self.assert_in_isolate_of(lock);
+        &self.handle
+    }
+
+    /// Makes another strong reference to the resource.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    #[must_use]
+    pub fn clone(&self, lock: &Lock<'_>) -> Self {
+        self.assert_in_isolate_of(lock);
+        let wrappable = v8::WrappableRc::clone(&self.wrappable);
+        wrappable.add_strong_ref();
+        Self::from_parts(
+            std::rc::Rc::clone(&self.handle),
+            wrappable,
+            Arc::clone(&self.state),
+        )
+    }
+
     /// Creates a [`Weak`] reference to this resource.
     ///
     /// The weak reference does not prevent GC collection. Use
     /// [`Weak::upgrade`] to obtain a strong `Rc<R>` if the resource is
     /// still alive.
     ///
-    /// Mirrors [`std::rc::Rc::downgrade`](std::rc::std::rc::Rc::downgrade).
-    pub fn downgrade(&self) -> Weak<R> {
-        Weak::from(self)
+    /// Mirrors [`std::rc::Rc::downgrade`].
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    #[must_use]
+    pub fn downgrade(&self, lock: &Lock<'_>) -> Weak<R> {
+        self.assert_in_isolate_of(lock);
+        Weak {
+            handle: std::rc::Rc::downgrade(&self.handle),
+            wrappable: Some(self.wrappable.as_ptr()),
+            state: Some(Arc::clone(&self.state)),
+        }
+    }
+
+    #[inline]
+    fn assert_in_isolate_of(&self, lock: &Lock<'_>) {
+        assert!(
+            is_isolate_of(&self.state, lock),
+            "attempt to use a jsg::Rc in an isolate other than the one it was created in"
+        );
     }
 
     /// Attaches this resource to the `this` object in a V8 constructor callback.
@@ -179,35 +235,19 @@ impl<R: Resource> Rc<R> {
     /// the `this` object from the `FunctionTemplate`'s `InstanceTemplate`;
     /// this method attaches the `Wrappable` to it so that instance methods
     /// can resolve the resource via `resolve_resource`.
-    pub fn attach_to_this(&self, info: &mut v8::FunctionCallbackInfo<'_>) {
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    pub fn attach_to_this(&self, lock: &Lock<'_>, info: &mut v8::FunctionCallbackInfo<'_>) {
+        self.assert_in_isolate_of(lock);
         self.wrappable.attach_to_this(info);
     }
 
     /// Returns the C++ Wrappable's strong reference count.
     #[cfg(debug_assertions)]
-    pub fn strong_refcount(&self) -> u32 {
+    pub fn strong_refcount(&self, lock: &Lock<'_>) -> u32 {
+        self.assert_in_isolate_of(lock);
         self.wrappable.strong_refcount()
-    }
-}
-
-impl<R: Resource> Deref for Rc<R> {
-    type Target = R;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.handle
-    }
-}
-
-impl<R: Resource> Clone for Rc<R> {
-    fn clone(&self) -> Self {
-        let wrappable = v8::WrappableRc::clone(&self.wrappable);
-        wrappable.add_strong_ref();
-        Self::from_parts(
-            std::rc::Rc::clone(&self.handle),
-            wrappable,
-            Arc::clone(&self.state),
-        )
     }
 }
 
@@ -241,7 +281,7 @@ impl<R: Resource> Releasable for ReleasedRc<R> {
     fn release(mut self, context: ReleaseContext) {
         // A ref that GC tracing has made weak no longer counts as strong; removing it again
         // would release another ref's strong reference. Once the isolate is disposed there is
-        // no wrapper left to update, and `removeStrongRef` may find the disposed isolate.
+        // no wrapper left to update.
         if self.strong && context == ReleaseContext::Locked {
             self.wrappable.remove_strong_ref();
         }
@@ -355,11 +395,11 @@ impl<R: Resource> std::hash::Hash for Rc<R> {
     }
 }
 
+/// Shows only the resource's type: its reference counts can't be read without the lock.
 impl<R: Resource> fmt::Debug for Rc<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Rc")
             .field("type", &std::any::type_name::<R>())
-            .field("rc_strong", &std::rc::Rc::strong_count(&self.handle))
             .finish_non_exhaustive()
     }
 }
@@ -376,9 +416,10 @@ impl<R: Resource> fmt::Debug for Rc<R> {
 /// dereferenced after `Weak::upgrade` confirms the resource (and thus the
 /// Wrappable) is still alive.
 ///
-/// The weak count of the `std::rc::Weak<R>` is not atomic either, so a drop hands it to the
-/// state of the resource's isolate, which releases it under that isolate's lock, as it does an
-/// [`Rc`]'s parts. The Wrappable may be gone by then, so the `Weak` keeps the state itself.
+/// The counts of the `std::rc::Weak<R>` are not atomic either, so, as for an [`Rc`], every
+/// operation but `Drop` takes a [`Lock`] of the resource's isolate, and a drop hands the
+/// `std::rc::Weak` to the state of that isolate, which releases it under the isolate's lock. The
+/// Wrappable may be gone by then, so the `Weak` keeps the state itself.
 pub struct Weak<R: Resource> {
     handle: std::rc::Weak<R>,
     /// Non-owning pointer to the C++ Wrappable. `None` for default-constructed
@@ -392,13 +433,21 @@ pub struct Weak<R: Resource> {
 
 impl<R: Resource> Weak<R> {
     /// Returns `true` if the resource is still alive.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
     #[inline]
-    pub fn is_alive(&self) -> bool {
+    pub fn is_alive(&self, lock: &Lock<'_>) -> bool {
+        self.assert_in_isolate_of(lock);
         self.handle.strong_count() > 0
     }
 
     /// Upgrades to a strong `Rc<R>` if the resource is still alive.
-    pub fn upgrade(&self) -> Option<Rc<R>> {
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    pub fn upgrade(&self, lock: &Lock<'_>) -> Option<Rc<R>> {
+        self.assert_in_isolate_of(lock);
         let handle = self.handle.upgrade()?;
         let wrappable_ptr = self.wrappable?;
         let state = Arc::clone(self.state.as_ref()?);
@@ -411,26 +460,38 @@ impl<R: Resource> Weak<R> {
         wrappable.add_strong_ref();
         Some(Rc::from_parts(handle, wrappable, state))
     }
-}
 
-impl<R: Resource> From<&Rc<R>> for Weak<R> {
-    fn from(r: &Rc<R>) -> Self {
-        Self {
-            handle: std::rc::Rc::downgrade(&r.handle),
-            wrappable: Some(r.wrappable.as_ptr()),
-            state: Some(Arc::clone(&r.state)),
-        }
-    }
-}
-
-impl<R: Resource> Clone for Weak<R> {
-    fn clone(&self) -> Self {
+    /// Makes another weak reference to the resource.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the resource's.
+    #[must_use]
+    pub fn clone(&self, lock: &Lock<'_>) -> Self {
+        self.assert_in_isolate_of(lock);
         Self {
             handle: std::rc::Weak::clone(&self.handle),
             wrappable: self.wrappable,
             state: self.state.clone(),
         }
     }
+
+    /// A default-constructed `Weak` belongs to no isolate, and has no count to guard.
+    #[inline]
+    fn assert_in_isolate_of(&self, lock: &Lock<'_>) {
+        if let Some(state) = &self.state {
+            assert!(
+                is_isolate_of(state, lock),
+                "attempt to use a jsg::Weak in an isolate other than the one it was created in"
+            );
+        }
+    }
+}
+
+/// Whether `lock` locks the isolate of `state`. A closed state's isolate has no `Realm` left, so
+/// no lock of it exists, though a new isolate may have its address.
+#[inline]
+fn is_isolate_of(state: &IsolateState, lock: &Lock<'_>) -> bool {
+    !state.is_closed() && state.belongs_to(lock.isolate().as_ffi())
 }
 
 impl<R: Resource> Drop for Weak<R> {
@@ -441,6 +502,21 @@ impl<R: Resource> Drop for Weak<R> {
         }
     }
 }
+
+// SAFETY: the resource, its Wrappable and the counts of both are shared by every `Rc` and `Weak`
+// of the resource, and guarded only by the isolate lock. What touches them takes a `&Lock` of the
+// isolate, and panics for another's (`get`, `clone`, `downgrade`, `to_js`, `attach_to_this`,
+// `strong_refcount`); is a GC or detaching visit, which `GcVisitor::visit_rc` lets change the
+// counts only under the lock of the resource's isolate; or is `Drop`, which releases the parts
+// under that lock and otherwise queues them without touching a count. `Lock` is neither `Send`
+// nor `Sync`. Equality, ordering and hashing use only the address, and `Debug` only the
+// type. `R: Send`, so the resource may be dropped by whichever thread releases it.
+unsafe impl<R: Resource + Send> Send for Rc<R> {}
+
+// SAFETY: as for `Rc`: `is_alive`, `upgrade` and `clone` take a `&Lock`, and `Drop` releases or
+// queues the `std::rc::Weak` as an `Rc`'s drop does. The Wrappable pointer is used only by
+// `upgrade`.
+unsafe impl<R: Resource + Send> Send for Weak<R> {}
 
 /// `Rc<R>` is a strong GC edge — visited via `GcVisitor::visit_rc`.
 impl<R: Resource> Traced for Rc<R> {
@@ -468,15 +544,6 @@ impl<R: Resource> MemoryInfo for Weak<R> {
     fn track_as_field(&self, _: &mut MemoryTracker<'_>, _: Option<&'static CStr>) {}
 }
 
-impl<R: Resource> GarbageCollected for Weak<R> {
-    fn memory_name(&self) -> &'static std::ffi::CStr {
-        // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.
-        // Delegate to the concrete R via a live upgrade. In the (unreachable)
-        // case where the referent is already gone, return an empty string.
-        self.handle.upgrade().as_deref().map_or(c"", R::memory_name)
-    }
-}
-
 impl<R: Resource> Default for Weak<R> {
     fn default() -> Self {
         Self {
@@ -494,7 +561,7 @@ impl<R: Resource> Default for Weak<R> {
 /// wrapper on the `Wrappable` via `CppgcShim`. This means:
 ///
 /// ```text
-/// let a = resource.clone().to_js(lock)?;
+/// let a = resource.clone(lock).to_js(lock)?;
 /// let b = resource.to_js(lock)?;
 /// // a === b in JavaScript (same object identity)
 /// ```

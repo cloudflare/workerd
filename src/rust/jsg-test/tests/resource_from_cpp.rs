@@ -114,7 +114,7 @@ unsafe fn check(isolate: *mut v8::ffi::Isolate, value: v8::ffi::Local) {
     let value: v8::Local<'_, v8::Value> = unsafe { v8::Local::from_ffi(value) };
     let name = if is_held == Some(true) {
         <jsg::Rc<Held> as jsg::FromJS>::from_js(lock, value)
-            .map(|held| held.name.clone())
+            .map(|held| held.get(lock).name.clone())
             .unwrap_or_default()
     } else {
         String::new()

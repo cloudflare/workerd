@@ -81,7 +81,8 @@ impl Thrower {
         lock: &mut jsg::Lock<'s>,
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        this.throw_then(lock, first, |lock| this.clone().to_js(lock))
+        this.get(lock)
+            .throw_then(lock, first, |lock| this.clone(lock).to_js(lock))
     }
 
     /// Gets the constructor of a resource type (`FunctionTemplate::GetFunction`).
@@ -195,7 +196,7 @@ fn exception_survives(call: &str) {
                 saw_pending: Cell::new(None),
             },
         );
-        ctx.set_global(lock, "obj", thrower.clone());
+        ctx.set_global(lock, "obj", thrower.clone(lock));
         let caught = ctx
             .eval::<String>(
                 lock,
@@ -207,7 +208,7 @@ fn exception_survives(call: &str) {
             )
             .unwrap();
         assert_eq!(caught, "RangeError: first", "{call}");
-        assert_eq!(thrower.saw_pending.get(), Some(true), "{call}");
+        assert_eq!(thrower.get(lock).saw_pending.get(), Some(true), "{call}");
         assert!(
             !ctx.eval::<bool>(lock, "secondRan").unwrap(),
             "{call} ran JavaScript with an exception pending"
@@ -303,13 +304,13 @@ fn callback_entered_while_try_catch_holds_exception_panics() {
                 ran: Cell::new(false),
             },
         );
-        ctx.set_global(lock, "callee", callee.clone());
+        ctx.set_global(lock, "callee", callee.clone(lock));
         match ctx.eval_with_caught_exception(lock, "callee.run()") {
             Err(crate::EvalError::EvalFailed) => {}
             Err(crate::EvalError::Exception(exception)) => assert!(exception.is_null()),
             other => panic!("the callback was entered: {other:?}"),
         }
-        assert!(!callee.ran.get());
+        assert!(!callee.get(lock).ran.get());
         Ok(())
     });
 }

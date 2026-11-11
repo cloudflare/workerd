@@ -10,6 +10,8 @@ namespace workerd::cpp_interop_test {
 
 namespace {
 uint32_t holdersDestroyed = 0;
+thread_local uint32_t holdersDestroyedOnThisThread = 0;
+thread_local uint32_t holdersDestroyedOnThisThreadInAnIsolate = 0;
 }  // namespace
 
 kj::Maybe<bool> HostTag::isInstance(v8::Isolate* isolate, jsg_cpp::Local value) {
@@ -38,6 +40,10 @@ void TestCppGreeter::failWithJsError(::workerd::jsg::Lock& js) {
 
 TestCppHolder::~TestCppHolder() noexcept(false) {
   ++holdersDestroyed;
+  ++holdersDestroyedOnThisThread;
+  if (v8::Isolate::TryGetCurrent() != nullptr) {
+    ++holdersDestroyedOnThisThreadInAnIsolate;
+  }
 }
 
 ::workerd::jsg::Optional<HostRef> TestCppHolder::getHeld(::workerd::jsg::Lock& js) {
@@ -69,6 +75,14 @@ kj::StringPtr TestCppHolder::which(kj::OneOf<HostRef, ::workerd::jsg::Ref<TestCp
 
 uint32_t holdersDestroyedForTest() {
   return holdersDestroyed;
+}
+
+uint32_t holdersDestroyedOnThisThreadForTest() {
+  return holdersDestroyedOnThisThread;
+}
+
+uint32_t holdersDestroyedOnThisThreadInAnIsolateForTest() {
+  return holdersDestroyedOnThisThreadInAnIsolate;
 }
 
 }  // namespace workerd::cpp_interop_test
@@ -162,12 +176,28 @@ bool test_cpp_current_base(v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppR
   });
 }
 
+bool test_cpp_holder_new_unwrapped(
+    v8::Isolate* isolate, kj::Maybe<kj::Own<jsg_cpp::CppRef>>& result) {
+  return jsg_cpp::callCppForRef<TestCppHolder>(isolate, result,
+      [](::workerd::jsg::Lock& js) -> ::workerd::jsg::Optional<::workerd::jsg::Ref<TestCppHolder>> {
+    return js.alloc<TestCppHolder>();
+  });
+}
+
 void test_cpp_set_in_request(bool value) {
   inRequest = value;
 }
 
 uint32_t test_cpp_holders_destroyed() {
   return ::workerd::cpp_interop_test::holdersDestroyedForTest();
+}
+
+uint32_t test_cpp_holders_destroyed_on_this_thread() {
+  return ::workerd::cpp_interop_test::holdersDestroyedOnThisThreadForTest();
+}
+
+uint32_t test_cpp_holders_destroyed_on_this_thread_in_an_isolate() {
+  return ::workerd::cpp_interop_test::holdersDestroyedOnThisThreadInAnIsolateForTest();
 }
 
 jsg_cpp::MaybeLocal test_cpp_greeter_new(v8::Isolate* isolate, ::rust::Str greeting) {

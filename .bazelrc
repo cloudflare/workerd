@@ -243,7 +243,7 @@ build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # common sanitizers options
-build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
+build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
 build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
 build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
@@ -640,6 +640,8 @@ common:bazelflare --cpu=k8 --host_cpu=k8
 common:bazelflare --platforms=//build/bazelflare:linux_x86_64
 common:bazelflare --host_platform=//build/bazelflare:linux_x86_64
 common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
+# Assign full runner for linking select binaries to avoid slowdown due to size/linker optimizations
+build:bazelflare --//build/config:link_executor=bazelflare
 # Host tools are Linux binaries, so actions don't fall back to the client, where most of them
 # couldn't run. One that could, such as a shell script's, can be allowed to run on the client with
 # --strategy=<Mnemonic>=remote,sandboxed.

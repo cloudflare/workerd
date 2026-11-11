@@ -207,6 +207,9 @@ fn run_deploy(
     if !args.experimental {
         usage_error::<T>("The deploy command is experimental. Pass --experimental to use it.");
     }
+    let options = args
+        .bucket_options()
+        .unwrap_or_else(|e| usage_error::<T>(e));
     let failed = |errors: Vec<String>| {
         for error in errors {
             eprintln!("deploy: {error}");
@@ -255,7 +258,6 @@ fn run_deploy(
     if let Err(errors) = deploy::check(&name, &deployment) {
         return failed(errors);
     }
-    let options = args.bucket_options();
     match deploy::publish(&args.bucket, &options, &name, &deployment) {
         Ok(published) => {
             println!(

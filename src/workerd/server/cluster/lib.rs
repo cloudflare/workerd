@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! A Durable Object cluster whose shared state is an S3-compatible bucket
-//! (S3, R2, `MinIO`) instead of a shared filesystem.
+//! A Durable Object cluster whose shared state is a bucket instead of a
+//! shared filesystem: an S3-compatible one (S3, R2, `MinIO`; `s3.rs`) or a
+//! Google Cloud Storage one (`gcs.rs`).
 //!
 //! Everything lives under `v1/` in the configured prefix, so a later format
 //! can tell an old bucket from its own:
@@ -41,11 +42,16 @@
 mod alarms;
 mod bucket;
 mod capture;
+mod client;
 pub mod cluster;
 pub mod compose;
 pub mod deploy;
 #[cfg(test)]
 mod dst;
+#[cfg(test)]
+mod fake_http;
+pub mod gcs;
+mod google_auth;
 mod http;
 mod log;
 #[cfg(test)]

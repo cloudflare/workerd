@@ -4,19 +4,105 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/io/compatibility-date.capnp.h>
-#include <kj/refcount.h>
+#include <workerd/jsg/jsg.h>
+
 #include <kj/compat/url.h>
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
 class URLSearchParams;
 
+// The legacy, non-standard URL logic, over kj::Url: what URL, URLSearchParams and
+// LegacyUrlHandle share. A URL and its searchParams share one LegacyUrl; a URLSearchParams
+// made on its own has one with only a query.
+//
+// The href setter is the only one that reports failure. The others ignore a value they reject,
+// leaving the URL unchanged.
+class LegacyUrl final: public kj::Refcounted {
+ public:
+  LegacyUrl() = default;
+  explicit LegacyUrl(kj::Url&& url);
+
+  // Throws TypeError: "Invalid URL string.", or with a base, "Invalid base URL string." or
+  // "Invalid relative URL string.".
+  static kj::Rc<LegacyUrl> parse(kj::String url, kj::Maybe<kj::String> base);
+  static kj::Maybe<kj::Rc<LegacyUrl>> tryParse(kj::String url, kj::Maybe<kj::String> base);
+
+  // May throw a TypeError for a URL that kj::Url cannot stringify.
+  kj::String getHref() const;
+  // Returns false, leaving the URL unchanged, if `value` is not a URL.
+  bool setHref(kj::String value);
+
+  kj::String getOrigin() const;
+
+  kj::String getProtocol() const;
+  void setProtocol(kj::String value);
+
+  kj::String getUsername() const;
+  void setUsername(kj::String value);
+
+  kj::String getPassword() const;
+  void setPassword(kj::String value);
+
+  kj::String getHost() const;
+  void setHost(kj::String value);
+
+  kj::String getHostname() const;
+  void setHostname(kj::String value);
+
+  kj::String getPort() const;
+  void setPort(kj::String value);
+
+  kj::String getPathname() const;
+  void setPathname(kj::String value);
+
+  kj::String getSearch() const;
+  void setSearch(kj::String value);
+
+  kj::String getHash() const;
+  void setHash(kj::String value);
+
+  // The query, as a URLSearchParams list.
+  size_t size() const {
+    return url.query.size();
+  }
+  void append(kj::String name, kj::String value);
+  // Removes the entries named `name`, and with `value` if given.
+  void delete_(kj::StringPtr name, kj::Maybe<kj::StringPtr> value);
+  kj::Maybe<kj::String> get(kj::StringPtr name) const;
+  kj::Array<kj::String> getAll(kj::StringPtr name) const;
+  bool has(kj::StringPtr name, kj::Maybe<kj::StringPtr> value) const;
+  // Sets the first entry named `name` to `value` and removes the others, or appends one.
+  void set(kj::String name, kj::String value);
+  // Sorts by name in UTF-16 code units, stably.
+  void sort();
+  kj::StringPtr nameAt(size_t index) const;
+  kj::StringPtr valueAt(size_t index) const;
+  // URLSearchParams.toString(): every entry as `name=value`, application/x-www-form-urlencoded.
+  kj::String serialize() const;
+
+  // A separate copy of this URL.
+  kj::Rc<LegacyUrl> clone() const;
+  // Replaces this URL with a copy of `other`.
+  void assign(const LegacyUrl& other);
+  // Replaces the query with `query` parsed as application/x-www-form-urlencoded, after one
+  // leading '?', reporting the parsed entries' memory to `adjustment`.
+  void assignQueryString(kj::ArrayPtr<const char> query, jsg::ExternalMemoryAdjustment& adjustment);
+  // Replaces the query with the given (name, value) pairs.
+  void assignQueryPairs(kj::Array<kj::Url::QueryParam> pairs);
+
+  size_t memorySize() const;
+
+ private:
+  kj::Url url;
+};
+
 // Implements the URL interface as prescribed by: https://url.spec.whatwg.org/#api
 // This is the legacy, non-standard implementation.
 class URL: public jsg::Object {
-public:
+ public:
   static jsg::Ref<URL> constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base);
 
   // Href is the only setter that throws. All others ignore errors, leaving their values
@@ -97,55 +183,27 @@ public:
     JSG_METHOD(toString);
     JSG_METHOD(toJSON);
 
-    JSG_TS_OVERRIDE({
-      constructor(url: string | URL, base?: string | URL);
-    });
-    // Allow URLs which get coerced to strings in either constructor parameter
+    // Declared in types/defines/url.d.ts, the same at every compatibility date.
+    JSG_TS_OVERRIDE(type URL = never);
   }
 
   // Treat as private -- needs to be public for js.alloc<T>()...
-  explicit URL(kj::Url&& u);
+  explicit URL(kj::Rc<LegacyUrl> url);
 
-  // Deep copy for workers started from a snapshot: the inner kj::Url is plain C++ data.
-  // `searchParams` is a back-reference into the same inner URL and is deliberately dropped;
-  // it is lazily recreated on first access, same as URL::snapshotClone in url-standard.h.
+  // Deep copy for workers started from a snapshot: the LegacyUrl is plain C++ data.
+  // `searchParams` shares the same LegacyUrl and is deliberately dropped; it is lazily
+  // recreated on first access, same as URL::snapshotClone in url-standard.h.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
     return ownAsWrappable(kj::refcounted<URL>(url->clone()));
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    size_t size = 0;
-    size += url->scheme.size();
-    KJ_IF_SOME(ui, url->userInfo) {
-      size += ui.username.size();
-      KJ_IF_SOME(pwd, ui.password) {
-        size += pwd.size();
-      }
-    }
-    size += url->host.size();
-    for (const auto& p: url->path) {
-      size += p.size();
-    }
-    for (const auto& param : url->query) {
-      size += param.name.size();
-      size += param.value.size();
-    }
-    KJ_IF_SOME(frag, url->fragment) {
-      size += frag.size();
-    }
-    tracker.trackFieldWithSize("inner", size);
+    tracker.trackFieldWithSize("inner", url->memorySize());
     tracker.trackField("searchParams", searchParams);
   }
 
-private:
-  friend class URLSearchParams;
-
-  struct RefcountedUrl: kj::Refcounted, kj::Url {
-    template <typename... Args>
-    RefcountedUrl(Args&&... args): kj::Url(kj::fwd<Args>(args)...) {}
-  };
-
-  kj::Own<RefcountedUrl> url;
+ private:
+  kj::Rc<LegacyUrl> url;
   kj::Maybe<jsg::Ref<URLSearchParams>> searchParams;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -155,7 +213,7 @@ private:
 
 class URLSearchParams: public jsg::Object {
   // TODO(cleanup): Combine implementation with FormData?
-private:
+ private:
   struct IteratorState {
     jsg::Ref<URLSearchParams> parent;
     uint index = 0;
@@ -165,11 +223,13 @@ private:
     }
   };
 
-public:
-  explicit URLSearchParams(kj::Own<URL::RefcountedUrl> url);
+ public:
+  explicit URLSearchParams(kj::Rc<LegacyUrl> url);
 
-  using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>, kj::String, jsg::Dict<kj::String>,
-                                kj::Array<kj::Array<kj::String>>>;
+  using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>,
+      kj::String,
+      jsg::Dict<kj::String>,
+      kj::Array<kj::Array<kj::String>>>;
 
   static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
@@ -182,26 +242,19 @@ public:
 
   void sort();
 
-  JSG_ITERATOR(EntryIterator, entries,
-                kj::Array<kj::String>,
-                IteratorState,
-                entryIteratorNext)
-  JSG_ITERATOR(KeyIterator, keys,
-                kj::String,
-                IteratorState,
-                keyIteratorNext)
-  JSG_ITERATOR(ValueIterator, values,
-                kj::String,
-                IteratorState,
-                valueIteratorNext)
+  JSG_ITERATOR(EntryIterator, entries, kj::Array<kj::String>, IteratorState, entryIteratorNext)
+  JSG_ITERATOR(KeyIterator, keys, kj::String, IteratorState, keyIteratorNext)
+  JSG_ITERATOR(ValueIterator, values, kj::String, IteratorState, valueIteratorNext)
 
   void forEach(jsg::Lock&,
-               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
-               jsg::Optional<jsg::Value>);
+      jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
+      jsg::Optional<jsg::Value>);
 
   kj::String toString();
 
-  inline uint getSize() { return url->query.size(); }
+  inline uint getSize() {
+    return url->size();
+  }
 
   JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
@@ -223,68 +276,149 @@ public:
 
     JSG_METHOD(toString);
 
-    if (flags.getSpecCompliantUrl()) {
-      // This is a hack. The non-spec-compliant URLSearchParams type is used in
-      // the Response and Request constructors. This means that when the
-      // TypeScript generation scripts are visiting root types for inclusion,
-      // we'll always visit the non-spec-compliant type even if we have the
-      // "url-standard" flag enabled. Rather than updating those usages based
-      // on which flags are enabled, we just delete the non-spec complaint
-      // declaration in an override if "url-standard" is enabled.
-      JSG_TS_OVERRIDE(type URLSearchParams = never);
-    } else {
-      JSG_TS_OVERRIDE({
-        constructor(init?: URLSearchParams | string | Record<string, string> | [key: string, value: string][]);
-
-        entries(): IterableIterator<[key: string, value: string]>;
-        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-
-        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
-      });
-    }
+    // Declared in types/defines/url.d.ts, the same at every compatibility date.
+    JSG_TS_OVERRIDE(type URLSearchParams = never);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize("url", url->toString().size());
+    tracker.trackFieldWithSize("url", url->memorySize());
   }
 
-private:
-  kj::Own<URL::RefcountedUrl> url;
+ private:
+  kj::Rc<LegacyUrl> url;
   kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
 
   static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->url->query.size()) {
+    if (state.index >= state.parent->url->size()) {
       return kj::none;
     }
-    auto& [key, value] = state.parent->url->query[state.index++];
-    return kj::arr(kj::str(key), kj::str(value));
+    auto index = state.index++;
+    auto& url = *state.parent->url;
+    return kj::arr(kj::str(url.nameAt(index)), kj::str(url.valueAt(index)));
   }
 
   static kj::Maybe<kj::String> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->url->query.size()) {
+    if (state.index >= state.parent->url->size()) {
       return kj::none;
     }
-    auto& [key, value] = state.parent->url->query[state.index++];
-    return kj::str(key);
+    return kj::str(state.parent->url->nameAt(state.index++));
   }
 
   static kj::Maybe<kj::String> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->url->query.size()) {
+    if (state.index >= state.parent->url->size()) {
       return kj::none;
     }
-    auto& [key, value] = state.parent->url->query[state.index++];
-    return kj::str(value);
+    return kj::str(state.parent->url->valueAt(state.index++));
   }
 };
 
-#define EW_URL_ISOLATE_TYPES                  \
-  api::URL,                                   \
-  api::URLSearchParams,                       \
-  api::URLSearchParams::EntryIterator,        \
-  api::URLSearchParams::EntryIterator::Next,  \
-  api::URLSearchParams::KeyIterator,          \
-  api::URLSearchParams::KeyIterator::Next,    \
-  api::URLSearchParams::ValueIterator,        \
-  api::URLSearchParams::ValueIterator::Next
+// A LegacyUrl as the per-isolate bootstrap's URL implementation holds it: the native backend of a
+// URL, and of its searchParams, on the legacy path. utils.createLegacyUrl() and its siblings
+// (api/url-bootstrap.h) make one. A URL and its searchParams share one handle.
+//
+// The members are LegacyUrl's. Their string arguments are USVStrings.
+class LegacyUrlHandle final: public jsg::Object {
+ public:
+  explicit LegacyUrlHandle(kj::Rc<LegacyUrl> url): url(kj::mv(url)) {}
+
+  kj::String getHref();
+  bool setHref(jsg::USVString value);
+  kj::String getOrigin();
+  kj::String getProtocol();
+  void setProtocol(jsg::USVString value);
+  kj::String getUsername();
+  void setUsername(jsg::USVString value);
+  kj::String getPassword();
+  void setPassword(jsg::USVString value);
+  kj::String getHost();
+  void setHost(jsg::USVString value);
+  kj::String getHostname();
+  void setHostname(jsg::USVString value);
+  kj::String getPort();
+  void setPort(jsg::USVString value);
+  kj::String getPathname();
+  void setPathname(jsg::USVString value);
+  kj::String getSearch();
+  void setSearch(jsg::USVString value);
+  kj::String getHash();
+  void setHash(jsg::USVString value);
+
+  uint32_t size();
+  void append(jsg::USVString name, jsg::USVString value);
+  void delete_(jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  kj::Maybe<kj::String> get(jsg::USVString name);
+  kj::Array<kj::String> getAll(jsg::USVString name);
+  bool has(jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  void set(jsg::USVString name, jsg::USVString value);
+  void sort();
+  // Throws a RangeError for an index at or past size().
+  kj::String nameAt(uint32_t index);
+  kj::String valueAt(uint32_t index);
+  kj::String serialize();
+  void assignQueryString(jsg::Lock& js, jsg::USVString query);
+  // `pairs` alternates names and values.
+  void assignQueryPairs(kj::Array<jsg::USVString> pairs);
+
+  JSG_RESOURCE_TYPE(LegacyUrlHandle) {
+    JSG_METHOD(getHref);
+    JSG_METHOD(setHref);
+    JSG_METHOD(getOrigin);
+    JSG_METHOD(getProtocol);
+    JSG_METHOD(setProtocol);
+    JSG_METHOD(getUsername);
+    JSG_METHOD(setUsername);
+    JSG_METHOD(getPassword);
+    JSG_METHOD(setPassword);
+    JSG_METHOD(getHost);
+    JSG_METHOD(setHost);
+    JSG_METHOD(getHostname);
+    JSG_METHOD(setHostname);
+    JSG_METHOD(getPort);
+    JSG_METHOD(setPort);
+    JSG_METHOD(getPathname);
+    JSG_METHOD(setPathname);
+    JSG_METHOD(getSearch);
+    JSG_METHOD(setSearch);
+    JSG_METHOD(getHash);
+    JSG_METHOD(setHash);
+
+    JSG_METHOD(size);
+    JSG_METHOD(append);
+    JSG_METHOD_NAMED(delete, delete_);
+    JSG_METHOD(get);
+    JSG_METHOD(getAll);
+    JSG_METHOD(has);
+    JSG_METHOD(set);
+    JSG_METHOD(sort);
+    JSG_METHOD(nameAt);
+    JSG_METHOD(valueAt);
+    JSG_METHOD(serialize);
+    JSG_METHOD(assignQueryString);
+    JSG_METHOD(assignQueryPairs);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type LegacyUrlHandle = never);
+  }
+
+  // Deep copy for workers started from a snapshot: the LegacyUrl is plain C++ data. A URL and its
+  // searchParams hold this one handle, so they still share a LegacyUrl in the restored worker.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<LegacyUrlHandle>(url->clone()));
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("url", url->memorySize());
+  }
+
+ private:
+  kj::Rc<LegacyUrl> url;
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+};
+
+#define EW_URL_ISOLATE_TYPES                                                                       \
+  api::URL, api::URLSearchParams, api::URLSearchParams::EntryIterator,                             \
+      api::URLSearchParams::EntryIterator::Next, api::URLSearchParams::KeyIterator,                \
+      api::URLSearchParams::KeyIterator::Next, api::URLSearchParams::ValueIterator,                \
+      api::URLSearchParams::ValueIterator::Next, api::LegacyUrlHandle
 
 }  // namespace workerd::api

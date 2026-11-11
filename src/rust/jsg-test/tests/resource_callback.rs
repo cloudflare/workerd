@@ -592,15 +592,15 @@ fn method_can_be_reentered() {
                 max_depth: Cell::new(0),
             },
         );
-        let wrapped = resource.clone().to_js(lock)?;
+        let wrapped = resource.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
         ctx.eval_raw(
             lock,
             "obj.enter(() => obj.enter(() => obj.enter(() => {})))",
         )
         .unwrap();
-        assert_eq!(resource.depth.get(), 0);
-        assert_eq!(resource.max_depth.get(), 3);
+        assert_eq!(resource.get(lock).depth.get(), 0);
+        assert_eq!(resource.get(lock).max_depth.get(), 3);
         Ok(())
     });
 }
@@ -723,7 +723,7 @@ fn calling_resource(
             saved: Cell::new(None),
         },
     );
-    ctx.set_global(lock, "obj", resource.clone());
+    ctx.set_global(lock, "obj", resource.clone(lock));
     let panicker = jsg::Rc::new(lock, PanicResource);
     ctx.set_global(lock, "panicker", panicker);
     resource
@@ -753,7 +753,7 @@ fn exception_from_callback_propagates_through_method() {
             "try { obj.call(() => { throw 'a string'; }); false } catch (e) { e === 'a string' }",
         );
         assert!(caught.unwrap());
-        assert!(resource.saw_pending.get());
+        assert!(resource.get(lock).saw_pending.get());
         Ok(())
     });
 }
@@ -798,7 +798,7 @@ fn termination_in_callback_propagates_through_method() {
             &format!("try {{ obj.call({TERMINATE}); }} catch (e) {{}} true"),
         );
         assert!(result.is_err());
-        assert!(resource.saw_pending.get());
+        assert!(resource.get(lock).saw_pending.get());
         Ok(())
     });
 }
@@ -818,7 +818,7 @@ fn call_while_terminating_runs_nothing() {
             ),
         );
         assert!(result.is_err());
-        assert!(resource.saw_pending.get());
+        assert!(resource.get(lock).saw_pending.get());
         // V8 clears the termination once no JavaScript is running.
         assert!(!ctx.eval::<bool>(lock, "secondRan").unwrap());
         Ok(())
@@ -844,7 +844,7 @@ fn call_while_exception_pending_runs_nothing() {
             )
             .unwrap();
         assert_eq!(caught, "RangeError: first");
-        assert!(resource.saw_pending.get());
+        assert!(resource.get(lock).saw_pending.get());
         assert!(!ctx.eval::<bool>(lock, "secondRan").unwrap());
         Ok(())
     });
@@ -859,14 +859,14 @@ fn try_catch_does_not_catch_termination() {
         let resource = calling_resource(lock, ctx);
         let caught = ctx.eval::<bool>(lock, "obj.callCatching(() => { throw new Error('boom'); })");
         assert!(caught.unwrap());
-        assert!(!resource.saw_pending.get());
+        assert!(!resource.get(lock).saw_pending.get());
 
         let result = ctx.eval::<bool>(
             lock,
             &format!("try {{ obj.callCatching({TERMINATE}); false }} catch (e) {{ true }}"),
         );
         assert!(result.is_err(), "the termination was caught: {result:?}");
-        assert!(resource.saw_pending.get());
+        assert!(resource.get(lock).saw_pending.get());
         Ok(())
     });
 }
@@ -926,7 +926,7 @@ fn pending_error_kept_after_exception_was_caught_throws_internal_error() {
         ctx.eval::<bool>(lock, "obj.catchAndSave(() => { throw 'boom'; }); true")
             .unwrap();
         assert!(ctx.eval::<bool>(lock, "obj.catchSaved()").unwrap());
-        assert!(resource.saved.take().is_none());
+        assert!(resource.get(lock).saved.take().is_none());
         Ok(())
     });
 }
@@ -1117,15 +1117,15 @@ fn resolve_receiver_rejects_everything_but_the_resource_type() {
         for source in ["42", "'obj'", "({})", "Object.create(obj)", "other"] {
             let value = ctx.eval_raw(lock, source).unwrap();
             assert!(
-                v8::WrappableRc::resolve_receiver::<EchoResource>(lock, value).is_none(),
+                v8::resolve_receiver::<EchoResource>(lock, value).is_none(),
                 "resolved {source}"
             );
         }
         let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
-        assert!(v8::WrappableRc::resolve_receiver::<EchoResource>(lock, cpp_obj).is_none());
+        assert!(v8::resolve_receiver::<EchoResource>(lock, cpp_obj).is_none());
 
         let value = ctx.eval_raw(lock, "obj").unwrap();
-        let resource = v8::WrappableRc::resolve_receiver::<EchoResource>(lock, value).unwrap();
+        let resource = v8::resolve_receiver::<EchoResource>(lock, value).unwrap();
         // SAFETY: `obj` is a global, so its wrapper keeps the resource alive.
         assert_eq!(unsafe { resource.as_ref() }.prefix, "Hi, ");
         Ok(())

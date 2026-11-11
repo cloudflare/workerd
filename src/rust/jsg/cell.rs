@@ -83,8 +83,9 @@ impl<T: Traced> Cell<T> {
     /// Replaces the value with `value` and returns the old one, made strong.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
-    /// heap snapshot is reporting a `jsg::Cell`'s value on this thread.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's, or if a heap snapshot is reporting a `jsg::Cell`'s value on
+    /// this thread.
     pub fn replace(&self, lock: &mut Lock<'_>, value: T) -> T {
         Self::check_not_reporting();
         // Detached once out of the cell: making a `jsg::Rc` to a resource with no wrapper strong
@@ -98,8 +99,9 @@ impl<T: Traced> Cell<T> {
     /// Takes the value, made strong, and leaves `T::default()` behind.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
-    /// heap snapshot is reporting a `jsg::Cell`'s value on this thread.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's, or if a heap snapshot is reporting a `jsg::Cell`'s value on
+    /// this thread.
     pub fn take(&self, lock: &mut Lock<'_>) -> T
     where
         T: Default,
@@ -227,7 +229,8 @@ impl<T: Traced> RefCell<T> {
     /// borrowed.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's.
     pub fn try_borrow_mut(&self, lock: &mut Lock<'_>) -> Result<RefMut<'_, T>, BorrowMutError> {
         let guard = self.inner.try_borrow_mut()?;
         GcVisitor::detach(lock, &*guard);

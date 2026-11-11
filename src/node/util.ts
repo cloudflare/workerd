@@ -7,6 +7,9 @@ import { default as utilImpl } from 'node-internal:util';
 import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
 import { Buffer } from 'node-internal:internal_buffer';
 import { MIMEParams, MIMEType } from 'node-internal:internal_mime';
+import { signals } from 'node-internal:internal_os_constants';
+
+const signalNames = Object.keys(signals);
 
 import {
   validateFunction,
@@ -412,6 +415,16 @@ export function styleText(
   return skipColorize ? text : `${left}${text}${right}`;
 }
 
+export function convertProcessSignalToExitCode(signalCode: string): number {
+  validateOneOf(signalCode, 'signalCode', signalNames);
+
+  // POSIX standard: exit code for signal termination is 128 + signal number.
+  return 128 + (signals[signalCode as keyof typeof signals] as number);
+}
+
+// Workers never receive SIGINT, so there is no stack trace to print.
+export function setTraceSigInt(_enable: boolean): void {}
+
 export function _errnoException(): void {
   // TODO(soon): We might support this in the future.
   throw new ERR_METHOD_NOT_IMPLEMENTED('_errnoException');
@@ -455,6 +468,8 @@ export default {
   getCallSite,
   getCallSites,
   isDeepStrictEqual,
+  convertProcessSignalToExitCode,
+  setTraceSigInt,
   _errnoException,
   _exceptionWithHostPort,
 

@@ -4,6 +4,14 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript URL (the TS_URL autogate) is only an own property of the
+// global, as WebIDL installs an interface; JSG puts the C++ one on the
+// global's prototype (src/tests/url/api-surface.js).
+const usingTsUrl = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis) as object,
+  'URL'
+);
+
 export default {
   'IdnaTestV2-removed.any.js': {},
   'IdnaTestV2.any.js': {
@@ -23,9 +31,9 @@ export default {
   'idlharness.any.js': {
     comment:
       'IDL tests fail because Workers exposes globals differently than browsers (not as own properties of self)',
-    expectedFailures: [
-      'URLSearchParams interface: iterable<USVString, USVString>',
-    ],
+    expectedFailures: usingTsUrl
+      ? []
+      : ['URLSearchParams interface: iterable<USVString, USVString>'],
   },
   'javascript-urls.window.js': {
     comment: 'Implement `globalThis.document`',

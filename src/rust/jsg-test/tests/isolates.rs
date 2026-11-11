@@ -228,12 +228,15 @@ fn resource_wrapped_in_another_isolate_panics() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let mut thing = None;
+    // Cloned in A, since cloning in B panics too; leaked by the panic.
+    let mut leaked = None;
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let created = jsg::Rc::new(lock, Thing);
-        let value = created.clone().to_js(lock)?;
+        let value = created.clone(lock).to_js(lock)?;
         // Keep the wrapper alive so it is not collected before B tries to reuse it.
         wrapper = Some(v8::TracedGlobal::new(lock, value));
+        leaked = Some(created.clone(lock));
         thing = Some(created);
         Ok(())
     });
@@ -241,7 +244,7 @@ fn resource_wrapped_in_another_isolate_panics() {
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         b.run_in_context(|lock, _ctx| {
-            let _value = thing.clone().to_js(lock)?;
+            let _value = leaked.take().expect("cloned in A").to_js(lock)?;
             Ok(())
         });
     }));
@@ -269,10 +272,13 @@ fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let mut thing = None;
+    // Cloned in A, since cloning in B panics too; leaked by the panic.
+    let mut leaked = None;
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let created = jsg::Rc::new(lock, Thing);
-        let value = created.clone().to_js(lock)?;
+        let value = created.clone(lock).to_js(lock)?;
+        leaked = Some(created.clone(lock));
         thing = Some(created);
         wrapper = Some(v8::TracedGlobal::new(lock, value));
         Ok(())
@@ -288,7 +294,7 @@ fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
             let thrown = thrower.call(lock, None, &[]);
             assert!(thrown.as_ref().is_err_and(jsg::Error::is_pending));
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                drop(thing.clone().to_js(lock));
+                drop(leaked.take().expect("cloned in A").to_js(lock));
             }));
             let payload = result.expect_err("wrapping a resource of A in B must panic");
             assert_eq!(
@@ -316,15 +322,19 @@ fn resource_created_in_another_isolate_panics_when_wrapped() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let mut thing = None;
+    // Cloned in A, since cloning in B panics too; leaked by the panic.
+    let mut leaked = None;
     a.run_in_context(|lock, _ctx| {
-        thing = Some(jsg::Rc::new(lock, Thing));
+        let created = jsg::Rc::new(lock, Thing);
+        leaked = Some(created.clone(lock));
+        thing = Some(created);
         Ok(())
     });
     let thing = thing.expect("created in A");
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         b.run_in_context(|lock, _ctx| {
-            let _value = thing.clone().to_js(lock)?;
+            let _value = leaked.take().expect("cloned in A").to_js(lock)?;
             Ok(())
         });
     }));
@@ -337,6 +347,57 @@ fn resource_created_in_another_isolate_panics_when_wrapped() {
     a.run_in_context(move |lock, _ctx| {
         let value = thing.to_js(lock)?;
         assert!(value.is_object());
+        Ok(())
+    });
+}
+
+/// Every operation on a `jsg::Rc` or `jsg::Weak` but dropping that reaches the resource or the
+/// reference counts takes a lock of the resource's isolate, since only that isolate's lock guards
+/// them.
+#[test]
+fn rc_used_in_another_isolate_panics() {
+    const MESSAGE: &str =
+        "attempt to use a jsg::Rc in an isolate other than the one it was created in";
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut thing = None;
+    let mut weak = None;
+    a.run_in_context(|lock, _ctx| {
+        let created = jsg::Rc::new(lock, Thing);
+        weak = Some(created.downgrade(lock));
+        thing = Some(created);
+        Ok(())
+    });
+    let thing = thing.expect("created in A");
+    let weak = weak.expect("created in A");
+
+    b.run_in_context(|lock, _ctx| {
+        let panics = |what: &str, f: &mut dyn FnMut()| {
+            let payload = std::panic::catch_unwind(AssertUnwindSafe(f))
+                .expect_err(&format!("{what} in B must panic"));
+            panic_message(&*payload).to_owned()
+        };
+        assert_eq!(panics("get", &mut || _ = thing.get(lock)), MESSAGE);
+        assert_eq!(panics("clone", &mut || drop(thing.clone(lock))), MESSAGE);
+        assert_eq!(
+            panics("downgrade", &mut || drop(thing.downgrade(lock))),
+            MESSAGE
+        );
+        let weak_message = MESSAGE.replace("jsg::Rc", "jsg::Weak");
+        assert_eq!(
+            panics("upgrade", &mut || drop(weak.upgrade(lock))),
+            weak_message
+        );
+        assert_eq!(
+            panics("is_alive", &mut || _ = weak.is_alive(lock)),
+            weak_message
+        );
+        Ok(())
+    });
+
+    a.run_in_context(move |lock, _ctx| {
+        assert!(weak.upgrade(lock).is_some());
+        drop(thing);
         Ok(())
     });
 }
@@ -367,6 +428,7 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
         Ok(())
     });
     let mut holder = None;
+    let mut holder_ptr: *const TracedGlobalHolder = std::ptr::null();
     b.run_in_context(|lock, ctx| {
         let created = jsg::Rc::new(
             lock,
@@ -375,18 +437,111 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
             },
         );
         // Wrapping the holder in B visits the `TracedGlobal`, and so does every GC of B.
-        ctx.set_global(lock, "holder", created.clone());
+        ctx.set_global(lock, "holder", created.clone(lock));
+        holder_ptr = created.get(lock);
         holder = Some(created);
         crate::Harness::request_gc(lock);
         Ok(())
     });
-    let holder = holder.expect("created in B");
+    let _holder = holder.expect("created in B");
 
     a.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
-        let global = holder.handle.take(lock).expect("set above");
+        // SAFETY: deliberately reaches B's resource under A's lock, to take out A's
+        // `TracedGlobal`. `_holder` keeps the resource alive, and no thread uses B meanwhile.
+        #[expect(unsafe_code, reason = "reads a resource of B under the lock of A")]
+        let holder_in_a = unsafe { &*holder_ptr };
+        let global = holder_in_a.handle.take(lock).expect("set above");
         assert!(global.as_local(lock).is_object());
         drop(global);
+        Ok(())
+    });
+}
+
+#[jsg_resource]
+struct RcHolder {
+    thing: jsg::Cell<Option<jsg::Rc<Thing>>>,
+}
+
+#[jsg_resource]
+impl RcHolder {}
+
+/// Detaching a `jsg::Rc` changes its counts, which only its own isolate's lock guards, so taking
+/// one of another isolate out of a `jsg::Cell` panics. B runs on a thread of its own, which doesn't
+/// hold A's lock, as in production: a harness holds its isolate's lock while it exists.
+#[test]
+fn rc_of_another_isolate_detached_panics() {
+    let a = crate::Harness::new();
+    let mut thing = None;
+    a.run_in_context(|lock, _ctx| {
+        thing = Some(jsg::Rc::new(lock, Thing));
+        Ok(())
+    });
+
+    std::thread::spawn(move || {
+        crate::Harness::new().run_in_context(|lock, _ctx| {
+            let holder = jsg::Rc::new(
+                lock,
+                RcHolder {
+                    thing: jsg::Cell::new(thing.take()),
+                },
+            );
+            let payload = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                drop(holder.get(lock).thing.take(lock));
+            }))
+            .expect_err("detaching A's jsg::Rc in B must panic");
+            assert_eq!(
+                panic_message(&*payload),
+                "attempt to use a jsg::Rc in an isolate other than the one it was created in"
+            );
+            Ok(())
+        });
+    })
+    .join()
+    .expect("B's thread");
+    // A releases its resource, which B's drop queued, at its next lock.
+    a.run_in_context(|_lock, _ctx| Ok(()));
+}
+
+/// GC of one isolate leaves alone a `jsg::Rc` of another that a resource of the first holds.
+/// Visiting it would change counts that only the other isolate's lock guards. Debug builds
+/// assert instead, in a visit made from C++, where a panic aborts.
+#[test]
+#[cfg(not(debug_assertions))]
+fn gc_of_another_isolate_leaves_an_rc_alone() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut thing = None;
+    a.run_in_context(|lock, _ctx| {
+        thing = Some(jsg::Rc::new(lock, Thing));
+        Ok(())
+    });
+    let mut holder = None;
+    let mut holder_ptr: *const RcHolder = std::ptr::null();
+    b.run_in_context(|lock, ctx| {
+        let created = jsg::Rc::new(
+            lock,
+            RcHolder {
+                thing: jsg::Cell::new(thing.take()),
+            },
+        );
+        // Wrapping the holder in B visits the `jsg::Rc`, and so does every GC of B.
+        ctx.set_global(lock, "holder", created.clone(lock));
+        holder_ptr = created.get(lock);
+        holder = Some(created);
+        crate::Harness::request_gc(lock);
+        Ok(())
+    });
+    let _holder = holder.expect("created in B");
+
+    a.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        // SAFETY: deliberately reaches B's resource under A's lock, to take out A's `jsg::Rc`.
+        // `_holder` keeps the resource alive, and no thread uses B meanwhile.
+        #[expect(unsafe_code, reason = "reads a resource of B under the lock of A")]
+        let holder_in_a = unsafe { &*holder_ptr };
+        let thing = holder_in_a.thing.take(lock).expect("set above");
+        let _thing: &Thing = thing.get(lock);
         Ok(())
     });
 }

@@ -128,7 +128,8 @@ impl<'s> IoContext<'s> {
     /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
     /// `future` and its output are `Send` because the future is polled without the isolate lock.
-    /// That keeps values bound to the isolate, such as a `jsg::Rc`, out of it.
+    /// A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since every other use takes a
+    /// [`jsg::Lock`], which the future doesn't have.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.

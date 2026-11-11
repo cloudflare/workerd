@@ -64,18 +64,19 @@ fn lenient_conversions_preserve_convertible_states() {
 
 #[test]
 fn tracing_visits_only_some() {
-    use std::cell::Cell;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use crate::Traced;
     use crate::v8;
 
-    struct Edge<'a>(&'a Cell<usize>);
+    struct Edge<'a>(&'a AtomicUsize);
     impl Traced for Edge<'_> {
         fn trace(&self, _visitor: &mut v8::GcVisitor) {
-            self.0.set(self.0.get() + 1);
+            self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
-    let visits = Cell::new(0);
+    let visits = AtomicUsize::new(0);
     let mut visitor = v8::GcVisitor {
         handle: v8::ffi::GcVisitor { ptr: 0 },
         mode: v8::VisitMode::Visit,
@@ -83,5 +84,5 @@ fn tracing_visits_only_some() {
     NullOrUndefined::Some(Edge(&visits)).trace(&mut visitor);
     NullOrUndefined::<Edge<'_>>::Null.trace(&mut visitor);
     NullOrUndefined::<Edge<'_>>::Undefined.trace(&mut visitor);
-    assert_eq!(visits.get(), 1);
+    assert_eq!(visits.load(Ordering::Relaxed), 1);
 }

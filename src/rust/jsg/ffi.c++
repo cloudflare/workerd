@@ -1716,8 +1716,17 @@ void drainAwaitingLock(v8::Isolate* isolate) {
 
 // The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
 // IsolateState that it hands over as data.
-void isolateDisposed(void* data) {
-  isolate_disposed(static_cast<const IsolateState*>(data));
+void isolateDisposeHook(void* data, ::workerd::jsg::IsolateBase::DisposeStage stage) {
+  auto* state = static_cast<const IsolateState*>(data);
+  switch (stage) {
+    case ::workerd::jsg::IsolateBase::DisposeStage::DISPOSING:
+      isolate_disposing(state);
+      return;
+    case ::workerd::jsg::IsolateBase::DisposeStage::DISPOSED:
+      isolate_disposed(state);
+      return;
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
@@ -1734,7 +1743,7 @@ void realm_attach(Isolate* isolate, Realm& realm) {
 void realm_detach(Isolate* isolate, const IsolateState* state) {
   auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
   isolateBase.setDeferredActionHook(nullptr);
-  isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
+  isolateBase.setDisposeHook(&isolateDisposeHook, const_cast<IsolateState*>(state));
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 

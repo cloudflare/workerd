@@ -487,11 +487,13 @@ class IsolateBase {
     deferredActionHook = hook;
   }
 
-  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
-  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
-  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
-  // destructor may do it.
-  using DisposeHook = void (*)(void* data);
+  // A function that ~IsolateBase() calls with `data` twice: with DISPOSING just before the
+  // isolate is disposed, so that another layer stops using the isolate pointer, and with DISPOSED
+  // once it is, so that the layer can free memory that V8 may write into until then. The Rust JSG
+  // Realm, of which an isolate has at most one, sets it when it is dropped. Setting it does not
+  // allocate, so a destructor may do it.
+  enum class DisposeStage { DISPOSING, DISPOSED };
+  using DisposeHook = void (*)(void* data, DisposeStage stage);
   void setDisposeHook(DisposeHook hook, void* data) {
     disposeHook = hook;
     disposeHookData = data;
@@ -1472,23 +1474,25 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
-      uint32_t badTagFieldsCount = 0;
       WrappableDeserializeMetadata metadata;
+      kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
         options.internalFieldsDeserializer =
-            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
             v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
+        abortOnGc.emplace(v8Isolate, metadata);
       }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      abortOnGc = kj::none;
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      KJ_REQUIRE(badTagFieldsCount == 0,
+      KJ_REQUIRE(metadata.badTagFieldsCount == 0,
           "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
           "wrapper markers",
-          badTagFieldsCount);
+          metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.finishWrappableDeserializeMetadata(metadata);
       }

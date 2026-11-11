@@ -4876,12 +4876,54 @@ impl GcVisitor {
     ///
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
+    ///
+    /// The visit changes the `jsg::Rc`'s counts, so it leaves alone an `Rc` of an isolate whose
+    /// lock this visit doesn't hold; see [`GcVisitor::may_change_in`].
+    ///
+    /// # Panics
+    /// Panics in a detaching visit if `r` belongs to an isolate other than the lock's, or to
+    /// one that is closed.
     pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
+        if !self.may_change_in(r.isolate_state(), "jsg::Rc") {
+            return;
+        }
         if self.is_detaching() {
             r.detach();
         } else {
             r.visit(self);
         }
+    }
+
+    /// Whether this visit may change a reference of the isolate of `state`, whose counts only
+    /// that isolate's lock guards:
+    ///
+    /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
+    ///   another, or of a closed isolate.
+    /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
+    ///   reference as it is: a strong reference stays strong, so its target leaks rather than
+    ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
+    ///   still runs until it is disposed.
+    /// - The visit for a resource's first strong reference has no isolate; it may change the
+    ///   reference only if this thread holds the lock of the reference's isolate.
+    pub(crate) fn may_change_in(&mut self, state: &IsolateState, what: &str) -> bool {
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                !state.is_closed() && state.belongs_to(isolate),
+                "attempt to use a {what} in an isolate other than the one it was created in"
+            );
+            return true;
+        }
+        // SAFETY: the visitor is valid for the duration of the visit.
+        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
+        if visiting.is_null() {
+            return state.this_thread_holds_lock();
+        }
+        let own = state.belongs_to(visiting);
+        debug_assert!(
+            own,
+            "a {what} was visited on behalf of an isolate other than its own"
+        );
+        own && !state.is_closed()
     }
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
@@ -5074,6 +5116,7 @@ impl IsolatePtr {
     }
 
     /// Returns the raw pointer to the V8 isolate.
+    #[inline]
     pub fn as_ffi(&self) -> *mut ffi::Isolate {
         self.handle.as_ptr()
     }
@@ -5096,51 +5139,54 @@ impl IsolatePtr {
 /// `Clone` / `Drop` only affect the `KjRc` refcount (`kj::Rc` reference counting).
 /// GC strong-ref tracking (`addStrongRef` / `removeStrongRef`) is handled by
 /// `Rc<R>`, not here.
+///
+/// It is private to the crate: its `Clone` and `Drop` change the `kj::Rc` count without checking
+/// the isolate lock, so it is used only under the lock, or by `Rc<R>` and `Weak<R>`, which
+/// release it as they release their other parts.
 #[derive(Clone)]
-pub struct WrappableRc {
+pub(crate) struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
 }
 
+/// Resolves the receiver `value` of a callback registered without a `v8::Signature`
+/// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
+/// a reference.
+///
+/// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+/// `value` is reachable, which a callback's `this` is for the duration of the call.
+#[doc(hidden)]
+pub fn resolve_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
+    let ptr = unsafe {
+        ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+    };
+    ptr?.resolve::<R>()
+}
+
+/// Like [`resolve_receiver`], for the receiver of a method registered with a
+/// `v8::Signature`.
+///
+/// # Safety
+///
+/// V8 must have checked `value` against the signature of a method of a resource type.
+#[doc(hidden)]
+pub unsafe fn resolve_method_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
+    // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
+    // keeps alive.
+    let ptr =
+        unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
+    ptr?.resolve::<R>()
+}
+
 impl WrappableRc {
-    /// Resolves the receiver `value` of a callback registered without a `v8::Signature`
-    /// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
-    /// a reference.
-    ///
-    /// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
-    /// `value` is reachable, which a callback's `this` is for the duration of the call.
-    #[doc(hidden)]
-    pub fn resolve_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
-        // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
-    /// Like [`Self::resolve_receiver`], for the receiver of a method registered with a
-    /// `v8::Signature`.
-    ///
-    /// # Safety
-    ///
-    /// V8 must have checked `value` against the signature of a method of a resource type.
-    #[doc(hidden)]
-    pub unsafe fn resolve_method_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
-        // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
-        // keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable
@@ -5148,8 +5194,7 @@ impl WrappableRc {
     ///
     /// The C++ `unwrap_resource` returns `None` when the value doesn't contain
     /// a Rust Wrappable.
-    #[doc(hidden)]
-    pub fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
+    pub(crate) fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); value handle is valid.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
             unsafe { ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) }.into();
@@ -5197,7 +5242,7 @@ impl WrappableRc {
     /// V8 has already created the `this` object from the `FunctionTemplate`'s
     /// `InstanceTemplate`; this method attaches the Wrappable to it via
     /// `CppgcShim` so that instance methods can resolve the resource.
-    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
+    pub(crate) fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
         // SAFETY: info is valid for the duration of the callback.
         let pin = unsafe { std::pin::Pin::new_unchecked(&mut *info.0) };
         // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches

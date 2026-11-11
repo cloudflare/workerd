@@ -621,9 +621,6 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
 
 jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    return encodeUtf8WithV8(js, str);
-  }
   return encodeUtf8WithSimdutf(js, str);
 }
 
@@ -713,15 +710,6 @@ EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    auto result = input.writeInto(
-        js, buffer.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(result.read),
-      .written = static_cast<int>(result.written),
-    };
-  }
-
   auto outputBuf = buffer.asArrayPtr<char>();
   EncodedPrefix encoded;
   {
