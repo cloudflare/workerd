@@ -68,14 +68,21 @@ fn is_interactive() -> bool {
 }
 
 /// Runs the console until the input ends or `.exit`, sending `requests` to the session; the
-/// session ends when the console drops them.
-pub fn run(requests: mpsc::UnboundedSender<Request>) {
+/// session ends when the console drops them. `first_input`, if any, runs before the first prompt,
+/// shown as if typed at it.
+pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>) {
     eprintln!("{BANNER}");
     let mut console = Console {
         requests,
         input: String::new(),
         scanner: Scanner::default(),
     };
+    if let Some(input) = first_input {
+        eprintln!("{PROMPT}{input}");
+        if console.evaluate(input) == Next::Exit {
+            return;
+        }
+    }
     let result = if is_interactive() {
         console.run_interactive()
     } else {

@@ -490,6 +490,15 @@ pub struct DeployArgs {
 
 #[derive(Args, Debug)]
 pub struct ReplArgs {
+    /// A config to load before the first prompt, into the global `s`: a Cap'n Proto config
+    /// (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, as for `serve`.
+    #[arg(value_name = "config-file")]
+    pub config_file: Option<String>,
+
+    /// For a Cap'n Proto <config-file>, the constant that contains the config, as for `serve`.
+    #[arg(value_name = "const-name", requires = "config_file")]
+    pub const_name: Option<String>,
+
     /// Give the REPL's JavaScript the behavior of this compatibility date. Defaults to today.
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,

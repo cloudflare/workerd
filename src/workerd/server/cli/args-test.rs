@@ -387,3 +387,18 @@ fn compiled_binary_has_no_config_arguments() {
     assert_eq!(main.serve.socket_addr_overrides.len(), 1);
     assert!(CompiledMain::try_parse_from(["workerd", "config.capnp"]).is_err());
 }
+
+#[test]
+fn repl_config_to_load() {
+    let repl = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl
+    };
+    let none = repl(&["repl", "--experimental"]);
+    assert_eq!(none.config_file, None);
+    let config = repl(&["repl", "--experimental", "config.capnp", "dev"]);
+    assert_eq!(config.config_file.as_deref(), Some("config.capnp"));
+    assert_eq!(config.const_name.as_deref(), Some("dev"));
+}
