@@ -18,8 +18,6 @@ async function blobs(env) {
   return out.sort();
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 export const getPutDelete = {
   async test(ctrl, env) {
     assert.strictEqual(await env.KV.get('missing'), null);
@@ -166,23 +164,24 @@ export const threshold = {
   },
 };
 
-// An overwritten or deleted blob is deleted once its grace period, shortened
-// by `TEST_CLOCK`, is over.
+// An overwritten or deleted blob is deleted once its grace period is over,
+// which `TEST_CLOCK`'s POST /gc skips to.
 export const blobGc = {
   async test(ctrl, env) {
-    await sleep(500);
+    const gc = () => env.KV_WORKER.fetch('http://kv/gc', { method: 'POST' });
+    await gc();
     const before = await blobs(env);
     const big = (c) => c.repeat(100_000);
     await env.KV.put('gc', big('a'));
     await env.KV.put('gc', big('b'));
     assert.strictEqual((await blobs(env)).length, before.length + 2);
     assert.strictEqual(await env.KV.get('gc'), big('b'));
-    await sleep(500);
+    await gc();
     assert.strictEqual((await blobs(env)).length, before.length + 1);
     await env.KV.put('gc', 'small');
     await env.KV.put('gc2', big('c'));
     await env.KV.delete('gc2');
-    await sleep(500);
+    await gc();
     assert.deepStrictEqual(await blobs(env), before);
     assert.strictEqual(await env.KV.get('gc'), 'small');
     assert.strictEqual(await env.KV.get('gc2'), null);

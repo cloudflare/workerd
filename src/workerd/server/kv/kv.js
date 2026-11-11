@@ -46,9 +46,11 @@
 // them, so entries are small; blobs never change, so `BLOB_CACHE` needs no
 // invalidation.
 //
-// With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock for
-// expiry and the entry cache, for tests; blob collection keeps the real
-// clock.
+// With `TEST_CLOCK`, for tests, POST /clock?advance=<ms> moves this
+// process's clock for expiry and the entry cache, and POST /gc deletes the
+// namespace's unnamed blobs as though their grace period were over. Blob
+// collection keeps the real clock, and its grace period outlasts a test, so
+// that a test sees blobs deleted only when it asks.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -66,9 +68,10 @@ const CACHE_BYTES = 64 * 1024 * 1024;
 // A reserved blob unclaimed this long is deleted.
 const RESERVE_MS = 600_000;
 // A blob no row names is deleted this much later, which spares readers
-// that read the row a moment before a retry; less under `TEST_CLOCK`.
+// that read the row a moment before a retry; under `TEST_CLOCK`, longer
+// than a test runs.
 const GRACE_MS = 2_000;
-const TEST_GRACE_MS = 100;
+const TEST_GRACE_MS = 600_000;
 const READS = 3;
 const BLOB_CACHE_BYTES = 1024 * 1024 * 1024;
 
@@ -137,6 +140,10 @@ async function serve(request, env, ns) {
           return fail(400, 'advance must be a number of milliseconds.');
         }
         skew += advance;
+        return new Response(null);
+      }
+      if (path === '/gc' && env.TEST_CLOCK) {
+        await space.shard.collectAll();
         return new Response(null);
       }
       break;
@@ -712,6 +719,18 @@ export class KVNamespace extends DurableObject {
   // Deletes expired rows and due blobs, then waits for the next.
   async alarm() {
     this.#alarm = null;
+    await this.#sweep(Date.now());
+  }
+
+  // The alarm's work, but with every unnamed blob's grace period over: POST
+  // /gc, for tests.
+  async collectAll() {
+    await this.#sweep(Date.now() + this.#grace());
+  }
+
+  // Deletes expired rows, due blobs, and unclaimable blobs due by `dueBy`,
+  // then waits for the next.
+  async #sweep(dueBy) {
     const now = Date.now();
     const expired = this.sql.exec(
       'SELECT key FROM entries WHERE expiration <= ? LIMIT 1000',
@@ -721,7 +740,12 @@ export class KVNamespace extends DurableObject {
     // A due blob stays in `garbage` until its delete succeeds, unclaimable
     // and due again a grace period later, so a crash cannot leak it.
     const due = this.sql
-      .exec('SELECT blob FROM garbage WHERE due <= ? LIMIT 100', now)
+      .exec(
+        `SELECT blob FROM garbage
+         WHERE due <= ? OR (key IS NULL AND due <= ?) LIMIT 100`,
+        now,
+        dueBy
+      )
       .toArray();
     for (const { blob } of due) this.#collect(blob, now + this.#grace());
     await Promise.all(
