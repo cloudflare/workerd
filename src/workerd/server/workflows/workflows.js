@@ -111,6 +111,7 @@ const EVENT_TYPES = new Set([
 ]);
 const BACKOFF = new Set(['constant', 'linear', 'exponential']);
 const TIMEOUT = Symbol('timeout');
+const DELETED = 'The Workflow instance was deleted';
 
 let skew = 0;
 const clock = () => Date.now() + skew;
@@ -1113,9 +1114,15 @@ export class Engine extends DurableObject {
     return new Subscription(next, () => (done = true));
   }
 
-  destroy() {
+  // Ends the `run()` in memory too, whose call this may be: the object
+  // aborts, and the binding takes `DELETED` as done.
+  async destroy() {
     if (!this.#meta) throw notFound();
+    const live = this.#drive;
     this.#destroy();
+    if (!live) return;
+    await this.ctx.storage.sync();
+    this.ctx.abort(DELETED);
   }
 }
 
@@ -1279,7 +1286,15 @@ export class WorkflowBinding extends WorkerEntrypoint {
 
   async deleteInstance(id) {
     if (typeof id !== 'string' || !ADDRESS.test(id)) throw invalidId();
-    await this.#instance(id).destroy();
+    await this.#destroy(id);
+  }
+
+  #destroy(id) {
+    return this.#instance(id)
+      .destroy()
+      .catch((e) => {
+        if (!String(e?.message).includes(DELETED)) throw e;
+      });
   }
 
   async deleteBatch(options) {
@@ -1296,7 +1311,7 @@ export class WorkflowBinding extends WorkerEntrypoint {
     }
     const unique = [...new Set(ids)];
     const results = await Promise.allSettled(
-      unique.map((id) => this.#instance(id).destroy())
+      unique.map((id) => this.#destroy(id))
     );
     const outcome = new Map(unique.map((id, i) => [id, results[i]]));
     const out = { deleted: [], errors: [] };

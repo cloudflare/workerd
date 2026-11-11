@@ -37,6 +37,11 @@ export class Flow extends WorkflowEntrypoint {
       case 'many':
         for (const name of ['a', 'b', 'c', 'd']) await once(name);
         return;
+      case 'self-delete':
+        await once('a');
+        await (await this.env.FLOW.get(id)).delete();
+        ran.push(`${id}/after`);
+        return;
       case 'void':
         return step.do('v', async () => {});
       case 'dispose':
@@ -90,12 +95,8 @@ export class Flow extends WorkflowEntrypoint {
         const config = { retries: { limit: 0, delay: 0 }, timeout: '1 minute' };
         return step.do('slow', config, () => signal(`${id}/slow`).promise);
       }
-      case 'hold': {
-        const held = () => signal(`${id}/held`).promise;
-        const value = await step.do('held', held).catch((e) => e.message);
-        signal(`${id}/ended`).resolve(value);
-        return value;
-      }
+      case 'hold':
+        return step.do('held', () => signal(`${id}/held`).promise);
       case 'retry': {
         const retries = { limit: 2, delay: '1 second', backoff: 'constant' };
         return step.do('flaky', { retries }, async (ctx) => {
@@ -325,13 +326,20 @@ export let recreate = {
     const instance = await create(env, 'held', 'event');
     await until(instance, 'wait_started');
     signal('held/held').resolve('old');
-    assert.match(
-      await signal('held/ended').promise,
-      /run of the instance has ended/
-    );
     await instance.sendEvent({ type: 'ping', payload: 'new' });
     await until(instance, 'workflow_completed');
     assert.strictEqual((await instance.status()).output, 'new');
+  },
+};
+
+// An instance that deletes itself stops there.
+export let selfDelete = {
+  async test(ctrl, env) {
+    await assert.rejects(until(await create(env, 'self', 'self-delete'), '-'));
+    await assert.rejects(env.FLOW.get('self'), /not_found/);
+    // By its end, code after the delete would have run.
+    await until(await create(env, 'self', 'steps'), 'workflow_completed');
+    assert.deepEqual(ranBy('self'), ['self/a', 'self/a', 'self/b']);
   },
 };
 
