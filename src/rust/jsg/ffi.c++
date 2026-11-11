@@ -704,6 +704,12 @@ bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value
   return v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
 }
 
+MaybeLocal local_array_get(Isolate* isolate, const Local& array, uint32_t index) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto context = isolate->GetCurrentContext();
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Array>(array)->Get(context, index));
+}
+
 // Local<ArrayBuffer>
 Local local_new_array_buffer(Isolate* isolate, const uint8_t* data, size_t length) {
   auto backingStore = v8::ArrayBuffer::NewBackingStore(isolate, length);
@@ -1006,8 +1012,11 @@ const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
 // returns, then opened in the caller's HandleScope. For an array in dictionary mode, Iterate()
 // passes only the elements that exist, so holes are left to the caller, and the memory used here
 // is bounded by the elements V8 holds, whatever the array's length.
-bool local_array_iterate(
-    Isolate* isolate, Local value, ::rust::Vec<ArrayElement>& result, uint32_t& length) {
+bool local_array_iterate(Isolate* isolate,
+    Local value,
+    ArrayIterateUntil until,
+    ::rust::Vec<ArrayElement>& result,
+    uint32_t& length) {
   if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
@@ -1024,15 +1033,19 @@ bool local_array_iterate(
   };
   struct Data {
     Isolate* isolate;
+    ArrayIterateUntil until;
     kj::Vector<Element> elements;
   };
-  Data data{isolate, kj::Vector<Element>(kj::min(arr->Length(), MAX_RESERVED))};
+  Data data{isolate, until, kj::Vector<Element>(kj::min(arr->Length(), MAX_RESERVED))};
 
   auto iterateResult = arr->Iterate(context,
       [](uint32_t index, v8::Local<v8::Value> element,
           void* userData) -> v8::Array::CallbackResult {
     auto* d = static_cast<Data*>(userData);
     d->elements.add(Element{index, v8::Global<v8::Value>(d->isolate, element)});
+    if (d->until == ArrayIterateUntil::Object && element->IsObject()) {
+      return v8::Array::CallbackResult::kBreak;
+    }
     return v8::Array::CallbackResult::kContinue;
   },
       &data);

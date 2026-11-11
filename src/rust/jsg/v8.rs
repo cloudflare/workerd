@@ -48,6 +48,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -90,6 +91,16 @@ pub mod ffi {
     struct ArrayElement {
         index: u32,
         value: Local,
+    }
+
+    /// Where [`Local::<Array>::iterate`](super::Local::iterate) stops reading.
+    #[repr(u8)]
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ArrayIterateUntil {
+        /// After the last element.
+        End,
+        /// After the first element that is an object, or after the last.
+        Object,
     }
 
     #[derive(Debug)]
@@ -522,11 +533,18 @@ pub mod ffi {
             index: u32,
             value: Local,
         ) -> bool;
+        // Leaves what a getter throws pending; see `call_into_js()`.
+        pub unsafe fn local_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: u32,
+        ) -> MaybeLocal;
         // Leaves what a getter or Proxy trap on an element throws pending; see
         // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
+            until: ArrayIterateUntil,
             result: &mut Vec<ArrayElement>,
             length: &mut u32,
         ) -> Result<bool>;
@@ -2261,16 +2279,42 @@ impl<'s> Local<'s, Array> {
         })
     }
 
+    /// Reads element `index`, like JS `array[index]`: a hole reads through the prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a getter, on the array or its prototype chain, throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn get(self, lock: &mut Lock<'s>, index: u32) -> crate::Result<Local<'s, Value>> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_array_get(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    index,
+                ))
+            })
+        })
+    }
+
     /// Reads every element that exists, using V8's native `Array::Iterate()`, as a handle in the
-    /// current scope. Each index below [`ArrayElements::length`] without an element is a hole,
-    /// which reads as `undefined`.
+    /// current scope, up to `until`. Each index below [`ArrayElements::length`] without an element
+    /// is a hole, which reads as `undefined`.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<ArrayElements<'s>> {
+    pub fn iterate(
+        self,
+        lock: &mut Lock<'s>,
+        until: ArrayIterateUntil,
+    ) -> crate::Result<ArrayElements<'s>> {
         call_into_js(lock, |lock| {
             let mut elements = Vec::new();
             let mut length = 0;
@@ -2279,6 +2323,7 @@ impl<'s> Local<'s, Array> {
                 ffi::local_array_iterate(
                     lock.isolate().as_ffi(),
                     self.into_ffi(),
+                    until,
                     &mut elements,
                     &mut length,
                 )
@@ -3003,6 +3048,8 @@ macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
+
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> std::string::String {
                 $name.to_owned()

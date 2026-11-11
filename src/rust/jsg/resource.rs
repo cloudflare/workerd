@@ -217,6 +217,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = UnionMember::Resource;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
     fn type_name() -> String {
         R::class_name().to_owned()

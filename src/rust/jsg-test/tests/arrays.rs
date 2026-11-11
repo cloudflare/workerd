@@ -529,6 +529,67 @@ fn vec_from_js_reads_getters_holes_and_inherited_elements() {
     });
 }
 
+/// Each element converts before the next is read, as in C++ JSG and Web IDL, when a conversion
+/// runs script.
+#[test]
+fn vec_from_js_converts_each_element_before_reading_the_next() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.log = [];
+             globalThis.element = (i) => ({ valueOf() { log.push(`convert ${i}`); return i; } });",
+        )
+        .unwrap();
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [element(0), , element(2)];
+                     Object.defineProperty(arr, 1, {
+                         get() { log.push('get 1'); return element(1); },
+                     });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 1.0, 2.0]);
+        assert_eq!(
+            ctx.eval::<String>(lock, "log.join()").unwrap(),
+            "convert 0,get 1,convert 1,convert 2"
+        );
+
+        // A conversion that changes the array changes the elements read after it.
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [{ valueOf() { arr[1] = 10; arr.push(20); return 0; } }, 1];
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 10.0, 20.0]);
+
+        // A conversion that throws stops the reads.
+        let arr = ctx
+            .eval_raw(
+                lock,
+                "log = [];
+                 (() => {
+                     const arr = [{ valueOf() { throw new Error('stop'); } }, 1];
+                     Object.defineProperty(arr, 1, { get() { log.push('get 1'); return 1; } });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        let caught = lock.try_catch(|lock| <Vec<f64> as jsg::FromJS>::from_js(lock, arr))?;
+        assert!(caught.is_err());
+        assert_eq!(ctx.eval::<String>(lock, "log.join()").unwrap(), "");
+        Ok(())
+    });
+}
+
 /// Holes convert as `undefined` for an array in dictionary mode too, for which V8's
 /// `Array::Iterate()` passes only the elements that exist.
 #[test]

@@ -138,6 +138,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
             type ResultType = jsg::Rc<Self>;
 
             const UNION_MEMBER: jsg::UnionMember = jsg::UnionMember::Resource;
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> String {
                 <Self as jsg::Type>::class_name().to_owned()

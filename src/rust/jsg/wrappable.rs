@@ -451,6 +451,13 @@ pub trait FromJS<'s>: Sized {
     #[doc(hidden)]
     const UNION_MEMBER: UnionMember = UnionMember::Fallible;
 
+    /// Whether converting an object to this type can run script, such as a getter, a Proxy trap
+    /// or a `valueOf`. Converting a value that isn't an object must never run script. `Vec`
+    /// reads elements ahead of their conversion only while no conversion can run script, so a
+    /// type that reads nothing from an object it converts sets this to false.
+    #[doc(hidden)]
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = true;
+
     /// Converts `value` during `pass` of a union conversion, or returns
     /// `Ok(None)` if this type does not take part in `pass` or does not match.
     /// A union overrides this to try its own variants, which flattens nested
@@ -499,6 +506,7 @@ impl<'s> FromJS<'s> for bool {
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = UnionMember::Boolean;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: Self = false;
 
     fn type_name() -> String {
         "boolean".to_owned()
@@ -641,6 +649,7 @@ impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
     type ResultType = T;
 
     const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1162,6 +1171,8 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
 impl<'s, T: FromJS<'s>> FromJS<'s> for Option<T> {
     type ResultType = Option<T::ResultType>;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
+
     fn type_name() -> String {
         T::type_name()
     }
@@ -1209,6 +1220,8 @@ impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
 
     const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
+    // Converts only a value that `T::is_exact()` accepts, which is never an object.
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
     fn type_name() -> String {
         T::type_name()
@@ -1259,6 +1272,8 @@ impl<T: Type> Type for Nullable<T> {
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
+
     fn type_name() -> String {
         T::type_name()
     }
@@ -1288,6 +1303,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
 
 impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
     type ResultType = NullOrUndefined<T::ResultType>;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1326,6 +1343,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
 
 impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
     type ResultType = Lenient<T::ResultType>;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1413,13 +1432,31 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             return Ok(None);
         };
 
-        let v8::ArrayElements { length, elements } = array.iterate(lock)?;
+        // Web IDL and C++ JSG convert each element before reading the next. The elements are read
+        // ahead here instead, up to the first object if converting one can run script: only a
+        // conversion that runs script can change what a later read returns. The difference shows
+        // when a conversion throws, such as a Symbol's to a string: a getter on a later element
+        // has already run, and if it threw, its exception is the one that propagates.
+        let until = if T::OBJECT_CONVERSION_MAY_RUN_SCRIPT {
+            v8::ArrayIterateUntil::Object
+        } else {
+            v8::ArrayIterateUntil::End
+        };
+        let v8::ArrayElements { length, elements } = array.iterate(lock, until)?;
         // Script sets the length, and a sparse array's can be up to 2^32 - 1 with no elements, so
         // a failure to allocate is an error, not an abort.
-        let mut result = Self::new();
-        result.try_reserve_exact(length).map_err(|_| {
+        let too_large = |length: usize| {
             Error::new_range_error(format!("Array of length {length} is too large to convert"))
-        })?;
+        };
+        let mut result = Self::new();
+        result
+            .try_reserve_exact(length)
+            .map_err(|_| too_large(length))?;
+        // If reading stopped at an object, it is the last element read.
+        let stopped = until == v8::ArrayIterateUntil::Object
+            && elements
+                .last()
+                .is_some_and(|(_, element)| element.is_object());
         for (index, element) in elements {
             while result.len() < index {
                 let undefined = lock.undefined();
@@ -1427,9 +1464,24 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             }
             result.push(T::from_js(lock, element)?);
         }
-        while result.len() < length {
-            let undefined = lock.undefined();
-            result.push(T::from_js(lock, undefined)?);
+        if stopped {
+            // The conversion can have changed the array, so the rest is read one element at a
+            // time, each after the previous one converts.
+            while result.len() < array.len() {
+                let Ok(index) = u32::try_from(result.len()) else {
+                    unreachable!("an array's length is a u32");
+                };
+                let element = array.get(lock, index)?;
+                let element = T::from_js(lock, element)?;
+                // A conversion can lengthen the array past the space reserved.
+                result.try_reserve(1).map_err(|_| too_large(array.len()))?;
+                result.push(element);
+            }
+        } else {
+            while result.len() < length {
+                let undefined = lock.undefined();
+                result.push(T::from_js(lock, undefined)?);
+            }
         }
         Ok(Some(result))
     }
@@ -1616,6 +1668,8 @@ where
 impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
     type ResultType = Self;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
     fn type_name() -> String {
         // C++ JSG names `v8::Local<v8::Value>` after `v8::Value`.
         "Value".to_owned()
@@ -1689,6 +1743,7 @@ macro_rules! impl_handle_from_js {
             type ResultType = Self;
 
             const UNION_MEMBER: UnionMember = $member;
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> String {
                 // C++ JSG names `v8::Local<T>` after `T`.
@@ -1760,6 +1815,8 @@ where
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = <v8::Local<'s, M> as FromJS<'s>>::UNION_MEMBER;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool =
+        <v8::Local<'s, M> as FromJS<'s>>::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         <v8::Local<'s, M> as FromJS<'s>>::type_name()
