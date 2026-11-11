@@ -73,8 +73,6 @@ namespace workerd::util {
   V(V8_FAST_API)                                                                                   \
   /* Enable refactor used to consolidate the different tail worker stream implementations. */      \
   V(TAIL_STREAM_REFACTOR)                                                                          \
-  /* Enable fast TextEncoder implementation using simdutf */                                       \
-  V(ENABLE_FAST_TEXTENCODER)                                                                       \
   /* When enabled, reject startTls calls that pass the expectedServerHostname option,              \
     which is not currently supported. When disabled, log the usage instead. */                     \
   V(STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)                                                      \
