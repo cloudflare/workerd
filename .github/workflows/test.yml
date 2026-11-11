@@ -337,6 +337,8 @@ jobs:
       # suite's output is printed in its own group once all of them have
       # finished.
       - name: Run workers-sdk tests
+        # Serially the suites took about 12 minutes, so a run past 30 is hung.
+        timeout-minutes: 30
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
         run: |
@@ -362,12 +364,32 @@ jobs:
             echo "::group::$name (exit $rc, ${seconds}s)"
             cat "$RUNNER_TEMP/$name.log"
             echo "::endgroup::"
+            touch "$RUNNER_TEMP/$name.printed"
             if [ "$rc" != 0 ]; then
               echo "::error::workers-sdk $name tests failed"
               failed=1
             fi
           done
           exit $failed
+
+      # If the step above timed out or was cancelled, it never printed the suite
+      # logs. Print whatever each unprinted suite wrote before it was stopped.
+      - name: Print unfinished workers-sdk test logs
+        if: cancelled() || failure()
+        run: |
+          for log in "$RUNNER_TEMP"/*-unit.log "$RUNNER_TEMP"/*-e2e.log; do
+            [ -f "$log" ] || continue
+            name=$(basename "$log" .log)
+            [ -f "$RUNNER_TEMP/$name.printed" ] && continue
+            status="did not finish"
+            if [ -f "$RUNNER_TEMP/$name.result" ]; then
+              read -r rc seconds < "$RUNNER_TEMP/$name.result"
+              status="exit $rc, ${seconds}s"
+            fi
+            echo "::group::$name ($status)"
+            cat "$log"
+            echo "::endgroup::"
+          done
 
   wpt-report:
     needs: [test-linux]
