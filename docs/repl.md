@@ -84,6 +84,9 @@ one after `)` to divide.
 Each result is printed with Node's `util.inspect()`. An exception prints as `Uncaught` followed by
 the error and its stack.
 
+As in Node's REPL, `_` holds the last result and `_error` the last exception. Assigning to one of
+them keeps the assigned value: it no longer follows the inputs.
+
 ### Top-level `await`
 
 An input that uses `await` outside a function runs inside an async function, and the REPL prints
