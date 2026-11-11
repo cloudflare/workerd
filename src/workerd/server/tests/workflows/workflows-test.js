@@ -171,6 +171,14 @@ export let steps = {
     // Restarted from "b": "a" returns its stored result.
     await instance.restart({ from: { name: 'b' } });
     await until(instance, 'workflow_completed');
+    // Its history keeps the start and "a".
+    const kept = ['workflow_queued', 'workflow_started', 'step_completed'];
+    assert.deepEqual(await history(instance, kept), [
+      ['workflow_queued'],
+      ['workflow_started'],
+      ['step_completed', 'a-1'],
+      ['step_completed', 'b-1'],
+    ]);
     await instance.restart();
     await until(instance, 'workflow_completed');
     assert.deepEqual(ranBy('steps'), [

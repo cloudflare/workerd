@@ -98,6 +98,7 @@ const FINAL = new Set([
   'workflow_errored',
   'workflow_terminated',
 ]);
+const START = new Set(['workflow_queued', 'workflow_started']);
 const TIMEOUT = Symbol('timeout');
 
 let skew = 0;
@@ -926,20 +927,28 @@ export class Engine extends DurableObject {
         );
       }
     }
+    // From a step, the history keeps the start and the steps before it.
+    const kept = steps.slice(0, keep).map(([, r]) => `${r.name}-${r.count}`);
+    const keeps = (e) =>
+      from && (START.has(e.type) || (e.stepName && kept.includes(e.stepName)));
     for (const [key] of steps.slice(keep)) this.#kv.delete(key);
-    for (const prefix of ['e:', 'l:']) {
-      for (const [key] of [...this.#kv.list({ prefix })]) this.#kv.delete(key);
+    for (const [key] of [...this.#kv.list({ prefix: 'e:' })]) {
+      this.#kv.delete(key);
     }
-    const { id, params, created, retention } = m;
+    for (const [key, event] of [...this.#kv.list({ prefix: 'l:' })]) {
+      if (!keeps(event)) this.#kv.delete(key);
+    }
+    const { id, params, created, retention, started } = m;
     this.#kv.put('meta', {
       id,
       params,
       created,
       retention,
+      started: from ? started : undefined,
       status: 'queued',
       generation: crypto.randomUUID(),
     });
-    this.#log('workflow_queued');
+    if (!from) this.#log('workflow_queued');
     this.#drive = null;
     this.#release();
     this.#wake();
