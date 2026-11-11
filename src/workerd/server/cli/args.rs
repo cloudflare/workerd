@@ -257,6 +257,12 @@ pub struct ReplArgs {
     #[arg(long = "compat-flag", value_name = "flag")]
     pub compat_flags: Vec<String>,
 
+    #[arg(long = "autogate", value_name = "name")]
+    pub autogates: Vec<String>,
+
+    #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
+    pub v8_flags: Vec<String>,
+
     #[arg(long)]
     pub experimental: bool,
 }

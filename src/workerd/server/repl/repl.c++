@@ -17,6 +17,8 @@
 #include <kj-rs-tokio/tokio-event-port.h>
 #include <kj-rs/kj-rs.h>
 
+#include <capnp/message.h>
+
 #include <cstring>
 
 namespace workerd::server::repl {
@@ -40,6 +42,34 @@ ReplEnvironmentOptions toEnvironmentOptions(const ReplOptions& options) {
     .experimental = options.experimental,
     .colors = options.colors,
   };
+}
+
+kj::Array<kj::String> toStrings(const ::rust::Vec<::rust::String>& strings) {
+  return KJ_MAP(string, strings) { return kj::str(kj::from<kj_rs::Rust>(string)); };
+}
+
+bool isAutogate(kj::StringPtr name) {
+  for (auto key: util::getAutogateKeys()) {
+    if (kj::str(key) == name) return true;
+  }
+  return false;
+}
+
+// Sets the process's autogates to `names`, each a gate's kebab-case name. Throws if one names no
+// gate, which a config's `autogates` would ignore.
+void initAutogates(kj::ArrayPtr<const kj::String> names) {
+  capnp::MallocMessageBuilder message;
+  auto gates = message.getOrphanage().newOrphan<capnp::List<capnp::Text>>(names.size());
+  for (auto i: kj::indices(names)) {
+    if (!isAutogate(names[i])) {
+      auto known = KJ_MAP(key, util::getAutogateKeys()) { return kj::str(key); };
+      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+          kj::str(
+              "No such autogate: ", names[i], ". The autogates are: ", kj::strArray(known, ", "))));
+    }
+    gates.get().set(i, kj::str("workerd-autogate-", names[i]));
+  }
+  util::Autogate::initAutogate(gates.getReader());
 }
 
 // Loads a config as `workerd serve` does (cli/repl/session.rs).
@@ -67,9 +97,11 @@ class ReplSession::Impl {
       : timer(loop.getTimer()),
         monotonicClock(kj::systemPreciseMonotonicClock()),
         provider(loop.getTimer()),
-        platform(initPlatform()),
+        v8Flags(toStrings(options.v8_flags)),
+        platform(initPlatform(toStrings(options.autogates))),
         v8Platform(*platform),
-        v8System(v8Platform, nullptr, platform.get()),
+        v8System(v8Platform,
+            KJ_MAP(flag, v8Flags) -> kj::StringPtr { return flag; }, platform.get()),
         environment(
             ReplServerResources{
               .v8System = v8System,
@@ -92,14 +124,15 @@ class ReplSession::Impl {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj_rs_io::TokioAsyncIoProvider provider;
+  kj::Array<kj::String> v8Flags;
   kj::Own<v8::Platform> platform;
   WorkerdPlatform v8Platform;
   jsg::V8System v8System;
   ReplEnvironment environment;
 
-  // Autogates are process-wide and set before V8 starts; the REPL's process runs with none.
-  static kj::Own<v8::Platform> initPlatform() {
-    util::Autogate::initAutogate({});
+  // Autogates are process-wide and set before V8 starts.
+  static kj::Own<v8::Platform> initPlatform(kj::Array<kj::String> autogates) {
+    initAutogates(autogates);
     return jsg::defaultPlatform(0);
   }
 };

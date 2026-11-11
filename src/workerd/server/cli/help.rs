@@ -400,11 +400,15 @@ any release.
 Options:
       --compat-date <date>           The REPL's compat date; default: today
       --compat-flag <flag>           Enable a compat flag; repeat for more
+      --autogate <name>              Enable an autogate; repeat for more
+      --v8-flag <flag>               Pass a flag to V8; repeat for more
       --experimental                 Required
       --verbose                      Log to stderr
   -h, --help                         Print this help
   nodejs_compat is on unless a --compat-flag turns it or
-  nodejs_compat_v2 on or off.
+  nodejs_compat_v2 on or off. Autogates are named in kebab-case, as in
+  --autogate=compression-rs. Every config the REPL loads runs with these
+  autogates and V8 flags, not its own autogates and v8Flags.
 ";
 
 pub const COMPILED: &str = concat!(

@@ -26,6 +26,10 @@ pub mod ffi {
         compat_flags: Vec<String>,
         /// `--experimental`, for the compatibility flags and the loaded configs.
         experimental: bool,
+        /// `--autogate`: the process's autogates, by kebab-case name.
+        autogates: Vec<String>,
+        /// `--v8-flag`: the process's V8 flags.
+        v8_flags: Vec<String>,
         /// Render results with ANSI colors.
         colors: bool,
     }
