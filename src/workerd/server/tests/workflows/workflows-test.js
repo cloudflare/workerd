@@ -269,6 +269,85 @@ export let streams = {
   },
 };
 
+// The testing API: a modifier, set before the instance exists or by an
+// introspection session, and waits on steps and statuses.
+export let testingApi = {
+  async test(ctrl, env) {
+    const api = env.FLOW_TEST;
+    assert.strictEqual(await api.unsafeGetBindingName(), 'FLOW');
+    const modifier = (id) => api.unsafeGetInstanceModifier(id);
+
+    let m = await modifier('mocked');
+    await m.disableSleeps();
+    await m.mockStepResult({ name: 'a' }, 'A');
+    await assert.rejects(
+      m.mockStepError({ name: 'a' }, new Error('no')),
+      /after mocking its result/
+    );
+    await create(env, 'mocked', 'sleep');
+    await api.unsafeWaitForStatus('mocked', 'complete');
+    assert.strictEqual(await api.unsafeWaitForStepResult('mocked', 'a'), 'A');
+    assert.strictEqual(await api.unsafeGetOutputOrError('mocked', true), 'b');
+    assert.deepEqual(ranBy('mocked'), ['mocked/b']);
+    await assert.rejects(
+      api.unsafeWaitForStatus('mocked', 'errored'),
+      /finite status/
+    );
+
+    m = await modifier('mretry');
+    await m.mockStepError({ name: 'flaky' }, new Error('mocked'), 1);
+    await m.disableRetryDelays();
+    await create(env, 'mretry', 'retry');
+    await api.unsafeWaitForStatus('mretry', 'complete');
+    assert.deepEqual(ranBy('mretry'), ['mretry/flaky2', 'mretry/flaky3']);
+
+    m = await modifier('mslow');
+    await m.forceStepTimeout({ name: 'slow' });
+    await create(env, 'mslow', 'slow');
+    await api.unsafeWaitForStatus('mslow', 'errored');
+    const { message } = await api.unsafeGetOutputOrError('mslow', false);
+    assert.match(message, /timed out after 0ms/);
+
+    m = await modifier('mevent');
+    await m.mockEvent({ type: 'ping', payload: 'mock' });
+    const mevent = await create(env, 'mevent', 'event');
+    await api.unsafeWaitForStatus('mevent', 'complete');
+    assert.strictEqual((await mevent.status()).output, 'mock');
+
+    m = await modifier('mnone');
+    await m.forceEventTimeout({ name: 'ping' });
+    await create(env, 'mnone', 'event');
+    await api.unsafeWaitForStatus('mnone', 'errored');
+
+    m = await modifier('mstream');
+    await m.disableSleeps();
+    const hi = new Blob(['hi']).stream();
+    await m.mockStepResult({ name: 's' }, hi);
+    await create(env, 'mstream', 'stream-text');
+    await api.unsafeWaitForStatus('mstream', 'complete');
+    assert.strictEqual(
+      await api.unsafeGetOutputOrError('mstream', true),
+      '2:hi'
+    );
+    const replayed = await api.unsafeWaitForStepResult('mstream', 's');
+    assert.strictEqual(await new Response(replayed).text(), 'hi');
+
+    const session = await api.unsafeStartIntrospection();
+    await assert.rejects(api.unsafeStartIntrospection(), /already has/);
+    await api.unsafeSetIntrospectionOperations(session, [
+      { type: 'disableSleeps' },
+    ]);
+    await create(env, 'session', 'sleep');
+    await api.unsafeWaitForStatus('session', 'complete');
+    assert.deepEqual(await api.unsafeGetIntrospectionInstances(session), [
+      'session',
+    ]);
+    await api.unsafeStopIntrospection(session);
+    await api.unsafeAbort('session');
+    await assert.rejects(env.FLOW.get('session'), /not_found/);
+  },
+};
+
 export let voidStep = {
   async test(ctrl, env) {
     const instance = await create(env, 'void', 'void');

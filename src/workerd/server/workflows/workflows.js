@@ -243,6 +243,68 @@ const undoOf = (rollback, name, ctx, record) => ({
   output: record.value,
 });
 
+// The testing API's changes to how an instance runs, each a call into it.
+class Modifier extends RpcTarget {
+  #modify;
+  constructor(modify) {
+    super();
+    this.#modify = modify;
+  }
+  disableSleeps(steps) {
+    return this.#modify('disableSleeps', steps);
+  }
+  disableRetryDelays(steps) {
+    return this.#modify('disableRetryDelays', steps);
+  }
+  mockStepResult(step, result) {
+    return this.#modify('mockStepResult', step, result);
+  }
+  mockStepError(step, error, times) {
+    return this.#modify('mockStepError', step, error, times);
+  }
+  forceStepTimeout(step, times) {
+    return this.#modify('forceStepTimeout', step, times);
+  }
+  mockEvent(event) {
+    return this.#modify('mockEvent', event);
+  }
+  forceEventTimeout(step) {
+    return this.#modify('forceEventTimeout', step);
+  }
+}
+
+// Applies an introspection session's recorded `op` to a new instance.
+function apply(modifier, op) {
+  switch (op.type) {
+    case 'mockStepResult': {
+      const r = op.stepResult;
+      const stream =
+        r?.__workflowIntrospectionStreamResult &&
+        new ReadableStream({
+          start(c) {
+            for (const chunk of r.chunks) c.enqueue(chunk.slice());
+            c.close();
+          },
+        });
+      return modifier.mockStepResult(op.step, stream || r);
+    }
+    case 'mockStepError': {
+      const e = error(op.error.name, op.error.message);
+      return modifier.mockStepError(op.step, e, op.times);
+    }
+    case 'forceStepTimeout':
+      return modifier.forceStepTimeout(op.step, op.times);
+    case 'mockEvent':
+      return modifier.mockEvent(op.event);
+    default:
+      return modifier[op.type](op.steps ?? op.step);
+  }
+}
+
+// The testing API's introspection sessions, by Workflow:
+// `{id, operations, instanceIds}`.
+const sessions = new Map();
+
 // The steps `run()` takes, each a call into the engine instance that made it.
 class Step extends RpcTarget {
   #step;
@@ -722,9 +784,13 @@ export class Engine extends DurableObject {
       const limit = ms(cfg.timeout);
       const timeout = this.#wait(clock() + limit);
       const reading = {};
-      const result = Promise.resolve(callback(ctx(attempt))).then((v) =>
-        v instanceof ReadableStream ? this.#store(key, attempt, v, reading) : v
-      );
+      const result = Promise.resolve()
+        .then(() => this.#mocked(stepName, attempt) ?? callback(ctx(attempt)))
+        .then((v) =>
+          v instanceof ReadableStream
+            ? this.#store(key, attempt, v, reading)
+            : v
+        );
       let value, failure;
       try {
         value = await Promise.race([
@@ -829,7 +895,8 @@ export class Engine extends DurableObject {
       } catch (e) {
         throw fail(e);
       }
-      record.retryAt = clock() + retryDelayMs;
+      const skip = this.#x('delay', stepName);
+      record.retryAt = clock() + (skip ? 0 : retryDelayMs);
       this.#kv.put(key, record);
       this.#log('attempt_errored', {
         stepName,
@@ -896,9 +963,11 @@ export class Engine extends DurableObject {
         durationMs: record.deadline - now,
       });
     }
-    if (this.#rest(run, record.deadline)) throw aborted();
-    await this.#wait(record.deadline);
-    if (!(await this.#enter(run))) throw aborted();
+    if (!this.#x('sleep', stepName)) {
+      if (this.#rest(run, record.deadline)) throw aborted();
+      await this.#wait(record.deadline);
+      if (!(await this.#enter(run))) throw aborted();
+    }
     this.#kv.put(key, { ...record, done: true });
     this.#log('sleep_completed', { stepName });
   }
@@ -917,14 +986,16 @@ export class Engine extends DurableObject {
     for (;;) {
       if (!(await this.#enter(run))) throw aborted();
       // Taken and recorded in one turn, so a crash keeps one or the other.
-      const event = this.#take(type);
+      const event = !this.#x('eventTimeout', stepName) && this.#take(type);
       if (event) {
         this.#kv.put(key, { ...record, done: true, value: event });
         this.#log('wait_completed', { stepName });
         return event;
       }
-      if (this.#rest(run, record.deadline)) throw aborted();
-      if ((await this.#wait(record.deadline, type)) !== TIMEOUT) continue;
+      if (!this.#x('eventTimeout', stepName)) {
+        if (this.#rest(run, record.deadline)) throw aborted();
+        if ((await this.#wait(record.deadline, type)) !== TIMEOUT) continue;
+      }
       if (!(await this.#enter(run))) throw aborted();
       const e = error(
         'WorkflowTimeoutError',
@@ -1213,7 +1284,8 @@ export class Engine extends DurableObject {
       from && (START.has(e.type) || (e.stepName && kept.includes(e.stepName)));
     for (const [key] of steps.slice(keep)) {
       this.#kv.delete(key);
-      this.#sql.exec('DELETE FROM chunks WHERE key = ?', key);
+      // A mocked stream, attempt 0, stays.
+      this.#sql.exec('DELETE FROM chunks WHERE key = ? AND attempt > 0', key);
     }
     for (const [key] of [...this.#kv.list({ prefix: 'e:' })]) {
       this.#kv.delete(key);
@@ -1237,9 +1309,13 @@ export class Engine extends DurableObject {
     this.#wake();
   }
 
-  sendEvent({ type, payload }) {
-    const m = this.#meta;
-    if (!m) throw notFound();
+  sendEvent(event) {
+    if (!this.#meta) throw notFound();
+    // A mocked event type takes no others.
+    if (!this.#kv.get(`x:event:${event.type}`)) this.#send(event);
+  }
+
+  #send({ type, payload }) {
     const seq = (this.#kv.get('events') ?? 0) + 1;
     this.#kv.put('events', seq);
     this.#kv.put(`e:${pad(seq)}`, {
@@ -1253,9 +1329,157 @@ export class Engine extends DurableObject {
       w.wake();
       break;
     }
-    if (m.dormant !== undefined)
+    if (this.#meta?.dormant !== undefined)
       this.#kv.put('meta', { ...this.#meta, dormant: undefined });
     this.#wake();
+  }
+
+  // The testing API.
+
+  modifier() {
+    return new Modifier((...args) => this.#modify(...args));
+  }
+
+  // What the modifier set for `kind`, of all steps or of `stepName`.
+  #x(kind, stepName) {
+    return this.#kv.get(`x:${kind}`) ?? this.#kv.get(`x:${kind}:${stepName}`);
+  }
+
+  // What `attempt` of `stepName` does instead of its callback, if mocked:
+  // fail, time out or return.
+  #mocked(stepName, attempt) {
+    const e =
+      this.#x('error', stepName) ??
+      this.#kv.get(`x:error:${stepName}:${attempt}`);
+    if (e) throw error(e.name, e.message);
+    if (
+      this.#x('timeout', stepName) ??
+      this.#kv.get(`x:timeout:${stepName}:${attempt}`)
+    )
+      throw error('WorkflowTimeoutError', 'Execution timed out after 0ms');
+    const r = this.#kv.get(`x:result:${stepName}`);
+    if (r) return r.stream ? new Stored(r.stream) : r.value;
+  }
+
+  async #modify(op, step, arg, times) {
+    const at = (s) => `${s.name}-${s.index ?? 1}`;
+    const put = (k, v = true) => this.#kv.put(`x:${k}`, v);
+    const each = (kind, steps) =>
+      steps ? steps.forEach((s) => put(`${kind}:${at(s)}`)) : put(kind);
+    // Persistent, or for the next `n` attempts, counted across mocks.
+    const attempts = (kind, s, n, v) => {
+      if (!n) return put(`${kind}:${at(s)}`, v);
+      const first = this.#kv.get(`x:count:${at(s)}`) ?? 1;
+      put(`count:${at(s)}`, first + n);
+      for (let i = first; i < first + n; i++) put(`${kind}:${at(s)}:${i}`, v);
+    };
+    const unmocked = (what) => {
+      if (this.#kv.get(`x:result:${at(step)}`) === undefined) return;
+      throw new Error(
+        `[WorkflowIntrospector] Trying to ${what} on step '${step.name}' ` +
+          'after mocking its result!'
+      );
+    };
+    switch (op) {
+      case 'disableSleeps':
+        return each('sleep', step);
+      case 'disableRetryDelays':
+        return each('delay', step);
+      case 'mockStepResult': {
+        if (this.#kv.get(`x:result:${at(step)}`) !== undefined) {
+          throw new Error(
+            `[WorkflowIntrospector] Trying to mock step '${step.name}' ` +
+              'multiple times!'
+          );
+        }
+        // Stored as attempt 0 of the step, which no run writes.
+        const key = `s:do:${step.index ?? 1}:${step.name}`;
+        const stream = arg instanceof ReadableStream && {
+          ...(await this.#store(key, 0, arg, {})),
+        };
+        return put(`result:${at(step)}`, stream ? { stream } : { value: arg });
+      }
+      case 'mockStepError':
+        unmocked('mock error');
+        return attempts('error', step, times, {
+          name: arg.name,
+          message: arg.message,
+        });
+      case 'forceStepTimeout':
+        unmocked('force timeout');
+        return attempts('timeout', step, arg, true);
+      case 'mockEvent':
+        put(`event:${step.type}`);
+        return this.#send(step);
+      case 'forceEventTimeout':
+        return put(`eventTimeout:${at(step)}`);
+    }
+  }
+
+  // The output of step `name` of `index`, once it has one, or its error.
+  async waitForStepResult(name, index = 1) {
+    const stepName = `${name}-${index}`;
+    const ends = new Set(['step_completed', 'step_errored']);
+    for (;;) {
+      const end = [...this.#kv.list({ prefix: 'l:' })]
+        .map(([, e]) => e)
+        .findLast((e) => e.stepName === stepName && ends.has(e.type));
+      const record = this.#kv.get(`s:do:${index}:${name}`);
+      if (end?.type === 'step_errored') {
+        throw error(record.error.name, record.error.message);
+      }
+      if (end && record?.stream && end.output !== '[REDACTED]') {
+        return this.#replayStream(
+          `s:do:${index}:${name}`,
+          stepName,
+          record.stream
+        );
+      }
+      if (end) return end.output;
+      await new Promise((wake) => this.#watchers.add(wake));
+    }
+  }
+
+  async waitForStatus(status) {
+    this.#wake();
+    for (;;) {
+      const now = this.#meta?.status;
+      if (now === status) return;
+      if (TERMINAL.has(now) && TERMINAL.has(status)) {
+        throw new Error(
+          `[WorkflowIntrospector] The Workflow instance ${this.ctx.id.name} ` +
+            `has reached status '${now}'. This is a finite status that ` +
+            'prevents it from ever reaching the expected status of ' +
+            `'${status}'.`
+        );
+      }
+      await new Promise((wake) => this.#watchers.add(wake));
+    }
+  }
+
+  outputOrError(isOutput) {
+    const { status, output, error } = this.#meta ?? {};
+    if (isOutput && status !== 'complete') {
+      throw new Error(
+        `Cannot retrieve output: Workflow instance is in status ` +
+          `"${status}" but must be "complete" to have an output available`
+      );
+    }
+    if (!isOutput && status !== 'errored') {
+      throw new Error(
+        `Cannot retrieve error: Workflow instance is in status ` +
+          `"${status}" but must be "errored" to have error information ` +
+          'available'
+      );
+    }
+    return isOutput ? output : error;
+  }
+
+  // Deletes the instance and aborts the object, as the end of a test does.
+  async abort(reason = DELETED) {
+    this.#destroy();
+    await this.ctx.storage.sync();
+    this.ctx.abort(reason);
   }
 
   subscribe({ cursor = 0, filter } = {}) {
@@ -1371,8 +1595,91 @@ export class WorkflowBinding extends WorkerEntrypoint {
     const id = 'id' in options ? options.id : crypto.randomUUID();
     if (!valid(id))
       throw error('WorkflowError', 'Workflow instance has invalid id');
+    const session = sessions.get(this.ctx.props.workflow);
+    if (session) {
+      session.instanceIds.push(id);
+      const modifier = this.#instance(id).modifier();
+      for (const op of session.operations) await apply(modifier, op);
+    }
     await this.#instance(id).create(options.params ?? {}, options.retention);
     return { id };
+  }
+
+  // The testing API, for a Workflows engine with a `TEST_API` binding. The
+  // binding's props name it as `binding`.
+
+  #test() {
+    if (!this.env.TEST_API) throw new Error('The testing API is not enabled');
+    return this.ctx.props.workflow;
+  }
+
+  #session(id) {
+    const workflow = this.#test();
+    const session = sessions.get(workflow);
+    if (session?.id === id) return session;
+    throw new Error(
+      `Workflow ${JSON.stringify(workflow)} does not have an active ` +
+        'introspection session for this introspector.'
+    );
+  }
+
+  async unsafeGetBindingName() {
+    this.#test();
+    return this.ctx.props.binding;
+  }
+
+  async unsafeStartIntrospection() {
+    const workflow = this.#test();
+    if (sessions.has(workflow)) {
+      throw new Error(
+        `Workflow ${JSON.stringify(workflow)} already has an active ` +
+          'introspection session for binding ' +
+          `${JSON.stringify(this.ctx.props.binding)}.`
+      );
+    }
+    const id = crypto.randomUUID();
+    sessions.set(workflow, { id, operations: [], instanceIds: [] });
+    return id;
+  }
+
+  async unsafeStopIntrospection(id) {
+    const workflow = this.#test();
+    if (sessions.get(workflow)?.id === id) sessions.delete(workflow);
+  }
+
+  async unsafeSetIntrospectionOperations(id, operations) {
+    this.#session(id).operations = operations;
+  }
+
+  async unsafeGetIntrospectionInstances(id) {
+    return this.#session(id).instanceIds;
+  }
+
+  async unsafeGetInstanceModifier(id) {
+    this.#test();
+    return this.#instance(id).modifier();
+  }
+
+  async unsafeWaitForStepResult(id, name, index) {
+    this.#test();
+    return this.#instance(id).waitForStepResult(name, index);
+  }
+
+  async unsafeWaitForStatus(id, status) {
+    this.#test();
+    return this.#instance(id).waitForStatus(status);
+  }
+
+  async unsafeGetOutputOrError(id, isOutput) {
+    this.#test();
+    return this.#instance(id).outputOrError(isOutput);
+  }
+
+  async unsafeAbort(id, reason) {
+    this.#test();
+    await this.#instance(id)
+      .abort(reason)
+      .catch(() => {});
   }
 
   async createBatch(options) {

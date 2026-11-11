@@ -22,6 +22,12 @@ const unitTests :Workerd.Config = (
               innerBindings = [ ( name = "fetcher", service = .flow ) ],
             ) ),
           ( name = "WORKFLOWS", service = "workflows" ),
+          # The binding's service itself, with the testing API.
+          ( name = "FLOW_TEST", service = (
+              name = "workflows",
+              entrypoint = "WorkflowBinding",
+              props = ( json = "{\"workflow\": \"flow\", \"binding\": \"FLOW\"}" ),
+            ) ),
         ],
         workflowsEngine = (
           actorClass = ( name = "workflows", entrypoint = "Engine" ),
@@ -44,6 +50,7 @@ const unitTests :Workerd.Config = (
           ( name = "WORKFLOWS",
             json = "{\"flow\": {\"steps\": 3, \"retention\": {\"success\": \"2 days\"}}}" ),
           ( name = "TEST_CLOCK", json = "true" ),
+          ( name = "TEST_API", json = "true" ),
         ],
         durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
       )
