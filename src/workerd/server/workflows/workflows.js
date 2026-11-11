@@ -557,22 +557,36 @@ export class Engine extends DurableObject {
       if (dynamic) logged.retries.delay = '[dynamic]';
       this.#log('step_started', { stepName, config: logged });
     }
-    for (;;) {
-      if (record.retryAt > clock()) {
-        await this.#wait(record.retryAt);
-      }
-      if (!(await this.#enter(run))) throw aborted();
-      // An attempt that ended the process failed.
-      if (record.attempts > cfg.retries.limit) {
+    // An attempt the process ended with failed, and is retried at once.
+    if (record.attempts > 0 && record.retryAt === undefined) {
+      const attempt = record.attempts;
+      this.#log('attempt_errored', {
+        stepName,
+        attempt,
+        error: {
+          name: 'WorkflowInternalError',
+          message: 'Attempt failed due to internal workflows error',
+        },
+      });
+      if (attempt > cfg.retries.limit) {
         const e = error(
           'WorkflowInternalError',
-          `Attempt ${record.attempts} of step "${name}" did not finish`
+          `Attempt ${attempt} of step "${name}" did not finish`
         );
         this.#kv.put(key, { ...record, error: plain(e) });
         this.#log('step_errored', { stepName });
         throw e;
       }
+      record.retryAt = clock();
+      this.#kv.put(key, record);
+    }
+    for (;;) {
+      if (record.retryAt > clock()) {
+        await this.#wait(record.retryAt);
+      }
+      if (!(await this.#enter(run))) throw aborted();
       const attempt = ++record.attempts;
+      record.retryAt = undefined;
       this.#kv.put(key, record);
       this.#log('attempt_started', { stepName, attempt });
       this.#busy++;
@@ -616,7 +630,8 @@ export class Engine extends DurableObject {
         if (undo) undo.output = value;
         this.#log('attempt_completed', { stepName, attempt });
         const output = cfg.sensitive === 'output' ? '[REDACTED]' : value;
-        this.#log('step_completed', { stepName, output });
+        const fields = output === undefined ? {} : { output };
+        this.#log('step_completed', { stepName, ...fields });
         return value;
       }
       const failed = plain(failure);

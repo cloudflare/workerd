@@ -37,6 +37,8 @@ export class Flow extends WorkflowEntrypoint {
       case 'many':
         for (const name of ['a', 'b', 'c', 'd']) await once(name);
         return;
+      case 'void':
+        return step.do('v', async () => {});
       case 'backoff': {
         const delay = ({ ctx }) => ctx.attempt * 2000;
         const retries = { limit: 1, delay };
@@ -166,6 +168,14 @@ async function advance(env, instance, ms) {
 
 const create = (env, id, kind, options = {}) =>
   env.FLOW.create({ id, params: { kind }, ...options });
+
+export let voidStep = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'void', 'void');
+    const event = await until(instance, 'step_completed');
+    assert.ok(!('output' in event));
+  },
+};
 
 export let steps = {
   async test(ctrl, env) {

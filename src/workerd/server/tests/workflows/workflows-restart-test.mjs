@@ -210,11 +210,19 @@ test('a crash fails a step at its limit and settles a pause', async () => {
 
     // The second and last attempt.
     server = serve(dir);
+    const { error: crashed } = await server.get(
+      '/until?id=crash&type=attempt_errored'
+    );
+    assert.deepEqual(crashed, {
+      name: 'WorkflowInternalError',
+      message: 'Attempt failed due to internal workflows error',
+    });
     await server.get('/until?id=crash&type=attempt_started&n=2');
     assert.strictEqual((await server.get('/status?id=hang')).status, 'paused');
     await server.stop('SIGKILL');
 
     server = serve(dir);
+    await server.get('/until?id=crash&type=attempt_errored&n=2');
     const { error } = await server.get('/until?id=crash&type=workflow_errored');
     assert.match(error.message, /Attempt 2 of step "crash" did not finish/);
   } finally {
@@ -240,7 +248,10 @@ test('terminate after a restart rolls back the steps done before', async () => {
     await server.get('/terminate?id=undo');
     await server.get('/until?id=undo&type=rollback_completed');
     assert.deepEqual(await server.ran(1), ['undo']);
-    assert.strictEqual((await server.get('/status?id=undo')).status, 'terminated');
+    assert.strictEqual(
+      (await server.get('/status?id=undo')).status,
+      'terminated'
+    );
   } finally {
     await server.stop();
     await rm(dir, { recursive: true });
