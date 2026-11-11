@@ -190,12 +190,13 @@ printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
 
 ## Loading configs
 
-`await workerd.loadConfig(path, { constName })` loads a config and starts serving it. It resolves
+`await workerd.loadConfig(path, { constName, watch })` loads a config and starts serving it. It resolves
 to a server handle once every socket listens. `path` is relative to the working directory, and
 names a Cap'n Proto config or a `wrangler.json` / `wrangler.jsonc`, read as `workerd serve` reads
 it. `constName` names the constant that holds a Cap'n Proto config, as `workerd serve`'s second
 argument does. If the config doesn't load or has errors, the promise rejects with an error that
-lists them, and nothing is left running.
+lists them, and nothing is left running. With `watch: true`, the config [reloads](#reloading)
+whenever a file it was loaded from changes.
 
 Each config is served by a server of its own, as `workerd serve` would serve it, in the REPL's
 process. A config can be loaded more than once, and several configs can be loaded at the same time.
@@ -218,10 +219,12 @@ workerd.
 | Member                                 | What it is                                                                                                                                      |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `path`                                 | The config's path, as given to `loadConfig()`.                                                                                                  |
-| `warnings`                             | The warnings reported while the config loaded.                                                                                                  |
+| `warnings`                             | The warnings reported while the config loaded, or last reloaded.                                                                                |
 | `closed`                               | Whether `close()` has been called.                                                                                                              |
+| `watching`                             | Whether a change to a file the config was loaded from reloads it: `loadConfig()` was given `watch: true`, and the server isn't closed.          |
 | `service(name, { entrypoint, props })` | A `Fetcher` for the config's service `name`, for `fetch()` and RPC: its `entrypoint` (the default export if none), with `props` as `ctx.props`. |
 | `socket(name)`                         | A `Fetcher` whose `fetch()` sends the request to the config's HTTP socket `name`, as a client connecting to the socket would.                   |
+| `reload()`                             | Loads the config again and serves it in place of the old one. Resolves to the handle once the new server is serving.                            |
 | `close()`                              | Drains the server and shuts it down. Resolves once it has; calling it again is harmless.                                                        |
 
 `service()` reaches any service in the config, not only a Worker, as a binding to it would. It
@@ -244,6 +247,34 @@ one that arrived at the socket.
 
 A `Fetcher` from `service()` or `socket()` can't be passed to another Worker, such as in an RPC
 call to a loaded Worker; that fails with a `DataCloneError`.
+
+### Reloading
+
+`await s.reload()` reads the config again, as `loadConfig()` read it, and starts a new server on
+it. Once that is serving, it takes the old server's place behind the handle, and the old server is
+closed as `close()` would close it: what it handed out fails with
+`Error: The server for <path> was reloaded.`, so ask the handle for new `Fetcher`s. Durable
+Objects and other state held in memory start afresh. If the config no longer loads, or the new
+server doesn't start, the promise rejects with the problems and the old server runs on.
+
+A config loaded with `watch: true` reloads by itself whenever one of the files it was loaded from
+changes: the config, the files it imports and embeds, or for a `wrangler.json`, the Worker's
+modules. The REPL waits until changes stop arriving for half a second, then reloads, and reports
+the outcome on stderr, after whatever the console has written so far, such as a prompt:
+
+```
+> s = await workerd.loadConfig('config.capnp', { watch: true })
+ReplServer {
+  path: 'config.capnp',
+  closed: false,
+  watching: true,
+  warnings: [ [length]: 0 ]
+}
+> Reloaded config.capnp: a file it was loaded from changed.
+```
+
+A reload that fails is reported the same way, and the next change reloads again, so fixing the
+config brings the server up to date. Reloads, asked for or not, run one at a time.
 
 ### Closing
 
@@ -285,7 +316,11 @@ isolate but not part of the Workers API's types.
 (`repl_load_config`, `cli/repl/session.rs`), then builds a `WorkerFactory` for it over the REPL's
 V8 and event loop and hands it to the Rust server's `InProcessServer` (`server/in_process.rs`).
 `InProcessServer::start()` serves the config in the background, its stream sockets on `loopback:`
-names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds.
+names. `ReplConfigServer` (`repl/repl-server.h`) is the handle the JavaScript API holds. A reload
+does all of that again and swaps the new `InProcessServer` in before closing the old one. The
+config loader (`ReplConfigLoader`) is an interface so that the C++ tests can serve configs given as
+text. Its watches are the CLI's file watcher (`cli/watch.rs`, as `serve --watch` uses it), which
+`repl_load_config` registers each file it reads with.
 
 **Host channels.** `service()` and `socket()` are the in-process server's host channels
 (`server/in_process/host.rs`). The REPL's `IoContext` keys headers by its own
@@ -296,7 +331,9 @@ socket's channel is an HTTP client of the socket's `loopback:` name. Every chann
 request started on one is held through a revoker: closing the server revokes them all before the
 server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
 
-**Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text;
+**Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text,
+with watches the test fires; `tests/repl/repl-test.mjs` runs the `workerd` binary for what only
+the command line, the console and the file watcher do;
 `cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line
 editor, the history file and the input heuristics; `server/in_process/host-test.rs` covers
 revocation.

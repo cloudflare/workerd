@@ -35,7 +35,9 @@ class ReplServerHost {
   // The config file, as the user named it.
   virtual kj::StringPtr getPath() const = 0;
   virtual bool isClosed() const = 0;
-  // The warnings the server reported as it loaded the config.
+  // Whether a change to a file the config was loaded from reloads it.
+  virtual bool isWatching() const = 0;
+  // The warnings the server reported as it loaded the config, or last reloaded it.
   virtual kj::ArrayPtr<const kj::String> getWarnings() const = 0;
 
   // A channel to the config's service `name`: its `entrypoint` (the default if none), with `props`
@@ -48,8 +50,24 @@ class ReplServerHost {
   // would. Throws a JSG error if there is no such socket, or the server is closed.
   virtual kj::Rc<IoChannelFactory::SubrequestChannel> socket(kj::StringPtr name) = 0;
 
+  // Loads the config again and serves it in place of what was loaded before, whose channels then
+  // fail. Rejects with a JSG error listing the problems, leaving the server as it was, if the
+  // config does not load, or with one if the server is closed.
+  virtual kj::Promise<void> reload() = 0;
+
   // Drains the server and takes it apart. Idempotent.
   virtual kj::Promise<void> close() = 0;
+};
+
+// A config to load.
+struct ReplConfigSource {
+  // The config file, as the user named it: a Cap'n Proto config, or a `wrangler.json` /
+  // `wrangler.jsonc`, relative to the working directory.
+  kj::String path;
+  // The constant that holds a Cap'n Proto config, as for `workerd serve`.
+  kj::Maybe<kj::String> constName;
+  // Reload whenever a file the config was loaded from changes.
+  bool watch = false;
 };
 
 // What the `workerd` global asks of the REPL. Outlives every JavaScript object in the REPL's
@@ -58,12 +76,9 @@ class ReplHost {
  public:
   virtual ~ReplHost() noexcept(false) = default;
 
-  // Loads the config at `path` (a Cap'n Proto config, or a `wrangler.json` / `wrangler.jsonc`),
-  // relative to the working directory, and starts serving it. `constName` names the constant that
-  // holds a Cap'n Proto config, as for `workerd serve`. Rejects with a JSG error, listing the
+  // Loads the config `source` names and starts serving it. Rejects with a JSG error, listing the
   // config errors, if the config does not load or has errors.
-  virtual kj::Promise<kj::Own<ReplServerHost>> loadConfig(
-      kj::String path, kj::Maybe<kj::String> constName) = 0;
+  virtual kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) = 0;
 };
 
 // A config the REPL serves: `await workerd.loadConfig(path)`.
@@ -84,6 +99,9 @@ class ReplServer final: public jsg::Object {
   bool getClosed() {
     return host->isClosed();
   }
+  bool getWatching() {
+    return host->isWatching();
+  }
   kj::Array<kj::String> getWarnings();
 
   // A Fetcher for the config's service `name`, for `fetch()` and RPC.
@@ -94,14 +112,19 @@ class ReplServer final: public jsg::Object {
   // in-process names rather than on their addresses.
   jsg::Ref<api::Fetcher> socket(jsg::Lock& js, kj::String name);
 
+  // Loads the config again in place of what was loaded before; this handle, once it has.
+  jsg::Promise<jsg::Ref<ReplServer>> reload(jsg::Lock& js);
+
   jsg::Promise<void> close(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ReplServer) {
     JSG_READONLY_PROTOTYPE_PROPERTY(path, getPath);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
+    JSG_READONLY_PROTOTYPE_PROPERTY(watching, getWatching);
     JSG_READONLY_PROTOTYPE_PROPERTY(warnings, getWarnings);
     JSG_METHOD(service);
     JSG_METHOD(socket);
+    JSG_METHOD(reload);
     JSG_METHOD(close);
   }
 
@@ -120,8 +143,10 @@ class ReplControl final: public jsg::Object {
 
   struct LoadConfigOptions {
     jsg::Optional<kj::String> constName;
+    // Reload the config whenever a file it was loaded from changes.
+    jsg::Optional<bool> watch;
 
-    JSG_STRUCT(constName);
+    JSG_STRUCT(constName, watch);
   };
 
   jsg::Promise<jsg::Ref<ReplServer>> loadConfig(

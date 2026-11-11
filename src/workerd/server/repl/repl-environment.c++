@@ -202,10 +202,10 @@ void ReplEnvironment::ErrorReporter::check(kj::StringPtr what) {
 }
 
 ReplEnvironment::ReplEnvironment(const ReplServerResources& resources,
-    ReplConfigLoader loadConfig,
+    ReplConfigLoader& configLoader,
     ReplEnvironmentOptions optionsParam)
     : resources(resources),
-      configLoader(kj::mv(loadConfig)),
+      configLoader(configLoader),
       options(kj::mv(optionsParam)),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
@@ -465,15 +465,18 @@ kj::Promise<void> ReplEnvironment::drain() {
   }
 }
 
-kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(
-    kj::String path, kj::Maybe<kj::String> constName) {
+kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSource source) {
   // JavaScript asked for the load under the REPL's isolate lock; the server's workers lock
   // isolates of their own, so the load runs on the event loop.
   co_await kj::yield();
-  auto config = configLoader(
-      path, constName.map([](kj::String& name) { return name.asPtr(); }), options.experimental);
-  auto server = co_await ReplConfigServer::start(
-      resources, *headerTable, kj::mv(path), config, options.experimental);
+  auto server = co_await ReplConfigServer::load(
+      ReplServerContext{
+        .resources = resources,
+        .replHeaderTable = *headerTable,
+        .loader = configLoader,
+        .experimental = options.experimental,
+      },
+      kj::mv(source));
   // Drop the servers that were closed since the last load.
   kj::Vector<kj::Own<ReplConfigServer>> open(servers.size() + 1);
   for (auto& s: servers) {

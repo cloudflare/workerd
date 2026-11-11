@@ -30,6 +30,12 @@ jsg::Ref<api::Fetcher> ReplServer::socket(jsg::Lock& js, kj::String name) {
   return js.alloc<api::Fetcher>(IoContext::current().addObject(host->socket(name)));
 }
 
+jsg::Promise<jsg::Ref<ReplServer>> ReplServer::reload(jsg::Lock& js) {
+  // Like closing, reloading starts and ends isolates, on the event loop.
+  return IoContext::current().awaitIo(
+      js, host->reload(), [self = JSG_THIS](jsg::Lock&) mutable { return kj::mv(self); });
+}
+
 jsg::Promise<void> ReplServer::close(jsg::Lock& js) {
   // Closing runs on the event loop: it ends the server's isolates, which must not be locked while
   // this isolate is.
@@ -38,11 +44,12 @@ jsg::Promise<void> ReplServer::close(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<ReplServer>> ReplControl::loadConfig(
     jsg::Lock& js, kj::String path, jsg::Optional<LoadConfigOptions> options) {
-  kj::Maybe<kj::String> constName;
+  ReplConfigSource source{.path = kj::mv(path)};
   KJ_IF_SOME(o, options) {
-    constName = kj::mv(o.constName);
+    source.constName = kj::mv(o.constName);
+    source.watch = o.watch.orDefault(false);
   }
-  return IoContext::current().awaitIo(js, host.loadConfig(kj::mv(path), kj::mv(constName)),
+  return IoContext::current().awaitIo(js, host.loadConfig(kj::mv(source)),
       [self = JSG_THIS](jsg::Lock& js, kj::Own<ReplServerHost> server) mutable {
     auto handle = js.alloc<ReplServer>(kj::mv(server));
     self->servers.add(handle.addRef());

@@ -39,12 +39,6 @@ struct ReplEnvironmentOptions {
   bool colors = false;
 };
 
-// Loads the config at `path` (with `constName`, for a Cap'n Proto config) as an encoded `Config`
-// message. Throws a JSG error describing the problems if it cannot. `workerd repl` loads configs as
-// `workerd serve` does (cli/repl/session.rs).
-using ReplConfigLoader = kj::Function<kj::Array<capnp::word>(
-    kj::StringPtr path, kj::Maybe<kj::StringPtr> constName, bool experimental)>;
-
 // The JavaScript environment `workerd repl` evaluates input in: a worker that never receives an
 // event, with one IoContext for the whole session, in which every input runs.
 //
@@ -69,7 +63,7 @@ class ReplEnvironment final: public ReplHost {
   };
 
   ReplEnvironment(const ReplServerResources& resources,
-      ReplConfigLoader loadConfig,
+      ReplConfigLoader& configLoader,
       ReplEnvironmentOptions options);
   ~ReplEnvironment() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ReplEnvironment);
@@ -91,8 +85,7 @@ class ReplEnvironment final: public ReplHost {
   // Rejects with the first server's failure to close, if any, once all of that is done.
   kj::Promise<void> drain();
 
-  kj::Promise<kj::Own<ReplServerHost>> loadConfig(
-      kj::String path, kj::Maybe<kj::String> constName) override;
+  kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) override;
 
  private:
   class ChannelFactory;
@@ -117,7 +110,7 @@ class ReplEnvironment final: public ReplHost {
   };
 
   ReplServerResources resources;
-  ReplConfigLoader configLoader;
+  ReplConfigLoader& configLoader;
   ReplEnvironmentOptions options;
 
   capnp::ByteStreamFactory byteStreamFactory;

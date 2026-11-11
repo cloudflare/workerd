@@ -582,7 +582,7 @@ fn watcher<T: CommandFactory>(
             );
         };
         Some(
-            Watcher::new(executable.path())
+            Watcher::with_executable(executable.path())
                 .unwrap_or_else(|error| usage_error::<T>(format!("--watch: {error}"))),
         )
     }

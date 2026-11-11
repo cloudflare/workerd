@@ -18,6 +18,7 @@ use super::input;
 use crate::bridge::ffi;
 use crate::config::Config;
 use crate::process::Process;
+use crate::watch::Watcher;
 use crate::wrangler;
 
 /// The most names tab completion offers.
@@ -99,11 +100,50 @@ pub fn repl_load_config(
     const_name: &str,
     experimental: bool,
 ) -> Result<Vec<u64>, cxx::KjError> {
+    load_config(path, const_name, experimental, None)
+}
+
+/// See the bridge's declaration.
+pub fn repl_watch_new() -> Result<Box<ReplWatch>, cxx::KjError> {
+    let watcher = Watcher::new()
+        .map_err(|error| cxx::KjError::new(cxx::KjExceptionType::Failed, error.to_string()))?;
+    Ok(Box::new(ReplWatch { watcher }))
+}
+
+/// The files configs were loaded from, watched.
+pub struct ReplWatch {
+    watcher: Watcher,
+}
+
+impl ReplWatch {
+    /// See the bridge's declaration.
+    pub fn load_config(
+        &self,
+        path: &str,
+        const_name: &str,
+        experimental: bool,
+    ) -> Result<Vec<u64>, cxx::KjError> {
+        load_config(path, const_name, experimental, Some(self.watcher.clone()))
+    }
+
+    /// See the bridge's declaration.
+    pub async fn changed(&self) -> Result<(), cxx::KjError> {
+        self.watcher.wait_quietly_for_changes().await
+    }
+}
+
+/// Loads the config at `path`, adding each file it reads to `watcher`'s, if any.
+fn load_config(
+    path: &str,
+    const_name: &str,
+    experimental: bool,
+    watcher: Option<Watcher>,
+) -> Result<Vec<u64>, cxx::KjError> {
     let failed = |message: String| cxx::KjError::new(cxx::KjExceptionType::Failed, message);
     if !Path::new(path).is_file() {
         return Err(failed(format!("{path}: No such file.")));
     }
-    let process = Process::new(None, None, Vec::new());
+    let process = Process::new(None, watcher, Vec::new());
     if wrangler::is_wrangler_config(path) {
         if !const_name.is_empty() {
             return Err(failed(format!(
