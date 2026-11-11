@@ -11,7 +11,8 @@
 //! the session ([`session`]), so the event loop keeps running -- timers, `waitUntil()`, the
 //! loaded servers -- while the console waits for the next line. What decides whether an input is
 //! finished, and how an input that awaits compiles, is in input.rs. On a terminal, the console
-//! keeps the lines typed in the history file (history.rs).
+//! keeps the lines typed in the history file (history.rs). On Unix, Ctrl+C abandons an input that
+//! awaits (interrupt.rs).
 
 mod bridge;
 mod console;
@@ -29,6 +30,8 @@ mod editor;
 )]
 mod history;
 mod input;
+#[cfg(unix)]
+mod interrupt;
 mod session;
 #[cfg(unix)]
 mod terminal;

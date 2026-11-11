@@ -149,24 +149,32 @@ A line that starts with `.` and a letter, at the start of an input, is a command
 
 On a Unix terminal, the REPL edits lines itself:
 
-| Key                   | Effect                                                                              |
-| --------------------- | ----------------------------------------------------------------------------------- |
-| Enter                 | Submits the line. The input runs if it is finished.                                 |
-| Left, Right, Ctrl+B/F | Moves the cursor by a character.                                                    |
-| Home, End, Ctrl+A/E   | Moves the cursor to the start or end of the line.                                   |
-| Up, Down, Ctrl+P/N    | Steps through earlier lines, including earlier sessions' (see [History](#history)). |
-| Backspace, Delete     | Deletes the character before or under the cursor.                                   |
-| Ctrl+K, Ctrl+U        | Deletes to the end, or to the start, of the line.                                   |
-| Ctrl+W                | Deletes the word before the cursor.                                                 |
-| Ctrl+L                | Clears the screen.                                                                  |
-| Tab                   | Completes a global's name, or a property name after `a.b.`; see below.              |
-| Ctrl+C                | Abandons the input being typed. While an input runs, Ctrl+C ends the REPL.          |
-| Ctrl+D                | Quits on an empty line; otherwise deletes the character under the cursor.           |
+| Key                   | Effect                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Enter                 | Submits the line. The input runs if it is finished.                                     |
+| Left, Right, Ctrl+B/F | Moves the cursor by a character.                                                        |
+| Home, End, Ctrl+A/E   | Moves the cursor to the start or end of the line.                                       |
+| Up, Down, Ctrl+P/N    | Steps through earlier lines, including earlier sessions' (see [History](#history)).     |
+| Backspace, Delete     | Deletes the character before or under the cursor.                                       |
+| Ctrl+K, Ctrl+U        | Deletes to the end, or to the start, of the line.                                       |
+| Ctrl+W                | Deletes the word before the cursor.                                                     |
+| Ctrl+L                | Clears the screen.                                                                      |
+| Tab                   | Completes a global's name, or a property name after `a.b.`; see below.                  |
+| Ctrl+C                | Abandons the input being typed. While an input runs, see [Interrupting](#interrupting). |
+| Ctrl+D                | Quits on an empty line; otherwise deletes the character under the cursor.               |
 
 Tab completes the name before the cursor. With a dot, the names are the properties, own and
 inherited, of the value before it (an identifier chain such as `s.service`); without one, they are
 the global scope's. Completing evaluates that chain, so it can run property getters. Tab inserts as
 much as the candidates have in common; when there is nothing more to insert, it lists them.
+
+### Interrupting
+
+On Unix, Ctrl+C while an input awaits stops awaiting it, whether or not input comes from a
+terminal. The REPL says `Interrupted`, and prompts for the next input. The input's promise isn't
+canceled, and what it started, such as a request, goes on; `_` and `_error` stay as they were.
+JavaScript that runs without awaiting, such as a loop, can't be stopped that way: press Ctrl+C
+again to end the REPL. On Windows, Ctrl+C ends the REPL.
 
 ### History
 
@@ -308,7 +316,7 @@ loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 
 - Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
   wide characters, such as CJK, or a line longer than the terminal is wide.
-- There is no way to interrupt an input that is running except to end the REPL.
+- Only an input that awaits can be [interrupted](#interrupting) without ending the REPL.
 - A Durable Object's alarm runs when it is due, and not before: an alarm runs only at the time it
   is set for, which only the object can change.
 - The REPL has no inspector, so DevTools can't attach to it or to the loaded configs.
