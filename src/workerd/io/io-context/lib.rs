@@ -265,6 +265,37 @@ impl<'s> IoContext<'s> {
         })
     }
 
+    /// Gives this `IoContext` ownership of `span`, a span of its request, as
+    /// [`add_object`](Self::add_object) does for a value that is `Send`. The span then ends no
+    /// later than the `IoContext` does, and on its thread.
+    ///
+    /// Hold a span this way when something whose lifetime the garbage collector decides, such
+    /// as the reaction to a promise, keeps it. Such a holder can be dropped on whichever thread
+    /// next locks the isolate, and a span reports to its request's observer, whose state belongs
+    /// to the request's thread. The returned handle can be dropped anywhere, as an
+    /// [`IoOwned`] can: the span stays behind, for the `IoContext` to end.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "the slot is shared with C++, which holds it as Send; see ThreadBoundSlotRef"
+    )]
+    pub fn add_span(&self, span: SpanBuilder) -> jsg::Result<IoOwned<SpanBuilder>> {
+        let slot = Arc::new(Mutex::new(Some(span)));
+        let object = bridge::io_context_add_object(
+            self.id,
+            Box::new(ffi::IoOwnedSlot(Box::new(ThreadBoundSlotRef(SlotRef(
+                Arc::clone(&slot),
+            ))))),
+        )?;
+        Ok(IoOwned {
+            slot,
+            owner: self.id,
+            _object: object,
+        })
+    }
+
     /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
     /// C++ `IoContext::awaitJs()` and `IoContext::addWaitUntil()`: the request is not done until
     /// `promise` settles. If `promise` rejects, the rejection is logged as an uncaught exception,
@@ -436,19 +467,21 @@ async fn catch_poll_panic<F: Future>(future: F) -> Result<F::Output, String> {
 /// A value an `IoContext` owns, from [`IoContext::add_object`].
 ///
 /// Like C++ `IoOwn<T>`, which `IoContext::addObject()` returns, it ties the value to its
-/// `IoContext`, but the value can only be taken out, not used in place. Compared with `IoOwn`:
+/// `IoContext`. Compared with `IoOwn`:
 ///
 /// - **When the value is dropped:** the same, when the handle is dropped or the `IoContext` is
 ///   destroyed, unless [`take`](Self::take) took it first. As with `IoOwn`, dropping the handle
 ///   while its `IoContext` is not current leaves the value to be dropped later, by the
 ///   `IoContext`.
-/// - **Access:** `IoOwn` is dereferenced in place; here the value is moved out with
-///   [`take`](Self::take). Both work only while the `IoContext` is current, and fail otherwise,
-///   including once it has been destroyed.
+/// - **Access:** `IoOwn` is dereferenced; here the value is used in place with
+///   [`with`](Self::with), or moved out with [`take`](Self::take). Both work only while the
+///   `IoContext` is current, and fail otherwise, including once it has been destroyed.
 /// - **Threads:** the value is shared with the `IoContext`, which drops it, unless it was taken,
 ///   on its own thread and without the isolate lock. The handle, held by a resource, may be
 ///   dropped wherever the resource is, such as by GC on another thread that has locked the
-///   isolate. So a mutex guards the value, which must be `Send`.
+///   isolate. So a mutex guards the value, which must be `Send`, except for a span from
+///   [`IoContext::add_span`]: it is used, taken and dropped only on the `IoContext`'s thread,
+///   and dropping the handle never drops it.
 pub struct IoOwned<T> {
     slot: Arc<Mutex<Option<T>>>,
     // The id of the IoContext that owns the value.
@@ -468,6 +501,30 @@ impl<T> IoOwned<T> {
         bridge::io_context_require_current(self.owner)?;
         Ok(lock_slot(&self.slot).take())
     }
+
+    /// Calls `f` with the value, in place, and returns what it returns, or `None` if the value
+    /// was taken. While `f` runs, the value is out of the handle: `f` sees `None` if it reaches
+    /// the value through the handle again. If `f` panics, the value is dropped.
+    ///
+    /// # Errors
+    /// Fails as [`take`](Self::take) does, unless the `IoContext` that owns the value is the
+    /// current one.
+    pub fn with<R>(
+        &self,
+        _lock: &mut jsg::Lock<'_>,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> jsg::Result<Option<R>> {
+        bridge::io_context_require_current(self.owner)?;
+        // Out of the mutex while `f` runs, so that nothing panics while holding it.
+        let Some(mut value) = lock_slot(&self.slot).take() else {
+            return Ok(None);
+        };
+        let result = f(&mut value);
+        // The IoContext drops the slot's value only when it is destroyed, or when this handle's
+        // object is, neither of which can happen while it is current and this is borrowed.
+        *lock_slot(&self.slot) = Some(value);
+        Ok(Some(result))
+    }
 }
 
 // Holds no JavaScript handles; see `IoContext::add_object`.
@@ -475,6 +532,25 @@ jsg::jsg_traced!(<T> IoOwned<T>);
 
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);
+
+/// The [`SlotRef`] of a span from [`IoContext::add_span`], which C++ holds as a `Send` value
+/// although the span is not one.
+struct ThreadBoundSlotRef(#[expect(dead_code, reason = "only dropped")] SlotRef<SpanBuilder>);
+
+#[expect(
+    unsafe_code,
+    reason = "a span's slot is handed to C++ as Send; see the SAFETY comment"
+)]
+// SAFETY: a span belongs to its request's thread, which is the only one that touches it here.
+// `add_span()` takes it on that thread, from code that holds it there, with the IoContext
+// current. `IoOwned::take()` and `IoOwned::with()` reach it only while that IoContext is current,
+// so on its thread. The IoContext drops this `SlotRef` on its thread: when it is destroyed, or
+// when it next runs after the handle's `IoOwn` is destroyed elsewhere, which only queues the
+// deletion for it (`DeleteQueue::scheduleDeletion()` in io-own.c++). Dropping this takes the span
+// out and drops it there. The handle's own reference to the slot may be dropped on another
+// thread, but if it is the last one, this has emptied the slot, and dropping `None` touches no
+// span.
+unsafe impl Send for ThreadBoundSlotRef {}
 
 impl<T> Drop for SlotRef<T> {
     fn drop(&mut self) {
