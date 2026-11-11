@@ -179,6 +179,29 @@ KJ_TEST("REPL reports exceptions and syntax errors") {
   KJ_EXPECT(fixture.eval("2") == "2");
 }
 
+KJ_TEST("REPL keeps the last result in `_` and the last exception in `_error`") {
+  Fixture fixture;
+  fixture.eval("6 * 7");
+  KJ_EXPECT(fixture.eval("_") == "42");
+  KJ_EXPECT(fixture.eval("_ + 1") == "43");
+  fixture.eval("throw new RangeError('far')");
+  KJ_EXPECT(fixture.eval("_error.message") == "'far'");
+
+  // An awaited input's outcome is what its promise settles to.
+  fixture.evalAwait("await Promise.resolve('later')");
+  KJ_EXPECT(fixture.eval("_") == "'later'");
+  fixture.evalAwait("await Promise.reject(new Error('no'))");
+  KJ_EXPECT(fixture.eval("_error.message") == "'no'");
+
+  // Once assigned, `_` keeps the assigned value.
+  KJ_EXPECT(fixture.eval("_ = 'mine'") == "'mine'");
+  fixture.eval("1");
+  KJ_EXPECT(fixture.eval("_") == "'mine'");
+  // `_error` still follows exceptions.
+  fixture.eval("throw 2");
+  KJ_EXPECT(fixture.eval("_error") == "2");
+}
+
 KJ_TEST("REPL tries candidates in order and awaits the awaited ones") {
   Fixture fixture;
   auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);

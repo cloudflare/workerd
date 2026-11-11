@@ -53,6 +53,8 @@ In an input that awaits at top level, a `const`, `let` or `var` declaration of a
 becomes an assignment to a global, so that later inputs see it. A destructuring declaration
 does not; assign instead, as in `({ a } = await f())`.
 
+`_` is the last result and `_error` the last exception, until you assign to them.
+
 Up and Down recall earlier lines, which are saved in ~/.workerd_repl_history. Set
 WORKERD_REPL_HISTORY to save them in another file, or to the empty string not to save them.
 

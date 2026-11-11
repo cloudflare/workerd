@@ -32,6 +32,31 @@ constexpr kj::StringPtr STARTUP_SCRIPT = "addEventListener('unhandledrejection',
                                          " console.error('Uncaught (in promise)', event.reason);"
                                          "});"_kj;
 
+// Defines `_` and `_error` on the global scope, as Node's REPL does: the last input's result and
+// its last exception. Assigning one keeps the assigned value from then on. Evaluates to the
+// function the REPL records each outcome with, which user code can't reach.
+constexpr kj::StringPtr OUTCOMES_SCRIPT = R"JS((() => {
+  const slots = {
+    _: { value: undefined, assigned: false },
+    _error: { value: undefined, assigned: false },
+  };
+  for (const name of ['_', '_error']) {
+    const slot = slots[name];
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      get() { return slot.value; },
+      set(value) {
+        if (!slot.assigned) console.warn(`Expression assignment to ${name} now disabled.`);
+        slot.assigned = true;
+        slot.value = value;
+      },
+    });
+  }
+  return (name, value) => {
+    if (!slots[name].assigned) slots[name].value = value;
+  };
+})())JS"_kj;
+
 const PythonConfig REPL_PYTHON_CONFIG{
   .packageDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false};
 
@@ -247,6 +272,9 @@ void ReplEnvironment::compileWorker() {
     auto control = js.alloc<ReplControl>(*this, RELEASE_VERSION);
     js.global().set(js, "workerd"_kj, WorkerdApi::from(api).wrapReplControl(js, kj::mv(control)));
     jsg::NonModuleScript::compile(js, STARTUP_SCRIPT, "repl-startup.js"_kj).run(js);
+    auto record =
+        jsg::NonModuleScript::compile(js, OUTCOMES_SCRIPT, "repl-outcomes.js"_kj).runAndReturn(js);
+    recordOutcome = jsg::JsRef(js, KJ_ASSERT_NONNULL(record.tryCast<jsg::JsFunction>()));
   }, IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
   errorReporter.check("worker");
@@ -289,9 +317,13 @@ kj::Promise<kj::String> ReplEnvironment::evaluate(kj::Array<Candidate> candidate
       auto result = kj::mv(a.result);
       auto promise = result.getHandle(js);
       // The input awaited the promise, so a rejection is thrown, as at the top level of a module.
-      rendered = promise.state() == jsg::PromiseState::REJECTED
-          ? kj::str("Uncaught ", describeException(js, promise.result()))
-          : render(js, promise.result());
+      if (promise.state() == jsg::PromiseState::REJECTED) {
+        record(js, "_error"_kj, promise.result());
+        rendered = kj::str("Uncaught ", describeException(js, promise.result()));
+      } else {
+        record(js, "_"_kj, promise.result());
+        rendered = render(js, promise.result());
+      }
     });
   }
 
@@ -307,6 +339,7 @@ kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
     if (!compiled.awaited || !result.isPromise()) {
       // A promise the user did not await renders as a promise: awaiting it could hang the REPL on
       // one that never settles.
+      record(js, "_"_kj, result);
       return render(js, result);
     }
     auto promise = KJ_ASSERT_NONNULL(result.tryCast<jsg::JsPromise>());
@@ -318,8 +351,17 @@ kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
       .settled = context.awaitJs(js, kj::mv(settled)),
     };
   }, [&](jsg::Value exception) -> Outcome {
-    return kj::str("Uncaught ", describeException(js, jsg::JsValue(exception.getHandle(js))));
+    auto thrown = jsg::JsValue(exception.getHandle(js));
+    record(js, "_error"_kj, thrown);
+    return kj::str("Uncaught ", describeException(js, thrown));
   });
+}
+
+void ReplEnvironment::record(jsg::Lock& js, kj::StringPtr name, const jsg::JsValue& value) {
+  KJ_IF_SOME(recorder, recordOutcome) {
+    // The recorder is the REPL's own, and does not throw.
+    recorder.getHandle(js).call(js, js.undefined(), js.str(name), value);
+  }
 }
 
 ReplEnvironment::Compiled ReplEnvironment::compile(

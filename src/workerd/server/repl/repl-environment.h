@@ -142,6 +142,10 @@ class ReplEnvironment final: public ReplHost {
   kj::Own<const Worker::Script> script;
   kj::Own<const Worker> worker;
 
+  // Sets `_` or `_error` (its first argument) to an input's outcome (its second); see
+  // OUTCOMES_SCRIPT. None only while the worker is compiled.
+  kj::Maybe<jsg::JsRef<jsg::JsFunction>> recordOutcome;
+
   kj::Own<kj::TaskSet::ErrorHandler> waitUntilErrorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
@@ -175,6 +179,8 @@ class ReplEnvironment final: public ReplHost {
   kj::OneOf<kj::String, Awaiting> run(
       jsg::Lock& js, IoContext& context, kj::ArrayPtr<const Candidate> candidates);
 
+  // Records `value` as the last result (`name` is "_") or exception ("_error").
+  void record(jsg::Lock& js, kj::StringPtr name, const jsg::JsValue& value);
   kj::String render(jsg::Lock& js, const jsg::JsValue& value);
   kj::String describeException(jsg::Lock& js, const jsg::JsValue& exception);
 };
