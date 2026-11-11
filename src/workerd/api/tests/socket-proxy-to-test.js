@@ -105,3 +105,41 @@ export const proxyToRejectsWhenTheRelayFails = {
     await rejects(silent.closed, { message: 'relay aborted' });
   },
 };
+
+// An abort while proxyTo() is still waiting for a socket to flush fails it, and closes both
+// sockets, although that socket would never finish flushing: a write through the Echo worker
+// completes only once its echo has been read, and nothing reads it.
+export const proxyToCanBeAbortedWhileWaitingForAFlush = {
+  async test(ctrl, env) {
+    const echo = env.ECHO.connect('echo.example:1');
+    const silent = env.SILENT.connect('silent.example:1');
+    const writer = echo.writable.getWriter();
+    // Swallow the write's outcome; this test is about proxyTo().
+    writer.write(new TextEncoder().encode('data')).catch(() => {});
+    writer.releaseLock();
+
+    const controller = new AbortController();
+    const relay = echo.proxyTo(silent, { signal: controller.signal });
+    controller.abort(new Error('relay aborted'));
+
+    await rejects(relay, { message: 'relay aborted' });
+    await rejects(echo.closed, { message: 'relay aborted' });
+    await rejects(silent.closed, { message: 'relay aborted' });
+  },
+};
+
+// A signal that has already been aborted fails proxyTo() and closes both sockets.
+export const proxyToFailsWithAnAlreadyAbortedSignal = {
+  async test(ctrl, env) {
+    const echo = env.ECHO.connect('echo.example:1');
+    const silent = env.SILENT.connect('silent.example:1');
+
+    const relay = echo.proxyTo(silent, {
+      signal: AbortSignal.abort(new Error('relay aborted')),
+    });
+
+    await rejects(relay, { message: 'relay aborted' });
+    await rejects(echo.closed, { message: 'relay aborted' });
+    await rejects(silent.closed, { message: 'relay aborted' });
+  },
+};

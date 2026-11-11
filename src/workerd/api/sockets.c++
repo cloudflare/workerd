@@ -1043,35 +1043,55 @@ jsg::Promise<void> Socket::proxyTo(
     signal = kj::mv(o.signal);
   }
 
-  auto ready = whenBothResolved(js, whenReadyToRelay(js), other->whenReadyToRelay(js));
-  return ready.then(js,
-      JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = kj::mv(other), signal = kj::mv(signal)),
+  // The signal covers waiting for both sockets to be ready as well as the relay itself, so an
+  // abort while either socket is still connecting or flushing fails proxyTo() at once.
+  auto& context = IoContext::current();
+  auto ready =
+      context.awaitJs(js, whenBothResolved(js, whenReadyToRelay(js), other->whenReadyToRelay(js)));
+  auto readyOrAborted =
+      context.awaitIo(js, AbortSignal::maybeCancelWrap(js, signal, kj::mv(ready)));
+
+  auto relay = readyOrAborted.then(js,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef(), signal = kj::mv(signal)),
           (self, other, signal),
-          (jsg::Lock & js) mutable { return self->runRelay(js, kj::mv(other), kj::mv(signal)); }));
+          (jsg::Lock & js) mutable { return self->runRelay(js, *other, signal); }));
+
+  auto otherOnSuccess = other.addRef();
+  return relay.then(js,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = kj::mv(otherOnSuccess)), (self, other),
+          (jsg::Lock& js) {
+            self->closedResolver.resolve(js);
+            other->closedResolver.resolve(js);
+            return js.resolvedPromise();
+          }),
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = kj::mv(other)), (self, other),
+          (jsg::Lock& js, jsg::Value error) {
+            self->failRelay(js, error.addRef(js));
+            other->failRelay(js, error.addRef(js));
+            return js.rejectedPromise<void>(kj::mv(error));
+          }));
 }
 
 jsg::Promise<void> Socket::runRelay(
-    jsg::Lock& js, jsg::Ref<Socket> other, kj::Maybe<jsg::Ref<AbortSignal>> signal) {
+    jsg::Lock& js, Socket& other, kj::Maybe<jsg::Ref<AbortSignal>>& signal) {
   // Either socket may have been locked or closed while we waited for them to be ready.
   requireRelayable(js);
-  other->requireRelayable(js);
-  auto relay = relayStreams(takeRelayEnd(js), other->takeRelayEnd(js));
+  other.requireRelayable(js);
+  auto relay = relayStreams(takeRelayEnd(js), other.takeRelayEnd(js));
+  return IoContext::current().awaitIo(js, AbortSignal::maybeCancelWrap(js, signal, kj::mv(relay)));
+}
 
-  auto& context = IoContext::current();
-  return context.awaitIo(js, AbortSignal::maybeCancelWrap(js, signal, kj::mv(relay)))
-      .then(js,
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef()), (self, other),
-              (jsg::Lock& js) {
-                self->closedResolver.resolve(js);
-                other->closedResolver.resolve(js);
-                return js.resolvedPromise();
-              }),
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef()), (self, other),
-              (jsg::Lock& js, jsg::Value error) {
-                self->errorHandler(js, error.addRef(js));
-                other->errorHandler(js, error.addRef(js));
-                return js.rejectedPromise<void>(kj::mv(error));
-              }));
+void Socket::failRelay(jsg::Lock& js, jsg::Value error) {
+  // A connection the relay never took over, because proxyTo() failed while waiting for the
+  // sockets to be ready, is torn down here instead, as close() would.
+  if (connectionData != kj::none && !isClosing) {
+    isClosing = true;
+    auto reason = jsg::JsValue(error.getHandle(js));
+    readable.forceCancel(js, reason).markAsHandled(js);
+    writable.forceAbort(js, reason).markAsHandled(js);
+    connectionData = kj::none;
+  }
+  errorHandler(js, kj::mv(error));
 }
 
 void Socket::requireRelayable(jsg::Lock& js) {

@@ -238,9 +238,11 @@ class Socket: public jsg::Object {
   // Relays this socket to the other one in both directions, until both directions have ended.
   // Once both sockets are open and have flushed what was written to them, their connections are
   // taken over by the relay, as with startTls(), and their readable and writable become unusable.
-  // The result resolves once both directions have finished and rejects as soon as either fails;
-  // both sockets' `closed` settle with it. A connect() handler that relays its socket should await
-  // it: the handler's socket is closed when the handler returns.
+  // The result resolves once both directions have finished and rejects as soon as either fails,
+  // or as soon as proxyTo() fails while waiting for the sockets to be ready; both sockets'
+  // `closed` settle with it, and a socket whose connection the relay never took over is closed.
+  // A connect() handler that relays its socket should await it: the handler's socket is closed
+  // when the handler returns.
   //
   // Each direction ends independently, whatever either socket's allowHalfOpen says: when one
   // connection reaches EOF, the relay shuts down the other's write side and keeps relaying the
@@ -411,7 +413,10 @@ class Socket: public jsg::Object {
   RelayEnd takeRelayEnd(jsg::Lock& js);
   // The part of proxyTo() that follows both sockets being ready.
   jsg::Promise<void> runRelay(
-      jsg::Lock& js, jsg::Ref<Socket> other, kj::Maybe<jsg::Ref<AbortSignal>> signal);
+      jsg::Lock& js, Socket& other, kj::Maybe<jsg::Ref<AbortSignal>>& signal);
+  // Settles `closed` with `error` once proxyTo() has failed, and closes the connection if the
+  // relay had not taken it over yet.
+  void failRelay(jsg::Lock& js, jsg::Value error);
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
