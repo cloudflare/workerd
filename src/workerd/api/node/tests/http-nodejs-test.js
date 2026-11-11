@@ -1,7 +1,13 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { throws, ok, strictEqual, deepStrictEqual } from 'node:assert';
+import {
+  throws,
+  ok,
+  strictEqual,
+  notStrictEqual,
+  deepStrictEqual,
+} from 'node:assert';
 import { validateHeaderName, validateHeaderValue, METHODS } from 'node:http';
 import httpCommon from 'node:_http_common';
 import { inspect } from 'node:util';
@@ -454,6 +460,39 @@ export const testExports = {
     strictEqual(typeof http.MessageEvent, 'function');
     strictEqual(typeof http._connectionListener, 'function');
     strictEqual(typeof http.setMaxIdleHTTPParsers, 'function');
+  },
+};
+
+// Ported from test/parallel/test-http-set-max-idle-http-parser.js
+export const testSetMaxIdleHTTPParsers = {
+  async test() {
+    for (const value of [
+      Symbol(),
+      {},
+      [],
+      () => {},
+      1n,
+      true,
+      '1',
+      null,
+      undefined,
+    ]) {
+      throws(() => http.setMaxIdleHTTPParsers(value), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+
+    for (const value of [-1, -Infinity, NaN, 0, 1.1]) {
+      throws(() => http.setMaxIdleHTTPParsers(value), {
+        code: 'ERR_OUT_OF_RANGE',
+      });
+    }
+
+    for (const value of [1, Number.MAX_SAFE_INTEGER]) {
+      notStrictEqual(httpCommon.parsers.max, value);
+      strictEqual(http.setMaxIdleHTTPParsers(value), undefined);
+      strictEqual(httpCommon.parsers.max, value);
+    }
   },
 };
 
