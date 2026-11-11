@@ -714,6 +714,14 @@ fn workflow_settings_reach_the_engine() {
             "{error}"
         );
     }
+    for name in ["-r", "a.b", &"r".repeat(65)] {
+        let wrangler = format!(
+            r#"{{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "workflows": [{{ "binding": "R", "name": "{name}", "class_name": "R" }}] }}"#
+        );
+        let error = load_project(&[("wrangler.jsonc", &wrangler), ("index.js", "")]);
+        assert!(error.err().unwrap().contains("Workflow names must be"));
+    }
 }
 
 #[test]

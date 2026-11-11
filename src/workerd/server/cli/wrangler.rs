@@ -714,6 +714,16 @@ fn workflows_services(
                 w.name
             ))
         };
+        let ok = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut chars = w.name.chars();
+        if w.name.len() > 64 || !chars.next().is_some_and(ok) || !chars.all(|c| ok(c) || c == '-') {
+            return Err(format!(
+                "workflows: \"{}\": Workflow names must be 1-64 characters \
+                 long, start with a letter, number, or underscore, and may \
+                 only contain letters, numbers, underscores, or hyphens.",
+                w.name
+            ));
+        }
         if w.script_name.as_ref().is_some_and(|s| s != target) {
             return unsupported("script_name");
         }
