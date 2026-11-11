@@ -78,7 +78,7 @@ pub struct RunOptions {
     pub deployments: Deployments,
     /// Sent the server once `run` has started every listener; dropped unsent if the config is
     /// refused or the start fails. `--control-fd`'s `listen` events, for a server embedded in this
-    /// process.
+    /// process. A run given it serves until drained, even with nothing to listen on.
     pub started: Option<oneshot::Sender<Weak<Server>>>,
 }
 
@@ -220,6 +220,14 @@ async fn start(
         )));
     }
     if let Some(started) = options.started.take() {
+        // The host reaches an embedded server through its own channels too, so the server serves
+        // until the drain even if no socket, trigger or port keeps a listener running.
+        let mut draining = context.draining.clone();
+        listeners.push(Box::pin(async move {
+            // The sender is the run's, which outlives its listeners.
+            let _ = draining.wait_for(|draining| *draining).await;
+            Ok(())
+        }));
         // The receiver may be gone; nothing else depends on the signal.
         let _ = started.send(Rc::downgrade(&server));
     }
