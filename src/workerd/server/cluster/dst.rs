@@ -4,7 +4,8 @@
 
 //! Deterministic simulation testing. A `Harness` runs a test's nodes as
 //! tasks on one thread over a bucket whose every call waits for a verdict:
-//! applied, failed before it applies, or failed after. A seed picks which
+//! applied, failed before it applies, or failed after; or, for a
+//! conditional write, decided and answered as of unknown outcome. A seed picks which
 //! call is decided when, how, and what the test does in between, so a
 //! failing seed replays exactly. Crashing a node drops its tasks wherever
 //! they wait. The test brings the world it models and the invariant.
@@ -56,11 +57,18 @@ enum Verdict {
     Apply,
     FailBefore,
     FailAfter,
+    /// A conditional write is decided, applied or refused, and answered
+    /// with `Error::OutcomeUnknown`, as the client answers a retry refused
+    /// after an attempt that may have landed. Only a conditional write gets
+    /// it.
+    Unknown,
 }
 
 /// A call waiting for its verdict.
 struct Call {
     what: String,
+    /// The call is a conditional write.
+    conditional: bool,
     verdict: oneshot::Sender<Verdict>,
 }
 
@@ -73,8 +81,17 @@ pub struct Store {
 
 impl Store {
     async fn decide(&self, what: String) -> Verdict {
+        self.decide_write(what, false).await
+    }
+
+    async fn decide_write(&self, what: String, conditional: bool) -> Verdict {
         let (verdict, decided) = oneshot::channel();
-        self.calls.borrow_mut().push(Call { what, verdict });
+        let call = Call {
+            what,
+            conditional,
+            verdict,
+        };
+        self.calls.borrow_mut().push(call);
         decided.await.unwrap_or(Verdict::FailBefore)
     }
 
@@ -124,15 +141,17 @@ impl crate::Store for Shared {
         guard: Option<Guard>,
         metadata: &[(&str, String)],
     ) -> Result<Option<Version>> {
-        let verdict = self.0.decide(format!("put {key}")).await;
+        let what = format!("put {key}");
+        let verdict = self.0.decide_write(what, guard.is_some()).await;
         if matches!(verdict, Verdict::FailBefore) {
             return Err(failed());
         }
         let put = self.0.inner.put(key, body, guard, metadata).await;
-        if matches!(verdict, Verdict::FailAfter) {
-            return Err(failed());
+        match verdict {
+            Verdict::Unknown => Err(Error::OutcomeUnknown(format!("PUT {key}: 412 (simulated)"))),
+            Verdict::FailAfter => Err(failed()),
+            Verdict::Apply | Verdict::FailBefore => put,
         }
-        put
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
@@ -217,6 +236,7 @@ impl Harness {
         let (verdict, tag) = match self.rng.below(100) {
             _ if !faults => (Verdict::Apply, "ok"),
             0..8 => (Verdict::FailBefore, "fail"),
+            12..16 if call.conditional => (Verdict::Unknown, "unknown"),
             8..16 => (Verdict::FailAfter, "fail-after"),
             _ => (Verdict::Apply, "ok"),
         };
