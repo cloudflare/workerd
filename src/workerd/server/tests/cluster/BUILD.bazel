@@ -3,7 +3,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 # One suite, split by test name: cluster-test, and cluster-cron-test, which
 # waits real minutes. cluster-test runs in shards, each of which should stay
 # well under 60 s: each test starts a cluster of its own, which takes a
-# second under TSan, the takeovers wait out a dead owner's lease, a quarter
+# second under TSan, the takeovers wait out a dead owner's lease, half
 # of the default in cluster-test.wd-test, and the drain tests wait out stop
 # deadlines. Add takeovers to the simulations instead.
 [js_test(
