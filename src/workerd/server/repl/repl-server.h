@@ -52,7 +52,7 @@ class ReplConfigServer final: public ReplServerHost, public kj::Refcounted {
   // Starts serving the config `config` (an encoded `Config` message) loaded from `path`, for
   // requests from an IoContext whose headers `replHeaderTable` keys. Resolves once every socket
   // listens. Rejects with a JSG error listing the config errors if there are any or the server
-  // does not start; the server is then closed.
+  // does not start; the server is then closed, and a failure to close is listed with them.
   static kj::Promise<kj::Own<ReplConfigServer>> start(const ReplServerResources& resources,
       const kj::HttpHeaderTable& replHeaderTable,
       kj::String path,
