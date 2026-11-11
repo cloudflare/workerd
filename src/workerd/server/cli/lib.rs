@@ -17,6 +17,7 @@ mod bridge;
 mod config;
 mod deploy;
 mod deployments;
+mod help;
 mod process;
 mod socket_fd;
 mod watch;

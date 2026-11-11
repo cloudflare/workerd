@@ -387,3 +387,56 @@ fn compiled_binary_has_no_config_arguments() {
     assert_eq!(main.serve.socket_addr_overrides.len(), 1);
     assert!(CompiledMain::try_parse_from(["workerd", "config.capnp"]).is_err());
 }
+
+/// Every help page fits 80 columns and lists each of its command's options, and `workerd -h`
+/// names every command, so the hand-written pages in help.rs cannot drift from the parser.
+#[test]
+fn help_pages_are_complete() {
+    fn check(cmd: &mut clap::Command, path: &str) {
+        let page = cmd.render_help().to_string();
+        for line in page.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "{path}: over 80 columns: {line}"
+            );
+            // An option row's description starts at column 37.
+            let flag = line
+                .strip_prefix("  -")
+                .or_else(|| line.strip_prefix("      --"));
+            if let Some(rest) = flag.and_then(|f| f.split_once("  ")) {
+                let column = line.len() - rest.1.trim_start().len();
+                assert!(
+                    rest.1.trim_start().is_empty() || column == 37,
+                    "{path}: description not at column 37: {line}"
+                );
+            }
+        }
+        for arg in cmd.get_arguments() {
+            let long = arg.get_long().map(|l| format!("--{l}"));
+            let short = arg.get_short().map(|s| format!("-{s}"));
+            for flag in long.iter().chain(short.iter()) {
+                assert!(page.contains(flag.as_str()), "{path}: no {flag}");
+            }
+        }
+    }
+    let mut main = Main::command();
+    main.build();
+    let page = main.render_help().to_string();
+    assert!(page.len() < 6000, "workerd -h is {} bytes", page.len());
+    check(&mut main, "workerd");
+    for sub in main.get_subcommands_mut() {
+        let name = sub.get_name().to_owned();
+        if !sub.is_hide_set() && name != "help" {
+            assert!(
+                page.contains(&format!("workerd {name} ")),
+                "workerd -h: no {name}"
+            );
+        }
+        if name != "help" {
+            check(sub, &format!("workerd {name}"));
+        }
+    }
+    let mut compiled = CompiledMain::command();
+    compiled.build();
+    check(&mut compiled, "compiled");
+}
