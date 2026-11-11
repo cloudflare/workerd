@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use crate::Error;
 use crate::Result;
 pub use crate::http::Payload;
 
@@ -124,6 +125,29 @@ impl Bucket {
         self.store.put(&self.key(key), body, Some(guard), &[]).await
     }
 
+    /// `put_if`, with an unknown outcome (`Error::OutcomeUnknown`) settled by
+    /// reading the object back: the write counts as landed, at the version
+    /// read, if the object holds `body`, and as refused otherwise. For
+    /// writes whose bytes no other writer puts at `key`, or where it means
+    /// the same if one does, and whose body differs from what the guarded
+    /// version holds: on a store whose versions do not follow content, a
+    /// refused write of those same bytes would read back as landed.
+    pub async fn put_if_settled(
+        &self,
+        key: &str,
+        body: Vec<u8>,
+        guard: Guard,
+    ) -> Result<Option<Version>> {
+        match self.put_if(key, body.clone(), guard).await {
+            Err(Error::OutcomeUnknown(_)) => {}
+            written => return written,
+        }
+        Ok(match self.get(key).await? {
+            Some((current, version)) if current == body => Some(version),
+            _ => None,
+        })
+    }
+
     /// Write `body` unconditionally, with user metadata.
     pub async fn put(&self, key: &str, body: Vec<u8>, metadata: &[(&str, String)]) -> Result<()> {
         let key = self.key(key);
@@ -216,7 +240,13 @@ pub mod memory {
         /// write. Shared, so a test keeps a handle on it once a `Bucket`
         /// owns the store.
         pub unknown: Rc<RefCell<Vec<String>>>,
+        /// Another writer's write of a key, which lands just before the next
+        /// guarded write of that key is decided; one entry per write.
+        pub interloper: Rc<RefCell<Vec<Write>>>,
     }
+
+    /// A write's key and body.
+    pub type Write = (String, Vec<u8>);
 
     /// Removes the first entry of `entries` that `matches` and answers it.
     fn take<T>(entries: &RefCell<Vec<T>>, matches: impl Fn(&T) -> bool) -> Option<T> {
@@ -252,6 +282,11 @@ pub mod memory {
             let guarded = guard.is_some();
             let unknown = guarded && take(&self.unknown, |k| k == key).is_some();
             let mut objects = self.objects.borrow_mut();
+            if guarded && let Some((_, other)) = take(&self.interloper, |(k, _)| k == key) {
+                self.writes.set(self.writes.get() + 1);
+                let version = Version(format!("\"{}\"", self.writes.get()));
+                objects.insert(key.to_owned(), (other, version));
+            }
             let current = objects.get(key).map(|(_, version)| version);
             let holds = match guard {
                 None => true,
