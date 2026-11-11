@@ -67,6 +67,22 @@ constexpr kj::StringPtr WORKER_CONFIG = R"((
   sockets = [ (name = "http", address = "*:0", http = (), service = "main") ],
 ))"_kj;
 
+// A config with a worker and no sockets, which only the REPL reaches.
+constexpr kj::StringPtr NO_SOCKETS_CONFIG = R"((
+  services = [
+    ( name = "main",
+      worker = (
+        compatibilityDate = "2025-01-01",
+        modules = [
+          ( name = "worker.js",
+            esModule = `export default { fetch() { return new Response("hello"); } };
+          ),
+        ],
+      ),
+    ),
+  ],
+))"_kj;
+
 // A config the server reports errors in.
 constexpr kj::StringPtr BROKEN_CONFIG = R"((
   sockets = [ (name = "http", address = "*:0", http = (), service = "missing") ],
@@ -97,6 +113,7 @@ struct Fixture {
   explicit Fixture(ReplEnvironmentOptions options = {})
       : environment(resources, KJ_BIND_METHOD(*this, loadConfig), kj::mv(options)) {
     configs.insert("worker.capnp"_kj, WORKER_CONFIG);
+    configs.insert("no-sockets.capnp"_kj, NO_SOCKETS_CONFIG);
     configs.insert("broken.capnp"_kj, BROKEN_CONFIG);
     configs.insert("process-wide.capnp"_kj, PROCESS_WIDE_CONFIG);
   }
@@ -325,6 +342,15 @@ KJ_TEST("REPL loads a config and calls its services and sockets") {
   KJ_EXPECT_STARTS_WITH(
       fixture.eval("s.socket('nope')"), "Uncaught Error: The config has no socket named \"nope\".");
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('nope')"), "Uncaught Error:");
+}
+
+KJ_TEST("REPL calls the services of a config with no sockets") {
+  Fixture fixture;
+  fixture.evalAwait("s = await workerd.loadConfig('no-sockets.capnp')");
+  // Lets the run of a server that has nothing to listen on end, if it does.
+  fixture.evalAwait("await scheduler.wait(1)");
+  KJ_EXPECT(
+      fixture.evalAwait("await (await s.service('main').fetch('http://x/')).text()") == "'hello'");
 }
 
 KJ_TEST("REPL revokes what a closed server handed out") {
