@@ -61,6 +61,55 @@ KJ_TEST("Non-special URL") {
   KJ_ASSERT(url.getProtocol() == "abc:"_kj);
 }
 
+KJ_TEST("Components") {
+  auto expectComponents = [](kj::StringPtr input, Url::Components expected) {
+    auto url = KJ_ASSERT_NONNULL(Url::tryParse(input));
+    auto c = url.getComponents();
+    auto actual = kj::str(c.protocolEnd, ' ', c.usernameEnd, ' ', c.hostStart, ' ', c.hostEnd, ' ',
+        c.port, ' ', c.pathnameStart, ' ', c.searchStart, ' ', c.hashStart);
+    auto want = kj::str(expected.protocolEnd, ' ', expected.usernameEnd, ' ', expected.hostStart,
+        ' ', expected.hostEnd, ' ', expected.port, ' ', expected.pathnameStart, ' ',
+        expected.searchStart, ' ', expected.hashStart);
+    KJ_EXPECT(actual == want, input, actual, want);
+  };
+  constexpr auto OMITTED = Url::Components::OMITTED;
+
+  // ada::url_components' own example.
+  expectComponents("https://user:pass@example.com:1234/foo/bar?baz#quux"_kj,
+      {
+        .protocolEnd = 6,
+        .usernameEnd = 12,
+        .hostStart = 17,
+        .hostEnd = 29,
+        .port = 1234,
+        .pathnameStart = 34,
+        .searchStart = 42,
+        .hashStart = 46,
+      });
+  expectComponents("http://a.com/"_kj,
+      {
+        .protocolEnd = 5,
+        .usernameEnd = 7,
+        .hostStart = 7,
+        .hostEnd = 12,
+        .port = OMITTED,
+        .pathnameStart = 12,
+        .searchStart = OMITTED,
+        .hashStart = OMITTED,
+      });
+  expectComponents("mailto:x@y?q"_kj,
+      {
+        .protocolEnd = 7,
+        .usernameEnd = 7,
+        .hostStart = 7,
+        .hostEnd = 7,
+        .port = OMITTED,
+        .pathnameStart = 7,
+        .searchStart = 10,
+        .hashStart = OMITTED,
+      });
+}
+
 KJ_TEST("Invalid Urls") {
   struct TestCase {
     kj::StringPtr input;

@@ -12,6 +12,7 @@
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/api/request-io.h>
+#include <workerd/api/url-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -345,6 +346,60 @@ static void ParseUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+static void UrlParse(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlBootstrap::parse(
+        js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2])));
+  });
+}
+
+static void UrlCanParse(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.boolean(
+        api::UrlBootstrap::canParse(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void UrlUpdate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlBootstrap::update(js, jsg::JsValue(args[0]),
+        jsg::JsValue(args[1]), jsg::JsValue(args[2]), jsg::JsValue(args[3])));
+  });
+}
+
+static void UrlOrigin(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlBootstrap::origin(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void CreateLegacyUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::UrlBootstrap::createLegacyUrl(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void TryCreateLegacyUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::UrlBootstrap::tryCreateLegacyUrl(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void CreateLegacySearchParams(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlBootstrap::createLegacySearchParams(js));
+  });
+}
+
 static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -502,6 +557,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createRequestIo",
     "isFetcher",
     "parseUrl",
+    "urlParse",
+    "urlCanParse",
+    "urlUpdate",
+    "urlOrigin",
+    "createLegacyUrl",
+    "tryCreateLegacyUrl",
+    "createLegacySearchParams",
     "mimeTypeEssence",
     "readableStreamState",
   };
@@ -533,6 +595,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateRequestIo),
     getMethod(js, IsFetcher),
     getMethod(js, ParseUrl),
+    getMethod(js, UrlParse),
+    getMethod(js, UrlCanParse),
+    getMethod(js, UrlUpdate),
+    getMethod(js, UrlOrigin),
+    getMethod(js, CreateLegacyUrl),
+    getMethod(js, TryCreateLegacyUrl),
+    getMethod(js, CreateLegacySearchParams),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
   };

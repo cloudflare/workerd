@@ -24,6 +24,9 @@ at context creation, before any user code. C++ entry point:
   `expose_draining_reader`, and the internal-testing cloneable
   `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
   `src/tests/serialization/`) under `expose_serialization_test_class`.
+- Under the `TS_URL` autogate, `main.ts` installs the TypeScript `URL` and
+  `URLSearchParams` (`url/`), which replace both C++ implementations; see
+  `url/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
