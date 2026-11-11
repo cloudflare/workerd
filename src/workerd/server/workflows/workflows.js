@@ -78,6 +78,19 @@ const UNITS = {
   year: 365 * DAY,
 };
 const TERMINAL = new Set(['complete', 'errored', 'terminated']);
+// Miniflare's numbers for the statuses.
+const STATUS_CODES = Object.fromEntries(
+  [
+    'queued',
+    'running',
+    'paused',
+    'errored',
+    'terminated',
+    'complete',
+    'waitingForPause',
+    'waiting',
+  ].map((s, i) => [s, i])
+);
 // The statuses a `run()` may take steps in.
 const LIVE = new Set([
   'queued',
@@ -1194,7 +1207,30 @@ export class Engine extends DurableObject {
     this.#wake();
     const m = this.#meta;
     if (!m) throw notFound();
-    return { status: m.status, error: m.error, output: m.output ?? null };
+    const dev = this.env.LOCAL_DEV && {
+      __LOCAL_DEV_STEP_OUTPUTS: this.#outputs(),
+    };
+    return {
+      status: m.status,
+      ...dev,
+      output: m.output ?? null,
+      error: m.error,
+    };
+  }
+
+  // Each step's output and each event's payload, in the order they came.
+  #outputs() {
+    const outputs = [];
+    for (const [, e] of this.#kv.list({ prefix: 'l:' })) {
+      if (e.type === 'step_completed') outputs.push(e.output);
+      if (e.type !== 'wait_completed') continue;
+      const i = e.stepName.lastIndexOf('-');
+      const [name, count] = [e.stepName.slice(0, i), e.stepName.slice(i + 1)];
+      outputs.push(
+        this.#kv.get(`s:waitForEvent:${count}:${name}`)?.value.payload
+      );
+    }
+    return outputs;
   }
 
   pause() {
@@ -1475,6 +1511,14 @@ export class Engine extends DurableObject {
     return isOutput ? output : error;
   }
 
+  // For Miniflare's local explorer, which finds instances by object ID.
+  getInstanceMetadata() {
+    const m = this.#meta;
+    if (!m) throw new Error('Engine was never started');
+    const createdOn = new Date(m.created).toISOString();
+    return { instanceId: m.id, status: STATUS_CODES[m.status], createdOn };
+  }
+
   // Deletes the instance and aborts the object, as the end of a test does.
   async abort(reason = DELETED) {
     this.#destroy();
@@ -1605,11 +1649,11 @@ export class WorkflowBinding extends WorkerEntrypoint {
     return { id };
   }
 
-  // The testing API, for a Workflows engine with a `TEST_API` binding. The
+  // The testing API, for a Workflows engine with a `LOCAL_DEV` binding. The
   // binding's props name it as `binding`.
 
   #test() {
-    if (!this.env.TEST_API) throw new Error('The testing API is not enabled');
+    if (!this.env.LOCAL_DEV) throw new Error('The testing API is not enabled');
     return this.ctx.props.workflow;
   }
 
@@ -1673,6 +1717,16 @@ export class WorkflowBinding extends WorkerEntrypoint {
   async unsafeGetOutputOrError(id, isOutput) {
     this.#test();
     return this.#instance(id).outputOrError(isOutput);
+  }
+
+  // Deletes an instance by its object's ID, as hex: whether it had one.
+  async unsafeDeletePersistedInstance(hex) {
+    this.#test();
+    const ns = this.env[this.ctx.props.workflow];
+    const instance = ns.get(ns.idFromString(hex));
+    if (!(await instance.exists())) return false;
+    await instance.abort().catch(() => {});
+    return true;
   }
 
   async unsafeAbort(id, reason) {

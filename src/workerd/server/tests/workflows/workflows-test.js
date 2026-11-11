@@ -289,6 +289,14 @@ export let testingApi = {
     assert.strictEqual(await api.unsafeWaitForStepResult('mocked', 'a'), 'A');
     assert.strictEqual(await api.unsafeGetOutputOrError('mocked', true), 'b');
     assert.deepEqual(ranBy('mocked'), ['mocked/b']);
+    const { __LOCAL_DEV_STEP_OUTPUTS } = await env.FLOW.get('mocked').then(
+      (i) => i.status()
+    );
+    assert.deepEqual(__LOCAL_DEV_STEP_OUTPUTS, ['A', 'b']);
+    // The local explorer's calls, by object ID.
+    const object = env.ENGINE.idFromName('mocked');
+    const meta = await env.ENGINE.get(object).getInstanceMetadata();
+    assert.deepEqual([meta.instanceId, meta.status], ['mocked', 5]);
     await assert.rejects(
       api.unsafeWaitForStatus('mocked', 'errored'),
       /finite status/
@@ -312,7 +320,9 @@ export let testingApi = {
     await m.mockEvent({ type: 'ping', payload: 'mock' });
     const mevent = await create(env, 'mevent', 'event');
     await api.unsafeWaitForStatus('mevent', 'complete');
-    assert.strictEqual((await mevent.status()).output, 'mock');
+    const status = await mevent.status();
+    assert.deepEqual(status.__LOCAL_DEV_STEP_OUTPUTS, ['mock']);
+    assert.strictEqual(status.output, 'mock');
 
     m = await modifier('mnone');
     await m.forceEventTimeout({ name: 'ping' });
@@ -345,6 +355,10 @@ export let testingApi = {
     await api.unsafeStopIntrospection(session);
     await api.unsafeAbort('session');
     await assert.rejects(env.FLOW.get('session'), /not_found/);
+    const hex = env.ENGINE.idFromName('mocked').toString();
+    assert.strictEqual(await api.unsafeDeletePersistedInstance(hex), true);
+    assert.strictEqual(await api.unsafeDeletePersistedInstance(hex), false);
+    await assert.rejects(env.FLOW.get('mocked'), /not_found/);
   },
 };
 

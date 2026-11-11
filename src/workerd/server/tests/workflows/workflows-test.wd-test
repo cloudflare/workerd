@@ -22,6 +22,7 @@ const unitTests :Workerd.Config = (
               innerBindings = [ ( name = "fetcher", service = .flow ) ],
             ) ),
           ( name = "WORKFLOWS", service = "workflows" ),
+          ( name = "ENGINE", durableObjectNamespace = "miniflare-workflows-flow" ),
           # The binding's service itself, with the testing API.
           ( name = "FLOW_TEST", service = (
               name = "workflows",
@@ -50,7 +51,7 @@ const unitTests :Workerd.Config = (
           ( name = "WORKFLOWS",
             json = "{\"flow\": {\"steps\": 3, \"retention\": {\"success\": \"2 days\"}}}" ),
           ( name = "TEST_CLOCK", json = "true" ),
-          ( name = "TEST_API", json = "true" ),
+          ( name = "LOCAL_DEV", json = "true" ),
         ],
         durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
       )
