@@ -17,8 +17,9 @@
 //! Requests go to `https://storage.googleapis.com`, or to the emulator
 //! `STORAGE_EMULATOR_HOST` names. Requests to an emulator carry no token
 //! unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` names
-//! where tokens come from.
+//! where tokens come from: gcloud's credentials file is not read for one.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::Error;
@@ -66,21 +67,28 @@ impl Gcs {
         if let Some((name, _)) = options.first() {
             return Err(Error::Config(format!(
                 "a gs:// bucket takes no bucketOptions, but {name} is set: its credentials come \
-                 from GOOGLE_APPLICATION_CREDENTIALS or the metadata server"
+                 from GOOGLE_APPLICATION_CREDENTIALS, gcloud's credentials file or the metadata \
+                 server"
             )));
         }
         let env = |name: &str| env(name).filter(|value| !value.is_empty());
         let emulator = env("STORAGE_EMULATOR_HOST");
         let metadata = env("GCE_METADATA_HOST");
         let http = Http::new().map_err(|e| Error::Config(e.to_string()))?;
-        let credentials = match env("GOOGLE_APPLICATION_CREDENTIALS") {
-            Some(path) => Some(Credentials::from_file(&PathBuf::from(path), http.clone())?),
+        // An emulator takes a token only from a source named for it.
+        let gcloud = google_auth::gcloud_credentials_file(&env, cfg!(windows))
+            .filter(|path| emulator.is_none() && !is_absent(path));
+        let credentials = match env("GOOGLE_APPLICATION_CREDENTIALS").map(PathBuf::from) {
+            Some(path) => Some(Credentials::from_file(&path, http.clone())?),
             None if emulator.is_some() && metadata.is_none() => None,
-            None => Some(Credentials::metadata(
-                metadata.as_deref(),
-                google_auth::google_cloud(&env, dmi_product),
-                http.clone(),
-            )),
+            None => match gcloud {
+                Some(path) => Some(Credentials::from_file(&path, http.clone())?),
+                None => Some(Credentials::metadata(
+                    metadata.as_deref(),
+                    google_auth::google_cloud(&env, dmi_product),
+                    http.clone(),
+                )),
+            },
         };
         let endpoint = match emulator {
             Some(host) if host.contains("://") => host,
@@ -90,6 +98,19 @@ impl Gcs {
         let google = Google { credentials };
         Ok((Self::with_dialect(google, http, &endpoint, &bucket), prefix))
     }
+}
+
+/// Whether no file is at `path`, as far as this process can tell: nothing is
+/// there, or a directory on the way is a file or may not be entered. A file
+/// that is there but cannot be read is not absent: reading it reports why.
+fn is_absent(path: &Path) -> bool {
+    use std::io::ErrorKind;
+    std::fs::metadata(path).is_err_and(|e| {
+        matches!(
+            e.kind(),
+            ErrorKind::NotFound | ErrorKind::NotADirectory | ErrorKind::PermissionDenied
+        )
+    })
 }
 
 /// `gs://<bucket>/<prefix>` as the bucket and the prefix.

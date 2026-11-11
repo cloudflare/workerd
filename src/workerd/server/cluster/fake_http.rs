@@ -25,6 +25,7 @@ pub struct Request {
     /// As sent, without the `?`.
     pub query: String,
     pub headers: http::HeaderMap,
+    pub body: Vec<u8>,
 }
 
 impl Request {
@@ -80,7 +81,8 @@ impl Server {
                 let (stream, _) = listener.accept().await.unwrap();
                 let (handler, log) = (handler.clone(), log.clone());
                 let service = hyper::service::service_fn(move |request| {
-                    std::future::ready(answer(request, &*handler, &log))
+                    let (handler, log) = (handler.clone(), log.clone());
+                    async move { answer(request, &*handler, &log).await }
                 });
                 let connection = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service);
@@ -105,17 +107,25 @@ impl Server {
     }
 }
 
-fn answer(
+async fn answer(
     request: http::Request<hyper::body::Incoming>,
     handler: &Handler,
     log: &Mutex<Vec<Request>>,
 ) -> Result<http::Response<Body>, &'static str> {
-    // The clients' requests here have no body.
-    let (head, _) = request.into_parts();
+    use http_body::Body as _;
+    let (head, mut incoming) = request.into_parts();
+    let mut body = Vec::new();
+    while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx)).await
+    {
+        if let Ok(data) = frame.map_err(|_| "read")?.into_data() {
+            body.extend_from_slice(&data);
+        }
+    }
     let request = Request {
         path: head.uri.path().to_owned(),
         query: head.uri.query().unwrap_or("").to_owned(),
         headers: head.headers,
+        body,
     };
     let n = {
         let mut log = log.lock().unwrap();

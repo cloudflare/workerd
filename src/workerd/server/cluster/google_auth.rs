@@ -2,15 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! OAuth 2.0 access tokens for Cloud Storage, from the service account key
-//! `GOOGLE_APPLICATION_CREDENTIALS` names, else from the metadata server of
-//! the Compute Engine VM or GKE pod the process runs on. GKE's Workload
-//! Identity serves the token of the pod's Kubernetes service account there.
+//! OAuth 2.0 access tokens for Cloud Storage, from the credentials file
+//! `GOOGLE_APPLICATION_CREDENTIALS` names, else from the one `gcloud auth
+//! application-default login` writes (`gcloud_credentials_file`), else from
+//! the metadata server of the Compute Engine VM or GKE pod the process runs
+//! on. GKE's Workload Identity serves the token of the pod's Kubernetes
+//! service account there.
 //!
-//! A service account key signs a JWT that its token endpoint exchanges for a
-//! token (the JWT bearer grant, RFC 7523). Other kinds of credentials file
-//! are refused. A key's token endpoint must be `https`, or on a loopback
-//! address.
+//! A credentials file holds either a service account's key, whose signed JWT
+//! is exchanged for a token (the JWT bearer grant, RFC 7523), or the user
+//! credentials `gcloud auth application-default login` writes, whose refresh
+//! token is. Other kinds of credentials file (workload identity federation,
+//! impersonation) are refused. A file's token endpoint must be `https`, or on
+//! a loopback address.
 //!
 //! A bucket call never waits for a token while the cached one is valid: once
 //! the token is due for replacement, a call starts one request for a new one
@@ -42,6 +46,7 @@
 //! within 10 s of that, bucket calls wait for the pause instead.
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -68,7 +73,7 @@ use crate::http::Payload;
 /// The metadata server's address on Compute Engine and GKE, unless
 /// `GCE_METADATA_HOST` names another.
 pub const METADATA_HOST: &str = "169.254.169.254";
-/// Where a key without a `token_uri` exchanges its JWT.
+/// Where a credentials file without a `token_uri` exchanges its grant.
 const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// Reading, writing, listing and deleting objects.
 const SCOPE: &str = "https://www.googleapis.com/auth/devstorage.read_write";
@@ -156,6 +161,13 @@ enum Source {
         email: String,
         key_id: Option<String>,
         key: Box<RsaKeyPair>,
+        token_uri: String,
+    },
+    /// A user's OAuth client and refresh token, as gcloud stores them.
+    AuthorizedUser {
+        client_id: String,
+        client_secret: String,
+        refresh_token: String,
         token_uri: String,
     },
     /// The metadata server's token endpoint; with `probe`, its `host:port`,
@@ -251,6 +263,9 @@ struct File {
     client_email: Option<String>,
     private_key: Option<String>,
     private_key_id: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    refresh_token: Option<String>,
     token_uri: Option<String>,
 }
 
@@ -477,6 +492,7 @@ impl Shared {
     fn describe(&self) -> String {
         match &self.source {
             Source::ServiceAccount { email, .. } => format!("service account {email}"),
+            Source::AuthorizedUser { .. } => "authorized_user credentials".into(),
             Source::Metadata { url, .. } => format!("metadata server {url}"),
             #[cfg(test)]
             Source::Test(_) => "test endpoint".into(),
@@ -510,6 +526,21 @@ impl Shared {
                 let body = form_body(&[
                     ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
                     ("assertion", &jwt),
+                ]);
+                ("POST", token_uri.clone(), form(), body)
+            }
+            Source::AuthorizedUser {
+                client_id,
+                client_secret,
+                refresh_token,
+                token_uri,
+                ..
+            } => {
+                let body = form_body(&[
+                    ("grant_type", "refresh_token"),
+                    ("client_id", client_id),
+                    ("client_secret", client_secret),
+                    ("refresh_token", refresh_token),
                 ]);
                 ("POST", token_uri.clone(), form(), body)
             }
@@ -560,24 +591,33 @@ fn parse_file(text: &str) -> std::result::Result<Source, String> {
             .ok_or_else(|| format!("{} credentials have no {name}", file.kind))
     };
     let token_uri = file.token_uri.clone().unwrap_or_else(|| TOKEN_URI.into());
-    if file.kind != "service_account" {
+    if !matches!(file.kind.as_str(), "service_account" | "authorized_user") {
         return Err(format!(
-            "credentials of type {:?} are not supported: use a service account key or the \
-             metadata server",
+            "credentials of type {:?} are not supported: use a service account key, \
+             authorized_user credentials, or the metadata server",
             file.kind
         ));
     }
     check_token_uri(&token_uri)?;
-    let pem = required(file.private_key.clone(), "private_key")?;
-    let der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())
-        .map_err(|e| format!("private_key: {e}"))?;
-    let key =
-        RsaKeyPair::from_pkcs8(der.secret_pkcs8_der()).map_err(|e| format!("private_key: {e}"))?;
-    Ok(Source::ServiceAccount {
-        email: required(file.client_email.clone(), "client_email")?,
-        key_id: file.private_key_id.clone(),
-        key: Box::new(key),
-        token_uri,
+    Ok(if file.kind == "service_account" {
+        let pem = required(file.private_key.clone(), "private_key")?;
+        let der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())
+            .map_err(|e| format!("private_key: {e}"))?;
+        let key = RsaKeyPair::from_pkcs8(der.secret_pkcs8_der())
+            .map_err(|e| format!("private_key: {e}"))?;
+        Source::ServiceAccount {
+            email: required(file.client_email.clone(), "client_email")?,
+            key_id: file.private_key_id.clone(),
+            key: Box::new(key),
+            token_uri,
+        }
+    } else {
+        Source::AuthorizedUser {
+            client_id: required(file.client_id.clone(), "client_id")?,
+            client_secret: required(file.client_secret.clone(), "client_secret")?,
+            refresh_token: required(file.refresh_token.clone(), "refresh_token")?,
+            token_uri,
+        }
     })
 }
 
@@ -650,8 +690,8 @@ fn metadata_source(host: &str, on_google: bool) -> Source {
 /// How long a connection to a metadata server that may not be there has.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 /// How to provide credentials, for an error that finds none.
-const HINT: &str =
-    "Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on Compute Engine or GKE";
+const HINT: &str = "Set GOOGLE_APPLICATION_CREDENTIALS to a credentials file, run `gcloud auth \
+                    application-default login`, or run on Compute Engine or GKE";
 
 /// Connects to the metadata server at `address`, `host:port`, which may not
 /// be there: an error when nothing answers within `PROBE_TIMEOUT`.
@@ -665,6 +705,23 @@ async fn probe(address: &str) -> std::result::Result<(), String> {
     Err(format!(
         "no credentials found: nothing is at the metadata server {address} ({problem}). {HINT}"
     ))
+}
+
+/// Where `gcloud auth application-default login` writes its credentials:
+/// `application_default_credentials.json` in gcloud's configuration
+/// directory, `CLOUDSDK_CONFIG`, else `%APPDATA%\gcloud` on `windows`, else
+/// `$HOME/.config/gcloud`.
+pub fn gcloud_credentials_file(
+    env: &dyn Fn(&str) -> Option<String>,
+    windows: bool,
+) -> Option<PathBuf> {
+    let env = |name| env(name).filter(|value| !value.is_empty());
+    let directory = match env("CLOUDSDK_CONFIG") {
+        Some(directory) => PathBuf::from(directory),
+        None if windows => PathBuf::from(env("APPDATA")?).join("gcloud"),
+        None => PathBuf::from(env("HOME")?).join(".config").join("gcloud"),
+    };
+    Some(directory.join("application_default_credentials.json"))
 }
 
 /// Variables that suggest Google Cloud when set: `GCE_METADATA_HOST`,

@@ -194,12 +194,19 @@ struct ClusterConfig {
   # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
   #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
-  # object generations. Its access tokens come from the service account key that
-  # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
-  # from the metadata server of the Compute Engine VM or GKE pod the instance runs on, which under
-  # GKE Workload Identity answers the token of the pod's Kubernetes service account.
-  # `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
-  # 169.254.169.254, needs it set to `[fd20:ce::254]`.
+  # object generations. Its access tokens come from the first of these that is there:
+  #
+  # - The credentials file `GOOGLE_APPLICATION_CREDENTIALS` names: a service account key, or the
+  #   `authorized_user` credentials `gcloud auth application-default login` writes.
+  # - The file that command writes: `application_default_credentials.json` in `$CLOUDSDK_CONFIG`,
+  #   else in `$HOME/.config/gcloud`, or `%APPDATA%\gcloud` on Windows. When it is not there, or
+  #   its directory cannot be reached, the next source is tried.
+  # - The metadata server of the Compute Engine VM or GKE pod the instance runs on, which under GKE
+  #   Workload Identity answers the token of the pod's Kubernetes service account.
+  #   `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
+  #   169.254.169.254, needs it set to `[fd20:ce::254]`.
+  #
+  # A credentials file of any other type is an error, as is one that is there but cannot be read.
   # A first token, from any source, is retried, as a new GKE pod's metadata server may refuse
   # requests at first: attempts start for up to 30 s and each has 10 s, so the wait can reach
   # about 40 s. But when nothing suggests the instance runs on Google Cloud (none of
@@ -218,7 +225,7 @@ struct ClusterConfig {
   # for storage, which shows up as a 403 when the instance starts.
   # For tests, `STORAGE_EMULATOR_HOST` (`host:port` or a URL) sends the requests to an emulator
   # instead, without a token unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` is
-  # set.
+  # set; gcloud's file is not read for an emulator.
 
   bucketOptions @1 :List(Text);
   # `key=value` settings for an `s3://` bucket: `aws_endpoint=https://...`, `aws_region=auto`,

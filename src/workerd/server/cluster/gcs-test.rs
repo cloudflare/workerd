@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -10,6 +11,8 @@ use super::*;
 use crate::Bucket;
 use crate::fake_http::Server;
 use crate::fake_http::reply;
+
+const TEST_KEY: &str = include_str!("google_auth-test.pem");
 
 fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let vars: Vec<(String, String)> = vars
@@ -94,6 +97,133 @@ fn where_requests_and_tokens_go() {
         Gcs::with_env("gs://b/p", &[], &vars, None),
         Err(Error::Config(_))
     ));
+}
+
+/// An empty directory of the test's own.
+fn scratch(name: &str) -> PathBuf {
+    let base = std::env::var("TEST_TMPDIR").map_or_else(|_| std::env::temp_dir(), PathBuf::from);
+    let dir = base.join(format!("gcs-test-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+const AUTHORIZED_USER: &str = r#"{"type": "authorized_user", "client_id": "c",
+    "client_secret": "s", "refresh_token": "r"}"#;
+
+#[test]
+fn gclouds_credentials_file_comes_before_the_metadata_server() {
+    let home = scratch("home");
+    let config = scratch("config");
+    let gcloud = home.join(".config").join("gcloud");
+    std::fs::create_dir_all(&gcloud).unwrap();
+    let in_home = gcloud.join("application_default_credentials.json");
+    let in_config = config.join("application_default_credentials.json");
+    let appdata = home.join(".config");
+    let (home, config) = (home.to_str().unwrap(), config.to_str().unwrap());
+    // `$HOME/.config/gcloud`, and `%APPDATA%\gcloud` on Windows: the same
+    // directory.
+    let user_vars = [("HOME", home), ("APPDATA", appdata.to_str().unwrap())];
+    let with = |more: &[(&'static str, &str)]| -> Vec<(&str, String)> {
+        let all = user_vars.iter().chain(more);
+        all.map(|(name, value)| (*name, (*value).to_owned()))
+            .collect()
+    };
+    let user = Some("authorized_user credentials".to_owned());
+
+    // No file: the metadata server.
+    assert_eq!(describe(&with(&[])).unwrap(), Some(metadata()));
+    std::fs::write(&in_home, AUTHORIZED_USER).unwrap();
+    assert_eq!(describe(&with(&[])).unwrap(), user);
+    // CLOUDSDK_CONFIG moves gcloud's configuration, and with it the file.
+    let moved = with(&[("CLOUDSDK_CONFIG", config)]);
+    assert_eq!(describe(&moved).unwrap(), Some(metadata()));
+    std::fs::write(&in_config, AUTHORIZED_USER).unwrap();
+    assert_eq!(describe(&moved).unwrap(), user);
+    // GOOGLE_APPLICATION_CREDENTIALS comes first.
+    let key = scratch("key").join("key.json");
+    let file = format!(
+        r#"{{"type": "service_account", "client_email": "sa@p", "private_key": {}}}"#,
+        serde_json::to_string(TEST_KEY).unwrap()
+    );
+    std::fs::write(&key, file).unwrap();
+    let named = with(&[("GOOGLE_APPLICATION_CREDENTIALS", key.to_str().unwrap())]);
+    assert_eq!(
+        describe(&named).unwrap(),
+        Some("service account sa@p".into())
+    );
+    // An emulator does not read it.
+    let emulator = with(&[("STORAGE_EMULATOR_HOST", "localhost:9023")]);
+    assert_eq!(describe(&emulator).unwrap(), None);
+
+    // A file of a type that is not supported is an error, not a reason to
+    // try the metadata server.
+    std::fs::write(&in_home, r#"{"type": "external_account"}"#).unwrap();
+    let Err(Error::Config(message)) = describe(&with(&[])) else {
+        panic!("an external_account file was accepted");
+    };
+    assert_eq!(
+        message,
+        format!(
+            "{}: credentials of type \"external_account\" are not supported: use a service \
+             account key, authorized_user credentials, or the metadata server",
+            in_home.display()
+        )
+    );
+    // So is one that is there but cannot be read.
+    std::fs::remove_file(&in_home).unwrap();
+    std::fs::create_dir(&in_home).unwrap();
+    assert!(matches!(describe(&with(&[])), Err(Error::Config(_))));
+}
+
+/// The source a gs:// bucket's tokens come from, under the environment
+/// `vars`.
+fn describe(vars: &[(&str, String)]) -> Result<Option<String>> {
+    let vars: Vec<(&str, &str)> = vars.iter().map(|(n, v)| (*n, v.as_str())).collect();
+    let gcs = Gcs::with_env("gs://b/p", &[], &env(&vars), None).map(|(gcs, _)| gcs);
+    gcs.map(|gcs| {
+        gcs.dialect()
+            .credentials
+            .as_ref()
+            .map(Credentials::describe)
+    })
+}
+
+fn metadata() -> String {
+    let url = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token";
+    format!("metadata server {url}")
+}
+
+#[test]
+fn a_gcloud_file_out_of_reach_is_not_there() {
+    let vars = |home: &str| vec![("HOME", home.to_owned()), ("APPDATA", home.to_owned())];
+    // A home that is a file.
+    let file = scratch("home-file").join("file");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(
+        describe(&vars(file.to_str().unwrap())).unwrap(),
+        Some(metadata())
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(describe(&vars("/dev/null")).unwrap(), Some(metadata()));
+        // A home that this user may not enter, as /root with mode 0700 is to
+        // a container's other users.
+        let home = scratch("home-closed");
+        let gcloud = home.join(".config").join("gcloud");
+        std::fs::create_dir_all(&gcloud).unwrap();
+        let path = gcloud.join("application_default_credentials.json");
+        std::fs::write(&path, AUTHORIZED_USER).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reachable = std::fs::metadata(&path).is_ok();
+        let found = describe(&vars(home.to_str().unwrap()));
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Root enters it anyway.
+        if !reachable {
+            assert_eq!(found.unwrap(), Some(metadata()));
+        }
+    }
 }
 
 #[test]

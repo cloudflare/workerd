@@ -35,6 +35,15 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
+/// An environment of `vars`.
+fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+    let vars: Vec<(String, String)> = vars
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect();
+    move |name| vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+}
+
 fn parse(text: &str) -> std::result::Result<Source, String> {
     parse_file(text)
 }
@@ -197,6 +206,11 @@ fn credentials_files() {
     };
     assert_eq!(token_uri, "http://127.0.0.1:1/token");
 
+    let user = r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s",
+                   "refresh_token": "r"}"#;
+    let credentials = Credentials::from_json(user, Http::new().unwrap()).unwrap();
+    assert_eq!(credentials.describe(), "authorized_user credentials");
+
     for (file, error) in [
         (
             r#"{"type": "service_account", "client_email": "sa@p"}"#.to_owned(),
@@ -207,10 +221,8 @@ fn credentials_files() {
             "private_key: ",
         ),
         (
-            r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s",
-                "refresh_token": "r"}"#
-                .to_owned(),
-            "credentials of type \"authorized_user\" are not supported",
+            r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s"}"#.to_owned(),
+            "authorized_user credentials have no refresh_token",
         ),
         (
             r#"{"type": "external_account"}"#.to_owned(),
@@ -788,13 +800,6 @@ fn an_error_answer_names_its_status() {
 
 #[test]
 fn signs_of_google_cloud() {
-    let env = |vars: &'static [(&'static str, &'static str)]| {
-        move |name: &str| {
-            vars.iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, v)| (*v).to_owned())
-        }
-    };
     assert!(!google_cloud(&env(&[]), None));
     assert!(!google_cloud(&env(&[]), Some("Virtual Machine\n")));
     assert!(!google_cloud(&env(&[("GCE_METADATA_HOST", "")]), None));
@@ -850,8 +855,8 @@ fn nothing_at_the_metadata_server_fails_at_once() {
         assert!(message.starts_with(prefix), "{message}");
         assert!(
             message.ends_with(
-                "). Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
-                 Compute Engine or GKE"
+                "). Set GOOGLE_APPLICATION_CREDENTIALS to a credentials file, run `gcloud auth \
+                 application-default login`, or run on Compute Engine or GKE"
             ),
             "{message}"
         );
@@ -930,8 +935,8 @@ fn an_answer_that_is_not_googles_fails_at_once() {
                 "token from metadata server http://{}/computeMetadata/v1/instance/\
                  service-accounts/default/token: no credentials found: the {status} answer is \
                  not from Google's metadata server, having no `Metadata-Flavor: Google` \
-                 header. Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
-                 Compute Engine or GKE",
+                 header. Set GOOGLE_APPLICATION_CREDENTIALS to a credentials file, run `gcloud \
+                 auth application-default login`, or run on Compute Engine or GKE",
                 endpoint.host
             );
             assert_eq!(message, expected);
@@ -1001,5 +1006,63 @@ fn a_replacement_that_is_not_googles_fails() {
             )
         );
         assert_eq!(endpoint.requests(), 1);
+    });
+}
+
+#[test]
+fn where_gcloud_keeps_its_credentials() {
+    let file = |vars, windows| gcloud_credentials_file(&env(vars), windows);
+    let home = [
+        ("HOME", "/home/u"),
+        ("APPDATA", "C:\\Users\\u\\AppData\\Roaming"),
+    ];
+    assert_eq!(
+        file(&home, false),
+        Some(PathBuf::from(
+            "/home/u/.config/gcloud/application_default_credentials.json"
+        ))
+    );
+    assert_eq!(
+        file(&home, true),
+        Some(
+            PathBuf::from("C:\\Users\\u\\AppData\\Roaming")
+                .join("gcloud")
+                .join("application_default_credentials.json")
+        )
+    );
+    let config = [("HOME", "/home/u"), ("CLOUDSDK_CONFIG", "/etc/gcloud")];
+    let expected = Some(PathBuf::from(
+        "/etc/gcloud/application_default_credentials.json",
+    ));
+    assert_eq!(file(&config, false), expected);
+    assert_eq!(file(&config, true), expected);
+    assert_eq!(file(&[("HOME", ""), ("CLOUDSDK_CONFIG", "")], false), None);
+    assert_eq!(file(&[], true), None);
+}
+
+#[test]
+fn user_credentials_exchange_their_refresh_token() {
+    runtime().block_on(async {
+        let endpoint = tokens_after(Vec::new()).await;
+        // Google's refresh tokens start with `1//`.
+        let file = format!(
+            r#"{{"type": "authorized_user", "client_id": "c 1", "client_secret": "s+ /=",
+                 "refresh_token": "1//r+x=", "token_uri": "http://{}/token"}}"#,
+            endpoint.host
+        );
+        let credentials = Credentials::from_json(&file, Http::new().unwrap()).unwrap();
+        assert_eq!(credentials.token().await.unwrap(), "t1");
+        let received = endpoint.received();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].path, "/token");
+        assert_eq!(
+            received[0].header("content-type"),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            String::from_utf8(received[0].body.clone()).unwrap(),
+            "grant_type=refresh_token&client_id=c%201&client_secret=s%2B%20%2F%3D&\
+             refresh_token=1%2F%2Fr%2Bx%3D"
+        );
     });
 }
