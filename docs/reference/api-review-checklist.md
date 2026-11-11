@@ -43,7 +43,7 @@ End-to-end, real-world performance is the priority over micro-optimizations.
 - **Never** recommend or approve changing/inverting the meaning of an existing compatibility flag.
 - **Never** suggest the compatibility flag checks are "dead code" that can be removed. Compatibility flags are permanent and must be maintained indefinitely, even if there is nothing apparently depending on them.
 - **Always** review consistency with existing API patterns
-- **Always** prefer KJ_TRY/KJ_CATCH over raw try/catch and JSG_TRY/JSG_CATCH over jsg::Lock::tryCatch (e.g. `js.tryCatch(fn)`)
+- **Always** prefer `JSG_TRY` / `JSG_CATCH` over `jsg::Lock::tryCatch` (e.g. `js.tryCatch(fn)`)
 
 ### Security Vulnerabilities
 
