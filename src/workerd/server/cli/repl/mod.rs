@@ -10,7 +10,8 @@
 //! servers. The console thread (console.rs) blocks reading input and sends each finished input to
 //! the session ([`session`]), so the event loop keeps running -- timers, `waitUntil()`, the
 //! loaded servers -- while the console waits for the next line. What decides whether an input is
-//! finished, and how an input that awaits compiles, is in input.rs.
+//! finished, and how an input that awaits compiles, is in input.rs. On a terminal, the console
+//! keeps the lines typed in the history file (history.rs).
 
 mod bridge;
 mod console;
@@ -19,6 +20,14 @@ mod console;
     expect(dead_code, reason = "the console edits lines only on Unix terminals")
 )]
 mod editor;
+#[cfg_attr(
+    not(unix),
+    expect(
+        dead_code,
+        reason = "the console saves history only when editing on a Unix terminal"
+    )
+)]
+mod history;
 mod input;
 mod session;
 #[cfg(unix)]

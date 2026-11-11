@@ -121,27 +121,38 @@ A line that starts with `.` and a letter, at the start of an input, is a command
 
 On a Unix terminal, the REPL edits lines itself:
 
-| Key                   | Effect                                                                     |
-| --------------------- | -------------------------------------------------------------------------- |
-| Enter                 | Submits the line. The input runs if it is finished.                        |
-| Left, Right, Ctrl+B/F | Moves the cursor by a character.                                           |
-| Home, End, Ctrl+A/E   | Moves the cursor to the start or end of the line.                          |
-| Up, Down, Ctrl+P/N    | Steps through the lines submitted in this session.                         |
-| Backspace, Delete     | Deletes the character before or under the cursor.                          |
-| Ctrl+K, Ctrl+U        | Deletes to the end, or to the start, of the line.                          |
-| Ctrl+W                | Deletes the word before the cursor.                                        |
-| Ctrl+L                | Clears the screen.                                                         |
-| Tab                   | Completes a global's name, or a property name after `a.b.`; see below.     |
-| Ctrl+C                | Abandons the input being typed. While an input runs, Ctrl+C ends the REPL. |
-| Ctrl+D                | Quits on an empty line; otherwise deletes the character under the cursor.  |
+| Key                   | Effect                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| Enter                 | Submits the line. The input runs if it is finished.                                 |
+| Left, Right, Ctrl+B/F | Moves the cursor by a character.                                                    |
+| Home, End, Ctrl+A/E   | Moves the cursor to the start or end of the line.                                   |
+| Up, Down, Ctrl+P/N    | Steps through earlier lines, including earlier sessions' (see [History](#history)). |
+| Backspace, Delete     | Deletes the character before or under the cursor.                                   |
+| Ctrl+K, Ctrl+U        | Deletes to the end, or to the start, of the line.                                   |
+| Ctrl+W                | Deletes the word before the cursor.                                                 |
+| Ctrl+L                | Clears the screen.                                                                  |
+| Tab                   | Completes a global's name, or a property name after `a.b.`; see below.              |
+| Ctrl+C                | Abandons the input being typed. While an input runs, Ctrl+C ends the REPL.          |
+| Ctrl+D                | Quits on an empty line; otherwise deletes the character under the cursor.           |
 
 Tab completes the name before the cursor. With a dot, the names are the properties, own and
 inherited, of the value before it (an identifier chain such as `s.service`); without one, they are
 the global scope's. Completing evaluates that chain, so it can run property getters. Tab inserts as
 much as the candidates have in common; when there is nothing more to insert, it lists them.
 
-Elsewhere, such as when input is piped in or on Windows, the REPL reads plain lines. Prompts and
-the REPL's own messages go to stderr and results to stdout, so a script can drive it:
+### History
+
+On a terminal, each line you submit is saved to `~/.workerd_repl_history` as you submit it, and
+the next session's history starts with the latest 1000 lines. Set `WORKERD_REPL_HISTORY` to save
+them in another file, or to the empty string not to save them. The file is created readable by
+its owner only. If it can't be read or written, the REPL warns once and saves no more history for
+the session. A line that repeats the one before it, or is empty, isn't saved.
+
+### Without a terminal
+
+Elsewhere, such as when input is piped in or on Windows, the REPL reads plain lines and saves no
+history. Prompts and the REPL's own messages go to stderr and results to stdout, so a script can
+drive it:
 
 ```sh
 printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
@@ -206,7 +217,6 @@ loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 
 - Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
   wide characters, such as CJK, or a line longer than the terminal is wide.
-- The history lasts only as long as the session.
 - There is no way to interrupt an input that is running except to end the REPL.
 - The REPL has no inspector, so DevTools can't attach to it or to the loaded configs.
 
@@ -246,5 +256,6 @@ request started on one is held through a revoker: closing the server revokes the
 server shuts down, so that nothing the REPL's JavaScript still holds keeps the factory alive.
 
 **Tests.** `repl/repl-environment-test.c++` evaluates inputs and loads configs given as text;
-`cli/repl/editor-test.rs` and `cli/repl/input-test.rs` cover the line editor and the input
-heuristics; `server/in_process/host-test.rs` covers revocation.
+`cli/repl/editor-test.rs`, `cli/repl/history-test.rs` and `cli/repl/input-test.rs` cover the line
+editor, the history file and the input heuristics; `server/in_process/host-test.rs` covers
+revocation.

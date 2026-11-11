@@ -4,9 +4,10 @@
 
 //! The REPL's console, on a thread of its own: it reads input, a line at a time, until an input
 //! is finished, and has the session evaluate it. On a terminal (Unix only) it edits lines with
-//! [`Editor`]; otherwise it reads them as they come, which is how a test drives it. Prompts and
-//! the console's own messages go to stderr and results to stdout, so that stdout holds only what
-//! the inputs produced.
+//! [`Editor`], whose history starts with the history file's and is saved to it
+//! ([`HistoryFile`]); otherwise it reads lines as they come, which is how a test drives it.
+//! Prompts and the console's own messages go to stderr and results to stdout, so that stdout
+//! holds only what the inputs produced.
 
 use std::io;
 use std::io::BufRead;
@@ -21,7 +22,11 @@ use super::editor::Completion;
 #[cfg(unix)]
 use super::editor::Editor;
 #[cfg(unix)]
+use super::editor::HISTORY_LIMIT;
+#[cfg(unix)]
 use super::editor::Line;
+#[cfg(unix)]
+use super::history::HistoryFile;
 use super::input::Scanner;
 use super::session::Request;
 
@@ -47,6 +52,9 @@ The `workerd` global loads configs and reaches their services:
 In an input that awaits at top level, a `const`, `let` or `var` declaration of a single name
 becomes an assignment to a global, so that later inputs see it. A destructuring declaration
 does not; assign instead, as in `({ a } = await f())`.
+
+Up and Down recall earlier lines, which are saved in ~/.workerd_repl_history. Set
+WORKERD_REPL_HISTORY to save them in another file, or to the empty string not to save them.
 
 Ctrl+C abandons the input being typed. While an input runs, Ctrl+C ends the REPL.
 ";
@@ -104,6 +112,20 @@ impl Console {
         let requests = self.requests.clone();
         let mut complete = |line: &str, cursor: usize| complete(&requests, line, cursor);
         let mut editor = Editor::new();
+        let mut history = HistoryFile::from_env();
+        if let Some(file) = &history {
+            match file.load(HISTORY_LIMIT) {
+                Ok(entries) => {
+                    for entry in &entries {
+                        editor.add_history(entry);
+                    }
+                }
+                Err(error) => {
+                    not_saving_history(file, &error);
+                    history = None;
+                }
+            }
+        }
         loop {
             let line = {
                 let mut terminal = super::terminal::RawTerminal::enter()?;
@@ -111,7 +133,9 @@ impl Console {
             };
             match line {
                 Line::Submitted(line) => {
-                    editor.add_history(&line);
+                    if editor.add_history(&line) {
+                        save(&mut history, &line);
+                    }
                     if self.line(&line) == Next::Exit {
                         return Ok(());
                     }
@@ -211,6 +235,24 @@ impl Console {
         }
         Next::Continue
     }
+}
+
+/// Appends `line` to the history file, if the session has one. A file that fails is warned about
+/// once, and the session saves no more history.
+#[cfg(unix)]
+fn save(history: &mut Option<HistoryFile>, line: &str) {
+    if let Some(file) = history
+        && let Err(error) = file.record(line)
+    {
+        not_saving_history(file, &error);
+        *history = None;
+    }
+}
+
+#[cfg(unix)]
+fn not_saving_history(file: &HistoryFile, error: &io::Error) {
+    let path = file.path().display();
+    eprintln!("Warning: not saving history: {path}: {error}");
 }
 
 /// The command a line is, if any: `.help` but not `.5`.

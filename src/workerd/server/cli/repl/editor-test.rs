@@ -167,10 +167,11 @@ fn cancels_and_ends() {
 #[test]
 fn browses_history() {
     let mut editor = Editor::new();
-    editor.add_history("first");
-    editor.add_history("second");
-    editor.add_history("second");
-    editor.add_history("");
+    assert!(editor.add_history("first"));
+    assert!(editor.add_history("second"));
+    // A repeat of the latest entry, or an empty line, is not added.
+    assert!(!editor.add_history("second"));
+    assert!(!editor.add_history(""));
     // Up past the oldest entry stays there; Down past the newest restores the edited line.
     assert_eq!(
         lines(
@@ -183,6 +184,17 @@ fn browses_history() {
         ),
         vec![submitted("first"), submitted("draft!"), submitted("second")]
     );
+}
+
+#[test]
+fn history_keeps_the_latest_entries() {
+    let mut editor = Editor::new();
+    for i in 0..=HISTORY_LIMIT {
+        editor.add_history(&i.to_string());
+    }
+    assert_eq!(editor.history.len(), HISTORY_LIMIT);
+    assert_eq!(editor.history.first().map(String::as_str), Some("1"));
+    assert_eq!(editor.history.last(), Some(&HISTORY_LIMIT.to_string()));
 }
 
 #[test]

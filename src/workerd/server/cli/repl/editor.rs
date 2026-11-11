@@ -22,6 +22,9 @@ const ESCAPE_TIMEOUT: Duration = Duration::from_millis(50);
 /// How wide a candidate listing may be.
 const LISTING_WIDTH: usize = 80;
 
+/// The most entries the history keeps; adding another drops the oldest.
+pub const HISTORY_LIMIT: usize = 1000;
+
 /// Input and output, as raw bytes and text.
 pub trait Terminal {
     /// What input is available, after waiting at most `timeout` (with `None`, as long as it
@@ -129,11 +132,17 @@ impl Editor {
         }
     }
 
-    /// Adds `line` to the history, unless it is empty or repeats the latest entry.
-    pub fn add_history(&mut self, line: &str) {
-        if !line.is_empty() && self.history.last().is_none_or(|last| last != line) {
-            self.history.push(line.to_owned());
+    /// Adds `line` to the history, unless it is empty or repeats the latest entry; whether it
+    /// did.
+    pub fn add_history(&mut self, line: &str) -> bool {
+        if line.is_empty() || self.history.last().is_some_and(|last| last == line) {
+            return false;
         }
+        if self.history.len() == HISTORY_LIMIT {
+            self.history.remove(0);
+        }
+        self.history.push(line.to_owned());
+        true
     }
 
     /// Edits one line after `prompt`. `complete` gives the completions for a line and a cursor (a

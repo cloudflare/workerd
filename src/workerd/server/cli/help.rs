@@ -386,8 +386,14 @@ Usage:
 
 Prints the result of each input. The workerd global loads configs, as
 serve does, and calls their services and sockets; type .help in the
-REPL for more. This is a tool for developing workerd, and may change
-or go away in any release.
+REPL for more.
+
+On a terminal, the lines typed are saved in ~/.workerd_repl_history;
+WORKERD_REPL_HISTORY names another file, or, set to the empty string,
+turns saving off.
+
+This is a tool for developing workerd, and may change or go away in
+any release.
 
 Options:
       --compat-date <date>           The REPL's compat date; default: today
