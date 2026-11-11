@@ -318,8 +318,32 @@ export let events = {
 export let failures = {
   async test(ctrl, env) {
     const fatal = await create(env, 'fatal', 'fatal');
-    const e = await until(fatal, 'workflow_errored');
-    assert.match(e.error.message, /no/);
+    // Reported as thrown under workflows_preserve_non_retryable_error_message.
+    const preserve =
+      Cloudflare.compatibilityFlags
+        .workflows_preserve_non_retryable_error_message;
+    const { error: attempt } = await until(fatal, 'attempt_errored');
+    const { error: e } = await until(fatal, 'workflow_errored');
+    assert.deepEqual(
+      [attempt, e],
+      preserve
+        ? [
+            { name: 'NonRetryableError', message: 'no' },
+            { name: 'NonRetryableError', message: 'no' },
+          ]
+        : [
+            {
+              name: 'WorkflowFatalError',
+              message: 'Step threw a NonRetryableError with message "no"',
+            },
+            {
+              name: 'WorkflowFatalError',
+              message:
+                'The execution of the Workflow instance was terminated, as ' +
+                'a step threw an NonRetryableError and it was not handled',
+            },
+          ]
+    );
 
     // The Workflow's step limit is 3.
     const many = await create(env, 'many', 'many');

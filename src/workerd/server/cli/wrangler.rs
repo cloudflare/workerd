@@ -485,7 +485,7 @@ fn bundled_services(
     }
     if !wrangler.workflows.is_empty() {
         let dir = storage.join("workflows");
-        workflows_services(services, at, name, &dir, &wrangler.workflows)?;
+        workflows_services(services, at, name, &dir, wrangler)?;
     }
     Ok(())
 }
@@ -687,6 +687,8 @@ fn set_workflows_engine(worker: worker::Builder<'_>, name: &str, workflows: &[Wo
     }
 }
 
+const PRESERVE_NON_RETRYABLE: &str = "workflows_preserve_non_retryable_error_message";
+
 /// The Workflows Worker `<target>-workflows` at `services[at]`, then its disk under `dir`, which
 /// holds the instances: a namespace binding to each Workflow's instances, named after it.
 fn workflows_services(
@@ -694,8 +696,9 @@ fn workflows_services(
     at: u32,
     target: &str,
     dir: &Path,
-    workflows: &[Workflow],
+    wrangler: &Wrangler,
 ) -> Result<(), String> {
+    let workflows = &wrangler.workflows;
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-workflows");
     disk_service(
@@ -729,7 +732,17 @@ fn workflows_services(
     }
     let service = services.reborrow().get(at);
     let n = workflows.len() as u32;
-    let mut bindings = bundled_worker(service, &name, "workflows.js", &[], None, n + 1);
+    // The engine reports a step's NonRetryableError as the Worker's flags ask.
+    let flag = |f: &str| wrangler.compatibility_flags.iter().any(|g| g == f);
+    let preserve = flag(PRESERVE_NON_RETRYABLE)
+        || (wrangler.compatibility_date.as_str() >= "2026-05-14"
+            && !flag("workflows_replace_non_retryable_error_message"));
+    let flags: &[&str] = if preserve {
+        &[PRESERVE_NON_RETRYABLE]
+    } else {
+        &[]
+    };
+    let mut bindings = bundled_worker(service, &name, "workflows.js", flags, None, n + 1);
     for (i, w) in (0u32..).zip(workflows) {
         let mut b = bindings.reborrow().get(i);
         b.set_name(&w.name);

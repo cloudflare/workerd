@@ -122,6 +122,25 @@ const plain = (e) => ({
 const nonRetryable = (e) =>
   e?.name === 'NonRetryableError' ||
   String(e?.message).startsWith('NonRetryableError');
+const PRESERVE =
+  globalThis.Cloudflare?.compatibilityFlags
+    ?.workflows_preserve_non_retryable_error_message ?? false;
+// A NonRetryableError as its step's attempt logs it, else as the instance's
+// error when `run()` does not handle it: as thrown under
+// workflows_preserve_non_retryable_error_message, else replaced.
+function nonRetryableError(e, attempt) {
+  const message = String(e?.message).replace(/^NonRetryableError:?\s*/, '');
+  if (PRESERVE) return { name: 'NonRetryableError', message };
+  return {
+    name: 'WorkflowFatalError',
+    message: attempt
+      ? `Step threw a NonRetryableError with message "${message}"`
+      : 'The execution of the Workflow instance was terminated, as a step ' +
+        'threw an NonRetryableError and it was not handled',
+  };
+}
+// The instance's error when `run()` throws `e`.
+const failureOf = (e) => (nonRetryable(e) ? nonRetryableError(e) : plain(e));
 
 // Milliseconds: a number, or "<n> <unit>[s]".
 function ms(d) {
@@ -408,7 +427,7 @@ export class Engine extends DurableObject {
         return;
       }
       if (failure === undefined) return this.#finish('complete', { output });
-      await this.#undo('errored', { error: plain(failure) }, failure);
+      await this.#undo('errored', { error: failureOf(failure) }, failure);
     })();
     this.ctx.waitUntil(done);
   }
@@ -564,7 +583,10 @@ export class Engine extends DurableObject {
       const failed = plain(failure);
       if (nonRetryable(failure) || attempt > cfg.retries.limit) {
         this.#kv.put(key, { ...record, error: failed });
-        this.#log('attempt_errored', { stepName, attempt, error: failed });
+        const logged = nonRetryable(failure)
+          ? nonRetryableError(failure, true)
+          : failed;
+        this.#log('attempt_errored', { stepName, attempt, error: logged });
         this.#log('step_errored', { stepName });
         throw failure;
       }
