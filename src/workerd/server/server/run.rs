@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::rc::Rc;
+use std::rc::Weak;
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -18,6 +19,7 @@ use futures::future::FusedFuture;
 use futures::future::LocalBoxFuture;
 use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use worker::CxxWorkerInterface;
 use worker::Interface;
@@ -74,6 +76,10 @@ pub struct RunOptions {
     /// The source deployment of each appended service and of each service left absent because its
     /// deployment was skipped.
     pub deployments: Deployments,
+    /// Sent the server once `run` has started every listener; dropped unsent if the config is
+    /// refused or the start fails. `--control-fd`'s `listen` events, for a server embedded in this
+    /// process.
+    pub started: Option<oneshot::Sender<Weak<Server>>>,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -115,12 +121,14 @@ impl Control {
     }
 }
 
+/// The server's listener futures; each ends when the server has drained, or fails fatally.
+type Listeners = FuturesUnordered<LocalBoxFuture<'static, Result<()>>>;
+
 /// Everything set up before either command diverges: the graph, the listeners, the drain
 /// signal.
 struct Running {
     server: Rc<Server>,
-    /// The listener futures; each ends when the server has drained, or fails fatally.
-    listeners: FuturesUnordered<LocalBoxFuture<'static, Result<()>>>,
+    listeners: Listeners,
     drain: watch::Sender<bool>,
 }
 
@@ -187,33 +195,7 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let mut listeners = FuturesUnordered::new();
-    let mut ports = Vec::new();
-    let sockets = config.get_sockets().map_err(capnp_error)?;
-    for (sock, bound) in sockets.iter().zip(bound.sockets) {
-        // A socket that failed to bind already reported its error.
-        let Some((bound, address)) = bound else {
-            continue;
-        };
-        let name = text(sock.get_name())?;
-        let mut errors = Vec::new();
-        let designator = Designator::from_reader(
-            sock.get_service().map_err(capnp_error)?,
-            format!("Socket \"{name}\""),
-            &mut errors,
-        )
-        .map_err(capnp_error)?;
-        for error in errors {
-            server.report().error(error);
-        }
-        let channel = server.lookup(&designator);
-        ports.push((name, listen::bound_port(&bound)?));
-        if let Some(listener) =
-            listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
-        {
-            listeners.push(listener);
-        }
-    }
+    let (ports, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
@@ -236,6 +218,10 @@ async fn start(
             Rc::clone(&context),
             listener,
         )));
+    }
+    if let Some(started) = options.started.take() {
+        // The receiver may be gone; nothing else depends on the signal.
+        let _ = started.send(Rc::downgrade(&server));
     }
 
     Ok(Some(Running {
@@ -261,6 +247,45 @@ fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio:
     factory.spawn_detached(async move { cluster.tier_loop().await });
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
+}
+
+/// Starts the listener of every socket of the config that bound; each socket's name and port, for
+/// its `listen` event, and the listeners. A socket whose service does not resolve is a config
+/// error.
+fn socket_listeners(
+    context: &Rc<ListenContext>,
+    config: config::Reader<'_>,
+    bound: Vec<Option<(BoundSocket, String)>>,
+    server: &Server,
+) -> Result<(Vec<(String, u16)>, Listeners)> {
+    let mut ports = Vec::new();
+    let listeners = Listeners::new();
+    let sockets = config.get_sockets().map_err(capnp_error)?;
+    for (sock, bound) in sockets.iter().zip(bound) {
+        // A socket that failed to bind already reported its error.
+        let Some((bound, address)) = bound else {
+            continue;
+        };
+        let name = text(sock.get_name())?;
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            sock.get_service().map_err(capnp_error)?,
+            format!("Socket \"{name}\""),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            server.report().error(error);
+        }
+        let channel = server.lookup(&designator);
+        ports.push((name, listen::bound_port(&bound)?));
+        if let Some(listener) =
+            listener(Rc::clone(context), sock, bound, &address, channel, server)?
+        {
+            listeners.push(listener);
+        }
+    }
+    Ok((ports, listeners))
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -402,9 +427,7 @@ fn report_unmatched_overrides(
 }
 
 /// Drives the listeners until they all end (the server drained) or one fails.
-async fn serve_listeners(
-    listeners: &mut FuturesUnordered<LocalBoxFuture<'static, Result<()>>>,
-) -> Result<()> {
+async fn serve_listeners(listeners: &mut Listeners) -> Result<()> {
     while let Some(result) = listeners.next().await {
         result?;
     }
