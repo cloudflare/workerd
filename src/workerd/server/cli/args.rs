@@ -192,7 +192,9 @@ pub enum Command {
 const REPL_HELP: &str = "\
 Evaluates JavaScript in a Worker environment and prints each result. The `workerd` global loads \
 configs, as `serve` does, and calls their services and sockets; type .help in the REPL for more. \
-This is a tool for developing workerd, and may change or go away in any release.";
+On a terminal, the lines typed are saved in ~/.workerd_repl_history; WORKERD_REPL_HISTORY names \
+another file, or, set to the empty string, turns saving off. This is a tool for developing \
+workerd, and may change or go away in any release.";
 
 const DEPLOY_HELP: &str = "\
 Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
