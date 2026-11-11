@@ -53,10 +53,10 @@ kj::Promise<kj::Own<ReplConfigServer>> ReplConfigServer::start(const ReplServerR
     for (auto& error: errors) {
       reported.add(kj::mv(error));
     }
-    try {
+    KJ_TRY {
       co_await self->close();
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
+    }
+    KJ_CATCH(exception) {
       reported.add(kj::str("Closing the server then failed: ", exception.getDescription()));
     }
     kj::throwFatalException(loadFailed(self->path, reported));
