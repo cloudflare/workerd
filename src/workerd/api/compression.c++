@@ -686,6 +686,10 @@ bool ZstdEncoderContext::isStreamEnd() const {
   return !ZSTD_isError(lastResult) && lastResult == 0;
 }
 
+bool ZstdEncoderContext::hasPendingOutput() const {
+  return flush_ == ZSTD_e_end && !ZSTD_isError(lastResult) && lastResult != 0;
+}
+
 ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
     : ZstdContext(_mode),
       dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
