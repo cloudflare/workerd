@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 /// A request as the server received it.
 #[derive(Clone, Debug)]
 pub struct Request {
+    pub method: String,
     pub path: String,
     /// As sent, without the `?`.
     pub query: String,
@@ -41,6 +42,7 @@ pub enum Answer {
     Close,
     /// The head of a 200 answer, then a byte of its body every 20 ms.
     Dribble,
+    /// With a `Date` of now, unless `headers` has one.
     Reply {
         status: u16,
         headers: Vec<(&'static str, String)>,
@@ -122,6 +124,7 @@ async fn answer(
         }
     }
     let request = Request {
+        method: head.method.to_string(),
         path: head.uri.path().to_owned(),
         query: head.uri.query().unwrap_or("").to_owned(),
         headers: head.headers,
@@ -147,12 +150,15 @@ async fn answer(
             body,
         } => {
             let mut response = http::Response::builder().status(status);
+            if !headers.iter().any(|(name, _)| *name == "date") {
+                let date = httpdate::fmt_http_date(std::time::SystemTime::now());
+                response = response.header("date", date);
+            }
             for (name, value) in headers {
                 response = response.header(name, value);
             }
-            let date = httpdate::fmt_http_date(std::time::SystemTime::now());
             let body = Body::Full(Some(Bytes::from(body)));
-            Ok(response.header("date", date).body(body).unwrap())
+            Ok(response.body(body).unwrap())
         }
     }
 }

@@ -196,8 +196,9 @@ struct ClusterConfig {
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the first of these that is there:
   #
-  # - The credentials file `GOOGLE_APPLICATION_CREDENTIALS` names: a service account key, or the
-  #   `authorized_user` credentials `gcloud auth application-default login` writes.
+  # - The credentials file `GOOGLE_APPLICATION_CREDENTIALS` names: a service account key, the
+  #   `authorized_user` credentials `gcloud auth application-default login` writes, or the
+  #   `impersonated_service_account` credentials it writes with `--impersonate-service-account`.
   # - The file that command writes: `application_default_credentials.json` in `$CLOUDSDK_CONFIG`,
   #   else in `$HOME/.config/gcloud`, or `%APPDATA%\gcloud` on Windows. When it is not there, or
   #   its directory cannot be reached, the next source is tried.
@@ -205,6 +206,20 @@ struct ClusterConfig {
   #   Workload Identity answers the token of the pod's Kubernetes service account.
   #   `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
   #   169.254.169.254, needs it set to `[fd20:ce::254]`.
+  #
+  # `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` names a service account whose tokens to use instead, by
+  # impersonation with the credentials found as above: an email address or unique ID, or, as
+  # gcloud's `--impersonate-service-account` takes one, a comma-separated delegation chain in which
+  # each account impersonates the next and the last is the target. The tokens come from IAM's
+  # `generateAccessToken`, for which the source identity needs
+  # `roles/iam.serviceAccountTokenCreator` on the first account of the chain, and its token the
+  # `cloud-platform` scope. A service account key asks for that scope and `gcloud auth
+  # application-default login` grants it, but a token from a Compute Engine VM's metadata server has
+  # the VM's access scopes, which must include it; under GKE Workload Identity it does. Credentials
+  # that impersonate already take no `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT`. Of a file's
+  # `service_account_impersonation_url`, only the service account is used: the request goes to
+  # `iamcredentials.googleapis.com`, not to the URL's host unless that is a loopback address. The
+  # `quota_project_id` of `authorized_user` source credentials, if any, is billed for that request.
   #
   # A credentials file of any other type is an error, as is one that is there but cannot be read.
   # A first token, from any source, is retried, as a new GKE pod's metadata server may refuse
@@ -219,13 +234,20 @@ struct ClusterConfig {
   # default address, an answer without the `Metadata-Flavor: Google` header of Google's metadata
   # server, on Google Cloud or off it, fails it at once too, unless its status is 429 or 5xx; a
   # metadata server `GCE_METADATA_HOST` names, such as a proxy or an emulator, need not send the
-  # header. The identity needs to read, write, list and delete the bucket's objects, as
-  # `roles/storage.objectUser` grants: replacing an object requires permission to delete it.
-  # Without Workload Identity, a GCE VM or GKE node's default access scopes are often read-only
-  # for storage, which shows up as a 403 when the instance starts.
+  # header.
+  #
+  # The identity needs to read, write, list and delete the bucket's objects, as
+  # `roles/storage.objectUser` grants: replacing an object requires permission to delete it. Without
+  # Workload Identity, a GCE VM or GKE node's default access scopes are often read-only for storage,
+  # which shows up as a 403 when the instance starts. The `quota_project_id` of `authorized_user`
+  # credentials, or the top-level one of `impersonated_service_account` credentials, if any, is
+  # billed for the bucket's requests (`x-goog-user-project`), as Google's client libraries bill it.
+  # That of a service account key is not used, as those libraries do not read it.
+  #
   # For tests, `STORAGE_EMULATOR_HOST` (`host:port` or a URL) sends the requests to an emulator
   # instead, without a token unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` is
-  # set; gcloud's file is not read for an emulator.
+  # set; gcloud's file is not read for an emulator, and `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` is
+  # ignored unless one of those is set.
 
   bucketOptions @1 :List(Text);
   # `key=value` settings for an `s3://` bucket: `aws_endpoint=https://...`, `aws_region=auto`,

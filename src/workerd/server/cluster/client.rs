@@ -433,7 +433,7 @@ fn unix_ms(t: SystemTime) -> i64 {
 }
 
 /// An RFC 7231 date, `Mon, 12 Oct 2026 23:10:55 GMT`, in ms since the epoch.
-fn http_date_ms(date: &str) -> Option<i64> {
+pub fn http_date_ms(date: &str) -> Option<i64> {
     httpdate::parse_http_date(date).ok().map(unix_ms)
 }
 

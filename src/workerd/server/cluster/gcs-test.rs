@@ -166,7 +166,8 @@ fn gclouds_credentials_file_comes_before_the_metadata_server() {
         message,
         format!(
             "{}: credentials of type \"external_account\" are not supported: use a service \
-             account key, authorized_user credentials, or the metadata server",
+             account key, authorized_user or impersonated_service_account credentials, or the \
+             metadata server",
             in_home.display()
         )
     );
@@ -224,6 +225,135 @@ fn a_gcloud_file_out_of_reach_is_not_there() {
             assert_eq!(found.unwrap(), Some(metadata()));
         }
     }
+}
+
+/// An `impersonated_service_account` file for `target`, whose source is
+/// `source` and whose tokens come from `generateAccessToken` at `base`.
+fn impersonated(target: &str, source: &serde_json::Value, base: &str) -> serde_json::Value {
+    let path = format!("/v1/projects/-/serviceAccounts/{target}:generateAccessToken");
+    serde_json::json!({
+        "type": "impersonated_service_account",
+        "service_account_impersonation_url": format!("{base}{path}"),
+        "source_credentials": source,
+    })
+}
+
+#[test]
+fn a_service_account_to_impersonate_from_the_environment() {
+    let target = "t@p.iam.gserviceaccount.com";
+    let named = [
+        ("GCE_METADATA_HOST", "127.0.0.1:8080".to_owned()),
+        ("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", target.to_owned()),
+    ];
+    assert_eq!(
+        describe(&named).unwrap().unwrap(),
+        format!(
+            "service account {target}, impersonated with metadata server \
+             http://127.0.0.1:8080/computeMetadata/v1/instance/service-accounts/default/token"
+        )
+    );
+    let bad = [("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", "t@p/x".to_owned())];
+    let Err(Error::Config(message)) = describe(&bad) else {
+        panic!("a bad address was accepted");
+    };
+    assert_eq!(
+        message,
+        "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: \"t@p/x\" is not a service account's email address \
+         or unique ID"
+    );
+    // An emulator ignores it unless a source is named for the emulator.
+    let emulator = ("STORAGE_EMULATOR_HOST", "localhost:9023".to_owned());
+    let unnamed = [emulator.clone(), named[1].clone()];
+    assert_eq!(describe(&unnamed).unwrap(), None);
+    let with_source = [emulator, named[0].clone(), named[1].clone()];
+    assert_eq!(describe(&with_source).unwrap(), describe(&named).unwrap());
+    // Nor does a file that impersonates already take another.
+    let path = scratch("impersonated").join("credentials.json");
+    let user: serde_json::Value = serde_json::from_str(AUTHORIZED_USER).unwrap();
+    let file = impersonated(target, &user, "https://iamcredentials.googleapis.com");
+    std::fs::write(&path, file.to_string()).unwrap();
+    let file = (
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        path.to_str().unwrap().to_owned(),
+    );
+    assert_eq!(
+        describe(std::slice::from_ref(&file)).unwrap().unwrap(),
+        format!("service account {target}, impersonated with authorized_user credentials")
+    );
+    let other = "u@p.iam.gserviceaccount.com".to_owned();
+    let twice = [file, ("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", other)];
+    let Err(Error::Config(message)) = describe(&twice) else {
+        panic!("impersonating twice was accepted");
+    };
+    assert_eq!(
+        message,
+        format!("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: the credentials impersonate {target} already")
+    );
+}
+
+#[test]
+fn an_impersonated_token_reaches_the_bucket() {
+    runtime().block_on(async {
+        let generate = "/v1/projects/-/serviceAccounts/t@p:generateAccessToken";
+        let server = Server::serving(move |request, _| {
+            let body = match request.path.as_str() {
+                "/token" => serde_json::json!({ "access_token": "source", "expires_in": 3600 }),
+                path if path == generate => serde_json::json!({
+                    "accessToken": "impersonated",
+                    "expireTime": "2999-01-01T00:00:00Z",
+                }),
+                _ => return reply(404, ""),
+            };
+            reply(200, &body.to_string())
+        })
+        .await;
+        let base = format!("http://{}", server.host);
+        let source = serde_json::json!({
+            "type": "authorized_user",
+            "client_id": "c",
+            "client_secret": "s",
+            "refresh_token": "r",
+            "token_uri": format!("{base}/token"),
+            "quota_project_id": "qp-source",
+        });
+        let mut file = impersonated("t@p", &source, &base);
+        file["quota_project_id"] = "qp-bucket".into();
+        let path = scratch("impersonated-bucket").join("credentials.json");
+        std::fs::write(&path, file.to_string()).unwrap();
+        let vars = env(&[
+            ("STORAGE_EMULATOR_HOST", &server.host),
+            ("GOOGLE_APPLICATION_CREDENTIALS", path.to_str().unwrap()),
+        ]);
+        let (gcs, prefix) = Gcs::with_env("gs://bkt/pre", &[], &vars, None).unwrap();
+        let bucket = Bucket::new(gcs, &prefix);
+        assert!(bucket.get("k").await.unwrap().is_none());
+        // The source's quota project is billed for the IAM call, the file's
+        // for the bucket's.
+        let requests: Vec<_> = server
+            .take()
+            .into_iter()
+            .map(|r| {
+                let header = |name| r.header(name).unwrap_or("").to_owned();
+                let headers = (header("authorization"), header("x-goog-user-project"));
+                (r.method.clone(), r.path.clone(), headers)
+            })
+            .collect();
+        let sent = |method: &str, path: &str, token: &str, project: &str| {
+            (
+                method.to_owned(),
+                path.to_owned(),
+                (token.to_owned(), project.to_owned()),
+            )
+        };
+        assert_eq!(
+            requests,
+            [
+                sent("POST", "/token", "", ""),
+                sent("POST", generate, "Bearer source", "qp-source"),
+                sent("GET", "/bkt/pre/k", "Bearer impersonated", "qp-bucket"),
+            ]
+        );
+    });
 }
 
 #[test]

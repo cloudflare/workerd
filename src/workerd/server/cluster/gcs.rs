@@ -17,7 +17,8 @@
 //! Requests go to `https://storage.googleapis.com`, or to the emulator
 //! `STORAGE_EMULATOR_HOST` names. Requests to an emulator carry no token
 //! unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` names
-//! where tokens come from: gcloud's credentials file is not read for one.
+//! where tokens come from: gcloud's credentials file is not read for one,
+//! and `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` is ignored without one of them.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -39,7 +40,8 @@ const ENDPOINT: &str = "https://storage.googleapis.com";
 /// A Cloud Storage bucket's client.
 pub type Gcs = Client<Google>;
 
-/// Authorizes requests with a bearer token.
+/// Authorizes requests with a bearer token, and bills them to the
+/// credentials' quota project, if any.
 pub struct Google {
     /// `None` for an emulator that takes no token.
     credentials: Option<Credentials>,
@@ -78,18 +80,26 @@ impl Gcs {
         // An emulator takes a token only from a source named for it.
         let gcloud = google_auth::gcloud_credentials_file(&env, cfg!(windows))
             .filter(|path| emulator.is_none() && !is_absent(path));
-        let credentials = match env("GOOGLE_APPLICATION_CREDENTIALS").map(PathBuf::from) {
-            Some(path) => Some(Credentials::from_file(&path, http.clone())?),
+        let source = match env("GOOGLE_APPLICATION_CREDENTIALS").map(PathBuf::from) {
+            Some(path) => Some(read_credentials(&path)?),
             None if emulator.is_some() && metadata.is_none() => None,
             None => match gcloud {
-                Some(path) => Some(Credentials::from_file(&path, http.clone())?),
-                None => Some(Credentials::metadata(
+                Some(path) => Some(read_credentials(&path)?),
+                None => Some(google_auth::metadata_server(
                     metadata.as_deref(),
                     google_auth::google_cloud(&env, dmi_product),
-                    http.clone(),
                 )),
             },
         };
+        // An emulator without a source named for it ignores IMPERSONATE too.
+        let source = match (source, env(IMPERSONATE)) {
+            (Some(source), Some(chain)) => Some(
+                google_auth::impersonate(source, &chain)
+                    .map_err(|e| Error::Config(format!("{IMPERSONATE}: {e}")))?,
+            ),
+            (source, _) => source,
+        };
+        let credentials = source.map(|source| Credentials::new(source, http.clone()));
         let endpoint = match emulator {
             Some(host) if host.contains("://") => host,
             Some(host) => format!("http://{host}"),
@@ -98,6 +108,16 @@ impl Gcs {
         let google = Google { credentials };
         Ok((Self::with_dialect(google, http, &endpoint, &bucket), prefix))
     }
+}
+
+/// The service account whose tokens a bucket's are, by impersonation.
+const IMPERSONATE: &str = "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT";
+
+/// The credentials file at `path`.
+fn read_credentials(path: &Path) -> Result<google_auth::Source> {
+    let shown = path.display();
+    let text = std::fs::read_to_string(path).map_err(|e| Error::Config(format!("{shown}: {e}")))?;
+    google_auth::parse_file(&text).map_err(|e| Error::Config(format!("{shown}: {e}")))
 }
 
 /// Whether no file is at `path`, as far as this process can tell: nothing is
@@ -163,6 +183,11 @@ impl Dialect for Google {
         let token = credentials.token().await?;
         let header = format!("Bearer {token}");
         request.headers.push(("authorization".into(), header));
+        if let Some(project) = credentials.quota_project() {
+            request
+                .headers
+                .push(("x-goog-user-project".into(), project.to_owned()));
+        }
         Ok(Some(token))
     }
 
