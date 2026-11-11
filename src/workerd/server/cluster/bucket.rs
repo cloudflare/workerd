@@ -58,7 +58,7 @@ pub trait Store {
     }
     /// Idempotent: deleting an absent key succeeds.
     async fn delete(&self, key: &str) -> Result<()>;
-    /// See `S3::clock_skew_ms`.
+    /// See `Client::clock_skew_ms`.
     fn clock_skew_ms(&self) -> Option<i64> {
         None
     }

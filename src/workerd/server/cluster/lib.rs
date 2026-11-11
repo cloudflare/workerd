@@ -41,6 +41,7 @@
 mod alarms;
 mod bucket;
 mod capture;
+mod client;
 pub mod cluster;
 pub mod compose;
 pub mod deploy;
