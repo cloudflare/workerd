@@ -138,6 +138,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     uint32_t asyncTraceStackDepth = 0;
     // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
     bool asyncTracePromises = false;
+    // The header table of the program that runs the server in-process and calls into it, which
+    // must outlive the factory. The `host_*` shims rekey headers between it and the factory's own
+    // table.
+    kj::Maybe<const kj::HttpHeaderTable&> hostHeaderTable;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an
@@ -495,6 +499,12 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
 kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
 kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
+kj::Own<kj::HttpHeaders> host_request_headers(
+    const WorkerFactory& factory, const kj::HttpHeaders& headers);
+kj::Own<kj::HttpService::Response> new_host_response(
+    const WorkerFactory& factory, kj::HttpService::Response& inner);
+kj::Own<kj::HttpService::ConnectResponse> new_host_connect_response(
+    const WorkerFactory& factory, kj::HttpService::ConnectResponse& inner);
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow);
