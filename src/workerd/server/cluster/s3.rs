@@ -241,7 +241,7 @@ impl S3 {
     /// an owner record is written twice in a row when an object reclaims:
     /// under a 10,000-object kill, four reclaims failed that way and dropped
     /// their objects. A refused request did nothing, conditional or not, so
-    /// it is retried after a pause.
+    /// it is retried after a pause, as is one that failed to connect.
     async fn send(
         &self,
         method: &str,
@@ -253,11 +253,11 @@ impl S3 {
     ) -> Result<HttpResponse> {
         let mut pause = Duration::from_millis(250);
         loop {
-            let response = self
+            let sent = self
                 .send_once(method, key, query, headers.clone(), body.clone(), to)
-                .await?;
-            if !matches!(response.status, 429 | 503) || pause > Duration::from_secs(2) {
-                return Ok(response);
+                .await;
+            if !retried(&sent) || pause > Duration::from_secs(2) {
+                return sent;
             }
             tokio::time::sleep(pause).await;
             pause *= 2;
@@ -508,8 +508,20 @@ pub fn format_rfc3339_nano(unix_millis: i64) -> String {
 fn request_error(method: &str, key: &str, error: &str) -> Error {
     if error == crate::http::TOO_LARGE {
         Error::TooLarge(format!("{method} {key}"))
+    } else if error.starts_with(crate::http::NOT_SENT) {
+        Error::NotSent(format!("{method} {key}: {error}"))
     } else {
         Error::Http(format!("{method} {key}: {error}"))
+    }
+}
+
+/// Whether a request is sent again after a pause: the bucket refused it with
+/// 429 or 503, or it failed to connect. Either way it did nothing. A request
+/// that failed once sent may have landed, so it is not.
+fn retried(sent: &Result<HttpResponse>) -> bool {
+    match sent {
+        Ok(response) => matches!(response.status, 429 | 503),
+        Err(error) => matches!(error, Error::NotSent(_)),
     }
 }
 
@@ -517,7 +529,80 @@ fn request_error(method: &str, key: &str, error: &str) -> Error {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
     use super::*;
+
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    /// A client of a bucket served on `port` of this machine.
+    fn local(port: u16) -> S3 {
+        let options = [
+            ("aws_endpoint", format!("http://127.0.0.1:{port}")),
+            ("aws_access_key_id", "k".to_owned()),
+            ("aws_secret_access_key", "s".to_owned()),
+        ]
+        .map(|(name, value)| (name.to_owned(), value));
+        S3::new("s3://bucket/prefix", &options).unwrap().0
+    }
+
+    #[test]
+    fn a_request_that_failed_to_connect_is_sent_again() {
+        block_on(async {
+            // Nothing listens on the port at the first attempt, 100 ms
+            // before the bucket starts.
+            let port = TcpListener::bind("127.0.0.1:0")
+                .await
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let _ = stream.read(&mut [0; 4096]).await;
+                let head = "HTTP/1.1 200 OK\r\netag: \"v\"\r\ncontent-length: 0\r\n\r\n";
+                stream.write_all(head.as_bytes()).await.unwrap();
+            });
+            let put = local(port).put("key", none(), None, &[]).await;
+            assert_eq!(put.unwrap(), Some(Version("\"v\"".to_owned())));
+        });
+    }
+
+    #[test]
+    fn a_request_that_failed_once_sent_is_not_sent_again() {
+        block_on(async {
+            // The bucket reads each request and hangs up without answering:
+            // the write may have landed.
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let accepted = Arc::new(AtomicUsize::new(0));
+            let counted = Arc::clone(&accepted);
+            tokio::spawn(async move {
+                loop {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    let _ = stream.read(&mut [0; 4096]).await;
+                }
+            });
+            let put = local(port).put("key", none(), None, &[]).await;
+            assert!(matches!(put, Err(Error::Http(_))), "{put:?}");
+            assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        });
+    }
 
     #[test]
     fn dates_round_trip() {

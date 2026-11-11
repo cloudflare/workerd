@@ -59,6 +59,10 @@ const CHUNK: usize = 256 << 10;
 /// The most of a response body held in memory rather than written to a file.
 pub const MAX_BODY: usize = 16 << 20;
 
+/// What starts the error text of a request that failed to connect: it sent
+/// nothing, so sending it again is safe, conditional or not.
+pub const NOT_SENT: &str = "not sent";
+
 /// Error text for a response body larger than [`MAX_BODY`].
 pub const TOO_LARGE: &str = "response body too large";
 
@@ -98,7 +102,13 @@ impl Http {
         let response = tokio::time::timeout(head, self.client.request(request))
             .await
             .map_err(|_| "timed out".to_owned())?
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                if e.is_connect() {
+                    format!("{NOT_SENT}: {e}")
+                } else {
+                    e.to_string()
+                }
+            })?;
         let header = |name| {
             let value = response.headers().get(name);
             value.and_then(|v| v.to_str().ok()).unwrap_or("").to_owned()
