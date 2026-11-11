@@ -42,6 +42,12 @@ export class Flow extends WorkflowEntrypoint {
         await (await this.env.FLOW.get(id)).delete();
         ran.push(`${id}/after`);
         return;
+      case 'big': {
+        const retries = { limit: 1, delay: 0 };
+        return step.do('big', { retries }, async (ctx) =>
+          ctx.attempt === 1 ? 'x'.repeat(9 * 1024 * 1024) : 'ok'
+        );
+      }
       case 'void':
         return step.do('v', async () => {});
       case 'dispose':
@@ -192,6 +198,20 @@ async function advance(env, instance, ms) {
 
 const create = (env, id, kind, options = {}) =>
   env.FLOW.create({ id, params: { kind }, ...options });
+
+// An output too large to store fails the attempt, which is retried.
+export let bigOutput = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'big', 'big');
+    const { error } = await until(instance, 'attempt_errored');
+    assert.deepEqual(error, {
+      name: 'WorkflowInternalError',
+      message: 'Step big-1 output is too large. Maximum allowed size is 1MiB.',
+    });
+    await until(instance, 'workflow_completed');
+    assert.strictEqual((await instance.status()).output, 'ok');
+  },
+};
 
 export let voidStep = {
   async test(ctrl, env) {

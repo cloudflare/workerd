@@ -622,20 +622,31 @@ export class Engine extends DurableObject {
         try {
           value = structuredClone(live);
           this.#kv.put(key, { ...record, done: true, value });
-        } catch {
-          this.#finish('errored', {
-            error: plain(
-              fatalError(
-                'The execution of the Workflow instance was terminated, as ' +
-                  `the step "${name}" returned a value which is not ` +
-                  'serialisable'
-              )
-            ),
-          });
-          throw aborted();
+        } catch (e) {
+          // Storage takes up to 8 MiB a value; the message is production's.
+          if (String(e?.message).includes('SQLITE_TOOBIG')) {
+            failure = error(
+              'WorkflowInternalError',
+              `Step ${stepName} output is too large. Maximum allowed size ` +
+                'is 1MiB.'
+            );
+          } else {
+            this.#finish('errored', {
+              error: plain(
+                fatalError(
+                  'The execution of the Workflow instance was terminated, as ' +
+                    `the step "${name}" returned a value which is not ` +
+                    'serialisable'
+                )
+              ),
+            });
+            throw aborted();
+          }
         } finally {
           dispose(live);
         }
+      }
+      if (failure === undefined) {
         if (undo) undo.output = value;
         this.#log('attempt_completed', { stepName, attempt });
         const output = cfg.sensitive === 'output' ? '[REDACTED]' : value;
