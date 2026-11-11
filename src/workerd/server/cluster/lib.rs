@@ -97,6 +97,12 @@ pub enum Error {
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),
+    /// The store refused a conditional write's guard, but an earlier attempt
+    /// of the same request may have been applied, and the refusal may be of
+    /// that attempt's own write: whether the write landed is unknown. Reading
+    /// the object back tells.
+    #[error("bucket: {0}; an earlier attempt may have landed")]
+    OutcomeUnknown(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
     /// Another writer kept winning the conditional write.

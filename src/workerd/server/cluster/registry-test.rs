@@ -41,6 +41,53 @@ fn a_renewal_whose_answer_was_lost_is_not_a_fence() {
     });
 }
 
+/// A renewal the store refused where the refusal may be of its own first
+/// attempt: the reread decides, as it does after any refusal.
+#[test]
+fn a_renewal_of_unknown_outcome_rereads_the_record() {
+    block_on(async {
+        let store = crate::bucket::memory::Memory::default();
+        let unknown = store.unknown.clone();
+        let bucket = Bucket::new(store, "");
+        let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
+        a.renew(0).await.unwrap();
+        // The renewal's write landed.
+        unknown.borrow_mut().push(node_key("a"));
+        assert_eq!(a.renew(1_000).await.unwrap(), 11_000);
+        assert!(unknown.borrow().is_empty());
+        let (body, version) = bucket.get(&node_key("a")).await.unwrap().unwrap();
+        let record: NodeRecord = serde_json::from_slice(&body).unwrap();
+        assert_eq!(record.expires_ms, 11_000);
+        assert_eq!(a.own.borrow().as_ref(), Some(&version));
+        // Another writer's record is still a fence.
+        let other = NodeRecord {
+            instance: a.instance + 1,
+            ..record
+        };
+        let body = serde_json::to_vec(&other).unwrap();
+        bucket.put(&node_key("a"), body, &[]).await.unwrap();
+        unknown.borrow_mut().push(node_key("a"));
+        assert!(matches!(a.renew(2_000).await, Err(Error::Fenced(_))));
+    });
+}
+
+#[test]
+fn a_deregistration_of_unknown_outcome_rereads_the_record() {
+    block_on(async {
+        let store = crate::bucket::memory::Memory::default();
+        let unknown = store.unknown.clone();
+        let bucket = Bucket::new(store, "");
+        let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
+        a.renew(0).await.unwrap();
+        unknown.borrow_mut().push(node_key("a"));
+        a.deregister().await.unwrap();
+        assert!(unknown.borrow().is_empty());
+        let (body, _) = bucket.get(&node_key("a")).await.unwrap().unwrap();
+        let record: NodeRecord = serde_json::from_slice(&body).unwrap();
+        assert_eq!((record.expires_ms, record.draining), (0, true));
+    });
+}
+
 /// A write's key and body.
 type Write = (String, Vec<u8>);
 
