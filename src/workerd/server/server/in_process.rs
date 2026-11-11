@@ -2,13 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The server run inside another program's event loop, such as `server-test.c++`.
+//! The server run inside another program's event loop: `server-test.c++`, and each config
+//! `workerd repl` loads (`repl/repl-server.c++`).
 //!
 //! The host builds the worker factory itself (its V8, timer, network and filesystem) and reaches
 //! the server through the `loopback:` registry: the config's addresses are loopback names, and the
-//! host connects to the server's sockets by name. With `mock_internet`, the host also accepts, by
-//! name, the connections the server makes, the `network` services' included; without it, those
-//! reach the internet. Config errors and warnings queue for the host to take as they are
+//! host connects to the server's sockets by name. A test also accepts, by name, the connections
+//! the server makes, the `network` services' included (`Loopback::mock_internet`); the REPL's
+//! servers reach the internet. Config errors and warnings queue for the host to take as they are
 //! reported. Tests can mark services as coming from cluster deployments, as `workerd serve`
 //! composes them; the server then serves those as a cluster node does, and their errors and
 //! warnings queue with the rest.

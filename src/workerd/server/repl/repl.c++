@@ -1,0 +1,144 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+#include "repl.h"
+
+#include "repl-environment.h"
+
+#include <workerd/jsg/exception.h>
+#include <workerd/jsg/setup.h>
+#include <workerd/server/cli/repl/bridge.rs.h>
+#include <workerd/server/v8-platform-impl.h>
+#include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
+
+#include <kj-rs-io/async-io.h>
+#include <kj-rs-tokio/tokio-event-port.h>
+#include <kj-rs/kj-rs.h>
+
+#include <cstring>
+
+namespace workerd::server::repl {
+
+namespace {
+
+class EntropySourceImpl final: public kj::EntropySource {
+ public:
+  void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    getEntropy(buffer);
+  }
+};
+
+ReplEnvironmentOptions toEnvironmentOptions(const ReplOptions& options) {
+  return {
+    .compatibilityDate = options.compat_date.empty()
+        ? kj::Maybe<kj::String>(kj::none)
+        : kj::str(kj::from<kj_rs::Rust>(options.compat_date)),
+    .compatibilityFlags =
+        KJ_MAP(flag, options.compat_flags) { return kj::str(kj::from<kj_rs::Rust>(flag)); },
+    .experimental = options.experimental,
+    .colors = options.colors,
+  };
+}
+
+// Loads a config as `workerd serve` does (cli/repl/session.rs).
+kj::Array<capnp::word> loadConfig(
+    kj::StringPtr path, kj::Maybe<kj::StringPtr> constName, bool experimental) {
+  ::rust::Vec<uint64_t> words;
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+    words = repl_load_config(path.as<kj_rs::RustUncheckedUtf8>(),
+        constName.orDefault(""_kj).as<kj_rs::RustUncheckedUtf8>(), experimental);
+  })) {
+    JSG_FAIL_REQUIRE(Error, e.getDescription());
+  }
+  auto config = kj::heapArray<capnp::word>(words.size());
+  memcpy(config.begin(), words.data(), words.size() * sizeof(uint64_t));
+  return config;
+}
+
+}  // namespace
+
+// The process-wide state a session sets up, in construction order: V8 is torn down after the
+// environment and before the I/O it was given.
+class ReplSession::Impl {
+ public:
+  Impl(kj_rs_tokio::TokioAsyncIoContext& loop, const ReplOptions& options)
+      : timer(loop.getTimer()),
+        monotonicClock(kj::systemPreciseMonotonicClock()),
+        provider(loop.getTimer()),
+        platform(initPlatform()),
+        v8Platform(*platform),
+        v8System(v8Platform, nullptr, platform.get()),
+        environment(
+            ReplServerResources{
+              .v8System = v8System,
+              .timer = timer,
+              .monotonicClock = monotonicClock,
+              .network = provider.getNetwork(),
+              .entropySource = entropySource,
+              .fs = *fs,
+            },
+            loadConfig,
+            toEnvironmentOptions(options)) {}
+
+  ReplEnvironment& getEnvironment() {
+    return environment;
+  }
+
+ private:
+  kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
+  EntropySourceImpl entropySource;
+  kj::Timer& timer;
+  const kj::MonotonicClock& monotonicClock;
+  kj_rs_io::TokioAsyncIoProvider provider;
+  kj::Own<v8::Platform> platform;
+  WorkerdPlatform v8Platform;
+  jsg::V8System v8System;
+  ReplEnvironment environment;
+
+  // Autogates are process-wide and set before V8 starts; the REPL's process runs with none.
+  static kj::Own<v8::Platform> initPlatform() {
+    util::Autogate::initAutogate({});
+    return jsg::defaultPlatform(0);
+  }
+};
+
+ReplSession::ReplSession(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
+ReplSession::~ReplSession() noexcept(false) {}
+
+kj::Own<ReplSession> repl_session_new(
+    kj_rs_tokio::TokioAsyncIoContext& loop, const ReplOptions& options) {
+  return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options));
+}
+
+kj::Promise<::rust::String> repl_evaluate(
+    ReplSession& session, ::rust::Vec<ReplCandidate> candidates) {
+  auto converted = KJ_MAP(candidate, candidates) {
+    return ReplEnvironment::Candidate{
+      .source = kj::str(kj::from<kj_rs::Rust>(candidate.source)),
+      .awaited = candidate.awaited,
+    };
+  };
+  auto result = co_await session.getImpl().getEnvironment().evaluate(kj::mv(converted));
+  // Rendered from JavaScript strings, which convert to valid UTF-8.
+  co_return result.as<kj_rs::RustUncheckedUtf8>();
+}
+
+kj::Promise<::rust::Vec<::rust::String>> repl_property_names(
+    ReplSession& session, ::rust::String base) {
+  auto names = co_await session.getImpl().getEnvironment().propertyNames(
+      kj::str(kj::from<kj_rs::Rust>(base)));
+  ::rust::Vec<::rust::String> result;
+  result.reserve(names.size());
+  for (auto& name: names) {
+    result.push_back(name.as<kj_rs::RustUncheckedUtf8>());
+  }
+  co_return result;
+}
+
+kj::Promise<void> repl_drain(ReplSession& session) {
+  return session.getImpl().getEnvironment().drain();
+}
+
+}  // namespace workerd::server::repl

@@ -22,7 +22,8 @@ wd_cc_library(
     ],
 )
 
-# The policy objects of a single-tenant runtime: no limits, and the clock JavaScript sees.
+# The policy objects of a single-tenant runtime: no limits, and the clock JavaScript sees. Shared by
+# the factory and `workerd repl`.
 wd_cc_library(
     name = "single-tenant-policy",
     hdrs = ["single-tenant-policy.h"],

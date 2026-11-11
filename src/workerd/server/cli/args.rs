@@ -177,7 +177,22 @@ pub enum Command {
         #[command(flatten)]
         deploy: DeployArgs,
     },
+
+    /// evaluate JavaScript interactively (experimental)
+    #[command(
+        long_about = "Evaluates JavaScript typed at a console (experimental).",
+        after_long_help = REPL_HELP,
+    )]
+    Repl {
+        #[command(flatten)]
+        repl: ReplArgs,
+    },
 }
+
+const REPL_HELP: &str = "\
+Evaluates JavaScript in a Worker environment and prints each result. The `workerd` global loads \
+configs, as `serve` does, and calls their services and sockets; type .help in the REPL for more. \
+This is a tool for developing workerd, and may change or go away in any release.";
 
 const DEPLOY_HELP: &str = "\
 Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
@@ -467,6 +482,22 @@ pub struct DeployArgs {
     pub binary: bool,
 
     /// Enable experimental features. Cluster mode requires this flag.
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ReplArgs {
+    /// Give the REPL's JavaScript the behavior of this compatibility date. Defaults to today.
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    /// Enable this compatibility flag in the REPL's JavaScript; repeat the option for more.
+    /// `nodejs_compat` is on unless a flag turns it or `nodejs_compat_v2` on or off.
+    #[arg(long = "compat-flag", value_name = "flag")]
+    pub compat_flags: Vec<String>,
+
+    /// Enable experimental features. The repl command requires this flag.
     #[arg(long)]
     pub experimental: bool,
 }

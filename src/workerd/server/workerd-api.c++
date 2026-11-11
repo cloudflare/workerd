@@ -283,6 +283,11 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
 }
 
+jsg::JsObject WorkerdApi::wrapReplControl(jsg::Lock& lock, jsg::Ref<ReplControl> ref) const {
+  return jsg::JsObject(
+      kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
+}
+
 const jsg::IsolateObserver& WorkerdApi::getObserver() const {
   return *impl->observer;
 }
