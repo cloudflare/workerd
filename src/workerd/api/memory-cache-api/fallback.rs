@@ -5,7 +5,6 @@
 //! A read that waits for the cache: as the leader, until it runs its fallback, or as a waiter,
 //! until the read it waits for finishes.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use io_context::IoContext;
@@ -149,22 +148,22 @@ fn reject<'s>(
 }
 
 /// What the reactions to a fallback's promise hold.
+///
+/// The garbage collector drops the reactions, on whichever thread then locks the isolate, and
+/// only when it collects them if the promise never settles. A span reports to its request's
+/// observer, whose state belongs to the request's thread, so the request owns the spans, as in
+/// memory-cache.c++: they end when the reactions drop them, or with the request.
 struct Fill {
     permit: IoOwned<FallbackPermit>,
     /// The key, for the span of the write.
     key: String,
-    spans: RefCell<FillSpans>,
-}
-
-/// The spans that end once the fallback settles, when the reactions to its promise drop the
-/// [`Fill`] that holds them, as in memory-cache.c++.
-struct FillSpans {
-    _read: SpanBuilder,
-    fallback: SpanBuilder,
+    /// Before its parent, so that it is released first, and ends first.
+    fallback_span: IoOwned<SpanBuilder>,
+    _read_span: IoOwned<SpanBuilder>,
 }
 
 /// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
-/// its spans. It holds no JavaScript values, so sharing it is sound.
+/// its callback and spans. It holds no JavaScript values, so sharing it is sound.
 struct SharedFill(Rc<Fill>);
 
 jsg::jsg_traced!(SharedFill);
@@ -172,7 +171,7 @@ jsg::jsg_traced!(SharedFill);
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
     /// settles then does not keep the reads waiting for it until the garbage collector drops its
-    /// reactions. Starts the span of the fallback.
+    /// reactions. Starts the span of the fallback, and gives the request it and `read_span`.
     fn new(
         lock: &mut jsg::Lock<'_>,
         permit: FallbackPermit,
@@ -182,22 +181,35 @@ impl Fill {
         let key = String::from_utf8_lossy(key).into_owned();
         let mut fallback_span = read_span.new_child(c"memory_cache_fallback");
         fallback_span.set_tag(c"key", &key);
+        let context = IoContext::current(lock)?;
+        // The parent first, so that the request, which destroys what it owns newest first,
+        // ends the child first.
+        let read_span = context.add_span(read_span)?;
         Ok(Self {
-            permit: IoContext::current(lock)?.add_object(permit)?,
+            permit: context.add_object(permit)?,
             key,
-            spans: RefCell::new(FillSpans {
-                _read: read_span,
-                fallback: fallback_span,
-            }),
+            fallback_span: context.add_span(fallback_span)?,
+            _read_span: read_span,
         })
     }
 
+    /// Fails, as memory-cache.c++ does when it reaches the spans, unless the request that ran
+    /// the fallback is the current one.
+    fn require_current(&self, lock: &mut jsg::Lock<'_>) -> jsg::Result<()> {
+        self.fallback_span.with(lock, |_| ())?;
+        Ok(())
+    }
+
+    /// Fails unless the request that ran the fallback is the current one.
     fn tag_fallback<'v>(
         &self,
+        lock: &mut jsg::Lock<'_>,
         key: &'static std::ffi::CStr,
         value: impl Into<io_context::TagValue<'v>>,
-    ) {
-        self.spans.borrow_mut().fallback.set_tag(key, value);
+    ) -> jsg::Result<()> {
+        self.fallback_span
+            .with(lock, |span| span.set_tag(key, value))?;
+        Ok(())
     }
 
     /// Records why the fallback failed, and abandons it, so that a read waiting for it runs its
@@ -208,8 +220,9 @@ impl Fill {
         lock: &mut jsg::Lock<'a>,
         exception: v8::Local<'a, v8::Value>,
     ) -> jsg::Result<()> {
-        self.tag_fallback(c"fallback_success", false);
-        self.tag_fallback(c"fallback_error", &exception.to_detail_string(lock)?);
+        self.tag_fallback(lock, c"fallback_success", false)?;
+        let error = exception.to_detail_string(lock)?;
+        self.tag_fallback(lock, c"fallback_error", &error)?;
         drop(self.permit.take(lock)?);
         Ok(())
     }
@@ -233,8 +246,11 @@ impl Fill {
                 .succeed(bytes, expiration, now)
                 .map_err(cache_error)?;
             trace::record_write(&context, &self.key, &trace)?;
-            self.tag_fallback(c"waiters_notified", trace::count(trace.waiters_notified));
-            Ok(())
+            self.tag_fallback(
+                lock,
+                c"waiters_notified",
+                trace::count(trace.waiters_notified),
+            )
         });
         if let Err(err) = result {
             tracing::error!(error = %err, "memory cache fallback completion failed");
@@ -311,21 +327,24 @@ fn fulfilled<'a>(
     fill: &SharedFill,
     produced: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
+    // Before serializing, which can run JavaScript, as memory-cache.c++ reaches the spans first.
+    fill.0.require_current(lock)?;
     let (value, expiration) = Produced::fields(lock, produced)?;
     let bytes = match serialize(lock, value)? {
         Ok(bytes) => bytes,
         Err(exception) => return Err(lock.throw_value(exception)),
     };
     fill.0
-        .tag_fallback(c"fallback_result_size", trace::count(bytes.len()));
+        .tag_fallback(lock, c"fallback_result_size", trace::count(bytes.len()))?;
     if expiration.is_some_and(f64::is_nan) {
         return Err(jsg::Error::new_type_error(
             "Expiration time must not be NaN.",
         ));
     }
-    fill.0.tag_fallback(c"has_expiration", expiration.is_some());
+    fill.0
+        .tag_fallback(lock, c"has_expiration", expiration.is_some())?;
     // Only now, so that a failure above does not overwrite it.
-    fill.0.tag_fallback(c"fallback_success", true);
+    fill.0.tag_fallback(lock, c"fallback_success", true)?;
     fill.0.succeed(lock, bytes, expiration)?;
     Ok(value)
 }

@@ -387,11 +387,14 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
       describe());
 }
 
-KJ_TEST("the spans of a fallback that never settles end with its request") {
-  // V8 owns the continuations attached to the fallback's Promise, and destroys them only when it
-  // collects them, which this fixture does not do on its own.
+// The memory_cache_* spans of a request whose fallback never settles. V8 owns the continuations
+// attached to the fallback's Promise, and destroys them only when it collects them, which the
+// fixture does not do on its own.
+kj::Array<kj::String> neverSettlingFallbackSpans(
+    MakeCache (*makeCache)(MemoryCacheProvider&, MemoryCacheLimits)) {
   MemoryCacheProvider provider;
-  auto spans = recordSpans(R"SCRIPT(
+  kj::Vector<kj::String> result;
+  for (auto& span: recordSpans(R"SCRIPT(
       export default {
         async fetch() {
           let fallbackStarted;
@@ -405,17 +408,26 @@ KJ_TEST("the spans of a fallback that never settles end with its request") {
         }
       };
     )SCRIPT"_kj,
-      cppCache(provider, testLimits()));
+           makeCache(provider, testLimits()))) {
+    if (span.startsWith("memory_cache")) result.add(kj::mv(span));
+  }
+  return result.releaseAsArray();
+}
 
-  for (auto name: {"memory_cache_read <- "_kj, "memory_cache_fallback <- "_kj}) {
-    bool found = false;
+KJ_TEST("the spans of a fallback that never settles end with its request") {
+  for (auto makeCache: {cppCache, rustCache}) {
+    auto implementation = makeCache == cppCache ? "C++"_kj : "Rust"_kj;
+    auto spans = neverSettlingFallbackSpans(makeCache);
     for (auto& span: spans) {
-      if (span.startsWith(name)) {
-        found = true;
-        KJ_EXPECT(!span.endsWith("(open)"), span);
-      }
+      KJ_EXPECT(!span.endsWith("(open)"), implementation, span);
     }
-    KJ_EXPECT(found, name, kj::strArray(spans, "\n"));
+    for (auto name: {"memory_cache_read <- "_kj, "memory_cache_fallback <- "_kj}) {
+      bool found = false;
+      for (auto& span: spans) {
+        found = found || span.startsWith(name);
+      }
+      KJ_EXPECT(found, implementation, name, kj::strArray(spans, "\n"));
+    }
   }
 }
 
