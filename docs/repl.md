@@ -212,20 +212,21 @@ process. A config can be loaded more than once, and several configs can be loade
 - The Workers' `console.log()` writes to stdout.
 
 `workerd.servers` lists the servers loaded and not yet closed. `workerd.version` is the version of
-workerd.
+workerd. `workerd.evict()` evicts a [Durable Object](#durable-objects).
 
 ### The server handle
 
-| Member                                 | What it is                                                                                                                                      |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `path`                                 | The config's path, as given to `loadConfig()`.                                                                                                  |
-| `warnings`                             | The warnings reported while the config loaded, or last reloaded.                                                                                |
-| `closed`                               | Whether `close()` has been called.                                                                                                              |
-| `watching`                             | Whether a change to a file the config was loaded from reloads it: `loadConfig()` was given `watch: true`, and the server isn't closed.          |
-| `service(name, { entrypoint, props })` | A `Fetcher` for the config's service `name`, for `fetch()` and RPC: its `entrypoint` (the default export if none), with `props` as `ctx.props`. |
-| `socket(name)`                         | A `Fetcher` whose `fetch()` sends the request to the config's HTTP socket `name`, as a client connecting to the socket would.                   |
-| `reload()`                             | Loads the config again and serves it in place of the old one. Resolves to the handle once the new server is serving.                            |
-| `close()`                              | Drains the server and shuts it down. Resolves once it has; calling it again is harmless.                                                        |
+| Member                                   | What it is                                                                                                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`                                   | The config's path, as given to `loadConfig()`.                                                                                                  |
+| `warnings`                               | The warnings reported while the config loaded, or last reloaded.                                                                                |
+| `closed`                                 | Whether `close()` has been called.                                                                                                              |
+| `watching`                               | Whether a change to a file the config was loaded from reloads it: `loadConfig()` was given `watch: true`, and the server isn't closed.          |
+| `service(name, { entrypoint, props })`   | A `Fetcher` for the config's service `name`, for `fetch()` and RPC: its `entrypoint` (the default export if none), with `props` as `ctx.props`. |
+| `socket(name)`                           | A `Fetcher` whose `fetch()` sends the request to the config's HTTP socket `name`, as a client connecting to the socket would.                   |
+| `durableObject(service, className, key)` | A stub for the [Durable Object](#durable-objects) `key` names, of the class `className` that the config's service `service` exports.            |
+| `reload()`                               | Loads the config again and serves it in place of the old one. Resolves to the handle once the new server is serving.                            |
+| `close()`                                | Drains the server and shuts it down. Resolves once it has; calling it again is harmless.                                                        |
 
 `service()` reaches any service in the config, not only a Worker, as a binding to it would. It
 throws if the config has no such service, or the Worker has no such entrypoint.
@@ -245,8 +246,28 @@ The REPL's JavaScript has the `service_binding_extra_handlers` flag, so a `Fetch
 `Host` header, the socket's HTTP options apply, and the Worker sees the request as it would see
 one that arrived at the socket.
 
-A `Fetcher` from `service()` or `socket()` can't be passed to another Worker, such as in an RPC
-call to a loaded Worker; that fails with a `DataCloneError`.
+A `Fetcher` from `service()`, `socket()` or `durableObject()` can't be passed to another Worker,
+such as in an RPC call to a loaded Worker; that fails with a `DataCloneError`.
+
+### Durable Objects
+
+`s.durableObject(service, className, key)` is a stub for one of the config's Durable Objects, for
+RPC and `fetch()`, as a binding to the class would reach it. `key` is the object's name, as
+`idFromName()` takes it, `{ name }`, or `{ id }` with the object's id as `idFromString()` takes it.
+The objects of an ephemeral class have names but no ids.
+
+`await workerd.evict(stub, { webSockets })` evicts the object behind a stub, as the runtime evicts
+an idle one, and as `evict()` from `cloudflare:unsafe` does. Its durable storage is kept, and on
+its next request it starts again, running its constructor. Its hibernatable WebSockets hibernate,
+or close with `webSockets: 'close'`. The promise rejects if the object isn't running.
+
+```
+> c = s.durableObject('main', 'Counter', 'alice')
+> await c.increment()
+1
+> await workerd.evict(c)
+undefined
+```
 
 ### Reloading
 
@@ -288,6 +309,8 @@ loaded, then waits for the REPL's `waitUntil()` tasks to finish.
 - Line editing works on Unix terminals only. The cursor is drawn in the wrong place on a line with
   wide characters, such as CJK, or a line longer than the terminal is wide.
 - There is no way to interrupt an input that is running except to end the REPL.
+- A Durable Object's alarm runs when it is due, and not before: an alarm runs only at the time it
+  is set for, which only the object can change.
 - The REPL has no inspector, so DevTools can't attach to it or to the loaded configs.
 
 ## How it works

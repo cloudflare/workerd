@@ -16,6 +16,7 @@
 // types reach that implementation through the abstract ReplHost and ReplServerHost.
 
 #include <workerd/api/http.h>
+#include <workerd/api/unsafe.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/jsg/jsg.h>
@@ -23,6 +24,17 @@
 #include <kj/async.h>
 
 namespace workerd::server {
+
+// A Durable Object of a loaded config: of the class `className` that the config's service
+// `service` exports, named by `name` (as `idFromName()` names it) or by `id` (as `idFromString()`
+// takes it, for a durable class). One of `name` and `id` is given. The strings are used only
+// during the call they are passed to.
+struct ReplActorAddress {
+  kj::StringPtr service;
+  kj::StringPtr className;
+  kj::Maybe<kj::StringPtr> name;
+  kj::Maybe<kj::StringPtr> id;
+};
 
 // A config the REPL loaded and serves in-process (repl-server.h). Shared between the REPL and the
 // JavaScript handles to it; closing the server, not the last handle's garbage collection, ends it.
@@ -49,6 +61,12 @@ class ReplServerHost {
   // A channel that sends HTTP requests to the config's socket `name`, as a client connecting to it
   // would. Throws a JSG error if there is no such socket, or the server is closed.
   virtual kj::Rc<IoChannelFactory::SubrequestChannel> socket(kj::StringPtr name) = 0;
+
+  // A channel to the Durable Object `address` names, as a binding to its class reaches it. Throws
+  // a JSG error if there is no such service or class, the address is not valid for the class, or
+  // the server is closed.
+  virtual kj::Rc<IoChannelFactory::SubrequestChannel> durableObject(
+      const ReplActorAddress& address) = 0;
 
   // Loads the config again and serves it in place of what was loaded before, whose channels then
   // fail. Rejects with a JSG error listing the problems, leaving the server as it was, if the
@@ -112,6 +130,23 @@ class ReplServer final: public jsg::Object {
   // in-process names rather than on their addresses.
   jsg::Ref<api::Fetcher> socket(jsg::Lock& js, kj::String name);
 
+  // Names a Durable Object by one of its name, as `idFromName()` takes it, and its id, as
+  // `idFromString()` does.
+  struct DurableObjectName {
+    jsg::Optional<kj::String> name;
+    jsg::Optional<kj::String> id;
+
+    JSG_STRUCT(name, id);
+  };
+  // A name, or a DurableObjectName. An object is never taken for a name: every object is a
+  // DurableObjectName.
+  using DurableObjectKey = kj::OneOf<kj::String, DurableObjectName>;
+
+  // A stub, for RPC and `fetch()`, of the Durable Object of class `className` that the config's
+  // service `service` exports, named by `key`.
+  jsg::Ref<api::Fetcher> durableObject(
+      jsg::Lock& js, kj::String service, kj::String className, DurableObjectKey key);
+
   // Loads the config again in place of what was loaded before; this handle, once it has.
   jsg::Promise<jsg::Ref<ReplServer>> reload(jsg::Lock& js);
 
@@ -124,6 +159,7 @@ class ReplServer final: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(warnings, getWarnings);
     JSG_METHOD(service);
     JSG_METHOD(socket);
+    JSG_METHOD(durableObject);
     JSG_METHOD(reload);
     JSG_METHOD(close);
   }
@@ -155,12 +191,19 @@ class ReplControl final: public jsg::Object {
   // The servers loaded in this session and not yet closed.
   kj::Array<jsg::Ref<ReplServer>> getServers();
 
+  // Evicts the Durable Object behind `stub` (from a server's durableObject()) as
+  // `cloudflare:unsafe`'s evict() does.
+  jsg::Promise<void> evict(jsg::Lock& js,
+      jsg::Ref<api::Fetcher> stub,
+      jsg::Optional<api::UnsafeModule::EvictOptions> options);
+
   kj::StringPtr getVersion() {
     return version;
   }
 
   JSG_RESOURCE_TYPE(ReplControl) {
     JSG_METHOD(loadConfig);
+    JSG_METHOD(evict);
     JSG_READONLY_PROTOTYPE_PROPERTY(servers, getServers);
     JSG_READONLY_PROTOTYPE_PROPERTY(version, getVersion);
   }
@@ -182,6 +225,7 @@ class ReplControl final: public jsg::Object {
 
 #define EW_REPL_ISOLATE_TYPES                                                                      \
   workerd::server::ReplControl, workerd::server::ReplControl::LoadConfigOptions,                   \
-      workerd::server::ReplServer, workerd::server::ReplServer::ServiceOptions
+      workerd::server::ReplServer, workerd::server::ReplServer::ServiceOptions,                    \
+      workerd::server::ReplServer::DurableObjectName
 
 }  // namespace workerd::server

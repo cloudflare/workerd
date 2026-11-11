@@ -24,6 +24,10 @@ kj::Exception loadFailed(kj::StringPtr path, kj::ArrayPtr<const kj::String> erro
   return ::rust::Str(str.begin(), str.size());
 }
 
+kj::Maybe<::rust::Str> toRust(kj::Maybe<kj::StringPtr> str) {
+  return str.map([](kj::StringPtr s) { return toRust(s); });
+}
+
 // What a started server reported: the config's errors, and its warnings.
 struct Reports {
   kj::Array<kj::String> errors;
@@ -148,14 +152,19 @@ InProcessServer& ReplConfigServer::requireOpen() {
 
 kj::Rc<IoChannelFactory::SubrequestChannel> ReplConfigServer::service(
     kj::StringPtr name, kj::Maybe<kj::StringPtr> entrypoint, kj::Maybe<Frankenvalue> props) {
-  auto rustEntrypoint = entrypoint.map([](kj::StringPtr e) { return toRust(e); });
   auto ownProps = props.map([](Frankenvalue& p) { return kj::heap<Frankenvalue>(kj::mv(p)); });
   return subrequest_channel_into_kj(
-      requireOpen().service(toRust(name), kj::mv(rustEntrypoint), kj::mv(ownProps)));
+      requireOpen().service(toRust(name), toRust(entrypoint), kj::mv(ownProps)));
 }
 
 kj::Rc<IoChannelFactory::SubrequestChannel> ReplConfigServer::socket(kj::StringPtr name) {
   return subrequest_channel_into_kj(requireOpen().socket(toRust(name)));
+}
+
+kj::Rc<IoChannelFactory::SubrequestChannel> ReplConfigServer::durableObject(
+    const ReplActorAddress& address) {
+  return subrequest_channel_into_kj(requireOpen().actor(toRust(address.service),
+      toRust(address.className), toRust(address.name), toRust(address.id)));
 }
 
 kj::Promise<void> ReplConfigServer::reload() {

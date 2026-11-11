@@ -15,8 +15,8 @@
 //! warnings queue with the rest.
 //!
 //! A server [`InProcessServer::start`] started serves its stream sockets on `loopback:` names
-//! whatever their addresses, and hands its host channels to its services and its http sockets
-//! (`host.rs`), which closing it revokes.
+//! whatever their addresses, and hands its host channels to its services, its Durable Objects and
+//! its http sockets (`host.rs`), which closing it revokes.
 
 mod host;
 
@@ -44,6 +44,7 @@ use crate::bench;
 use crate::bridge::ffi;
 use crate::channels::ServerHandle;
 use crate::channels::SubrequestChannel;
+use crate::config::ActorKey;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Reporter;
@@ -268,6 +269,34 @@ impl InProcessServer {
         let channel = self
             .revoker
             .channel(channel.0, &self.factory, Events::All)?;
+        Ok(SubrequestChannel::new(channel))
+    }
+
+    /// The channel to the object of the config's service `service`'s Durable Object class
+    /// `class_name` that `name` or `id` names, as a binding to the class would reach it. Until
+    /// revoked.
+    pub fn actor(
+        &self,
+        service: &str,
+        class_name: &str,
+        name: KjMaybe<&str>,
+        id: KjMaybe<&str>,
+    ) -> Result<Box<SubrequestChannel>> {
+        self.revoker.check()?;
+        let key = match (Option::from(name), Option::from(id)) {
+            (Some(name), None) => ActorKey::Name(name),
+            (None, Some(id)) => ActorKey::Id(id),
+            _ => {
+                return Err(kj::failed!(
+                    "jsg.TypeError: A Durable Object is named by one of a name and an id."
+                ));
+            }
+        };
+        let server = ServerHandle(Weak::clone(&self.server.borrow()));
+        let (namespace, id) = server.resolve_actor_key(service, class_name, key)?;
+        let channel =
+            self.revoker
+                .channel(namespace.channel(id, false), &self.factory, Events::All)?;
         Ok(SubrequestChannel::new(channel))
     }
 
