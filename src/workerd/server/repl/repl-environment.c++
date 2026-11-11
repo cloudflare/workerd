@@ -387,8 +387,17 @@ kj::Promise<kj::Array<kj::String>> ReplEnvironment::propertyNames(kj::String bas
 }
 
 kj::Promise<void> ReplEnvironment::drain() {
+  // A server that fails to close does not keep the others open or the request undrained.
+  kj::Maybe<kj::Exception> failure;
   for (auto& server: servers) {
-    co_await server->close();
+    try {
+      co_await server->close();
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      if (failure == kj::none) {
+        failure = kj::mv(exception);
+      }
+    }
   }
   servers.clear();
 
@@ -397,6 +406,10 @@ kj::Promise<void> ReplEnvironment::drain() {
     incomingRequest = kj::none;
     draining->drain(waitUntilTasks, kj::mv(draining));
     co_await waitUntilTasks.onEmpty();
+  }
+
+  KJ_IF_SOME(exception, failure) {
+    kj::throwFatalException(kj::mv(exception));
   }
 }
 

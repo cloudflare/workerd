@@ -88,6 +88,7 @@ class ReplEnvironment final: public ReplHost {
 
   // Closes every loaded config's server, then ends the session's IoContext once its waitUntil()
   // tasks are done. Must complete before destruction; nothing else may be called afterwards.
+  // Rejects with the first server's failure to close, if any, once all of that is done.
   kj::Promise<void> drain();
 
   kj::Promise<kj::Own<ReplServerHost>> loadConfig(

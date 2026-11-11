@@ -47,8 +47,19 @@ kj::Promise<kj::Own<ReplConfigServer>> ReplConfigServer::start(const ReplServerR
 
   auto errors = co_await self->serve();
   if (errors.size() > 0) {
-    co_await self->close();
-    kj::throwFatalException(loadFailed(self->path, errors));
+    // The config's errors are why the load failed, so a failure to close joins them rather than
+    // taking their place.
+    kj::Vector<kj::String> reported(errors.size() + 1);
+    for (auto& error: errors) {
+      reported.add(kj::mv(error));
+    }
+    try {
+      co_await self->close();
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reported.add(kj::str("Closing the server then failed: ", exception.getDescription()));
+    }
+    kj::throwFatalException(loadFailed(self->path, reported));
   }
   co_return self;
 }
