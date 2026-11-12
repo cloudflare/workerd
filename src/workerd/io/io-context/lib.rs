@@ -265,7 +265,10 @@ impl<'s> IoContext<'s> {
     /// as for a promise that never settles, as in C++. As in C++, the promise must settle in
     /// this request: its reactions are not run in another, and if the promise is
     /// garbage-collected without settling, or this `IoContext` is destroyed first, the future
-    /// fails with an `Error` whose message is `Promise will never complete.`.
+    /// fails with an `Error` whose message is `Promise will never complete.`. If the isolate has
+    /// excessively exceeded its heap limit by then, it fails instead with C++
+    /// `IoContext::memoryLimitException()`, an overloaded `Error` whose message is `Worker has
+    /// exceeded memory limit.`, with the detail that marks an out-of-memory outcome.
     ///
     /// The reactions hold the half of the wait that settles it through an [`IoOwned`], which
     /// gives it the lifetime C++ gives `AwaitJsFulfiller` through `IoOwn`:
@@ -282,8 +285,7 @@ impl<'s> IoContext<'s> {
     /// error for which [`jsg::Error::is_pending`] is true if V8 fails to register the reactions
     /// or execution is terminating.
     //
-    // TODO(soon): Join the wait with the request's abort, record it for async tracing, and
-    // choose the memory-limit error once the isolate is past its heap limit.
+    // TODO(soon): Join the wait with the request's abort, and record it for async tracing.
     pub fn await_js<T, M>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -303,6 +305,7 @@ impl<'s> IoContext<'s> {
         let shared = Arc::new(AwaitJsShared(Mutex::new(AwaitJsState::Waiting(None))));
         let sender = self.add_object(AwaitJsSender {
             shared: Arc::clone(&shared),
+            isolate: bridge::io_context_isolate_weak_ref(self.id)?,
         })?;
         promise.into().then_or_catch(
             lock,
@@ -633,6 +636,9 @@ enum AwaitJsState<T> {
     Rejected(cxx::KjError),
     /// The sender was dropped without settling the wait.
     NeverSettled,
+    /// The sender was dropped without settling the wait while the isolate had excessively
+    /// exceeded its heap limit.
+    MemoryLimitExceeded,
     /// The [`AwaitJs`] was dropped before the wait settled.
     Cancelled,
     /// The [`AwaitJs`] returned the outcome.
@@ -667,24 +673,54 @@ impl<T> AwaitJsShared<T> {
     fn is_cancelled(&self) -> bool {
         matches!(*self.lock(), AwaitJsState::Cancelled)
     }
+
+    fn is_waiting(&self) -> bool {
+        matches!(*self.lock(), AwaitJsState::Waiting(_))
+    }
 }
 
 /// The half of a wait of [`IoContext::await_js`] that settles it, which the request owns through
 /// an [`IoOwned`].
 struct AwaitJsSender<T> {
     shared: Arc<AwaitJsShared<T>>,
+    /// The isolate of the request the wait was started in, weakly, as C++ `awaitJsImpl()` takes
+    /// it, so that the wait never keeps the isolate alive. It is `Send`, as the sender must be.
+    isolate: KjOwn<bridge::IsolateWeakRef>,
 }
 
 impl<T> Drop for AwaitJsSender<T> {
     /// Settles the wait as never settling, as `~AwaitJsFulfiller()` does, unless it has settled
-    /// or was cancelled.
+    /// or was cancelled. As there, whether the isolate has excessively exceeded its heap limit
+    /// is decided now, and if it has, the wait fails with the memory-limit error instead. An
+    /// isolate that is gone has not.
     ///
     /// The reactions' data is dropped by the garbage collector once the promise is unreachable,
     /// in a cppgc finalizer or the GC epilogue, so this must not enter V8, allocate on its heap,
-    /// or panic. It only sets the state and wakes the future, which builds the error once it is
-    /// polled.
+    /// or panic. It only reads the isolate's limit enforcer, which does none of these (see
+    /// `isolate_weak_ref_has_excessively_exceeded_heap_limit()`), sets the state and wakes the
+    /// future, which builds the error once it is polled.
     fn drop(&mut self) {
-        self.shared.settle(AwaitJsState::NeverSettled);
+        if !self.shared.is_waiting() {
+            return;
+        }
+        let exceeded =
+            match bridge::isolate_weak_ref_has_excessively_exceeded_heap_limit(&self.isolate) {
+                Ok(exceeded) => exceeded,
+                // The check is not expected to throw. If it does, the wait still fails, as never
+                // settled. Logging enters no V8.
+                Err(err) => {
+                    bridge::io_context_log_error(&format!(
+                        "checking the heap limit for an unsettled IoContext::await_js() failed: \
+                         {err}"
+                    ));
+                    false
+                }
+            };
+        self.shared.settle(if exceeded {
+            AwaitJsState::MemoryLimitExceeded
+        } else {
+            AwaitJsState::NeverSettled
+        });
     }
 }
 
@@ -723,6 +759,7 @@ impl<T> Future for AwaitJs<T> {
                 cxx::KjExceptionType::Failed,
                 format!("jsg.Error: {}", bridge::io_context_never_settled_message()),
             ))),
+            AwaitJsState::MemoryLimitExceeded => Poll::Ready(Err(ffi::memory_limit_exception())),
             AwaitJsState::Cancelled | AwaitJsState::Done => {
                 unreachable!("an AwaitJs polled after it returned its outcome")
             }

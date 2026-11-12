@@ -7,8 +7,8 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, the waitUntil and inspector calls take V8 handles, and the trace span \
-              calls take literals that C++ does not copy"
+              set up, the waitUntil and inspector calls take V8 handles, the trace span calls \
+              take literals that C++ does not copy, and IsolateWeakRef is declared Send"
 )]
 
 use std::any::Any;
@@ -57,10 +57,17 @@ pub mod bridge {
         include!("workerd/io/io-context/ffi.h");
 
         type IoOwnedObject;
+        type IsolateWeakRef;
 
         fn io_context_no_request_message() -> &'static str;
         // TODO(soon): Define this message in Rust once C++ `IoContext::awaitJs()` is gone.
         fn io_context_never_settled_message() -> &'static str;
+        // Always fails, with C++ `IoContext::memoryLimitException()`.
+        fn io_context_throw_memory_limit_exception() -> Result<()>;
+        fn io_context_isolate_weak_ref(id: u64) -> Result<KjOwn<IsolateWeakRef>>;
+        fn isolate_weak_ref_has_excessively_exceeded_heap_limit(
+            isolate: &IsolateWeakRef,
+        ) -> Result<bool>;
         fn io_context_try_current_id() -> KjMaybe<u64>;
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
@@ -171,6 +178,26 @@ pub mod bridge {
             callback: Box<IoCallback>,
             output: Box<IoOutput>,
         ) -> IoCallbackOutcome;
+    }
+}
+
+// SAFETY: an `IsolateWeakRef` holds only a `kj::Own<const AtomicWeakRef<Worker::Isolate>>`, which
+// may be used and released on any thread: `AtomicWeakRef` is `kj::AtomicRefcounted`, and a
+// `kj::MutexGuarded` guards its pointer to the isolate, which the isolate clears when it is
+// destroyed, so `tryAddStrongRef()` is safe on any thread, even once the isolate is gone. The one
+// thing Rust does with it, `isolate_weak_ref_has_excessively_exceeded_heap_limit()`, takes a
+// strong reference to the `kj::AtomicRefcounted` `Worker::Isolate`, and calls a `const` method of
+// its `IsolateLimitEnforcer`, which needs no isolate lock (see its declaration).
+unsafe impl Send for bridge::IsolateWeakRef {}
+
+/// The exception that `io_context_throw_memory_limit_exception()` throws: C++
+/// `IoContext::memoryLimitException()`, with its type, description, location and details. C++
+/// thus defines the whole exception once, for itself and for Rust, which receives it through the
+/// bridge's conversion of a thrown `kj::Exception`.
+pub fn memory_limit_exception() -> cxx::KjError {
+    match bridge::io_context_throw_memory_limit_exception() {
+        Err(exception) => exception.into(),
+        Ok(()) => unreachable!("io_context_throw_memory_limit_exception() always throws"),
     }
 }
 

@@ -66,6 +66,25 @@ void setTag(Span& span, Literal key, Value value) {
   return IoContext::NEVER_SETTLED_MESSAGE.cStr();
 }
 
+void io_context_throw_memory_limit_exception() {
+  kj::throwFatalException(IoContext::memoryLimitException());
+}
+
+kj::Own<IsolateWeakRef> io_context_isolate_weak_ref(uint64_t id) {
+  return kj::heap<IsolateWeakRef>(currentWithId(id).getWorker().getIsolate().getWeakRef());
+}
+
+bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& weakRef) {
+  // Rust calls this when it drops the half of an await_js() wait that settles it: in a cppgc
+  // finalizer or the GC epilogue, or without the isolate lock, where ~AwaitJsFulfiller() runs
+  // rejectNeverSettled(). It enters no V8: tryAddStrongRef() takes the weak reference's mutex and
+  // an atomic reference, and hasExcessivelyExceededHeapLimit() must not (see its declaration).
+  return weakRef.ref->tryAddStrongRef()
+      .map([](kj::Own<const Worker::Isolate> isolate) {
+    return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
+  }).orDefault(false);
+}
+
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });

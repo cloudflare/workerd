@@ -109,6 +109,8 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     return 128 * 1024 * 1024;  // 128 MB
   }
 
+  // IoContext::awaitJs() calls this when the promise it waits for is never settled, which can be
+  // in a GC finalizer or without the isolate lock, so it must neither enter V8 nor need the lock.
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
 
   // Returns the TrackedWasmInstanceList for this isolate. Subclasses own the list and provide

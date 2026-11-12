@@ -1148,6 +1148,141 @@ KJ_TEST("destroying the IoContext drops an unsettled await_js() with its wait") 
   forget_awaited_js_resolver();
 }
 
+constexpr kj::StringPtr MEMORY_LIMIT_OUTCOME =
+    "rejected: jsg.Error: Worker has exceeded memory limit."_kj;
+
+// The exception the wait of the last await_js_start() failed with, as the bridge converts it.
+kj::Exception awaitedJsError() {
+  return KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([]() { raise_awaited_js_error(); }), "the wait has not failed");
+}
+
+// `exception`'s details, as "<id>: <size>" each, separated by ", ".
+kj::String describeDetails(const kj::Exception& exception) {
+  return kj::strArray(KJ_MAP(detail, exception.getDetails()) {
+    return kj::str(kj::hex(detail.id), ": ", detail.value.size());
+  }, ", ");
+}
+
+// Checks that `exception` is IoContext::memoryLimitException(), as awaitJs() fails with it. Its
+// location is the one memoryLimitException() records, which C++ and Rust share; an exception that
+// Rust created would have a location in Rust instead.
+void expectMemoryLimitException(const kj::Exception& exception) {
+  auto expected = IoContext::memoryLimitException();
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::OVERLOADED, exception);
+  KJ_EXPECT(exception.getDescription() == kj::str("jsg.Error: ", IoContext::MEMORY_LIMIT_MESSAGE),
+      exception);
+  KJ_EXPECT(exception.getFile() == kj::StringPtr(expected.getFile()), exception.getFile());
+  KJ_EXPECT(exception.getLine() == expected.getLine(), exception.getLine());
+  // The detail, whose value is empty, marks the outcome as out of memory.
+  KJ_EXPECT(describeDetails(exception) == kj::str(kj::hex(MEMORY_LIMIT_DETAIL_ID), ": 0"),
+      describeDetails(exception));
+  KJ_EXPECT(RequestObserver::outcomeFromException(exception) == EventOutcome::EXCEEDED_MEMORY);
+}
+
+KJ_TEST("await_js() fails with the memory-limit error once GC collects the unsettled promise "
+        "while the isolate is past its heap limit") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  fixture.setHeapLimitExcessivelyExceeded(true);
+  collectGarbage(fixture, *request);
+  // As in C++, the error is chosen when the promise's reactions are collected, not when the
+  // wait's future is next polled.
+  fixture.setHeapLimitExcessivelyExceeded(false);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == MEMORY_LIMIT_OUTCOME, jsOutcome());
+  expectMemoryLimitException(awaitedJsError());
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_js() fails as never settled if the isolate is past its heap limit only while the "
+        "wait starts") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.setHeapLimitExcessivelyExceeded(true);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  fixture.setHeapLimitExcessivelyExceeded(false);
+  collectGarbage(fixture, *request);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  auto error = awaitedJsError();
+  KJ_EXPECT(error.getType() == kj::Exception::Type::FAILED, error);
+  KJ_EXPECT(error.getDetail(MEMORY_LIMIT_DETAIL_ID) == kj::none, describeDetails(error));
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+// Whether the isolate is past its heap limit while destroyContextWithHeldWait() destroys the
+// IoContext.
+enum class HeapLimit { EXCEEDED, NOT_EXCEEDED };
+
+// Starts a wait that outlives its IoContext, then destroys the IoContext, with the isolate past
+// its heap limit meanwhile as `heapLimit` says, and returns how the wait ended.
+kj::String destroyContextWithHeldWait(HeapLimit heapLimit) {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::Held);
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(!poll_held_awaited_js());
+  fixture.setHeapLimitExcessivelyExceeded(heapLimit == HeapLimit::EXCEEDED);
+  fixture.drainAndDestroy(kj::mv(request));
+  fixture.setHeapLimitExcessivelyExceeded(false);
+  KJ_EXPECT(poll_held_awaited_js());
+  forget_awaited_js_resolver();
+  return jsOutcome();
+}
+
+KJ_TEST("destroying the IoContext while the isolate is past its heap limit fails an unsettled "
+        "await_js() with the memory-limit error") {
+  auto outcome = destroyContextWithHeldWait(HeapLimit::EXCEEDED);
+  KJ_EXPECT(outcome == MEMORY_LIMIT_OUTCOME, outcome);
+  expectMemoryLimitException(awaitedJsError());
+}
+
+KJ_TEST("destroying the IoContext fails an unsettled await_js() as never settled") {
+  auto outcome = destroyContextWithHeldWait(HeapLimit::NOT_EXCEEDED);
+  KJ_EXPECT(outcome == NEVER_SETTLED_OUTCOME, outcome);
+}
+
+KJ_TEST("past the heap limit, await_js() fails with the exception C++ awaitJs() fails with") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  kj::Maybe<kj::Exception> cppError;
+  kj::Maybe<kj::Promise<void>> cppWait;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    // Both promises are unreachable once their resolvers are dropped, here and in Rust.
+    auto paf = env.js.newPromiseAndResolver<void>();
+    cppWait = env.context.awaitJs(env.js, kj::mv(paf.promise))
+                  .then([]() { KJ_FAIL_EXPECT("C++ awaitJs() fulfilled"); },
+                      [&cppError](kj::Exception&& e) {
+      cppError = kj::mv(e);
+    }).eagerlyEvaluate(nullptr);
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  fixture.setHeapLimitExcessivelyExceeded(true);
+  collectGarbage(fixture, *request);
+  fixture.setHeapLimitExcessivelyExceeded(false);
+  fixture.pollEventLoop();
+
+  auto& cpp = KJ_ASSERT_NONNULL(cppError, "C++ awaitJs() has not failed");
+  auto rust = awaitedJsError();
+  expectMemoryLimitException(cpp);
+  KJ_EXPECT(rust.getType() == cpp.getType(), rust, cpp);
+  KJ_EXPECT(rust.getDescription() == cpp.getDescription(), rust, cpp);
+  KJ_EXPECT(kj::StringPtr(rust.getFile()) == kj::StringPtr(cpp.getFile()), rust, cpp);
+  KJ_EXPECT(rust.getLine() == cpp.getLine(), rust, cpp);
+  KJ_EXPECT(describeDetails(rust) == describeDetails(cpp), rust, cpp);
+  cppWait = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 // Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it
 // exists, and passes on other messages the log level allowed before, as in request-ops-test.c++.
 // Only INFO messages are recorded, so that a failed KJ_EXPECT that quotes one reaches the test.

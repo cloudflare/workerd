@@ -23,7 +23,9 @@ use std::time::UNIX_EPOCH;
 use execution_context::new_gate;
 use execution_context::new_rust_execution_context;
 use execution_context::open_gate;
+use futures::FutureExt;
 use futures::channel::oneshot;
+use io_context::AwaitJs;
 use io_context::IoContext;
 use io_context::IoOwned;
 use io_context::IoOwnedSpan;
@@ -127,6 +129,9 @@ mod ffi {
         MapFails,
         /// Keeps the resolver, with a conversion that returns an internal error.
         MapFailsInternally,
+        /// Keeps the resolver, and holds the wait outside the request, for
+        /// `poll_held_awaited_js()`, so that it can outlive the `IoContext`.
+        Held,
     }
 
     /// The `UncaughtExceptionSource` that `log_uncaught_exception()` logs from.
@@ -185,6 +190,8 @@ mod ffi {
         fn awaited_js_outcome() -> String;
         fn awaited_js_map_runs() -> u32;
         fn awaited_js_detail_ids() -> Vec<u64>;
+        fn raise_awaited_js_error() -> Result<()>;
+        fn poll_held_awaited_js() -> bool;
         unsafe fn log_uncaught_exception(
             isolate: usize,
             source: LogSource,
@@ -829,15 +836,31 @@ thread_local! {
 static AWAITED_JS_OUTCOME: Mutex<String> = Mutex::new(String::new());
 /// How many times the conversion of the last `await_js_start()` ran.
 static AWAITED_JS_MAP_RUNS: AtomicU32 = AtomicU32::new(0);
-/// The ids of the details of the exception the wait of the last `await_js_start()` failed with.
-static AWAITED_JS_DETAIL_IDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+/// The exception the wait of the last `await_js_start()` failed with, if it failed.
+static AWAITED_JS_ERROR: Mutex<Option<cxx::KjError>> = Mutex::new(None);
 /// What cancels the wait of the last `await_js_start(Cancellable)`.
 static AWAITED_JS_CANCEL: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
+/// The wait of the last `await_js_start(Held)`, until `poll_held_awaited_js()` finds it ended.
+static AWAITED_JS_HELD: Mutex<Option<AwaitJs<f64>>> = Mutex::new(None);
 
 fn set_awaited_js_outcome(outcome: String) {
     *AWAITED_JS_OUTCOME
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = outcome;
+}
+
+/// Records the exception the wait failed with, if it did, and returns how the wait ended.
+fn record_awaited_js(result: std::result::Result<f64, cxx::KjError>) -> String {
+    match result {
+        Ok(value) => format!("fulfilled: {value}"),
+        Err(err) => {
+            let outcome = format!("rejected: {}", err.description());
+            *AWAITED_JS_ERROR
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(err);
+            outcome
+        }
+    }
 }
 
 /// The conversion of `await_js_start()`'s wait, which counts its runs.
@@ -887,10 +910,14 @@ fn count_and_fail_internally<'a>(
 unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()> {
     set_awaited_js_outcome("pending".to_owned());
     AWAITED_JS_MAP_RUNS.store(0, Ordering::SeqCst);
-    AWAITED_JS_DETAIL_IDS
+    AWAITED_JS_ERROR
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .clear();
+        .take();
+    AWAITED_JS_HELD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
     AWAITED_JS_RESOLVER.with(|cell| cell.borrow_mut().take());
     let (cancel, cancelled) = oneshot::channel::<()>();
     // Without `Cancellable`, the future holds the sender, so that the wait is never cancelled.
@@ -921,19 +948,16 @@ unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()>
         let resolver = resolver.to_global(lock);
         AWAITED_JS_RESOLVER.with(|cell| *cell.borrow_mut() = Some(resolver));
     }
+    if start == ffi::AwaitJsStart::Held {
+        *AWAITED_JS_HELD
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(wait);
+        return Ok(());
+    }
     let future = async move {
         let _held_cancel = held_cancel;
         match futures::future::select(wait, cancelled).await {
-            futures::future::Either::Left((Ok(value), _)) => format!("fulfilled: {value}"),
-            futures::future::Either::Left((Err(err), _)) => {
-                *AWAITED_JS_DETAIL_IDS
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = err
-                    .details()
-                    .map(|details| details.iter().map(|(id, _)| *id).collect())
-                    .unwrap_or_default();
-                format!("rejected: {}", err.description())
-            }
+            futures::future::Either::Left((result, _)) => record_awaited_js(result),
             futures::future::Either::Right(_) => "cancelled".to_owned(),
         }
     };
@@ -1007,10 +1031,38 @@ fn awaited_js_map_runs() -> u32 {
 }
 
 fn awaited_js_detail_ids() -> Vec<u64> {
-    AWAITED_JS_DETAIL_IDS
+    AWAITED_JS_ERROR
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(cxx::KjError::details)
+        .map(|details| details.iter().map(|(id, _)| *id).collect())
+        .unwrap_or_default()
+}
+
+/// Fails with the exception the wait of the last `await_js_start()` failed with, which C++
+/// receives with its type, description, location and details, or succeeds if it has not failed.
+fn raise_awaited_js_error() -> std::result::Result<(), cxx::KjError> {
+    AWAITED_JS_ERROR
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone()
+        .map_or(Ok(()), Err)
+}
+
+/// Polls the wait of the last `await_js_start(Held)` once, and, if it has ended, records how, as
+/// for the other waits, and returns true.
+fn poll_held_awaited_js() -> bool {
+    let mut held = AWAITED_JS_HELD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let Some(result) = held.as_mut().and_then(FutureExt::now_or_never) else {
+        return false;
+    };
+    held.take();
+    drop(held);
+    set_awaited_js_outcome(record_awaited_js(result));
+    true
 }
 
 /// In a request, `IoContext::log_uncaught_exception()`s `exception`, a handle in the caller's
