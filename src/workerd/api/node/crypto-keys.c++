@@ -869,7 +869,7 @@ jsg::JsUint8Array CryptoImpl::statelessDH(
   KJ_ASSERT(privateKeyAlg == publicKeyAlg, "Mismatched public and private key types");
   KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
-      auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
+      auto data = ncrypto::DHPointer::stateless(pvtKey, pubKey);
       JSG_REQUIRE(data, Error, "Failed to derive shared diffie-hellman secret");
       kj::ArrayPtr<const kj::byte> ptr(static_cast<const kj::byte*>(data.get()), data.size());
       return jsg::JsUint8Array::create(js, ptr);
