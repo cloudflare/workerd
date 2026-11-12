@@ -452,8 +452,10 @@ impl Cluster {
     pub async fn announce_draining(&self) {
         let timing = self.lease.borrow().timing;
         let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
-        if !matches!(renew.await, Ok(Ok(_))) {
-            tracing::warn!("cluster: publishing the drain failed");
+        match renew.await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::warn!("cluster: publishing the drain failed: {e}"),
+            Err(_) => tracing::warn!("cluster: publishing the drain timed out"),
         }
         let _ = timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await;
     }
