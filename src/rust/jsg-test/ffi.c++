@@ -343,6 +343,16 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
+bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value));
+  try {
+    kj::throwFatalException(js.exceptionToKj(::workerd::jsg::JsValue(handle)));
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    return false;
+  }
+}
+
 ::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
     Isolate* isolate, ::workerd::rust::jsg::Local exception) {
   auto& js = ::workerd::jsg::Lock::from(isolate);

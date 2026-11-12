@@ -333,7 +333,7 @@ impl<'s> IoContext<'s> {
     /// JavaScript execution, and returns the error that carries the termination; return it from
     /// the method that called this (see [`jsg::Lock::terminate_execution_now`]).
     ///
-    /// The `IoContext` is aborted with `reason` as C++ `jsg::Lock::exceptionToKj()` encodes it,
+    /// The `IoContext` is aborted with `reason` as [`jsg::Lock::exception_to_kj`] encodes it,
     /// or, without one, with an `Error` whose message is `Worker execution was aborted due to
     /// call to ctx.abort().`, through C++ `IoContext::abort()`, so the request fails with that
     /// exception.

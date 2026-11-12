@@ -1932,6 +1932,31 @@ Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
   return to_ffi(createInternalError(isolate, internalMessage));
 }
 
+uint64_t tunneled_exception_detail_id() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_DETAIL_ID;
+}
+
+uint64_t tunneled_exception_enhanced_detail_id() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID;
+}
+
+uint64_t js_exception_metadata_detail_id() {
+  return ::workerd::jsg::JS_EXCEPTION_METADATA_DETAIL_ID;
+}
+
+uint32_t tunneled_exception_serialization_version() {
+  return ::workerd::jsg::TUNNELED_EXCEPTION_SERIALIZATION_VERSION;
+}
+
+size_t js_exception_metadata_max_field_size() {
+  return ::workerd::jsg::JS_EXCEPTION_METADATA_MAX_FIELD_SIZE;
+}
+
+bool starts_with_tunneled_error_type(::rust::Str description) {
+  return ::workerd::jsg::startsWithTunneledErrorType(
+      kj::arrayPtr(description.data(), description.size()));
+}
+
 // TryCatch
 bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
   // The rule of jsg::Lock::tryCatch(): nothing caught means a termination, which V8 may already

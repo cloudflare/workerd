@@ -782,6 +782,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: &Local,
             errors_are_host_objects: bool,
+            version: KjMaybe<u32>,
             result: &mut Vec<u8>,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
@@ -834,6 +835,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             internal_message: &str,
         ) -> Local;
+        pub fn tunneled_exception_detail_id() -> u64;
+        pub fn tunneled_exception_enhanced_detail_id() -> u64;
+        pub fn js_exception_metadata_detail_id() -> u64;
+        pub fn tunneled_exception_serialization_version() -> u32;
+        pub fn js_exception_metadata_max_field_size() -> usize;
+        pub fn starts_with_tunneled_error_type(description: &str) -> bool;
 
         // TryCatch
         pub unsafe fn isolate_try_catch(

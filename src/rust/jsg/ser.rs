@@ -19,11 +19,19 @@
 //!   [`serialize`] and [`deserialize`] throw `DataCloneError` for them.
 //!
 //! A `SharedArrayBuffer` is written as a reference that [`deserialize`] cannot resolve. Transfer
-//! lists, externals and the other `jsg::Serializer` options are not supported.
+//! lists, externals and the `jsg::Serializer` options other than `version` are not supported.
 
 use crate::Error;
 use crate::Lock;
 use crate::v8;
+
+/// Options of [`serialize_with_options`], as those of `jsg::Serializer::Options` it supports.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SerializeOptions {
+    /// The version of V8's format to write, rather than the latest. V8 writes versions 13 and
+    /// later, up to its latest.
+    pub version: Option<u32>,
+}
 
 /// Serializes `value`, with a header, as `jsg::Serializer` does.
 ///
@@ -37,6 +45,19 @@ pub fn serialize<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
 ) -> Result<Vec<u8>, Error> {
+    serialize_with_options(lock, value, SerializeOptions::default())
+}
+
+/// [`serialize`] with `options`, as `jsg::Serializer` with those options.
+///
+/// # Errors
+///
+/// As for [`serialize`]. A version V8 can't write fails with a pending `DataCloneError`.
+pub fn serialize_with_options<'s>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+    options: SerializeOptions,
+) -> Result<Vec<u8>, Error> {
     value.debug_assert_isolate(lock);
     let errors_are_host_objects = lock.feature_flags().get_enhanced_error_serialization();
     v8::call_into_js(lock, |lock| {
@@ -48,6 +69,7 @@ pub fn serialize<'s>(
                 lock.isolate().as_ffi(),
                 value.as_ffi(),
                 errors_are_host_objects,
+                options.version.into(),
                 &mut data,
             )
         }?;

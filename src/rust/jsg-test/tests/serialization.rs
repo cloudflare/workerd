@@ -518,3 +518,47 @@ fn nothing_runs_while_execution_is_terminating() {
         Ok(())
     });
 }
+
+#[test]
+fn an_older_version_is_written_and_read_back() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr = "new Uint8Array([1, 2, 3])";
+        let check = "v instanceof Uint8Array && v[2] === 3";
+        let value = eval(lock, ctx, expr);
+        let latest = jsg::ser::serialize(lock, value).unwrap();
+        let options = jsg::ser::SerializeOptions { version: Some(13) };
+        let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        assert_eq!(data[..2], [0xff, 13]);
+        // Version 14 added the flags of an ArrayBufferView.
+        assert!(data.len() < latest.len());
+        for copy in [
+            jsg::ser::deserialize(lock, &data).unwrap(),
+            Harness::cpp_deserialize(lock, &data),
+        ] {
+            ctx.set_global(lock, "v", copy);
+            assert!(ctx.eval::<bool>(lock, check).unwrap());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_write_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let value = eval(lock, ctx, "1");
+        let caught = lock
+            .try_catch(|lock| {
+                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let result = jsg::ser::serialize_with_options(lock, value, options);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        ctx.set_global(lock, "e", caught.expect_err("serialization should throw"));
+        assert!(
+            ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
+                .unwrap()
+        );
+        Ok(())
+    });
+}

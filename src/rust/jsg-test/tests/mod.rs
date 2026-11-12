@@ -18,6 +18,7 @@ mod dict;
 mod dispose;
 mod dom_exception;
 mod eval;
+mod exception_to_kj;
 mod fast_api;
 mod function;
 mod function_new;

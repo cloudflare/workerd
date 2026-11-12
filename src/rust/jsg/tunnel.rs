@@ -244,7 +244,7 @@ fn js_error<'s>(lock: &mut Lock<'s>, ty: JsErrorType, message: &str) -> v8::Loca
 
 /// The name and message of the `DOMException` that `value` unwraps as, as C++ JSG unwraps a
 /// `DOMException&` parameter: `value` or the first object in its prototype chain that is one.
-fn try_unwrap_dom_exception<'s>(
+pub fn try_unwrap_dom_exception<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
 ) -> Result<Option<(String, String)>> {

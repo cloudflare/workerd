@@ -598,12 +598,14 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 //
 // Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
 // `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
-// objects through their serializers. Stores the bytes in `result` and returns true, or returns
-// false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
-// Proxy trap or serializer threw.
+// objects through their serializers, in the format of `version`, or of V8's latest version
+// (jsg::Serializer's `version` option). Stores the bytes in `result` and returns true, or
+// returns false if serialization threw, leaving the exception pending: a DataCloneError, also for
+// a version V8 can't write, or what a getter, Proxy trap or serializer threw.
 bool local_serialize(Isolate* isolate,
     const Local& value,
     bool errors_are_host_objects,
+    kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result);
 // Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
 // returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
@@ -649,6 +651,16 @@ bool dom_exception_try_unwrap(
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
+// The ids of the details jsg::createTunneledException() gives a kj::Exception (util.h).
+uint64_t tunneled_exception_detail_id();
+uint64_t tunneled_exception_enhanced_detail_id();
+uint64_t js_exception_metadata_detail_id();
+// jsg::TUNNELED_EXCEPTION_SERIALIZATION_VERSION, jsg::JS_EXCEPTION_METADATA_MAX_FIELD_SIZE and
+// jsg::startsWithTunneledErrorType(), with which jsg::createTunneledException() serializes and
+// describes a value (util.h).
+uint32_t tunneled_exception_serialization_version();
+size_t js_exception_metadata_max_field_size();
+bool starts_with_tunneled_error_type(::rust::Str description);
 
 // TryCatch
 // Decides what `tryCatch` caught as jsg::Lock::tryCatch() does: stores a catchable exception in

@@ -38,6 +38,7 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
 struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
+struct AbortReason;
 
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and
@@ -93,17 +94,23 @@ void trace_context_detach_async(TraceContext& context);
 // IoContext::setFailOpen(), for ctx.passThroughOnException().
 void io_context_set_fail_open(uint64_t id);
 
-// The two calls below use C++ JSG, as a reviewed exception; see "C++ JSG" in ffi.c++. Each takes
-// handles in the scope of the caller's lock, and returns false if JavaScript threw, leaving the
+// Fails unless `id` identifies the current IoContext, as every call here that takes one does.
+void io_context_check_current(uint64_t id);
+
+// IoContext::abort() with the exception `reason` carries, which Rust encoded with
+// jsg::Lock::exception_to_kj(), for ctx.abort(reason). Does not terminate execution.
+void io_context_abort(uint64_t id, ::rust::Box<AbortReason> reason);
+
+// IoContext::abort() with IoContext::abortWithoutReasonException(), for ctx.abort() without a
+// reason. Does not terminate execution.
+void io_context_abort_without_reason(uint64_t id);
+
+// The call below uses C++ JSG, as a reviewed exception; see "C++ JSG" in ffi.c++. It takes a
+// handle in the scope of the caller's lock, and returns false if JavaScript threw, leaving the
 // exception pending, which Rust turns into a jsg::Error for which is_pending() is true.
 
 // IoContext::addWaitUntil(IoContext::awaitJs(promise)), for ctx.waitUntil().
 bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise);
-
-// IoContext::abort() with `reason` as jsg::Lock::exceptionToKj() encodes it, or, if `reason` is
-// empty, with the error ctx.abort() aborts with when called without one. Does not terminate
-// execution.
-bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason);
 
 // Logs `message` as an error, as KJ_LOG(ERROR) does.
 void io_context_log_error(::rust::Str message);
