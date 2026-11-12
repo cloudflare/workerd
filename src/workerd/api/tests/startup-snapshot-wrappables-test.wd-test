@@ -61,6 +61,7 @@ const unitTests :Workerd.Config = (
           (name = "cpp-streams-pending-cancel", service = "cpp-streams-pending-cancel"),
           (name = "performance", service = "performance"),
           (name = "performance-entries", service = "performance-entries"),
+          (name = "span", service = "span"),
           (name = "webfs-tmp", service = "webfs-tmp"),
           (name = "webfs-bundle", service = "webfs-bundle"),
         ],
@@ -278,6 +279,19 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .performanceCompatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"performance-entries\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # Tracing spans the top level starts, outside any request.
+    ( name = "span",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"span\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

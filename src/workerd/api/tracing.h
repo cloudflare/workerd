@@ -150,6 +150,11 @@ class Span: public jsg::Object {
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
+  // A span created outside an IoContext (at the top level, say) records nothing: its state is a
+  // no-op one the Span owns, and the clone gets a fresh no-op state. A span of a request holds its
+  // state through an IoOwn and stays unclonable.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 

@@ -12,7 +12,12 @@
 // zygote; without it they are plain Workers and the same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
-import { DurableObject, WorkerEntrypoint, env } from 'cloudflare:workers';
+import {
+  DurableObject,
+  WorkerEntrypoint,
+  env,
+  tracing,
+} from 'cloudflare:workers';
 // Whether a Worker was started from a startup snapshot is asked at request time: at module scope
 // the answer would be the zygote's and be baked into the snapshot.
 import unsafe from 'workerd:unsafe';
@@ -49,6 +54,9 @@ let pending = null;
 // The performance cases.
 let performanceAtTopLevel = null;
 let nowAtTopLevel = 0;
+// The span case.
+let span = null;
+let endedSpan = null;
 // The finalization case's registry and what its cleanup callback did. The handler reads this
 // object, which keeps the registry reachable: an unreachable registry never runs its callback.
 const finalization = { registry: null, cleaned: [], headers: null };
@@ -102,6 +110,14 @@ switch (MODE) {
   case 'performance-entries':
     // A recorded entry is a jsg::Ref the clone cannot carry.
     performance.mark('top-level');
+    break;
+  case 'span':
+    // Outside a request tracing.startSpan() returns a span that records nothing, which the
+    // snapshot clones. Nothing the top level does to such a span leaves state behind.
+    span = tracing.startSpan('top-level');
+    span.setAttribute('key', 'value');
+    endedSpan = tracing.startSpan('ended');
+    endedSpan.end();
     break;
   case 'gc':
     // Wrappers created and dropped before the snapshot: their collection in the zygote must not
@@ -244,6 +260,37 @@ async function checks() {
       result.performanceEntries =
         performance.getEntriesByName('top-level').length === 1;
       break;
+    case 'span': {
+      const context = span.spanContext();
+      const requestSpan = tracing.startSpan('request');
+      result.spanType =
+        span instanceof tracing.Span && endedSpan instanceof tracing.Span;
+      result.spanDistinct = span !== endedSpan;
+      result.spanNotTraced = !span.isTraced && !endedSpan.isTraced;
+      result.spanContext =
+        context.traceId === '0'.repeat(32) &&
+        context.spanId === '0'.repeat(16) &&
+        context.traceFlags === 0;
+      // Every mutator returns the span it was called on.
+      result.spanChaining =
+        span.setAttribute('key', 'value') === span &&
+        span.setAttributes({ a: 1, b: true }) === span &&
+        span.updateName('renamed') === span &&
+        span.setStatus({ code: 'error', message: 'failed' }) === span;
+      span.recordException(new Error('boom'));
+      span.end();
+      endedSpan.end();
+      result.spanEnded = !span.isTraced && !endedSpan.isTraced;
+      // The runtime takes the span as an argument and hands the same object back.
+      result.spanActive =
+        tracing.withActiveSpan(span, () => tracing.getActiveSpan()) === span;
+      // A span of this request is another object of the same type.
+      result.spanOfRequest =
+        requestSpan !== span &&
+        Object.getPrototypeOf(requestSpan) === Object.getPrototypeOf(span);
+      requestSpan.end();
+      break;
+    }
     case 'bindings':
       // Capability bindings. The RPC calls go through the wildcard property handler of the
       // Fetcher template and of a subclass's.
@@ -305,6 +352,7 @@ async function test(ctrl, env) {
     // has none.
     'cpp-streams',
     'performance',
+    'span',
     // File system handles: see startup-snapshot-wrappables-webfs-test.js.
     'webfs-tmp',
     'webfs-bundle',
