@@ -6,6 +6,8 @@
 // Types describing a V8 startup snapshot and how an isolate relates to one. Only high-level code
 // that creates isolates (jsg::IsolateBase and its callers) needs to include this file.
 
+#include <workerd/jsg/wrappable.h>
+
 #include <cppgc/persistent.h>
 #include <v8-callbacks.h>
 #include <v8-object.h>
@@ -27,9 +29,6 @@ constexpr size_t BINDINGS_SCOPE_SNAPSHOT_INDEX = 0;
 
 // Index of the main module's namespace object.
 constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
-
-class HeapTracer;
-class Wrappable;
 
 // Everything needed to create a new isolate from a V8 startup snapshot:
 // * `blob` is the serialized snapshot data, allocated with `new[]` by v8::SnapshotCreator.
@@ -169,9 +168,6 @@ struct WrappablesSerializeMetadata {
     // Named by the clonability gate. Captured while the original was alive.
     kj::String typeName;
 
-    // The serialized payload: `index`, at an address that stays valid while V8 copies it.
-    size_t payload = 0;
-
     // Whether the serializer emitted `index`, i.e. the wrapper was reachable at CreateBlob().
     bool serialized = false;
 
@@ -186,8 +182,8 @@ struct WrappablesSerializeMetadata {
   // API-wrapper serializer. Each entry roots its shim; see Entry::shim.
   kj::HashMap<const void*, Entry> entries;
 
-  // Findings the callback cannot raise itself (V8 is built without exceptions); checked by
-  // dropUnreachableWrappables().
+  // Findings the callback cannot raise itself (V8 is built without exceptions); raised by
+  // checkCallbackFindings().
   kj::Vector<kj::String> unclonable;
   uint32_t unknownWrappersCount = 0;
 
@@ -199,8 +195,10 @@ struct WrappablesSerializeMetadata {
       SnapshotArtifact& artifact,
       kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless);
 
-  // Raises the findings the serializer callback accumulated, then drops the
-  // transfers of wrappers whose index never reached the blob.
+  // After CreateBlob(): raises the findings the serializer callback accumulated.
+  void checkCallbackFindings();
+
+  // After CreateBlob(): drops the transfers of wrappers whose index never reached the blob.
   void dropUnreachableWrappables(SnapshotArtifact& artifact);
 };
 
@@ -239,14 +237,16 @@ struct WrappableDeserializeMetadata {
   // AbortOnGcInDeserializerCallbacks.
   bool inCallback = false;
 
-  // Before creating a context: pre-allocates the CppgcShim that will back each restored wrapper,
-  // so that the deserializer callback only needs to link holder and shim. `instances` is parallel
-  // to `artifact.liveWrappables`: the object each slot's restored wrapper is attached to (see
-  // IsolateBase::prepareWrappableDeserializeMetadata()), null for a dropped slot.
-  void preallocateCppgcShims(v8::Isolate* isolate,
+  // Before creating a context: resolves each `artifact.liveWrappables` slot into the object its
+  // restored wrapper is attached to (a stateless type's fresh instance from `recreateFnFor(tag)`,
+  // or a snapshotClone() of a stored clone) and pre-allocates the CppgcShim that will back it, so
+  // that the deserializer callback only needs to link holder and shim. A dropped slot gets no
+  // shim. Throws only if a recreate function or a snapshotClone() does, which their contracts
+  // forbid: nothing on this path catches it and the Worker fails to start.
+  void preallocateCppgcShims(Lock& js,
       HeapTracer& tracer,
       const SnapshotArtifact& artifact,
-      kj::Array<kj::Own<Wrappable>> instances);
+      kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor);
 
   // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
   // original named references (Wrappable::snapshotReferences()) the linked instances of those.

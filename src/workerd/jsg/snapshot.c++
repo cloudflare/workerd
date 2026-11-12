@@ -4,6 +4,7 @@
 
 #include "snapshot.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/wrappable.h>
 
 #include <v8-isolate.h>
@@ -67,6 +68,11 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
         }
       }
     }
+
+    // Recorded even without a clone. This list holds every wrapper not yet swept, including
+    // ones JS no longer reaches, and the GC inside CreateBlob() collects those before the
+    // serializer runs, so only the serializer callback knows whether a wrapper without a clone
+    // actually reaches the blob.
     entries.insert(&shim,
         Entry{.index = index,
           .tag = tag,
@@ -86,7 +92,7 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
   }
 }
 
-void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& artifact) {
+void WrappablesSerializeMetadata::checkCallbackFindings() {
   KJ_REQUIRE(unknownWrappersCount == 0,
       "PREPARE_SNAPSHOT: wrapper objects reachable from the context carry CppHeap pointers that "
       "were not recorded before the wrappers were destroyed (wrappers created after "
@@ -98,9 +104,10 @@ void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& ar
       "snapshotClone() were reachable from the context; these types cannot be transferred "
       "through the startup snapshot",
       kj::strArray(unclonable, ", "));
+}
 
-  // Drop the transfers of wrappers that were not reachable during snapshot creation: their
-  // indices never reached the blob. The slots stay so the serialized indices remain valid.
+void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& artifact) {
+  // The slots stay so the serialized indices remain valid.
   for (auto& entry: entries) {
     KJ_IF_SOME(index, entry.value.index) {
       if (!entry.value.serialized) {
@@ -110,19 +117,42 @@ void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& ar
   }
 }
 
-void WrappableDeserializeMetadata::preallocateCppgcShims(v8::Isolate* v8Isolate,
+// The restored worker's half of the live-wrappable transfer, before Context::New(). The artifact
+// is shared by every worker started from it, so a slot's transfer is only the model: the object
+// attached to the restored wrapper is this worker's own instance. Nothing on this path catches an
+// exception from a recreate function or a snapshotClone(): it propagates out of newContext() and
+// the Worker fails to start, which is why the contracts on Object::jsgSnapshotStateless and
+// Wrappable::snapshotClone() forbid throwing.
+void WrappableDeserializeMetadata::preallocateCppgcShims(Lock& js,
     HeapTracer& tracer,
     const SnapshotArtifact& artifact,
-    kj::Array<kj::Own<Wrappable>> instances) {
-  KJ_REQUIRE(instances.size() == artifact.liveWrappables.size());
-  isolate = v8Isolate;
-  slots = kj::heapArray<Slot>(instances.size());
-  this->instances = KJ_MAP(instance, instances) { return instance.get(); };
-  for (auto i: kj::indices(instances)) {
-    if (instances[i].get() == nullptr) continue;
-    slots[i].shim =
-        tracer.allocateShimForSnapshotRestore(kj::mv(instances[i]), artifact.liveWrappables[i].tag);
+    kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor) {
+  isolate = js.v8Isolate;
+  slots = kj::heapArray<Slot>(artifact.liveWrappables.size());
+  auto instancesBuilder = kj::heapArrayBuilder<Wrappable*>(artifact.liveWrappables.size());
+  for (auto i: kj::indices(artifact.liveWrappables)) {
+    auto& stored = artifact.liveWrappables[i];
+    if (stored.transfer == nullptr) {
+      instancesBuilder.add(nullptr);
+      continue;
+    }
+    kj::Own<Wrappable> instance;
+    KJ_SWITCH_ONEOF(stored.transfer) {
+      KJ_CASE_ONEOF(stateless, SnapshotArtifact::LiveWrappable::Stateless) {
+        auto recreate = KJ_ASSERT_NONNULL(recreateFnFor(stored.tag),
+            "a stateless slot's tag has no snapshot recreate function",
+            static_cast<uint16_t>(stored.tag));
+        instance = recreate(js);
+      }
+      KJ_CASE_ONEOF(clone, kj::Own<Wrappable>) {
+        instance = KJ_ASSERT_NONNULL(clone->snapshotClone(), "snapshot clone failed to clone again",
+            clone->jsgGetMemoryName());
+      }
+    }
+    instancesBuilder.add(instance.get());
+    slots[i].shim = tracer.allocateShimForSnapshotRestore(kj::mv(instance), stored.tag);
   }
+  instances = instancesBuilder.finish();
 }
 
 void WrappableDeserializeMetadata::relinkReferences(const SnapshotArtifact& artifact) {
@@ -164,23 +194,20 @@ void WrappableDeserializeMetadata::releaseSlotsWithChecks() {
 
 v8::StartupData serializeApiWrapperCallback(
     v8::Local<v8::Object> holder, void* cppHeapPointer, void* data) {
-  // `cppHeapPointer` is the CppgcShim the wrapper was Wrap()ped with, or null for template
-  // instances that were never wrapped.
   if (cppHeapPointer == nullptr) return {nullptr, 0};
+
   auto& metadata = *static_cast<WrappablesSerializeMetadata*>(data);
   KJ_IF_SOME(entry, metadata.entries.find(static_cast<const void*>(cppHeapPointer))) {
     if (static_cast<uint16_t>(entry.tag) == kContextGlobalWrappableTag) {
-      // The hidden JSGlobalObject shares the global's shim. newContext() attaches a fresh global
-      // scope on load, so nothing is transferred for it.
       return {nullptr, 0};
     }
 
     KJ_IF_SOME(index, entry.index) {
-      entry.payload = index;
       entry.serialized = true;
-      return {reinterpret_cast<const char*>(&entry.payload), sizeof(entry.payload)};
+      return {reinterpret_cast<const char*>(&index), sizeof(index)};
     }
 
+    // index == kj::none means that there was no snapshotClone() for this obj.
     metadata.unclonable.add(kj::str(entry.typeName));
     return {nullptr, 0};
   }
