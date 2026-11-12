@@ -83,7 +83,7 @@ impl Resource for Versioned {
     fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         registry.add(Self::next_member());
         if flags.get_node_js_compat() {
-            registry.add(jsg::inherit_intrinsic(Intrinsic::IteratorPrototype));
+            registry.inherit_intrinsic(Intrinsic::IteratorPrototype);
         }
     }
 }

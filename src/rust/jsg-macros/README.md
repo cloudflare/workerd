@@ -280,7 +280,8 @@ Properties are registered in the order they are added to `registry`. V8 enumerat
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
 types itself, as `jsg::nested_type::<Foo>(name)`. Neither can `inherit_intrinsic`; a custom
-`members` registers `jsg::inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead.
+`members` calls `registry.inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead, as it
+calls `registry.ts_override(..)`.
 
 A custom `members` can also choose the TypeScript customizations by compatibility flag, as C++
 does by calling `JSG_TS_OVERRIDE` conditionally in `JSG_RESOURCE_TYPE`.

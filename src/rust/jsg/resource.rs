@@ -663,16 +663,30 @@ pub unsafe fn ffi_is<R: Resource + 'static>(
 }
 
 /// The registry through which template creation collects the members of a resource type.
-struct TemplateMembers(Vec<Member>);
+struct TemplateMembers {
+    /// The type's class name, for the panics of template creation.
+    class_name: &'static str,
+    members: Vec<Member>,
+    inherit_intrinsic: Option<Intrinsic>,
+}
 
 impl MemberRegistry for TemplateMembers {
     fn add(&mut self, member: impl MemberDefinition) {
-        self.0.push(member.into_member());
+        self.members.push(member.into_member());
     }
 
     fn ts_override(&mut self, _ts_override: &'static str) {}
 
     fn ts_define(&mut self, _ts_define: &'static str) {}
+
+    fn inherit_intrinsic(&mut self, intrinsic: Intrinsic) {
+        assert!(
+            self.inherit_intrinsic.is_none(),
+            "{} inherits from more than one intrinsic",
+            self.class_name
+        );
+        self.inherit_intrinsic = Some(intrinsic);
+    }
 }
 
 /// Builds a [`ResourceDescriptor`] from the members that `R`'s
@@ -704,9 +718,14 @@ fn get_resource_descriptor<R: Resource>(
         inherit_intrinsic: KjMaybe::None,
     };
 
-    let mut members = TemplateMembers(Vec::new());
+    let mut members = TemplateMembers {
+        class_name: R::class_name(),
+        members: Vec::new(),
+        inherit_intrinsic: None,
+    };
     R::members(&mut members, flags);
-    for m in members.0 {
+    descriptor.inherit_intrinsic = members.inherit_intrinsic.into();
+    for m in members.members {
         match m {
             Member::Constructor { callback, length } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
@@ -840,14 +859,6 @@ fn get_resource_descriptor<R: Resource>(
                     R::class_name()
                 );
                 descriptor.iterable = KjMaybe::Some(callback as usize);
-            }
-            Member::InheritIntrinsic { intrinsic } => {
-                assert!(
-                    descriptor.inherit_intrinsic.is_none(),
-                    "{} inherits from more than one intrinsic",
-                    R::class_name()
-                );
-                descriptor.inherit_intrinsic = KjMaybe::Some(intrinsic);
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
@@ -1050,6 +1061,13 @@ pub trait MemberRegistry {
     /// `JSG_TS_DEFINE`. Replaces any definitions registered earlier or given by
     /// `#[jsg_resource(ts_define = "...")]`. Template creation ignores it.
     fn ts_define(&mut self, ts_define: &'static str);
+
+    /// Makes `intrinsic` the [[Prototype]] of the resource's prototype, like C++
+    /// `JSG_INHERIT_INTRINSIC`, so that instances inherit its methods; RTTI writes it as the
+    /// structure's `extends`. `#[jsg_resource(inherit_intrinsic = ...)]` calls it with automatic
+    /// registration. A type inherits from at most one: template creation panics if it is called
+    /// twice.
+    fn inherit_intrinsic(&mut self, intrinsic: Intrinsic);
 }
 
 /// A member that [`Resource::members`] can register: the result of a generated member factory,
@@ -1109,28 +1127,6 @@ impl MemberDefinition for NestedTypeMember {
             name: self.name,
             identity: (self.nested_type.describe)(cx),
         })
-    }
-}
-
-/// The intrinsic a resource type inherits from, which describes itself; see
-/// [`inherit_intrinsic`].
-pub struct InheritIntrinsicMember(Intrinsic);
-
-/// Makes `intrinsic` the [[Prototype]] of the type's prototype, like C++ `JSG_INHERIT_INTRINSIC`.
-///
-/// Builds a [`Member::InheritIntrinsic`] and describes it for RTTI.
-/// `#[jsg_resource(inherit_intrinsic = ...)]` registers it with automatic registration.
-pub fn inherit_intrinsic(intrinsic: Intrinsic) -> InheritIntrinsicMember {
-    InheritIntrinsicMember(intrinsic)
-}
-
-impl MemberDefinition for InheritIntrinsicMember {
-    fn into_member(self) -> Member {
-        Member::InheritIntrinsic { intrinsic: self.0 }
-    }
-
-    fn describe(self, _cx: &mut rtti::Context) -> Option<rtti::Member> {
-        Some(rtti::Member::InheritIntrinsic(self.0))
     }
 }
 

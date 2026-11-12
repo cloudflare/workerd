@@ -1116,9 +1116,7 @@ fn inherit_intrinsic_is_registered() {
     let expanded =
         expand_resource_impl(quote! { inherit_intrinsic = IteratorPrototype }, &input).to_string();
     assert!(
-        expanded.contains(
-            "registry . add (jsg :: inherit_intrinsic (jsg :: Intrinsic :: IteratorPrototype))"
-        ),
+        expanded.contains("registry . inherit_intrinsic (jsg :: Intrinsic :: IteratorPrototype)"),
         "{expanded}"
     );
     assert!(expanded.contains("Self :: next_member ()"), "{expanded}");

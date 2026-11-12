@@ -875,8 +875,8 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     if let (Some(custom_members), Some((inherit, _))) = (&custom_members, &inherit_intrinsic) {
         let mut error = syn::Error::new_spanned(
             inherit,
-            "`inherit_intrinsic` cannot be combined with `custom_members`; register \
-             `jsg::inherit_intrinsic(jsg::Intrinsic::...)` in `Resource::members` instead",
+            "`inherit_intrinsic` cannot be combined with `custom_members`; call \
+             `registry.inherit_intrinsic(jsg::Intrinsic::...)` in `Resource::members` instead",
         );
         error.combine(syn::Error::new_spanned(
             custom_members,
@@ -966,7 +966,7 @@ fn generate_resource_bindings(
     let automatic = registrations.iter().map(|r| &r.automatic);
     let nested_type_registrations = nested_types.iter().map(nested_type_registration);
     let inherit_intrinsic_registration = inherit_intrinsic.map(|variant| {
-        quote! { registry.add(jsg::inherit_intrinsic(jsg::Intrinsic::#variant)); }
+        quote! { registry.inherit_intrinsic(jsg::Intrinsic::#variant); }
     });
 
     let resource_impl = if mode == RegistrationMode::Automatic {

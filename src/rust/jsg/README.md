@@ -1647,9 +1647,10 @@ They behave as in C++ JSG:
   iterators register `JSG_ITERABLE(self)` anyway, and a port can keep it.
 - Without `set_to_string_tag`, a type has no `Symbol.toStringTag` of its own, so an iterator
   that inherits `Iterator.prototype` reads as `[object Iterator]`.
-- A type inherits from at most one intrinsic. `custom_members` registers it with
-  `jsg::inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)`, and the iterator method with its
-  factory `<name>_iterable_member()`. Two of either panic when the template is created.
+- A type inherits from at most one intrinsic. `custom_members` sets it with
+  `registry.inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)`, a setting of the structure
+  like `registry.ts_override(..)`, and registers the iterator method with its factory
+  `<name>_iterable_member()`. Two of either panic when the template is created.
 - RTTI describes them as C++ RTTI does: the method as the structure's `iterator`, with
   `iterable` set, and the intrinsic as its `extends`, which the TypeScript generator declares as
   `[Symbol.iterator]()` and `extends Iterator<unknown>`.

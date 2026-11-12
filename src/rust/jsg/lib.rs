@@ -66,7 +66,6 @@ pub use oneof::try_union_from_js;
 #[doc(hidden)]
 pub use oneof::validate_union_names;
 pub use resource::DescribedMember;
-pub use resource::InheritIntrinsicMember;
 pub use resource::MemberDefinition;
 pub use resource::MemberRegistry;
 pub use resource::NestedType;
@@ -76,7 +75,6 @@ pub use resource::Resource;
 pub use resource::Undescribed;
 pub use resource::Weak;
 pub use resource::described_member;
-pub use resource::inherit_intrinsic;
 pub use resource::nested_type;
 pub use resource::undescribed;
 pub use rtti::TypeInfo;
@@ -1385,12 +1383,6 @@ pub enum Member {
     /// unlike one, it is not enumerable. A type has at most one.
     Iterable {
         callback: RawFunctionCallback,
-    },
-    /// Makes `intrinsic` the [[Prototype]] of the type's prototype, like C++ JSG's
-    /// `JSG_INHERIT_INTRINSIC`, so that instances inherit its methods. A type has at most one.
-    /// Register it with [`inherit_intrinsic`], which also describes it for RTTI.
-    InheritIntrinsic {
-        intrinsic: Intrinsic,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

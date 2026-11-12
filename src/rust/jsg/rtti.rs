@@ -113,9 +113,6 @@ pub enum Member {
         args: Vec<Parameter>,
         result: Type,
     },
-    /// The intrinsic the type's prototype inherits from. It is the encoded structure's
-    /// `extends`, as C++ RTTI writes a `JSG_INHERIT_INTRINSIC`.
-    InheritIntrinsic(crate::Intrinsic),
 }
 
 /// Customizations of a structure's TypeScript declaration.
@@ -131,6 +128,9 @@ pub struct TypeScript {
     pub ts_override: Option<&'static str>,
     /// TypeScript declarations emitted next to the generated declaration.
     pub ts_define: Option<&'static str>,
+    /// The intrinsic the type's prototype inherits from, which the declaration extends: the
+    /// structure's `extends`, as C++ RTTI writes a `JSG_INHERIT_INTRINSIC`.
+    pub extends: Option<crate::Intrinsic>,
 }
 
 struct Structure {
@@ -280,6 +280,7 @@ impl Context {
             ts_root,
             ts_override,
             ts_define,
+            extends,
         } = structure.typescript;
         builder.set_ts_root(ts_root);
         if let Some(ts_override) = ts_override {
@@ -287,6 +288,13 @@ impl Context {
         }
         if let Some(ts_define) = ts_define {
             builder.set_ts_define(ts_define);
+        }
+        if let Some(intrinsic) = extends {
+            builder
+                .reborrow()
+                .init_extends()
+                .init_intrinsic()
+                .set_name(intrinsic_name(intrinsic));
         }
         // Template creation rejects a type with more than one of each of these, which are
         // fields of the structure rather than members.
@@ -305,11 +313,6 @@ impl Context {
                     result.write(iterator.reborrow().init_return_type());
                     write_args(args, iterator.init_args(length(args.len())));
                 }
-                Member::InheritIntrinsic(intrinsic) => builder
-                    .reborrow()
-                    .init_extends()
-                    .init_intrinsic()
-                    .set_name(intrinsic_name(*intrinsic)),
                 _ => members.push(member),
             }
         }
@@ -341,6 +344,10 @@ impl MemberRegistry for DescribedMembers<'_> {
 
     fn ts_define(&mut self, ts_define: &'static str) {
         self.typescript.ts_define = Some(ts_define);
+    }
+
+    fn inherit_intrinsic(&mut self, intrinsic: crate::Intrinsic) {
+        self.typescript.extends = Some(intrinsic);
     }
 }
 
@@ -504,7 +511,7 @@ impl Member {
                     crate::ConstantValue::Number(value) => constant.set_number_value(*value),
                 }
             }
-            Self::Callable { .. } | Self::Iterator { .. } | Self::InheritIntrinsic(_) => {
+            Self::Callable { .. } | Self::Iterator { .. } => {
                 unreachable!("Context::write_structure writes these as fields of the structure")
             }
         }

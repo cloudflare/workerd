@@ -117,6 +117,7 @@ pub fn typescript_options(tokens: impl Into<proc_macro2::TokenStream>) -> proc_m
                     ts_root: #ts_root,
                     ts_override: #ts_override,
                     ts_define: #ts_define,
+                    extends: None,
                 }
             }
         }

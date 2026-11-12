@@ -192,6 +192,7 @@ impl Resource for Flagged {
         }));
         if flags.get_cache_option_enabled() {
             registry.ts_override("FlaggedWithCache");
+            registry.inherit_intrinsic(crate::Intrinsic::IteratorPrototype);
             registry.add(crate::described_member(
                 || panic!("RTTI export built a member"),
                 move |_| Member::Property {
@@ -212,6 +213,7 @@ impl TypeInfo for Flagged {
             ts_root: true,
             ts_override: Some("FlaggedWithoutCache"),
             ts_define: Some("type FlaggedMode = string;"),
+            extends: None,
         };
         cx.structure::<Self>("Flagged", typescript, resource_members::<Self>)
     }
@@ -510,11 +512,11 @@ impl TypeInfo for IteratorNode {
     fn describe(cx: &mut Context) -> Type {
         let typescript = TypeScript {
             ts_root: true,
+            extends: Some(crate::Intrinsic::IteratorPrototype),
             ..TypeScript::default()
         };
         cx.structure::<Self>("IteratorNode", typescript, |_, _| {
             vec![
-                Member::InheritIntrinsic(crate::Intrinsic::IteratorPrototype),
                 Member::Iterator {
                     name: "entries",
                     args: Vec::new(),
@@ -588,20 +590,25 @@ fn structure_without_iterator_or_intrinsic_has_neither() {
     assert!(!structure.has_extends());
 }
 
-// `jsg::inherit_intrinsic` describes itself, so custom registration keeps it in the RTTI.
+// The intrinsic a registration inherits from under the context's flags is the structure's
+// `extends`, as for its TypeScript override.
 #[test]
-fn inherit_intrinsic_member_describes_itself() {
-    let mut cx = Context::default();
-    let described = crate::MemberDefinition::describe(
-        crate::inherit_intrinsic(crate::Intrinsic::IteratorPrototype),
-        &mut cx,
-    );
-    assert!(matches!(
-        described,
-        Some(Member::InheritIntrinsic(
-            crate::Intrinsic::IteratorPrototype
-        ))
-    ));
+fn registration_sets_the_inherited_intrinsic() {
+    for (cache, extends) in [(false, None), (true, Some("v8::kIteratorPrototype"))] {
+        let mut cx = Context::with_flags(|mut flags| flags.set_cache_option_enabled(cache));
+        Flagged::describe(&mut cx);
+        let message = read_context(&cx);
+        let structure = only_structure(&message);
+        let name = structure.has_extends().then(|| {
+            let rtti_capnp::type_::Intrinsic(intrinsic) =
+                structure.get_extends().unwrap().which().unwrap()
+            else {
+                panic!("Flagged extends something other than an intrinsic");
+            };
+            intrinsic.unwrap().get_name().unwrap().to_string().unwrap()
+        });
+        assert_eq!(name.as_deref(), extends, "cache_option_enabled = {cache}");
+    }
 }
 
 #[test]

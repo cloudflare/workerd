@@ -259,7 +259,7 @@ impl Resource for Versioned {
         registry.add(Self::next_member());
         registry.add(Self::iterator_iterable_member());
         if flags.get_cache_option_enabled() {
-            registry.add(jsg::inherit_intrinsic(Intrinsic::IteratorPrototype));
+            registry.inherit_intrinsic(Intrinsic::IteratorPrototype);
         }
     }
 }
@@ -757,10 +757,8 @@ impl Resource for Conflicting {
                 callback: Self::second_iterable_callback(),
             }));
         } else {
-            registry.add(jsg::inherit_intrinsic(Intrinsic::IteratorPrototype));
-            registry.add(jsg::undescribed(Member::InheritIntrinsic {
-                intrinsic: Intrinsic::IteratorPrototype,
-            }));
+            registry.inherit_intrinsic(Intrinsic::IteratorPrototype);
+            registry.inherit_intrinsic(Intrinsic::IteratorPrototype);
         }
     }
 }
