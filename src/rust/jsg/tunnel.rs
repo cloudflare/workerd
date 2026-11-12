@@ -83,9 +83,9 @@ const JSG_PREFIX: &str = "jsg.";
 impl TunneledException {
     /// Converts `exception` as C++ JSG's `ExceptionWrapper` converts it to a `kj::Exception`.
     ///
-    /// This reads the exception's `overloaded`, `retryable`, `name` and `stack` properties and
-    /// serializes it, all of which can run JavaScript. What serializing it throws is caught, and
-    /// the exception is then not serialized.
+    /// This reads the exception's `overloaded`, `retryable`, `name`, `stack` and `message`
+    /// properties and serializes it, all of which can run JavaScript. What serializing it throws
+    /// is caught, and the exception is then not serialized.
     ///
     /// # Errors
     ///
@@ -121,11 +121,15 @@ impl TunneledException {
         let detail_drops_stacks = lock.feature_flags().get_enhanced_error_serialization();
         if let Some(object) = object {
             // C++ JSG reads these for the exception's metadata, which runs their getters, except
-            // that it takes a DOMException's name as `try_unwrap_dom_exception` returns it.
+            // that it takes a DOMException's name and message as `try_unwrap_dom_exception`
+            // returns them.
             if dom_exception.is_none() {
                 object.get(lock, "name")?;
             }
             object.get(lock, "stack")?;
+            if dom_exception.is_none() {
+                object.get(lock, "message")?;
+            }
         }
         Ok(Self {
             kind,

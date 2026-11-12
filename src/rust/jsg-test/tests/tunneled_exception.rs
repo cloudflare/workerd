@@ -211,7 +211,7 @@ fn reads_properties_like_cpp_jsg() {
                     "(() => {{
                         globalThis.reads = [];
                         const e = {base};
-                        for (const k of ['overloaded', 'retryable', 'name', 'stack', 'code']) {{
+                        for (const k of ['overloaded', 'retryable', 'name', 'stack', 'message', 'code']) {{
                             Object.defineProperty(e, k, {{
                                 get() {{ reads.push(k); return undefined; }},
                                 enumerable: true,
