@@ -115,15 +115,12 @@ ObjectSetPrototypeOf(ReadResult.prototype, null);
 delete (ReadResult.prototype as { constructor?: unknown }).constructor;
 ObjectFreeze(ReadResult.prototype);
 
-export function createReadResult<T>(
-  value: T,
-  done: false
-): { value: T; done: false };
-export function createReadResult<T>(
+function createReadResult<T>(value: T, done: false): { value: T; done: false };
+function createReadResult<T>(
   value: T | undefined,
   done: true
 ): { value: T | undefined; done: true };
-export function createReadResult<T>(
+function createReadResult<T>(
   value: T | undefined,
   done: boolean
 ): { value: T | undefined; done: boolean } {
@@ -271,7 +268,7 @@ function fractionalFillError(): TypeError {
 // elementSize): passing bytes happens to work for Uint8Array and is wrong
 // for every other view type. For DataView, elementSize is 1 and its length
 // parameter is in bytes, so the same expression holds.
-export function filledView(desc: PullIntoDescriptor): ArrayBufferView {
+function filledView(desc: PullIntoDescriptor): ArrayBufferView {
   // assert: desc.bytesFilled % desc.elementSize === 0
   // assert: desc.bytesFilled <= desc.byteLength
   return new desc.viewCtor(
@@ -283,7 +280,7 @@ export function filledView(desc: PullIntoDescriptor): ArrayBufferView {
 
 // The rest of a pull-into's buffer, still to be filled: the view a
 // byobRequest exposes to the source.
-export function unfilledView(desc: PullIntoDescriptor): Uint8Array {
+function unfilledView(desc: PullIntoDescriptor): Uint8Array {
   return new Uint8Array(
     desc.buffer,
     desc.byteOffset + desc.bytesFilled,
@@ -1831,7 +1828,14 @@ class ByteStreamCursor
 
 // Type-only exports (fully erased at runtime — the loader sees only the
 // module.exports assignment below, matching the readable.ts pattern).
-export type { StreamQueue, QueueCursor, ByteStreamCursor };
+export type {
+  StreamQueue,
+  QueueCursor,
+  ByteStreamCursor,
+  createReadResult,
+  filledView,
+  unfilledView,
+};
 
 module.exports = {
   CLOSE_SENTINEL,

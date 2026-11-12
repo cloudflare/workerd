@@ -40,6 +40,12 @@
 //  14. A cron trigger runs once a minute, through its schedule owner's death
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
 //      a test clock moved to each minute.
+//  15. A cluster on a Cloud Storage bucket (gs://, fake-s3.mjs in its GCS
+//      dialect): requests are forwarded, a lease renewal refused by a
+//      generation precondition renews over the new generation, KV keeps a
+//      large value in the bucket, and tokens come from the metadata server,
+//      replaced before they expire, or from a service account key's signed
+//      JWT.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -55,7 +61,12 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  generateKeyPairSync,
+  randomBytes,
+} from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
 import { test as nodeTest } from 'node:test';
@@ -121,8 +132,10 @@ class ClusterNode {
   #extraArgs;
   #disk;
   #configName;
+  #env;
 
-  // `localPath` is the directory of the config's disk service `disk`.
+  // `localPath` is the directory of the config's disk service `disk`. `env`
+  // adds to the process's environment, or with `undefined` removes from it.
   constructor({
     binary,
     config,
@@ -132,7 +145,9 @@ class ClusterNode {
     s3Port,
     nodeId,
     extraArgs = [],
+    env = {},
   }) {
+    this.#env = env;
     this.#extraArgs = extraArgs;
     this.#disk = disk;
     this.#configName = configName;
@@ -211,6 +226,7 @@ class ClusterNode {
         KJ_CLEAN_SHUTDOWN: '1',
         NODE_ID: this.#nodeId,
         AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
+        ...this.#env,
       },
     });
     this.#child = child;
@@ -332,23 +348,45 @@ async function fetchJson(port, path, { timeoutMs } = {}) {
   return { status: res.status, body };
 }
 
-// The fake S3 the cluster's state lives in (fake-s3.mjs). The tests share
-// one, emptied for each.
-let fakeS3Server = null;
+// The fake S3 the cluster's state lives in (fake-s3.mjs), or in its "gcs"
+// dialect the fake Cloud Storage, which the test's own requests reach without
+// a token. The tests share one of each, emptied for each.
+const fakeServers = new Map();
 
 class FakeS3 {
-  // An empty bucket.
-  static async fresh() {
-    if (fakeS3Server === null) {
-      fakeS3Server = new FakeS3Server();
-      await fakeS3Server.listen();
+  #server;
+  #headers;
+
+  // An empty bucket of `dialect`, "s3" or "gcs".
+  static async fresh(dialect = 's3') {
+    let server = fakeServers.get(dialect);
+    if (server === undefined) {
+      server = new FakeS3Server({ dialect });
+      await server.listen();
+      fakeServers.set(dialect, server);
     }
-    fakeS3Server.reset();
-    return new FakeS3();
+    server.reset();
+    return new FakeS3(server, dialect === 'gcs' ? { 'x-fake-admin': '1' } : {});
+  }
+
+  constructor(server, headers) {
+    this.#server = server;
+    this.#headers = headers;
+  }
+
+  // Where a node's bucket client and token requests go, for a fake Cloud
+  // Storage.
+  get gcsEnv() {
+    const host = `127.0.0.1:${this.port}`;
+    return {
+      STORAGE_EMULATOR_HOST: host,
+      GCE_METADATA_HOST: host,
+      GOOGLE_APPLICATION_CREDENTIALS: undefined,
+    };
   }
 
   get port() {
-    return fakeS3Server.port;
+    return this.#server.port;
   }
 
   // The keys under `prefix` in the cluster's bucket, whose layout is under
@@ -358,7 +396,9 @@ class FakeS3 {
       'list-type': '2',
       prefix: `cluster/v1/${prefix}`,
     });
-    const res = await fetch(`http://127.0.0.1:${this.port}/wdtest/?${query}`);
+    const res = await fetch(`http://127.0.0.1:${this.port}/wdtest/?${query}`, {
+      headers: this.#headers,
+    });
     const xml = await res.text();
     return [...xml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((m) =>
       m[1].slice('cluster/v1/'.length)
@@ -367,7 +407,8 @@ class FakeS3 {
 
   async get(key) {
     const res = await fetch(
-      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`
+      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
+      { headers: this.#headers }
     );
     return res.status === 404 ? null : await res.text();
   }
@@ -375,15 +416,35 @@ class FakeS3 {
   async delete(key) {
     await fetch(`http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`, {
       method: 'DELETE',
+      headers: this.#headers,
     });
   }
 
   async put(key, body, headers = {}) {
     const res = await fetch(
       `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
-      { method: 'PUT', body, headers }
+      { method: 'PUT', body, headers: { ...this.#headers, ...headers } }
     );
     assert.strictEqual(res.status, 200, `PUT ${key} answered ${res.status}`);
+  }
+
+  // How many writes to `key` failed their precondition.
+  async rejected(key) {
+    const query = new URLSearchParams({ key: `cluster/v1/${key}` });
+    return (
+      await fetch(`http://127.0.0.1:${this.port}/_rejected?${query}`)
+    ).json();
+  }
+
+  // A fake Cloud Storage's tokens: with `account`, sets their lifetime
+  // (`expiresIn`) or the service account (`email`, `jwk`); answers how many
+  // it issued and refused (fake-s3.mjs).
+  async gcs(account) {
+    const res = await fetch(`http://127.0.0.1:${this.port}/_gcs`, {
+      method: account === undefined ? 'GET' : 'POST',
+      body: account === undefined ? undefined : JSON.stringify(account),
+    });
+    return res.json();
   }
 
   // The key of the node that owns the Counter with this ID, or null when no
@@ -445,7 +506,8 @@ class FakeS3 {
 //              what owner records name
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
-// the bucket.
+// the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
+// what a node adds to its environment.
 async function withCluster(
   numNodes,
   fn,
@@ -455,12 +517,14 @@ async function withCluster(
     configName = 'config',
     disk = 'local',
     before = async () => {},
+    dialect = 's3',
+    nodeEnv = () => ({}),
   } = {}
 ) {
   // Each test run gets its own bucket and disks, so state doesn't leak
   // between tests.
   const root = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
-  const bucket = await FakeS3.fresh();
+  const bucket = await FakeS3.fresh(dialect);
   const nodes = [];
   const nodeKeys = new Map();
   try {
@@ -478,6 +542,7 @@ async function withCluster(
           s3Port: bucket.port,
           nodeId: `node${i}`,
           extraArgs: await extraArgs(i),
+          env: nodeEnv(bucket),
         })
       );
     }
@@ -1123,11 +1188,8 @@ test('cluster: a KV namespace survives its owner', async () => {
 
     assert.strictEqual((await bucket.list('services/kv/')).length, 1);
     await kv(survivor, 'put', { key: 'big', value: 'small' });
-    const collected = Date.now() + 10_000;
-    while ((await bucket.list('services/kv/')).length > 0) {
-      assert(Date.now() < collected, 'the replaced blob was never collected');
-      await sleep(100);
-    }
+    assert.strictEqual((await kv(survivor, 'gc', {})).status, 200);
+    assert.deepStrictEqual(await bucket.list('services/kv/'), []);
   });
 });
 
@@ -2818,6 +2880,137 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
     );
   } finally {
     await rm(project, { recursive: true, force: true });
+  }
+});
+
+// A cluster on the fake Cloud Storage, whose state is in the config constant
+// `gcs`.
+const GCS = {
+  configName: 'gcs',
+  dialect: 'gcs',
+};
+
+// Polls `check` until it answers true, for at most `ms`.
+async function until(check, ms, message) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await sleep(200);
+  }
+  assert.fail(message);
+}
+
+test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata server', async () => {
+  await withCluster(
+    2,
+    async ({ nodes, bucket, nodeKeys }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=gcs');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(first.body.count, 1);
+      const owner = first.body.nodeId;
+      const record = await bucket.get(
+        `${objectPrefix(first.body.id)}/own.json`
+      );
+      assert.strictEqual(JSON.parse(record).node, nodeKeys.get(owner));
+      const other = nodes.find((n) => n.nodeId !== owner);
+      const second = await fetchJson(other.httpPort, '/increment?name=gcs');
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.count, 2);
+      assert.strictEqual(second.body.nodeId, owner, 'forwarded to the owner');
+
+      // Another writer rewrites a node's lease record as it was: the node's
+      // next renewal fails its generation precondition, rereads the record,
+      // finds its own, and renews over the new generation. The record goes
+      // back byte for byte: its instance is a u64, which a JS number would
+      // round, and a record of another instance fences the node.
+      const key = `nodes/${nodeKeys.get(other.nodeId)}.json`;
+      const text = await bucket.get(key);
+      await bucket.put(key, text);
+      const lease = JSON.parse(text);
+      await until(
+        async () =>
+          (await bucket.rejected(key)) > 0 &&
+          JSON.parse(await bucket.get(key)).expires_ms > lease.expires_ms,
+        15_000,
+        `${other.nodeId} did not renew over its rewritten lease record`
+      );
+      const third = await fetchJson(other.httpPort, '/increment?name=gcs');
+      assert.strictEqual(third.status, 200, JSON.stringify(third.body));
+      assert.strictEqual(third.body.count, 3);
+
+      // KV keeps a large value in the bucket (`ClusterBucket`), through the
+      // same client.
+      const kv = (node, op, params) =>
+        fetchJson(node.httpPort, `/kv/${op}?${new URLSearchParams(params)}`, {
+          timeoutMs: 10_000,
+        });
+      const put = await kv(nodes[0], 'put', { key: 'big', size: '100000' });
+      assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+      assert.strictEqual((await bucket.list('services/kv/')).length, 1);
+      const big = await kv(nodes[1], 'get', { key: 'big' });
+      assert.strictEqual(big.status, 200, JSON.stringify(big.body));
+      assert.strictEqual(big.body.value.length, 100000);
+
+      // Each node process takes two tokens at startup, for its deployments
+      // and for its cluster, and replaces a token halfway through its
+      // lifetime, before the bucket would refuse it.
+      await until(
+        async () => (await bucket.gcs()).metadata > 4,
+        15_000,
+        'no token was replaced'
+      );
+      const issued = await bucket.gcs();
+      assert.strictEqual(issued.jwt, 0, JSON.stringify(issued));
+      assert.strictEqual(issued.refused, 0, JSON.stringify(issued));
+    },
+    {
+      ...GCS,
+      before: (bucket) => bucket.gcs({ expiresIn: 8 }),
+      nodeEnv: (bucket) => bucket.gcsEnv,
+    }
+  );
+});
+
+test('cluster: a gs:// bucket takes a service account key', async () => {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+  });
+  const email = 'workerd@test.iam.gserviceaccount.com';
+  const dir = await mkdtemp(join(tmpdir(), 'workerd-cluster-key-'));
+  const keyFile = join(dir, 'key.json');
+  try {
+    await withCluster(
+      1,
+      async ({ nodes, bucket }) => {
+        const res = await fetchJson(nodes[0].httpPort, '/increment?name=key');
+        assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+        const issued = await bucket.gcs();
+        assert(issued.jwt >= 1, JSON.stringify(issued));
+        assert.strictEqual(issued.metadata, 0, JSON.stringify(issued));
+        assert.strictEqual(issued.refused, 0, JSON.stringify(issued));
+      },
+      {
+        ...GCS,
+        before: async (bucket) => {
+          await bucket.gcs({ email, jwk: publicKey.export({ format: 'jwk' }) });
+          const key = {
+            type: 'service_account',
+            client_email: email,
+            private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+            private_key_id: 'test',
+            token_uri: `http://127.0.0.1:${bucket.port}/token`,
+          };
+          await writeFile(keyFile, JSON.stringify(key));
+        },
+        nodeEnv: (bucket) => ({
+          ...bucket.gcsEnv,
+          GCE_METADATA_HOST: undefined,
+          GOOGLE_APPLICATION_CREDENTIALS: keyFile,
+        }),
+      }
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

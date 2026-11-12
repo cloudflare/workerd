@@ -319,33 +319,77 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Run Wrangler unit tests
-        # Run all the wrangler unit tests besides the ConfigController ones since those
-        # are currently very flaky (the ANT team will look into stabilizing them and
-        # re-enabling them here as soon as possible, ref: https://jira.cfdata.org/browse/DEVX-2309)
-        run: pnpm test:ci --filter wrangler -- -t '^((?!(ConfigController)).)*$'
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
+      # Build every package the suites below need in one turbo run, so each
+      # dependency is built once rather than once per suite.
+      - name: Build workers-sdk packages
+        run: >-
+          pnpm turbo build
+          --filter=wrangler
+          --filter=miniflare
+          --filter=@cloudflare/vite-plugin
+          --filter=./fixtures/vitest-plugin-examples
+          --filter=create-cloudflare
 
-      - name: Run Miniflare unit tests
-        run: pnpm test:ci --filter miniflare
+      # The suites are independent, and no single one keeps the runner's cores
+      # busy, so run them at the same time. `--only` skips the dependency builds
+      # done above. The Vite and Vitest suites run fewer workers than their
+      # defaults so that timing-sensitive tests aren't starved of CPU. Each
+      # suite's output is printed in its own group once all of them have
+      # finished.
+      - name: Run workers-sdk tests
+        # Serially the suites took about 12 minutes, so a run past 30 is hung.
+        timeout-minutes: 30
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+        run: |
+          suite() {
+            local name=$1
+            shift
+            local start=$SECONDS rc=0
+            "$@" > "$RUNNER_TEMP/$name.log" 2>&1 || rc=$?
+            echo "$rc $((SECONDS - start))" > "$RUNNER_TEMP/$name.result"
+          }
+          # Skip Wrangler's ConfigController tests, which are flaky
+          # (https://jira.cfdata.org/browse/DEVX-2309).
+          suite wrangler-unit pnpm test:ci --filter wrangler --only -- -t '^((?!(ConfigController)).)*$' &
+          suite miniflare-unit pnpm test:ci --filter miniflare --only &
+          suite vite-unit pnpm test:ci --filter @cloudflare/vite-plugin --only -- --maxWorkers=4 &
+          suite vitest-unit pnpm test:ci --filter=./fixtures/vitest-plugin-examples --only -- --maxWorkers=4 &
+          suite wrangler-nodejs-e2e pnpm test:e2e --filter wrangler --only -- unenv-preset &
+          wait
 
-      - name: Run Vite unit tests
-        run: pnpm test:ci --filter @cloudflare/vite-plugin
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
+          failed=0
+          for name in wrangler-unit miniflare-unit vite-unit vitest-unit wrangler-nodejs-e2e; do
+            read -r rc seconds < "$RUNNER_TEMP/$name.result"
+            echo "::group::$name (exit $rc, ${seconds}s)"
+            cat "$RUNNER_TEMP/$name.log"
+            echo "::endgroup::"
+            touch "$RUNNER_TEMP/$name.printed"
+            if [ "$rc" != 0 ]; then
+              echo "::error::workers-sdk $name tests failed"
+              failed=1
+            fi
+          done
+          exit $failed
 
-      - name: Run Vitest unit tests
-        run: pnpm test:ci --filter="./fixtures/vitest-plugin-examples"
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
-
-      - name: Run Wrangler Node.js e2e tests
-        run: pnpm test:e2e --filter wrangler -- unenv-preset
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
+      # If the step above timed out or was cancelled, it never printed the suite
+      # logs. Print whatever each unprinted suite wrote before it was stopped.
+      - name: Print unfinished workers-sdk test logs
+        if: cancelled() || failure()
+        run: |
+          for log in "$RUNNER_TEMP"/*-unit.log "$RUNNER_TEMP"/*-e2e.log; do
+            [ -f "$log" ] || continue
+            name=$(basename "$log" .log)
+            [ -f "$RUNNER_TEMP/$name.printed" ] && continue
+            status="did not finish"
+            if [ -f "$RUNNER_TEMP/$name.result" ]; then
+              read -r rc seconds < "$RUNNER_TEMP/$name.result"
+              status="exit $rc, ${seconds}s"
+            fi
+            echo "::group::$name ($status)"
+            cat "$log"
+            echo "::endgroup::"
+          done
 
   wpt-report:
     needs: [test-linux]

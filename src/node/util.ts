@@ -7,6 +7,9 @@ import { default as utilImpl } from 'node-internal:util';
 import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
 import { Buffer } from 'node-internal:internal_buffer';
 import { MIMEParams, MIMEType } from 'node-internal:internal_mime';
+import { signals } from 'node-internal:internal_os_constants';
+
+const signalNames = Object.keys(signals);
 
 import {
   validateFunction,
@@ -16,6 +19,7 @@ import {
   validateString,
   validateBoolean,
   validateOneOf,
+  validateNumber,
 } from 'node-internal:validators';
 
 import { debuglog } from 'node-internal:debuglog';
@@ -25,7 +29,13 @@ export { debuglog };
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
+import {
+  getErrorMap,
+  getErrorMessage,
+  getErrorName,
+} from 'node-internal:internal_uv';
 
 import {
   inspect,
@@ -35,6 +45,7 @@ import {
 } from 'node-internal:internal_inspect';
 
 import { callbackify, parseEnv } from 'node-internal:internal_utils';
+import { diff } from 'node-internal:internal_util_diff';
 import {
   isReadableStream,
   isWritableStream,
@@ -100,6 +111,7 @@ export function isArray(val: unknown): boolean {
   return Array.isArray(val);
 }
 export { callbackify, parseEnv } from 'node-internal:internal_utils';
+export { diff };
 export const types = internalTypes;
 
 export { MIMEParams, MIMEType };
@@ -245,12 +257,18 @@ export function parseArgs(): unknown {
   throw new Error('node:util parseArgs is not implemented');
 }
 
-export function transferableAbortController(): void {
-  throw new Error('node:util transferableAbortController is not implemented');
+// Workers has no worker_threads, and AbortSignal is only serializable over
+// RPC, so there is no extra transfer mode to mark. These return the signal or
+// a plain AbortController, keeping Node's argument validation.
+export function transferableAbortController(): AbortController {
+  return new AbortController();
 }
 
-export function transferableAbortSignal(): void {
-  throw new Error('node:util transferableAbortSignal is not implemented');
+export function transferableAbortSignal(signal: unknown): AbortSignal {
+  if (!(signal instanceof AbortSignal)) {
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+  }
+  return signal;
 }
 
 export async function aborted(
@@ -298,16 +316,25 @@ export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
   return _isDeepStrictEqual(a, b);
 }
 
-export function getSystemErrorMap(): void {
-  throw new Error('node:util getSystemErrorMap is not implemented');
+export function getSystemErrorMap(): Map<number, [string, string]> {
+  return getErrorMap();
 }
 
-export function getSystemErrorName(): void {
-  throw new Error('node:util getSystemErrorName is not implemented');
+function validateSystemError(err: unknown): asserts err is number {
+  validateNumber(err, 'err');
+  if (err >= 0 || !Number.isSafeInteger(err)) {
+    throw new ERR_OUT_OF_RANGE('err', 'a negative integer', err);
+  }
 }
 
-export function getSystemErrorMessage(): void {
-  throw new Error('node:util getSystemErrorMessage is not implemented');
+export function getSystemErrorName(err: unknown): string {
+  validateSystemError(err);
+  return getErrorName(err);
+}
+
+export function getSystemErrorMessage(err: unknown): string {
+  validateSystemError(err);
+  return getErrorMessage(err);
 }
 
 function escapeStyleCode(code: number | undefined): string {
@@ -390,6 +417,16 @@ export function styleText(
   return skipColorize ? text : `${left}${text}${right}`;
 }
 
+export function convertProcessSignalToExitCode(signalCode: string): number {
+  validateOneOf(signalCode, 'signalCode', signalNames);
+
+  // POSIX standard: exit code for signal termination is 128 + signal number.
+  return 128 + (signals[signalCode as keyof typeof signals] as number);
+}
+
+// Workers never receive SIGINT, so there is no stack trace to print.
+export function setTraceSigInt(_enable: boolean): void {}
+
 export function _errnoException(): void {
   // TODO(soon): We might support this in the future.
   throw new ERR_METHOD_NOT_IMPLEMENTED('_errnoException');
@@ -433,6 +470,9 @@ export default {
   getCallSite,
   getCallSites,
   isDeepStrictEqual,
+  convertProcessSignalToExitCode,
+  setTraceSigInt,
+  diff,
   _errnoException,
   _exceptionWithHostPort,
 

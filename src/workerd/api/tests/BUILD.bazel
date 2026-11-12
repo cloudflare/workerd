@@ -1299,6 +1299,93 @@ wd_test(
     data = ["url-test.js"],
 )
 
+# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
+# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
+    # timeout in loaded debug builds.
+    size = "large",
+    src = "startup-snapshot-globals-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-globals-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+# Top-level event listeners across a startup snapshot. Only the @all-autogates variant runs the
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
+# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-listeners-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-listeners-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+# Module identity across a startup snapshot. Only the @all-autogates variant runs the pipeline.
+# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
+# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-modules-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-modules-cjs-test.js",
+        "startup-snapshot-modules-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
+# Live API objects (Headers, URL, TextEncoder, crypto, navigator, node:fs, bindings) across a
+# startup snapshot, and the cases that must fall back. Only the @all-autogates variant runs the
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
+# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-wrappables-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-wrappables-fs-test.js",
+        "startup-snapshot-wrappables-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
+# Capability bindings captured at module scope and used at request time, and the kinds that keep
+# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline. The
+# @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of the
+# startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-bindings-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-bindings-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+# Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the
+# Worker out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-functions-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-functions-case-test.js",
+        "startup-snapshot-functions-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
+# Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
+# Only the @all-autogates variant runs the pipeline. The @all-compat-flags variant would turn
+# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline and so would
+# quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-node-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
 wd_test(
     src = "url-searchparams-iterator-uaf-test.wd-test",
     args = ["--experimental"],
@@ -1631,12 +1718,25 @@ wd_test(
 )
 
 wd_test(
-    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    # Fetches Pyodide.
-    tags = ["requires-network"],
+)
+
+# Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
+# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+wd_test(
+    size = "enormous",
+    src = "worker-loader-python-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-python-test.js"],
+    tags = [
+        "cpu:2",
+        "no-coverage",
+        "python",
+        # Fetches Pyodide.
+        "requires-network",
+    ],
 )
 
 wd_test(
@@ -1848,6 +1948,25 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+# Checks that `workerd bench` runs its startup group with the inspector enabled.
+wd_cli_test(
+    name = "bench-inspector-test",
+    src = "bench-inspector-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "bench",
+        "$(location bench-inspector-test.wd-bench)",
+        "--quick",
+        # Port 0 binds an ephemeral port, so parallel runs do not collide.
+        "--inspector-addr=127.0.0.1:0",
+    ],
+    data = [
+        "bench-inspector-test.js",
+        "bench-inspector-test.wd-bench",
         "//src/workerd/server:workerd",
     ],
 )

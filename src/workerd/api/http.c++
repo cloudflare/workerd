@@ -140,6 +140,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
+    KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
+      return ExtractedBody(js, JsReadableStream(js, searchParams.serialize(js)),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -2364,6 +2368,18 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> Fetcher::snapshotClone() const {
+  // A Fetcher bound to a live channel or factory belongs to one IoContext. One that registered a
+  // connect override (ctx.mapVirtualHost()) left that override on the zygote's global scope,
+  // which the restored Worker's fresh global scope does not have.
+  KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
+    if (registeredConnectOverride) return kj::none;
+    return ownAsWrappable(
+        kj::refcounted<Fetcher>(channel, requiresHost, isInHouse, rpcCompatGateBypassed));
+  }
+  return kj::none;
+}
+
 void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
   if (registeredConnectOverride) {
     return;
@@ -3177,4 +3193,8 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Fetch API cannot load: ", url));
   }
 }
+kj::Maybe<kj::Own<jsg::Wrappable>> ExtendedFetcher::snapshotClone() const {
+  return kj::none;
+}
+
 }  // namespace workerd::api

@@ -18,6 +18,7 @@
 
 #include <kj/common.h>
 #include <kj/debug.h>
+#include <kj/function.h>
 #include <kj/list.h>
 #include <kj/refcount.h>
 #include <kj/vector.h>
@@ -46,6 +47,10 @@ class Visitor;
 }
 
 namespace workerd::jsg {
+
+// Records a C++ callback address that V8 can find in the heap, so that a startup snapshot can
+// serialize it; a no-op unless the isolate is preparing one (IsolateBase in setup.h).
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
 
 WD_STRONG_BOOL(IsContextGlobal);
 
@@ -81,6 +86,7 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO = CONSOLE_ORIGINAL_DEBUG + 2,
   CONSOLE_ORIGINAL_LOG = CONSOLE_ORIGINAL_DEBUG + 3,
   CONSOLE_ORIGINAL_WARN = CONSOLE_ORIGINAL_DEBUG + 4,
+
   // The highest ContextDataSlot; update it when adding a slot.
   MAX_DATA_SLOT = CONSOLE_ORIGINAL_WARN,
 };
@@ -143,6 +149,7 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class Lock;
 class Object;
 class Wrappable;  // Forward declaration for WeakRefAnchor.
 
@@ -199,6 +206,9 @@ class Wrappable: public kj::Refcounted {
     KJ_IF_SOME(a, weakRefAnchor) {
       a->invalidate();
     }
+    if (link.isLinked()) {
+      unlinkFromTracer();
+    }
   }
 
   enum InternalFields : int {
@@ -247,13 +257,13 @@ class Wrappable: public kj::Refcounted {
   // reference to it, and the shim's destructor is only deferred, not cancelled.
   //
   // A Wrappable is a member of HeapTracer::wrappers exactly between attachWrapper() and
-  // detachWrapper(), so being linked while having no wrapper isolates precisely the case where
-  // cppgc nulled `weakShim` behind our back. That link test is load-bearing, because a null
-  // `weakShim` has two producers: cppgc on major GC (this case), and detachWrapper() itself --
-  // including the minor-GC path, where V8 drops a droppable wrapper while the Wrappable lives
+  // detachWrapper(), so being in that list while having no wrapper isolates precisely the case
+  // where cppgc nulled `weakShim` behind our back. That membership test is load-bearing, because
+  // a null `weakShim` has two producers: cppgc on major GC (this case), and detachWrapper() itself
+  // -- including the minor-GC path, where V8 drops a droppable wrapper while the Wrappable lives
   // on.
   bool isCondemned() const {
-    return link.isLinked() && !hasWrapper();
+    return linkedInWrappers && !hasWrapper();
   }
 
   // Invalidate all outstanding jsg::WeakRef<T>s pointing at this Wrappable. Called lazily from
@@ -291,7 +301,7 @@ class Wrappable: public kj::Refcounted {
   // zapped handle.
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
 
-  // The isolate a wrapper was last attached in, or null if none ever was or that isolate is gone.
+  // The isolate this Wrappable is bound to (see `isolate`), or null if it is unbound.
   v8::Isolate* getIsolate() const {
     return isolate;
   }
@@ -411,6 +421,41 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
+  // Override in subclasses with state that must survive a V8 startup snapshot. Must return a deep,
+  // isolate-independent copy: no V8 handles, no jsg::Ref<T> members, no IoContext/IO refs. A
+  // kj::none result marks the type as not transferable; a snapshot whose context reaches such a
+  // wrapper is rejected (see IsolateBase::createSnapshotBlob()). Stateless types do not override
+  // this: they set Object::jsgSnapshotStateless instead, and the snapshot records only their tag.
+  //
+  // Called twice per transferred object: once in the zygote, on the live original (under the
+  // isolate lock, with its wrapper still attached), to produce the copy stored in the
+  // SnapshotArtifact; then once per worker started from that snapshot, on the stored copy, to
+  // produce the object attached to the restored wrapper.
+  //
+  // Must not throw. In the zygote an exception only fails the snapshot, and the Worker starts
+  // without one. In a worker started from the snapshot the second call runs inside
+  // jsg::Isolate::newContext(), outside the Worker constructor's error handling, so an exception
+  // fails the Worker's startup instead.
+  virtual kj::Maybe<kj::Own<Wrappable>> snapshotClone() const {
+    return kj::none;
+  }
+
+  // The other JSG objects this one holds a jsg::Ref to whose identity JavaScript can observe, such
+  // as Crypto's `subtle`. Called in the zygote on the live original, with every wrapper still
+  // attached. A restored instance is built afresh (by its type's constructor or snapshotClone()),
+  // so on its own it would refer to new objects rather than to the ones behind the restored
+  // wrappers; a Worker started from the snapshot passes snapshotRelink() those instead. Must not
+  // throw or allocate on the V8 or cppgc heap.
+  virtual kj::Array<const Wrappable*> snapshotReferences() const {
+    return nullptr;
+  }
+
+  // In a Worker started from a snapshot, once every restored wrapper is linked: one entry per
+  // entry snapshotReferences() returned in the zygote, the restored instance behind that object's
+  // wrapper, or nullptr when the snapshot carried no wrapper for it (keep what this instance has).
+  // Must not throw.
+  virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 
@@ -454,7 +499,9 @@ class Wrappable: public kj::Refcounted {
   // handle, to force the wrapper to stay alive. Otherwise, `strongWrapper` is empty.
   v8::Global<v8::Object> strongWrapper;
 
-  // Will be non-null if a wrapper has ever been attached.
+  // The isolate this Wrappable is bound to: set when a wrapper is first attached, or when a
+  // parent bound to an isolate first visits a Ref<T> to it, and cleared by isolate teardown. A
+  // bound Wrappable must be destroyed under the isolate lock (see maybeDeferDestruction()).
   v8::Isolate* isolate = nullptr;
 
   // How many strong Ref<T>s point at this Wrappable, forcing its wrapper to stay alive even if
@@ -470,8 +517,16 @@ class Wrappable: public kj::Refcounted {
   // before and after. In other words, a wrapper can only be condemned while strongRefcount == 0.
   uint strongRefcount = 0;
 
-  // While a wrapper is attached, the Wrappable is a member of the list `HeapTracer::wrappers`.
+  // Whether `link` is in `HeapTracer::wrappers` rather than `HeapTracer::unwrapped`.
+  bool linkedInWrappers = false;
+
+  // While bound to an isolate, the Wrappable is a member of one of its HeapTracer's lists:
+  // `wrappers` from attachWrapper() to detachWrapper(), and `unwrapped` otherwise, so that
+  // isolate teardown can unbind every Wrappable that outlives it.
   kj::ListLink<Wrappable> link;
+
+  // Removes this Wrappable from its HeapTracer's list. Called by the destructor.
+  void unlinkFromTracer();
 
   // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for Wrappables that never
   // have weak references taken. Created on first call to getOrCreateWeakRefAnchor().
@@ -496,6 +551,12 @@ class Wrappable: public kj::Refcounted {
   friend class Ref;
 };
 
+// Builds the instance a restored wrapper of a stateless type is attached to when a worker starts
+// from a V8 startup snapshot: the type's `Lock&` constructor when it has one, otherwise its default
+// constructor. Runs under the isolate lock before the context exists; see
+// Object::jsgSnapshotStateless and TypeWrapper::snapshotRecreateFnFor().
+using SnapshotRecreateFn = kj::Own<Wrappable> (*)(Lock&);
+
 // For historical reasons, this is actually implemented in setup.c++.
 class HeapTracer: public v8::EmbedderRootsHandler {
  public:
@@ -516,13 +577,32 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // object, which implies that we are collecting unreachable objects.
   static bool isInCppgcDestructor();
 
-  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
-    wrappers.add(wrappable);
-  }
-  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
-    wrappers.remove(wrappable);
-  }
+  // Move `wrappable`, which is bound to this tracer's isolate, between `wrappers` and
+  // `unwrapped`. addWrapper() also takes a Wrappable that is in neither list yet.
+  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable);
+  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable);
+  // Adds a Wrappable that a GC visit has just bound to this tracer's isolate to `unwrapped`.
+  void addUnwrapped(kj::Badge<Wrappable>, Wrappable& wrappable);
+
+  // Detaches every wrapper, and unbinds every Wrappable from the isolate, so that one that
+  // outlives the isolate does not use it. Call under the isolate lock when shutting it down.
   void clearWrappers();
+
+  // Calls `fn` for every Wrappable in `wrappers`, i.e. every one that currently has a V8 wrapper
+  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. Startup-snapshot
+  // preparation only: the one caller is WrappablesSerializeMetadata::recordLiveWrappables().
+  //
+  // The caller holds the isolate lock. The references are valid only for the duration of the
+  // call: `fn` must not attach or detach wrappers (the list is being iterated) and must not
+  // allocate on the V8 or cppgc heap, since a GC drops collected wrappers from the list. What
+  // `fn` may keep past the call is the shim's address, the key under which V8 later reports the
+  // wrapper to the API-wrapper serializer, provided `fn` also roots the shim (a
+  // cppgc::Persistent): destroyLiveWrappableInstances() retires shims instead of freelisting
+  // them, so a retired shim is never handed out again, but one that no wrapper reaches any more
+  // is swept by the next major GC, and a shim allocated afterwards can take its address.
+  void forEachLiveWrapper(
+      kj::FunctionParam<void(Wrappable&, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag)>
+          fn);
 
   // Detach the V8 wrapper from every live Wrappable and release the wrapper's ownership share,
   // destroying each Wrappable whose last owner that was. Startup-snapshot preparation only: the
@@ -533,6 +613,22 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();
+
+  // Startup-snapshot load. Allocates the CppgcShim that will back `instance`'s restored wrapper
+  // ahead of Context::New(): the deserializer callback that links wrapper and shim runs under V8's
+  // DisallowGarbageCollection and must not allocate. `instance` is a fresh, never-wrapped object
+  // built from the SnapshotArtifact (a stateless type's default construction or a stateful type's
+  // snapshotClone()). The shim owns it from here on, and the returned Persistent is the only root
+  // keeping it alive until linkRestoredWrapper().
+  cppgc::Persistent<v8::Object::Wrappable> allocateShimForSnapshotRestore(
+      kj::Own<Wrappable> instance, v8::CppHeapPointerTag tag);
+
+  // Links a deserialized wrapper object to a shim from allocateShimForSnapshotRestore(): writes the
+  // CppHeap pointer, creates the traced handle and completes the Wrappable's attach bookkeeping.
+  // Allocates nothing on either GC heap, so it is callable from a DeserializeAPIWrapperCallback.
+  // Does not throw; callers validate the slot first.
+  void linkRestoredWrapper(v8::Object::Wrappable& shim, v8::Local<v8::Object> wrapper);
+
   static void substituteCppgcShimForTest(
       v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
 
@@ -585,6 +681,14 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // List of all Wrappables for which a JavaScript wrapper exists.
   kj::List<Wrappable, &Wrappable::link> wrappers;
 
+  // List of all other Wrappables bound to this isolate: those whose wrapper was detached, and
+  // those that a GC visit bound without a wrapper.
+  kj::List<Wrappable, &Wrappable::link> unwrapped;
+
+  // Removes `wrappable` from whichever list it is in, and clears its `isolate`.
+  void unbind(Wrappable& wrappable);
+  void moveToUnwrapped(Wrappable& wrappable);
+
   // Freelists of shim objects for wrappers that were collected during a minor GC. The shim
   // objects can be reused for future allocations before the next major GC.
   //
@@ -611,7 +715,7 @@ class HeapTracer: public v8::EmbedderRootsHandler {
 
 inline void Wrappable::condemn() {
   // Only reachable from isCondemned() returning true, which implies this Wrappable is still
-  // linked into HeapTracer::wrappers, which implies attachWrapper() set `isolate`.
+  // linked into HeapTracer::wrappers, which implies it is bound.
   KJ_DASSERT(isolate != nullptr);
   ++HeapTracer::getTracer(isolate).condemnedWrapperCount;
   invalidateWeakRefs();

@@ -33,6 +33,7 @@ use crate::channels::Channel;
 use crate::config::capnp_error;
 use crate::config::text;
 use crate::log;
+use crate::worker::WorkerService;
 
 /// `workerd bench`'s options, besides the service and entrypoint patterns.
 #[expect(
@@ -57,6 +58,8 @@ pub struct Options {
     pub output: Option<String>,
     /// `--trace`: run tail workers, which add their cost to every request.
     pub trace: bool,
+    /// `--no-startup`: don't time starting the services' workers.
+    pub no_startup: bool,
 }
 
 /// The compatibility dates of a run's workers, resolved once, so that the workers and the report
@@ -108,8 +111,16 @@ impl Options {
             params.set_case_filter(pattern);
         }
         params.set_quick(self.quick);
+        params.set_skip_startup(self.no_startup);
         to_words(message.borrow_inner())
     }
+}
+
+/// Whether `params`, an encoded `BenchParams` message, leaves out the startup groups.
+pub(crate) fn skips_startup(params: &[u64]) -> Result<bool> {
+    let message = read_words(params).map_err(capnp_error)?;
+    let params: bench_params::Reader<'_> = message.get_root().map_err(capnp_error)?;
+    Ok(params.get_skip_startup())
 }
 
 /// A `BenchReport` being filled in, a group at a time.
@@ -168,8 +179,34 @@ impl Report {
                 .map_err(crate::Error::from),
             Err(error) => Err(error),
         };
-        let duration = start.elapsed();
+        self.add_group(name, result, start.elapsed(), false)
+    }
 
+    /// Times starting `worker`, the service `name`, in new isolates, as the report's next group:
+    /// a startup group (see `BenchReport.Group.startup`) named `name`, with `params` (an encoded
+    /// `BenchParams` message) as for a handler. Logged as `run_group` logs a handler's group,
+    /// with the name `<name> (startup)`.
+    pub async fn run_startup(
+        &mut self,
+        worker: &WorkerService,
+        name: &str,
+        params: &[u64],
+    ) -> Result<()> {
+        log::debug(&format!("[ BENCH ] {name} (startup)"));
+        let start = Instant::now();
+        let result = worker.bench_startup(params).await;
+        self.add_group(name, result, start.elapsed(), true)
+    }
+
+    /// Fills in the next group, named `name`: the encoded group `result`, or a group with its
+    /// error. Logs how it went, which took `duration`.
+    fn add_group(
+        &mut self,
+        name: &str,
+        result: Result<Vec<u64>>,
+        duration: Duration,
+        startup: bool,
+    ) -> Result<()> {
         let index = self.filled;
         self.filled += 1;
         let root = self.message.get_root().map_err(capnp_error)?;
@@ -184,7 +221,9 @@ impl Report {
         }
         let mut group = groups.get(index);
         group.set_name(name);
-        if log_outcome(group.into_reader(), name, duration)? {
+        group.set_startup(startup);
+        let group = group.into_reader();
+        if log_outcome(group, &group_label(group)?, duration)? {
             self.failed = true;
         }
         Ok(())
@@ -372,9 +411,24 @@ fn format_text(report: bench_report::Reader<'_>) -> Result<String> {
         let _ = writeln!(out, "WARNING: {}", text(warning)?);
     }
     for group in report.get_groups().map_err(capnp_error)? {
+        // A startup group without cases or an error is one whose phases the case filter excluded
+        // entirely; unlike a handler's, nothing it reports would be news.
+        if group.get_startup() && !group.has_error() && !group.has_cases() {
+            continue;
+        }
         format_group(&mut out, group)?;
     }
     Ok(out)
+}
+
+/// What the text report and the log call `group`: its name, marked if it is a startup group.
+fn group_label(group: bench_report::group::Reader<'_>) -> Result<String> {
+    let name = text(group.get_name())?;
+    Ok(if group.get_startup() {
+        format!("{name} (startup)")
+    } else {
+        name
+    })
 }
 
 /// The columns of a group's table.
@@ -390,7 +444,7 @@ struct Row {
 /// Appends `group` to `out`: its name, error and the overhead subtracted from its cases, then a
 /// table of its cases, the columns padded to line up.
 fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Result<()> {
-    let _ = writeln!(out, "\n{}", text(group.get_name())?);
+    let _ = writeln!(out, "\n{}", group_label(group)?);
     if group.has_error() {
         let _ = writeln!(out, "  FAILED: {}", first_line(&text(group.get_error())?));
     }
@@ -406,7 +460,7 @@ fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Res
     }
     let mut rows = Vec::new();
     for case in group.get_cases().map_err(capnp_error)? {
-        rows.push(case_row(case)?);
+        rows.push(case_row(case, group.get_startup())?);
     }
     if rows.is_empty() {
         return Ok(());
@@ -441,13 +495,13 @@ fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Res
     Ok(())
 }
 
-/// The row of `case`: its statistics, or why it has none.
-fn case_row(case: bench_report::case::Reader<'_>) -> Result<Row> {
+/// The row of `case`, a case of a startup group if `startup`: its statistics, or why it has none.
+fn case_row(case: bench_report::case::Reader<'_>, startup: bool) -> Result<Row> {
     use bench_report::case::Status;
 
     let name = text(case.get_name())?;
     let message = match case.get_status().map_err(|e| capnp_error(e.into()))? {
-        Status::Ok => return statistics_row(name, case),
+        Status::Ok => return statistics_row(name, case, startup),
         Status::Skipped => "skipped".to_owned(),
         Status::Failed => format!("FAILED: {}", first_line(&text(case.get_error())?)),
     };
@@ -457,8 +511,13 @@ fn case_row(case: bench_report::case::Reader<'_>) -> Result<Row> {
     })
 }
 
-/// The row of `case`, which ran, named `name`: its statistics, with notes on its flags.
-fn statistics_row(name: String, case: bench_report::case::Reader<'_>) -> Result<Row> {
+/// The row of `case`, which ran, named `name`: its statistics, with notes on its flags. A
+/// startup group's cases (`startup`) have no options to suggest.
+fn statistics_row(
+    name: String,
+    case: bench_report::case::Reader<'_>,
+    startup: bool,
+) -> Result<Row> {
     use bench_report::case::Flag;
 
     let wall = case.get_wall_ns().map_err(capnp_error)?;
@@ -479,6 +538,7 @@ fn statistics_row(name: String, case: bench_report::case::Reader<'_>) -> Result<
     let mut notes = Vec::new();
     for flag in case.get_flags().map_err(capnp_error)? {
         notes.push(match flag.map_err(|e| capnp_error(e.into()))? {
+            Flag::HighVariance if startup => "high variance: check that the machine is quiet",
             Flag::HighVariance => "high variance: try more samples or a longer minTime",
             Flag::AtFloor => "at measurement floor: pass results through b.blackBox()",
         });

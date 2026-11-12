@@ -357,8 +357,11 @@ struct CryptoKeyPair {
   JSG_STRUCT(publicKey, privateKey);
 };
 
-class SubtleCrypto: public jsg::Object {
+class SubtleCrypto final: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -997,9 +1000,25 @@ class DigestStream: public WritableStream {
 
 // Implements the Crypto interface as prescribed by:
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
-class Crypto: public jsg::Object {
+class Crypto final: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
+  // Both Crypto and SubtleCrypto are stateless, so a worker started from a snapshot gets a fresh
+  // pair from the constructor above. If the zygote's `subtle` had a wrapper, the restored Crypto
+  // then takes the restored SubtleCrypto behind it (snapshotRelink()), so that `crypto.subtle` is
+  // still the object the top level saw.
+  static constexpr bool jsgSnapshotStateless = true;
+
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    return kj::arr(snapshotReferenceTo(*subtle));
+  }
+
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(restoredSubtle, snapshotRelinkedRef<SubtleCrypto>(restored[0])) {
+      subtle = kj::mv(restoredSubtle);
+    }
+  }
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 

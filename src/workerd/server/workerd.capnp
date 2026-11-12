@@ -104,13 +104,13 @@ struct ClusterConfig {
   # Each Durable Object runs on one instance at a time, its owner; any instance routes requests
   # for it there.
   #
-  # The cluster's shared state lives in an S3-compatible bucket: each instance renews a lease
-  # record naming its address, and each Durable Object's owner is a record claimed by a conditional
-  # write. Taking an object over from an owner whose lease expired bumps its ownership epoch.
-  # Instances need no shared filesystem: `durableObjectStorage.localDisk` is each instance's own
-  # disk. Durable Objects stored in memory stay local to each instance. The bucket's copy of an
-  # object replaces the instance's, so a `localDisk` already holding Durable Objects from before
-  # cluster mode is refused at startup; they are not imported.
+  # The cluster's shared state lives in a bucket, S3-compatible or Google Cloud Storage (`bucket`):
+  # each instance renews a lease record naming its address, and each Durable Object's owner is a
+  # record claimed by a conditional write. Taking an object over from an owner whose lease expired
+  # bumps its ownership epoch. Instances need no shared filesystem: `durableObjectStorage.localDisk`
+  # is each instance's own disk. Durable Objects stored in memory stay local to each instance. The
+  # bucket's copy of an object replaces the instance's, so a `localDisk` already holding Durable
+  # Objects from before cluster mode is refused at startup; they are not imported.
   #
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
@@ -190,16 +190,50 @@ struct ClusterConfig {
   # of the bucket does not reduce that authority.
 
   bucket @0 :Text;
-  # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
+  # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
+  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  #
+  # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
+  # object generations. Its access tokens come from the service account key that
+  # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
+  # from the metadata server of the Compute Engine VM or GKE pod the instance runs on, which under
+  # GKE Workload Identity answers the token of the pod's Kubernetes service account.
+  # `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
+  # 169.254.169.254, needs it set to `[fd20:ce::254]`.
+  # A first token, from any source, is retried, as a new GKE pod's metadata server may refuse
+  # requests at first: attempts start for up to 30 s and each has 10 s, so the wait can reach
+  # about 40 s. But when nothing suggests the instance runs on Google Cloud (none of
+  # `GCE_METADATA_HOST`, `KUBERNETES_SERVICE_HOST`, Cloud Run's `K_SERVICE` and `CLOUD_RUN_JOB`,
+  # Cloud Run functions' `FUNCTION_TARGET` and `FUNCTION_NAME`, or App Engine's `GAE_ENV` and
+  # `GAE_SERVICE` is set, and the machine's DMI product name is not Google's), a metadata server
+  # that refuses the connection, or does not connect within a second, fails it at once, with an
+  # error that says how to provide credentials. On a Kubernetes cluster outside Google Cloud
+  # whose network drops packets to 169.254.169.254, that error comes only after the 40 s. At the
+  # default address, an answer without the `Metadata-Flavor: Google` header of Google's metadata
+  # server, on Google Cloud or off it, fails it at once too, unless its status is 429 or 5xx; a
+  # metadata server `GCE_METADATA_HOST` names, such as a proxy or an emulator, need not send the
+  # header. The identity needs to read, write, list and delete the bucket's objects, as
+  # `roles/storage.objectUser` grants: replacing an object requires permission to delete it.
+  # Without Workload Identity, a GCE VM or GKE node's default access scopes are often read-only
+  # for storage, which shows up as a 403 when the instance starts.
+  # For tests, `STORAGE_EMULATOR_HOST` (`host:port` or a URL) sends the requests to an emulator
+  # instead, without a token unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` is
+  # set.
 
   bucketOptions @1 :List(Text);
-  # `key=value` settings for `bucket`: `aws_endpoint=https://...`, `aws_region=auto`,
+  # `key=value` settings for an `s3://` bucket: `aws_endpoint=https://...`, `aws_region=auto`,
   # `aws_access_key_id=...`, `aws_secret_access_key=...`, and `aws_token=...`. In place of the
   # last three, `aws_credentials_file=<path>` names a file of `AWS_ACCESS_KEY_ID=`,
   # `AWS_SECRET_ACCESS_KEY=` and `AWS_SESSION_TOKEN=` lines, reread whenever it changes, so
   # short-lived credentials rotate without a restart. Replace it by rename, not in place. Each
   # setting not given falls back to an environment variable: `AWS_ENDPOINT_URL`, `AWS_REGION`,
   # `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CREDENTIALS_FILE`.
+  #
+  # A `gs://` bucket takes no settings: any setting is an error that stops the instance, as
+  # `workerd deploy --endpoint` or `--region` is for the command. The `AWS_*` environment
+  # variables do not apply to it.
+  #
+  # For either scheme, an entry without `=` is ignored.
 
   address @2 :Text;
   # Where this instance listens for other instances: `host:port`, a port of 0 for an ephemeral
@@ -579,9 +613,9 @@ struct Worker {
 
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
-      # Worker, or `/workerd/cron.js`, cron triggers (see each one's header for the config it
-      # takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is a
-      # Worker's source. Experimental.
+      # Worker, `/workerd/cron.js`, cron triggers, or `/workerd/queues.js`, the Queues Worker
+      # (see each one's header for the config it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

@@ -90,8 +90,11 @@ class URLSearchParams;
 using DOMException = jsg::DOMException;
 
 // A subset of the standard Navigator API.
-class Navigator: public jsg::Object {
+class Navigator final: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
@@ -145,10 +148,14 @@ class Navigator: public jsg::Object {
 // Exposed as a global to provide access to certain Cloudflare-specific
 // configuration details. This is not a standard API and great care should
 // be taken when deciding to expose new properties or methods here.
-class Cloudflare: public jsg::Object {
+class Cloudflare final: public jsg::Object {
  public:
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
+  // Stateless (compatibilityFlags is a lazy property materialized on the JS object),
+  // safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   JSG_RESOURCE_TYPE(Cloudflare) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(compatibilityFlags, getCompatibilityFlags);
@@ -909,6 +916,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
+
+  // The state of this global scope's own that a Worker started from a startup snapshot must see:
+  // the `process` and `Buffer` values the top level resolved or assigned, which live here rather
+  // than on the global object. A null-prototype object, or none when the top level touched
+  // neither. The caller has the context entered.
+  kj::Maybe<jsg::JsObject> getSnapshotState(jsg::Lock& js);
+  // Takes over the state getSnapshotState() returned in the zygote, on the fresh global scope of a
+  // Worker started from the snapshot.
+  void restoreSnapshotState(jsg::Lock& js, jsg::JsObject state);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
@@ -1074,18 +1090,26 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(Navigator);
     }
 
-    if (flags.getSpecCompliantUrl()) {
-      JSG_NESTED_TYPE_NAMED(url::URL, URL);
-      JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
-    } else {
-      JSG_NESTED_TYPE(URL);
-      JSG_NESTED_TYPE(URLSearchParams);
+    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
+    // TypeScript URL and URLSearchParams instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL)) {
+      if (flags.getSpecCompliantUrl()) {
+        JSG_NESTED_TYPE_NAMED(url::URL, URL);
+        JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
+      } else {
+        JSG_NESTED_TYPE(URL);
+        JSG_NESTED_TYPE(URLSearchParams);
+      }
     }
 
-    if (flags.getSpecCompliantUrlpattern()) {
-      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
-    } else {
-      JSG_NESTED_TYPE(URLPattern);
+    // Under the TS_URL_PATTERN autogate, the per-isolate bootstrap installs the TypeScript
+    // URLPattern instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL_PATTERN)) {
+      if (flags.getSpecCompliantUrlpattern()) {
+        JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+      } else {
+        JSG_NESTED_TYPE(URLPattern);
+      }
     }
 
     JSG_NESTED_TYPE(Blob);

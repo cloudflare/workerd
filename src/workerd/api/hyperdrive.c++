@@ -163,4 +163,8 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
         FAILED, kj::str("unexpected error connecting to database: ", status.statusText)));
   }
 }
+kj::Maybe<kj::Own<jsg::Wrappable>> Hyperdrive::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<Hyperdrive>(SnapshotCloneTag{}, *this));
+}
+
 }  // namespace workerd::api

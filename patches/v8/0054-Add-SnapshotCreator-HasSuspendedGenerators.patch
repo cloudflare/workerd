@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Carney <dcarney@cloudflare.com>
+Date: Tue, 10 Nov 2026 12:00:00 +0000
+Subject: Add SnapshotCreator::HasSuspendedGenerators()
+
+CreateBlob() with FunctionCodeHandling::kClear discards the bytecode
+of every function that can be recompiled, including a generator, async
+function or async generator that is suspended in the heap being
+serialized. Resuming such a generator after deserialization then finds
+its function without bytecode: ResumeGeneratorTrampoline aborts with
+"Missing bytecode array from function" under --debug-code, and
+otherwise relies on the lazy recompile producing bytecode identical to
+the one the generator was suspended in. Bytecode flushing never
+discards a resumable function's bytecode for the same reason.
+
+Let an embedder find out before calling CreateBlob(), so that it can
+refrain from creating such a snapshot. Only objects reachable from the
+roots count: CreateBlob() collects all garbage first.
+
+diff --git a/include/v8-snapshot.h b/include/v8-snapshot.h
+--- a/include/v8-snapshot.h
++++ b/include/v8-snapshot.h
+@@ -275,6 +275,15 @@ class V8_EXPORT SnapshotCreator {
+    */
+   StartupData CreateBlob(FunctionCodeHandling function_code_handling);
+ 
++  /**
++   * Returns whether the live heap holds a suspended generator: a generator,
++   * async function or async generator that has been created and has not
++   * finished. CreateBlob() with FunctionCodeHandling::kClear discards the
++   * bytecode such a generator needs to be resumed, so an embedder that uses
++   * kClear should not create a snapshot while this returns true.
++   */
++  bool HasSuspendedGenerators();
++
+   // Disallow copying and assigning.
+   SnapshotCreator(const SnapshotCreator&) = delete;
+   void operator=(const SnapshotCreator&) = delete;
+diff --git a/src/api/api.cc b/src/api/api.cc
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -107,6 +107,7 @@
+ #include "src/objects/js-array-buffer-inl.h"
+ #include "src/objects/js-array-inl.h"
+ #include "src/objects/js-collection-inl.h"
++#include "src/objects/js-generator-inl.h"
+ #include "src/objects/js-objects.h"
+ #include "src/objects/js-promise-inl.h"
+ #include "src/objects/js-proxy-inl.h"
+@@ -454,6 +455,21 @@ StartupData SnapshotCreator::CreateBlob(
+   return impl_->CreateBlob(function_code_handling);
+ }
+ 
++bool SnapshotCreator::HasSuspendedGenerators() {
++  i::Isolate* i_isolate = impl_->isolate();
++  // Only what CreateBlob() would serialize counts: it collects all garbage
++  // before serializing, so a suspended generator nothing reaches is no
++  // obstacle.
++  i::HeapObjectIterator it(i_isolate->heap(),
++                           i::HeapObjectIterator::kFilterUnreachable);
++  for (i::Tagged<i::HeapObject> obj = it.Next(); !obj.is_null();
++       obj = it.Next()) {
++    i::Tagged<i::JSGeneratorObject> generator;
++    if (i::TryCast(obj, &generator) && generator->is_suspended()) return true;
++  }
++  return false;
++}
++
+ bool StartupData::CanBeRehashed() const {
+   DCHECK(i::Snapshot::VerifyChecksum(this));
+   return i::Snapshot::ExtractRehashability(this);

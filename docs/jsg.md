@@ -1683,6 +1683,166 @@ private:
 - Tag enum values must never change once data has been serialized
 - `deserialize()` receives the tag so it can handle multiple versions
 
+### Classes Implemented in JavaScript
+
+Classes that the runtime implements in JavaScript, in the per-isolate bootstrap
+(`src/per_isolate/`), have no C++ type to declare `JSG_SERIALIZABLE`. They take
+part through a protocol modelled on Node.js's js_transferable, which
+`src/per_isolate/serialization.ts` sets up:
+
+- `markUncloneable(instance)`: serializing the instance throws `DataCloneError`
+  (unless the `ExternalHandler`, such as RPC's, serializes it as an external).
+- `makeCloneable(ctor, 'module:Export', clone, deserialize)` once per class
+  returns the class's `Cloneable`, and `markCloneable(instance, cloneable)` in
+  the constructor marks each instance with it. The instance is written as
+  `SERIALIZATION_TAG_JS_SERIALIZABLE` and its `deserializeInfo`
+  (`'module:Export'`), and `clone(instance)`'s data follows the top-level
+  value.
+- `getOwnDataProperty(data, key)` reads a property of the data that
+  `deserialize()` is given, without reading its prototype chain.
+
+Neither mark has any effect on an instance of a built-in that V8 serializes
+itself, such as a `Map`, even of a subclass, so `makeCloneable()` rejects a
+class that inherits from one.
+
+For example, a bootstrap module `example/range` that defines a cloneable
+`Range`:
+
+```ts
+'use strict';
+
+import type { SerializationHelpers } from '../serialization';
+
+const { NumberIsFinite, TypeError } = primordials;
+const { getPrivateSymbol } = utils;
+const { getOwnDataProperty, makeCloneable, markCloneable } = require(
+  'serialization'
+) as SerializationHelpers;
+
+// The state lives under V8-private properties, not #private fields: the
+// deserializer makes instances without calling the constructor, and an
+// instance made that way has no #private fields.
+const kStart = getPrivateSymbol('example:Range:start');
+const kEnd = getPrivateSymbol('example:Range:end');
+
+type Slots = Record<symbol, unknown>;
+
+function isBound(value: unknown): value is number {
+  return typeof value === 'number' && NumberIsFinite(value);
+}
+
+// Shared by the constructor and deserialize(), so that a deserialized
+// instance is checked exactly as a constructed one is.
+function initRange(range: Range, start: unknown, end: unknown): void {
+  if (!isBound(start) || !isBound(end) || start > end) {
+    throw new TypeError('Invalid range');
+  }
+  (range as unknown as Slots)[kStart] = start;
+  (range as unknown as Slots)[kEnd] = end;
+}
+
+// The brand check, by the private state rather than `#field in` or
+// `instanceof`. Reading a V8-private property never reaches a Proxy's traps
+// or the prototype chain.
+function slotsOf(value: unknown): Slots {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    (value as Slots)[kStart] === undefined
+  ) {
+    throw new TypeError('Illegal invocation');
+  }
+  return value as Slots;
+}
+
+class Range {
+  constructor(start: number, end: number) {
+    initRange(this, start, end);
+    markCloneable(this, rangeCloneable);
+  }
+
+  get start(): number {
+    return slotsOf(this)[kStart] as number;
+  }
+
+  get end(): number {
+    return slotsOf(this)[kEnd] as number;
+  }
+}
+
+// After the class: the constructor reads rangeCloneable only when it runs.
+const rangeCloneable = makeCloneable(
+  Range,
+  // Stored in serialized data, Durable Object storage included: never change
+  // it. A renamed class keeps its old export as an alias.
+  'example/range:Range',
+  // The data: any serializable value. The class's own state only; the
+  // instance's prototype and own properties may have been changed by user
+  // code.
+  (range) => {
+    const slots = slotsOf(range);
+    return { start: slots[kStart], end: slots[kEnd] };
+  },
+  // `data` may come from an untrusted peer and need not be anything clone()
+  // returned, so check everything about it, with primordials only. Read its
+  // properties with getOwnDataProperty(): `data.start` or destructuring
+  // would look a property the data lacks up on Object.prototype, where user
+  // code may have installed a getter. Don't use the other instances in the
+  // data: their own deserialize() may not have run yet.
+  (range, data) => {
+    if (typeof data !== 'object' || data === null) {
+      throw new TypeError('Invalid Range data');
+    }
+    initRange(
+      range,
+      getOwnDataProperty(data, 'start'),
+      getOwnDataProperty(data, 'end')
+    );
+  }
+);
+
+module.exports = { Range };
+```
+
+The module must be `require()`d by `main.ts` (directly or through another
+module) while the bootstrap runs: a reader can find only classes whose modules
+are loaded. It finds any such class, whatever the compatibility flags expose, so
+data from an untrusted peer can make an instance of any class whose module is
+loaded. A reader may have different flags from the writer. If every reader must
+read `Range`, as when it replaces a C++ class under a flag, require its module
+whatever the flags. If only some flags expose `Range`, as for an experimental
+class, require its module only under those flags.
+
+The export must be a data property of an ordinary object, as
+`module.exports = { ... }` makes it: the deserializer can't call a getter, so
+data naming an accessor export is a `DataCloneError`, as is data naming a
+property of a workerd API object. The `per_isolate@eslint` test rejects value
+exports (`export class`, `export function`), which TypeScript compiles to
+getters.
+
+The deserializer finds the class by resolving `'module:Export'` among the
+bootstrap's loaded modules (`jsg::BootstrapModules`), so there is no registry.
+V8 runs no JavaScript while it reads a value, so the deserializer creates each
+instance from `Export.prototype` without calling the constructor (as a native
+error if the prototype inherits from `Error.prototype`), marks it with the
+class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
+value has been read. An error's `stack` is not part of its data: the serializer
+writes it if it is a string, and the deserializer restores it as it does a
+native error's, when `preserveStackInErrors` is set or the writer was not using
+enhanced error serialization. Otherwise it keeps the stack it captured, which
+begins with the error's name and the writer's message, as a native error's does
+(the serializer writes the message for that alone: `deserialize()` still sets
+`message`). The class that marked an instance decides how it is written, so an
+instance of a subclass is written as one of `Range`, and changing an instance's
+prototype does not change which `clone()` runs. A `deserializeInfo` is part of
+the format: like a tag, it must never change. `src/workerd/jsg/ser.h` describes
+the protocol in full.
+
+`src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. Its
+classes are exposed as `CloneableTestBox` and `CloneableTestError` under the
+experimental `expose_serialization_test_class` flag, for tests such as
+`src/tests/serialization/`, which sends instances over RPC.
+
 ### Versioning Serializable Types
 
 List the current tag first, then old tags:
@@ -2393,10 +2553,13 @@ kj::Own<ResolveStatus> onResolveModule(kj::StringPtr specifier, Context context,
 ### `InternalExceptionObserver`
 
 ```cpp
-void reportInternalException(const kj::Exception& exception, Detail detail) override {
+void reportInternalException(const kj::Exception& exception, Detail detail) const override {
   // detail.isInternal, detail.isFromRemote, detail.isDurableObjectReset, detail.internalErrorId
 }
 ```
+
+`reportInternalException` can be called without the isolate lock, so implementations must be
+thread-safe.
 
 ---
 

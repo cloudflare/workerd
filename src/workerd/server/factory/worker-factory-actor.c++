@@ -174,7 +174,7 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
       sqliteDirectory(actors->replicated()
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
-      vfs(*sqliteDirectory),
+      vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,

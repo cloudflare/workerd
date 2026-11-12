@@ -33,6 +33,11 @@
 //
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
+// Loaded whatever the compatibility flags, as is every module that sets up a
+// cloneable class that every reader must be able to read (see
+// serialization.ts).
+require('serialization');
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,
@@ -357,4 +362,70 @@ if (autogates['ts-event-source']) {
       },
     });
   }
+}
+
+// The TypeScript URL and URLSearchParams replace the C++ ones, which
+// global-scope.h then leaves out. Installed as WebIDL installs an interface:
+// own, non-enumerable properties of the global, and not on its prototype.
+if (autogates['ts-url']) {
+  const { URL, URLSearchParams } = require('url/url');
+  // The C++ bridge's functions, which it finds already loaded.
+  require('url/cpp_exports');
+  ObjectDefineProperties(globalThis, {
+    URL: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URL,
+    },
+    URLSearchParams: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLSearchParams,
+    },
+  });
+}
+
+// The TypeScript URLPattern replaces the C++ ones, which global-scope.h then
+// leaves out, installed as URL is.
+if (autogates['ts-url-pattern']) {
+  const { URLPattern } = require('urlpattern/urlpattern');
+  ObjectDefineProperties(globalThis, {
+    URLPattern: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLPattern,
+    },
+  });
+}
+
+// Internal-only: cloneable classes for testing the serialization protocol
+// (serialization.ts), such as over RPC. Gated by an experimental flag that
+// may never lose its experimental annotation.
+if (compatFlags['expose_serialization_test_class']) {
+  const {
+    CloneableTestBox,
+    CloneableTestError,
+  } = require('testing/cloneable-test-box');
+  ObjectDefineProperties(globalThis, {
+    CloneableTestBox: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CloneableTestBox,
+    },
+    CloneableTestError: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CloneableTestError,
+    },
+  });
 }

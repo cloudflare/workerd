@@ -7,7 +7,6 @@
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/exception.h>
 
 #include <kj/async-io.h>
@@ -935,7 +934,6 @@ KJ_TEST("alarm scheduling tags failures after delivery") {
 KJ_TEST("an alarm that fails to schedule drains its request") {
   RejectingTimerChannel timer;
   TestFixture fixture(TestFixture::SetupParams{
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .actorId = Worker::Actor::Id(kj::str("alarm-drain-test")),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
@@ -967,8 +965,7 @@ KJ_TEST("an alarm that fails to schedule drains its request") {
 }
 
 KJ_TEST("an alarm canceled while it waits for its scheduled time drains its request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("alarm-cancel-drain-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("alarm-cancel-drain-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto& actor = fixture.getActor();
   auto context = fixture.newIoContext();
@@ -1141,7 +1138,6 @@ KJ_TEST("a promise settled from another context while an actor idles with a hibe
   auto loopback = kj::refcounted<FixtureLoopback>();
   TestFixture fixture(TestFixture::SetupParams{
     .featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .mainModuleSource = PROMISE_WEB_SOCKET_SOURCE,
     .actorId = Worker::Actor::Id(kj::str("idle-web-socket-promise-test")),
     .actorClassName = "default"_kj,

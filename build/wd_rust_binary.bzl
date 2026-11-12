@@ -54,7 +54,8 @@ def wd_rust_binary(
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         target_compatible_with = None,
-        test_size = "small"):
+        test_size = "small",
+        exec_properties = None):
     """Define rust binary.
 
     Args:
@@ -76,6 +77,7 @@ def wd_rust_binary(
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
         target_compatible_with: additional platform constraints for the binary and its test.
+        exec_properties: exec_properties of the binary, not of its test.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -135,6 +137,7 @@ def wd_rust_binary(
         lint_config = "@workerd//build/rust:lints",
         tags = tags,
         target_compatible_with = target_compatible_with,
+        exec_properties = exec_properties,
         **binary_kwargs
     )
 

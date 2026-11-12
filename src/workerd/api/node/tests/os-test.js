@@ -51,3 +51,20 @@ export const osTest = {
     });
   },
 };
+
+export const signalsTest = {
+  test() {
+    const { signals } = os.constants;
+    strictEqual(signals.SIGHUP, 1);
+    strictEqual(signals.SIGTERM, 15);
+    strictEqual(Object.isFrozen(signals), true);
+    // The table's prototype is a frozen object with a null prototype, so no
+    // Object.prototype members are reachable from it.
+    const proto = Object.getPrototypeOf(signals);
+    strictEqual(Object.isFrozen(proto), true);
+    strictEqual(Object.getPrototypeOf(proto), null);
+    strictEqual(Object.keys(proto).length, 0);
+    strictEqual(signals.toString, undefined);
+    strictEqual(signals.hasOwnProperty, undefined);
+  },
+};

@@ -46,6 +46,7 @@ class R2MultipartUpload;
 class R2Bucket: public jsg::Object {
  protected:
   struct friend_tag_t {};
+  struct snapshot_clone_tag_t {};
 
   struct FeatureFlags {
     FeatureFlags(CompatibilityFlags::Reader featureFlags);
@@ -85,6 +86,19 @@ class R2Bucket: public jsg::Object {
       FeatureFlags featureFlags, IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel)
       : featureFlags(featureFlags),
         clientChannel(kj::mv(subrequestChannel)) {}
+
+  // The copy snapshotClone() makes of a bucket bound to channel number `clientIndex`.
+  R2Bucket(snapshot_clone_tag_t, const R2Bucket& original, uint clientIndex)
+      : featureFlags(original.featureFlags),
+        clientChannel(clientIndex),
+        adminBucket(original.adminBucket.map([](const kj::String& s) { return kj::str(s); })),
+        bucket(original.bucket.map([](const kj::String& s) { return kj::str(s); })),
+        binding(original.binding.map([](const kj::String& s) { return kj::str(s); })),
+        jwt(original.jwt.map([](const kj::String& s) { return kj::str(s); })) {}
+
+  // A binding transfers through a startup snapshot as its channel number and names. A bucket
+  // carried as a capability belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   struct Range {
     jsg::Optional<double> offset;

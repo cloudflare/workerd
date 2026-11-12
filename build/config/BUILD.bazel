@@ -34,3 +34,32 @@ repeatable_string_flag(
     build_setting_default = [],
     visibility = ["//visibility:public"],
 )
+
+# The remote executor of the build, if it has larger runners for the links of select binaries (see
+# link_exec_properties in //build/bazelflare:exec_properties.bzl).
+string_flag(
+    name = "link_executor",
+    build_setting_default = "",
+    values = [
+        "",
+        "bazelflare",
+        "bazelflare-internal",
+        "internal-rbe",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "link_on_bazelflare",
+    flag_values = {":link_executor": "bazelflare"},
+)
+
+config_setting(
+    name = "link_on_bazelflare_internal",
+    flag_values = {":link_executor": "bazelflare-internal"},
+)
+
+config_setting(
+    name = "link_on_rbe_ci",
+    flag_values = {":link_executor": "internal-rbe"},
+)

@@ -6,6 +6,7 @@
 import {
   validateHeaderName,
   validateHeaderValue,
+  parsers,
 } from 'node-internal:internal_http';
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 import { ClientRequest } from 'node-internal:internal_http_client';
@@ -68,9 +69,11 @@ export function createServer(
 // ref: https://github.com/nodejs/node/blob/3b715d35440d509c6242ea61dec9d2802f219c83/src/node_options.cc#L787
 export const maxHeaderSize = 16384;
 
+// The http client is built on fetch() and has no pool of idle parsers, so
+// the value is only recorded on the parsers stub that _http_common exposes.
 export function setMaxIdleHTTPParsers(max: unknown): void {
   validateInteger(max, 'max', 1);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('setMaxIdleHTTPParsers');
+  parsers.max = max;
 }
 
 export {

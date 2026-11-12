@@ -49,6 +49,7 @@
 // below, and decoded with a streaming TextDecoder before it is parsed.
 
 import type { EventTargetInternals } from '../events/event-target-internals';
+import type { RuntimeClassHelpers } from '../runtime-class';
 
 const {
   AbortController,
@@ -73,8 +74,6 @@ const {
   StringPrototypeSlice,
   Symbol,
   SymbolDispose,
-  SymbolFor,
-  SymbolToStringTag,
   TextDecoder,
   TextDecoderDecode,
   TextEncoder,
@@ -90,7 +89,6 @@ const {
 
 const {
   createRequestIo,
-  getApiSymbol,
   isAnyArrayBuffer,
   isArrayBufferView,
   isDataView,
@@ -111,6 +109,8 @@ const {
   getEventHandlerAttribute,
   setEventHandlerAttribute,
 } = require('events/event-target-internals') as EventTargetInternals;
+const { markAsRuntimeClass, setNameAndLength } =
+  require('runtime-class') as RuntimeClassHelpers;
 
 // Whichever streams implementation main.ts installed before loading this
 // module; a Response body and anything EventSource.from() accepts are its
@@ -826,19 +826,8 @@ class EventSource extends EventTarget {
 
 const kSpecCompliantPropertyAttributes =
   compatFlags['spec_compliant_property_attributes'] === true;
-const kInternalClass = SymbolFor('cloudflare:internal-class');
-const kResourceTypeInspect = getApiSymbol('kResourceTypeInspect');
-const kNoInspectProperties = ObjectFreeze({ __proto__: null });
 
 const proto = EventSource.prototype;
-
-function setNameAndLength(fn: unknown, name: string, length: number): void {
-  ObjectDefineProperties(fn, {
-    __proto__: null,
-    name: { __proto__: null, value: name },
-    length: { __proto__: null, value: length },
-  });
-}
 
 // WebIDL constants are non-configurable; JSG's are configurable unless
 // spec_compliant_property_attributes.
@@ -934,32 +923,7 @@ setNameAndLength(
   kSpecCompliantPropertyAttributes ? 1 : 0
 );
 
-if (compatFlags['set_tostring_tag'] === true) {
-  ObjectDefineProperty(proto, SymbolToStringTag, {
-    __proto__: null,
-    value: 'EventSource',
-    writable: true,
-    enumerable: false,
-    configurable: true,
-  } as PropertyDescriptor);
-}
-ObjectDefineProperties(proto, {
-  __proto__: null,
-  [kInternalClass]: {
-    __proto__: null,
-    value: kInternalClass,
-    writable: false,
-    enumerable: false,
-    configurable: false,
-  },
-  [kResourceTypeInspect]: {
-    __proto__: null,
-    value: kNoInspectProperties,
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
-});
+markAsRuntimeClass(proto, 'EventSource');
 
 // Disposal defers to close(), through a function of its own, anonymous and
 // of length 0, as JSG_DISPOSE installs it. It calls this class's close()

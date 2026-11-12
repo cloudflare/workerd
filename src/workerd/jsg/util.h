@@ -7,6 +7,7 @@
 //
 // This file contains misc utility functions used elsewhere.
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/observer.h>
 
 #include <v8-array-buffer.h>
 #include <v8-exception.h>
@@ -87,6 +88,41 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 v8::Local<v8::Value> exceptionToJs(
     v8::Isolate* isolate, kj::Exception&& exception, ExceptionToJsOptions options = {});
 
+// The `name`, `message` and `stack` properties of the JavaScript error that a kj::Exception
+// converts to.
+struct JsErrorDescription {
+  kj::String name;
+  kj::String message;
+
+  // The `stack` property, which normally begins by repeating the name and the message. None if
+  // the error has no stack trace beyond that.
+  kj::Maybe<kj::String> stack;
+
+  // Set if the exception is internal, meaning its details are hidden from JavaScript: what
+  // InternalExceptionObserver::reportInternalException() is told about it.
+  kj::Maybe<InternalExceptionObserver::Detail> internalException;
+
+  // The internal error id that `message` refers to, if it refers to one. `internalException` has
+  // the id only if the exception was logged under it.
+  kj::Maybe<InternalExceptionObserver::Detail::InternalErrorId> internalErrorId;
+};
+
+// Describes the JavaScript error that exceptionToJs() converts `exception` to when
+// `options.trusted` is set, without creating it. This needs neither the isolate lock nor V8, so
+// it can be called while another thread runs JavaScript in the isolate.
+//
+// Like exceptionToJs(), this logs the full details of an internal exception to stderr, under the
+// id that `message` refers to, and reports the exception to `observer`. Pass the observer of the
+// isolate that the exception is described for, which exceptionToJs() would report it to. To
+// convert the exception afterwards without logging and reporting it a second time, pass the
+// description as ExceptionToJsOptions::alreadyDescribed.
+//
+// A tunneled JavaScript error is described from the JsExceptionMetadata recorded when it was
+// tunneled, which holds at most 4KB of each property. A stack that is cut off before its first
+// frame is left out.
+JsErrorDescription describeAsJsError(
+    const kj::Exception& exception, kj::Maybe<const InternalExceptionObserver&> observer);
+
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
@@ -102,7 +138,7 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 // empty, so that runtimes whose Rust bridge cannot copy an empty detail can still read it.
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID = 0xbdc917cdea1f7681ull;
 
-// Detail type for JavaScript exception metadata (error type and stack trace)
+// Detail type for JavaScript exception metadata (error type, message and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 
 // The version of V8's serialization format in which addExceptionDetail() writes the value of a
@@ -132,8 +168,11 @@ constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_I
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
-// Extract and add JavaScript exception metadata (error type and stack trace) to the KJ exception.
-// Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
+// Extract and add JavaScript exception metadata (error type, message and stack trace) to the KJ
+// exception. Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
+//
+// describeAsJsError() describes a tunneled error from this metadata, so an exception that gets the
+// serialized copy above must get the metadata too.
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 // Attach the Durable Object id that produced an exception before it is propagated over RPC.

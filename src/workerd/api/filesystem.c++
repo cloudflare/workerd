@@ -30,33 +30,42 @@ constexpr kj::StringPtr nameForFsType(FsType type) {
   KJ_UNREACHABLE;
 }
 
-// A file path is passed to the C++ layer as a URL object. However, we have two different
-// implementations of URL in the system. This class wraps and abstracts over both of them.
+// A file path is passed to the C++ layer as a URL object: either C++ implementation's, or,
+// under the TS_URL autogate, the TypeScript one's. This class wraps and abstracts over them.
 struct NormalizedFilePath {
   const jsg::Url url;
 
-  static jsg::Url normalize(FileSystemModule::FilePath path) {
+  // Parses a URL's serialization, resolving the legacy parser's against file:///.
+  static jsg::Url normalizeHref(kj::StringPtr href) {
+    auto parsed =
+        JSG_REQUIRE_NONNULL(jsg::Url::tryParse(href, "file:///"_kj), Error, "Invalid URL"_kj);
+    // The cloning here is necessary to de-percent-encode characters in the
+    // path that don't need to be percent-encoded, allowing us to treat equivalent
+    // encodings of the same path as equal. For instance, '/foo' and '/%66oo' should
+    // be considered the same path since 'f' and '%66' are equivalent. Importantly,
+    // this retains percent-encoding on characters that do need to be percent-encoded
+    // to be valid in URLs, such as non-ASCII characters.
+    return parsed.clone(jsg::Url::EquivalenceOption::NORMALIZE_PATH);
+  }
+
+  static jsg::Url normalize(jsg::Lock& js, FileSystemModule::FilePath path) {
     KJ_SWITCH_ONEOF(path) {
       KJ_CASE_ONEOF(legacy, jsg::Ref<URL>) {
-        auto parsed = JSG_REQUIRE_NONNULL(
-            jsg::Url::tryParse(legacy->getHref(), "file:///"_kj), Error, "Invalid URL"_kj);
-        // The cloning here is necessary to de-percent-encode characters in the
-        // path that don't need to be percent-encoded, allowing us to treat equivalent
-        // encodings of the same path as equal. For instance, '/foo' and '/%66oo' should
-        // be considered the same path since 'f' and '%66' are equivalent. Importantly,
-        // this retains percent-encoding on characters that do need to be percent-encoded
-        // to be valid in URLs, such as non-ASCII characters.
-        return parsed.clone(jsg::Url::EquivalenceOption::NORMALIZE_PATH);
+        return normalizeHref(legacy->getHref());
       }
       KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
         jsg::Url url = *standard;
         return url.clone(jsg::Url::EquivalenceOption::NORMALIZE_PATH);
       }
+      KJ_CASE_ONEOF(ts, JsUrl) {
+        return normalizeHref(ts.getHref(js));
+      }
     }
     KJ_UNREACHABLE;
   }
 
-  NormalizedFilePath(FileSystemModule::FilePath path): url(normalize(kj::mv(path))) {
+  NormalizedFilePath(jsg::Lock& js, FileSystemModule::FilePath path)
+      : url(normalize(js, kj::mv(path))) {
     validate();
   }
 
@@ -155,7 +164,7 @@ kj::Maybe<Stat> FileSystemModule::stat(
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
-      NormalizedFilePath normalizedPath(kj::mv(path));
+      NormalizedFilePath normalizedPath(js, kj::mv(path));
       KJ_IF_SOME(node,
           vfs.resolve(
               js, normalizedPath, {.followLinks = options.followSymlinks.orDefault(true)})) {
@@ -206,7 +215,7 @@ void FileSystemModule::setLastModified(
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
-      NormalizedFilePath normalizedPath(kj::mv(path));
+      NormalizedFilePath normalizedPath(js, kj::mv(path));
       KJ_IF_SOME(node,
           vfs.resolve(
               js, normalizedPath, {.followLinks = options.followSymlinks.orDefault(true)})) {
@@ -269,7 +278,7 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
-      NormalizedFilePath normalizedPath(kj::mv(path));
+      NormalizedFilePath normalizedPath(js, kj::mv(path));
       KJ_IF_SOME(node, vfs.resolve(js, normalizedPath)) {
         KJ_SWITCH_ONEOF(node) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -323,7 +332,7 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
 
 kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
   KJ_IF_SOME(node, vfs.resolve(js, normalizedPath, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -358,8 +367,8 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
 void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options) {
   // The from argument is where we are creating the link, while the to is the target.
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedFrom(kj::mv(from));
-  NormalizedFilePath normalizedTo(kj::mv(to));
+  NormalizedFilePath normalizedFrom(js, kj::mv(from));
+  NormalizedFilePath normalizedTo(js, kj::mv(to));
 
   // First, let's make sure the destination (from) does not already exist.
   const jsg::Url& fromUrl = normalizedFrom;
@@ -430,7 +439,7 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
 
 void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
 
@@ -470,7 +479,7 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
 
 int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
   KJ_SWITCH_ONEOF(vfs.openFd(js, normalizedPath,
                       workerd::VirtualFileSystem::OpenOptions{
                         .read = options.read,
@@ -611,7 +620,7 @@ jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
-      NormalizedFilePath normalized(kj::mv(path));
+      NormalizedFilePath normalized(js, kj::mv(path));
       KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
         KJ_SWITCH_ONEOF(node) {
           KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -685,7 +694,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
 
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
-      NormalizedFilePath normalized(kj::mv(path));
+      NormalizedFilePath normalized(js, kj::mv(path));
       KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
         // If the exclusive option is set, the file must not already exist.
         if (options.exclusive) {
@@ -840,8 +849,8 @@ void FileSystemModule::renameOrCopy(
   // The source must exist. An existing destination is replaced, as with
   // rename(2) and Node's fs.rename/fs.copyFile.
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedSrc(kj::mv(src));
-  NormalizedFilePath normalizedDest(kj::mv(dest));
+  NormalizedFilePath normalizedSrc(js, kj::mv(src));
+  NormalizedFilePath normalizedDest(js, kj::mv(dest));
 
   const jsg::Url& destUrl = normalizedDest;
   const jsg::Url& srcUrl = normalizedSrc;
@@ -1021,7 +1030,7 @@ void FileSystemModule::renameOrCopy(
 jsg::Optional<kj::String> FileSystemModule::mkdir(
     jsg::Lock& js, FilePath path, MkdirOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
 
   // The path must not already exist. However, if the path is a directory, we
@@ -1166,7 +1175,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
 void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
   // TODO(node-fs): Implement the force option.
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
   const jsg::Url& url = normalizedPath;
   jsg::Url::Relative relative = url.getRelative();
 
@@ -1281,7 +1290,7 @@ void readdirImpl(jsg::Lock& js,
 kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     jsg::Lock& js, FilePath path, ReadDirOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedPath(kj::mv(path));
+  NormalizedFilePath normalizedPath(js, kj::mv(path));
 
   KJ_IF_SOME(node, vfs.resolve(js, normalizedPath, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(node) {
@@ -1976,8 +1985,8 @@ void cpImpl(jsg::Lock& js,
 
 void FileSystemModule::cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedSrc(kj::mv(src));
-  NormalizedFilePath normalizedDest(kj::mv(dest));
+  NormalizedFilePath normalizedSrc(js, kj::mv(src));
+  NormalizedFilePath normalizedDest(js, kj::mv(dest));
   // TODO(node-fs): Support the preserveTimestamps option.
   cpImpl(js, vfs, normalizedSrc, normalizedDest, options);
 }
@@ -1985,7 +1994,7 @@ void FileSystemModule::cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions 
 jsg::Ref<Blob> FileSystemModule::openAsBlob(
     jsg::Lock& js, FilePath path, OpenAsBlobOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  NormalizedFilePath normalizedSrc(kj::mv(path));
+  NormalizedFilePath normalizedSrc(js, kj::mv(path));
   KJ_IF_SOME(item, vfs.resolve(js, normalizedSrc, {})) {
     KJ_SWITCH_ONEOF(item) {
       KJ_CASE_ONEOF(err, workerd::FsError) {

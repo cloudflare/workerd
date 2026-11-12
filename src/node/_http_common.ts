@@ -7,6 +7,7 @@ import {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
   chunkExpression,
+  parsers,
 } from 'node-internal:internal_http';
 import { METHODS } from 'node-internal:internal_http_constants';
 import { kIncomingMessage } from 'node-internal:internal_http_util';
@@ -15,13 +16,11 @@ export {
   _checkInvalidHeaderChar,
   chunkExpression,
   kIncomingMessage,
+  parsers,
 };
 export const CRLF = '\r\n';
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
 export const methods = METHODS;
-// In Node.js, parsers is a FreeList instance for managing HTTP parser objects.
-// We provide a stub with the expected properties for compatibility.
-export const parsers = { name: 'parsers', max: 1000 };
 
 export default {
   _checkIsHttpToken,

@@ -3,12 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 declare module 'pyodide-internal:introspection.py' {
-  const value: Uint8Array;
+  const value: ArrayBuffer;
   export default value;
 }
 
 declare module 'pyodide-internal:setup_python_search_path.py' {
-  const value: Uint8Array;
+  const value: ArrayBuffer;
   export default value;
 }
 

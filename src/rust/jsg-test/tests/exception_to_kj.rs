@@ -76,6 +76,10 @@ const VALUES: &[&str] = &[
     "Object.assign(new Error('boom'), { code: 7, cause: new TypeError('cause') })",
     "Object.assign(new Error('boom'), { stack: 'x'.repeat(5000) })",
     "Object.assign(new Error('boom'), { name: '\u{e9}'.repeat(3000) })",
+    "Object.assign(new Error('boom'), { name: 'a' + '\u{e9}'.repeat(3000) })",
+    "Object.assign(new Error('boom'), { stack: 'a' + '\u{20ac}'.repeat(2000) })",
+    "new Error('a' + '\u{1f600}'.repeat(2000))",
+    "Object.assign(new Error('boom'), { message: 42 })",
     "new Error('a\\0b')",
     "Object.assign(new Error('boom'), { name: 'A\\0B' })",
     "new DOMException('a\\0b', 'Data\\0Error')",
@@ -211,7 +215,7 @@ fn reads_properties_as_cpp_jsg_does() {
         Harness::cpp_exception_to_kj(lock, value).unwrap();
         let cpp_reads: String = ctx.eval(lock, "reads.join()").unwrap();
         assert_eq!(rust_reads, cpp_reads);
-        assert_eq!(rust_reads, "overloaded,retryable,name,stack");
+        assert_eq!(rust_reads, "overloaded,retryable,name,stack,message");
         Ok(())
     });
 }
@@ -264,6 +268,11 @@ fn what_reading_a_property_throws_stays_pending() {
                 "Object.defineProperty(new Error('boom'), 'stack', \
                    { get() { throw new RangeError('stack') } })",
                 "RangeError: stack",
+            ),
+            (
+                "Object.defineProperty(new Error('boom'), 'message', \
+                   { get() { throw new RangeError('message') } })",
+                "RangeError: message",
             ),
         ] {
             assert_eq!(thrown(lock, ctx, expr), [expected, expected], "{expr}");

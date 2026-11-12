@@ -17,6 +17,7 @@ pub mod feature_flags;
 mod isolate_state;
 pub mod json;
 pub mod lenient;
+mod lock_guarded;
 pub mod macros;
 mod memory;
 pub mod modules;
@@ -45,6 +46,7 @@ pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use lock_guarded::LockGuarded;
 pub use memory::MemoryInfo;
 pub use memory::MemoryRetainer;
 pub use memory::MemoryTracker;
@@ -138,11 +140,16 @@ mod ffi {
         /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
         unsafe fn realm_drain_awaiting_lock(isolate: *mut Isolate);
 
+        /// Records that the isolate is about to be disposed; see
+        /// `IsolateState::isolate_disposing`. `~IsolateBase` calls it just before
+        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
+        /// reference to the state that `realm_detach` was given.
+        unsafe fn isolate_disposing(state: *const IsolateState);
+
         /// Frees the slots of `TracedGlobal`s, and releases the references of `Rc`s and
         /// `Weak`s, dropped after the Realm; see `IsolateState::isolate_disposed`.
-        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the hook that
-        /// `realm_detach` installs, with the reference to the state that `realm_detach` was
-        /// given.
+        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
+        /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
@@ -161,9 +168,9 @@ mod ffi {
         /// Stores `realm` in the isolate's data slot and installs the deferred action hook
         /// that calls `realm_drain_awaiting_lock`.
         pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
-        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
-        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
-        /// the isolate is disposed.
+        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that passes
+        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposing` just
+        /// before the isolate is disposed, then hands it to `isolate_disposed` once it is.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
     }
 }
@@ -1194,8 +1201,9 @@ impl<'s> Lock<'s> {
     /// - **Details:** the value serialized as `jsg::Serializer` writes it, in version 15 of
     ///   V8's format, with a marker if errors were serialized as host objects (the
     ///   `enhanced_error_serialization` compatibility flag), unless the value can't be
-    ///   serialized. Then, for an object, its `name` and `stack`, if they are strings, each up to
-    ///   its first NUL and cut to 4096 bytes, as a `JsExceptionMetadata` message
+    ///   serialized. Then, for an object, its `name`, `stack` and `message`, if they are strings,
+    ///   each up to its first NUL and cut to at most 4096 bytes without splitting a character,
+    ///   and whether it is a native error, as a `JsExceptionMetadata` message
     ///   (`workerd/jsg/exception-metadata.capnp`).
     ///
     /// The properties are read in that order, and reading them can run JavaScript (getters and
@@ -1205,9 +1213,9 @@ impl<'s> Lock<'s> {
     /// # Errors
     ///
     /// Fails with an error for which [`Error::is_pending`] is true if reading `overloaded`,
-    /// `retryable`, `name` or `stack` throws, leaving the exception pending, as C++ throws
-    /// `JsExceptionThrown` then, and if an exception or a termination is already pending or
-    /// execution terminates.
+    /// `retryable`, `name`, `stack` or `message` throws, leaving the exception pending, as C++
+    /// throws `JsExceptionThrown` then, and if an exception or a termination is already pending
+    /// or execution terminates.
     pub fn exception_to_kj(&mut self, exception: v8::Local<'s, v8::Value>) -> Result<cxx::KjError> {
         exception.debug_assert_isolate(self);
         let object = v8::Local::<v8::Object>::try_from(exception).ok();
@@ -1254,7 +1262,7 @@ impl<'s> Lock<'s> {
         if let Some(object) = object {
             details.push((
                 v8::ffi::js_exception_metadata_detail_id(),
-                exception_metadata(self, object)?,
+                exception_metadata(self, exception, object)?,
             ));
         }
 
@@ -1290,15 +1298,16 @@ fn dom_exception_name_and_message<'s>(
     found.then_some((name, message))
 }
 
-/// `object`'s `name` and `stack`, as the `JsExceptionMetadata` message that C++
-/// `addJsExceptionMetadata()` writes.
+/// The `name`, `stack` and `message` of `exception`, which is `object`, and whether it is a native
+/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes.
 fn exception_metadata<'s>(
     lock: &mut Lock<'s>,
+    exception: v8::Local<'s, v8::Value>,
     object: v8::Local<'s, v8::Object>,
 ) -> Result<Vec<u8>> {
-    let mut message = capnp::message::Builder::new_default();
+    let mut builder = capnp::message::Builder::new_default();
     let mut metadata =
-        message.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
+        builder.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
     let name = object.get(lock, "name")?;
     if name.is_string() {
         let name = String::from_js(lock, name)?;
@@ -1309,16 +1318,28 @@ fn exception_metadata<'s>(
         let stack = String::from_js(lock, stack)?;
         metadata.set_stack_trace(capped(&stack));
     }
-    Ok(capnp::serialize::write_message_to_words(&message))
+    let message = object.get(lock, "message")?;
+    if message.is_string() {
+        let message = String::from_js(lock, message)?;
+        metadata.set_message(capped(&message));
+    }
+    metadata.set_is_native_error(exception.is_native_error());
+    Ok(capnp::serialize::write_message_to_words(&builder))
 }
 
-/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to the length
-/// C++ `addJsExceptionMetadata()` keeps, in bytes, which, as in C++, can end in part of a
-/// character.
-fn capped(text: &str) -> capnp::text::Reader<'_> {
-    let bytes = up_to_nul(text).as_bytes();
-    let max = v8::ffi::js_exception_metadata_max_field_size();
-    capnp::text::Reader::from(&bytes[..bytes.len().min(max)])
+/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to at most the
+/// length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last character boundary within
+/// it, as C++ cuts it.
+fn capped(text: &str) -> &str {
+    let text = up_to_nul(text);
+    let mut end = v8::ffi::js_exception_metadata_max_field_size();
+    if end >= text.len() {
+        return text;
+    }
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 /// `text` up to its first NUL.
@@ -1650,6 +1671,18 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
     // lives in the `Box` until `Realm::drop` detaches it.
     unsafe { ffi::realm_attach(isolate, &mut realm) };
     realm
+}
+
+/// See the bridge declaration.
+#[expect(
+    unsafe_code,
+    reason = "borrows the reference to the state that C++ holds"
+)]
+unsafe fn isolate_disposing(state: *const IsolateState) {
+    // SAFETY: `state` comes from `Arc::into_raw` in `Realm::drop`, and C++ holds it until it
+    // hands it to `isolate_disposed`, after this call.
+    let state = unsafe { &*state };
+    state.isolate_disposing();
 }
 
 /// See the bridge declaration.

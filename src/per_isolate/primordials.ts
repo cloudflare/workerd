@@ -53,7 +53,9 @@ const AggregateErrorCtor = AggregateError;
 const ArrayCtor = Array;
 const ArrayBufferCtor = ArrayBuffer;
 const BigIntCtor = BigInt;
+const BooleanCtor = Boolean;
 const DataViewCtor = DataView;
+const DateCtor = Date;
 const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
@@ -64,6 +66,7 @@ const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
 const RegExpCtor = RegExp;
 const SetCtor = Set;
+const StringCtor = String;
 const SymbolCtor = Symbol;
 const TypeErrorCtor = TypeError;
 const Uint8ArrayCtor = Uint8Array;
@@ -85,9 +88,16 @@ const ObjectDefineProperty = Object.defineProperty;
 const ObjectDefineProperties = Object.defineProperties;
 const ObjectFreeze = Object.freeze;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectHasOwn = Object.hasOwn;
 const ObjectKeys = Object.keys;
 const ObjectGetPrototypeOf = Object.getPrototypeOf;
 const ObjectSetPrototypeOf = Object.setPrototypeOf;
+
+// %IteratorPrototype% — not directly exposed as a global.
+// Reached via: an array iterator → [[Prototype]] → [[Prototype]]
+const IteratorPrototype = ObjectGetPrototypeOf(
+  ObjectGetPrototypeOf([][Symbol.iterator]())
+);
 
 // %AsyncIteratorPrototype% — not directly exposed as a global.
 // Reached via: async function*(){} → .prototype → [[Prototype]] → [[Prototype]]
@@ -211,6 +221,8 @@ const ArrayPrototypePush = uncurryThis(Array.prototype.push);
 const ArrayPrototypeShift = uncurryThis(Array.prototype.shift);
 const ArrayPrototypeSlice = uncurryThis(Array.prototype.slice);
 const ArrayPrototypeSplice = uncurryThis(Array.prototype.splice);
+// Stable, as ECMAScript requires.
+const ArrayPrototypeSort = uncurryThis(Array.prototype.sort);
 
 // Map
 const MapPrototypeGet = uncurryThis(Map.prototype.get);
@@ -248,6 +260,13 @@ const StringPrototypeCharCodeAt = uncurryThis(String.prototype.charCodeAt);
 const StringPrototypeSlice = uncurryThis(String.prototype.slice);
 const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
+// Replaces each lone surrogate with U+FFFD: WebIDL's USVString conversion,
+// after ToString.
+const StringPrototypeToWellFormed = uncurryThis(String.prototype.toWellFormed);
+
+// RegExp
+// RegExpBuiltinExec: the builtin, whatever user code makes RegExp.prototype.exec.
+const RegExpPrototypeExec = uncurryThis(RegExp.prototype.exec);
 
 // Symbol
 const SymbolIterator = Symbol.iterator;
@@ -274,6 +293,7 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 
 // Reflect
 const ReflectConstruct = Reflect.construct;
+const ReflectOwnKeys = Reflect.ownKeys;
 
 // Math / Number (statics — plain value captures)
 const MathMax = Math.max;
@@ -635,6 +655,13 @@ const EventTargetRemoveEventListener = uncurryThis(
   EventTargetCtor.prototype.removeEventListener
 ) as (target: object, type: string, listener: () => void) => void;
 
+// Throws for any receiver but a Blob (a File included): a brand check.
+const BlobPrototypeSlice = uncurryThis(globalThis.Blob.prototype.slice) as (
+  blob: Blob,
+  start?: number,
+  end?: number
+) => Blob;
+
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
 const DOMException = globalThis.DOMException;
@@ -679,7 +706,9 @@ module.exports = ObjectFreeze({
   Array: ArrayCtor,
   ArrayBuffer: ArrayBufferCtor,
   BigInt: BigIntCtor,
+  Boolean: BooleanCtor,
   DataView: DataViewCtor,
+  Date: DateCtor,
   Error: ErrorCtor,
   EventTarget: EventTargetCtor,
   FinalizationRegistry: FinalizationRegistryCtor,
@@ -691,6 +720,7 @@ module.exports = ObjectFreeze({
   RangeError: RangeErrorCtor,
   RegExp: RegExpCtor,
   Set: SetCtor,
+  String: StringCtor,
   Symbol: SymbolCtor,
   TextDecoder: TextDecoderCtor,
   TextEncoder: TextEncoderCtor,
@@ -712,11 +742,13 @@ module.exports = ObjectFreeze({
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  ObjectHasOwn,
   ObjectKeys,
   ObjectGetPrototypeOf,
   ObjectSetPrototypeOf,
 
-  // %AsyncIteratorPrototype%
+  // %IteratorPrototype% / %AsyncIteratorPrototype%
+  IteratorPrototype,
   AsyncIteratorPrototype,
 
   // Promise — regular Promise (for user-facing promises)
@@ -742,6 +774,10 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
+  ArrayPrototypeSort,
+
+  // Blob
+  BlobPrototypeSlice,
 
   // DOMException
   DOMException,
@@ -788,6 +824,7 @@ module.exports = ObjectFreeze({
 
   // Reflect
   ReflectConstruct,
+  ReflectOwnKeys,
 
   // Math / Number
   MathMax,
@@ -802,6 +839,7 @@ module.exports = ObjectFreeze({
   ArrayBufferPrototypeDetachedGet,
 
   // TypedArray
+  TypedArrayPrototype,
   TypedArrayPrototypeSet,
   TypedArrayPrototypeSlice,
   TypedArrayPrototypeSubarray,
@@ -822,6 +860,10 @@ module.exports = ObjectFreeze({
   StringPrototypeSlice,
   StringPrototypeStartsWith,
   StringPrototypeIndexOf,
+  StringPrototypeToWellFormed,
+
+  // RegExp
+  RegExpPrototypeExec,
 
   // Symbol
   SymbolAsyncIterator,

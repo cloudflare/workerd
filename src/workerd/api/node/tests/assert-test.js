@@ -42,6 +42,7 @@ import {
   rejects,
   strictEqual,
   throws,
+  Assert,
   AssertionError,
 } from 'node:assert';
 
@@ -49,6 +50,7 @@ import { mock } from 'node:test';
 import util from 'node:util';
 
 import { default as assert } from 'node:assert';
+import { default as strictAssert } from 'node:assert/strict';
 
 const _strictEqualMessageStart = 'Expected values to be strictly equal:\n';
 const start = 'Expected values to be strictly deep-equal:';
@@ -1518,5 +1520,247 @@ export const setterFailsIfGetterOptionsIsTrue = {
     throws(() => {
       mock.setter({}, 'method', { getter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
+  },
+};
+
+// Ported from Node.js test/parallel/test-assert-class.js and
+// test/parallel/test-assert-class-destructuring.js.
+export const assertClass = {
+  async test() {
+    strictEqual(assert.Assert, Assert);
+    strictEqual(strictAssert.Assert, Assert);
+
+    throws(() => Assert(), {
+      code: 'ERR_CONSTRUCT_CALL_REQUIRED',
+      name: 'TypeError',
+    });
+
+    throws(() => new Assert({ diff: 'invalid' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'TypeError',
+      message:
+        "The property 'options.diff' must be one of: 'simple', 'full'. Received 'invalid'",
+    });
+    new Assert({ diff: 'simple' });
+    new Assert({ diff: 'full' });
+
+    // Non-strict instance.
+    {
+      const assertInstance = new Assert({ diff: undefined, strict: false });
+      strictEqual(assertInstance.AssertionError, AssertionError);
+      assertInstance.ok(true);
+      strictEqual(typeof assertInstance.ok, 'function');
+      strictEqual(assertInstance.ok.strictEqual, undefined);
+      throws(() => assertInstance.ok(false), { name: 'AssertionError' });
+      throws(() => assertInstance.fail(), {
+        code: 'ERR_ASSERTION',
+        message: 'Failed',
+        operator: 'fail',
+        generatedMessage: true,
+      });
+      assertInstance.equal(undefined, undefined);
+      assertInstance.equal(null, undefined);
+      assertInstance.equal(2, '2');
+      assertInstance.equal(NaN, NaN);
+      assertInstance.notEqual(true, false);
+      throws(() => assertInstance.equal(1, 2), {
+        code: 'ERR_ASSERTION',
+        operator: '==',
+      });
+      throws(() => assertInstance.notEqual(2, '2'), {
+        code: 'ERR_ASSERTION',
+        operator: '!=',
+      });
+      assertInstance.deepEqual({ a: 1 }, { a: '1' });
+      assertInstance.notDeepEqual({ a: 1 }, { a: 2 });
+      throws(() => assertInstance.deepEqual({ a: 1 }, { a: 2 }), {
+        code: 'ERR_ASSERTION',
+        operator: 'deepEqual',
+      });
+      throws(() => assertInstance.deepEqual(/a/), {
+        code: 'ERR_MISSING_ARGS',
+      });
+      throws(() => assertInstance.notDeepEqual('test'), {
+        code: 'ERR_MISSING_ARGS',
+      });
+      assertInstance.notStrictEqual(2, '2');
+      throws(
+        () => assertInstance.strictEqual(2, '2'),
+        assertInstance.AssertionError
+      );
+      throws(() => assertInstance.match(/abc/, 'string'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => assertInstance.doesNotMatch(/abc/, 'string'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      assertInstance.throws(() => {
+        throw new TypeError('boom');
+      }, TypeError);
+      await assertInstance.rejects(Promise.reject(new Error('boom')));
+      assertInstance.ifError(null);
+      throws(
+        () =>
+          assertInstance.doesNotThrow(() => {
+            throw new TypeError('wrong');
+          }, assertInstance.AssertionError),
+        TypeError
+      );
+      const rangeError = new RangeError('my range');
+      throws(
+        () =>
+          assertInstance.doesNotThrow(
+            () => {
+              throw new TypeError('wrong type');
+            },
+            TypeError,
+            rangeError
+          ),
+        (err) =>
+          err instanceof assertInstance.AssertionError &&
+          err.message.includes(rangeError.message)
+      );
+      throws(
+        () =>
+          assertInstance.partialDeepStrictEqual(
+            { a: true },
+            { a: false },
+            'custom message'
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+    }
+
+    // Strict instance (the default).
+    {
+      const assertInstance = new Assert();
+      strictEqual(assertInstance.equal, assertInstance.strictEqual);
+      strictEqual(assertInstance.deepEqual, assertInstance.deepStrictEqual);
+      strictEqual(assertInstance.notEqual, assertInstance.notStrictEqual);
+      strictEqual(
+        assertInstance.notDeepEqual,
+        assertInstance.notDeepStrictEqual
+      );
+      throws(() => assertInstance.equal(2, '2'), AssertionError);
+      throws(() => assertInstance.ok(), {
+        code: 'ERR_ASSERTION',
+        message: 'No value argument passed to `assert.ok()`',
+      });
+    }
+
+    // skipPrototype.
+    function CoolClass(name) {
+      this.name = name;
+    }
+    function AwesomeClass(name) {
+      this.name = name;
+    }
+    class Modern {
+      constructor(value) {
+        this.value = value;
+      }
+    }
+    class Legacy {
+      constructor(value) {
+        this.value = value;
+      }
+    }
+    const cool = new CoolClass('Assert is inspiring');
+    const awesome = new AwesomeClass('Assert is inspiring');
+    const modern = new Modern(42);
+    const legacy = new Legacy(42);
+
+    {
+      const assertInstance = new Assert({ skipPrototype: true });
+      throws(
+        () =>
+          assertInstance.deepEqual(
+            [1, 2, 3, 4, 5, 6, 7],
+            [1, 2, 3, 4, 5, 9, 7]
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepEqual(cool, awesome);
+      assertInstance.deepStrictEqual(cool, awesome);
+      assertInstance.deepEqual(modern, legacy);
+      assertInstance.deepStrictEqual(modern, legacy);
+      throws(
+        () =>
+          assertInstance.deepStrictEqual(cool, new CoolClass('Soooo coooool')),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepStrictEqual(
+        { obj: new CoolClass('test'), arr: [1, 2, 3] },
+        { obj: new AwesomeClass('test'), arr: [1, 2, 3] }
+      );
+      assertInstance.deepStrictEqual(
+        new Uint8Array([1, 2, 3]),
+        Buffer.from([1, 2, 3])
+      );
+      assertInstance.deepStrictEqual([1, 2, 3], Array.of(1, 2, 3));
+      assertInstance.deepStrictEqual(
+        new Date('2023-01-01'),
+        new Date('2023-01-01')
+      );
+      assertInstance.deepStrictEqual(/test/g, new RegExp('test', 'g'));
+      throws(
+        () =>
+          assertInstance.deepStrictEqual(
+            new Date('2023-01-01'),
+            new Date('2023-01-02')
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepStrictEqual(
+        { value: 42, nested: { prop: 'test' } },
+        new (function CustomObj(value, nested) {
+          this.value = value;
+          this.nested = nested;
+        })(42, { prop: 'test' })
+      );
+      throws(() => assertInstance.deepStrictEqual({ num: 42 }, { num: '42' }), {
+        code: 'ERR_ASSERTION',
+      });
+      throws(() => assertInstance.notDeepStrictEqual(cool, awesome), {
+        code: 'ERR_ASSERTION',
+      });
+      assertInstance.notDeepStrictEqual(
+        cool,
+        new AwesomeClass('Not so awesome')
+      );
+    }
+    {
+      const assertInstance = new Assert({
+        strict: false,
+        skipPrototype: true,
+      });
+      assertInstance.deepStrictEqual(cool, awesome);
+      assertInstance.deepStrictEqual(modern, legacy);
+    }
+    new Assert({ skipPrototype: false }).notDeepStrictEqual(cool, awesome);
+    throws(() => new Assert().deepStrictEqual(cool, awesome), {
+      code: 'ERR_ASSERTION',
+    });
+
+    // Destructured methods lose the instance options.
+    {
+      const { equal: equalNonStrict } = new Assert({ strict: false });
+      const { equal: equalStrict } = new Assert({ strict: true });
+      equalNonStrict(2, '2');
+      throws(() => equalStrict(2, '2'), AssertionError);
+
+      const { deepStrictEqual: deepStrictEqualSkip } = new Assert({
+        skipPrototype: true,
+      });
+      throws(() => deepStrictEqualSkip(cool, awesome), AssertionError);
+
+      const { fail, throws: throwsFn, match, doesNotMatch } = new Assert();
+      throws(() => fail('test message'), { message: 'test message' });
+      throwsFn(() => {
+        throw new Error('test');
+      }, Error);
+      match('hello world', /world/);
+      doesNotMatch('hello world', /xyz/);
+    }
   },
 };

@@ -1815,7 +1815,22 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
   # like a fetch handler whose client went away.
   #
+  # A Durable Object's pending I/O belongs to the object, not to the request that started it, so a
+  # canceled call doesn't stop it: the method runs to completion, as a Durable Object's fetch
+  # handler does when its client disconnects. To have a Durable Object stop early, pass it an
+  # `AbortSignal` (`enable_abortsignal_rpc`) and abort the signal when disposing the call. The
+  # object still receives the abort after the call is canceled.
+  #
   # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
   # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
   # event is in flight cancels the event and ends the callee's request.
+
+  exposeSerializationTestClass @205 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
+  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
+  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
+  # RPC. This flag is intended for internal testing only and may never have its experimental
+  # annotation removed.
 }

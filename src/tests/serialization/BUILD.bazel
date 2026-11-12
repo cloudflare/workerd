@@ -1,0 +1,13 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "rpc.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
+
+wd_test(
+    src = "error-stacks.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)

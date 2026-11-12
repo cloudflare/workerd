@@ -1,0 +1,17 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The URL benchmarks, on the standard (ada) path, against the C++
+# implementation and the TypeScript one (TS_URL). Enabling every autogate
+# enables TS_URL, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables TS_URL itself.
+
+wd_bench(
+    src = "url-cpp.wd-bench",
+    data = ["url.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "url-ts.wd-bench",
+    data = ["url.js"],
+)

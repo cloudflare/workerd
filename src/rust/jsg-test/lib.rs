@@ -166,6 +166,16 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_exception_to_kj(isolate: *mut Isolate, value: Local) -> Result<bool>;
 
+        /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which
+        /// is its class's descriptor if it is cloneable. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn mark_js_serializable(
+            isolate: *mut Isolate,
+            object: Local,
+            mark: Local,
+        ) -> Result<()>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -640,6 +650,26 @@ impl Harness {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
+    }
+
+    /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which C++
+    /// JSG's `jsg::Serializer` serializes it through if `mark` is its class's descriptor (see
+    /// `jsg/ser.h`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `object` is not an object.
+    pub fn mark_js_serializable<'s>(
+        lock: &mut jsg::Lock<'s>,
+        object: v8::Local<'s, v8::Value>,
+        mark: v8::Local<'s, v8::Value>,
+    ) {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `object` and `mark` belong to.
+        unsafe {
+            ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
+        }
+        .expect("the value should be an object");
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
