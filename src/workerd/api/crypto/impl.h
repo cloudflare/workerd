@@ -334,6 +334,14 @@ class CryptoKey::Impl {
     // By default, nothing to visit.
   }
 
+  // A copy of the key for a startup snapshot (CryptoKey::snapshotClone()): it holds nothing of
+  // any isolate, and copies or shares the key material only in ways that keep it zeroized when
+  // freed. A restored Worker may copy it again on another thread, so this only reads. kj::none,
+  // the default, for kinds of key that do not transfer.
+  virtual kj::Maybe<kj::Own<Impl>> snapshotClone() const {
+    return kj::none;
+  }
+
  private:
   const bool extractable;
   const CryptoKeyUsageSet usages;

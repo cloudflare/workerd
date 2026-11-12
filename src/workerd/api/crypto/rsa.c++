@@ -505,6 +505,7 @@ class RsaBase: public AsymmetricKeyCryptoKeyImpl {
   }
 
  protected:
+  // Holds the public exponent as a V8 buffer, which is why RSA keys have no snapshotClone().
   CryptoKey::RsaKeyAlgorithm keyAlgorithm;
 
  private:

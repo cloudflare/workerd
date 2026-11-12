@@ -4,9 +4,10 @@
 
 // Live API objects across a startup snapshot. A case Worker's top level creates objects whose
 // native side has to travel through the snapshot (Headers, URL, TextEncoder, crypto, navigator,
-// the text/data/JSON bindings; node:fs in startup-snapshot-wrappables-fs-test.js, file system
-// handles in startup-snapshot-wrappables-webfs-test.js) and at request time reports whether they
-// still hold their state and still work. Negative cases leave an object the snapshot cannot carry
+// the text/data/JSON bindings; CryptoKeys in the crypto-keys case; node:fs in
+// startup-snapshot-wrappables-fs-test.js, file system handles in
+// startup-snapshot-wrappables-webfs-test.js) and at request time reports whether they still hold
+// their state and still work. Negative cases leave an object the snapshot cannot carry
 // reachable, or do not qualify for the pipeline, and must start as plain Workers. The runner
 // asserts the reports. Under the startup-snapshot autogate every service here goes through the
 // zygote; without it they are plain Workers and the same assertions hold with snapshotUsed false.
@@ -42,6 +43,26 @@ const textAtTopLevel = env.TEXT;
 const jsonAtTopLevel = env.JSON;
 const dataAtTopLevel = env.DATA;
 
+// Fixed keys for the crypto cases.
+const EC_JWK = {
+  kty: 'EC',
+  crv: 'P-256',
+  x: '_w8CT04oAPekH1gM6xiOVPX14wM7h5bj0W95tF0WL1s',
+  y: 'zZ0H57YkMq_Taaa-oYyink-RlVw3t9xrabj4cfBC5ks',
+  d: 'xHDBUG6nHIKnSYC0B2w_b54aLmaev81Slo7sW6Rgjj4',
+};
+const ED25519_JWK = {
+  kty: 'OKP',
+  crv: 'Ed25519',
+  x: 'sTmjguLELrzU3VPBOcA_cguPH8CYso9jVrSgN9a2aqM',
+  d: 'GzqCoxDqYdXR3nxkmYguU1Lr5UC52zByLW_kIoX_0po',
+};
+const RSA_N =
+  'tmLA_YIxKDNFmz9bpIuoNRueaAKC8CjeWaYNH3HphuohsE2ycNARdFbD5QPfuGRkJxO77Dh6gRuU5zpZQqasBfoo-2Rh' +
+  'dhV7hVuhWyhcnNF-PpnaOntrD_1eLXBPlEWkkbmqoRdTferBsR8H7F0tyQ6NpZB-BoZcPb0RYNdDSHwiiBMG1m9qnX2G' +
+  'dh4KyJ7E34EHogygKa4nCdB79fu8sAZsj-xB3PvkyUKkezEfkAaDAVnpXrVDC56MD88PWjV8WHKeOy1nGQp9A4srS9_5' +
+  'dR2nSp79FjufZiDyBK3E3S-f1Zva2JAcKNR68yDUERDWTmQQcDpOdanyAvGVRl5-9Q';
+
 // Per-case top-level state.
 let controller = null;
 let params = null;
@@ -71,6 +92,70 @@ switch (MODE) {
     // A decoder with the first byte of a two-byte character pending.
     kept = new TextDecoder();
     kept.decode(new Uint8Array([0xc3]), { stream: true });
+    break;
+  case 'crypto-keys': {
+    // Keys whose Impl copies itself: secret key material, and asymmetric keys sharing their
+    // EVP_PKEY. None of their `algorithm` or `usages` properties is read here. The top level may
+    // not generate random values, so every key is imported.
+    const importPair = async (jwk, algorithm) => ({
+      privateKey: await subtle.importKey('jwk', jwk, algorithm, false, [
+        'sign',
+      ]),
+      publicKey: await subtle.importKey(
+        'jwk',
+        { ...jwk, d: undefined },
+        algorithm,
+        false,
+        ['verify']
+      ),
+    });
+    kept = {
+      hmac: await subtle.importKey(
+        'raw',
+        encoder.encode('0123456789abcdef'),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign', 'verify']
+      ),
+      aes: await subtle.importKey(
+        'raw',
+        new Uint8Array(32).fill(7),
+        'AES-GCM',
+        true,
+        ['encrypt', 'decrypt']
+      ),
+      ecdsa: await importPair(EC_JWK, { name: 'ECDSA', namedCurve: 'P-256' }),
+      ed25519: await importPair(ED25519_JWK, { name: 'Ed25519' }),
+      pbkdf2: await subtle.importKey(
+        'raw',
+        encoder.encode('password'),
+        'PBKDF2',
+        false,
+        ['deriveBits']
+      ),
+    };
+    break;
+  }
+  case 'crypto-key-algorithm':
+    // A key whose `algorithm` object JavaScript has seen: its identity cannot be carried.
+    kept = await subtle.importKey(
+      'raw',
+      encoder.encode('0123456789abcdef'),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    kept.algorithm.seen = true;
+    break;
+  case 'crypto-key-rsa':
+    // An RSA key's algorithm holds its public exponent in a V8 buffer, which a copy cannot.
+    kept = await subtle.importKey(
+      'jwk',
+      { kty: 'RSA', n: RSA_N, e: 'AQAB' },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
     break;
   case 'searchparams':
     // The C++ URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
@@ -230,6 +315,15 @@ async function checks() {
       controller.abort('now');
       result.abortWorks = kept.aborted && kept.reason === 'now';
       break;
+    case 'crypto-keys':
+      Object.assign(result, await cryptoKeyChecks(kept));
+      break;
+    case 'crypto-key-algorithm':
+      result.algorithmIdentity = kept.algorithm.seen === true;
+      break;
+    case 'crypto-key-rsa':
+      result.rsa = kept.type === 'public';
+      break;
     case 'gc':
       collect();
       result.keptAfterGc = kept.get('kept') === 'yes';
@@ -315,6 +409,78 @@ async function checks() {
   return result;
 }
 
+// The crypto-keys case: each key still works, with its options.
+async function cryptoKeyChecks({ hmac, aes, ecdsa, ed25519, pbkdf2 }) {
+  const data = encoder.encode('abc');
+  const toHex = (buffer) =>
+    [...new Uint8Array(buffer)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  const hmacSignature = await subtle.sign('HMAC', hmac, data);
+  const iv = new Uint8Array(12);
+  const cipherText = await subtle.encrypt({ name: 'AES-GCM', iv }, aes, data);
+  const plainText = await subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    aes,
+    cipherText
+  );
+  const exported = await subtle.exportKey('raw', aes);
+  const ecdsaAlgorithm = { name: 'ECDSA', hash: 'SHA-256' };
+  const ecdsaSignature = await subtle.sign(
+    ecdsaAlgorithm,
+    ecdsa.privateKey,
+    data
+  );
+  const edSignature = await subtle.sign('Ed25519', ed25519.privateKey, data);
+  const bits = await subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: data, iterations: 1 },
+    pbkdf2,
+    128
+  );
+  return {
+    hmac:
+      toHex(hmacSignature) ===
+        toHex(
+          await subtle.sign(
+            'HMAC',
+            await subtle.importKey(
+              'raw',
+              encoder.encode('0123456789abcdef'),
+              { name: 'HMAC', hash: 'SHA-256' },
+              false,
+              ['sign']
+            ),
+            data
+          )
+        ) && (await subtle.verify('HMAC', hmac, hmacSignature, data)),
+    hmacOptions:
+      !hmac.extractable &&
+      hmac.usages.join() === 'sign,verify' &&
+      hmac.algorithm.hash.name === 'SHA-256',
+    aes:
+      new TextDecoder().decode(plainText) === 'abc' &&
+      aes.extractable &&
+      exported.byteLength === 32 &&
+      aes.algorithm.length === 256,
+    ecdsa:
+      (await subtle.verify(
+        ecdsaAlgorithm,
+        ecdsa.publicKey,
+        ecdsaSignature,
+        data
+      )) &&
+      ecdsa.privateKey.type === 'private' &&
+      ecdsa.publicKey.algorithm.namedCurve === 'P-256',
+    ed25519: await subtle.verify(
+      'Ed25519',
+      ed25519.publicKey,
+      edSignature,
+      data
+    ),
+    pbkdf2: bits.byteLength === 16,
+  };
+}
+
 export async function report(extraChecks = {}) {
   return {
     mode: MODE,
@@ -373,6 +539,7 @@ async function test(ctrl, env) {
     // node:fs and node:url: the module scope reaches UrlUtil, a Rust JSG resource
     // (src/rust/api/url.rs) marked snapshot_stateless.
     'fs',
+    'crypto-keys',
     ...(tsUrl ? ['searchparams'] : []),
   ];
   // Cases that fail the zygote: always plain Workers.
@@ -385,6 +552,8 @@ async function test(ctrl, env) {
     'cpp-streams-pending-cancel',
     // A recorded performance entry is JavaScript state the clone cannot carry.
     'performance-entries',
+    'crypto-key-algorithm',
+    'crypto-key-rsa',
   ];
 
   const run = async (name, expectedSnapshotUsed) => {

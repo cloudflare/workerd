@@ -65,6 +65,9 @@ const unitTests :Workerd.Config = (
           (name = "span", service = "span"),
           (name = "webfs-tmp", service = "webfs-tmp"),
           (name = "webfs-bundle", service = "webfs-bundle"),
+          (name = "crypto-keys", service = "crypto-keys"),
+          (name = "crypto-key-algorithm", service = "crypto-key-algorithm"),
+          (name = "crypto-key-rsa", service = "crypto-key-rsa"),
         ],
       )
     ),
@@ -229,6 +232,42 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"midstream-decoder\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "crypto-keys",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"crypto-keys\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "crypto-key-algorithm",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"crypto-key-algorithm\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "crypto-key-rsa",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"crypto-key-rsa\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),
