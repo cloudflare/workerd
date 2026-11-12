@@ -99,7 +99,7 @@ pub mod bridge {
             props: Local,
             version: MaybeLocal,
         ) -> MaybeLocal;
-        /// `jsg::resource::ffi_is::<ExecutionContext>`, for `RustExecutionContextTag::isInstance`.
+        /// `jsg::resource::ffi_is::<ExecutionContext>`, for `api::isRustExecutionContext()`.
         unsafe fn execution_context_is(isolate: *mut Isolate, value: Local) -> KjMaybe<bool>;
     }
 }

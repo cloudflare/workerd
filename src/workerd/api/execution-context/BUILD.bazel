@@ -30,8 +30,8 @@ wd_rust_crate(
     ],
 )
 
-# The C++ shims that ffi.rs calls, the definition of RustExecutionContextTag::isInstance(), and
-# api::newExecutionContext() (execution-context.h).
+# The C++ shims that `ffi.rs` calls, and the definitions of `api::newRustExecutionContext()` and
+# `api::isRustExecutionContext()` (`execution-context.h`).
 wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],

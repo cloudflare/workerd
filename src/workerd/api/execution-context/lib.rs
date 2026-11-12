@@ -8,7 +8,7 @@
 //! It behaves as the C++ `api::ExecutionContext` (`src/workerd/api/global-scope.h`) does, which
 //! it replaces under the `rust-execution-context` autogate. C++ holds either one as an
 //! `api::exportedhandler::ExecutionContext`, and creates this one through
-//! `api::newExecutionContext()` (`execution-context.h`).
+//! `api::newRustExecutionContext()` (`execution-context.h`).
 
 mod ffi;
 
