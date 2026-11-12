@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -103,7 +104,20 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
 
 // Wrappable implementation - calls into Rust via CXX bridge
 Wrappable::~Wrappable() {
-  wrappable_invoke_drop(*this);
+  // The cxx bridge turns a panic in the resource's `Drop` into a kj::Exception. This destructor
+  // runs from the cppgc sweep, among other places, where a throw would terminate the process, so
+  // the panic is logged and the isolate marked (see IsolateBase::setResourceDropPanicked()).
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { wrappable_invoke_drop(*this); })) {
+    LOG_EXCEPTION("rustResourceDropPanic", e);
+    // An unbound Wrappable has no isolate of its own; it is dropped with its isolate current.
+    v8::Isolate* isolate = getIsolate() != nullptr ? getIsolate() : v8::Isolate::TryGetCurrent();
+    if (isolate != nullptr) {
+      // None while the isolate is being torn down, when there is nothing left to abort.
+      KJ_IF_SOME(base, ::workerd::jsg::IsolateBase::tryFrom(isolate)) {
+        base.setResourceDropPanicked();
+      }
+    }
+  }
 }
 
 void Wrappable::jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) {

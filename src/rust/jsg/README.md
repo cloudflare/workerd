@@ -478,6 +478,11 @@ let js_obj = resource.to_js(&mut lock)?;
 let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 ```
 
+A resource is dropped when its wrapper is collected and no `Rc` holds it, often inside the
+garbage collector's sweep. A panic in its `Drop` impl is logged, and since the resource's cleanup
+did not finish, the isolate is aborted (`abortIsolate()`) the next time a request enters it,
+before that JavaScript runs. JavaScript already running when the panic happened is not stopped.
+
 ### Reaching the resource from a callback
 
 A method's `&self` is only valid during the call. Code that runs later, such as a promise

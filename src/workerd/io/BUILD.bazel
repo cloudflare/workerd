@@ -814,6 +814,14 @@ kj_test(
 )
 
 kj_test(
+    src = "io-context-drop-panic-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-context-task-test.c++",
     deps = [
         ":io",
