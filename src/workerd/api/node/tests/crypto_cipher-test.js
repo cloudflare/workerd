@@ -735,3 +735,45 @@ export const testUnimplemented = {
     strictEqual(typeof createDecipher, 'function');
   },
 };
+
+export const gcmSetAuthTagAfterUpdate = {
+  test() {
+    // For GCM the auth tag only has to be set before final(), so streaming
+    // decryption can call update() before the tag is known.
+    for (const { name, size } of authTagTests) {
+      if (!name.endsWith('-gcm')) continue;
+      const key = Buffer.alloc(size, 0x4c);
+      const iv = Buffer.alloc(12, 0x61);
+      const aad = Buffer.from('header');
+      const plaintext = Buffer.from('attack at dawn, and again at dusk');
+
+      const cipher = createCipheriv(name, key, iv);
+      cipher.setAAD(aad);
+      const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const tag = cipher.getAuthTag();
+
+      const newDecipher = () => {
+        const decipher = createDecipheriv(name, key, iv);
+        decipher.setAAD(aad);
+        return decipher;
+      };
+
+      const decipher = newDecipher();
+      const head = decipher.update(ct.subarray(0, 10));
+      const tail = decipher.update(ct.subarray(10));
+      decipher.setAuthTag(tag);
+      deepStrictEqual(Buffer.concat([head, tail, decipher.final()]), plaintext);
+
+      const badTag = Buffer.from(tag);
+      badTag[0] ^= 1;
+      const bad = newDecipher();
+      bad.update(ct);
+      bad.setAuthTag(badTag);
+      throws(() => bad.final(), { message: 'Authentication failed' });
+
+      const missing = newDecipher();
+      missing.update(ct);
+      throws(() => missing.final(), { message: 'No auth tag provided' });
+    }
+  },
+};
