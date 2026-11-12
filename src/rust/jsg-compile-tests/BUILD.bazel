@@ -6,5 +6,8 @@ wd_rust_compile_test(
     name = "jsg",
     srcs = glob(["*.rs"]),
     proc_macro_deps = ["//src/rust/jsg-macros"],
-    deps = ["//src/rust/jsg"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+    ],
 )

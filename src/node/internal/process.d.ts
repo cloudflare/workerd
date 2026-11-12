@@ -4,6 +4,7 @@
 
 export function getEnvObject(): Record<string, string>;
 export function getBuiltinModule(id: string): object;
+export function getInternalModule(specifier: string): object;
 export function exitImpl(code: number): void;
 export function getCwd(): string;
 export function setCwd(path: string): void;

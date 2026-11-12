@@ -1150,6 +1150,36 @@ export const processStdio = {
   },
 };
 
+// The stdio streams are built on first access, through accessors on the process
+// object as in Node.js, and every route to them yields the same object.
+export const processStdioAccessors = {
+  test() {
+    for (const name of ['stdin', 'stdout', 'stderr']) {
+      const desc = Object.getOwnPropertyDescriptor(process, name);
+      assert.strictEqual(typeof desc.get, 'function', `${name} is an accessor`);
+      assert.ok(desc.enumerable && desc.configurable);
+      assert.strictEqual(process[name], process[name]);
+      assert.strictEqual(processMod[name], process[name]);
+      assert.strictEqual(processMod.default[name], process[name]);
+      assert.strictEqual(processBuiltin[name], process[name]);
+      assert.strictEqual(processBuiltinScheme[name], process[name]);
+    }
+    assert.strictEqual(process.openStdin(), process.stdin);
+
+    // Assignment replaces the stream, as it does for a data property.
+    const desc = Object.getOwnPropertyDescriptor(process, 'stdout');
+    const fake = { write() {} };
+    try {
+      process.stdout = fake;
+      assert.strictEqual(process.stdout, fake);
+      assert.strictEqual(processMod.default.stdout, fake);
+    } finally {
+      Object.defineProperty(process, 'stdout', desc);
+    }
+    assert.strictEqual(process.stdout, processMod.stdout);
+  },
+};
+
 export const processAssert = {
   test() {
     assert.ok('assert' in process);

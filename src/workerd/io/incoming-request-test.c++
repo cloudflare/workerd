@@ -9,7 +9,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -883,7 +882,7 @@ void expectRejectsForNoCurrentIncomingRequest(kj::WaitScope& waitScope, kj::Prom
 }
 
 KJ_TEST("run() fails without running its callback when there is no current request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  TestFixture fixture;
   auto context = fixture.newIoContext();
 
   bool ran = false;
@@ -893,8 +892,7 @@ KJ_TEST("run() fails without running its callback when there is no current reque
 }
 
 KJ_TEST("run() in a critical section fails when there is no current request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
 
@@ -908,8 +906,7 @@ KJ_TEST("run() in a critical section fails when there is no current request") {
 }
 
 KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -927,13 +924,8 @@ KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
 
 KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
   auto io = kj::setupAsyncIo();
-  // Each fixture initializes the process's autogates, so both enable it.
-  TestFixture fixture({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
-  TestFixture other({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
+  TestFixture fixture({.waitScope = io.waitScope, .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
@@ -950,8 +942,7 @@ KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") 
 }
 
 KJ_TEST("run() in a critical section fails with the abort reason of an aborted context") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("run-critical-section-abort-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-critical-section-abort-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   context->abort(KJ_EXCEPTION(FAILED, "test abort"));
@@ -991,7 +982,7 @@ KJ_TEST("runOnHibernate() drops the cross-context actions queued while the actor
     KJ_EXPECT(ran == 0, ran);
     KJ_EXPECT(executor.getQueuedActionCountForTest() == 0, executor.getQueuedActionCountForTest());
     KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
-  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  });
 }
 
 KJ_TEST("runOnHibernate() runs the cross-context actions queued during the handler, but not those "
@@ -1032,7 +1023,7 @@ KJ_TEST("runOnHibernate() runs the cross-context actions queued during the handl
     KJ_EXPECT(readEvents(fixture) == "onHibernate;resumed;", readEvents(fixture));
     KJ_EXPECT(idleRan == 0, idleRan);
     KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
-  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  });
 }
 
 }  // namespace

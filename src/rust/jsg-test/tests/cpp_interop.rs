@@ -117,17 +117,18 @@ fn rust_method_rejects_another_type() {
 #[test]
 fn rust_method_describes_a_cpp_resource_by_its_cpp_name() {
     let mut cx = jsg::rtti::Context::default();
-    let greet_with = jsg::rtti::resource_members::<Host>(&mut cx)
-        .into_iter()
-        .find_map(|member| match member {
-            jsg::rtti::Member::Method {
-                name: "greetWith",
-                args,
-                ..
-            } => Some(args),
-            _ => None,
-        })
-        .unwrap();
+    let greet_with =
+        jsg::rtti::resource_members::<Host>(&mut cx, &mut jsg::rtti::TypeScript::default())
+            .into_iter()
+            .find_map(|member| match member {
+                jsg::rtti::Member::Method {
+                    name: "greetWith",
+                    args,
+                    ..
+                } => Some(args),
+                _ => None,
+            })
+            .unwrap();
     assert!(matches!(
         greet_with[0].ty,
         jsg::rtti::Type::CppStructure {
@@ -241,6 +242,30 @@ fn kj_exception_from_cpp_becomes_its_js_error() {
     assert_eq!(message, "thrown by C++ as a kj::Exception");
 }
 
+/// Describes what `call` throws: its class, name, message and legacy code.
+fn describe_thrown(call: &str) -> String {
+    eval::<String>(&format!(
+        "let e; try {{ {call}; }} catch (thrown) {{ e = thrown; }}
+         `${{e.constructor.name}} ${{e.name}}: ${{e.message}} (${{e.code}})`"
+    ))
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_a_dom_exception_name_of_its_own() {
+    assert_eq!(
+        describe_thrown("h.failWithQuotaExceededError(greeter)"),
+        "DOMException QuotaExceededError: thrown by C++ as a kj::Exception (22)",
+    );
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_dom_syntax_error_a_dom_exception() {
+    assert_eq!(
+        describe_thrown("h.failWithDomSyntaxError(greeter)"),
+        "DOMException SyntaxError: thrown by C++ as a kj::Exception (12)",
+    );
+}
+
 #[test]
 fn js_exception_from_cpp_passes_through() {
     let (name, message) = eval_error("h.failWithJsError(greeter)");
@@ -261,6 +286,7 @@ fn cpp_is_not_called_while_an_exception_is_pending() {
                 // Run, `greet()` would succeed and return "Hello, x". Not run, the call fails and
                 // the exception stays pending.
                 let err = greeter
+                    .get(lock)
                     .greet(lock, "x")
                     .expect_err("should not run the C++");
                 assert!(err.is_pending(), "not pending: {err}");
@@ -326,6 +352,48 @@ fn held_resources_survive_gc() {
     });
 }
 
+#[test]
+fn heap_snapshot_follows_a_held_cpp_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
+        ctx.eval_raw(lock, "h.hold(holder)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let host = snapshot.find("Host");
+        let held = snapshot.target(host, "held");
+        assert_eq!(snapshot.nodes[held].name, "workerd / TestCppHolder");
+        // The C++ resource has a wrapper, so the snapshot also reaches it through the isolate's
+        // list of wrapped objects, and that is the same node.
+        assert_eq!(snapshot.find_all("TestCppHolder"), [held]);
+        Ok(())
+    });
+}
+
+#[test]
+fn heap_snapshot_follows_a_held_rust_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
+        ctx.eval_raw(lock, "holder.hold(h)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let holder = snapshot.find("TestCppHolder");
+        let host = snapshot.find("Host");
+        // C++ holds a Rust resource by its wrapper, so the edge is to the wrapper, which leads on
+        // to the resource's node.
+        let wrapper = snapshot.target(holder, "held");
+        // V8 shows the wrapper as one node with the cppgc object it holds.
+        assert!(!snapshot.nodes[wrapper].name.starts_with("workerd /"));
+        assert!(
+            snapshot
+                .targets(wrapper, "javascript_to_native")
+                .contains(&host)
+        );
+        Ok(())
+    });
+}
+
 /// A C++ resource carried by a typed promise is detached from the promise's wrapper when a
 /// reaction takes it, as a moved `jsg::Ref` is, so it can go in a Rust resource and be traced
 /// there after a collection that the wrapper traced it in.
@@ -333,7 +401,7 @@ fn held_resources_survive_gc() {
 fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
     Harness::new().run_in_context(|lock, ctx| {
         let host = new_host(lock);
-        set_globals(lock, ctx, host.clone());
+        set_globals(lock, ctx, host.clone(lock));
         let holder = ctx.eval_raw(lock, "holder").unwrap();
         let holder = <jsg_cpp::Ref<ffi::TestCppHolder> as jsg::FromJS>::from_js(lock, holder)?;
         ctx.eval_raw(lock, "globalThis.holder = undefined;")
@@ -341,7 +409,7 @@ fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
         let (promise, resolver) =
             jsg::Promise::<jsg_cpp::Ref<ffi::TestCppHolder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, host, |lock, host, holder| {
-            host.hold(lock, holder);
+            host.get(lock).hold(lock, holder);
             // Traces the host, and through it the reference, from its new owner.
             Harness::request_gc(lock);
             Ok(())
@@ -358,4 +426,224 @@ fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
         );
         Ok(())
     });
+}
+
+/// The message of a panic caught by `catch_unwind`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+}
+
+/// Only the lock of the object's isolate guards a `Ref`'s reference count and the object, so
+/// every operation on one but dropping panics under another isolate's lock. B runs on a thread of
+/// its own, which doesn't hold A's lock, as in production: a harness holds its isolate's lock
+/// while it exists.
+#[test]
+fn ref_used_in_another_isolate_panics() {
+    const MESSAGE: &str =
+        "attempt to use a jsg::LockGuarded in an isolate other than the one it was created in";
+    let a = Harness::new();
+    let mut greeters = None;
+    a.run_in_context(|lock, _ctx| {
+        // SAFETY: the constructor is called with the lock's isolate, in its scope.
+        let value = new_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_new(isolate, "Hello")
+        });
+        let greeter = <jsg_cpp::Ref<ffi::TestCppGreeter> as jsg::FromJS>::from_js(lock, value)?;
+        greeters = Some((greeter.clone(lock), greeter));
+        Ok(())
+    });
+    let (greeter, to_wrap) = greeters.expect("created in A");
+
+    std::thread::spawn(move || {
+        Harness::new().run_in_context(|lock, _ctx| {
+            let mut panics = |what: &str, f: &mut dyn FnMut(&mut jsg::Lock<'_>)| {
+                let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(lock)))
+                    .expect_err(&format!("{what} in B must panic"));
+                assert_eq!(panic_message(&*payload), Some(MESSAGE), "{what}");
+            };
+            panics("get", &mut |lock| _ = greeter.get(lock));
+            panics("as_cpp", &mut |lock| _ = greeter.as_cpp(lock));
+            panics("clone", &mut |lock| drop(greeter.clone(lock)));
+            let mut to_wrap = Some(to_wrap);
+            panics("to_js", &mut |lock| {
+                _ = jsg::ToJS::to_js(to_wrap.take().expect("once"), lock);
+            });
+            Ok(())
+        });
+        drop(greeter);
+    })
+    .join()
+    .expect("B's thread");
+    // A releases the references that B's thread dropped at its next lock.
+    a.run_in_context(|_lock, _ctx| Ok(()));
+}
+
+/// A `Ref` dropped without its isolate's lock is queued for the next lock, though C++ would
+/// destroy an object with no wrapper at once: two such references dropped on two threads would
+/// otherwise change the object's reference count at the same time.
+#[test]
+fn ref_to_unwrapped_object_dropped_without_the_lock_waits_for_it() {
+    let a = Harness::new();
+    let mut holders = None;
+    a.run_in_context(|lock, _ctx| {
+        let holder = ffi::TestCppHolder::new_unwrapped(lock)?.expect("a new holder");
+        holders = Some((holder.clone(lock), holder));
+        Ok(())
+    });
+    let (first, second) = holders.expect("created in A");
+    let destroyed = ffi::test_cpp_holders_destroyed();
+
+    let threads = [
+        std::thread::spawn(move || drop(first)),
+        std::thread::spawn(move || drop(second)),
+    ];
+    for thread in threads {
+        thread.join().expect("dropping thread");
+    }
+    assert_eq!(ffi::test_cpp_holders_destroyed(), destroyed);
+
+    a.run_in_context(|_lock, _ctx| Ok(()));
+    assert_eq!(ffi::test_cpp_holders_destroyed() - destroyed, 1);
+}
+
+#[jsg_macros::jsg_resource]
+struct CppHolderHolder {
+    held: jsg_cpp::Ref<ffi::TestCppHolder>,
+}
+
+#[jsg_macros::jsg_resource]
+impl CppHolderHolder {}
+
+/// Gives a global of a new harness a resource holding a `Ref` to a C++ object with no wrapper,
+/// which the GC visits. Returns the harness and a clone of the `Ref`.
+fn harness_with_held_cpp_holder() -> (Harness, jsg_cpp::Ref<ffi::TestCppHolder>) {
+    let harness = Harness::new();
+    let mut clone = None;
+    harness.run_in_context(|lock, ctx| {
+        let held = ffi::TestCppHolder::new_unwrapped(lock)?.expect("a new holder");
+        clone = Some(held.clone(lock));
+        let holder = jsg::Rc::new(lock, CppHolderHolder { held });
+        ctx.set_global(lock, "holder", holder);
+        Harness::request_gc(lock);
+        Ok(())
+    });
+    (harness, clone.expect("set in the context"))
+}
+
+/// Teardown drops the resource under the lock, and so the `Ref` it holds, and destroys the C++
+/// object then, before the isolate is disposed, as C++ JSG destroys the objects it holds.
+#[test]
+fn ref_that_teardown_drops_destroys_its_object_before_the_isolate_is_disposed() {
+    let (harness, clone) = harness_with_held_cpp_holder();
+    drop(clone);
+    let destroyed = ffi::test_cpp_holders_destroyed_on_this_thread();
+    let in_an_isolate = ffi::test_cpp_holders_destroyed_on_this_thread_in_an_isolate();
+    drop(harness);
+    assert_eq!(
+        ffi::test_cpp_holders_destroyed_on_this_thread() - destroyed,
+        1
+    );
+    assert_eq!(
+        ffi::test_cpp_holders_destroyed_on_this_thread_in_an_isolate() - in_an_isolate,
+        1
+    );
+}
+
+#[jsg_macros::jsg_resource]
+struct OuterHolder {
+    inner: jsg::Rc<CppHolderHolder>,
+}
+
+#[jsg_macros::jsg_resource]
+impl OuterHolder {}
+
+/// The same holds for a `Ref` that teardown reaches through a `jsg::Rc`: dropping the outer
+/// resource releases the inner one under the lock, which drops the `Ref`.
+#[test]
+fn nested_ref_that_teardown_drops_destroys_its_object_before_the_isolate_is_disposed() {
+    let harness = Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let held = ffi::TestCppHolder::new_unwrapped(lock)?.expect("a new holder");
+        let inner = jsg::Rc::new(lock, CppHolderHolder { held });
+        let outer = jsg::Rc::new(lock, OuterHolder { inner });
+        ctx.set_global(lock, "outer", outer);
+        Harness::request_gc(lock);
+        Ok(())
+    });
+    let in_an_isolate = ffi::test_cpp_holders_destroyed_on_this_thread_in_an_isolate();
+    drop(harness);
+    assert_eq!(
+        ffi::test_cpp_holders_destroyed_on_this_thread_in_an_isolate() - in_an_isolate,
+        1
+    );
+}
+
+/// A `Ref` kept past teardown destroys its object once dropped, though the isolate is gone.
+#[test]
+fn ref_kept_past_teardown_destroys_its_object() {
+    let (harness, kept) = harness_with_held_cpp_holder();
+    drop(harness);
+    let destroyed = ffi::test_cpp_holders_destroyed_on_this_thread();
+    drop(kept);
+    assert_eq!(
+        ffi::test_cpp_holders_destroyed_on_this_thread() - destroyed,
+        1
+    );
+}
+
+#[jsg_macros::jsg_resource]
+struct GreeterHolder {
+    greeter: jsg::Cell<Option<jsg_cpp::Ref<ffi::TestCppGreeter>>>,
+}
+
+#[jsg_macros::jsg_resource]
+impl GreeterHolder {}
+
+/// Detaching a `Ref` changes its reference count, which only its own isolate's lock guards, so
+/// taking one of another isolate out of a `jsg::Cell` panics. B runs on a thread of its own, which
+/// doesn't hold A's lock, as in production: a harness holds its isolate's lock while it exists.
+#[test]
+fn ref_of_another_isolate_detached_panics() {
+    let a = Harness::new();
+    let mut greeter = None;
+    a.run_in_context(|lock, _ctx| {
+        // SAFETY: the constructor is called with the lock's isolate, in its scope.
+        let value = new_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_new(isolate, "Hello")
+        });
+        greeter = Some(<jsg_cpp::Ref<ffi::TestCppGreeter> as jsg::FromJS>::from_js(
+            lock, value,
+        )?);
+        Ok(())
+    });
+
+    std::thread::spawn(move || {
+        Harness::new().run_in_context(|lock, _ctx| {
+            let holder = jsg::Rc::new(
+                lock,
+                GreeterHolder {
+                    greeter: jsg::Cell::new(greeter.take()),
+                },
+            );
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(holder.get(lock).greeter.take(lock));
+            }))
+            .expect_err("detaching A's Ref in B must panic");
+            assert_eq!(
+                panic_message(&*payload),
+                Some(
+                    "attempt to use a jsg::LockGuarded in an isolate other than the one it was \
+                     created in"
+                )
+            );
+            Ok(())
+        });
+    })
+    .join()
+    .expect("B's thread");
+    // A releases its object, whose drop in B C++ deferred, at its next lock.
+    a.run_in_context(|_lock, _ctx| Ok(()));
 }

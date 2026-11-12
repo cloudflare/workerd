@@ -105,6 +105,22 @@ fn is_result_type_cases() {
 }
 
 #[test]
+fn is_promise_type_cases() {
+    assert!(is_promise_type(&parse_quote!(v8::Local<'s, v8::Promise>)));
+    assert!(is_promise_type(&parse_quote!(jsg::Promise<'s, String>)));
+    assert!(is_promise_type(&parse_quote!(
+        jsg::Result<v8::Local<'s, v8::Promise>>
+    )));
+    assert!(is_promise_type(&parse_quote!(
+        Result<jsg::Promise<'s, String>, jsg::Error>
+    )));
+    assert!(!is_promise_type(&parse_quote!(v8::Local<'s, v8::Value>)));
+    assert!(!is_promise_type(&parse_quote!(jsg::Result<()>)));
+    assert!(!is_promise_type(&parse_quote!(v8::VoidPromise<'s>)));
+    assert!(!is_promise_type(&parse_quote!(String)));
+}
+
+#[test]
 fn is_lock_ref_cases() {
     assert!(is_lock_ref(&parse_quote!(&mut Lock)));
     assert!(is_lock_ref(&parse_quote!(&mut jsg::Lock)));
@@ -277,4 +293,50 @@ fn this_param_cases() {
     );
     assert_eq!(this(parse_quote!(fn f(that: jsg::Rc<Self>))), None);
     assert_eq!(this(parse_quote!(fn f())), None);
+}
+
+/// Parses TypeScript customizations into `(ts_root, ts_override, ts_define)`.
+fn parse_typescript(
+    tokens: proc_macro2::TokenStream,
+) -> syn::Result<(bool, Option<String>, Option<String>)> {
+    parse_typescript_options(tokens).map(|(ts_root, ts_override, ts_define)| {
+        (
+            ts_root,
+            ts_override.map(|value| value.value()),
+            ts_define.map(|value| value.value()),
+        )
+    })
+}
+
+#[test]
+fn typescript_options_cases() {
+    assert_eq!(parse_typescript(quote! {}).unwrap(), (false, None, None));
+    assert_eq!(
+        parse_typescript(quote! { name = "Foo", ts_root, custom_trace }).unwrap(),
+        (true, None, None)
+    );
+    assert_eq!(
+        parse_typescript(quote! { ts_override = "{ a(): void }", ts_define = r#"type A = "a";"# })
+            .unwrap(),
+        (
+            false,
+            Some("{ a(): void }".to_owned()),
+            Some(r#"type A = "a";"#.to_owned())
+        )
+    );
+}
+
+#[test]
+fn typescript_options_reject_invalid_values() {
+    let error = parse_typescript(quote! { ts_override = Foo }).unwrap_err();
+    assert_eq!(error.to_string(), "expected a string literal of TypeScript");
+    let error = parse_typescript(quote! { ts_define = "a", ts_define = "b" }).unwrap_err();
+    assert_eq!(error.to_string(), "duplicate `ts_define`");
+}
+
+#[test]
+fn invalid_typescript_options_still_evaluate_to_customizations() {
+    let expression = typescript_options(quote! { ts_override = 1 }).to_string();
+    assert!(expression.contains("compile_error"));
+    assert!(expression.contains("TypeScript :: default ()"));
 }

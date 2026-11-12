@@ -659,7 +659,7 @@ fn coercion_exception_propagates_through_method() {
                 call_count: Cell::new(0),
             },
         );
-        ctx.set_global(lock, "resource", resource.clone());
+        ctx.set_global(lock, "resource", resource.clone(lock));
         let caught = ctx.eval::<bool>(
             lock,
             "const thrown = new RangeError('boom');
@@ -670,7 +670,7 @@ fn coercion_exception_propagates_through_method() {
              caught === thrown && caughtNumber === 42",
         );
         assert!(caught.unwrap());
-        assert_eq!(resource.call_count.get(), 0);
+        assert_eq!(resource.get(lock).call_count.get(), 0);
         Ok(())
     });
 }
@@ -855,7 +855,7 @@ fn converting_resource(
             saw_pending: Cell::new(false),
         },
     );
-    ctx.set_global(lock, "obj", resource.clone());
+    ctx.set_global(lock, "obj", resource.clone(lock));
     let panicker = jsg::Rc::new(
         lock,
         ReentrantResource {
@@ -883,7 +883,7 @@ fn termination_during_conversion_propagates() {
                 result.is_err(),
                 "{conversion:?}: not terminated: {result:?}"
             );
-            assert!(resource.saw_pending.get(), "{conversion:?}");
+            assert!(resource.get(lock).saw_pending.get(), "{conversion:?}");
             Ok(())
         });
     }
@@ -911,7 +911,7 @@ fn conversion_while_terminating_runs_nothing() {
                 result.is_err(),
                 "{conversion:?}: not terminated: {result:?}"
             );
-            assert!(resource.saw_pending.get(), "{conversion:?}");
+            assert!(resource.get(lock).saw_pending.get(), "{conversion:?}");
             // V8 clears the termination once no JavaScript is running.
             assert!(
                 !ctx.eval::<bool>(lock, "secondRan").unwrap(),
@@ -946,7 +946,7 @@ fn conversion_while_exception_pending_runs_nothing() {
                 )
                 .unwrap();
             assert_eq!(caught, "RangeError: first", "{conversion:?}");
-            assert!(resource.saw_pending.get(), "{conversion:?}");
+            assert!(resource.get(lock).saw_pending.get(), "{conversion:?}");
             assert!(
                 !ctx.eval::<bool>(lock, "secondRan").unwrap(),
                 "{conversion:?} ran JavaScript with an exception pending"

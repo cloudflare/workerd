@@ -31,74 +31,6 @@ class Blob;
 template <typename T>
 struct DeferredProxy;
 
-class CloseEvent: public Event {
- public:
-  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
-  CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close", {}, Trusted::YES),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {})
-      : Event(kj::mv(type), kj::mv(init)),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-
-  struct Initializer {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<int> code;
-    jsg::Optional<jsg::USVString> reason;
-    jsg::Optional<bool> wasClean;
-
-    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
-    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
-  };
-  static jsg::Ref<CloseEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
-    Initializer init = kj::mv(initializer).orDefault({});
-    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
-        Event::Init{
-          .bubbles = init.bubbles,
-          .cancelable = init.cancelable,
-          .composed = init.composed,
-        });
-  }
-
-  int getCode() {
-    return code;
-  }
-  kj::StringPtr getReason() {
-    return reason;
-  }
-  bool getWasClean() {
-    return clean;
-  }
-
-  JSG_RESOURCE_TYPE(CloseEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
-
-    JSG_TS_ROOT();
-    // CloseEvent will be referenced from the `WebSocketEventMap` define
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  int code;
-  kj::String reason;
-  bool clean;
-};
-
 WD_STRONG_BOOL(AllowHalfOpen);
 
 // The forward declaration is necessary so we can make some
@@ -441,8 +373,8 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocket::AcceptOptions,    \
-      api::WebSocketPair, api::WebSocketPair::PairIterator,                                        \
+  api::WebSocket, api::WebSocket::AcceptOptions, api::WebSocketPair,                               \
+      api::WebSocketPair::PairIterator,                                                            \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
@@ -802,6 +734,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
     kj::WebSocket::Message message;
     size_t pendingAutoResponses = 0;
+    // See chargeOutgoing().
+    kj::Maybe<jsg::ExternalMemoryAdjustment> memory;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
 
@@ -888,6 +822,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   void tryReleaseNative(jsg::Lock& js);
 
+  // Returns an adjustment that counts a message queued by send() with a payload of `payloadBytes`
+  // as isolate external memory. The queue lives outside the V8 heap, so without this a peer that
+  // never reads, or a WebSocketPair end that is never returned in a Response, lets it grow without
+  // the isolate's memory limit seeing it.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> chargeOutgoing(size_t payloadBytes);
+
   // ---------------------------------------------------------------------------
   // Members retained by the legacy adapter while the EW-10817 refactor is incomplete.
   // ---------------------------------------------------------------------------
@@ -940,6 +880,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // If any error has occurred.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> error;
+
+  // The isolate's external memory, to which queued outgoing messages are charged.
+  kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> outgoingMemory;
 
   // Queue of messages to be sent. Wrapped in an IoOwn so the pump loop can safely access
   // the map without locking the isolate.

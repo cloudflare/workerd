@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+using UrlPatternModules = import "urlpattern-modules.capnp";
+
+# Runs the URLPattern suite against the C++ standard implementation (api/urlpattern-standard.h, ada).
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util) and expose_global_message_channel.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "urlpattern-standard-cpp",
+      worker = (
+        modules = UrlPatternModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "expose_global_message_channel",
+          "urlpattern_standard",
+          "set_tostring_tag",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
+      )
+    ),
+  ],
+);

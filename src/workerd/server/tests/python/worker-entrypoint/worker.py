@@ -3,8 +3,27 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 import os
+import re
+import signal
+import sys
 
 from workers import WorkerEntrypoint
+
+# The runtime imports its introspection module once, after this top level has run. A dedicated
+# snapshot is collected after that, so it holds this hook and its count, and an isolate restored
+# from it finds the module in sys.modules instead of compiling it again.
+introspection_compiles = 0
+
+
+def count_introspection_compiles(event, args):
+    global introspection_compiles
+    if event == "compile" and re.search(
+        r"/_cloudflare/introspection_\w+\.py$", str(args[1])
+    ):
+        introspection_compiles += 1
+
+
+sys.addaudithook(count_introspection_compiles)
 
 
 class WorkerEntrypointExample(WorkerEntrypoint):
@@ -26,3 +45,12 @@ async def test(ctrl, env, ctx):
     second_resp = await env.entrypoint.rpc_trigger_func()
     # We expect the counter to stay the same since this isn't a durable object.
     assert second_resp == "hello from python 1"
+
+    assert introspection_compiles == 1, introspection_compiles
+
+    ((introspection_name, introspection),) = (
+        (name, mod)
+        for name, mod in sys.modules.items()
+        if name.startswith("_cloudflare.introspection_")
+    )
+    assert signal.getsignal(signal.SIGXCPU) is introspection.raise_cpu_limit_exceeded

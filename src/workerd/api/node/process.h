@@ -15,7 +15,15 @@ class ProcessModule final: public jsg::Object {
   ProcessModule() = default;
   ProcessModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
+
+  // Returns the namespace of a node-internal: module, resolving and evaluating it if
+  // necessary. node-internal:public_process uses this to load the parts of `process`
+  // that are expensive to set up, such as the stdio streams, on first use.
+  jsg::JsObject getInternalModule(jsg::Lock& js, kj::String specifier);
 
 // This process.platform implementation is always gated behind the
 // 'enable_deprecated_process_actual_platform' compatibility flag
@@ -57,6 +65,7 @@ class ProcessModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(ProcessModule) {
     JSG_METHOD(getEnvObject);
     JSG_METHOD(getBuiltinModule);
+    JSG_METHOD(getInternalModule);
     JSG_METHOD(exitImpl);
     JSG_METHOD(getCwd);
     JSG_METHOD(setCwd);

@@ -120,6 +120,13 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
+        /// Takes a heap snapshot of the isolate, which includes what `jsg::MemoryTracker`
+        /// reports, and returns it serialized as JSON.
+        pub unsafe fn take_heap_snapshot(isolate: *mut Isolate) -> Result<String>;
+
+        /// `sizeof` the C++ `Wrappable` of a Rust resource, which its heap snapshot node counts.
+        pub fn rust_wrappable_size() -> usize;
+
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
         /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
         #[expect(clippy::allow_attributes)]
@@ -152,6 +159,23 @@ mod ffi {
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+
+        /// Converts `exception` to a `kj::Exception` and back, as C++ JSG does with
+        /// `jsg::Lock::exceptionToKj()` and `jsg::Lock::exceptionToJsValue()`. Fails if
+        /// converting it throws, leaving that exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
+
+        /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which
+        /// is its class's descriptor if it is cloneable. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn mark_js_serializable(
+            isolate: *mut Isolate,
+            object: Local,
+            mark: Local,
+        ) -> Result<()>;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
@@ -215,10 +239,10 @@ impl Drop for Autogates {
 
 /// Configures the process's autogates to exactly `names` for as long as the returned guard lives.
 ///
-/// Each name is in kebab-case without the `workerd-autogate-` prefix
-/// (`"jsg-integer-enforce-range"` for `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`). An empty slice
-/// disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and
-/// the tests run serially, so a test holds the guard for its duration.
+/// Each name is in kebab-case without the `workerd-autogate-` prefix (`"test-workerd"` for
+/// `AutogateKey::TEST_WORKERD`). An empty slice disables every autogate, whatever
+/// `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and the tests run serially, so a test
+/// holds the guard for its duration.
 ///
 /// # Panics
 ///
@@ -599,6 +623,25 @@ impl Harness {
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
+    /// Takes a heap snapshot, as the inspector's `HeapProfiler.takeHeapSnapshot` does, and
+    /// returns it in V8's JSON format.
+    ///
+    /// # Panics
+    ///
+    /// If V8 fails to take the snapshot.
+    pub fn take_heap_snapshot(lock: &mut jsg::Lock<'_>) -> String {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::take_heap_snapshot(lock.isolate().as_ffi()) }
+            .expect("V8 takes a heap snapshot")
+    }
+
+    /// The size of the C++ `Wrappable` of a Rust resource, which the resource's heap snapshot
+    /// node adds to the resource's own.
+    #[must_use]
+    pub fn rust_wrappable_size() -> usize {
+        ffi::rust_wrappable_size()
+    }
+
     /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
     /// Used to test that Rust unwrap rejects non-Rust wrappable objects.
     pub fn create_cpp_tagged_object<'s>(lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Value> {
@@ -608,6 +651,26 @@ impl Harness {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
+    }
+
+    /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which C++
+    /// JSG's `jsg::Serializer` serializes it through if `mark` is its class's descriptor (see
+    /// `jsg/ser.h`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `object` is not an object.
+    pub fn mark_js_serializable<'s>(
+        lock: &mut jsg::Lock<'s>,
+        object: v8::Local<'s, v8::Value>,
+        mark: v8::Local<'s, v8::Value>,
+    ) {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `object` and `mark` belong to.
+        unsafe {
+            ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
+        }
+        .expect("the value should be an object");
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
@@ -645,6 +708,26 @@ impl Harness {
                     .expect("C++ JSG should deserialize the data"),
             )
         }
+    }
+
+    /// Converts `exception` to a `kj::Exception` and back with C++ JSG, to compare with
+    /// [`jsg::TunneledException`].
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if converting it throws.
+    pub fn cpp_tunnel_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        exception: v8::Local<'s, v8::Value>,
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(ffi::cpp_tunnel_exception(
+                lock.isolate().as_ffi(),
+                exception.into_ffi(),
+            ))
+        }
+        .ok_or_else(jsg::Error::pending)
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

@@ -393,6 +393,20 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
   return kj::mv(result);
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> Headers::snapshotClone() const {
+  auto clone = kj::refcounted<Headers>();
+  clone->guard = guard;
+  for (auto i: kj::indices(commonHeaders)) {
+    KJ_IF_SOME(header, commonHeaders[i]) {
+      clone->commonHeaders[i] = header->clone();
+    }
+  }
+  for (auto& entry: uncommonHeaders) {
+    clone->uncommonHeaders.insert(kj::str(entry.key), entry.value->clone());
+  }
+  return ownAsWrappable(kj::mv(clone));
+}
+
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {

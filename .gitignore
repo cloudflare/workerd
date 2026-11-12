@@ -37,7 +37,12 @@ package-lock.json
 coverage
 perf.data
 
-.claude
+# Claude Code: track the shared project config, which reuses the opencode agents, commands,
+# skills, and tools under .opencode/; ignore everything else, such as settings.local.json.
+.claude/*
+!.claude/agents/
+!.claude/commands
+!.claude/skills
 
 # opencode auto-generates package.json, bun.lock, and .gitignore inside .opencode/
 # at startup to install plugin dependencies. These are runtime artifacts that should

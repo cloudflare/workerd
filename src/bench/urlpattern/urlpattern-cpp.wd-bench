@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the URLPattern benchmarks against the C++ standard implementation
+# (api/urlpattern-standard.h). No compatibilityDate, so that the variants
+# supply it; urlpattern_standard is pinned, so every variant measures the
+# ada path.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "urlpattern-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "urlpattern.js")],
+        compatibilityFlags = ["urlpattern_standard"],
+      )
+    ),
+  ],
+);

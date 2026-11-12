@@ -65,6 +65,20 @@ struct Runtime {
       stackTrace @4 :StackTrace;
     }
   }
+
+  struct Command {
+    struct GetHeapUsage {
+      # Returns the JavaScript heap usage. It is the total usage of the corresponding isolate not
+      # scoped to a particular Runtime.
+      struct Params {}
+      struct Result {
+        usedSize @0 :Float64; # Used JavaScript heap size in bytes.
+        totalSize @1 :Float64; # Allocated JavaScript heap size in bytes.
+        embedderHeapUsedSize @2 :Float64; # Used size in bytes in the embedder's garbage-collected heap.
+        backingStorageSize @3 :Float64; # Size in bytes of backing storage for array buffers and external strings.
+      }
+    }
+  }
 }
 struct Page {
   # Actions and events related to the inspected page belong to the page domain.
@@ -384,6 +398,7 @@ struct Command $Json.discriminator(name = "method") {
     profilerStart @7 :Method(Profiler.Command.Start.Params, Profiler.Command.Start.Result) $Json.name("Profiler.start") $Json.flatten();
     profilerStop @8 :Method(Profiler.Command.Stop.Params, Profiler.Command.Stop.Result) $Json.name("Profiler.stop") $Json.flatten();
     takeHeapSnapshot @9 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
+    runtimeGetHeapUsage @10 :Method(Runtime.Command.GetHeapUsage.Params, Runtime.Command.GetHeapUsage.Result) $Json.name("Runtime.getHeapUsage") $Json.flatten();
   }
 }
 

@@ -104,13 +104,13 @@ struct ClusterConfig {
   # Each Durable Object runs on one instance at a time, its owner; any instance routes requests
   # for it there.
   #
-  # The cluster's shared state lives in an S3-compatible bucket: each instance renews a lease
-  # record naming its address, and each Durable Object's owner is a record claimed by a conditional
-  # write. Taking an object over from an owner whose lease expired bumps its ownership epoch.
-  # Instances need no shared filesystem: `durableObjectStorage.localDisk` is each instance's own
-  # disk. Durable Objects stored in memory stay local to each instance. The bucket's copy of an
-  # object replaces the instance's, so a `localDisk` already holding Durable Objects from before
-  # cluster mode is refused at startup; they are not imported.
+  # The cluster's shared state lives in a bucket, S3-compatible or Google Cloud Storage (`bucket`):
+  # each instance renews a lease record naming its address, and each Durable Object's owner is a
+  # record claimed by a conditional write. Taking an object over from an owner whose lease expired
+  # bumps its ownership epoch. Instances need no shared filesystem: `durableObjectStorage.localDisk`
+  # is each instance's own disk. Durable Objects stored in memory stay local to each instance. The
+  # bucket's copy of an object replaces the instance's, so a `localDisk` already holding Durable
+  # Objects from before cluster mode is refused at startup; they are not imported.
   #
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
@@ -190,16 +190,50 @@ struct ClusterConfig {
   # of the bucket does not reduce that authority.
 
   bucket @0 :Text;
-  # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
+  # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
+  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  #
+  # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
+  # object generations. Its access tokens come from the service account key that
+  # `GOOGLE_APPLICATION_CREDENTIALS` names (a credentials file of another type is an error); else
+  # from the metadata server of the Compute Engine VM or GKE pod the instance runs on, which under
+  # GKE Workload Identity answers the token of the pod's Kubernetes service account.
+  # `GCE_METADATA_HOST` names another metadata server; an IPv6-only VM, which cannot reach
+  # 169.254.169.254, needs it set to `[fd20:ce::254]`.
+  # A first token, from any source, is retried, as a new GKE pod's metadata server may refuse
+  # requests at first: attempts start for up to 30 s and each has 10 s, so the wait can reach
+  # about 40 s. But when nothing suggests the instance runs on Google Cloud (none of
+  # `GCE_METADATA_HOST`, `KUBERNETES_SERVICE_HOST`, Cloud Run's `K_SERVICE` and `CLOUD_RUN_JOB`,
+  # Cloud Run functions' `FUNCTION_TARGET` and `FUNCTION_NAME`, or App Engine's `GAE_ENV` and
+  # `GAE_SERVICE` is set, and the machine's DMI product name is not Google's), a metadata server
+  # that refuses the connection, or does not connect within a second, fails it at once, with an
+  # error that says how to provide credentials. On a Kubernetes cluster outside Google Cloud
+  # whose network drops packets to 169.254.169.254, that error comes only after the 40 s. At the
+  # default address, an answer without the `Metadata-Flavor: Google` header of Google's metadata
+  # server, on Google Cloud or off it, fails it at once too, unless its status is 429 or 5xx; a
+  # metadata server `GCE_METADATA_HOST` names, such as a proxy or an emulator, need not send the
+  # header. The identity needs to read, write, list and delete the bucket's objects, as
+  # `roles/storage.objectUser` grants: replacing an object requires permission to delete it.
+  # Without Workload Identity, a GCE VM or GKE node's default access scopes are often read-only
+  # for storage, which shows up as a 403 when the instance starts.
+  # For tests, `STORAGE_EMULATOR_HOST` (`host:port` or a URL) sends the requests to an emulator
+  # instead, without a token unless `GOOGLE_APPLICATION_CREDENTIALS` or `GCE_METADATA_HOST` is
+  # set.
 
   bucketOptions @1 :List(Text);
-  # `key=value` settings for `bucket`: `aws_endpoint=https://...`, `aws_region=auto`,
+  # `key=value` settings for an `s3://` bucket: `aws_endpoint=https://...`, `aws_region=auto`,
   # `aws_access_key_id=...`, `aws_secret_access_key=...`, and `aws_token=...`. In place of the
   # last three, `aws_credentials_file=<path>` names a file of `AWS_ACCESS_KEY_ID=`,
   # `AWS_SECRET_ACCESS_KEY=` and `AWS_SESSION_TOKEN=` lines, reread whenever it changes, so
   # short-lived credentials rotate without a restart. Replace it by rename, not in place. Each
   # setting not given falls back to an environment variable: `AWS_ENDPOINT_URL`, `AWS_REGION`,
   # `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CREDENTIALS_FILE`.
+  #
+  # A `gs://` bucket takes no settings: any setting is an error that stops the instance, as
+  # `workerd deploy --endpoint` or `--region` is for the command. The `AWS_*` environment
+  # variables do not apply to it.
+  #
+  # For either scheme, an entry without `=` is ignored.
 
   address @2 :Text;
   # Where this instance listens for other instances: `host:port`, a port of 0 for an ephemeral
@@ -230,6 +264,57 @@ struct ClusterConfig {
   # Allow a public IP as `address` or `advertise`. Refused by default, since traffic between
   # instances is not encrypted. Private, loopback, link-local and shared (100.64.0.0/10, as
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
+
+  stopTimeoutMs @6 :UInt32 = 8000;
+  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
+  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
+  # while it keeps serving the rest: each object takes no new requests but those that the work of
+  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
+  # its requests in flight finish, and it is released for the next request anywhere to claim.
+  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
+  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
+  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
+  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
+  # stops its containers' Docker containers.
+  #
+  # The time is spent in order: until half of it, requests in flight on an object being handed off
+  # may finish, and are then cancelled, failing as requests that may have run, which are not sent
+  # again; at three quarters, the handoff ends, and an object not yet released is stopped if it
+  # still runs, and taken over by a peer once the instance has left; at nine tenths, the instance
+  # stops waiting for its connections, whose requests end as it exits; the rest is for the
+  # containers. A call that reaches an object being handed off through a stateless worker, rather
+  # than from a Durable Object, waits like any other request, so a call from the object back to
+  # itself that way ends only with the requests in flight. Stopping an object's Docker container
+  # takes one of the few handoffs that run at once.
+  #
+  # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
+  # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
+  # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
+  # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut
+  # short. An instance with very many objects may not stop them all by 33/40 of the timeout: it
+  # then stays a member, and its peers take over every object it did not hand off once its lease
+  # expires, after it exited, as they do when the supervisor kills it first.
+  #
+  # A `fetch()` to an object that moves is sent on transparently. A JS RPC call that a peer sent
+  # through a stub to the stopping instance may fail once, as retryable; the stub's next call finds
+  # the object. WebSockets an object here accepted close as it is handed off. An alarm that comes
+  # due on a stopping instance runs where its object goes: when a request claims the object there,
+  # or else once a peer adopts the alarms of the instance that left, within five seconds of its
+  # leaving, so up to one stop and five seconds late; for an instance that stays a member with
+  # objects still running, once its lease expires, up to 20 seconds later still.
+  #
+  # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
+  # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+
+  unsafeTimeDivisor @7 :UInt32 = 1;
+  # For tests: divides by this the times that a takeover and a stop wait out, which tests would
+  # otherwise spend most of their time on. These are the 20-second lease, with the rounds that
+  # renew it and the bounds on them, the five seconds between rounds that adopt dead instances'
+  # alarms, and the five seconds a stopping instance accepts requests for at least.
+  # `stopTimeoutMs` is not divided. A divisor of 0, or one that rounds a time down to 0 (above
+  # 1000), fails the config. Bucket requests that stall past the shortened bounds fence the
+  # instance, so leave this at 1 outside tests.
 }
 
 struct LoggingOptions {
@@ -361,12 +446,26 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    bucket @6 :ClusterBucket;
+    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
   #   be a list of Worker names, where each Worker must have a binding called `next`. This
   #   implicitly creates an inherited worker that wraps this service, with the `next` binding
   #   pointing to the service itself (or to the next middleware in the stack).
+}
+
+struct ClusterBucket {
+  # GET, PUT and DELETE on `/<file>` read, write and remove the object
+  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
+  # that every instance sees the same files. The cluster keeps its own state outside
+  # `services/`, where this service cannot reach it. A binding to this service grants only its
+  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 }
 
 struct ServiceDesignator {
@@ -511,6 +610,12 @@ struct Worker {
 
       obsoletePythonRequirement @9 :Text;
       # This position used to be the pythonRequirement type that has now been deprecated.
+
+      bundled @11 :Text;
+      # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
+      # Worker, `/workerd/cron.js`, cron triggers, or `/workerd/queues.js`, the Queues Worker
+      # (see each one's header for the config it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

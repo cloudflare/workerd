@@ -81,7 +81,8 @@ impl Thrower {
         lock: &mut jsg::Lock<'s>,
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        this.throw_then(lock, first, |lock| this.clone().to_js(lock))
+        this.get(lock)
+            .throw_then(lock, first, |lock| this.clone(lock).to_js(lock))
     }
 
     /// Gets the constructor of a resource type (`FunctionTemplate::GetFunction`).
@@ -92,6 +93,46 @@ impl Thrower {
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
         self.throw_then(lock, first, jsg::resource::function_template_of::<Fresh>)
+    }
+
+    /// Creates a `DOMException`, which instantiates a template.
+    #[jsg_method]
+    fn throw_then_create_dom_exception<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        })
+    }
+
+    /// Creates the exception for an `Error` of a `DOMException` type.
+    #[jsg_method]
+    fn throw_then_create_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.exception(&jsg::Error::new_abort_error("second"))
+        })
+    }
+
+    /// Fails with an `Error` of a `DOMException` type in place of the pending error, as code that
+    /// breaks the rule does. Throwing it creates nothing, so the exception `first` threw
+    /// propagates.
+    #[jsg_method]
+    fn throw_then_fail_with_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        let pending = self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        });
+        assert!(pending.is_err_and(|err| err.is_pending()));
+        Err(jsg::Error::new_abort_error("second"))
     }
 
     /// Detaches a new `ArrayBuffer`, which leaves it attached.
@@ -155,7 +196,7 @@ fn exception_survives(call: &str) {
                 saw_pending: Cell::new(None),
             },
         );
-        ctx.set_global(lock, "obj", thrower.clone());
+        ctx.set_global(lock, "obj", thrower.clone(lock));
         let caught = ctx
             .eval::<String>(
                 lock,
@@ -167,7 +208,7 @@ fn exception_survives(call: &str) {
             )
             .unwrap();
         assert_eq!(caught, "RangeError: first", "{call}");
-        assert_eq!(thrower.saw_pending.get(), Some(true), "{call}");
+        assert_eq!(thrower.get(lock).saw_pending.get(), Some(true), "{call}");
         assert!(
             !ctx.eval::<bool>(lock, "secondRan").unwrap(),
             "{call} ran JavaScript with an exception pending"
@@ -194,6 +235,21 @@ fn wrapping_a_wrapped_resource_while_exception_pending_fails() {
 #[test]
 fn getting_a_constructor_while_exception_pending_fails() {
     exception_survives("throwThenGetConstructor(first)");
+}
+
+#[test]
+fn creating_a_dom_exception_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomException(first)");
+}
+
+#[test]
+fn creating_a_dom_error_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomError(first)");
+}
+
+#[test]
+fn throwing_a_dom_error_while_exception_pending_keeps_the_exception() {
+    exception_survives("throwThenFailWithDomError(first)");
 }
 
 #[test]
@@ -248,13 +304,13 @@ fn callback_entered_while_try_catch_holds_exception_panics() {
                 ran: Cell::new(false),
             },
         );
-        ctx.set_global(lock, "callee", callee.clone());
+        ctx.set_global(lock, "callee", callee.clone(lock));
         match ctx.eval_with_caught_exception(lock, "callee.run()") {
             Err(crate::EvalError::EvalFailed) => {}
             Err(crate::EvalError::Exception(exception)) => assert!(exception.is_null()),
             other => panic!("the callback was entered: {other:?}"),
         }
-        assert!(!callee.ran.get());
+        assert!(!callee.get(lock).ran.get());
         Ok(())
     });
 }

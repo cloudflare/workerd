@@ -73,8 +73,6 @@ namespace workerd::util {
   V(V8_FAST_API)                                                                                   \
   /* Enable refactor used to consolidate the different tail worker stream implementations. */      \
   V(TAIL_STREAM_REFACTOR)                                                                          \
-  /* Enable fast TextEncoder implementation using simdutf */                                       \
-  V(ENABLE_FAST_TEXTENCODER)                                                                       \
   /* When enabled, reject startTls calls that pass the expectedServerHostname option,              \
     which is not currently supported. When disabled, log the usage instead. */                     \
   V(STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)                                                      \
@@ -82,8 +80,6 @@ namespace workerd::util {
      related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by           \
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
-  /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
-  V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
@@ -100,11 +96,6 @@ namespace workerd::util {
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
-  /* When enabled, the Node.js `i18n` transcode implementation (api::node                          \
-     i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
-     instead of the C++ implementation. The C++ implementation is retained                         \
-     for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)                                                                              \
   /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
@@ -117,26 +108,26 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
-  /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
-     before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
-     arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
-     uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
-     fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
-  /* Cross-context actions queued on an actor between events wait for its next request instead     \
-     of aborting it, and IoContext::run() without a current request fails with a typed error.      \
-     An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
-     actor's onHibernate event drops the actions queued before it. Also counts the copies of an    \
-     abort's reason its queued deliveries share as external memory, and queues at most one         \
-     request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
-     actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
+     (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
+  V(TS_URL)                                                                                        \
+  /* URLPattern is the TypeScript implementation from the per-isolate bootstrap                    \
+     (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
+     api/urlpattern-standard.h. */                                                                 \
+  V(TS_URL_PATTERN)                                                                                \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
-  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
+     (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
+  V(RUST_MEMORY_CACHE)                                                                             \
+  /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
+     external memory, so that the isolate's memory limit applies to them. See                      \
+     LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

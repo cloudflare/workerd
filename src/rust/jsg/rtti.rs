@@ -105,13 +105,39 @@ pub enum Member {
         args: Vec<Parameter>,
         result: Type,
     },
+    /// The `[Symbol.iterator]()` method, named after the Rust method. It is not a member of the
+    /// encoded structure but its `iterator` field, with `iterable` set, as C++ RTTI writes a
+    /// `JSG_ITERABLE`.
+    Iterator {
+        name: &'static str,
+        args: Vec<Parameter>,
+        result: Type,
+    },
+}
+
+/// Customizations of a structure's TypeScript declaration.
+///
+/// These correspond to C++ `JSG_TS_ROOT`, `JSG_TS_OVERRIDE` and `JSG_TS_DEFINE`; see the
+/// `## JSG_TS_OVERRIDE Rules` section of `src/workerd/jsg/README.md` for the override syntax.
+/// The fields are named after the `rtti.capnp` fields they set.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TypeScript {
+    /// Whether the declaration is a root of the ambient declarations.
+    pub ts_root: bool,
+    /// A partial or complete TypeScript statement that customizes the generated declaration.
+    pub ts_override: Option<&'static str>,
+    /// TypeScript declarations emitted next to the generated declaration.
+    pub ts_define: Option<&'static str>,
+    /// The intrinsic the type's prototype inherits from, which the declaration extends: the
+    /// structure's `extends`, as C++ RTTI writes a `JSG_INHERIT_INTRINSIC`.
+    pub extends: Option<crate::Intrinsic>,
 }
 
 struct Structure {
     identity: &'static str,
     name: &'static str,
     members: Vec<Member>,
-    root: bool,
+    typescript: TypeScript,
 }
 
 /// A deterministic, cycle-safe collection of reachable binding definitions.
@@ -174,8 +200,9 @@ impl Context {
 
     /// Describes the structure `T` the first time it is reached, and returns a reference to it.
     ///
-    /// The structure is interned before `members` runs, so members can refer to it
-    /// recursively.
+    /// `members` describes the structure's members, and can amend its TypeScript
+    /// customizations, as a resource's registration does. The structure is interned before
+    /// `members` runs, so members can refer to it recursively.
     ///
     /// # Panics
     ///
@@ -183,8 +210,8 @@ impl Context {
     pub fn structure<T: ?Sized + 'static>(
         &mut self,
         name: &'static str,
-        root: bool,
-        members: impl FnOnce(&mut Self) -> Vec<Member>,
+        typescript: TypeScript,
+        members: impl FnOnce(&mut Self, &mut TypeScript) -> Vec<Member>,
     ) -> Type {
         let identity = type_name::<T>();
         if !self.indices.contains_key(&TypeId::of::<T>()) {
@@ -198,10 +225,13 @@ impl Context {
                 identity,
                 name,
                 members: Vec::new(),
-                root,
+                typescript,
             });
-            let members = members(self);
-            self.structures[index].members = members;
+            let mut typescript = typescript;
+            let members = members(self, &mut typescript);
+            let structure = &mut self.structures[index];
+            structure.members = members;
+            structure.typescript = typescript;
         }
         Type::Structure { identity, name }
     }
@@ -246,16 +276,45 @@ impl Context {
             return;
         }
         nesting.push(index);
-        builder.set_ts_root(structure.root);
-        let (callables, members): (Vec<_>, Vec<_>) = structure
-            .members
-            .iter()
-            .partition(|member| matches!(member, Member::Callable { .. }));
-        // Template creation rejects a type that is callable more than one way.
-        if let Some(Member::Callable { args, result }) = callables.first() {
-            let mut callable = builder.reborrow().init_callable();
-            result.write(callable.reborrow().init_return_type());
-            write_args(args, callable.init_args(length(args.len())));
+        let TypeScript {
+            ts_root,
+            ts_override,
+            ts_define,
+            extends,
+        } = structure.typescript;
+        builder.set_ts_root(ts_root);
+        if let Some(ts_override) = ts_override {
+            builder.set_ts_override(ts_override);
+        }
+        if let Some(ts_define) = ts_define {
+            builder.set_ts_define(ts_define);
+        }
+        if let Some(intrinsic) = extends {
+            builder
+                .reborrow()
+                .init_extends()
+                .init_intrinsic()
+                .set_name(intrinsic_name(intrinsic));
+        }
+        // Template creation rejects a type with more than one of each of these, which are
+        // fields of the structure rather than members.
+        let mut members = Vec::new();
+        for member in &structure.members {
+            match member {
+                Member::Callable { args, result } => {
+                    let mut callable = builder.reborrow().init_callable();
+                    result.write(callable.reborrow().init_return_type());
+                    write_args(args, callable.init_args(length(args.len())));
+                }
+                Member::Iterator { name, args, result } => {
+                    builder.set_iterable(true);
+                    let mut iterator = builder.reborrow().init_iterator();
+                    iterator.set_name(*name);
+                    result.write(iterator.reborrow().init_return_type());
+                    write_args(args, iterator.init_args(length(args.len())));
+                }
+                _ => members.push(member),
+            }
         }
         let mut builders = builder.init_members(length(members.len()));
         for (i, member) in members.into_iter().enumerate() {
@@ -268,6 +327,7 @@ impl Context {
 /// The registry through which RTTI export collects the members of a resource type.
 struct DescribedMembers<'a> {
     cx: &'a mut Context,
+    typescript: &'a mut TypeScript,
     members: Vec<Member>,
 }
 
@@ -277,14 +337,30 @@ impl MemberRegistry for DescribedMembers<'_> {
             self.members.push(member);
         }
     }
+
+    fn ts_override(&mut self, ts_override: &'static str) {
+        self.typescript.ts_override = Some(ts_override);
+    }
+
+    fn ts_define(&mut self, ts_define: &'static str) {
+        self.typescript.ts_define = Some(ts_define);
+    }
+
+    fn inherit_intrinsic(&mut self, intrinsic: crate::Intrinsic) {
+        self.typescript.extends = Some(intrinsic);
+    }
 }
 
-/// Describes the members that `R` registers under the context's compatibility flags, in
-/// registration order. [`undescribed`](crate::undescribed) members are omitted.
-pub fn resource_members<R: Resource>(cx: &mut Context) -> Vec<Member> {
+/// Describes the members that `R` registers under the context's compatibility flags.
+///
+/// Members are described in registration order, and the TypeScript customizations `R`
+/// registers are applied to `typescript`. [`undescribed`](crate::undescribed) members are
+/// omitted.
+pub fn resource_members<R: Resource>(cx: &mut Context, typescript: &mut TypeScript) -> Vec<Member> {
     let flags = Rc::clone(&cx.flags);
     let mut registry = DescribedMembers {
         cx,
+        typescript,
         members: Vec::new(),
     };
     R::members(&mut registry, flags.reader());
@@ -360,6 +436,14 @@ impl Type {
     }
 }
 
+/// The name by which C++ RTTI identifies `intrinsic`, as `JSG_INHERIT_INTRINSIC` spells it.
+fn intrinsic_name(intrinsic: crate::Intrinsic) -> &'static str {
+    match intrinsic {
+        crate::Intrinsic::IteratorPrototype => "v8::kIteratorPrototype",
+        _ => unreachable!("every Intrinsic variant has a name"),
+    }
+}
+
 fn write_args(
     args: &[Parameter],
     mut builder: capnp::struct_list::Builder<'_, rtti_capnp::type_::Owned>,
@@ -427,8 +511,8 @@ impl Member {
                     crate::ConstantValue::Number(value) => constant.set_number_value(*value),
                 }
             }
-            Self::Callable { .. } => {
-                unreachable!("Context::write_structure writes a callable as the structure's")
+            Self::Callable { .. } | Self::Iterator { .. } => {
+                unreachable!("Context::write_structure writes these as fields of the structure")
             }
         }
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/api/streams/writable.h>
+#include <workerd/api/url-bridge.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
@@ -51,7 +52,7 @@ class FileFdHandle final: public jsg::Object {
 
 class FileSystemModule final: public jsg::Object {
  public:
-  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>, JsUrl>;
 
   struct StatOptions {
     jsg::Optional<bool> followSymlinks;
@@ -170,6 +171,16 @@ class FileSystemModule final: public jsg::Object {
 
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
+
+  // The VFS itself is fetched per-call via VirtualFileSystem::current(js), so the only
+  // state to carry over is the temp-name counter. It is copied rather than reset so that
+  // temp names minted after restore can't collide with paths that top-level code saved
+  // into JS state before the snapshot was taken.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    auto clone = kj::refcounted<FileSystemModule>();
+    clone->tmpFileCounter = tmpFileCounter;
+    return ownAsWrappable(kj::mv(clone));
+  }
 
   jsg::Ref<FileFdHandle> getFdHandle(jsg::Lock& js, int fd) {
     return FileFdHandle::constructor(js, fd);
@@ -657,6 +668,9 @@ class FileSystemWritableFileStream final: public WritableStream {
 
 class StorageManager final: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> getDirectory(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
 

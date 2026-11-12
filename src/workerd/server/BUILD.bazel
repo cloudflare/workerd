@@ -8,6 +8,7 @@ load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+load("//build/bazelflare:exec_properties.bzl", "link_exec_properties")
 
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
@@ -68,6 +69,7 @@ wd_cc_embed(
 wd_rust_binary(
     name = "workerd",
     srcs = ["workerd.rs"],
+    exec_properties = link_exec_properties(),
     malloc = ":malloc",
     test = False,
     tool = True,
@@ -211,6 +213,7 @@ wd_cc_library(
         "workerd-api.h",
     ],
     implementation_deps = [
+        "//src/rust/jsg:ffi",
         "//src/workerd/api:analytics-engine",
         "//src/workerd/api:capnp",
         "//src/workerd/api:kv",
@@ -218,6 +221,8 @@ wd_cc_library(
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
+        "//src/workerd/api/memory-cache-api",
+        "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:promise-wrapper",
     ],
     local_defines = select({
@@ -248,6 +253,9 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
+        "//src/workerd/server/cron:cron-js",
+        "//src/workerd/server/kv:kv-js",
+        "//src/workerd/server/queues:queues-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
     ] + select({
@@ -383,7 +391,7 @@ wd_capnp_library(
 )
 
 kj_test(
-    size = "large",
+    size = "enormous",
     src = "server-test.c++",
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],

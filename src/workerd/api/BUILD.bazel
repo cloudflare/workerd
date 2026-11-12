@@ -48,6 +48,7 @@ filegroup(
         "trace.c++",
         "tracing.c++",
         "unsafe.c++",
+        "url-bridge.c++",
         "url-standard.c++",
         "web-socket.c++",
         "worker-rpc.c++",
@@ -110,6 +111,7 @@ filegroup(
         "trace.h",
         "tracing.h",
         "unsafe.h",
+        "url-bridge.h",
         "url-standard.h",
         "web-socket.h",
         "worker-rpc.h",
@@ -372,6 +374,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/cxx",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],
@@ -572,6 +575,21 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "url-bootstrap",
+    srcs = ["url-bootstrap.c++"],
+    hdrs = ["url-bootstrap.h"],
+    implementation_deps = [
+        ":url",
+        "//src/workerd/jsg:url",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "urlpattern",
     srcs = ["urlpattern.c++"],
     hdrs = ["urlpattern.h"],
@@ -589,8 +607,36 @@ wd_cc_library(
     hdrs = ["urlpattern-standard.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":urlpattern-regex",
         "//src/workerd/jsg",
         "@ada-url",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-bootstrap",
+    srcs = ["urlpattern-bootstrap.c++"],
+    hdrs = ["urlpattern-bootstrap.h"],
+    implementation_deps = [
+        ":urlpattern-regex",
+        "//src/workerd/jsg:url",
+        "@ada-url",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-regex",
+    srcs = ["urlpattern-regex.c++"],
+    hdrs = ["urlpattern-regex.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -672,6 +718,9 @@ kj_test(
     src = "memory-cache-test.c++",
     deps = [
         ":memory-cache",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/api/memory-cache-api",
+        "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
         "//src/workerd/util:thread-scopes",
@@ -723,6 +772,32 @@ kj_test(
 
 kj_test(
     src = "bootstrap-utils-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "urlpattern-bootstrap-test.c++",
+    deps = [
+        ":urlpattern-bootstrap",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "url-bootstrap-test.c++",
+    deps = [
+        ":url-bootstrap",
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "serialization-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

@@ -1,10 +1,13 @@
 // Tests for the C++ side of the memory cache: binding lifetime, singleflight
-// leader/waiter handoff, and the FallbackDoneCallback contract. The storage and
-// coordination logic itself is covered by the Rust crate's own tests.
+// leader/waiter handoff, the FallbackDoneCallback contract, and the trace spans of
+// MemoryCache.read(), which the Rust MemoryCache must record as the C++ one does. The
+// storage and coordination logic itself is covered by the Rust crate's own tests.
 
 #include "memory-cache.h"
 
+#include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/io/trace.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -210,14 +213,56 @@ KJ_TEST("fallback callback stores the value and survives binding destruction") {
   });
 }
 
-KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
-  // In predictable mode, overwriting a span's tag logs an error, which fails this test. It logs
-  // only the first overwrite in the process, so no other test here may overwrite one.
+// Makes the MemoryCache that a test's script reads as `globalThis.CACHE`.
+using MakeCache = kj::Function<v8::Local<v8::Value>(const TestFixture::Environment&)>;
+
+// Runs a request of `script`, which reads `globalThis.CACHE`, and returns the spans it records in
+// the order they open, each as "name <- parent: key=type:value ...". The order spans end in
+// depends on when each implementation of MemoryCache releases them, so it is not recorded. Runs
+// in predictable mode, in which overwriting a span's tag logs an error, which fails the test. It
+// logs only the first overwrite in the process, so no test here may overwrite one.
+kj::Array<kj::String> recordSpans(kj::StringPtr script, MakeCache makeCache) {
   setPredictableModeForTest();
-  MemoryCacheProvider provider;
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setMemoryCacheDelete(true);
   auto records = kj::rc<RecordedSpans>();
   TestFixture fixture({
-    .mainModuleSource = R"SCRIPT(
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = script,
+    .requestObserverFactory = records->requestObserverFactory(),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    jsg::check(env.js.v8Context()->Global()->Set(
+        env.js.v8Context(), env.js.str("CACHE"_kj), makeCache(env)));
+  });
+  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
+  KJ_EXPECT(response.statusCode == 200, response.body);
+  return KJ_MAP(span, records->spans) {
+    return kj::str(span.name, " <- ", records->parentName(span), ": ",
+        span.ended ? span.tags.asPtr() : "(open)"_kj);
+  };
+}
+
+// A C++ MemoryCache over `provider`.
+MakeCache cppCache(MemoryCacheProvider& provider, MemoryCacheLimits limits) {
+  return [&provider, limits](const TestFixture::Environment& env) -> v8::Local<v8::Value> {
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
+    return handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, limits)));
+  };
+}
+
+// A Rust MemoryCache over `provider`.
+MakeCache rustCache(MemoryCacheProvider& provider, MemoryCacheLimits limits) {
+  return [&provider, limits](const TestFixture::Environment& env) -> v8::Local<v8::Value> {
+    return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+        memory_cache_new(env.isolate, provider.bindForRust(kj::none, limits))));
+  };
+}
+
+KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
+  MemoryCacheProvider provider;
+  auto spans = recordSpans(R"SCRIPT(
       export default {
         async fetch() {
           const settle = (promise) => promise.then(() => {}, () => {});
@@ -227,24 +272,11 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
         }
       };
     )SCRIPT"_kj,
-    .requestObserverFactory = records->requestObserverFactory(),
-  });
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
-    auto cache =
-        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
-    jsg::check(
-        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
-  });
-  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
-  KJ_EXPECT(response.statusCode == 200, response.body);
+      cppCache(provider, testLimits()));
 
-  // Each as "name <- parent: key=type:value ...".
-  kj::Vector<kj::String> spans;
   kj::Vector<kj::StringPtr> fallbacks;
-  for (auto& span: records->spans) {
-    auto& line = spans.add(kj::str(span.name, " <- ", records->parentName(span), ": ", span.tags));
-    if (span.name == "memory_cache_fallback") fallbacks.add(line);
+  for (auto& span: spans) {
+    if (span.startsWith("memory_cache_fallback ")) fallbacks.add(span);
   }
   KJ_ASSERT(fallbacks.size() == 2, kj::strArray(spans, "\n"));
   KJ_EXPECT(fallbacks[0] ==
@@ -257,6 +289,146 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
   KJ_EXPECT(fallbacks[1].startsWith("memory_cache_fallback <- memory_cache_read: fallback_error="),
       fallbacks[1]);
   KJ_EXPECT(fallbacks[1].endsWith(" fallback_success=bool:false key=str:function"), fallbacks[1]);
+}
+
+// Reads that take every path of read(), with and without a fallback, fill the cache past its
+// limits and produce a value that cannot be serialized, then deletes of a cached key and of one
+// never cached. The fallbacks of a key's reads are coalesced: the second read of "b" waits for
+// the first, and the second of "c" runs its own once the first's fails.
+constexpr auto PARITY_SCENARIO = R"SCRIPT(
+  export default {
+    async fetch() {
+      const cache = globalThis.CACHE;
+      const settle = (promise) => promise.then(() => {}, () => {});
+
+      await cache.read("missing");
+      await cache.read("a", async () => ({ value: "x".repeat(10) }));
+      await cache.read("a");
+      await cache.read("a", () => { throw new Error("unused"); });
+
+      const leader = cache.read("b", async () => ({ value: 1, expiration: Date.now() + 1e6 }));
+      const waiter = cache.read("b", () => ({ value: 2 }));
+      await Promise.all([leader, waiter]);
+
+      const failing = cache.read("c", async () => { throw new Error("boom"); });
+      const promoted = cache.read("c", () => ({ value: "second" }));
+      await settle(failing);
+      await promoted;
+
+      await settle(cache.read("d", () => { throw new TypeError("sync"); }));
+      await settle(cache.read("e", () => ({ value: 1, expiration: NaN })));
+      await settle(cache.read("f", () => Promise.reject("not an error")));
+      await settle(cache.read("g", () => ({ value: "y".repeat(100) })));
+      await settle(cache.read("h", () => ({ value: 1, expiration: 0 })));
+      await settle(cache.read("j", () => ({ value: Symbol("s") })));
+      await settle(cache.read("k", () => ({ value: { get x() { throw new RangeError("getter"); } } })));
+      await settle(cache.read("l", () => 42));
+      await settle(cache.read("n", () => ({ get value() { throw new Error("result getter"); } })));
+      await cache.read("i", () => ({ value: "evicts a" }));
+
+      cache.delete("i");
+      cache.delete("never cached");
+      await cache.read("i");
+      return new Response("ok");
+    }
+  };
+)SCRIPT"_kj;
+
+constexpr MemoryCacheLimits PARITY_LIMITS{
+  .maxKeys = 3,
+  .maxValueSize = 64,
+  .maxTotalValueSize = 1024,
+};
+
+// The memory_cache_* spans of PARITY_SCENARIO.
+kj::Array<kj::String> parityScenarioSpans(
+    MakeCache (*makeCache)(MemoryCacheProvider&, MemoryCacheLimits)) {
+  MemoryCacheProvider provider;
+  kj::Vector<kj::String> result;
+  for (auto& span: recordSpans(PARITY_SCENARIO, makeCache(provider, PARITY_LIMITS))) {
+    if (span.startsWith("memory_cache")) result.add(kj::mv(span));
+  }
+  return result.releaseAsArray();
+}
+
+KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
+  auto cpp = parityScenarioSpans(cppCache);
+  auto rust = parityScenarioSpans(rustCache);
+  auto describe = [&]() {
+    return kj::str("C++:\n", kj::strArray(cpp, "\n"), "\nRust:\n", kj::strArray(rust, "\n"));
+  };
+  KJ_EXPECT(cpp.size() == rust.size(), describe());
+  for (auto i: kj::zeroTo(kj::min(cpp.size(), rust.size()))) {
+    KJ_EXPECT(cpp[i] == rust[i], i, describe());
+  }
+
+  // The comparison means something only if C++ records what it should.
+  auto contains = [&](kj::StringPtr expected) {
+    for (auto& span: cpp) {
+      if (span == expected) return true;
+    }
+    return false;
+  };
+  KJ_EXPECT(contains("memory_cache_read <- request: cache_entry_count=float:0 "
+                     "cache_hit=bool:false cache_total_size=float:0 "
+                     "memory_cache_lock_wait_time_ns=int:0"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:Error: boom "
+                     "fallback_success=bool:false key=str:c"_kj),
+      describe());
+  // kj::str() of a DOMException is empty, as Rust's to_detail_string() is.
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str: "
+                     "fallback_success=bool:false key=str:j"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:RangeError: "
+                     "getter fallback_success=bool:false key=str:k"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_delete <- request: delete_completed=bool:true key=str:i"_kj),
+      describe());
+}
+
+// The memory_cache_* spans of a request whose fallback never settles. V8 owns the continuations
+// attached to the fallback's Promise, and destroys them only when it collects them, which the
+// fixture does not do on its own.
+kj::Array<kj::String> neverSettlingFallbackSpans(
+    MakeCache (*makeCache)(MemoryCacheProvider&, MemoryCacheLimits)) {
+  MemoryCacheProvider provider;
+  kj::Vector<kj::String> result;
+  for (auto& span: recordSpans(R"SCRIPT(
+      export default {
+        async fetch() {
+          let fallbackStarted;
+          const started = new Promise(resolve => fallbackStarted = resolve);
+          globalThis.CACHE.read("key", () => {
+            fallbackStarted();
+            return new Promise(() => {});
+          });
+          await started;
+          return new Response("ok");
+        }
+      };
+    )SCRIPT"_kj,
+           makeCache(provider, testLimits()))) {
+    if (span.startsWith("memory_cache")) result.add(kj::mv(span));
+  }
+  return result.releaseAsArray();
+}
+
+KJ_TEST("the spans of a fallback that never settles end with its request") {
+  for (auto makeCache: {cppCache, rustCache}) {
+    auto implementation = makeCache == cppCache ? "C++"_kj : "Rust"_kj;
+    auto spans = neverSettlingFallbackSpans(makeCache);
+    for (auto& span: spans) {
+      KJ_EXPECT(!span.endsWith("(open)"), implementation, span);
+    }
+    for (auto name: {"memory_cache_read <- "_kj, "memory_cache_fallback <- "_kj}) {
+      bool found = false;
+      for (auto& span: spans) {
+        found = found || span.startsWith(name);
+      }
+      KJ_EXPECT(found, implementation, name, kj::strArray(spans, "\n"));
+    }
+  }
 }
 
 }  // namespace

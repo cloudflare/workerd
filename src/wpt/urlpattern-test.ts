@@ -4,6 +4,14 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript URLPattern (the TS_URL_PATTERN autogate) is only an own
+// property of the global, as WebIDL installs an interface; JSG puts the C++
+// one on the global's prototype (src/tests/urlpattern/api-surface.js).
+const usingTsUrlPattern = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis) as object,
+  'URLPattern'
+);
+
 export default {
   'urlpattern-constructor.any.js': {},
   'urlpattern-hasregexpgroups.any.js': {
@@ -155,7 +163,12 @@ export default {
       'Pattern: [{"pathname":"/([\\\\d&&[0-1]])"}] Inputs: [{"pathname":"/0"}]',
       'Pattern: [{"pathname":"/([\\\\d&&[0-1]])"}] Inputs: [{"pathname":"/3"}]',
       'Pattern: ["http://🚲.com/"] Inputs: ["http://🚲.com/"]',
-      'Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []',
+      // The TypeScript implementation converts the pattern to a USVString,
+      // replacing the lone surrogates (src/tests/urlpattern/AGENTS.md,
+      // ledger #6).
+      ...(usingTsUrlPattern
+        ? []
+        : ['Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []']),
       'Pattern: [{"pathname":"test/:a𐑐b"}] Inputs: [{"pathname":"test/foo"}]',
       'Pattern: [{"hostname":"bad#hostname"}] Inputs: [{"hostname":"bad"}]',
       'Pattern: [{"hostname":"bad/hostname"}] Inputs: [{"hostname":"bad"}]',

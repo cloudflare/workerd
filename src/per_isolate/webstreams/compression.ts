@@ -38,6 +38,7 @@ import type {
   RingBufferConstructor,
 } from './ring-buffer';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 import type { ViewExtentHelpers } from './view-extent';
 
 const { ObjectDefineProperties, SymbolToStringTag, TypeError, uncurryThis } =
@@ -67,6 +68,8 @@ const {
   UnderlyingSourceRecord,
   toStringTagProperty,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -387,6 +390,7 @@ class CompressionStream {
   }
 
   constructor(format: unknown) {
+    markUncloneable(this);
     this.#pair = createCodecPair('compress', format);
   }
 
@@ -412,6 +416,7 @@ class DecompressionStream {
   }
 
   constructor(format: unknown) {
+    markUncloneable(this);
     this.#pair = createCodecPair('decompress', format);
   }
 

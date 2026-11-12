@@ -15,6 +15,7 @@
     reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
 )]
 
+pub use crate::actor::MovedHook;
 pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
@@ -244,6 +245,16 @@ pub mod ffi {
         v8_version: String,
     }
 
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/util/thread-scopes.h");
+
+        /// Whether the process runs `workerd bench`, which turns bench mode on before any worker
+        /// compiles.
+        #[cxx_name = "isBenchMode"]
+        fn is_bench_mode() -> bool;
+    }
+
     #[namespace = "kj_rs_tokio"]
     unsafe extern "C++" {
         include!("kj-rs-tokio/tokio-event-port.h");
@@ -357,6 +368,17 @@ pub mod ffi {
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
         ) -> Result<KjOwn<CompiledWorker>>;
+        /// Times starting the config's worker `services[config_service]`, which `spec` compiled,
+        /// for `workerd bench`: compiles and destroys throwaway copies of it in new isolates, as
+        /// `params` (an encoded `BenchParams` message, bench.capnp, in words) ask. Returns the
+        /// startup `BenchReport.Group` of the timings, encoded, without its name. A copy that
+        /// fails to start fails the group; an error means it could not be run at all.
+        async fn factory_bench_startup(
+            factory: &WorkerFactory,
+            spec: &WorkerSpec,
+            config_service: u32,
+            params: &[u64],
+        ) -> Result<Vec<u64>>;
 
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.
@@ -527,6 +549,16 @@ pub mod ffi {
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
+        /// Shuts down the Docker client of root actor `actor`'s container, in the namespace
+        /// `unique_key`, and resolves once Docker has removed the container.
+        async fn factory_stop_container(
+            factory: &WorkerFactory,
+            unique_key: &str,
+            actor: &str,
+        ) -> Result<()>;
+        /// Gives `metadata` what made it when an actor's work makes it: the actor's
+        /// `ActorHooks::stamp_cause`.
+        fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);
 
         /// The source of a dynamic worker, as the worker that loads it supplies it; handed
         /// straight to `factory_new_worker`.
@@ -545,6 +577,20 @@ pub mod ffi {
         fn request_metadata_set_from_persistent_stub(
             metadata: Pin<&mut RequestMetadata>,
             persistent: bool,
+        );
+        /// The draining cluster node that sent the request on.
+        fn request_metadata_forwarded_by(metadata: &RequestMetadata) -> KjMaybe<String>;
+        /// Names this draining node as the one that sent the request on.
+        fn request_metadata_set_forwarded_by(metadata: Pin<&mut RequestMetadata>, node: &str);
+        /// Whether the work of an object being handed off made the request, as its maker said.
+        fn request_metadata_from_handoff(metadata: &RequestMetadata) -> bool;
+        /// The objects whose work made the request, as its maker said.
+        fn request_metadata_caused_by(metadata: &RequestMetadata) -> Vec<String>;
+        /// Sets what made the request, also for a peer it is sent to.
+        fn request_metadata_set_cause(
+            metadata: Pin<&mut RequestMetadata>,
+            from_handoff: bool,
+            caused_by: Vec<String>,
         );
         /// Makes stubs the request creates for the actor itself restorable: they encode the
         /// actor's namespace and id.
@@ -625,6 +671,24 @@ pub mod ffi {
             client: &RpcClient,
             metadata: KjOwn<RequestMetadata>,
         ) -> KjOwn<WorkerInterface>;
+        /// `inner`, calling `hook.moved()` on each of its events that fails with a `moved`
+        /// answer (`cluster::moved`).
+        fn worker_interface_watch_moved(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
+        /// marked as before or after delivery is marked as after it, and one that is a
+        /// disconnect calls `hook.lost()`.
+        fn worker_interface_watch_peer(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+
+        /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+        /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+        fn request_not_delivered_detail_id() -> u64;
+        fn actor_predecessor_rejected_detail_id() -> u64;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -946,6 +1010,8 @@ pub mod ffi {
         fn inactive(self: &ActorHooks);
         /// What makes the actor's commits durable, when the cluster replicates it.
         fn committer(self: &ActorHooks) -> Result<Box<Committer>>;
+        /// Gives a request the actor's work makes what made it (`Cause`).
+        fn stamp_cause(self: &ActorHooks, metadata: Pin<&mut RequestMetadata>);
 
         type Committer;
         /// Makes the commits captured so far durable.
@@ -961,6 +1027,12 @@ pub mod ffi {
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
+
+        /// What a stub forgets when the instance it reached answers that the object moved
+        /// (`worker_interface_watch_moved`).
+        type MovedHook;
+        fn moved(self: &MovedHook);
+        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.

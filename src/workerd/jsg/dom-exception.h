@@ -110,4 +110,29 @@ class DOMException: public Object {
   PropertyReflection<kj::String> stack;
 };
 
+// Creates a DOMException with `name` and `message`, as Lock::domException() does, for native code
+// that holds no jsg::Lock, such as Rust JSG's shims. Requires an entered context. Returns nothing,
+// creating nothing, while an exception or a termination is pending: creating a DOMException
+// enters V8 with the context, which would clear it. Also returns nothing if creating it threw,
+// leaving that exception pending: one from V8 stays as it is, and a C++ exception becomes a
+// pending internal error.
+//
+// Callers depend only on this signature, not on how DOMException is implemented.
+v8::MaybeLocal<v8::Object> newDOMException(
+    v8::Isolate* isolate, kj::ArrayPtr<const char> name, v8::Local<v8::String> message);
+
+// The name and message of a DOMException.
+struct DOMExceptionNameAndMessage {
+  kj::String name;
+  kj::String message;
+};
+
+// The name and message of the DOMException that `value` unwraps as, as Lock::tryUnwrapDOMException()
+// unwraps it, for native code that holds no jsg::Lock, such as Rust JSG's shims. Requires an
+// entered context. Runs no JavaScript.
+//
+// Callers depend only on this signature, not on how DOMException is implemented.
+kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMExceptionNameAndMessage(
+    v8::Isolate* isolate, v8::Local<v8::Value> value);
+
 }  // namespace workerd::jsg

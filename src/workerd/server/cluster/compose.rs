@@ -384,6 +384,10 @@ fn check_deployment(
                 "{owner} defines disk service \"{name}\". A deployment cannot define a disk. \
                  Define the disk in the instance's config and refer to it by name."
             )),
+            Ok(service::Which::Bucket(_)) => errors.push(format!(
+                "{owner} defines bucket service \"{name}\". A deployment cannot define a \
+                 bucket service. Define it in the instance's config and refer to it by name."
+            )),
             Ok(service::Which::Worker(worker)) => {
                 let worker = worker?;
                 let context = format!("service \"{name}\" in {owner}");
