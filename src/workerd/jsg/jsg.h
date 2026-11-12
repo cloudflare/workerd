@@ -3196,6 +3196,10 @@ class Lock {
   virtual Ref<DOMException> domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
+  // The DOMException that `value` unwraps as, as a `DOMException&` parameter unwraps it: `value`
+  // or the first object in its prototype chain that is one. Runs no JavaScript.
+  virtual kj::Maybe<DOMException&> tryUnwrapDOMException(v8::Local<v8::Value> value) = 0;
+
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //
   // WARNING: A malicious script can tamper with this by overwriting the `prototype` property
