@@ -24,6 +24,30 @@ namespace workerd::io_context {
 // promise.
 ::rust::Str io_context_never_settled_message();
 
+// Throws IoContext::memoryLimitException(), which Rust receives as the error it fails with, with
+// the exception's type, description, location and details.
+void io_context_throw_memory_limit_exception();
+
+// A weak reference to the Worker::Isolate of an IoContext, from Worker::Isolate::getWeakRef(), as
+// IoContext::awaitJs() takes one. It may outlive the isolate, and may be used and destroyed on
+// any thread without the isolate lock: AtomicWeakRef's refcount is atomic, and a mutex guards its
+// pointer to the isolate, which the isolate clears when it is destroyed. A struct of its own,
+// since Rust can't name a kj::Own<const T>.
+struct IsolateWeakRef {
+  kj::Own<const Worker::Isolate::WeakIsolateRef> ref;
+};
+
+// A weak reference to the isolate of the IoContext that `id` identifies.
+kj::Own<IsolateWeakRef> io_context_isolate_weak_ref(uint64_t id);
+
+// True if the isolate still exists and IsolateLimitEnforcer::hasExcessivelyExceededHeapLimit()
+// says so, which is how IoContext::AwaitJsFulfiller::rejectNeverSettled() decides. Enters no V8
+// and needs no isolate lock, so it may be called in a GC finalizer. The caller must keep the
+// isolate alive meanwhile, as the IoContext that owns an await_js() wait does through its
+// Worker: the strong reference this takes must not be the last one, whose release would destroy
+// the isolate.
+bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& weakRef);
+
 // IoContext::tryGetCurrentId(), as a uint64_t.
 kj::Maybe<uint64_t> io_context_try_current_id();
 

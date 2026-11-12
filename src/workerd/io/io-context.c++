@@ -777,6 +777,12 @@ kj::Exception IoContext::abortWithoutReasonException() {
       FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
 }
 
+kj::Exception IoContext::memoryLimitException() {
+  auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, MEMORY_LIMIT_MESSAGE);
+  e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return e;
+}
+
 void IoContext::abortIsolate(kj::StringPtr reason) {
   getIoChannelFactory().abortIsolate(reason);
 }

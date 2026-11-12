@@ -605,6 +605,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The message of the Error with which awaitJs() fails if JavaScript never settles the promise.
   static constexpr kj::StringPtr NEVER_SETTLED_MESSAGE = "Promise will never complete."_kj;
 
+  // The message of memoryLimitException().
+  static constexpr kj::StringPtr MEMORY_LIMIT_MESSAGE = "Worker has exceeded memory limit."_kj;
+
+  // The exception with which awaitJs() fails, rather than with NEVER_SETTLED_MESSAGE, if
+  // JavaScript never settles the promise while the isolate has excessively exceeded its heap
+  // limit: an OVERLOADED Error with MEMORY_LIMIT_MESSAGE, carrying MEMORY_LIMIT_DETAIL_ID, which
+  // marks it as an out-of-memory outcome.
+  static kj::Exception memoryLimitException();
+
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
 
@@ -2116,9 +2125,7 @@ class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
       return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
     }).orDefault(false);
     if (hasExcessivelyExceededHeapLimit) {
-      auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
-      e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      fulfiller->reject(kj::mv(e));
+      fulfiller->reject(memoryLimitException());
     } else {
       // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
       // this promise.
