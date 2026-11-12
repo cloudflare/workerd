@@ -6,6 +6,7 @@ load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
+load("//:build/wd_rust_capnp_library.bzl", "wd_rust_capnp_library")
 
 exports_files(["modules.capnp"])
 
@@ -63,7 +64,6 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         "//src/workerd/util",
-        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
@@ -104,6 +104,7 @@ wd_cc_library(
         "resource.c++",
         "ser.c++",
         "setup.c++",
+        "snapshot.c++",
         "util.c++",
         "v8-platform-wrapper.c++",
         "wrappable.c++",
@@ -116,6 +117,7 @@ wd_cc_library(
         "jsg.h",
         "jsvalue.h",
         "jsvalue-defs.h",
+        "module-source.h",
         "modules-new.h",
         "resource.h",
         "ser.h",
@@ -291,6 +293,13 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
+wd_rust_capnp_library(
+    name = "exception_metadata_capnp_rust",
+    srcs = ["exception-metadata.capnp"],
+    crate_name = "exception_metadata_capnp",
+    visibility = ["//visibility:public"],
+)
+
 js_capnp_library(
     name = "rtti_capnp_js",
     srcs = ["rtti.capnp"],
@@ -359,6 +368,7 @@ wd_cc_library(
         # defined below
         "code-cache-test.c++",
         "compile-cache-test.c++",
+        "fast-api-test.c++",
         "jsg-test.c++",
         "macro-meta-test.c++",
         "resource-test.c++",
@@ -368,6 +378,13 @@ wd_cc_library(
         "multiple-typewrappers-test.c++",
     ],
 )]
+
+kj_test(
+    size = "large",
+    src = "fast-api-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [":jsg"],
+)
 
 kj_test(
     size = "large",

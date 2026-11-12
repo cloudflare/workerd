@@ -446,12 +446,16 @@ fn guarded_termination_survives(
                 saw_pending: Cell::new(None),
             },
         );
-        guarded = Some(obj.clone());
+        guarded = Some(obj.clone(lock));
         obj
     };
-    termination_survives_call(&crate::Harness::new(), new_guarded, call, check);
+    let harness = crate::Harness::new();
+    termination_survives_call(&harness, new_guarded, call, check);
     let guarded = guarded.expect("created by termination_survives_call");
-    assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(guarded.get(lock).saw_pending.get(), Some(true), "{call}");
+        Ok(())
+    });
 }
 
 #[test]

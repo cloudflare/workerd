@@ -47,13 +47,15 @@ def wd_rust_binary(
         malloc = None,
         tool = False,
         test = True,
+        features = [],
         visibility = None,
         tags = [],
         cxx_bridge_src = None,
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         target_compatible_with = None,
-        test_size = "small"):
+        test_size = "small",
+        exec_properties = None):
     """Define rust binary.
 
     Args:
@@ -70,10 +72,12 @@ def wd_rust_binary(
         malloc: the malloc implementation to link, if not the default.
         tool: True for a binary where performance matters: linked with linkopts_tool, as
             wd_cc_binary does. False for development tools and tests (linkopts_default).
+        features: additional C++ toolchain features for the binary's link action.
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
         target_compatible_with: additional platform constraints for the binary and its test.
+        exec_properties: exec_properties of the binary, not of its test.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -125,16 +129,15 @@ def wd_rust_binary(
             "//build/deps:linkopts_tool" if tool else "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
+        features = features,
         visibility = visibility,
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
         lint_config = "@workerd//build/rust:lints",
-        # linkopts_tool links with full optimization, so it is given more CPUs.
-        tags = tags + ["cpu:4" if tool else "cpu:2"],
+        tags = tags,
         target_compatible_with = target_compatible_with,
-        # Use dedicated high-CPU runner if available
-        exec_properties = {"runner": "high-cpu"},
+        exec_properties = exec_properties,
         **binary_kwargs
     )
 
@@ -156,6 +159,5 @@ def wd_rust_binary(
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        # Tag with cpu:2 since this target depends on linkopts_default.
-        tags = ["no-coverage", "cpu:2"],
+        tags = ["no-coverage"],
     )

@@ -16,8 +16,10 @@ reorder data as they grow and wrap.
 ## Cells
 
 `scaling-cpp.wd-test` and `scaling-ts.wd-test` share `scaling-modules.capnp`.
-Both run with `timeout = "eternal"`, are tagged `no-asan`, and have no
-`@gc-stress` variant: a GC per continuation would drown the timing. The
+Both run with `timeout = "eternal"`, are tagged `no-asan` and
+`no-tsan`, and have no `@gc-stress` variant: a GC per continuation
+would drown the timing. Sanitizers slow C++ far more than JIT-compiled
+JavaScript, so under them a run's time stops tracking the queue. The
 assertion is a ratio and holds on slow machines, but the runs are long:
 on CI the TS cell takes up to ~30 s and the C++ cell 35-60 s per variant
 (an identity write costs ~375 µs there; locally 4 s and 16 s).

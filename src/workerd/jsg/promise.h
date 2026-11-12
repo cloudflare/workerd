@@ -235,17 +235,24 @@ class Promise {
   Promise(decltype(nullptr)): v8Promise(kj::none) {}
   // For use when you're declaring a local variable that will be initialized later.
 
-  void markAsHandled(Lock& js) {
+  JSG_NO_JS void markAsHandled(Lock& js) {
     auto promise = getInner(js);
     promise->MarkAsHandled();
     markedAsHandled = true;
+  }
+
+  // Gives the JavaScript promise this becomes, when it is returned to JavaScript, `dispose` as its
+  // `[Symbol.dispose]()` method. Returning a `jsg::Promise` to JavaScript returns a promise derived
+  // from it, so a method can't set the property itself.
+  void setDispose(Lock& js, v8::Local<v8::Function> dispose) {
+    this->dispose = V8Ref<v8::Function>(js.v8Isolate, dispose);
   }
 
   // Attach a continuation function and error handler to be called when this promise
   // is fulfilled. It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func, typename ErrorFunc>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
+  JSG_NO_JS PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
     using Output = ReturnType<Func, T, true>;
     static_assert(kj::isSameType<Output, ReturnType<ErrorFunc, Value, true>>(),
         "functions passed to .then() must return exactly the same type");
@@ -260,7 +267,7 @@ class Promise {
   // It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
+  JSG_NO_JS PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
     using Output = ReturnType<Func, T, true>;
 
     // HACK: The error function is never called, so it need not actually be a functor.
@@ -271,7 +278,7 @@ class Promise {
   }
 
   template <typename ErrorFunc>
-  Promise<T> catch_(Lock& js, ErrorFunc&& errorFunc) {
+  JSG_NO_JS Promise<T> catch_(Lock& js, ErrorFunc&& errorFunc) {
     static_assert(kj::isSameType<T, ReturnType<ErrorFunc, Value, true>>(),
         "function passed to .catch_() must return exactly the promise's type");
 
@@ -288,7 +295,7 @@ class Promise {
   // with each call creating a new branch off the original promise. Another key difference
   // with whenResolved() is that the markAsHandled status will propagate to the new Promise<void>
   // returned by whenResolved().
-  Promise<void> whenResolved(Lock& js) {
+  JSG_NO_JS Promise<void> whenResolved(Lock& js) {
     auto promise = Promise<void>(js.v8Isolate, getInner(js));
     if (markedAsHandled) {
       promise.markAsHandled(js);
@@ -359,7 +366,7 @@ class Promise {
       reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
-    Resolver addRef(Lock& js) {
+    JSG_NO_JS Resolver addRef(Lock& js) {
       return {js.v8Isolate, v8Resolver.getHandle(js)};
     }
     void visitForGc(GcVisitor& visitor) {
@@ -377,11 +384,15 @@ class Promise {
 
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(v8Promise);
+    visitor.visit(dispose);
   }
 
   JSG_MEMORY_INFO(Promise) {
     KJ_IF_SOME(promise, v8Promise) {
       tracker.trackField("promise", promise);
+    }
+    KJ_IF_SOME(d, dispose) {
+      tracker.trackField("dispose", d);
     }
   }
 
@@ -403,6 +414,7 @@ class Promise {
  private:
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
   bool markedAsHandled = false;
+  kj::Maybe<V8Ref<v8::Function>> dispose;
 
   v8::Local<v8::Promise> getInner(Lock& js) {
     return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
@@ -620,6 +632,12 @@ class PromiseWrapper {
     // ought to be marked as handled as well.
     if (markedAsHandled) {
       ret->MarkAsHandled();
+    }
+    // Likewise, the method the C++ code gave the Promise for `[Symbol.dispose]` belongs on the
+    // derived promise.
+    KJ_IF_SOME(dispose, promise.dispose) {
+      check(ret->DefineOwnProperty(context, v8::Symbol::GetDispose(js.v8Isolate),
+          dispose.getHandle(js), v8::PropertyAttribute::DontEnum));
     }
 
     return ret;

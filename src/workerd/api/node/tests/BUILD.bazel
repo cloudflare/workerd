@@ -21,6 +21,17 @@ wd_test(
     data = ["buffer-nodejs-test.js"],
 )
 
+# Each reverse search here calls memrchr(3) about 60,000 times, each time over most of a 5 MB
+# buffer, and each call finds a match within a few bytes of the end. ThreadSanitizer's memrchr
+# interceptor checks the whole range before searching, so under TSan this test checks about 960 GB
+# of shadow memory and takes over 100 s, against 1-3 s otherwise. The code is single-threaded, so
+# TSan has nothing to find here.
+wd_test(
+    src = "buffer-reverse-search-nodejs-test.wd-test",
+    data = ["buffer-reverse-search-nodejs-test.js"],
+    tags = ["no-tsan"],
+)
+
 wd_test(
     size = "enormous",
     src = "buffer-base64-large-test.wd-test",
@@ -318,6 +329,12 @@ wd_test(
     src = "process-exit-test.wd-test",
     args = ["--experimental"],
     data = ["process-exit-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-lazy-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-stdio-lazy-test.js"],
 )
 
 wd_test(

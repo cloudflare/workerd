@@ -13,7 +13,6 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
@@ -1011,11 +1010,10 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   incomingRequest->delivered("alarm"_kj);
 
   KJ_DEFER({
-    // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, delivered() can start a waitUntil task to run
-    // the cross-context actions queued while the actor was idle. Drain the request even if the
-    // alarm is canceled or fails, so the task can finish. The AlarmFulfiller case drains it itself.
-    if (incomingRequest.get() != nullptr &&
-        util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+    // delivered() can start a waitUntil task to run the cross-context actions queued while the
+    // actor was idle. Drain the request even if the alarm is canceled or fails, so the task can
+    // finish. The AlarmFulfiller case drains it itself.
+    if (incomingRequest.get() != nullptr) {
       incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     }
   });

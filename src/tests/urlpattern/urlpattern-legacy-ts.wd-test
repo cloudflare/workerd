@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+using UrlPatternModules = import "urlpattern-modules.capnp";
+
+# Runs the URLPattern suite against the TypeScript implementation
+# (src/per_isolate/urlpattern/) with its legacy (jsg::UrlPattern) parser.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util) and expose_global_message_channel.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "urlpattern-legacy-ts",
+      worker = (
+        modules = UrlPatternModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "expose_global_message_channel",
+          "urlpattern_original",
+          "do_not_set_tostring_tag",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-url-pattern"],
+);

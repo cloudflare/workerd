@@ -1,6 +1,5 @@
 #include <workerd/io/io-context.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async-io.h>
@@ -105,8 +104,7 @@ class ExpectNoTaskFailures final: public kj::TaskSet::ErrorHandler {
 };
 
 KJ_TEST("cross-context actions scheduled while actions run still wake the IoContext") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("rearm-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("rearm-test"))});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
   auto executor = context->getCrossContextExecutor();
@@ -123,8 +121,7 @@ KJ_TEST("cross-context actions scheduled while actions run still wake the IoCont
 }
 
 KJ_TEST("cross-context actions that fail abort the IoContext, whatever details they carry") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("failing-action-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("failing-action-test"))});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
@@ -144,8 +141,7 @@ KJ_TEST("cross-context actions that fail abort the IoContext, whatever details t
 }
 
 KJ_TEST("a cross-context action that fails drops the actions taken with it") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("failing-batch-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("failing-batch-test"))});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
   auto executor = context->getCrossContextExecutor();
@@ -169,8 +165,7 @@ KJ_TEST("a cross-context action that fails drops the actions taken with it") {
 }
 
 KJ_TEST("cross-context actions wait for an I/O continuation holding the input lock") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("input-lock-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("input-lock-test"))});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
@@ -195,8 +190,7 @@ KJ_TEST("cross-context actions wait for an I/O continuation holding the input lo
 }
 
 KJ_TEST("cross-context actions run while an older request outlives a newer one") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("older-request-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("older-request-test"))});
   auto context = fixture.newIoContext();
   auto older = fixture.newIncomingRequest(*context);
   auto newer = fixture.newIncomingRequest(*context);
@@ -214,8 +208,7 @@ KJ_TEST("cross-context actions run while an older request outlives a newer one")
 
 KJ_TEST(
     "a request doesn't finish draining while actions queued during it wait for the input lock") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("drain-wait-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("drain-wait-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -242,8 +235,7 @@ KJ_TEST(
 
 KJ_TEST(
     "cross-context actions stay queued if the request ends while they wait for the input lock") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("input-lock-wait-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("input-lock-wait-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -268,14 +260,10 @@ KJ_TEST(
 
 KJ_TEST("cross-context actions stay queued if the actor shuts down while they wait for a lock") {
   auto io = kj::setupAsyncIo();
-  // Each fixture initializes the process's autogates, so both enable it.
   TestFixture fixture({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .actorId = Worker::Actor::Id(kj::str("isolate-lock-wait-test")),
     .useRealTimers = false});
-  TestFixture other({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
   auto context = fixture.newIoContext();
 
   // The request drains until the actor shuts down.
@@ -303,8 +291,7 @@ KJ_TEST("cross-context actions stay queued if the actor shuts down while they wa
 }
 
 KJ_TEST("cross-context actions wait for an idle actor's next request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("idle-actor-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("idle-actor-test"))});
   auto context = fixture.newIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
 
@@ -322,8 +309,7 @@ KJ_TEST("cross-context actions wait for an idle actor's next request") {
 }
 
 KJ_TEST("an idle actor's queued actions run before its next request's own work") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("idle-actor-order-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("idle-actor-order-test"))});
   auto context = fixture.newIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
 
@@ -343,8 +329,7 @@ KJ_TEST("an idle actor's queued actions run before its next request's own work")
 
 KJ_TEST("a cross-context action that fails when an idle actor's next request runs it aborts the "
         "IoContext") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("idle-failing-action-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("idle-failing-action-test"))});
   auto context = fixture.newIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
 
@@ -364,8 +349,7 @@ KJ_TEST("a cross-context action that fails when an idle actor's next request run
 }
 
 KJ_TEST("an idle actor's next request doesn't finish draining before its queued actions run") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("short-request-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("short-request-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
@@ -396,14 +380,10 @@ KJ_TEST("an idle actor's next request doesn't finish draining before its queued 
 KJ_TEST("an idle actor's queued actions stay queued if it shuts down before its next request "
         "runs them") {
   auto io = kj::setupAsyncIo();
-  // Each fixture initializes the process's autogates, so both enable it.
   TestFixture fixture({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .actorId = Worker::Actor::Id(kj::str("next-request-shutdown-test")),
     .useRealTimers = false});
-  TestFixture other({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
   auto context = fixture.newIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
 
@@ -432,26 +412,9 @@ KJ_TEST("an idle actor's queued actions stay queued if it shuts down before its 
   KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
 }
 
-KJ_TEST("without the autogate, cross-context actions abort an idle actor") {
-  TestFixture fixture({.ignoreAllAutogatesEnv = true,
-    .actorId = Worker::Actor::Id(kj::str("idle-actor-gate-off-test"))});
-  auto context = fixture.newIoContext();
-  fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
-
-  uint ran = 0;
-  KJ_ASSERT(context->getCrossContextExecutor().tryExecute([&ran](jsg::Lock&) { ++ran; }));
-  fixture.pollEventLoop();
-  KJ_EXPECT(ran == 0, ran);
-  KJ_IF_SOME(reason, context->getAbortReason()) {
-    KJ_EXPECT(reason.getDescription().contains("no current IncomingRequest"), reason);
-  } else {
-    KJ_FAIL_EXPECT("the IoContext wasn't aborted");
-  }
-}
-
 KJ_TEST("a stateless context's cross-context actions wait without aborting it once its request "
         "has ended") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  TestFixture fixture;
   auto context = fixture.newStatelessIoContext();
   fixture.drainAndDestroy(fixture.newIncomingRequest(*context));
 
@@ -467,13 +430,8 @@ KJ_TEST("a stateless context's cross-context actions wait without aborting it on
 KJ_TEST("a stateless context's cross-context actions stay queued if its request ends while they "
         "wait for the isolate lock") {
   auto io = kj::setupAsyncIo();
-  // Each fixture initializes the process's autogates, so both enable it.
-  TestFixture fixture({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
-  TestFixture other({.waitScope = io.waitScope,
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .useRealTimers = false});
+  TestFixture fixture({.waitScope = io.waitScope, .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
   auto context = fixture.newStatelessIoContext();
   auto request = fixture.newIncomingRequest(*context);
 
@@ -542,7 +500,6 @@ void withPromiseSettledOnIdleActor(
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setHandleCrossRequestPromiseResolution(true);
   TestFixture fixture({.featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .mainModuleSource = PROMISE_ACTOR_SOURCE,
     .actorId = Worker::Actor::Id(kj::str(actorId)),
     .actorClassName = "default"_kj});

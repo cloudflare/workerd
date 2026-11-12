@@ -920,12 +920,21 @@ class Data {
   }
 
   // Get the raw underlying v8 handle.
-  v8::Local<v8::Data> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<v8::Data> getHandle(Lock& js) const;
 
   Data addRef(v8::Isolate* isolate) {
     return Data(isolate, getHandle(isolate));
   }
-  Data addRef(Lock& js);
+  JSG_NO_JS Data addRef(Lock& js);
+
+  // Call fn with the underlying v8::Global<v8::Data> handle.
+  // Also resets tracedHandle, which V8 would otherwise report as an unserialized eternal handle
+  // during snapshot creation (TracedReferences are stored alongside eternal handles internally).
+  template <typename Fn>
+  void visitHandle(Fn&& fn) {
+    fn(handle);
+    tracedHandle = kj::none;
+  }
 
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
@@ -1016,12 +1025,12 @@ class V8Ref: private Data {
       return Data::getHandle(isolate).template As<T>();
     }
   }
-  v8::Local<T> getHandle(jsg::Lock& js) const;
+  JSG_NO_JS v8::Local<T> getHandle(jsg::Lock& js) const;
 
   V8Ref addRef(v8::Isolate* isolate) {
     return V8Ref(isolate, getHandle(isolate));
   }
-  V8Ref addRef(jsg::Lock& js);
+  JSG_NO_JS V8Ref addRef(jsg::Lock& js);
 
   V8Ref deepClone(jsg::Lock& js);
 
@@ -1034,6 +1043,8 @@ class V8Ref: private Data {
 
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
+
+  using Data::visitHandle;
 
   // Create a weak reference to the held V8 value. The weak reference does not prevent the
   // value from being garbage collected and is not traced by GC.
@@ -1071,7 +1082,7 @@ class HashableV8Ref: public V8Ref<T> {
   HashableV8Ref addRef(v8::Isolate* isolate) {
     return HashableV8Ref(isolate, this->getHandle(isolate), identityHash);
   }
-  HashableV8Ref addRef(jsg::Lock& js);
+  JSG_NO_JS HashableV8Ref addRef(jsg::Lock& js);
 
   int hashCode() const {
     return identityHash;
@@ -1163,7 +1174,7 @@ class WeakV8Ref final {
     return KJ_ASSERT_NONNULL(
         tryGetHandle(isolate), "attempt to access collected jsg::WeakV8Ref target");
   }
-  v8::Local<T> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<T> getHandle(Lock& js) const;
 
   // Try to promote to a strong V8Ref<T>. Returns kj::none if collected.
   kj::Maybe<V8Ref<T>> tryAddRef(v8::Isolate* isolate) const {
@@ -1409,9 +1420,73 @@ class Object: private Wrappable {
   // This is used to detect when a subclass has defined a custom serializer.
   static constexpr uint jsgSerializeLevel = 0;
 
+  // A subclass that sets this declares that any freshly constructed instance is interchangeable
+  // with any other. A V8 startup snapshot then records only the wrapper's type tag for each live
+  // instance, and a worker started from the snapshot attaches a fresh instance to each restored
+  // wrapper, built by the type's constructor (see jsgRecreateForSnapshot()).
+  // Types with state override Wrappable::snapshotClone() instead.
+  //
+  // The constructor runs when a worker starts from the snapshot: under the isolate lock, before
+  // the context exists, outside any IoContext. It must not throw. The restore runs inside
+  // jsg::Isolate::newContext(), outside the Worker constructor's error handling, so an exception
+  // fails the Worker's startup; it does not fall back to starting without a snapshot. Allocating
+  // other JSG objects with js.alloc() is fine (it creates a C++ object with no wrapper, as
+  // api::Crypto does for its SubtleCrypto); touching the JS heap is not.
+  static constexpr bool jsgSnapshotStateless = false;
+
+  // The snapshot recreate function of a stateless type U (jsgSnapshotStateless == true): builds the
+  // instance a restored wrapper is attached to. The instance is created with kj::refcounted rather
+  // than js.alloc because it must not be held by a jsg::Ref: the restore path requires a strong
+  // refcount of zero (see ownAsWrappable()).
+  template <typename U>
+  static kj::Own<Wrappable> jsgRecreateForSnapshot(Lock& js) {
+    // A subclass would inherit the flag and be rebuilt as a fresh instance, losing its own state.
+    static_assert(std::is_final_v<U>,
+        "a type that sets jsgSnapshotStateless must be final: a subclass inherits the flag");
+    if constexpr (requires(Lock& lock) { U(lock); }) {
+      return ownAsWrappable(kj::refcounted<U>(js));
+    } else {
+      return ownAsWrappable(kj::refcounted<U>());
+    }
+  }
+
  protected:
   template <typename T>
   WeakRef<T> getWeakRefToThis(Lock& js);
+
+  // Upcasts an instance built for a startup-snapshot restore (by jsgRecreateForSnapshot() or a
+  // snapshotClone() override) to the kj::Own<Wrappable> the restore path takes. Wrappable is a
+  // private base of Object, so the upcast has to happen in Object.
+  //
+  // Unlike every other JSG object, such an instance is never held by a jsg::Ref. It comes from
+  // kj::refcounted<T>(), so `obj` is its only kj ownership share and its strong (jsg::Ref)
+  // refcount is zero; HeapTracer::allocateShimForSnapshotRestore() checks both. The returned
+  // share moves whole into the CppgcShim allocated ahead of the context deserialization
+  // (CppgcShim::Restoring, wrappable.c++), and HeapTracer::linkRestoredWrapper() turns it into
+  // the shim's ordinary CppgcShim::Active ownership, the same share attachWrapper() gives a shim
+  // through kj::addRef(). From there the object's life is the usual one: when the wrapper is
+  // collected the shim drops its share and the object is destroyed, unless a jsg::Ref obtained by
+  // unwrapping keeps it alive.
+  template <typename T>
+  static kj::Own<Wrappable> ownAsWrappable(kj::Own<T> obj) {
+    Wrappable& wrappable = *static_cast<Object*>(obj.get());
+    return kj::addRef(wrappable);
+  }
+
+  // For a snapshotReferences() override: `obj` as the Wrappable the snapshot knows it by.
+  static const Wrappable* snapshotReferenceTo(const Object& obj) {
+    return &obj;
+  }
+
+  // For a snapshotRelink() override: a restored reference as a Ref<T>, or none when the snapshot
+  // carried none or the object is not a T.
+  template <typename T>
+  static kj::Maybe<Ref<T>> snapshotRelinkedRef(Wrappable* restored) {
+    if (restored == nullptr) return kj::none;
+    T* obj = dynamic_cast<T*>(static_cast<Object*>(restored));
+    if (obj == nullptr) return kj::none;
+    return _jsgThis(obj);
+  }
 
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
@@ -1772,7 +1847,7 @@ class WeakRef {
   kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
 
   // Create another weak ref to the same target.
-  WeakRef addRef(jsg::Lock& js) &;
+  JSG_NO_JS WeakRef addRef(jsg::Lock& js) &;
   WeakRef addRef(jsg::Lock& js) && = delete;  // Redundant, just move.
 
  private:
@@ -2111,7 +2186,7 @@ class JsContext {
   v8::Local<v8::Context> getHandle(v8::Isolate* isolate) const {
     return handle.Get(isolate);
   }
-  v8::Local<v8::Context> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<v8::Context> getHandle(Lock& js) const;
 
   // Moves out the underlying Global<Context> handle so snapshot preparation can reset it
   // ahead of CreateBlob. Leaves this JsContext with an empty handle, so this is only valid
@@ -3087,14 +3162,14 @@ class Lock {
   // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
   // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
   // implementation in setup.c++. Use responsibly.
-  void requestGcForTesting() const;
+  JSG_MAY_RUN_JS void requestGcForTesting() const;
 
   // Like requestGcForTesting(), but sweeps cppgc the way an allocation-triggered GC would: a
   // forced GC always sweeps atomically, whereas this uses the sweeping type newCppHeap()
   // configured. It is the only way a test can observe the finalization timing production
   // actually gets, and so notice if the configuration stops being honoured. Test-only, same as
   // requestGcForTesting().
-  void requestGcWithDefaultSweepForTesting() const;
+  JSG_MAY_RUN_JS void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
@@ -3120,6 +3195,10 @@ class Lock {
 
   virtual Ref<DOMException> domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
+
+  // The DOMException that `value` unwraps as, as a `DOMException&` parameter unwraps it: `value`
+  // or the first object in its prototype chain that is one. Runs no JavaScript.
+  virtual kj::Maybe<DOMException&> tryUnwrapDOMException(v8::Local<v8::Value> value) = 0;
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //
@@ -3228,7 +3307,7 @@ class Lock {
   JS_V8_SYMBOLS(V)
 #undef V
 
-  void runMicrotasks();
+  JSG_MAY_RUN_JS void runMicrotasks();
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();

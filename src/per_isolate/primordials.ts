@@ -1,4 +1,4 @@
-// This is the FIRST script executed during per-isolate bootstrap — it runs
+// This is the FIRST script executed during per-isolate bootstrap - it runs
 // before main.ts and before any other bootstrap script. Its exports are
 // cached and injected as the `primordials` pseudo-global into every
 // subsequent bootstrap script's scope.
@@ -10,7 +10,7 @@
 // Captures built-in prototype methods and static functions as standalone
 // references resistant to prototype pollution.
 //
-// Usage in other bootstrap scripts (no require needed — it's a pseudo-global):
+// Usage in other bootstrap scripts (no require needed - it's a pseudo-global):
 //
 //   const { PromisePrototypeThen, uncurryThis } = primordials;
 //
@@ -53,7 +53,9 @@ const AggregateErrorCtor = AggregateError;
 const ArrayCtor = Array;
 const ArrayBufferCtor = ArrayBuffer;
 const BigIntCtor = BigInt;
+const BooleanCtor = Boolean;
 const DataViewCtor = DataView;
+const DateCtor = Date;
 const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
@@ -64,6 +66,7 @@ const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
 const RegExpCtor = RegExp;
 const SetCtor = Set;
+const StringCtor = String;
 const SymbolCtor = Symbol;
 const TypeErrorCtor = TypeError;
 const Uint8ArrayCtor = Uint8Array;
@@ -85,12 +88,19 @@ const ObjectDefineProperty = Object.defineProperty;
 const ObjectDefineProperties = Object.defineProperties;
 const ObjectFreeze = Object.freeze;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectHasOwn = Object.hasOwn;
 const ObjectKeys = Object.keys;
 const ObjectGetPrototypeOf = Object.getPrototypeOf;
 const ObjectSetPrototypeOf = Object.setPrototypeOf;
 
-// %AsyncIteratorPrototype% — not directly exposed as a global.
-// Reached via: async function*(){} → .prototype → [[Prototype]] → [[Prototype]]
+// %IteratorPrototype% - not directly exposed as a global.
+// Reached via: an array iterator -> [[Prototype]] -> [[Prototype]]
+const IteratorPrototype = ObjectGetPrototypeOf(
+  ObjectGetPrototypeOf([][Symbol.iterator]())
+);
+
+// %AsyncIteratorPrototype% - not directly exposed as a global.
+// Reached via: async function*(){} -> .prototype -> [[Prototype]] -> [[Prototype]]
 const AsyncIteratorPrototype = ObjectGetPrototypeOf(
   ObjectGetPrototypeOf(async function* () {}.prototype)
 );
@@ -211,6 +221,8 @@ const ArrayPrototypePush = uncurryThis(Array.prototype.push);
 const ArrayPrototypeShift = uncurryThis(Array.prototype.shift);
 const ArrayPrototypeSlice = uncurryThis(Array.prototype.slice);
 const ArrayPrototypeSplice = uncurryThis(Array.prototype.splice);
+// Stable, as ECMAScript requires.
+const ArrayPrototypeSort = uncurryThis(Array.prototype.sort);
 
 // Map
 const MapPrototypeGet = uncurryThis(Map.prototype.get);
@@ -248,6 +260,13 @@ const StringPrototypeCharCodeAt = uncurryThis(String.prototype.charCodeAt);
 const StringPrototypeSlice = uncurryThis(String.prototype.slice);
 const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
+// Replaces each lone surrogate with U+FFFD: WebIDL's USVString conversion,
+// after ToString.
+const StringPrototypeToWellFormed = uncurryThis(String.prototype.toWellFormed);
+
+// RegExp
+// RegExpBuiltinExec: the builtin, whatever user code makes RegExp.prototype.exec.
+const RegExpPrototypeExec = uncurryThis(RegExp.prototype.exec);
 
 // Symbol
 const SymbolIterator = Symbol.iterator;
@@ -260,8 +279,8 @@ const SymbolFor = Symbol.for;
 const SymbolDispose = Symbol.dispose;
 
 // WeakRef / FinalizationRegistry
-// These globals exist during bootstrap — their deletion from the global is
-// deferred until after bootstrap completes (see runPerIsolateBootstrap) —
+// These globals exist during bootstrap - their deletion from the global is
+// deferred until after bootstrap completes (see runPerIsolateBootstrap) -
 // but they are hidden from user code unless the enable_weak_ref compat flag
 // is set. The captures here keep working after the globals are deleted.
 const WeakRefPrototypeDeref = uncurryThis(WeakRef.prototype.deref);
@@ -274,8 +293,9 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 
 // Reflect
 const ReflectConstruct = Reflect.construct;
+const ReflectOwnKeys = Reflect.ownKeys;
 
-// Math / Number (statics — plain value captures)
+// Math / Number (statics - plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
 const NumberIsFinite = Number.isFinite;
@@ -287,7 +307,7 @@ const JSONStringify = JSON.stringify;
 
 // Helper: capture a spec-mandated prototype accessor getter, with a
 // validation guard instead of non-null assertions. These accessors are
-// guaranteed by the ECMAScript spec or by the bootstrap's own classes — the
+// guaranteed by the ECMAScript spec or by the bootstrap's own classes - the
 // guard is a diagnostic safety net, not a recoverable branch.
 function getProtoGetter<T>(proto: object, name: string | symbol): T {
   const desc = ObjectGetOwnPropertyDescriptor(proto, name);
@@ -309,14 +329,14 @@ const SetPrototypeSizeGet = getProtoGetter<(set: Set<any>) => number>(
   'size'
 );
 
-// %MapIteratorPrototype%.next — shared by entries(), keys(), values().
+// %MapIteratorPrototype%.next - shared by entries(), keys(), values().
 // Reached by spinning up a throwaway iterator to get the prototype.
 const MapIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
   uncurryThis(
     (ObjectGetPrototypeOf(MapPrototypeEntries(new MapCtor())) as any).next
   );
 
-// %SetIteratorPrototype%.next — shared by entries(), keys(), values().
+// %SetIteratorPrototype%.next - shared by entries(), keys(), values().
 const SetIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
   uncurryThis(
     (ObjectGetPrototypeOf(SetPrototypeValues(new SetCtor())) as any).next
@@ -334,14 +354,14 @@ const ArrayBufferPrototypeDetachedGet = getProtoGetter<
   (buffer: ArrayBuffer) => boolean
 >(ArrayBuffer.prototype, 'detached');
 
-// TypedArray — instance methods live on %TypedArray%.prototype, the shared
+// TypedArray - instance methods live on %TypedArray%.prototype, the shared
 // prototype of all typed array types. Capturing via Uint8Array.prototype
 // reaches the same (inherited) functions.
 const TypedArrayPrototypeSet = uncurryThis(Uint8Array.prototype.set);
 const TypedArrayPrototypeSlice = uncurryThis(Uint8Array.prototype.slice);
 const TypedArrayPrototypeSubarray = uncurryThis(Uint8Array.prototype.subarray);
 
-// %TypedArray%.prototype — the shared prototype holding the metadata
+// %TypedArray%.prototype - the shared prototype holding the metadata
 // accessors for every typed array type.
 const TypedArrayPrototype = ObjectGetPrototypeOf(Uint8Array.prototype);
 
@@ -349,13 +369,13 @@ const TypedArrayPrototype = ObjectGetPrototypeOf(Uint8Array.prototype);
 // internal [[TypedArrayName]] slot: returns e.g. "Uint8Array" for typed
 // arrays and undefined for anything else (including DataView, whose own
 // toStringTag is a plain data property). This is the pollution-proof way to
-// identify a view's REAL type — never use view.constructor, which is
+// identify a view's REAL type - never use view.constructor, which is
 // user-controllable via an own property.
 const TypedArrayPrototypeGetSymbolToStringTag = getProtoGetter<
   (value: unknown) => string | undefined
 >(TypedArrayPrototype, SymbolToStringTag);
 
-// Metadata getter captures — view.buffer / view.byteOffset / view.byteLength
+// Metadata getter captures - view.buffer / view.byteOffset / view.byteLength
 // / view.length are PROTOTYPE ACCESSORS, patchable by user code. Internal
 // reads of view metadata at trust boundaries must go through these (or the
 // DataView equivalents below), never through property access on the view.
@@ -388,7 +408,7 @@ const DataViewPrototypeGetByteLength = getProtoGetter<
 // Captured constructors for every typed array type, keyed by the name
 // returned by TypedArrayPrototypeGetSymbolToStringTag. Null prototype so
 // lookups can't be confused via Object.prototype pollution. DataView is not
-// in this map (the getter returns undefined for it) — detect it separately
+// in this map (the getter returns undefined for it) - detect it separately
 // and use the DataView capture above.
 // Float16Array is enabled unconditionally, so a plain capture is safe.
 const TypedArrayCtorByName = ObjectFreeze(
@@ -416,7 +436,7 @@ const TypedArrayCtorByName = ObjectFreeze(
 // because they override every method to dispatch through the captured
 // primordials, not the (potentially polluted) prototype chain.
 
-// Safe iterator wrappers — hold a real iterator internally and call the
+// Safe iterator wrappers - hold a real iterator internally and call the
 // captured .next(), so iteration is resistant to prototype pollution of
 // %MapIteratorPrototype% / %SetIteratorPrototype%.
 class SafeMapIterator<T> {
@@ -527,7 +547,7 @@ class SafeSet<T> extends SetCtor<T> {
       SetPrototypeEntries(this)
     ) as unknown as SetIterator<[T, T]>;
   }
-  // Per spec, Set.prototype.keys === Set.prototype.values (ECMA-262 §24.2.5.5),
+  // Per spec, Set.prototype.keys === Set.prototype.values (ECMA-262 section 24.2.5.5),
   // so delegating to SetPrototypeValues is correct.
   override keys(): SetIterator<T> {
     return new SafeSetIterator(
@@ -635,6 +655,13 @@ const EventTargetRemoveEventListener = uncurryThis(
   EventTargetCtor.prototype.removeEventListener
 ) as (target: object, type: string, listener: () => void) => void;
 
+// Throws for any receiver but a Blob (a File included): a brand check.
+const BlobPrototypeSlice = uncurryThis(globalThis.Blob.prototype.slice) as (
+  blob: Blob,
+  start?: number,
+  end?: number
+) => Blob;
+
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
 const DOMException = globalThis.DOMException;
@@ -666,7 +693,7 @@ const TextDecoderIgnoreBOMGet = captureJsgGetter<
 // Freeze the exports object to prevent accidental mutation by bootstrap scripts.
 // Uses the captured ObjectFreeze, not the potentially-polluted global.
 module.exports = ObjectFreeze({
-  // Helpers — exported so other scripts can capture ad-hoc
+  // Helpers - exported so other scripts can capture ad-hoc
   uncurryThis,
   applyBind,
   getProtoGetter,
@@ -679,7 +706,9 @@ module.exports = ObjectFreeze({
   Array: ArrayCtor,
   ArrayBuffer: ArrayBufferCtor,
   BigInt: BigIntCtor,
+  Boolean: BooleanCtor,
   DataView: DataViewCtor,
+  Date: DateCtor,
   Error: ErrorCtor,
   EventTarget: EventTargetCtor,
   FinalizationRegistry: FinalizationRegistryCtor,
@@ -691,6 +720,7 @@ module.exports = ObjectFreeze({
   RangeError: RangeErrorCtor,
   RegExp: RegExpCtor,
   Set: SetCtor,
+  String: StringCtor,
   Symbol: SymbolCtor,
   TextDecoder: TextDecoderCtor,
   TextEncoder: TextEncoderCtor,
@@ -712,22 +742,24 @@ module.exports = ObjectFreeze({
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  ObjectHasOwn,
   ObjectKeys,
   ObjectGetPrototypeOf,
   ObjectSetPrototypeOf,
 
-  // %AsyncIteratorPrototype%
+  // %IteratorPrototype% / %AsyncIteratorPrototype%
+  IteratorPrototype,
   AsyncIteratorPrototype,
 
-  // Promise — regular Promise (for user-facing promises)
+  // Promise - regular Promise (for user-facing promises)
   PromiseResolve,
   PromiseReject,
   PromiseWithResolvers,
-  // Promise — captured prototype methods
+  // Promise - captured prototype methods
   PromisePrototypeThen,
   PromisePrototypeCatch,
   PromisePrototypeFinally,
-  // Promise — SafePromise (for internal-only promises needing species protection)
+  // Promise - SafePromise (for internal-only promises needing species protection)
   SafePromise,
 
   // Array
@@ -742,6 +774,10 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
+  ArrayPrototypeSort,
+
+  // Blob
+  BlobPrototypeSlice,
 
   // DOMException
   DOMException,
@@ -788,6 +824,7 @@ module.exports = ObjectFreeze({
 
   // Reflect
   ReflectConstruct,
+  ReflectOwnKeys,
 
   // Math / Number
   MathMax,
@@ -802,6 +839,7 @@ module.exports = ObjectFreeze({
   ArrayBufferPrototypeDetachedGet,
 
   // TypedArray
+  TypedArrayPrototype,
   TypedArrayPrototypeSet,
   TypedArrayPrototypeSlice,
   TypedArrayPrototypeSubarray,
@@ -822,6 +860,10 @@ module.exports = ObjectFreeze({
   StringPrototypeSlice,
   StringPrototypeStartsWith,
   StringPrototypeIndexOf,
+  StringPrototypeToWellFormed,
+
+  // RegExp
+  RegExpPrototypeExec,
 
   // Symbol
   SymbolAsyncIterator,
@@ -852,7 +894,7 @@ module.exports = ObjectFreeze({
   TextEncoderEncode,
   TextDecoderDecode,
 
-  // Safe types — use normal method syntax, resistant to prototype pollution
+  // Safe types - use normal method syntax, resistant to prototype pollution
   SafeMap,
   SafeSet,
   SafeWeakMap,

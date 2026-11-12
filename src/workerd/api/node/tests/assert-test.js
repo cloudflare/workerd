@@ -42,13 +42,15 @@ import {
   rejects,
   strictEqual,
   throws,
+  Assert,
   AssertionError,
 } from 'node:assert';
 
-import { mock } from 'node:test';
+import { mock, MockTracker } from 'node:test';
 import util from 'node:util';
 
 import { default as assert } from 'node:assert';
+import { default as strictAssert } from 'node:assert/strict';
 
 const _strictEqualMessageStart = 'Expected values to be strictly equal:\n';
 const start = 'Expected values to be strictly deep-equal:';
@@ -1518,5 +1520,495 @@ export const setterFailsIfGetterOptionsIsTrue = {
     throws(() => {
       mock.setter({}, 'method', { getter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
+  },
+};
+
+// The mock.property() tests below are ported from Node.js
+// test/parallel/test-runner-mocking.js.
+export const spiesOnAProperty = {
+  test() {
+    const obj = { foo: 42 };
+    const prop = mock.property(obj, 'foo', 100);
+
+    strictEqual(obj.foo, 100);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, 100);
+
+    obj.foo = 200;
+    strictEqual(obj.foo, 200);
+    strictEqual(prop.mock.accesses.length, 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[1].value, 200);
+    strictEqual(prop.mock.accesses[2].type, 'get');
+    strictEqual(prop.mock.accesses[2].value, 200);
+
+    obj.foo = 300;
+    strictEqual(obj.foo, 300);
+    strictEqual(prop.mock.accessCount(), 5);
+    strictEqual(prop.mock.accesses[3].type, 'set');
+    strictEqual(prop.mock.accesses[3].value, 300);
+    strictEqual(prop.mock.accesses[4].type, 'get');
+    strictEqual(prop.mock.accesses[4].value, 300);
+
+    prop.mock.resetAccesses();
+    strictEqual(prop.mock.accessCount(), 0);
+
+    obj.foo = 500;
+    strictEqual(obj.foo, 500);
+    strictEqual(prop.mock.accessCount(), 2);
+    strictEqual(prop.mock.accesses[0].type, 'set');
+    strictEqual(prop.mock.accesses[1].type, 'get');
+
+    prop.mock.resetAccesses();
+    strictEqual(prop.mock.accessCount(), 0);
+
+    strictEqual(obj.foo, 500);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 42);
+  },
+};
+
+export const spiesOnAPropertyWithoutProvidingAValue = {
+  test() {
+    const obj = { foo: 123 };
+    const prop = mock.property(obj, 'foo');
+
+    strictEqual(obj.foo, 123);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, 123);
+
+    obj.foo = 456;
+    strictEqual(obj.foo, 456);
+    strictEqual(prop.mock.accessCount(), 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[1].value, 456);
+    strictEqual(prop.mock.accesses[2].type, 'get');
+    strictEqual(prop.mock.accesses[2].value, 456);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 123);
+  },
+};
+
+export const spiesOnASymbolProperty = {
+  test() {
+    const symbol = Symbol('foo');
+    const obj = { [symbol]: 123 };
+    const prop = mock.property(obj, symbol, 456);
+
+    strictEqual(obj[symbol], 456);
+    strictEqual(prop.mock.accessCount(), 1);
+
+    obj[symbol] = 789;
+    strictEqual(obj[symbol], 789);
+    strictEqual(prop.mock.accessCount(), 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[2].type, 'get');
+
+    prop.mock.restore();
+    strictEqual(obj[symbol], 123);
+  },
+};
+
+export const changesMockedPropertyValueDynamically = {
+  test() {
+    const obj = { foo: 1 };
+
+    const prop = mock.property(obj, 'foo', 2);
+    strictEqual(obj.foo, 2);
+    strictEqual(prop.mock.accessCount(), 1);
+
+    prop.mock.mockImplementation(99);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 3);
+
+    prop.mock.mockImplementationOnce(42);
+    strictEqual(obj.foo, 42);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 5);
+
+    throws(() => {
+      prop.mock.mockImplementationOnce(55, 4);
+    }, /The value of "onAccess" is out of range\. It must be >= 5/);
+
+    prop.mock.mockImplementationOnce(100, 5);
+    prop.mock.mockImplementationOnce(200, 6);
+    strictEqual(obj.foo, 100);
+    strictEqual(obj.foo, 200);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 8);
+
+    prop.mock.mockImplementationOnce(555, 10);
+    strictEqual(obj.foo, 99);
+    strictEqual(obj.foo, 99);
+    strictEqual(obj.foo, 555);
+
+    prop.mock.mockImplementation(undefined);
+    strictEqual(obj.foo, undefined);
+  },
+};
+
+export const mocksPropertyValueToUndefined = {
+  test() {
+    const obj = { foo: 123 };
+    const prop = mock.property(obj, 'foo', undefined);
+
+    strictEqual(obj.foo, undefined);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, undefined);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 123);
+  },
+};
+
+export const resetAccessesDoesNotAffectPropertyValue = {
+  test() {
+    const obj = { foo: 1 };
+    const prop = mock.property(obj, 'foo', 2);
+
+    obj.foo = 5;
+    strictEqual(obj.foo, 5);
+    strictEqual(prop.mock.accessCount(), 2);
+
+    prop.mock.resetAccesses();
+    strictEqual(obj.foo, 5);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+  },
+};
+
+export const restoresOriginalPropertyValue = {
+  test() {
+    const obj = {
+      foo: 10,
+    };
+
+    const prop = mock.property(obj, 'foo', 20);
+    strictEqual(obj.foo, 20);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 10);
+  },
+};
+
+export const throwsIfSettingANonWritableProperty = {
+  test() {
+    const obj = {};
+    Object.defineProperty(obj, 'bar', {
+      value: 1,
+      writable: false,
+      configurable: true,
+      enumerable: true,
+    });
+
+    mock.property(obj, 'bar', 2);
+    strictEqual(obj.bar, 2);
+
+    throws(
+      () => {
+        obj.bar = 3;
+      },
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+  },
+};
+
+export const throwsIfPropertyDoesNotExist = {
+  test() {
+    throws(
+      () => {
+        mock.property({}, 'doesNotExist', 1);
+      },
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+  },
+};
+
+export const throwsIfObjectIsNull = {
+  test() {
+    throws(
+      () => {
+        mock.property(null, 'foo', 1);
+      },
+      { code: 'ERR_INVALID_ARG_TYPE' }
+    );
+  },
+};
+
+// Node's "local property mocks are auto restored after the test finishes"
+// relies on per-test t.mock, which workerd's node:test does not provide, so
+// this exercises the same restore path through restoreAll() and reset().
+export const propertyMocksAreRestoredByRestoreAllAndReset = {
+  test() {
+    const tracker = new MockTracker();
+    const baz = () => 0;
+    const obj = { foo: 111, bar: 222, baz };
+
+    tracker.property(obj, 'foo', 888);
+    strictEqual(obj.foo, 888);
+    strictEqual(obj.bar, 222);
+
+    tracker.restoreAll();
+    strictEqual(obj.foo, 111);
+    strictEqual(obj.bar, 222);
+
+    tracker.property(obj, 'bar', 999);
+    const fn = tracker.method(obj, 'baz', () => 1);
+    strictEqual(obj.bar, 999);
+    strictEqual(obj.baz, fn);
+
+    tracker.reset();
+    strictEqual(obj.foo, 111);
+    strictEqual(obj.bar, 222);
+    strictEqual(obj.baz, baz);
+  },
+};
+
+// Ported from Node.js test/parallel/test-assert-class.js and
+// test/parallel/test-assert-class-destructuring.js.
+export const assertClass = {
+  async test() {
+    strictEqual(assert.Assert, Assert);
+    strictEqual(strictAssert.Assert, Assert);
+
+    throws(() => Assert(), {
+      code: 'ERR_CONSTRUCT_CALL_REQUIRED',
+      name: 'TypeError',
+    });
+
+    throws(() => new Assert({ diff: 'invalid' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'TypeError',
+      message:
+        "The property 'options.diff' must be one of: 'simple', 'full'. Received 'invalid'",
+    });
+    new Assert({ diff: 'simple' });
+    new Assert({ diff: 'full' });
+
+    // Non-strict instance.
+    {
+      const assertInstance = new Assert({ diff: undefined, strict: false });
+      strictEqual(assertInstance.AssertionError, AssertionError);
+      assertInstance.ok(true);
+      strictEqual(typeof assertInstance.ok, 'function');
+      strictEqual(assertInstance.ok.strictEqual, undefined);
+      throws(() => assertInstance.ok(false), { name: 'AssertionError' });
+      throws(() => assertInstance.fail(), {
+        code: 'ERR_ASSERTION',
+        message: 'Failed',
+        operator: 'fail',
+        generatedMessage: true,
+      });
+      assertInstance.equal(undefined, undefined);
+      assertInstance.equal(null, undefined);
+      assertInstance.equal(2, '2');
+      assertInstance.equal(NaN, NaN);
+      assertInstance.notEqual(true, false);
+      throws(() => assertInstance.equal(1, 2), {
+        code: 'ERR_ASSERTION',
+        operator: '==',
+      });
+      throws(() => assertInstance.notEqual(2, '2'), {
+        code: 'ERR_ASSERTION',
+        operator: '!=',
+      });
+      assertInstance.deepEqual({ a: 1 }, { a: '1' });
+      assertInstance.notDeepEqual({ a: 1 }, { a: 2 });
+      throws(() => assertInstance.deepEqual({ a: 1 }, { a: 2 }), {
+        code: 'ERR_ASSERTION',
+        operator: 'deepEqual',
+      });
+      throws(() => assertInstance.deepEqual(/a/), {
+        code: 'ERR_MISSING_ARGS',
+      });
+      throws(() => assertInstance.notDeepEqual('test'), {
+        code: 'ERR_MISSING_ARGS',
+      });
+      assertInstance.notStrictEqual(2, '2');
+      throws(
+        () => assertInstance.strictEqual(2, '2'),
+        assertInstance.AssertionError
+      );
+      throws(() => assertInstance.match(/abc/, 'string'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => assertInstance.doesNotMatch(/abc/, 'string'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      assertInstance.throws(() => {
+        throw new TypeError('boom');
+      }, TypeError);
+      await assertInstance.rejects(Promise.reject(new Error('boom')));
+      assertInstance.ifError(null);
+      throws(
+        () =>
+          assertInstance.doesNotThrow(() => {
+            throw new TypeError('wrong');
+          }, assertInstance.AssertionError),
+        TypeError
+      );
+      const rangeError = new RangeError('my range');
+      throws(
+        () =>
+          assertInstance.doesNotThrow(
+            () => {
+              throw new TypeError('wrong type');
+            },
+            TypeError,
+            rangeError
+          ),
+        (err) =>
+          err instanceof assertInstance.AssertionError &&
+          err.message.includes(rangeError.message)
+      );
+      throws(
+        () =>
+          assertInstance.partialDeepStrictEqual(
+            { a: true },
+            { a: false },
+            'custom message'
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+    }
+
+    // Strict instance (the default).
+    {
+      const assertInstance = new Assert();
+      strictEqual(assertInstance.equal, assertInstance.strictEqual);
+      strictEqual(assertInstance.deepEqual, assertInstance.deepStrictEqual);
+      strictEqual(assertInstance.notEqual, assertInstance.notStrictEqual);
+      strictEqual(
+        assertInstance.notDeepEqual,
+        assertInstance.notDeepStrictEqual
+      );
+      throws(() => assertInstance.equal(2, '2'), AssertionError);
+      throws(() => assertInstance.ok(), {
+        code: 'ERR_ASSERTION',
+        message: 'No value argument passed to `assert.ok()`',
+      });
+    }
+
+    // skipPrototype.
+    function CoolClass(name) {
+      this.name = name;
+    }
+    function AwesomeClass(name) {
+      this.name = name;
+    }
+    class Modern {
+      constructor(value) {
+        this.value = value;
+      }
+    }
+    class Legacy {
+      constructor(value) {
+        this.value = value;
+      }
+    }
+    const cool = new CoolClass('Assert is inspiring');
+    const awesome = new AwesomeClass('Assert is inspiring');
+    const modern = new Modern(42);
+    const legacy = new Legacy(42);
+
+    {
+      const assertInstance = new Assert({ skipPrototype: true });
+      throws(
+        () =>
+          assertInstance.deepEqual(
+            [1, 2, 3, 4, 5, 6, 7],
+            [1, 2, 3, 4, 5, 9, 7]
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepEqual(cool, awesome);
+      assertInstance.deepStrictEqual(cool, awesome);
+      assertInstance.deepEqual(modern, legacy);
+      assertInstance.deepStrictEqual(modern, legacy);
+      throws(
+        () =>
+          assertInstance.deepStrictEqual(cool, new CoolClass('Soooo coooool')),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepStrictEqual(
+        { obj: new CoolClass('test'), arr: [1, 2, 3] },
+        { obj: new AwesomeClass('test'), arr: [1, 2, 3] }
+      );
+      assertInstance.deepStrictEqual(
+        new Uint8Array([1, 2, 3]),
+        Buffer.from([1, 2, 3])
+      );
+      assertInstance.deepStrictEqual([1, 2, 3], Array.of(1, 2, 3));
+      assertInstance.deepStrictEqual(
+        new Date('2023-01-01'),
+        new Date('2023-01-01')
+      );
+      assertInstance.deepStrictEqual(/test/g, new RegExp('test', 'g'));
+      throws(
+        () =>
+          assertInstance.deepStrictEqual(
+            new Date('2023-01-01'),
+            new Date('2023-01-02')
+          ),
+        { code: 'ERR_ASSERTION' }
+      );
+      assertInstance.deepStrictEqual(
+        { value: 42, nested: { prop: 'test' } },
+        new (function CustomObj(value, nested) {
+          this.value = value;
+          this.nested = nested;
+        })(42, { prop: 'test' })
+      );
+      throws(() => assertInstance.deepStrictEqual({ num: 42 }, { num: '42' }), {
+        code: 'ERR_ASSERTION',
+      });
+      throws(() => assertInstance.notDeepStrictEqual(cool, awesome), {
+        code: 'ERR_ASSERTION',
+      });
+      assertInstance.notDeepStrictEqual(
+        cool,
+        new AwesomeClass('Not so awesome')
+      );
+    }
+    {
+      const assertInstance = new Assert({
+        strict: false,
+        skipPrototype: true,
+      });
+      assertInstance.deepStrictEqual(cool, awesome);
+      assertInstance.deepStrictEqual(modern, legacy);
+    }
+    new Assert({ skipPrototype: false }).notDeepStrictEqual(cool, awesome);
+    throws(() => new Assert().deepStrictEqual(cool, awesome), {
+      code: 'ERR_ASSERTION',
+    });
+
+    // Destructured methods lose the instance options.
+    {
+      const { equal: equalNonStrict } = new Assert({ strict: false });
+      const { equal: equalStrict } = new Assert({ strict: true });
+      equalNonStrict(2, '2');
+      throws(() => equalStrict(2, '2'), AssertionError);
+
+      const { deepStrictEqual: deepStrictEqualSkip } = new Assert({
+        skipPrototype: true,
+      });
+      throws(() => deepStrictEqualSkip(cool, awesome), AssertionError);
+
+      const { fail, throws: throwsFn, match, doesNotMatch } = new Assert();
+      throws(() => fail('test message'), { message: 'test message' });
+      throwsFn(() => {
+        throw new Error('test');
+      }, Error);
+      match('hello world', /world/);
+      doesNotMatch('hello world', /xyz/);
+    }
   },
 };

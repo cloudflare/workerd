@@ -169,6 +169,35 @@ fn errors_with_enhanced_error_serialization() {
     });
 }
 
+/// Without `preserve_stack_in_errors`, an error keeps the stack it gets when read, and its other
+/// properties, as `jsg::Deserializer` does without `preserveStackInErrors`.
+#[test]
+fn errors_without_their_stacks() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = eval(
+            lock,
+            ctx,
+            "Object.assign(new Error('e'), { stack: 'original', code: 42 })",
+        );
+        let data = jsg::ser::serialize(lock, value)?;
+        let options = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+        };
+        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+        ctx.set_global(lock, "v", copy);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "v instanceof Error && v.message === 'e' && v.code === 42 && \
+                 typeof v.stack === 'string' && v.stack !== 'original'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
 /// that the bytes stay the same.
 #[test]
@@ -264,6 +293,72 @@ fn unserializable_values_throw_data_clone_error() {
             "DataCloneError",
             "Could not serialize object of type \"Unserializable\". This type does not support \
              serialization.",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn classes_implemented_in_javascript_throw_data_clone_error() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        // Whatever the instance's mark, and even if it is a native error.
+        let cloneable = "({ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1, \
+                         deserialize: () => {} })";
+        for (expr, mark, class) in [
+            ("new (class Point {})()", cloneable, "Point"),
+            ("new (class Opaque {})()", "0", "Opaque"),
+            (
+                "new (class TestError extends Error {})('e')",
+                cloneable,
+                "TestError",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            let mark = eval(lock, ctx, mark);
+            Harness::mark_js_serializable(lock, value, mark);
+            ctx.set_global(lock, "instance", value);
+            let exception = serialize_exception(lock, ctx, "[instance]");
+            assert_error(
+                lock,
+                ctx,
+                exception,
+                "DataCloneError",
+                &format!(
+                    "Could not serialize object of type \"{class}\". This type does not support \
+                     serialization."
+                ),
+            );
+        }
+
+        // A mark on an object whose prototype is Object.prototype or null is ignored, as by
+        // jsg::Serializer.
+        for (expr, check) in [
+            ("({ a: 1 })", "v.a === 1"),
+            (
+                "Object.create(null)",
+                "Object.getPrototypeOf(v) === Object.prototype",
+            ),
+        ] {
+            let value = eval(lock, ctx, expr);
+            let mark = eval(lock, ctx, "0");
+            Harness::mark_js_serializable(lock, value, mark);
+            ctx.set_global(lock, "instance", value);
+            assert_round_trip(lock, ctx, "instance", check);
+        }
+
+        // What C++ JSG writes for one: V8's tag for a host object, jsg::Serializer's tag for an
+        // instance of a class implemented in JavaScript, its length-delimited deserializeInfo, and
+        // its flags.
+        let mut data = header(lock);
+        data.extend_from_slice(b"\\\x17\x0atest:Point\x00");
+        let exception = deserialize_exception(lock, &data);
+        assert_error(
+            lock,
+            ctx,
+            exception,
+            "DataCloneError",
+            "This deserializer does not support objects implemented in JavaScript.",
         );
         Ok(())
     });
@@ -420,6 +515,50 @@ fn nothing_runs_while_execution_is_terminating() {
             other => panic!("the script was not terminated: {other:?}"),
         }
         assert!(CHECKED_WHILE_TERMINATING.load(Ordering::SeqCst));
+        Ok(())
+    });
+}
+
+#[test]
+fn an_older_version_is_written_and_read_back() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr = "new Uint8Array([1, 2, 3])";
+        let check = "v instanceof Uint8Array && v[2] === 3";
+        let value = eval(lock, ctx, expr);
+        let latest = jsg::ser::serialize(lock, value).unwrap();
+        let options = jsg::ser::SerializeOptions { version: Some(13) };
+        let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        assert_eq!(data[..2], [0xff, 13]);
+        // Version 14 added the flags of an ArrayBufferView.
+        assert!(data.len() < latest.len());
+        for copy in [
+            jsg::ser::deserialize(lock, &data).unwrap(),
+            Harness::cpp_deserialize(lock, &data),
+        ] {
+            ctx.set_global(lock, "v", copy);
+            assert!(ctx.eval::<bool>(lock, check).unwrap());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_write_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let value = eval(lock, ctx, "1");
+        let caught = lock
+            .try_catch(|lock| {
+                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let result = jsg::ser::serialize_with_options(lock, value, options);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        ctx.set_global(lock, "e", caught.expect_err("serialization should throw"));
+        assert!(
+            ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
+                .unwrap()
+        );
         Ok(())
     });
 }

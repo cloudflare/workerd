@@ -60,10 +60,10 @@ impl Task {
         this == other
     }
 
-    /// `this` dereferences to the resource.
+    /// `this` borrows the resource with the lock.
     #[jsg_method]
-    fn name(this: jsg::Rc<Self>) -> String {
-        this.name.clone()
+    fn name(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> String {
+        this.get(lock).name.clone()
     }
 
     /// `this` comes before the lock, as `&self` does.
@@ -72,7 +72,7 @@ impl Task {
         this: jsg::Rc<Self>,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<v8::Local<'s, v8::Value>> {
-        this.name.as_str().to_js(lock)
+        this.get(lock).name.as_str().to_js(lock)
     }
 
     /// Drops its `jsg::Rc` while the JavaScript wrapper may be the only other owner.
@@ -85,30 +85,34 @@ impl Task {
     /// wrapper in return.
     #[jsg_method]
     fn schedule(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, queue: jsg::Rc<Queue>) {
-        this.queue.set(Some(
-            queue.clone().to_js(lock).unwrap().to_traced_global(lock),
+        this.get(lock).queue.set(Some(
+            queue
+                .clone(lock)
+                .to_js(lock)
+                .unwrap()
+                .to_traced_global(lock),
         ));
-        queue.tasks.borrow_mut(lock).push(this);
+        queue.get(lock).tasks.borrow_mut(lock).push(this);
     }
 
     #[jsg_property]
-    fn get_label(this: jsg::Rc<Self>) -> String {
-        this.label.borrow().clone()
+    fn get_label(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> String {
+        this.get(lock).label.borrow().clone()
     }
 
     #[jsg_property]
-    fn set_label(this: jsg::Rc<Self>, label: String) {
-        *this.label.borrow_mut() = label;
+    fn set_label(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, label: String) {
+        *this.get(lock).label.borrow_mut() = label;
     }
 
     #[jsg_property(instance)]
-    fn get_own_name(this: jsg::Rc<Self>) -> String {
-        this.name.clone()
+    fn get_own_name(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> String {
+        this.get(lock).name.clone()
     }
 
     #[jsg_inspect_property]
-    fn debug_name(this: jsg::Rc<Self>) -> String {
-        format!("Task({})", this.name)
+    fn debug_name(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> String {
+        format!("Task({})", this.get(lock).name)
     }
 }
 

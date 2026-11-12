@@ -96,18 +96,30 @@ import {
 } from 'cloudflare:workers';
 
 export default {
+  // cluster-cron.wd-test's trigger: each occurrence logged by the node
+  // that runs it, its schedule's owner.
+  scheduled(controller) {
+    console.error(`TICK ${controller.scheduledTime}`);
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/cron-clock') {
+      return env.CRON.fetch(`http://cron/clock${url.search}`, {
+        method: 'POST',
+      });
+    }
     if (url.pathname.startsWith('/on-hibernate/')) {
       return env.ON_HIBERNATE.fetch(request);
     }
 
     if (url.pathname.startsWith('/kv/')) {
-      if (url.pathname === '/kv/clock') {
-        await env.KV_WORKER.fetch(`http://kv/clock${url.search}`, {
-          method: 'POST',
-        });
-        return Response.json({});
+      if (url.pathname === '/kv/clock' || url.pathname === '/kv/gc') {
+        const r = await env.KV_WORKER.fetch(
+          `http://kv${url.pathname.slice(3)}${url.search}`,
+          { method: 'POST' }
+        );
+        return Response.json({}, { status: r.status });
       }
       return kv(url, env.KV);
     }

@@ -213,8 +213,10 @@ bool setDurableObjectIdError(
       jsg::v8StrIntern(isolate, "durableObjectId"_kj), jsg::v8Str(isolate, durableObjectId)));
 }
 
-struct DecodedException {
-  v8::Local<v8::Value> handle;
+constexpr kj::StringPtr NETWORK_CONNECTION_LOST = "Network connection lost."_kj;
+
+// What decoding a kj::Exception determines besides the JavaScript error itself.
+struct DecodedExceptionInfo {
   bool isInternal;
   bool isFromRemote;
   bool isDurableObjectReset;
@@ -223,6 +225,104 @@ struct DecodedException {
   bool isDisconnection;
   bool isDoNotLogException;
 };
+
+struct DecodedException: public DecodedExceptionInfo {
+  v8::Local<v8::Value> handle;
+};
+
+DecodedExceptionInfo initDecodedExceptionInfo(const TunneledErrorType& tunneledInfo) {
+  return {
+    .isInternal = tunneledInfo.isInternal,
+    .isFromRemote = tunneledInfo.isFromRemote,
+    .isDurableObjectReset = tunneledInfo.isDurableObjectReset,
+    .internalErrorId = kj::none,
+    .isDisconnection = false,
+    .isDoNotLogException = tunneledInfo.isDoNotLogException,
+  };
+}
+
+// Returns the id in `internalErrorId`, after storing a new one there if it has none.
+InternalErrorId& ensureInternalErrorId(kj::Maybe<InternalErrorId>& internalErrorId) {
+  KJ_IF_SOME(id, internalErrorId) {
+    return id;
+  }
+  return internalErrorId.emplace(makeInternalErrorId());
+}
+
+// The message of a tunneled error: the part of its description that follows the error type,
+// `errorString`. An internal error's message is hidden behind the id in `internalErrorId`, which
+// gets a new id if it has none.
+kj::String tunneledErrorMessage(const TunneledErrorType& tunneledInfo,
+    kj::StringPtr errorString,
+    kj::Maybe<InternalErrorId>& internalErrorId) {
+  if (tunneledInfo.isInternal) {
+    return renderInternalError(ensureInternalErrorId(internalErrorId));
+  } else {
+    return kj::str(trimErrorMessage(errorString));
+  }
+}
+
+// If `errorType` begins with a DOMException and its parenthesized error name, like
+// "DOMException(SyntaxError): message", returns the name and advances `errorType` past the closing
+// parenthesis. A "DOMException(" that is never closed is skipped: `errorType` is advanced past it
+// and whatever follows is left to be matched as an error type.
+kj::Maybe<kj::String> tryConsumeDomExceptionName(kj::StringPtr& errorType) {
+  if (errorType.startsWith("DOMException(")) {
+    errorType = errorType.slice(strlen("DOMException("));
+    // Check for closing brace
+    KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
+      auto errorName = kj::str(errorType.first(closeParen));
+      errorType = errorType.slice(1 + closeParen);
+      return kj::mv(errorName);
+    }
+  }
+  return kj::none;
+}
+
+// One of the standard error types that a tunneled error's description can name.
+struct JsErrorType {
+  kj::StringPtr name;
+  v8::Local<v8::Value> (*construct)(v8::Local<v8::String> message, v8::Local<v8::Value> options);
+};
+
+// Returns the first error type whose name `errorType` starts with.
+kj::Maybe<const JsErrorType&> tryFindJsErrorType(kj::StringPtr errorType) {
+  static const JsErrorType TYPES[] = {
+#define V(error_name, error_type) {error_name##_kj, &v8::Exception::error_type},
+    JS_ERROR_TYPES(V)
+#undef V
+  };
+  for (auto& type: TYPES) {
+    if (errorType.startsWith(type.name)) return type;
+  }
+  return kj::none;
+}
+
+// Logs an internal exception to stderr and returns what an InternalExceptionObserver gets to know
+// about it, after telling `observer` if there is one.
+InternalExceptionObserver::Detail reportInternalException(const kj::Exception& exception,
+    const DecodedExceptionInfo& info,
+    kj::Maybe<const InternalExceptionObserver&> observer) {
+  // Don't log exceptions that have been explicitly marked with worker_do_not_log or are
+  // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
+  bool shouldLogWithInternalId = !info.isDisconnection && !info.isDoNotLogException;
+  InternalExceptionObserver::Detail detail{
+    .isInternal = info.isInternal,
+    .isFromRemote = info.isFromRemote,
+    .isDurableObjectReset = info.isDurableObjectReset,
+    .internalErrorId = shouldLogWithInternalId ? info.internalErrorId : kj::none,
+  };
+  KJ_IF_SOME(o, observer) {
+    o.reportInternalException(exception, detail);
+  }
+  if (shouldLogWithInternalId) {
+    auto& wdErrId = KJ_ASSERT_NONNULL(info.internalErrorId);
+    LOG_EXCEPTION_WITH_ID("jsgInternalError", exception, wdErrId);
+  } else {
+    KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
+  }
+  return detail;
+}
 
 DecodedException decodeTunneledException(
     v8::Isolate* isolate, const kj::Exception& exception, const ExceptionToJsOptions& options) {
@@ -241,22 +341,15 @@ DecodedException decodeTunneledException(
   //
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
   auto tunneledInfo = tunneledErrorType(exception.getDescription());
-  DecodedException result;
-  result.isDisconnection = false;
-  result.isDoNotLogException = tunneledInfo.isDoNotLogException;
+  DecodedException result{initDecodedExceptionInfo(tunneledInfo)};
+  KJ_IF_SOME(description, options.alreadyDescribed) {
+    result.internalErrorId = description.internalErrorId;
+  }
 
   auto errorType = tunneledInfo.message;
   auto appMessage = [&](kj::StringPtr errorString) -> kj::String {
-    if (tunneledInfo.isInternal) {
-      result.internalErrorId = makeInternalErrorId();
-      return renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId));
-    } else {
-      return kj::str(trimErrorMessage(errorString));
-    }
+    return tunneledErrorMessage(tunneledInfo, errorString, result.internalErrorId);
   };
-  result.isInternal = tunneledInfo.isInternal;
-  result.isFromRemote = tunneledInfo.isFromRemote;
-  result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
 
   auto addAdditionalInfo = [isolate, &result, &exception]() {
     if (!result.handle->IsObject()) return;
@@ -294,18 +387,13 @@ DecodedException decodeTunneledException(
     // TODO(someday): We always handle DOMException specifically here rather than decoding from
     // the serialized detail because using the detail breaks some tests that expect a specific
     // error details. We'll need to investigate further to see if we can make this more consistent.
-    if (errorType.startsWith("DOMException(")) {
-      errorType = errorType.slice(strlen("DOMException("));
-      // Check for closing brace
-      KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
-        auto& js = Lock::from(isolate);
-        auto errorName = kj::str(errorType.first(closeParen));
-        auto message = appMessage(errorType.slice(1 + closeParen));
-        auto exception = js.domException(kj::mv(errorName), kj::mv(message));
-        result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
-        addAdditionalInfo();
-        return result;
-      }
+    KJ_IF_SOME(errorName, tryConsumeDomExceptionName(errorType)) {
+      auto& js = Lock::from(isolate);
+      auto message = appMessage(errorType);
+      auto exception = js.domException(kj::mv(errorName), kj::mv(message));
+      result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+      addAdditionalInfo();
+      return result;
     }
 
     // A payload written without enhanced error serialization uses V8's native error encoding,
@@ -360,16 +448,12 @@ DecodedException decodeTunneledException(
 
     // It's neither a DOMException nor are we using a serialized detail, so it must be
     // one of the standard JS error types (or we will treat it as such).
-#define HANDLE_AND_RETURN_V8_ERROR(error_name, error_type)                                         \
-  if (errorType.startsWith(error_name)) {                                                          \
-    auto message = appMessage(errorType.slice(strlen(error_name)));                                \
-    result.handle = v8::Exception::error_type(v8Str(isolate, message));                            \
-    addAdditionalInfo();                                                                           \
-    return result;                                                                                 \
-  }
-
-    JS_ERROR_TYPES(HANDLE_AND_RETURN_V8_ERROR)
-#undef HANDLE_AND_RETURN_V8_ERROR
+    KJ_IF_SOME(type, tryFindJsErrorType(errorType)) {
+      auto message = appMessage(errorType.slice(type.name.size()));
+      result.handle = type.construct(v8Str(isolate, message), {});
+      addAdditionalInfo();
+      return result;
+    }
   }
 
   // It's not a tunneled JavaScript error type that we recognize.
@@ -384,7 +468,7 @@ DecodedException decodeTunneledException(
   // handling above.
   if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
     result.isDisconnection = true;
-    result.handle = v8::Exception::Error(v8StrIntern(isolate, "Network connection lost."_kj));
+    result.handle = v8::Exception::Error(v8StrIntern(isolate, NETWORK_CONNECTION_LOST));
     if (tunneledInfo.isFromRemote) {
       setRemoteError(isolate, result.handle);
     }
@@ -401,9 +485,8 @@ DecodedException decodeTunneledException(
     }
   } else {
     // For everything return a generic error with an internal error id.
-    result.internalErrorId = makeInternalErrorId();
     result.handle = v8::Exception::Error(
-        v8Str(isolate, renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId))));
+        v8Str(isolate, renderInternalError(ensureInternalErrorId(result.internalErrorId))));
     addAdditionalInfo();
   }
   return result;
@@ -427,28 +510,155 @@ v8::Local<v8::Value> exceptionToJs(
   // inlining it back into this function.
   auto tunneledException = decodeTunneledException(isolate, exception, options);
 
-  if (tunneledException.isInternal) {
-    // Don't log exceptions that have been explicitly marked with worker_do_not_log or are
-    // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
-    bool shouldLogWithInternalId =
-        !tunneledException.isDisconnection && !tunneledException.isDoNotLogException;
-    auto& observer = IsolateBase::from(isolate).getObserver();
-    observer.reportInternalException(exception,
-        {
-          .isInternal = tunneledException.isInternal,
-          .isFromRemote = tunneledException.isFromRemote,
-          .isDurableObjectReset = tunneledException.isDurableObjectReset,
-          .internalErrorId = shouldLogWithInternalId ? tunneledException.internalErrorId : kj::none,
-        });
-    if (shouldLogWithInternalId) {
-      auto& wdErrId = KJ_ASSERT_NONNULL(tunneledException.internalErrorId);
-      LOG_EXCEPTION_WITH_ID("jsgInternalError", exception, wdErrId);
-    } else {
-      KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
-    }
+  if (tunneledException.isInternal && options.alreadyDescribed == kj::none) {
+    reportInternalException(exception, tunneledException, IsolateBase::from(isolate).getObserver());
   }
 
   return tunneledException.handle;
+}
+
+namespace {
+
+// V8's own error serialization, which a serialized detail written without enhanced error
+// serialization uses, keeps the type of these errors only. Any other error comes back as a plain
+// Error, whatever its `name` was.
+kj::StringPtr nameAfterNativeErrorSerialization(kj::StringPtr name) {
+  for (auto preserved: {"EvalError"_kj, "RangeError"_kj, "ReferenceError"_kj, "SyntaxError"_kj,
+         "TypeError"_kj, "URIError"_kj}) {
+    if (name == preserved) return preserved;
+  }
+  return "Error"_kj;
+}
+
+// Whether `stack`, the `stack` of an error with the given `name` and `message`, is no more than
+// the "name: message" that a stack starts with, or the beginning of it. That is all that is left
+// of a stack whose name and message fill the 4KB kept of it.
+bool isStackWithoutFrames(kj::StringPtr stack, kj::StringPtr name, kj::StringPtr message) {
+  if (stack.startsWith(name)) {
+    stack = stack.slice(name.size());
+    if (stack.startsWith(": "_kj)) {
+      stack = stack.slice(2);
+    }
+  }
+  return message.startsWith(stack);
+}
+
+// The properties of the object that exceptionToJs() deserializes from the serialized copy of a
+// tunneled error, as far as the error's JsExceptionMetadata has them. A property that is missing
+// or not a string is none.
+struct TunneledErrorProperties {
+  kj::Maybe<kj::String> name;
+  kj::Maybe<kj::String> message;
+  kj::Maybe<kj::String> stack;
+};
+
+// Reads the JsExceptionMetadata of an exception that also has a serialized copy of the error.
+// exceptionToJs() rebuilds the error from that copy, so without the copy it does not see what the
+// metadata holds either.
+kj::Maybe<TunneledErrorProperties> tryReadTunneledErrorProperties(const kj::Exception& exception) {
+  if (exception.getDetail(TUNNELED_EXCEPTION_DETAIL_ID) == kj::none) return kj::none;
+  auto bytes = KJ_UNWRAP_OR_RETURN(exception.getDetail(JS_EXCEPTION_METADATA_DETAIL_ID), kj::none);
+  if (bytes.size() % sizeof(capnp::word) != 0) return kj::none;
+
+  // The detail is not necessarily aligned.
+  auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+  words.asBytes().copyFrom(bytes);
+
+  kj::Maybe<TunneledErrorProperties> result;
+  // A detail can come from another process, so it may not be a valid message.
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+    capnp::FlatArrayMessageReader reader(words);
+    auto metadata = reader.getRoot<JsExceptionMetadata>();
+    auto& properties = result.emplace();
+    if (metadata.getIsNativeError() &&
+        exception.getDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID) == kj::none) {
+      properties.name = kj::str(nameAfterNativeErrorSerialization(metadata.getErrorType()));
+    } else if (metadata.hasErrorType()) {
+      properties.name = kj::str(metadata.getErrorType());
+    }
+    if (metadata.hasMessage()) {
+      properties.message = kj::str(metadata.getMessage());
+    }
+    // The stack names the error as it was thrown, whatever becomes of its name when it is
+    // serialized.
+    kj::StringPtr thrownName = metadata.hasErrorType() ? metadata.getErrorType() : "Error"_kj;
+    if (metadata.hasStackTrace() &&
+        !isStackWithoutFrames(metadata.getStackTrace(), thrownName, metadata.getMessage())) {
+      properties.stack = kj::str(metadata.getStackTrace());
+    }
+  })) {
+    KJ_LOG(INFO, "Failed to read tunneled JS error metadata", e);
+    return kj::none;
+  }
+  return result;
+}
+
+}  // namespace
+
+JsErrorDescription describeAsJsError(
+    const kj::Exception& exception, kj::Maybe<const InternalExceptionObserver&> observer) {
+  // This mirrors decodeTunneledException() for a trusted reader, case by case.
+  auto tunneledInfo = tunneledErrorType(exception.getDescription());
+  auto info = initDecodedExceptionInfo(tunneledInfo);
+  JsErrorDescription result;
+
+  [&]() {
+    auto errorType = tunneledInfo.message;
+
+    if (tunneledInfo.isJsgError) {
+      // A DOMException is rebuilt from the description, without the stack of the original.
+      KJ_IF_SOME(errorName, tryConsumeDomExceptionName(errorType)) {
+        result.name = kj::mv(errorName);
+        result.message = tunneledErrorMessage(tunneledInfo, errorType, info.internalErrorId);
+        return;
+      }
+
+      // Any other error is the original object, deserialized, if a copy of it came along.
+      auto original = tryReadTunneledErrorProperties(exception);
+      KJ_IF_SOME(properties, original) {
+        KJ_IF_SOME(message, properties.message) {
+          result.name = kj::mv(properties.name).orDefault([]() { return kj::str("Error"); });
+          result.message = kj::mv(message);
+          result.stack = kj::mv(properties.stack);
+          return;
+        }
+      }
+
+      // Otherwise it is a new error of the type that the description names, which has no stack
+      // trace.
+      KJ_IF_SOME(type, tryFindJsErrorType(errorType)) {
+        result.name = kj::str(type.name);
+        result.message = tunneledErrorMessage(
+            tunneledInfo, errorType.slice(type.name.size()), info.internalErrorId);
+        KJ_IF_SOME(properties, original) {
+          // The original has no message that is a string, or its metadata predates the message
+          // field. What the description says, which is how the original was stringified when it
+          // was tunneled, stands in for the message.
+          KJ_IF_SOME(name, properties.name) {
+            result.name = kj::mv(name);
+          }
+          result.stack = kj::mv(properties.stack);
+        }
+        return;
+      }
+    }
+
+    // It's not a tunneled JavaScript error type that we recognize.
+    info.isInternal = true;
+    result.name = kj::str("Error");
+    if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+      info.isDisconnection = true;
+      result.message = kj::str(NETWORK_CONNECTION_LOST);
+    } else {
+      result.message = renderInternalError(ensureInternalErrorId(info.internalErrorId));
+    }
+  }();
+
+  result.internalErrorId = info.internalErrorId;
+  if (info.isInternal) {
+    result.internalException = reportInternalException(exception, info, observer);
+  }
+  return result;
 }
 
 Value Lock::exceptionToJs(kj::Exception&& exception, ExceptionToJsOptions options) {
@@ -488,14 +698,24 @@ void throwInternalError(
   }
 }
 
+bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description) {
+  static const constexpr kj::StringPtr NAMES[] = {
+#define V(name, _) name##_kj,
+    JS_ERROR_TYPES(V)
+#undef V
+        "DOMException"_kj,
+  };
+  for (auto name: NAMES) {
+    if (description.startsWith(name.asArray())) return true;
+  }
+  return false;
+}
+
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows a termination.
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
-    Serializer ser(js,
-        {// Make sure we don't break compatibility if V8 introduces a new version. This value can
-          // be bumped to match the new version once all of production is updated to understand it.
-          .version = 15});
+    Serializer ser(js, {.version = TUNNELED_EXCEPTION_SERIALIZATION_VERSION});
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
     if (js.isUsingEnhancedErrorSerialization()) {
@@ -526,6 +746,19 @@ kj::Maybe<kj::String> getDurableObjectId(const kj::Exception& exception) {
   return kj::none;
 }
 
+namespace {
+
+// Returns the first `size` bytes of `text`, or fewer so as not to end in the middle of a UTF-8
+// sequence. `size` must be less than the size of `text`.
+kj::String truncateUtf8(kj::StringPtr text, size_t size) {
+  while (size > 0 && (static_cast<kj::byte>(text[size]) & 0xc0) == 0x80) {
+    --size;
+  }
+  return kj::str(text.first(size));
+}
+
+}  // namespace
+
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   // Extract JavaScript error type and stack trace
   if (!handle->IsObject()) {
@@ -538,16 +771,13 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   capnp::MallocMessageBuilder message;
   auto metadata = message.initRoot<JsExceptionMetadata>();
 
-  // Limit for user-controlled fields (4KB)
-  constexpr size_t MAX_FIELD_SIZE = 4096;
-
   // Extract error name (e.g., "Error", "TypeError", "RangeError")
   auto nameProp = errorObj.get(js, "name"_kj);
   if (nameProp.isString()) {
     auto errorType = nameProp.toString(js);
     // Truncate to 4KB if needed
-    if (errorType.size() > MAX_FIELD_SIZE) {
-      errorType = kj::str(errorType.slice(0, MAX_FIELD_SIZE));
+    if (errorType.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      errorType = truncateUtf8(errorType, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
     }
     metadata.setErrorType(errorType);
   }
@@ -557,11 +787,24 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   if (stackProp.isString()) {
     auto stackTrace = stackProp.toString(js);
     // Truncate to 4KB if needed
-    if (stackTrace.size() > MAX_FIELD_SIZE) {
-      stackTrace = kj::str(stackTrace.slice(0, MAX_FIELD_SIZE));
+    if (stackTrace.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      stackTrace = truncateUtf8(stackTrace, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
     }
     metadata.setStackTrace(stackTrace);
   }
+
+  // Extract error message
+  auto messageProp = errorObj.get(js, "message"_kj);
+  if (messageProp.isString()) {
+    auto errorMessage = messageProp.toString(js);
+    // Truncate to 4KB if needed
+    if (errorMessage.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      errorMessage = truncateUtf8(errorMessage, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
+    }
+    metadata.setMessage(errorMessage);
+  }
+
+  metadata.setIsNativeError(handle->IsNativeError());
 
   // Serialize to bytes using Cap'n Proto
   auto words = capnp::messageToFlatArray(message);

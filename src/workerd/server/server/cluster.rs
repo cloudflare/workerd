@@ -25,6 +25,8 @@ use cluster::Cluster;
 use cluster::Layout;
 use cluster::Route;
 use cluster_logic::handoff::Budget;
+use cluster_logic::handoff::GRACE_MS;
+use cluster_logic::lease::Timing;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
@@ -75,6 +77,8 @@ pub struct ClusterNode {
     namespaces: RefCell<HashMap<String, Weak<ActorNamespace>>>,
     /// How a stop's time is spent (`stopTimeoutMs`).
     budget: Budget,
+    /// `ALARMS_INTERVAL`, unless a test shortens it.
+    alarms_interval: Duration,
     /// Set once this instance drains.
     deadlines: Cell<Option<Deadlines>>,
     /// The requests peers have in flight here.
@@ -312,12 +316,16 @@ impl ClusterNode {
         address: String,
     ) -> Result<Rc<Self>> {
         let options = conf.get_bucket_options().map_err(|e| capnp(&e))?;
+        let divisor = conf.get_unsafe_time_divisor();
+        let timing = Timing::divided(divisor.into()).ok_or_else(|| {
+            kj::failed!("cluster: unsafeTimeDivisor {divisor} rounds a lease time down to 0 ms")
+        })?;
         let setup = cluster::Setup {
             url: text(conf.get_bucket())?,
             options: options.iter().map(text).collect::<Result<_>>()?,
             node: cluster::hex(&rand::random::<[u8; 16]>()),
             address: address.clone(),
-            ttl_ms: cluster_logic::lease::LEASE_MS,
+            timing,
             key: text(conf.get_key())?.into_bytes(),
         };
         let cluster = Cluster::new(setup).map_err(|e| kj::failed!("cluster: {e}"))?;
@@ -330,7 +338,9 @@ impl ClusterNode {
             namespaces: RefCell::default(),
             budget: Budget {
                 stop_ms: conf.get_stop_timeout_ms().into(),
+                accept_ms: GRACE_MS / u64::from(divisor),
             },
+            alarms_interval: ALARMS_INTERVAL / divisor,
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
             serving: Cell::new(false),
@@ -421,7 +431,7 @@ impl ClusterNode {
     /// Never returns.
     pub async fn alarms_loop(&self) {
         loop {
-            tokio::time::sleep(ALARMS_INTERVAL).await;
+            tokio::time::sleep(self.alarms_interval).await;
             // A draining instance takes on no alarms; its own go to its peers as it leaves.
             if self.cluster.is_draining() {
                 continue;

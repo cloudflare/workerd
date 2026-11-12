@@ -125,6 +125,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     // workers would add their cost to each. The server still looks a config worker's tails up, so
     // that their config errors are reported, but does not link them.
     bool tailWorkers = true;
+    // Whether Durable Object storage on disk is synced (see SqliteDatabase::VfsOptions::sync).
+    // `workerd test` turns this off, since a test's storage need not survive a crash of the
+    // machine.
+    bool syncStorage = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
     // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute
@@ -191,6 +195,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
+kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
+    const WorkerSpec& spec,
+    uint32_t configService,
+    ::rust::Slice<const uint64_t> params);
 
 // =======================================================================================
 

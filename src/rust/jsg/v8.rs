@@ -49,6 +49,8 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::ArrayIterateUntil;
+pub use self::ffi::JsErrorType;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -84,6 +86,23 @@ pub mod ffi {
     #[derive(Debug, Clone, Copy, Default)]
     struct MaybeLocal {
         ptr: usize,
+    }
+
+    /// An element that exists in an array, and its index.
+    #[derive(Debug, Clone, Copy)]
+    struct ArrayElement {
+        index: u32,
+        value: Local,
+    }
+
+    /// Where [`Local::<Array>::iterate`](super::Local::iterate) stops reading.
+    #[repr(u8)]
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ArrayIterateUntil {
+        /// After the last element.
+        End,
+        /// After the first element that is an object, or after the last.
+        Object,
     }
 
     #[derive(Debug)]
@@ -142,6 +161,25 @@ pub mod ffi {
         Error,
         RangeError,
         ReferenceError,
+    }
+
+    /// The JavaScript error types that C++ JSG tunnels through a `kj::Exception`, those of
+    /// `JS_ERROR_TYPES` in `jsg/util.h`, named as there.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum JsErrorType {
+        Error,
+        RangeError,
+        TypeError,
+        SyntaxError,
+        ReferenceError,
+        WasmCompileError,
+        WasmLinkError,
+        WasmRuntimeError,
+        WasmSuspendError,
+        AggregateError,
+        SuppressedError,
+        URIError,
+        EvalError,
     }
 
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
@@ -210,6 +248,7 @@ pub mod ffi {
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_object_with_null_prototype(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;
@@ -357,6 +396,7 @@ pub mod ffi {
         // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
         // coercion threw, leaving the exception pending; see `call_into_js()`.
         pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
+        pub unsafe fn local_to_detail_string(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -537,12 +577,20 @@ pub mod ffi {
             index: u32,
             value: Local,
         ) -> bool;
+        // Leaves what a getter throws pending; see `call_into_js()`.
+        pub unsafe fn local_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: u32,
+        ) -> MaybeLocal;
         // Leaves what a getter or Proxy trap on an element throws pending; see
         // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            result: &mut Vec<Global>,
+            until: ArrayIterateUntil,
+            result: &mut Vec<ArrayElement>,
+            length: &mut u32,
         ) -> Result<bool>;
 
         // Local<TypedArray>
@@ -734,11 +782,16 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: &Local,
             errors_are_host_objects: bool,
+            version: KjMaybe<u32>,
             result: &mut Vec<u8>,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
         // throws.
-        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+        pub unsafe fn value_deserialize(
+            isolate: *mut Isolate,
+            data: &[u8],
+            preserve_stack_in_errors: bool,
+        ) -> Result<MaybeLocal>;
 
         // JSON
         // Leave what parsing and stringifying throw pending; see `call_into_js()`.
@@ -765,10 +818,29 @@ pub mod ffi {
             name: &str,
             message: &[u8],
         ) -> MaybeLocal;
+        // Infallible, as exception_create_from_bytes().
+        pub unsafe fn js_error_create_from_bytes(
+            isolate: *mut Isolate,
+            error_type: JsErrorType,
+            message: &[u8],
+        ) -> Local;
+        // Fallible only if no context is entered.
+        pub unsafe fn dom_exception_try_unwrap(
+            isolate: *mut Isolate,
+            value: &Local,
+            name: &mut String,
+            message: &mut String,
+        ) -> Result<bool>;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
         ) -> Local;
+        pub fn tunneled_exception_detail_id() -> u64;
+        pub fn tunneled_exception_enhanced_detail_id() -> u64;
+        pub fn js_exception_metadata_detail_id() -> u64;
+        pub fn tunneled_exception_serialization_version() -> u32;
+        pub fn js_exception_metadata_max_field_size() -> usize;
+        pub fn starts_with_tunneled_error_type(description: &str) -> bool;
 
         // TryCatch
         pub unsafe fn isolate_try_catch(
@@ -795,6 +867,9 @@ pub mod ffi {
         );
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
+        // The global object of the entered context (`v8::Context::Global()`). Requires a context
+        // to be entered. Runs no JavaScript.
+        pub unsafe fn isolate_current_context_global(isolate: *mut Isolate) -> Local;
 
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
@@ -902,6 +977,18 @@ pub mod ffi {
         pub async_dispose: KjMaybe<usize>,
         /// The `v8::FunctionCallback` that runs when an instance is called as a function.
         pub callable: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.iterator]`.
+        pub iterable: KjMaybe<usize>,
+        /// The intrinsic that is the [[Prototype]] of the type's prototype.
+        pub inherit_intrinsic: KjMaybe<Intrinsic>,
+    }
+
+    /// An object built into every context that a resource type's prototype can inherit from
+    /// (`jsg::Intrinsic`, a `v8::Intrinsic`).
+    #[derive(Debug)]
+    enum Intrinsic {
+        /// `%IteratorPrototype%` (`v8::kIteratorPrototype`), which `Iterator.prototype` is.
+        IteratorPrototype = 0,
     }
 
     // Resources
@@ -1007,6 +1094,10 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
+
+    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
+    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
+    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -1949,6 +2040,31 @@ impl<'s, T> Local<'s, T> {
             })
         })
     }
+
+    /// Describes the value for a log or a trace, as C++ `kj::str()` of a `v8::Local` does: an
+    /// error as `"TypeError: message"`, a string as itself, and a plain object as
+    /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
+    /// method.
+    ///
+    /// Corresponds to `v8::Value::ToDetailString()`.
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, or V8 fails, which only happens if execution
+    /// is terminating, the error is one for which [`Error::is_pending`] is true.
+    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> crate::Result<std::string::String> {
+        let detail: Local<'s, String> = call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a string V8 created in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_to_detail_string(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                ))
+            })
+        })?;
+        Ok(detail.to_string(lock))
+    }
 }
 
 impl PartialEq for Local<'_, Value> {
@@ -1992,14 +2108,14 @@ impl Function {
     /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
     /// traces may lead back to the function. Two things break this:
     ///
-    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
-    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
-    ///   collector, and the function and `data` are freed only when the isolate is torn down.
-    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
-    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
-    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
-    ///   traced from two owners can be freed while one of them still uses it. To share state,
-    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (which has no
+    ///   `Traced` impl, but can hide inside a type with a hand-written one). If it can reach the
+    ///   function, the cycle is invisible to the garbage collector, and the function and `data`
+    ///   are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces. `data` must be the only owner that
+    ///   traces what it traces: tracing one `jsg::Rc` from two owners fails an assertion, and a
+    ///   `TracedGlobal` traced from two owners can be freed while one of them still uses it. To
+    ///   share state, hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
     ///
     /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
     /// from `data`.
@@ -2355,29 +2471,79 @@ impl<'s> Local<'s, Array> {
         })
     }
 
-    /// Iterates over array elements using V8's native `Array::Iterate()`.
-    /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
+    /// Reads element `index`, like JS `array[index]`: a hole reads through the prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a getter, on the array or its prototype chain, throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn get(self, lock: &mut Lock<'s>, index: u32) -> crate::Result<Local<'s, Value>> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_array_get(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    index,
+                ))
+            })
+        })
+    }
+
+    /// Reads every element that exists, using V8's native `Array::Iterate()`, as a handle in the
+    /// current scope, up to `until`. Each index below [`ArrayElements::length`] without an element
+    /// is a hole, which reads as `undefined`.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        let globals = call_into_js(lock, |lock| {
-            let mut globals = Vec::new();
+    pub fn iterate(
+        self,
+        lock: &mut Lock<'s>,
+        until: ArrayIterateUntil,
+    ) -> crate::Result<ArrayElements<'s>> {
+        call_into_js(lock, |lock| {
+            let mut elements = Vec::new();
+            let mut length = 0;
             // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
             let ok = unsafe {
-                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+                ffi::local_array_iterate(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    until,
+                    &mut elements,
+                    &mut length,
+                )
             }?;
-            Ok(ok.then_some(globals))
-        })?;
-        let state = lock.isolate_state();
-        Ok(globals
-            .into_iter()
-            .map(|g| TracedGlobal::from_ffi_in(g, Arc::clone(state)))
-            .collect())
+            Ok(ok.then(|| ArrayElements {
+                length: length as usize,
+                elements: elements
+                    .into_iter()
+                    .map(|element| {
+                        // SAFETY: the shim opened the elements in the current HandleScope.
+                        let value = unsafe { Local::from_ffi(element.value) };
+                        (element.index as usize, value)
+                    })
+                    .collect(),
+            }))
+        })
     }
+}
+
+/// The elements of an array, as [`Local::<Array>::iterate`] reads them.
+#[derive(Debug)]
+pub struct ArrayElements<'s> {
+    /// The number of elements the array converts to: its length, or more if a getter shortened
+    /// it after its element was read.
+    pub length: usize,
+    /// The elements that exist, with their indices, in index order. Each index below `length`
+    /// that isn't here is a hole.
+    pub elements: Vec<(usize, Local<'s, Value>)>,
 }
 
 // =============================================================================
@@ -3074,6 +3240,8 @@ macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
+
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> std::string::String {
                 $name.to_owned()
@@ -4809,12 +4977,54 @@ impl GcVisitor {
     ///
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
+    ///
+    /// The visit changes the `jsg::Rc`'s counts, so it leaves alone an `Rc` of an isolate whose
+    /// lock this visit doesn't hold; see [`GcVisitor::may_change_in`].
+    ///
+    /// # Panics
+    /// Panics in a detaching visit if `r` belongs to an isolate other than the lock's, or to
+    /// one that is closed.
     pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
+        if !self.may_change_in(r.isolate_state(), "jsg::Rc") {
+            return;
+        }
         if self.is_detaching() {
             r.detach();
         } else {
             r.visit(self);
         }
+    }
+
+    /// Whether this visit may change a reference of the isolate of `state`, whose counts only
+    /// that isolate's lock guards:
+    ///
+    /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
+    ///   another, or of a closed isolate.
+    /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
+    ///   reference as it is: a strong reference stays strong, so its target leaks rather than
+    ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
+    ///   still runs until it is disposed.
+    /// - The visit for a resource's first strong reference has no isolate; it may change the
+    ///   reference only if this thread holds the lock of the reference's isolate.
+    pub(crate) fn may_change_in(&mut self, state: &IsolateState, what: &str) -> bool {
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                !state.is_closed() && state.belongs_to(isolate),
+                "attempt to use a {what} in an isolate other than the one it was created in"
+            );
+            return true;
+        }
+        // SAFETY: the visitor is valid for the duration of the visit.
+        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
+        if visiting.is_null() {
+            return state.this_thread_holds_lock();
+        }
+        let own = state.belongs_to(visiting);
+        debug_assert!(
+            own,
+            "a {what} was visited on behalf of an isolate other than its own"
+        );
+        own && !state.is_closed()
     }
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
@@ -4877,8 +5087,7 @@ impl GcVisitor {
     /// The visit makes the handle strong if the parent has strong Rust references, and weak if
     /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
     /// last visit wins, and the value can be collected while the other owner still uses it. So
-    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
-    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    /// a `TracedGlobal` must have exactly one GC owner; see `README.md` §Safety rules, rule 2.
     ///
     /// # Panics
     /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
@@ -5007,6 +5216,7 @@ impl IsolatePtr {
     }
 
     /// Returns the raw pointer to the V8 isolate.
+    #[inline]
     pub fn as_ffi(&self) -> *mut ffi::Isolate {
         self.handle.as_ptr()
     }
@@ -5029,51 +5239,54 @@ impl IsolatePtr {
 /// `Clone` / `Drop` only affect the `KjRc` refcount (`kj::Rc` reference counting).
 /// GC strong-ref tracking (`addStrongRef` / `removeStrongRef`) is handled by
 /// `Rc<R>`, not here.
+///
+/// It is private to the crate: its `Clone` and `Drop` change the `kj::Rc` count without checking
+/// the isolate lock, so it is used only under the lock, or by `Rc<R>` and `Weak<R>`, which
+/// release it as they release their other parts.
 #[derive(Clone)]
-pub struct WrappableRc {
+pub(crate) struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
 }
 
+/// Resolves the receiver `value` of a callback registered without a `v8::Signature`
+/// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
+/// a reference.
+///
+/// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+/// `value` is reachable, which a callback's `this` is for the duration of the call.
+#[doc(hidden)]
+pub fn resolve_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
+    let ptr = unsafe {
+        ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+    };
+    ptr?.resolve::<R>()
+}
+
+/// Like [`resolve_receiver`], for the receiver of a method registered with a
+/// `v8::Signature`.
+///
+/// # Safety
+///
+/// V8 must have checked `value` against the signature of a method of a resource type.
+#[doc(hidden)]
+pub unsafe fn resolve_method_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
+    // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
+    // keeps alive.
+    let ptr =
+        unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
+    ptr?.resolve::<R>()
+}
+
 impl WrappableRc {
-    /// Resolves the receiver `value` of a callback registered without a `v8::Signature`
-    /// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
-    /// a reference.
-    ///
-    /// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
-    /// `value` is reachable, which a callback's `this` is for the duration of the call.
-    #[doc(hidden)]
-    pub fn resolve_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
-        // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
-    /// Like [`Self::resolve_receiver`], for the receiver of a method registered with a
-    /// `v8::Signature`.
-    ///
-    /// # Safety
-    ///
-    /// V8 must have checked `value` against the signature of a method of a resource type.
-    #[doc(hidden)]
-    pub unsafe fn resolve_method_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
-        // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
-        // keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable
@@ -5081,8 +5294,7 @@ impl WrappableRc {
     ///
     /// The C++ `unwrap_resource` returns `None` when the value doesn't contain
     /// a Rust Wrappable.
-    #[doc(hidden)]
-    pub fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
+    pub(crate) fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); value handle is valid.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
             unsafe { ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) }.into();
@@ -5130,7 +5342,7 @@ impl WrappableRc {
     /// V8 has already created the `this` object from the `FunctionTemplate`'s
     /// `InstanceTemplate`; this method attaches the Wrappable to it via
     /// `CppgcShim` so that instance methods can resolve the resource.
-    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
+    pub(crate) fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
         // SAFETY: info is valid for the duration of the callback.
         let pin = unsafe { std::pin::Pin::new_unchecked(&mut *info.0) };
         // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches

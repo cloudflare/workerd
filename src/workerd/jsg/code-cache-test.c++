@@ -927,13 +927,14 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
 }
 
 kj::Arc<modules::ModuleRegistry> newLazyModuleRegistry(
-    modules::ModuleRegistry::Builder::Options options) {
+    modules::ModuleRegistry::Builder::Options options,
+    kj::ArrayPtr<const int> compileHints = nullptr) {
   const auto base = "file:///"_url;
   modules::ModuleRegistry::Builder builder(base, options);
   modules::ModuleBundle::BundleBuilder bundle(base);
   auto flags = modules::Module::Flags::ESM;
-  bundle.addEsmModule(
-      "main", jsg::copyToArc(LAZY_MODULE), flags, builder.newCodeCacheKey(LAZY_MODULE));
+  bundle.addEsmModule("main", jsg::copyToArc(LAZY_MODULE), flags,
+      builder.newCodeCacheKey(LAZY_MODULE), compileHints);
   return builder.add(bundle.finish()).finish();
 }
 
@@ -955,6 +956,45 @@ void evalNewRegistry(jsg::Lock& js,
   } else {
     KJ_EXPECT(hints.size() == 0);
   }
+}
+
+KJ_TEST(
+    "New registry: a keyed module prefers the installed code cache over hints on a miss and hit") {
+  auto store = newStore();
+  CountingObserver observer;
+  int hints[] = {16};
+  auto registry =
+      newLazyModuleRegistry(modules::ModuleRegistry::Builder::Options::CODE_CACHE_KEYS, hints);
+  for (auto i: kj::zeroTo(2)) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      evalNewRegistry(js, *registry, observer, CollectCompileHints::NO);
+    }, UseNewModuleRegistry::YES);
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == i + 1);
+    KJ_EXPECT(lock->hits == i);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(observer.hintsConsumed == 0);
+  }
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 1);
+}
+
+KJ_TEST("New registry: an unkeyed module consumes hints despite an installed code cache") {
+  auto store = newStore();
+  CountingObserver observer;
+  int hints[] = {16};
+  auto registry = newLazyModuleRegistry(modules::ModuleRegistry::Builder::Options::NONE, hints);
+  for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      evalNewRegistry(js, *registry, observer, CollectCompileHints::NO);
+    }, UseNewModuleRegistry::YES);
+    KJ_EXPECT(observer.hintsConsumed == 1);
+  }
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 0);
+  KJ_EXPECT(lock->inserts == 0);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 1);
 }
 
 KJ_TEST("New registry: producing hints bypasses an empty or populated code cache store") {

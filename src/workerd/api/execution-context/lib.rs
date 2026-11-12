@@ -128,7 +128,7 @@ impl ExecutionContext {
         fetcher: jsg_cpp::Ref<bridge::Fetcher>,
         port: u16,
     ) -> jsg::Result<String> {
-        fetcher.map_virtual_host(lock, port)
+        fetcher.get(lock).map_virtual_host(lock, port)
     }
 
     /// `ctx.tracing`, the user tracing API.

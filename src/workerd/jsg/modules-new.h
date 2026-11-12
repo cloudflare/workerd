@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/observer.h>
@@ -582,17 +583,19 @@ class ModuleBundle {
 
     // Adds source backed by static process-lifetime storage, such as a
     // compiled-in string literal. Use the Arc<OwnedAscii> overload for all
-    // other source buffers.
+    // other source buffers. Both overloads copy `compileHints` into the shared definition.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::ArrayPtr<const char> code,
-        Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
+        Module::Flags flags = Module::Flags::ESM,
+        kj::ArrayPtr<const int> compileHints = nullptr) KJ_LIFETIMEBOUND;
 
     // Adds source with shared ownership of its backing storage. See
     // ModuleRegistry::Builder::newCodeCacheKey() for `codeCacheKey`.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::Arc<OwnedAscii> code,
         Module::Flags flags = Module::Flags::ESM,
-        kj::Maybe<CodeCacheKey> codeCacheKey = kj::none) KJ_LIFETIMEBOUND;
+        kj::Maybe<CodeCacheKey> codeCacheKey = kj::none,
+        kj::ArrayPtr<const int> compileHints = nullptr) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addWasmModule(kj::StringPtr name,
         kj::ArrayPtr<const kj::byte> data,
@@ -653,19 +656,19 @@ class ModuleBundle {
   static kj::Own<ModuleBundle> newFallbackBundle(
       Builder::ResolveCallback callback) KJ_WARN_UNUSED_RESULT;
 
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle);
+  // Adds the bundle's modules of the builder's type. If `moduleSource` is given, V8 reads each
+  // source module from the storage it provides (see jsg/module-source.h) instead of the
+  // compiled-in bytes.
+  static void getBuiltInBundleFromCapnp(
+      BuiltinBuilder& builder, Bundle::Reader bundle, const ModuleSource* moduleSource = nullptr);
 
   // Overload that accepts a per-module filter predicate. Only modules for which
   // the filter returns true are added to the builder. This is used for per-module
   // feature flag gating (e.g., individual node:* modules behind compat flags).
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
-      kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
-
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-      Bundle::Reader bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
-      kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
+      const ModuleSource* moduleSource = nullptr);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 

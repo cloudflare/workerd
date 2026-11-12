@@ -14,6 +14,7 @@ import {
   generateKeySync,
   generateKeyPair,
   generateKeyPairSync,
+  randomBytes,
   sign,
   verify,
 } from 'node:crypto';
@@ -1099,12 +1100,18 @@ export const private_key_hmac_fails = {
 
 export const private_key_tocryptokey = {
   async test(_, env) {
+    // Web Crypto has no DSA algorithm, so a DSA key cannot become a CryptoKey.
     const key = createPrivateKey(env['dsa_private.pem']);
-    // TODO(soon): Getting a CryptoKey from the KeyObject currently does not work.
-    // Will will implement this conversion as a follow up step.
-    throws(() => key.toCryptoKey(), {
-      message: 'The toCryptoKey method is not implemented',
+    throws(() => key.toCryptoKey({ name: 'DSA' }, true, ['sign']), {
+      name: 'NotSupportedError',
     });
+    throws(
+      () =>
+        key.toCryptoKey({ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, [
+          'sign',
+        ]),
+      { name: 'DataError' }
+    );
 
     // Getting the private key from a CryptoKey should generally work...
     const { privateKey } = await crypto.subtle.generateKey(
@@ -1369,12 +1376,21 @@ export const create_public_key = {
 
 export const public_key_tocryptokey = {
   async test(_, env) {
+    // Web Crypto has no DSA algorithm, so a DSA key cannot become a CryptoKey.
     const key = createPublicKey(env['dsa_public_1025.pem']);
-    // TODO(soon): Getting a CryptoKey from the KeyObject currently does not work.
-    // Will will implement this conversion as a follow up step.
-    throws(() => key.toCryptoKey(), {
-      message: 'The toCryptoKey method is not implemented',
+    throws(() => key.toCryptoKey({ name: 'DSA' }, true, ['verify']), {
+      name: 'NotSupportedError',
     });
+    throws(() => key.toCryptoKey('ECDSA', true, ['verify']), {
+      name: 'TypeError',
+    });
+    throws(
+      () =>
+        key.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+          'verify',
+        ]),
+      { name: 'DataError' }
+    );
 
     // Getting the private key from a CryptoKey should generally work...
     const { publicKey } = await crypto.subtle.generateKey(
@@ -2324,6 +2340,533 @@ export const regression_create_secret_key_dataview = {
     ok(
       keyFull.equals(keyFromUint8),
       'DataView key must equal Buffer key with same bytes'
+    );
+  },
+};
+
+// KeyObject.prototype.toCryptoKey(). The vectors and invalid cases below are
+// ported from Node.js test/parallel/test-crypto-key-objects-to-crypto-key.js
+// (v24.x), limited to the algorithms workerd's Web Crypto implements.
+const toCryptoKeyHashes = ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'];
+const toCryptoKeySigningUsages = { public: ['verify'], private: ['sign'] };
+const toCryptoKeyDerivationUsages = { public: [], private: ['deriveBits'] };
+const toCryptoKeyRsaOaepUsages = {
+  public: ['encrypt', 'wrapKey'],
+  private: ['decrypt', 'unwrapKey'],
+};
+
+// Node's assertCryptoKey() also checks keyObject.equals(KeyObject.from(key)).
+// workerd's KeyObject.equals() does not compare a Node.js key with a Web
+// Crypto key (or any non-extractable key), so compare the exported key
+// material instead when the new key is extractable.
+function assertToCryptoKey(cryptoKey, keyObject, name, extractable, usages) {
+  ok(cryptoKey instanceof CryptoKey);
+  strictEqual(cryptoKey.type, keyObject.type);
+  strictEqual(cryptoKey.algorithm.name, name);
+  strictEqual(cryptoKey.extractable, extractable);
+  deepStrictEqual(cryptoKey.usages, usages);
+  if (!extractable) return;
+  const from = KeyObject.from(cryptoKey);
+  strictEqual(from.type, keyObject.type);
+  const options =
+    keyObject.type === 'secret'
+      ? {}
+      : {
+          format: 'der',
+          type: keyObject.type === 'public' ? 'spki' : 'pkcs8',
+        };
+  deepStrictEqual(from.export(options), keyObject.export(options));
+}
+
+function toCryptoKeyVector(keyObject, algorithm, usages, expected) {
+  const name = typeof algorithm === 'string' ? algorithm : algorithm.name;
+  for (const extractable of [true, false]) {
+    const cryptoKey = keyObject.toCryptoKey(algorithm, extractable, usages);
+    assertToCryptoKey(cryptoKey, keyObject, name, extractable, usages);
+    if (expected?.length !== undefined) {
+      strictEqual(cryptoKey.algorithm.length, expected.length);
+    }
+    if (expected?.hash !== undefined) {
+      strictEqual(cryptoKey.algorithm.hash.name, expected.hash);
+    }
+    if (expected?.namedCurve !== undefined) {
+      strictEqual(cryptoKey.algorithm.namedCurve, expected.namedCurve);
+    }
+  }
+}
+
+function usagesFor(keyObject, usages) {
+  return keyObject.type === 'public' ? usages.public : usages.private;
+}
+
+// Node: symmetricVectors() for AES-KW, AES-CBC, AES-CTR and AES-GCM.
+export const to_crypto_key_aes = {
+  test() {
+    for (const [name, usages] of [
+      ['AES-KW', ['wrapKey', 'unwrapKey']],
+      ['AES-CBC', ['encrypt', 'decrypt']],
+      ['AES-CTR', ['encrypt', 'decrypt']],
+      ['AES-GCM', ['encrypt', 'decrypt']],
+    ]) {
+      for (const length of [128, 192, 256]) {
+        const keyObject = createSecretKey(randomBytes(length >> 3));
+        toCryptoKeyVector(keyObject, name, usages, { length });
+      }
+    }
+  },
+};
+
+// Node: hmacVectors().
+export const to_crypto_key_hmac = {
+  test() {
+    for (const length of [128, 192, 256]) {
+      const keyObject = createSecretKey(randomBytes(length >> 3));
+      for (const hash of toCryptoKeyHashes) {
+        toCryptoKeyVector(
+          keyObject,
+          { name: 'HMAC', hash },
+          ['sign', 'verify'],
+          {
+            length,
+          }
+        );
+      }
+    }
+  },
+};
+
+// Node: macInvalid() for HMAC.
+export const to_crypto_key_hmac_invalid = {
+  test() {
+    const key = createSecretKey(randomBytes(32));
+    const algorithm = { name: 'HMAC', hash: 'SHA-256' };
+    const usages = ['sign', 'verify'];
+
+    // Node's message is 'Usages cannot be empty when importing a secret key.'
+    throws(() => key.toCryptoKey(algorithm, true, []), {
+      name: 'SyntaxError',
+    });
+    // Node's message is 'HmacImportParams.length cannot be 0'.
+    throws(() => key.toCryptoKey({ ...algorithm, length: 0 }, true, usages), {
+      name: 'DataError',
+    });
+  },
+};
+
+// Node: genericSecretVectors() and genericSecretInvalid() for HKDF and
+// PBKDF2.
+export const to_crypto_key_generic_secret = {
+  test() {
+    for (const name of ['HKDF', 'PBKDF2']) {
+      const keyObject = createSecretKey(randomBytes(16));
+      const cryptoKey = keyObject.toCryptoKey(name, false, ['deriveBits']);
+      assertToCryptoKey(cryptoKey, keyObject, name, false, ['deriveBits']);
+
+      // Node's message is `${name} keys are not extractable`.
+      throws(() => keyObject.toCryptoKey(name, true, ['deriveBits']), {
+        name: 'SyntaxError',
+      });
+      // Node's message is `Unsupported key usage for a ${name} key`.
+      throws(() => keyObject.toCryptoKey(name, false, ['wrapKey']), {
+        name: 'SyntaxError',
+      });
+    }
+  },
+};
+
+// Node: rsaVectors() for RSA-OAEP, RSA-PSS and RSASSA-PKCS1-v1_5.
+export const to_crypto_key_rsa = {
+  test() {
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    });
+    for (const [name, usages] of [
+      ['RSA-OAEP', toCryptoKeyRsaOaepUsages],
+      ['RSA-PSS', toCryptoKeySigningUsages],
+      ['RSASSA-PKCS1-v1_5', toCryptoKeySigningUsages],
+    ]) {
+      for (const keyObject of [publicKey, privateKey]) {
+        for (const hash of toCryptoKeyHashes) {
+          toCryptoKeyVector(
+            keyObject,
+            { name, hash },
+            usagesFor(keyObject, usages),
+            { hash }
+          );
+        }
+      }
+    }
+  },
+};
+
+// Node: ecVectors() for ECDH and ECDSA.
+export const to_crypto_key_ec = {
+  test() {
+    for (const namedCurve of ['P-256', 'P-384', 'P-521']) {
+      const { publicKey, privateKey } = generateKeyPairSync('ec', {
+        namedCurve,
+      });
+      for (const [name, usages] of [
+        ['ECDH', toCryptoKeyDerivationUsages],
+        ['ECDSA', toCryptoKeySigningUsages],
+      ]) {
+        for (const keyObject of [publicKey, privateKey]) {
+          toCryptoKeyVector(
+            keyObject,
+            { name, namedCurve },
+            usagesFor(keyObject, usages),
+            { namedCurve }
+          );
+        }
+      }
+    }
+  },
+};
+
+// Node: ecdhInvalid().
+export const to_crypto_key_ecdh_invalid = {
+  test() {
+    const { publicKey, privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+    // Node's message is 'Usages cannot be empty when importing a private key.'
+    throws(
+      () =>
+        privateKey.toCryptoKey({ name: 'ECDH', namedCurve: 'P-256' }, true, []),
+      { name: 'SyntaxError' }
+    );
+    // Node's message is 'Named curve mismatch'.
+    throws(
+      () =>
+        publicKey.toCryptoKey({ name: 'ECDH', namedCurve: 'P-384' }, true, []),
+      { name: 'DataError' }
+    );
+  },
+};
+
+// Node: cfrgVectors() for Ed25519 and X25519, and invalidAsymmetricKeyType().
+export const to_crypto_key_cfrg = {
+  test() {
+    for (const [name, usages, other] of [
+      ['Ed25519', toCryptoKeySigningUsages, 'X25519'],
+      ['X25519', toCryptoKeyDerivationUsages, 'Ed25519'],
+    ]) {
+      const { publicKey, privateKey } = generateKeyPairSync(name.toLowerCase());
+      for (const keyObject of [publicKey, privateKey]) {
+        toCryptoKeyVector(keyObject, name, usagesFor(keyObject, usages));
+      }
+      throws(() => publicKey.toCryptoKey(other, true, []), {
+        name: 'DataError',
+        message: 'Invalid key type',
+      });
+    }
+  },
+};
+
+export const to_crypto_key_round_trip = {
+  async test() {
+    const data = new TextEncoder().encode('hello');
+
+    // Signatures made with the converted private key verify with the
+    // converted public key.
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    for (const algorithm of [
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      { name: 'RSA-PSS', hash: 'SHA-256', saltLength: 32 },
+    ]) {
+      const priv = rsa.privateKey.toCryptoKey(algorithm, false, ['sign']);
+      const pub = rsa.publicKey.toCryptoKey(algorithm, false, ['verify']);
+      const sig = await crypto.subtle.sign(algorithm, priv, data);
+      ok(await crypto.subtle.verify(algorithm, pub, sig, data));
+    }
+
+    // The converted key verifies signatures made by node:crypto.
+    const pkcs1 = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
+    ok(
+      await crypto.subtle.verify(
+        pkcs1,
+        rsa.publicKey.toCryptoKey(pkcs1, true, ['verify']),
+        sign('sha256', data, rsa.privateKey),
+        data
+      )
+    );
+
+    const oaep = { name: 'RSA-OAEP', hash: 'SHA-256' };
+    const ciphertext = await crypto.subtle.encrypt(
+      oaep,
+      rsa.publicKey.toCryptoKey(oaep, false, ['encrypt']),
+      data
+    );
+    const plaintext = await crypto.subtle.decrypt(
+      oaep,
+      rsa.privateKey.toCryptoKey(oaep, false, ['decrypt']),
+      ciphertext
+    );
+    deepStrictEqual(new Uint8Array(plaintext), data);
+
+    const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const ecdsa = { name: 'ECDSA', namedCurve: 'P-256' };
+    const ecdsaSig = { name: 'ECDSA', hash: 'SHA-256' };
+    const ecSig = await crypto.subtle.sign(
+      ecdsaSig,
+      ec.privateKey.toCryptoKey(ecdsa, false, ['sign']),
+      data
+    );
+    ok(
+      await crypto.subtle.verify(
+        ecdsaSig,
+        ec.publicKey.toCryptoKey(ecdsa, false, ['verify']),
+        ecSig,
+        data
+      )
+    );
+
+    const ed = generateKeyPairSync('ed25519');
+    const edSig = await crypto.subtle.sign(
+      'Ed25519',
+      ed.privateKey.toCryptoKey('Ed25519', false, ['sign']),
+      data
+    );
+    ok(
+      await crypto.subtle.verify(
+        'Ed25519',
+        ed.publicKey.toCryptoKey('Ed25519', false, ['verify']),
+        edSig,
+        data
+      )
+    );
+    ok(verify(null, data, ed.publicKey, Buffer.from(edSig)));
+
+    // Both sides of a key agreement derive the same bits.
+    for (const [type, algorithm] of [
+      ['x25519', { name: 'X25519' }],
+      ['ec', { name: 'ECDH', namedCurve: 'P-256' }],
+    ]) {
+      const options = type === 'ec' ? { namedCurve: 'P-256' } : undefined;
+      const a = generateKeyPairSync(type, options);
+      const b = generateKeyPairSync(type, options);
+      const derive = (priv, pub) =>
+        crypto.subtle.deriveBits(
+          {
+            name: algorithm.name,
+            public: pub.toCryptoKey(algorithm, false, []),
+          },
+          priv.toCryptoKey(algorithm, false, ['deriveBits']),
+          256
+        );
+      deepStrictEqual(
+        new Uint8Array(await derive(a.privateKey, b.publicKey)),
+        new Uint8Array(await derive(b.privateKey, a.publicKey))
+      );
+    }
+
+    // Secret keys: AES-GCM encrypt/decrypt and HMAC matching node:crypto.
+    const secret = createSecretKey(randomBytes(32));
+    const aes = secret.toCryptoKey('AES-GCM', false, ['encrypt', 'decrypt']);
+    const iv = randomBytes(12);
+    const sealed = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      aes,
+      data
+    );
+    deepStrictEqual(
+      new Uint8Array(
+        await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aes, sealed)
+      ),
+      data
+    );
+
+    const hmac = secret.toCryptoKey({ name: 'HMAC', hash: 'SHA-256' }, false, [
+      'sign',
+    ]);
+    deepStrictEqual(
+      Buffer.from(await crypto.subtle.sign('HMAC', hmac, data)),
+      createHmac('sha256', secret).update(data).digest()
+    );
+
+    const hkdf = secret.toCryptoKey('HKDF', false, ['deriveBits']);
+    strictEqual(
+      (
+        await crypto.subtle.deriveBits(
+          { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: data },
+          hkdf,
+          256
+        )
+      ).byteLength,
+      32
+    );
+  },
+};
+
+export const to_crypto_key_extractable = {
+  async test() {
+    // A non-extractable result cannot be exported.
+    const secret = createSecretKey(randomBytes(16));
+    const aes = secret.toCryptoKey('AES-CBC', false, ['encrypt']);
+    await rejects(crypto.subtle.exportKey('raw', aes), {
+      name: 'InvalidAccessError',
+    });
+
+    const { publicKey, privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+    const algorithm = { name: 'ECDSA', namedCurve: 'P-256' };
+    const priv = privateKey.toCryptoKey(algorithm, false, ['sign']);
+    await rejects(crypto.subtle.exportKey('pkcs8', priv), {
+      name: 'InvalidAccessError',
+    });
+    throws(() => KeyObject.from(priv).export({ format: 'der', type: 'pkcs8' }));
+
+    // An extractable result exports the same key material.
+    const pub = publicKey.toCryptoKey(algorithm, true, ['verify']);
+    deepStrictEqual(
+      Buffer.from(await crypto.subtle.exportKey('spki', pub)),
+      publicKey.export({ format: 'der', type: 'spki' })
+    );
+    const exportedSecret = await crypto.subtle.exportKey(
+      'raw',
+      secret.toCryptoKey('AES-CBC', true, ['encrypt'])
+    );
+    deepStrictEqual(Buffer.from(exportedSecret), secret.export());
+
+    // A KeyObject wrapping a non-extractable CryptoKey can only produce
+    // non-extractable keys.
+    const source = await crypto.subtle.generateKey(
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const wrapped = KeyObject.from(source);
+    throws(() => wrapped.toCryptoKey('AES-GCM', true, ['encrypt']), {
+      name: 'InvalidAccessError',
+    });
+    const fromWrapped = wrapped.toCryptoKey(
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    deepStrictEqual(
+      Buffer.from(
+        await crypto.subtle.sign('HMAC', fromWrapped, new Uint8Array())
+      ),
+      Buffer.from(await crypto.subtle.sign('HMAC', source, new Uint8Array()))
+    );
+  },
+};
+
+export const to_crypto_key_from_web_crypto_key = {
+  async test() {
+    // A KeyObject made from a Web Crypto key converts back to another
+    // algorithm.
+    const { privateKey, publicKey } = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const ecdh = { name: 'ECDH', namedCurve: 'P-256' };
+    const priv = KeyObject.from(privateKey).toCryptoKey(ecdh, true, [
+      'deriveBits',
+    ]);
+    strictEqual(priv.algorithm.name, 'ECDH');
+    const pub = KeyObject.from(publicKey).toCryptoKey(ecdh, true, []);
+    strictEqual(pub.algorithm.name, 'ECDH');
+    deepStrictEqual(
+      Buffer.from(await crypto.subtle.exportKey('spki', pub)),
+      Buffer.from(await crypto.subtle.exportKey('spki', publicKey))
+    );
+
+    const aes = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt']
+    );
+    const hmac = KeyObject.from(aes).toCryptoKey(
+      { name: 'HMAC', hash: 'SHA-256' },
+      true,
+      ['sign']
+    );
+    strictEqual(hmac.algorithm.length, 256);
+  },
+};
+
+export const to_crypto_key_invalid_arguments = {
+  test() {
+    const secret = createSecretKey(randomBytes(16));
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+
+    // Usages not valid for the algorithm or key type.
+    throws(() => secret.toCryptoKey('AES-GCM', true, ['sign']), {
+      name: 'SyntaxError',
+    });
+    throws(() => publicKey.toCryptoKey('Ed25519', true, ['sign']), {
+      name: 'SyntaxError',
+    });
+    throws(() => privateKey.toCryptoKey('Ed25519', true, ['verify']), {
+      name: 'SyntaxError',
+    });
+    // Node: emptyPrivateUsagesInvalid(). Public keys may have no usages.
+    throws(() => privateKey.toCryptoKey('Ed25519', true, []), {
+      name: 'SyntaxError',
+    });
+    deepStrictEqual(publicKey.toCryptoKey('Ed25519', true, []).usages, []);
+
+    // Algorithms that do not fit the key.
+    throws(() => secret.toCryptoKey('NOT-AN-ALGORITHM', true, ['sign']), {
+      name: 'NotSupportedError',
+    });
+    // As in Node.js, an asymmetric algorithm for a secret key and the other
+    // way round are NotSupportedError; a mismatched asymmetric key type is
+    // DataError.
+    throws(() => secret.toCryptoKey('Ed25519', true, ['sign']), {
+      name: 'NotSupportedError',
+    });
+    throws(
+      () =>
+        publicKey.toCryptoKey({ name: 'HMAC', hash: 'SHA-256' }, true, [
+          'verify',
+        ]),
+      {
+        name: 'NotSupportedError',
+      }
+    );
+    throws(
+      () =>
+        publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+          'verify',
+        ]),
+      { name: 'DataError' }
+    );
+    throws(
+      () =>
+        publicKey.toCryptoKey(
+          { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+          true,
+          ['verify']
+        ),
+      { name: 'DataError' }
+    );
+    // AES needs a 128, 192 or 256 bit key.
+    throws(
+      () =>
+        createSecretKey(randomBytes(20)).toCryptoKey('AES-GCM', true, [
+          'encrypt',
+        ]),
+      { name: 'DataError' }
+    );
+
+    // Argument conversion (Web IDL in Node.js).
+    throws(() => secret.toCryptoKey(Symbol('x'), true, ['encrypt']), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => secret.toCryptoKey('AES-GCM', true, 'encrypt'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => secret.toCryptoKey('AES-GCM', true, ['bogus']), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+    strictEqual(
+      secret.toCryptoKey('AES-GCM', 1, new Set(['encrypt'])).extractable,
+      true
     );
   },
 };

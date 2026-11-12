@@ -111,7 +111,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
         jsg::modules::ModuleRegistry::Builder::Options::NONE,
-    const api::node::ModuleSource* nodeModuleSource = nullptr) {
+    const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
@@ -133,7 +133,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   });
 
   // Add the module bundles that are built into the runtime.
-  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, nodeModuleSource);
+  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, moduleSource);
 
   bool hasPythonModules = false;
 
@@ -167,8 +167,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, jsg::copyToArc(content.body), flags, builder.newCodeCacheKey(content.body));
+          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags,
+              builder.newCodeCacheKey(content.body), content.compileHints);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {

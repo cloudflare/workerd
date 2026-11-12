@@ -28,13 +28,12 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `nullptr`        | `v8::Null`      | `null`          | Via `kj::Maybe<T>`                         |
 | `nullptr`        | `v8::Undefined` | `undefined`     | Via `jsg::Optional<T>`                     |
 
-An integer of up to 32 bits is unwrapped with `ToNumber`, a range check and a truncating cast
-(`value.h`). NaN and the infinities are a `TypeError` for every type except `int`, which reads
-them as 0, and so is a value out of the type's range. Whether a fraction just past a range limit
-(`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned type) is out of range or is truncated first, as
-Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, depends on the
-`JSG_INTEGER_ENFORCE_RANGE` autogate (`util/autogate.h`). `int64_t` and `uint64_t` take a
-`BigInt` that fits, or any other value converted to a number that is finite and in range.
+An integer of up to 32 bits is unwrapped with `ToNumber`, truncation toward zero and a range
+check (`value.h`), in the order of Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API
+arguments, so a fraction just past a range limit (`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned
+type) converts. NaN and the infinities are a `TypeError` for every type except `int`, which reads
+them as 0, and so is a value out of the type's range. `int64_t` and `uint64_t` take a `BigInt`
+that fits, or any other value converted to a number that is finite and in range.
 
 ## Nullable/Optional Semantics
 
@@ -261,6 +260,45 @@ signal that weak references should not be traced. Do not include them in `visitF
 from two owners is strong or traced depending on which visited last. The `jsg-shared-visit`
 clang-tidy check flags such visits.
 
+## Calls That Run JavaScript
+
+A call that runs JavaScript (calling a `jsg::Function` or `v8::Function`, resolving a promise,
+reading or writing a property, converting a value to a string or number, running microtasks,
+forcing a GC) can free anything a script can reach: user code can drop the last reference to
+an object, transition its state, or change a container the caller is iterating. Do not hold a
+local reference, pointer, iterator, or view (`kj::ArrayPtr`, `kj::StringPtr`, `kj::Ptr`) into
+JSG-owned state across such a call, and do not make such a call on one.
+
+```cpp
+// Bad: triggerAbort() runs listeners, which can drop the last reference to `follower`.
+auto& follower = KJ_ASSERT_NONNULL(weakFollower.tryGet());
+follower.triggerAbort(js, reason);
+
+// Good: the strong reference keeps it alive for the whole call.
+KJ_IF_SOME(follower, weakFollower.tryAddRef(js)) {
+  follower->triggerAbort(js, reason);
+}
+```
+
+Running JavaScript requires the lock, so treat any call you pass `js` to as able to run it. The
+`jsg-js-reentry` clang-tidy check does the same: a callee that takes a `jsg::Lock&`, one marked
+`JSG_MAY_RUN_JS`, a V8 entry point that runs script, or a function whose body in the translation
+unit calls one of those can run JavaScript, and the check reports borrows used after, or as the
+receiver of, such a call. A virtual call or an out-of-line definition needs no annotation, because
+the lock in its signature is enough. A lambda is judged by its body instead, which is always
+visible, and a call named only in an unevaluated operand such as `decltype` doesn't count. Both
+markers live in `util.h`:
+
+- `JSG_NO_JS` marks a primitive that takes the lock but never runs JavaScript, such as
+  `getHandle()`, `addRef()` or `jsg::Promise::then()`. Calls to it, and to its overrides, don't
+  count.
+- `JSG_MAY_RUN_JS` marks a function that runs JavaScript without taking the lock, such as one that
+  finds the lock itself.
+
+A `jsg::Function` keeps itself alive while it is called, and a `kj::Function` is held in C++
+state, so calling either through a borrow is not reported. Suppress a known-safe site with
+`// NOLINT(jsg-js-reentry)` and the reason.
+
 ## Weak References
 
 `jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference
@@ -443,6 +481,8 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | `write(js, JsValue)`                         | `readValue(js) → JsValue`                           |
 | `transfer(js, JsArrayBuffer)`                | `getVersion() → uint32_t`                           |
 
+A raw read past the end of the data throws DataCloneError.
+
 ### Rules
 
 - `JSG_SERIALIZABLE` MUST appear AFTER `JSG_RESOURCE_TYPE` block
@@ -452,6 +492,23 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
   runtime call-site label (defaults to `"unknown"`).
+
+### Classes Implemented in JavaScript
+
+The runtime's classes implemented in JavaScript (the per-isolate bootstrap's) have no
+`JSG_SERIALIZABLE`. They take part through V8-private properties that `src/per_isolate/serialization.ts`
+sets up: each instance is marked with its class's descriptor, and is written as
+`SERIALIZATION_TAG_JS_SERIALIZABLE` with a `"module:Export"` `deserializeInfo` naming the class,
+its data following the top-level value. The deserializer creates each instance without calling its
+constructor and initializes it once the whole value has been read, with JavaScript allowed.
+`ser.h` describes the protocol and the format; `docs/jsg.md` has a complete example.
+
+- A `deserializeInfo` MUST NOT change once data has been serialized
+- A value a `JSG_SERIALIZABLE` type's `deserialize()` reads with `readValue()` may contain such
+  instances before they are initialized: keep it as a `JsRef` rather than unwrapping it or reading
+  its properties, unless the type's own state, which can't contain one, produced it
+- A Serializer or Deserializer that writes to or reads for another delegate (`writeApiObject()`,
+  `readApiObject()`, as the Rust serializer uses) rejects such instances with DataCloneError
 
 ## Web IDL Union Validation Rules
 
@@ -551,6 +608,22 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 Internal fields: slot 0 = `WORKERD_WRAPPABLE_TAG`, slot 1 = `Wrappable*` pointer.
 Check: `jsg::Wrappable::isWorkerdApiObject(object)`.
 
+## Startup Snapshot
+
+A zygote isolate (built by a `v8::SnapshotCreator`) evaluates a Worker's top level and
+serializes its context; the Worker's own isolate is created from the blob and skips evaluation.
+Guide: [docs/startup-snapshot.md](../../../docs/startup-snapshot.md). Declarations:
+`snapshot.h` (`SnapshotArtifact`, serializer callbacks) and the snapshot section of `setup.h`.
+
+| Declaration on a resource type | Meaning |
+| --- | --- |
+| `static constexpr bool jsgSnapshotStateless = true;` | Any fresh instance is interchangeable: the snapshot records only the wrapper's tag, and the restored wrapper gets an instance from the type's `Lock&` (or default) constructor |
+| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles, `jsg::Ref` or IoContext); called in the zygote on the original and again per started worker on the stored copy |
+| neither | Not transferable: a Worker whose top level leaves an instance reachable starts without a snapshot |
+
+Both run outside any IoContext and must not throw. `IsolateBase::isPreparingSnapshot()` and
+`isStartingFromSnapshot()` tell which side of the pipeline code is on.
+
 ## BackingStore Factory Methods
 
 | Method                                             | Template Param  | Description                                       |
@@ -592,12 +665,14 @@ null. Builds without the sandbox store an ordinary pointer.
 | `CompilationObserver`       | `onCompileCacheRejected`          | Cached data rejected (version mismatch)   |
 | `CompilationObserver`       | `onCompileCacheGenerated`         | New cache data generated                  |
 | `CompilationObserver`       | `onCompileCacheGenerationFailed`  | Cache generation failed                   |
-| `CompilationObserver`       | `onCompileHintsConsumed`          | Legacy ESM compiled using function hints  |
+| `CompilationObserver`       | `onCompileHintsConsumed`          | Bundle ESM compiled using function hints  |
 | `ResolveObserver`           | `onResolveModule`                 | Module resolution begins                  |
 | `InternalExceptionObserver` | `reportInternalException`         | Internal exception for metrics            |
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |
 
 `onXxxStart` methods return `kj::Own<void>` destroyed on completion (RAII timing).
+`reportInternalException` can be called without the isolate lock, so implementations must be
+thread-safe.
 Compilation `Option`: `BUNDLE` (user code) or `BUILTIN` (runtime modules).
 Resolve `Context`: `BUNDLE`, `BUILTIN`, `BUILTIN_ONLY`.
 Resolve `Source`: `STATIC_IMPORT`, `DYNAMIC_IMPORT`, `REQUIRE`, `INTERNAL`.

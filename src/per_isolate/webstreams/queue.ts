@@ -6,47 +6,47 @@
 // conventions separating this backend from the native one.
 //
 // One StreamQueue per controller holds each chunk exactly once. Every
-// consumer (the stream itself, and each tee branch) owns a QueueCursor — a
+// consumer (the stream itself, and each tee branch) owns a QueueCursor - a
 // logical position into the shared queue. Entries are reclaimed once every
 // live cursor has advanced past them; the slowest cursor drives
 // backpressure (desiredSize = highWaterMark - max(cursor remaining size)).
 //
 // QUEUED-BACKEND INVARIANTS (binding on changes to this file; the native
-// backend in native.ts has a DIFFERENT set — do not port logic across the
+// backend in native.ts has a DIFFERENT set - do not port logic across the
 // fence without checking both):
-//   - The CLOSE_SENTINEL is always the LAST slot; it is the ONLY close-
+//  - The CLOSE_SENTINEL is always the LAST slot; it is the ONLY close-
 //     propagation mechanism (drain-then-close per cursor). BYOB
 //     descriptors facing the sentinel settle via a DEFERRED end-of-data
 //     settlement (one microtask): a same-turn respond(0) first claims the
 //     spec's RespondInClosedState fold (done: true with the partial bytes);
-//     otherwise the read settles with the C++-parity tail shape —
+//     otherwise the read settles with the C++-parity tail shape -
 //     element-aligned partial fills resolve { done: false, value: partial }
 //     and unfilled descriptors resolve { done: true, value: empty view }.
 //     The result owns the descriptor's buffer (transferred once, no copy);
 //     the descriptor remains listed, flagged settledAtEndOfData, so a later
 //     respond(0) is still legal and knows not to transfer again. (The spec
-//     leaves the read itself pending until that response — a footgun we
+//     leaves the read itself pending until that response - a footgun we
 //     deliberately do not reproduce.)
-//   - read() takes the fast path ONLY when no reads are pending (per-reader
+//  - read() takes the fast path ONLY when no reads are pending (per-reader
 //     FIFO; entries and pending reads coexist under batched notification).
-//   - Byte entries are {buffer, byteOffset, byteLength} triples; queue
+//  - Byte entries are {buffer, byteOffset, byteLength} triples; queue
 //     internals never read view metadata through patchable getters.
-//   - Copy-on-read for shared byte entries: copy iff any OTHER live cursor
-//     still needs the entry (exact last-consumer test) — REQUIRED for
+//  - Copy-on-read for shared byte entries: copy iff any OTHER live cursor
+//     still needs the entry (exact last-consumer test) - REQUIRED for
 //     soundness, not just spec parity.
-//   - Cursors hold weak owner refs; orphan pruning happens on cursor walks
+//  - Cursors hold weak owner refs; orphan pruning happens on cursor walks
 //     (the controller's own cursor excepted: it holds its owner strongly,
 //     as the controller does; a per-read walk checks only the cursors that
 //     decide it), with the FinalizationRegistry as the idle-queue backstop
-//     (the native backend needs NEITHER — JSG owns its source lifetime).
-//   - A queue whose last cursor has left or been collected has no consumer
+//     (the native backend needs NEITHER - JSG owns its source lifetime).
+//  - A queue whose last cursor has left or been collected has no consumer
 //     for good: it drops what it holds and what is enqueued later, and
 //     desiredSize reads as the high-water mark. The controller releases the
-//     source (no more pulls; cancel never runs — GC timing runs no user
+//     source (no more pulls; cancel never runs - GC timing runs no user
 //     callback) but keeps its own state machine.
-//   - desiredSize reflects the SLOWEST live cursor; a pending read on any
+//  - desiredSize reflects the SLOWEST live cursor; a pending read on any
 //     cursor overrides backpressure at the controller.
-//   - A released reader's filled bytes precede later data. respond() on the
+//  - A released reader's filled bytes precede later data. respond() on the
 //     released head re-queues them; enqueue() keeps them in the byte
 //     cursor's own prefix, ahead of the chunk, before any read is served,
 //     so a pending read(view) takes both (spec steps 8.5 and 10). Forks
@@ -115,15 +115,12 @@ ObjectSetPrototypeOf(ReadResult.prototype, null);
 delete (ReadResult.prototype as { constructor?: unknown }).constructor;
 ObjectFreeze(ReadResult.prototype);
 
-export function createReadResult<T>(
-  value: T,
-  done: false
-): { value: T; done: false };
-export function createReadResult<T>(
+function createReadResult<T>(value: T, done: false): { value: T; done: false };
+function createReadResult<T>(
   value: T | undefined,
   done: true
 ): { value: T | undefined; done: true };
-export function createReadResult<T>(
+function createReadResult<T>(
   value: T | undefined,
   done: boolean
 ): { value: T | undefined; done: boolean } {
@@ -215,19 +212,19 @@ type ArrayBufferViewCtor = new (
 // read(view) time (and re-transferred on every respond()), so the result
 // view is reconstructed from these primitives only at fulfillment.
 export interface PullIntoDescriptor {
-  // CURRENT backing buffer — re-pointed by the controller after each
+  // CURRENT backing buffer - re-pointed by the controller after each
   // transfer (read(view), respond(), respondWithNewView()).
   buffer: ArrayBuffer;
   // Spec "buffer byte length": the buffer's byteLength at creation time.
-  // Persists even when `buffer` has been transferred (detached → byteLength 0).
+  // Persists even when `buffer` has been transferred (detached -> byteLength 0).
   // Used by respondWithNewView() to validate the replacement buffer matches.
   bufferByteLength: number;
   byteOffset: number; // start of the caller's view within buffer
   byteLength: number; // caller's view length in bytes
   bytesFilled: number; // accumulates across enqueues/responds
-  minimumFill: number; // min × elementSize, in BYTES
+  minimumFill: number; // min x elementSize, in BYTES
   elementSize: number; // BYTES_PER_ELEMENT (1 for DataView)
-  // Captured via safe view-type detection — NEVER view.constructor, which
+  // Captured via safe view-type detection - NEVER view.constructor, which
   // is user-controllable via an own property.
   viewCtor: ArrayBufferViewCtor;
   // 'default' = synthetic descriptor for a default read on a byte stream
@@ -242,7 +239,7 @@ export interface PullIntoDescriptor {
   // result view was built over `buffer` (transferred once, at settlement),
   // so the reader owns those bytes. The descriptor stays listed so a later
   // closed-state respond(0)/respondWithNewView(empty) remains legal, but
-  // those paths MUST NOT re-transfer `buffer` — it would detach the
+  // those paths MUST NOT re-transfer `buffer` - it would detach the
   // delivered result. Independent of readerType: a releaseLock after
   // settlement rewrites readerType to 'none' and must not lose this.
   settledAtEndOfData: boolean;
@@ -271,7 +268,7 @@ function fractionalFillError(): TypeError {
 // elementSize): passing bytes happens to work for Uint8Array and is wrong
 // for every other view type. For DataView, elementSize is 1 and its length
 // parameter is in bytes, so the same expression holds.
-export function filledView(desc: PullIntoDescriptor): ArrayBufferView {
+function filledView(desc: PullIntoDescriptor): ArrayBufferView {
   // assert: desc.bytesFilled % desc.elementSize === 0
   // assert: desc.bytesFilled <= desc.byteLength
   return new desc.viewCtor(
@@ -283,7 +280,7 @@ export function filledView(desc: PullIntoDescriptor): ArrayBufferView {
 
 // The rest of a pull-into's buffer, still to be filled: the view a
 // byobRequest exposes to the source.
-export function unfilledView(desc: PullIntoDescriptor): Uint8Array {
+function unfilledView(desc: PullIntoDescriptor): Uint8Array {
   return new Uint8Array(
     desc.buffer,
     desc.byteOffset + desc.bytesFilled,
@@ -348,8 +345,8 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
 // Orphan-detection backstop
 //
 // Lazy WeakRef pruning (see StreamQueue#prune) only runs inside queue
-// operations. An idle queue whose consumers were all GC'd — but which is
-// pinned from the C++ side via the controller — would otherwise never
+// operations. An idle queue whose consumers were all GC'd - but which is
+// pinned from the C++ side via the controller - would otherwise never
 // observe "all cursors gone" and never cancel the underlying source. The
 // registry provides the active signal; cleanup scheduling is controlled by
 // workerd and deliberately coarse.
@@ -387,7 +384,7 @@ class StreamQueue<T, V = T> {
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   // Idempotent hook, wired to the controller: releases the underlying source
   // when the last consumer goes away. "cursorCount === 0" is a state, not an
-  // event — every path that can remove the last cursor funnels here.
+  // event - every path that can remove the last cursor funnels here.
   #onAllCursorsGone: () => void;
   #hadCursors: boolean = false;
   // An internal source's notification that consumption progressed: called
@@ -412,7 +409,7 @@ class StreamQueue<T, V = T> {
   // decide their answer. #cursors is stable for the rest of a walk whose
   // callbacks run no user code (all but notify(), see #notifyAll): they
   // never add or remove a cursor synchronously, and a re-entrant prune
-  // (notify → #gc) finds nothing new, since a deref'd owner stays alive to
+  // (notify -> #gc) finds nothing new, since a deref'd owner stays alive to
   // the end of the job.
   #prune(): void {
     const cursors = this.#cursors;
@@ -541,7 +538,7 @@ class StreamQueue<T, V = T> {
   }
 
   // Snapshot of the live owner streams (one per live cursor). Used for
-  // error propagation across tee branches — the queue itself stays
+  // error propagation across tee branches - the queue itself stays
   // policy-free; the controller decides what to do with the owners.
   getLiveOwners(): object[] {
     this.#prune();
@@ -554,7 +551,7 @@ class StreamQueue<T, V = T> {
     return owners;
   }
 
-  // Access a slot by logical position. May return the CLOSE_SENTINEL —
+  // Access a slot by logical position. May return the CLOSE_SENTINEL -
   // callers must check (isQueueEntry) before touching value/size.
   getEntry(logicalIndex: number): QueueSlot<T> | undefined {
     return this.#entries.get(logicalIndex - this.#headOffset);
@@ -570,12 +567,12 @@ class StreamQueue<T, V = T> {
       // Reentrant close() from inside size() already pushed the sentinel.
       // The chunk is readable by every consumer or by none, so tee
       // branches always see the same chunks:
-      //   - A cursor at the sentinel has drained, and its stream closed
+      //  - A cursor at the sentinel has drained, and its stream closed
       //     with the close() (spec: a close() on an empty queue closes the
       //     stream, and the chunk is never read; with a tee, a drained
       //     branch means the tee has read the source's queue empty). The
       //     chunk is dropped.
-      //   - Otherwise every cursor is behind the sentinel. The spec's
+      //  - Otherwise every cursor is behind the sentinel. The spec's
       //     close() only requested the close and the chunk is still
       //     readable: insert it BEFORE the sentinel, so each cursor drains
       //     through it before reaching the close marker.
@@ -658,7 +655,7 @@ class StreamQueue<T, V = T> {
   }
 
   // Stream error: reject all pending reads on every cursor (byte cursors
-  // also reject pending pull-intos — partial fills are lost) and drop all
+  // also reject pending pull-intos - partial fills are lost) and drop all
   // buffered data. Cursors remain attached; reads submitted after the error
   // are rejected at the reader/stream layer via the stored error.
   error(reason: unknown): void {
@@ -678,8 +675,8 @@ class StreamQueue<T, V = T> {
   // Called by the QueueCursor constructor (cursors self-register): a
   // forked cursor (tee, detach) joins through addCursor, and the
   // controller's own cursor through addAnchorCursor. A forked cursor's
-  // `owner` is the stream object — registered as the FinalizationRegistry's
-  // weak target and also held weakly by the cursor — and the cursor resumes
+  // `owner` is the stream object - registered as the FinalizationRegistry's
+  // weak target and also held weakly by the cursor - and the cursor resumes
   // at the source cursor's position AND byteOffset, exactly where the
   // original left off.
   //
@@ -790,7 +787,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #queue: StreamQueue<T, V>;
   // Weak back-reference to the owning ReadableStream of a forked cursor. A
   // cursor whose owner has been GC'd is an orphan and gets pruned by the
-  // queue. Note pending reads pin the owner (pending.reader → reader →
+  // queue. Note pending reads pin the owner (pending.reader -> reader ->
   // stream), so orphaned implies no pending reads from any live reader.
   #owner: WeakRef<object> | undefined;
   // The owner of the controller's own cursor (the queue's anchor): the
@@ -896,7 +893,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     const slot = this.#queue.getEntry(this.#position);
     if (isQueueEntry(slot)) {
       // Only the REMAINING portion of this entry contributes to the
-      // running total — bytes before #byteOffset were already debited
+      // running total - bytes before #byteOffset were already debited
       // (by setConsumed or via initialTotalSize at cursor construction).
       this.#queueTotalSize -= slot.size - this.#byteOffset;
       // Spec DequeueValue: a total that rounding has taken below 0 becomes
@@ -915,7 +912,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     }
     // Adjust running total for consumed entries and byte offset changes.
     // The entry at the CURRENT position may be partially consumed
-    // (#byteOffset > 0) — those bytes were already debited, so only
+    // (#byteOffset > 0) - those bytes were already debited, so only
     // the remainder counts. Subsequent entries are fully outstanding.
     for (let i = this.#position; i < position; i++) {
       const slot = this.#queue.getEntry(i);
@@ -943,8 +940,8 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   // read must never jump ahead of older ones.
   //
   // Ordering: spec PullSteps dequeues, then calls CallPullIfNeeded, then
-  // fulfills the read request. We preserve that order (advance →
-  // onCursorAdvanced, which may trigger a pull → resolve) so the relative
+  // fulfills the read request. We preserve that order (advance ->
+  // onCursorAdvanced, which may trigger a pull -> resolve) so the relative
   // microtask ordering of pull side-effects vs. read fulfillment matches
   // ordering-sensitive WPT tests.
   // Attempt a synchronous read. Returns the result directly when data (or
@@ -972,7 +969,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     // promise when data is already buffered.
     const sync = this.tryReadSync(reader);
     if (sync !== undefined) return PromiseResolve(sync);
-    // No data available (or reads already queued) — defer.
+    // No data available (or reads already queued) - defer.
     const { promise, resolve, reject } =
       PromiseWithResolvers() as PromiseWithResolversType<
         ReadableStreamReadResult<V>
@@ -995,7 +992,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       if (slot === undefined) break;
       if (slot === CLOSE_SENTINEL) {
         // End of stream: every remaining pending read resolves done. This
-        // deliberately uses the non-virtual helper — the byte cursor's
+        // deliberately uses the non-virtual helper - the byte cursor's
         // pending pull-intos must NOT be auto-committed at the sentinel
         // (see "Close semantics for byte cursors" in the design doc).
         this.#resolvePendingReadsAsDone();
@@ -1030,7 +1027,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   // Resolve all pending reads as done (stream CANCEL path). Per spec,
-  // cancel() RESOLVES pending reads with { done: true, value: undefined } —
+  // cancel() RESOLVES pending reads with { done: true, value: undefined } -
   // including BYOB reads, whose partial data is dropped. Rejection is
   // reserved for error() and releaseLock().
   resolveAllReadsAsDone(): void {
@@ -1043,7 +1040,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   // cursor first would fire the all-cursors-gone hook, which releases the
   // cancel algorithm before the decision could run it. The stream layer
   // owns the policy (tee composite hooks vs direct controller cancel) via
-  // `decideSourceCancel` — including binding the reason — while the
+  // `decideSourceCancel` - including binding the reason - while the
   // last-consumer determination is queue knowledge, supplied to it here.
   cancelStream(
     _reason: unknown,
@@ -1063,7 +1060,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   // Bulk read for the draining reader (and pipeTo): consume all buffered
   // entries from the current position, up to the soft limit `maxSize`
-  // (in strategy size units — bytes for byte streams). Returns
+  // (in strategy size units - bytes for byte streams). Returns
   // synchronously; the draining reader wraps in a promise at its API
   // boundary. Always takes at least one available entry so callers make
   // progress even when maxSize is smaller than the next entry. Done
@@ -1120,7 +1117,7 @@ class ByteStreamCursor
   extends QueueCursor<ByteQueueEntry, Uint8Array>
   implements ByteStreamConsumer
 {
-  // Spec [[pendingPullIntos]] — a LIST. Multiple reads can be queued, and
+  // Spec [[pendingPullIntos]] - a LIST. Multiple reads can be queued, and
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
   readonly #pendingPullIntos: RingBufferType<PullIntoDescriptor> =
     new RingBuffer();
@@ -1136,7 +1133,7 @@ class ByteStreamCursor
   #endOfDataSettlementScheduled: boolean = false;
 
   // Callback invoked when the cursor detects a fractional-element fill at
-  // the close sentinel — the cursor's stream must be errored with a
+  // the close sentinel - the cursor's stream must be errored with a
   // TypeError. Set by the stream layer (the cursor layer cannot error a
   // stream directly); it receives the cursor's owner, held weakly here.
   #errorStreamCallback: ErrorStreamCallback | undefined;
@@ -1170,7 +1167,7 @@ class ByteStreamCursor
     return this.#pendingPullIntos.peek();
   }
 
-  // View over the unfilled remainder of the head descriptor — what
+  // View over the unfilled remainder of the head descriptor - what
   // byobRequest.view exposes to the underlying source.
   get pendingPullIntoView(): Uint8Array | undefined {
     const head = this.#pendingPullIntos.peek();
@@ -1194,7 +1191,7 @@ class ByteStreamCursor
   // starting at the current byteOffset (whole entry when byteOffset is 0).
   //
   // COPY-ON-READ for shared entries: if any OTHER live cursor still needs
-  // this entry, hand out a copy — aliased mutable views across tee branches
+  // this entry, hand out a copy - aliased mutable views across tee branches
   // would let one consumer corrupt its sibling's data. The last consumer
   // (and the single-cursor common case) takes the view zero-copy. This is
   // the exact last-consumer test from the design doc; readEntryValue is
@@ -1370,7 +1367,7 @@ class ByteStreamCursor
   // { done: true, value: zero-length view over the transferred buffer }
   // before ever reaching here, and errored streams reject at the reader
   // layer. The stream can still be readable while the QUEUE is already
-  // closed (buffered data not yet drained — e.g. a tee branch that has
+  // closed (buffered data not yet drained - e.g. a tee branch that has
   // not read); a below-minimum fill that lands at the sentinel then
   // settles via the deferred end-of-data settlement.
   readBYOB(
@@ -1436,7 +1433,7 @@ class ByteStreamCursor
         // End of DATA. Check for fractional-element fill: if any BYOB
         // descriptor has partially filled bytes that don't align to the
         // element size, the remaining bytes can never complete an element
-        // — the stream must be errored with a TypeError (spec
+        // - the stream must be errored with a TypeError (spec
         // ReadableByteStreamControllerClose step 4).
         if (this.hasFractionalFill) {
           this.#errorStreamForFractionalFill();
@@ -1508,7 +1505,7 @@ class ByteStreamCursor
   }
 
   // The deferred end-of-data settlement. Scheduled (once per turn) whenever
-  // BYOB descriptors face the close sentinel — from notify() when close()
+  // BYOB descriptors face the close sentinel - from notify() when close()
   // lands with reads parked, and from readBYOB() when a read submitted
   // against a closed-but-undrained queue fills below its minimum. The
   // one-microtask deferral lets a source that calls
@@ -1518,7 +1515,7 @@ class ByteStreamCursor
   // WPT read-min pinned behavior). Otherwise the read falls through to the
   // C++-parity tail shape, without invalidating the descriptor.
   //
-  // CONSEQUENCE — the result shape depends on microtask timing. With a
+  // CONSEQUENCE - the result shape depends on microtask timing. With a
   // partially filled read parked, `close(); respond(0)` in one turn yields
   // { done: true, value: partial }, while `close(); await x; respond(0)`
   // yields { done: false, value: partial } followed by { done: true,
@@ -1536,10 +1533,10 @@ class ByteStreamCursor
 
   // Settle every still-pending read with the tail shape: element-aligned
   // partial fills resolve { done: false, value: partial } (a subsequent
-  // read observes the closed stream and resolves done with an empty view —
+  // read observes the closed stream and resolves done with an empty view -
   // the C++ readAtLeast tail contract); unfilled descriptors resolve
   // { done: true, value: empty view }. Either way the reader gets its own
-  // buffer back: it is transferred once (O(1), no copy — the point of
+  // buffer back: it is transferred once (O(1), no copy - the point of
   // BYOB) so any view the source still holds over the old buffer
   // (byobRequest.view) detaches, as the spec's commit-time transfer would.
   // The descriptor stays listed, pointing at the transferred buffer, so a
@@ -1559,7 +1556,7 @@ class ByteStreamCursor
       const desc = pending.get(i) as PullIntoDescriptor;
       // 'none': released reader (or an auto-allocate read already
       // answered by #answerDefaultPullIntosAsDone, or a BYOB read settled
-      // by an earlier invocation) — nothing to settle.
+      // by an earlier invocation) - nothing to settle.
       if (desc.readerType === 'none') continue;
       let result: ReadableStreamReadResult<ArrayBufferView>;
       if (desc.readerType === 'default') {
@@ -1608,7 +1605,7 @@ class ByteStreamCursor
     }
   }
 
-  // byobRequest.respond(bytesWritten) — zero-copy path. The controller has
+  // byobRequest.respond(bytesWritten) - zero-copy path. The controller has
   // already validated bytesWritten, re-transferred the buffer, and
   // re-pointed head.buffer at the transferred copy.
   respondBYOB(bytesWritten: number): void {
@@ -1645,7 +1642,7 @@ class ByteStreamCursor
     }
 
     if (head.bytesFilled < head.minimumFill) {
-      // Not enough yet — stays pending. byobRequest now exposes a view
+      // Not enough yet - stays pending. byobRequest now exposes a view
       // over the unfilled remainder of the (new) buffer; the source can
       // keep writing or fall back to enqueue().
       return;
@@ -1682,8 +1679,8 @@ class ByteStreamCursor
   }
 
   // Commit all pending pull-into descriptors at end-of-stream: resolve with
-  // the filled-so-far view (possibly zero-length — the buffer is handed
-  // back) and done: true in a SINGLE result — the spec's
+  // the filled-so-far view (possibly zero-length - the buffer is handed
+  // back) and done: true in a SINGLE result - the spec's
   // RespondInClosedState fold shape. Called by the controller from the
   // respond(0)-while-closed path ONLY; descriptors the source never
   // responds to settle through #settlePullIntosAtEndOfData instead, with
@@ -1722,7 +1719,7 @@ class ByteStreamCursor
   }
 
   // Stream cancel: pending BYOB reads resolve { done: true, value:
-  // undefined } — partial data and buffers are dropped (spec,
+  // undefined } - partial data and buffers are dropped (spec,
   // WPT-verified).
   override resolveAllReadsAsDone(): void {
     this.#prefix = undefined;
@@ -1756,10 +1753,10 @@ class ByteStreamCursor
 
   // Fill `desc` from the queue starting at (position, byteOffset). Mirrors
   // ReadableByteStreamControllerFillPullIntoDescriptorFromQueue:
-  //   - if queued data reaches an element-aligned boundary >= minimumFill,
+  //  - if queued data reaches an element-aligned boundary >= minimumFill,
   //     copy only up to that aligned boundary (remainder bytes stay queued
-  //     for the next read) — descriptor is then ready;
-  //   - otherwise copy everything available (the descriptor may temporarily
+  //     for the next read) - descriptor is then ready;
+  //  - otherwise copy everything available (the descriptor may temporarily
   //     end mid-element) and stay pending.
   // Takes the prefix first. Stops at the CLOSE_SENTINEL. Advances
   // position/byteOffset for consumed bytes (which triggers GC + backpressure
@@ -1829,9 +1826,16 @@ class ByteStreamCursor
   }
 }
 
-// Type-only exports (fully erased at runtime — the loader sees only the
+// Type-only exports (fully erased at runtime - the loader sees only the
 // module.exports assignment below, matching the readable.ts pattern).
-export type { StreamQueue, QueueCursor, ByteStreamCursor };
+export type {
+  StreamQueue,
+  QueueCursor,
+  ByteStreamCursor,
+  createReadResult,
+  filledView,
+  unfilledView,
+};
 
 module.exports = {
   CLOSE_SENTINEL,

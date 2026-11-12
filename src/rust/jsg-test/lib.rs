@@ -160,6 +160,29 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
 
+        /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
+        /// `value`, or returns false if creating it threw, leaving the exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_exception_to_kj(isolate: *mut Isolate, value: Local) -> Result<bool>;
+
+        /// Converts `exception` to a `kj::Exception` and back, as C++ JSG does with
+        /// `jsg::Lock::exceptionToKj()` and `jsg::Lock::exceptionToJsValue()`. Fails if
+        /// converting it throws, leaving that exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
+
+        /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which
+        /// is its class's descriptor if it is cloneable. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn mark_js_serializable(
+            isolate: *mut Isolate,
+            object: Local,
+            mark: Local,
+        ) -> Result<()>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -222,10 +245,10 @@ impl Drop for Autogates {
 
 /// Configures the process's autogates to exactly `names` for as long as the returned guard lives.
 ///
-/// Each name is in kebab-case without the `workerd-autogate-` prefix
-/// (`"jsg-integer-enforce-range"` for `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`). An empty slice
-/// disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and
-/// the tests run serially, so a test holds the guard for its duration.
+/// Each name is in kebab-case without the `workerd-autogate-` prefix (`"test-workerd"` for
+/// `AutogateKey::TEST_WORKERD`). An empty slice disables every autogate, whatever
+/// `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and the tests run serially, so a test
+/// holds the guard for its duration.
 ///
 /// # Panics
 ///
@@ -636,6 +659,26 @@ impl Harness {
         }
     }
 
+    /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which C++
+    /// JSG's `jsg::Serializer` serializes it through if `mark` is its class's descriptor (see
+    /// `jsg/ser.h`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `object` is not an object.
+    pub fn mark_js_serializable<'s>(
+        lock: &mut jsg::Lock<'s>,
+        object: v8::Local<'s, v8::Value>,
+        mark: v8::Local<'s, v8::Value>,
+    ) {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `object` and `mark` belong to.
+        unsafe {
+            ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
+        }
+        .expect("the value should be an object");
+    }
+
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
     /// `v8::Function::new` function, and returns whether the data is taken for a Rust Wrappable.
     pub fn cpp_wrapped_function_data_is_rust_wrappable(lock: &mut jsg::Lock<'_>) -> bool {
@@ -671,6 +714,44 @@ impl Harness {
                     .expect("C++ JSG should deserialize the data"),
             )
         }
+    }
+
+    /// The KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for `value`, to compare
+    /// with [`jsg::Lock::exception_to_kj`].
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`jsg::Error::is_pending`] is true if creating it threw,
+    /// leaving the exception pending.
+    pub fn cpp_exception_to_kj<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<cxx::KjError> {
+        // SAFETY: as for `cpp_serialize`.
+        match unsafe { ffi::cpp_exception_to_kj(lock.isolate().as_ffi(), value.into_ffi()) } {
+            Ok(_) => Err(jsg::Error::pending()),
+            Err(exception) => Ok(exception.into()),
+        }
+    }
+
+    /// Converts `exception` to a `kj::Exception` and back with C++ JSG, to compare with
+    /// [`jsg::TunneledException`].
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if converting it throws.
+    pub fn cpp_tunnel_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        exception: v8::Local<'s, v8::Value>,
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(ffi::cpp_tunnel_exception(
+                lock.isolate().as_ffi(),
+                exception.into_ffi(),
+            ))
+        }
+        .ok_or_else(jsg::Error::pending)
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

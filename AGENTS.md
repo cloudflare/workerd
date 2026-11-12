@@ -12,6 +12,10 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - If checked out as a submodule, be aware that there is additional documentation and context in the
   root of that repository that is not present here. Look for the `../../README.md`, `../../AGENTS.md`,
   and other markdown files in the root of the parent repository.
+- Custom tools (`next-capnp-ordinal`, `compat-date-at`) are defined in `.opencode/lib/`. opencode
+  loads them natively; Claude Code reaches them through the `workerd` MCP server registered in
+  `.mcp.json`, which needs Node 22.18 or later on `PATH` (for TypeScript type stripping). With an
+  older Node, the server fails to start and the tools are missing.
 
 ## Project Overview
 
@@ -202,8 +206,10 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
 | JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
 | Streams benchmarks     | `src/bench/streams/`                                          | C++ vs TS streams: the same modules under a cell per implementation; see its `AGENTS.md`                     |
+| Clone benchmarks       | `src/bench/serialization/`                                    | `structuredClone()` of object graphs, class instances, arrays and strings                                    |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | See `docs/v8-updates.md`                                                                                     |
+| Startup snapshot       | `src/workerd/jsg/snapshot.{h,c++}`, `setup.{h,c++}`           | Zygote bakes the top level into a V8 snapshot; `STARTUP_SNAPSHOT` autogate; see `docs/startup-snapshot.md`   |
 
 ## Coding Conventions
 
@@ -358,5 +364,6 @@ See the markdown files in the `docs/` directory for additional information on sp
 
 - [development.md](docs/development.md) - Development environment setup and tools
 - [api-updates.md](docs/api-updates.md) - Guidelines for adding new JavaScript APIs
+- [startup-snapshot.md](docs/startup-snapshot.md) - How a zygote evaluates a Worker's top level into a V8 startup snapshot and how the Worker starts from it
 
 Some source directories also contain README.md files with more specific information about that component. Proactively look for these when working in unfamiliar areas of the codebase. Proactively suggest updates to the documentation when it is missing or out of date, but do not make edits without confirming accuracy.

@@ -1,0 +1,9 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# The Queues Worker, the bundled module `/workerd/queues.js`
+# (Worker.Module.bundled).
+wd_cc_embed(
+    name = "queues-js",
+    src = "queues.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

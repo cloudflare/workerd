@@ -23,13 +23,13 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
-use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
+use crate::utils::typescript_options;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -50,7 +50,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let ts_root = has_flag(&attr, "ts_root");
+    let typescript = typescript_options(attr.clone());
     let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
         Ok(generated) => generated,
         Err(err) => return err.to_compile_error().into(),
@@ -111,7 +111,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+                cx.structure::<Self>(
+                    #class_name,
+                    #typescript,
+                    jsg::rtti::resource_members::<Self>,
+                )
             }
         }
 
@@ -131,6 +135,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
             type ResultType = jsg::Rc<Self>;
 
             const UNION_MEMBER: jsg::UnionMember = jsg::UnionMember::Resource;
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> String {
                 <Self as jsg::Type>::class_name().to_owned()
@@ -370,6 +375,34 @@ fn collect_callable_registrations(
     })
 }
 
+/// Scans `impl_block` for `#[jsg_iterable]` methods, registered as the type's
+/// `[Symbol.iterator]()`, which it has at most one of. The factory is `{name}_iterable_member`,
+/// so that a method can also be a `#[jsg_method]`. As in C++ RTTI, the description names the
+/// method after the Rust method.
+fn collect_iterable_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let factory_name = |rust_name: &syn::Ident| {
+        syn::Ident::new(&format!("{rust_name}_iterable_member"), rust_name.span())
+    };
+    collect_at_most_one(impl_block, mode, "jsg_iterable", factory_name, |method| {
+        let callback = crate::iterable_callback_name(&method.sig.ident);
+        let member = quote! { jsg::Member::Iterable { callback: Self::#callback() } };
+        let name = snake_to_camel(&method.sig.ident.to_string());
+        let args = describe_args(method, Callable::Method);
+        let result = describe_result(method);
+        let description = quote! {
+            jsg::rtti::Member::Iterator {
+                name: #name,
+                args: vec![#(#args),*],
+                result: #result,
+            }
+        };
+        (member, Some(description))
+    })
+}
+
 /// Registers each method of `impl_block` annotated with `#[attr]`, a member a resource type has
 /// at most one of, in a factory named by `factory_name`; `registration` gives the member and its
 /// RTTI description. With automatic registration a second such method is a compile error,
@@ -592,7 +625,8 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
-                            `custom_memory_info` or `ts_root` on a #[jsg_resource] struct";
+                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `ts_define = \"...\"` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
         match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
@@ -640,6 +674,12 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
                     }),
                 ..
             }) if path.is_ident("name") => None,
+            // `typescript_options` reports a value that is not a string literal.
+            syn::Meta::NameValue(syn::MetaNameValue { path, .. })
+                if path.is_ident("ts_override") || path.is_ident("ts_define") =>
+            {
+                None
+            }
             _ => Some(syn::Error::new_spanned(meta, EXPECTED)),
         }
     })
@@ -736,6 +776,8 @@ enum RegistrationMode {
 struct ImplArgs {
     mode: RegistrationMode,
     nested_types: Vec<NestedTypeArg>,
+    /// The `jsg::Intrinsic` variant of `inherit_intrinsic = ...`.
+    inherit_intrinsic: Option<syn::Ident>,
 }
 
 /// Parses the arguments of `#[jsg_resource]` on an impl block: `custom_members` and any
@@ -751,16 +793,31 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::parse::Parser as _;
     use syn::punctuated::Punctuated;
 
-    const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name`, `custom_trace`, `memory_info` \
-                            and `custom_memory_info` belong on the struct)";
+    const EXPECTED: &str = "expected `custom_members`, `nested_types(...)` or \
+                            `inherit_intrinsic = ...` on a #[jsg_resource] impl block (`name`, \
+                            `custom_trace`, `memory_info`, `custom_memory_info`, `ts_root`, \
+                            `ts_override` and `ts_define` belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;
     let mut nested_types = Vec::<NestedTypeArg>::new();
     let mut first_nested_types = None;
+    let mut inherit_intrinsic = None;
     for arg in args {
         match &arg {
+            syn::Meta::NameValue(name_value) if name_value.path.is_ident("inherit_intrinsic") => {
+                if inherit_intrinsic.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &name_value.path,
+                        "duplicate `inherit_intrinsic`; a resource type inherits from at most \
+                         one intrinsic",
+                    ));
+                }
+                inherit_intrinsic = Some((
+                    name_value.path.clone(),
+                    inherit_intrinsic_variant(&name_value.value)?,
+                ));
+            }
             syn::Meta::Path(path) if path.is_ident("custom_members") => {
                 if custom_members.is_some() {
                     return Err(syn::Error::new_spanned(arg, "duplicate `custom_members`"));
@@ -803,7 +860,7 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     } else {
         RegistrationMode::Automatic
     };
-    if let (Some(custom_members), Some(nested)) = (custom_members, first_nested_types) {
+    if let (Some(custom_members), Some(nested)) = (&custom_members, first_nested_types) {
         let mut error = syn::Error::new_spanned(
             nested,
             "`nested_types(...)` cannot be combined with `custom_members`; register \
@@ -815,7 +872,39 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
         ));
         return Err(error);
     }
-    Ok(ImplArgs { mode, nested_types })
+    if let (Some(custom_members), Some((inherit, _))) = (&custom_members, &inherit_intrinsic) {
+        let mut error = syn::Error::new_spanned(
+            inherit,
+            "`inherit_intrinsic` cannot be combined with `custom_members`; call \
+             `registry.inherit_intrinsic(jsg::Intrinsic::...)` in `Resource::members` instead",
+        );
+        error.combine(syn::Error::new_spanned(
+            custom_members,
+            "`custom_members` given here",
+        ));
+        return Err(error);
+    }
+    Ok(ImplArgs {
+        mode,
+        nested_types,
+        inherit_intrinsic: inherit_intrinsic.map(|(_, variant)| variant),
+    })
+}
+
+/// The `jsg::Intrinsic` variant that `inherit_intrinsic = <value>` names.
+fn inherit_intrinsic_variant(value: &syn::Expr) -> syn::Result<syn::Ident> {
+    let syn::Expr::Path(path) = value else {
+        return Err(syn::Error::new_spanned(
+            value,
+            "expected a `jsg::Intrinsic` variant, such as `IteratorPrototype`",
+        ));
+    };
+    path.path.get_ident().cloned().ok_or_else(|| {
+        syn::Error::new_spanned(
+            path,
+            "expected a `jsg::Intrinsic` variant without a path, such as `IteratorPrototype`",
+        )
+    })
 }
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on an impl block.
@@ -843,8 +932,11 @@ fn generate_resource_bindings(
     attr: proc_macro2::TokenStream,
     impl_block: &ItemImpl,
 ) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
-    let ImplArgs { mode, nested_types } =
-        parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
+    let ImplArgs {
+        mode,
+        nested_types,
+        inherit_intrinsic,
+    } = parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
     let self_ty = &impl_block.self_ty;
 
     if !matches!(&**self_ty, syn::Type::Path(_)) {
@@ -867,10 +959,15 @@ fn generate_resource_bindings(
     registrations.extend(disposers);
     let (callable, callable_error) = collect_callable_registrations(impl_block, mode);
     registrations.extend(callable);
+    let (iterable, iterable_error) = collect_iterable_registrations(impl_block, mode);
+    registrations.extend(iterable);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
     let nested_type_registrations = nested_types.iter().map(nested_type_registration);
+    let inherit_intrinsic_registration = inherit_intrinsic.map(|variant| {
+        quote! { registry.inherit_intrinsic(jsg::Intrinsic::#variant); }
+    });
 
     let resource_impl = if mode == RegistrationMode::Automatic {
         quote! {
@@ -881,6 +978,7 @@ fn generate_resource_bindings(
                     _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
                 ) {
                     let _ = &registry;
+                    #inherit_intrinsic_registration
                     #(registry.add(#automatic);)*
                     #(registry.add(#nested_type_registrations);)*
                 }
@@ -894,6 +992,7 @@ fn generate_resource_bindings(
         #wildcard_error
         #(#dispose_errors)*
         #callable_error
+        #iterable_error
 
         #[automatically_derived]
         impl #self_ty {
@@ -1156,7 +1255,7 @@ fn generate_constructor_registration(
 
                 #construct
                 let rc = jsg::Rc::new(lock, resource);
-                rc.attach_to_this(args);
+                rc.attach_to_this(lock, args);
             }),
             length: #length,
         }

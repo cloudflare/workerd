@@ -12,6 +12,7 @@
 #include "headers.h"
 #include "queue.h"
 #include "request-io.h"
+#include "url-bridge.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
@@ -61,6 +62,8 @@ class Body: public jsg::Object {
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
+      // Before the async generator, which would take a URLSearchParams as an iterable.
+      JsUrlSearchParams,
       jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it
@@ -425,6 +428,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<QueueResult> queue(jsg::Lock& js,
       kj::String queueName,
       kj::Array<ServiceBindingQueueMessage> messages,
@@ -444,6 +449,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, noRetry);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
@@ -458,6 +465,10 @@ class Fetcher: public JsRpcClientProvider {
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
+
+  // A binding transfers through a startup snapshot as the description it is: a channel number
+  // that every request resolves through its own IoContext. See http.c++ for what does not.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
@@ -618,6 +629,10 @@ class ExtendedFetcher final: public Fetcher {
   }
   // Get host and set up override, if needed.
   kj::StringPtr getHost(jsg::Lock& js);
+
+  // Minted by ctx.mapVirtualHost() for one Worker's global scope, whose connect override the
+  // restored Worker's fresh global scope would lack.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(ExtendedFetcher) {
     JSG_INHERIT(Fetcher);

@@ -12,7 +12,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -629,18 +628,22 @@ void IoContext::logUncaughtException(
 void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     kj::Exception&& exception,
     kj::Maybe<IncomingRequest&> incomingRequest) {
+  // The request whose trace the exception goes in.
+  kj::Maybe<IncomingRequest&> traceRequest = incomingRequest;
+  if (traceRequest == kj::none && !incomingRequests.empty()) {
+    traceRequest = getCurrentIncomingRequest();
+  }
+
   kj::Maybe<BaseTracer&> tracer;
   kj::Maybe<RequestObserver&> metrics;
-  KJ_IF_SOME(request, incomingRequest) {
+  KJ_IF_SOME(request, traceRequest) {
     KJ_DASSERT(&request.getContext() == this);
     tracer = request.getWorkerTracer();
     metrics = request.getMetrics();
-  } else if (!incomingRequests.empty()) {
-    tracer = getWorkerTracer();
-    metrics = getMetrics();
   }
+  bool inspectorEnabled = worker->getIsolate().isInspectorEnabled();
 
-  if (tracer == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+  if (tracer == kj::none && !inspectorEnabled) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
@@ -655,38 +658,90 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     return;
   }
 
+  // Make sure this is logged even if another exception occurs trying to log it to the trace or
+  // the devtools inspector, e.g. if `runImpl` throws before calling logUncaughtExceptionToConsole.
+  // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
+  KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
+
+  // The exception as JavaScript would see it, which takes neither JavaScript nor the isolate lock
+  // to find out. An internal exception is logged and reported to the isolate's observer in the
+  // process, as it is when it is converted to JavaScript.
+  auto error = jsg::describeAsJsError(exception, worker->getIsolate().getApi().getObserver());
+
+  // The request's observer is told as well. An isolate observer that passes the report on to the
+  // current request by looking up IoContext::tryCurrent() finds no current IoContext here, as the
+  // isolate lock is not held.
+  KJ_IF_SOME(detail, error.internalException) {
+    KJ_IF_SOME(m, metrics) {
+      m.reportInternalException(exception, detail);
+    }
+  }
+
+  KJ_IF_SOME(t, tracer) {
+    // An intermediate report of an exception that passes from JavaScript to C++ is redundant in
+    // the trace; see addExceptionToTrace() in worker.c++.
+    if (source != UncaughtExceptionSource::INTERNAL &&
+        source != UncaughtExceptionSource::INTERNAL_ASYNC) {
+      auto& request = KJ_ASSERT_NONNULL(traceRequest);
+
+      // A request's clock moves only when it is synced, which is otherwise done on entering the
+      // isolate. Sync it to get the time the exception is logged at rather than the time
+      // JavaScript last ran, as IncomingRequest::nowForTraceOnset() does for the onset.
+      request.ioChannelFactory->getTimer().syncTime();
+      auto timestamp = now(request);
+
+      // The exception belongs to the request as a whole, and no JavaScript is running whose async
+      // context could name a more specific user span, so report it under the request's root user
+      // span.
+      auto userSpan = request.getRootUserTraceSpan();
+      auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
+
+      auto errorInfo =
+          tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
+              error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+      t.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
+          kj::mv(errorInfo.stack));
+    }
+  }
+
+  if (!inspectorEnabled) {
+    // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
+    if (kj::_::Debug::shouldLog(kj::LogSeverity::INFO)) {
+      KJ_IF_SOME(stack, error.stack) {
+        KJ_LOG(INFO, "uncaught exception", source, stack);
+      } else {
+        // An error without a stack trace has a stack that is just its name and message.
+        auto stack = kj::str(error.name, ": ", error.message);
+        KJ_LOG(INFO, "uncaught exception", source, stack);
+      }
+    }
+    return;
+  }
+
   struct RunnableImpl: public Runnable {
     UncaughtExceptionSource source;
     kj::Exception exception;
-    kj::Maybe<IncomingRequest&> incomingRequest;
+    const jsg::JsErrorDescription& error;
 
     RunnableImpl(UncaughtExceptionSource source,
         kj::Exception&& exception,
-        kj::Maybe<IncomingRequest&> incomingRequest)
+        const jsg::JsErrorDescription& error)
         : source(source),
           exception(kj::mv(exception)),
-          incomingRequest(incomingRequest) {}
+          error(error) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, kj::mv(exception), incomingRequest);
+      lock.logUncaughtExceptionToConsole(source, kj::mv(exception), error);
     }
   };
 
-  // Make sure this is logged even if another exception occurs trying to log it to the devtools inspector,
-  // e.g. if `runImpl` throws before calling logUncaughtException.
-  // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
-  KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
-  RunnableImpl runnable(source, kj::mv(exception), incomingRequest);
-  // TODO(perf): Is it worth using an async lock here? The only case where it really matters is
-  //   when a trace worker is active, but maybe they'll be more common in the future. To take an
-  //   async lock here, we'll probably have to update all the call sites of this method... ick.
+  RunnableImpl runnable(source, kj::mv(exception), error);
   runImpl(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
 
 void IoContext::requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report) {
-  if (incomingRequests.empty() &&
-      util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+  if (incomingRequests.empty()) {
     // As in runSingle(), the abort explains the failure better.
     KJ_IF_SOME(ex, abortException) {
       kj::throwException(ex.clone());
@@ -2059,22 +2114,6 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // end. On each iteration of the loop we wait for the delete queue's cross
   // thread signal, then run the queued actions.
   try {
-    if (!util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-      // Without the autogate, every wake runs the actions, aborting the IoContext if that fails.
-      for (;;) {
-        co_await context->deleteQueue.queue->resetCrossThreadSignal();
-        co_await context->run([](auto& lock) {
-          auto& context = IoContext::current();
-          auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-          auto& state = KJ_ASSERT_NONNULL(*l);
-          for (auto& action: state.actions) {
-            action(lock);
-          }
-          state.actions.clear();
-        });
-      }
-    }
-
     auto& queue = *context->deleteQueue.queue;
     auto signal = queue.resetCrossThreadSignal();
     for (;;) {
@@ -2130,9 +2169,6 @@ kj::Promise<void> IoContext::runQueuedActions() {
 
 void IoContext::handleActionsQueuedWhileIdle(
     kj::StringPtr eventType, DropQueuedCrossContextActions drop) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-    return;
-  }
   if (drop) {
     // Destroyed at the end of this scope, without the queue's lock held.
     auto dropped = deleteQueue.queue->takeActions();
