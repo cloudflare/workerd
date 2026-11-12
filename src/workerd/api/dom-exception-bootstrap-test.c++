@@ -4,8 +4,9 @@
 
 // What native code sees of a DOMException in a context with the per-isolate bootstrap: the bytes
 // it serializes to, what reading tags 7 and 8 creates, the kj::Exception it tunnels as, and how
-// reportError() describes it. src/tests/dom-exception/ covers what JavaScript sees.
+// kj::str() and reportError() describe it. src/tests/dom-exception/ covers what JavaScript sees.
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/tests/test-fixture.h>
@@ -160,6 +161,24 @@ KJ_TEST("A tunneled jsg.DOMException(name) becomes a DOMException") {
                                     .tryCast<jsg::JsFunction>());
     auto result = fn.call(js, js.undefined(), handle).toString(js);
     KJ_EXPECT(result == "true,NotFoundError,m,8,string"_kj, result);
+  });
+}
+
+KJ_TEST("kj::str() describes a DOMException by its name and message") {
+  runWithBootstrap([](jsg::Lock& js) {
+    // The TypeScript DOMException's. The C++ one's name and message are lazy data properties,
+    // which V8's description doesn't evaluate, so it is empty until JavaScript reads them.
+    if (jsg::tryGetBootstrapDomExceptionPrototype(js) == kj::none) return;
+    auto expectDescribed = [&](jsg::JsValue value, kj::StringPtr expected) {
+      auto description = kj::str(value);
+      KJ_EXPECT(description == expected, description);
+    };
+    expectDescribed(eval(js, "new DOMException('m', 'AbortError')"_kj), "AbortError: m"_kj);
+    expectDescribed(eval(js, "new DOMException('', 'AbortError')"_kj), "AbortError"_kj);
+    expectDescribed(eval(js, "new DOMException('m', '')"_kj), "m"_kj);
+    expectDescribed(
+        eval(js, "AbortSignal.abort().reason"_kj), "AbortError: The operation was aborted"_kj);
+    expectDescribed(js.domException(kj::str("NotFoundError"), kj::str("m")), "NotFoundError: m"_kj);
   });
 }
 

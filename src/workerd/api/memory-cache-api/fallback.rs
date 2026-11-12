@@ -377,15 +377,18 @@ fn serialize<'a>(
 }
 
 /// What memory-cache.c++ makes of what serializing `value` threw, which it throws on as a
-/// `kj::Exception`: an exception with an empty detail string, such as the `DataCloneError` that
-/// the serializer throws, becomes a `DataCloneError` that says only what type failed, and any
-/// other exception becomes the copy that tunnelling it through the `kj::Exception` makes.
+/// `kj::Exception`: a `DOMException`, such as the `DataCloneError` that the serializer throws,
+/// or an exception with an empty detail string becomes a `DataCloneError` that says only what
+/// type failed, and any other exception becomes the copy that tunnelling it through the
+/// `kj::Exception` makes.
 fn serialization_error<'a>(
     lock: &mut jsg::Lock<'a>,
     value: v8::Local<'a, v8::Value>,
     exception: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-    if exception.to_detail_string(lock)?.is_empty() {
+    if jsg::try_unwrap_dom_exception(lock, exception)?.is_some()
+        || exception.to_detail_string(lock)?.is_empty()
+    {
         let err = jsg::Error::new_data_clone_error(format!(
             "failed to serialize {}",
             value.type_of(lock)

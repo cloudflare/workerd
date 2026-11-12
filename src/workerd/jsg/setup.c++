@@ -575,8 +575,8 @@ IsolateBase::IsolateBase(V8System& system,
       jsSerializeModeKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
 
-      domExceptionNameKey.Reset(
-          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_NAME_KEY)));
+      domExceptionBrandKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_BRAND_KEY)));
 
       auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
       errorPrototypeTemplate->SetIntrinsicDataProperty(
@@ -762,7 +762,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
-  domExceptionNameKey.Reset();
+  domExceptionBrandKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -1267,9 +1267,9 @@ v8::Local<v8::Value> IsolateBase::getErrorPrototype(
   return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
 }
 
-v8::Local<v8::Private> IsolateBase::getDomExceptionNameKey(v8::Isolate* isolate) {
+v8::Local<v8::Private> IsolateBase::getDomExceptionBrandKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
-      ->domExceptionNameKey.Get(isolate);
+      ->domExceptionBrandKey.Get(isolate);
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
@@ -1301,7 +1301,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
-    KJ_DEFER(domExceptionNameKey.Reset());
+    KJ_DEFER(domExceptionBrandKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
     KJ_DEFER(zygoteRestoreTimeHolders = kj::none);
@@ -1395,10 +1395,11 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
 void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args) {}
 
 // V8 asks whether an API wrapper object is a native error for Error.isError(), as WebIDL
-// requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its name.
+// requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its
+// brand.
 bool IsolateBase::isJsApiWrapperNativeErrorCallback(
     v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionNameKey(isolate))
+  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionBrandKey(isolate))
       .FromMaybe(false);
 }
 

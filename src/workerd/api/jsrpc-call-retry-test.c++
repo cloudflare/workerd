@@ -565,21 +565,12 @@ jsg::JsValue callChild(jsg::Lock& js, JsRpcPromise& parent) {
   return childFunction.call(js, js.undefined());
 }
 
-// `error`'s name and message, as `name: message`, read from its properties. kj::str() of the
-// handle would use V8's ToDetailString(), which reads only data properties, and the TypeScript
-// DOMException's name and message are accessors.
-kj::String describeError(jsg::Lock& js, jsg::Value& error) {
-  auto object = KJ_REQUIRE_NONNULL(jsg::JsValue(error.getHandle(js)).tryCast<jsg::JsObject>());
-  return kj::str(
-      object.get(js, "name"_kj).toString(js), ": ", object.get(js, "message"_kj).toString(js));
-}
-
 // Resolves once `value` rejects with a disconnect, as the stored first-attempt failure is.
 jsg::Promise<void> expectDisconnect(jsg::Lock& js, jsg::JsValue value) {
   return js.toPromise(value).then(js, [](jsg::Lock& js, jsg::Value) {
     KJ_FAIL_ASSERT("committed RPC attempt unexpectedly succeeded");
   }, [](jsg::Lock& js, jsg::Value error) {
-    auto message = describeError(js, error);
+    auto message = jsg::JsValue(error.getHandle(js)).toString(js);
     KJ_EXPECT(message == DISCONNECT_JS_MESSAGE, message);
   });
 }
@@ -589,7 +580,7 @@ jsg::Promise<void> expectDisposed(jsg::Lock& js, jsg::JsValue value) {
   return js.toPromise(value).then(js, [](jsg::Lock& js, jsg::Value) {
     KJ_FAIL_ASSERT("disposed RPC call unexpectedly succeeded");
   }, [](jsg::Lock& js, jsg::Value error) {
-    auto message = describeError(js, error);
+    auto message = jsg::JsValue(error.getHandle(js)).toString(js);
     KJ_EXPECT(message == DISPOSED_JS_MESSAGE, message);
   });
 }
@@ -1300,7 +1291,7 @@ KJ_TEST("rejected actor RPC promise releases its committed result pipeline") {
           env.js, env.js.toPromise(value).then(env.js, [](jsg::Lock&, jsg::Value) {
         KJ_FAIL_ASSERT("rejected actor RPC unexpectedly succeeded");
       }, [](jsg::Lock& js, jsg::Value error) {
-        auto message = describeError(js, error);
+        auto message = jsg::JsValue(error.getHandle(js)).toString(js);
         KJ_EXPECT(message == "Error: boom"_kj, message);
       }));
     };
@@ -1709,7 +1700,7 @@ jsg::Promise<void> expectDisposedStub(jsg::Lock& js, jsg::JsValue value) {
     return js.toPromise(answer.call(js, stub)).then(js, [](jsg::Lock&, jsg::Value) {
       KJ_FAIL_ASSERT("disposed RPC result is still usable");
     }, [](jsg::Lock& js, jsg::Value error) {
-      auto message = describeError(js, error);
+      auto message = jsg::JsValue(error.getHandle(js)).toString(js);
       KJ_EXPECT(message.contains("disposed"), message);
     });
   });

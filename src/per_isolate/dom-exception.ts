@@ -9,12 +9,14 @@
 //
 // An instance is an API wrapper object (jsg::getBootstrapDomExceptionBase())
 // with V8's stack, whose prototype is DOMException.prototype; Error.isError()
-// reports it as a native error, as WebIDL requires. Its name and message live
-// under two V8 private symbols, and the prototype carries a third, which
-// native code also uses (jsg/dom-exception.h): Lock::domException() creates
-// instances without running JavaScript, and the serializer and tryUnwrap()
-// recognize them by the name, which is also the brand the attributes check.
-// Native code finds the class through this module's exports.
+// reports it as a native error, as WebIDL requires. Its brand, name and
+// message live under V8 private symbols, and the prototype carries a fourth,
+// which native code also uses (jsg/dom-exception.h): Lock::domException()
+// creates instances without running JavaScript, and the serializer and
+// tryUnwrap() recognize them by the brand, which the attributes also check.
+// The name and message are under the keys that jsg.h gives any error whose
+// name and message are accessors, so that native code can describe it for a
+// log. Native code finds the class through this module's exports.
 
 const {
   Error: ErrorCtor,
@@ -31,11 +33,12 @@ const {
 
 const { getPrivateSymbol, DOMExceptionBase } = utils;
 
-const kName = getPrivateSymbol('workerd:domExceptionName');
-const kMessage = getPrivateSymbol('workerd:domExceptionMessage');
+const kBrand = getPrivateSymbol('workerd:domException');
+const kName = getPrivateSymbol('workerd:errorName');
+const kMessage = getPrivateSymbol('workerd:errorMessage');
 const kPrototype = getPrivateSymbol('workerd:domExceptionPrototype');
 
-type Slots = Record<symbol, string | undefined>;
+type Slots = Record<symbol, unknown>;
 
 // JSG's mark on the prototype of every runtime class, by which Miniflare
 // recognizes them (jsg/resource.h). JSG's other mark, kResourceTypeInspect,
@@ -84,7 +87,7 @@ function slotsOf(value: unknown): Slots {
   if (
     typeof value !== 'object' ||
     value === null ||
-    (value as Slots)[kName] === undefined
+    (value as Slots)[kBrand] === undefined
   ) {
     throw new TypeErrorCtor('Illegal invocation');
   }
@@ -102,6 +105,7 @@ class DOMException {
     // formats the stack's header lazily, from the name and message read
     // through the getters below.
     const self = ReflectConstruct(DOMExceptionBase, [], new.target) as Slots;
+    self[kBrand] = true;
     self[kName] = nameString;
     self[kMessage] = messageString;
     ErrorCaptureStackTrace(self, new.target);

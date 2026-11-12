@@ -98,6 +98,7 @@ pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
 pub use tunnel::TunneledException;
+pub use tunnel::try_unwrap_dom_exception;
 pub use typed_promise::Promise;
 pub use typed_promise::PromiseArgument;
 pub use typed_promise::PromiseResolver;

@@ -207,7 +207,7 @@ Serializer::Serializer(Lock& js, Options options)
 #endif
   prototypeOfObject = js.obj().getPrototype(js);
   jsSerializeModeKey = IsolateBase::getJsSerializeModeKey(js.v8Isolate);
-  domExceptionNameKey = IsolateBase::getDomExceptionNameKey(js.v8Isolate);
+  domExceptionBrandKey = IsolateBase::getDomExceptionBrandKey(js.v8Isolate);
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.
     ser.SetTreatFunctionsAsHostObjects(true);
@@ -295,7 +295,7 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
       return v8::Just(true);
     }
     bool isDomException;
-    if (!object->HasPrivate(isolate->GetCurrentContext(), domExceptionNameKey)
+    if (!object->HasPrivate(isolate->GetCurrentContext(), domExceptionBrandKey)
              .To(&isDomException)) {
       return v8::Nothing<bool>();
     }

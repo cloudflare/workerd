@@ -88,6 +88,14 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   The properties are neither reflected nor inherited, and the keys must stay
   in module scope. Ordinary symbols, including `getApiSymbol` results, are
   reflection-visible and are not secrets.
+- An error class whose `name` and `message` are accessors, as WebIDL
+  attributes are, keeps them as strings under the private keys
+  `workerd:errorName` and `workerd:errorMessage` (`ERROR_NAME_KEY` and
+  `ERROR_MESSAGE_KEY`, `jsg/jsg.h`). `kj::str()` and Rust JSG's
+  `to_detail_string()`, which run no JavaScript, then describe an instance
+  as `name: message`; V8's description reads only data properties. Any such
+  class may use the keys, so they are no brand: brand-check with a key of
+  the class's own, as `dom-exception.ts` does.
 - **Structured serialization** (`structuredClone()`, `postMessage()`, RPC,
   Durable Object storage) goes through `serialization.ts`, a leaf module
   modelled on Node.js's js_transferable, which `main.ts` loads whatever the

@@ -1417,8 +1417,8 @@ class ExceptionWrapper {
 
     // A DOMException tunnels by the name and message it holds, which
     // Lock::tryGetDomExceptionInfo() reads without running JavaScript. Other
-    // values are described by V8's side-effect-free ToDetailString(), which
-    // would not show a DOMException's name.
+    // values tunnel by what kj::str() describes them as, which runs no
+    // JavaScript either.
     kj::Exception result = [&]() {
       kj::Exception::Type excType = [&]() {
         // Use .retryable and .overloaded properties as hints for what kj exception type to use.

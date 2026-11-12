@@ -31,12 +31,11 @@ class Serializer;
 class Deserializer;
 
 // The DOMException implemented in the per-isolate bootstrap (src/per_isolate/dom-exception.ts)
-// holds an instance's name and message under the V8 private symbols named
-// DOM_EXCEPTION_NAME_KEY and DOM_EXCEPTION_MESSAGE_KEY; the name is also its brand. Its
-// prototype carries DOM_EXCEPTION_PROTOTYPE_KEY. Through them native code creates, recognizes
-// and serializes such an instance without running JavaScript.
-constexpr kj::StringPtr DOM_EXCEPTION_NAME_KEY = "workerd:domExceptionName"_kj;
-constexpr kj::StringPtr DOM_EXCEPTION_MESSAGE_KEY = "workerd:domExceptionMessage"_kj;
+// marks an instance with the V8 private symbol named DOM_EXCEPTION_BRAND_KEY, and holds its name
+// and message under ERROR_NAME_KEY and ERROR_MESSAGE_KEY (jsg.h), as any such error may. Its
+// prototype carries DOM_EXCEPTION_PROTOTYPE_KEY. Through them native code creates, recognizes,
+// serializes and describes such an instance without running JavaScript.
+constexpr kj::StringPtr DOM_EXCEPTION_BRAND_KEY = "workerd:domException"_kj;
 constexpr kj::StringPtr DOM_EXCEPTION_PROTOTYPE_KEY = "workerd:domExceptionPrototype"_kj;
 
 // The prototype of the bootstrap's DOMException, if the context has a bootstrap and its

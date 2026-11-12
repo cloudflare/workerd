@@ -150,14 +150,16 @@ export const valueGetterThrows = {
     strictEqual(err.message, 'r');
     strictEqual(err.retryable, true);
 
-    // A DOMException's detail string is empty, so it becomes a DataCloneError.
-    err = await readThrowing(
-      'getter',
-      new DOMException('m', 'AbortError')
-    ).catch((e) => e);
-    ok(err instanceof DOMException);
-    strictEqual(err.name, 'DataCloneError');
-    strictEqual(err.message, 'failed to serialize object');
+    // A DOMException becomes a DataCloneError, including one whose name
+    // JavaScript has read, which kj::str() of the C++ DOMException then shows.
+    const named = new DOMException('m', 'AbortError');
+    strictEqual(named.name, 'AbortError');
+    for (const exception of [new DOMException('m', 'AbortError'), named]) {
+      err = await readThrowing('getter', exception).catch((e) => e);
+      ok(err instanceof DOMException);
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.message, 'failed to serialize object');
+    }
   },
 };
 

@@ -183,6 +183,17 @@ mod ffi {
             mark: Local,
         ) -> Result<()>;
 
+        /// Gives `object` `name` and `message` as an error implemented in the per-isolate
+        /// bootstrap holds them. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_error_slots(
+            isolate: *mut Isolate,
+            object: Local,
+            name: &str,
+            message: &str,
+        ) -> Result<()>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -677,6 +688,26 @@ impl Harness {
             ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
         }
         .expect("the value should be an object");
+    }
+
+    /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,
+    /// whose `name` and `message` are accessors, holds them: under the private symbols that C++
+    /// JSG's `ERROR_NAME_KEY` and `ERROR_MESSAGE_KEY` name, which
+    /// [`v8::Local::<v8::Value>::to_detail_string`] reads.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `object` is not an object.
+    pub fn set_error_slots<'s>(
+        lock: &mut jsg::Lock<'s>,
+        object: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
+    ) {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `object` belongs to.
+        unsafe { ffi::set_error_slots(lock.isolate().as_ffi(), object.into_ffi(), name, message) }
+            .expect("the value should be an object");
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a

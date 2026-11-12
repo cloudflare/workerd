@@ -352,9 +352,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // Empty for a Serializer that writes to another delegate's serializer.
   v8::Local<v8::Private> jsSerializeModeKey;
 
-  // The DOM_EXCEPTION_NAME_KEY private symbol, the brand of the bootstrap's DOMException, which
+  // The DOM_EXCEPTION_BRAND_KEY private symbol, the brand of the bootstrap's DOMException, which
   // IsHostObject() also checks class instances for. Empty as jsSerializeModeKey is.
-  v8::Local<v8::Private> domExceptionNameKey;
+  v8::Local<v8::Private> domExceptionBrandKey;
 
   // The actual ValueSerializer. Note that it's important to define this last because its
   // constructor will call back to the Delegate, which is this object, so we hope that this object

@@ -41,8 +41,22 @@ using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
+// The V8 private symbols under which a class implemented in the per-isolate bootstrap keeps an
+// error's name and message, as strings, when its `name` and `message` are accessors, as WebIDL
+// attributes are. V8's ToDetailString() reads only data properties, so it can't describe such an
+// error; toDetailString(), and so kj::str() of a handle, reads these instead.
+constexpr kj::StringPtr ERROR_NAME_KEY = "workerd:errorName"_kj;
+constexpr kj::StringPtr ERROR_MESSAGE_KEY = "workerd:errorMessage"_kj;
+
+// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does,
+// except that an object holding strings under ERROR_NAME_KEY and ERROR_MESSAGE_KEY is described
+// as V8 describes an error with that name and message, as `name: message`. Runs no JavaScript,
+// and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims. Requires an
+// entered context. Fails, as ToDetailString() does, only if execution is terminating.
+v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value);
+
 kj::String stringifyHandle(v8::Local<v8::Value> value);
-}
+}  // namespace workerd::jsg
 
 namespace v8 {
 // Allows v8 handles to be passed to kj::str() as well as KJ_LOG and related macros.

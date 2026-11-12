@@ -59,8 +59,10 @@ JsObject newBootstrapDomException(Lock& js,
   auto object = check(tmpl->InstanceTemplate()->NewInstance(context));
   check(object->SetPrototype(context, prototype));
   auto result = JsObject(object);
-  result.setPrivate(js, DOM_EXCEPTION_NAME_KEY, js.str(name));
-  result.setPrivate(js, DOM_EXCEPTION_MESSAGE_KEY, js.str(message));
+  // In the TypeScript constructor's order, so that both make instances of the same shape.
+  result.setPrivate(js, DOM_EXCEPTION_BRAND_KEY, js.boolean(true));
+  result.setPrivate(js, ERROR_NAME_KEY, js.str(name));
+  result.setPrivate(js, ERROR_MESSAGE_KEY, js.str(message));
   KJ_IF_SOME(s, stack) {
     v8::Local<v8::String> stackName = js.strIntern("stack"_kj);
     v8::Local<v8::String> stackValue = js.str(s);
@@ -75,10 +77,11 @@ kj::Maybe<BootstrapDomExceptionInfo> tryGetBootstrapDomExceptionInfo(
     Lock& js, v8::Local<v8::Value> value) {
   if (!value->IsObject()) return kj::none;
   auto object = JsObject(value.As<v8::Object>());
-  auto name = KJ_UNWRAP_OR(
-      object.getPrivate(js, DOM_EXCEPTION_NAME_KEY).tryCast<JsString>(), return kj::none);
-  auto message = KJ_UNWRAP_OR(
-      object.getPrivate(js, DOM_EXCEPTION_MESSAGE_KEY).tryCast<JsString>(), return kj::none);
+  if (!object.hasPrivate(js, DOM_EXCEPTION_BRAND_KEY)) return kj::none;
+  auto name =
+      KJ_UNWRAP_OR(object.getPrivate(js, ERROR_NAME_KEY).tryCast<JsString>(), return kj::none);
+  auto message =
+      KJ_UNWRAP_OR(object.getPrivate(js, ERROR_MESSAGE_KEY).tryCast<JsString>(), return kj::none);
   return BootstrapDomExceptionInfo{.name = name, .message = message};
 }
 

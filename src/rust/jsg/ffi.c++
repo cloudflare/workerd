@@ -334,7 +334,7 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
 MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(
-      local_as_ref_from_ffi<v8::Value>(val)->ToDetailString(isolate->GetCurrentContext()));
+      ::workerd::jsg::toDetailString(isolate, local_as_ref_from_ffi<v8::Value>(val)));
 }
 
 // Utf8Value

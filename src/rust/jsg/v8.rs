@@ -2047,7 +2047,9 @@ impl<'s, T> Local<'s, T> {
     /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
     /// method.
     ///
-    /// Corresponds to `v8::Value::ToDetailString()`.
+    /// Corresponds to C++ JSG's `workerd::jsg::toDetailString()`: `v8::Value::ToDetailString()`,
+    /// except that an error implemented in the per-isolate bootstrap, such as its `DOMException`,
+    /// whose `name` and `message` are accessors, is described by the name and message it holds.
     ///
     /// # Errors
     ///

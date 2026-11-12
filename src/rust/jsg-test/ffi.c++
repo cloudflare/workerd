@@ -377,6 +377,18 @@ void mark_js_serializable(
       js.v8Context(), key, ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(mark))));
 }
 
+void set_error_slots(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(object));
+  KJ_REQUIRE(handle->IsObject());
+  auto jsObject = ::workerd::jsg::JsObject(handle.As<v8::Object>());
+  jsObject.setPrivate(js, ::workerd::jsg::ERROR_NAME_KEY,
+      js.str(kj::ArrayPtr<const char>(name.data(), name.size())));
+  jsObject.setPrivate(js, ::workerd::jsg::ERROR_MESSAGE_KEY,
+      js.str(kj::ArrayPtr<const char>(message.data(), message.size())));
+}
+
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }

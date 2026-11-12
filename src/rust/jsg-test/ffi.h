@@ -136,6 +136,12 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 void mark_js_serializable(
     Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark);
 
+// Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
+// error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not
+// an object.
+void set_error_slots(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 

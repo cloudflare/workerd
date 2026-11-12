@@ -249,9 +249,10 @@ fn js_error<'s>(lock: &mut Lock<'s>, ty: JsErrorType, message: &str) -> v8::Loca
     }
 }
 
-/// The name and message of `value`, if it is a `DOMException`, as C++ JSG's
-/// `jsg::Lock::tryGetDomExceptionInfo()` returns them: the ones it was created with, which own
-/// properties that shadow them do not change. Runs no JavaScript.
+/// The name and message of `value`, if it is a `DOMException`. Runs no JavaScript.
+///
+/// They are the ones it was created with, as C++ JSG's `jsg::Lock::tryGetDomExceptionInfo()`
+/// returns them, which own properties that shadow them do not change.
 ///
 /// # Errors
 ///

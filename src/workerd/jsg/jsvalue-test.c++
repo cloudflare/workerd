@@ -91,6 +91,14 @@ struct JsValueContext: public ContextGlobalObject {
     return obj.getPrototype(js);
   }
 
+  // kj::str() of `object` after giving it `name` and `message` as an error implemented in the
+  // per-isolate bootstrap holds them.
+  kj::String describeWithErrorSlots(Lock& js, JsObject object, JsValue name, JsValue message) {
+    object.setPrivate(js, ERROR_NAME_KEY, name);
+    object.setPrivate(js, ERROR_MESSAGE_KEY, message);
+    return kj::str(object);
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -108,6 +116,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
+    JSG_METHOD(describeWithErrorSlots);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -150,6 +159,24 @@ KJ_TEST("simple") {
       "boolean", "false");
   e.expectEval("function f(val) { return this == globalThis && val === 1; }; callFunction(f);",
       "boolean", "true");
+}
+
+KJ_TEST("kj::str() describes an object by the error name and message it holds") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  e.expectEval("describeWithErrorSlots({}, 'AbortError', 'boom')", "string", "AbortError: boom");
+  e.expectEval("describeWithErrorSlots({}, 'AbortError', '')", "string", "AbortError");
+  e.expectEval("describeWithErrorSlots({}, '', 'boom')", "string", "boom");
+  // Not by its properties, which V8's ToDetailString() reads, or by a Proxy's traps.
+  e.expectEval("describeWithErrorSlots("
+               "Object.assign(new Error('other'), { name: 'Other' }), 'AbortError', 'boom')",
+      "string", "AbortError: boom");
+  e.expectEval("describeWithErrorSlots("
+               "new Proxy({}, { get() { throw new Error('ran'); } }), 'AbortError', 'boom')",
+      "string", "AbortError: boom");
+  // Unless both are strings, as V8 describes it.
+  e.expectEval("describeWithErrorSlots(new Error('other'), 'AbortError', undefined)", "string",
+      "Error: other");
+  e.expectEval("describeWithErrorSlots(new Error('other'), 42, 'boom')", "string", "Error: other");
 }
 
 KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getPrototype") {
