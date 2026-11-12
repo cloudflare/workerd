@@ -564,27 +564,27 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
   // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
   // This means we may read from multiple string segments, but that's fine for our use case.
+  //
+  // The staging buffers below are uninitialized native memory, so only the prefix writeInto()
+  // reports as written is encoded. It can be shorter than `length` when a corrupted string in the
+  // V8 sandbox changes its length between the two reads, and encoding the rest would copy native
+  // memory into the sandbox.
 
   if (str.isOneByte(js)) {
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
     kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
+    auto latin1 = latin1Buffer.first(str.writeInto(js, latin1Buffer.asPtr()).written).asChars();
 
-    [[maybe_unused]] auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
-    KJ_DASSERT(
-        writeResult.written == length, "writeInto must completely overwrite the backing buffer");
-
-    utf8_length = simdutf::utf8_length_from_latin1(
-        reinterpret_cast<const char*>(latin1Buffer.begin()), length);
+    utf8_length = simdutf::utf8_length_from_latin1(latin1.begin(), latin1.size());
 
     auto view = jsg::JsUint8Array::create(js, utf8_length);
-    if (utf8_length == length) {
+    if (utf8_length == latin1.size()) {
       // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
-      view.asArrayPtr().copyFrom(latin1Buffer);
+      view.asArrayPtr().asChars().copyFrom(latin1);
     } else {
-      [[maybe_unused]] auto written =
-          simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()),
-              length, view.asArrayPtr().asChars().begin());
+      [[maybe_unused]] auto written = simdutf::convert_latin1_to_utf8(
+          latin1.begin(), latin1.size(), view.asArrayPtr().asChars().begin());
       KJ_DASSERT(utf8_length == written);
     }
     return view;
@@ -592,27 +592,23 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
 
   // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
   // and potentially triggering GC. Stack allocation for small strings, heap for large.
-  // Stack allocation for small strings, heap for large.
   kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
-
-  [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
-  KJ_DASSERT(
-      writeResult.written == length, "writeInto must completely overwrite the backing buffer");
+  size_t utf16Length = str.writeInto(js, utf16Buffer.asPtr()).written;
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
-  auto lengthResult = simdutf::utf8_length_from_utf16_with_replacement(data, length);
+  auto lengthResult = simdutf::utf8_length_from_utf16_with_replacement(data, utf16Length);
   utf8_length = lengthResult.count;
 
   if (lengthResult.error == simdutf::SURROGATE) {
     // If there are surrogates there may be unpaired surrogates. Fix them.
-    simdutf::to_well_formed_utf16(data, length, data);
+    simdutf::to_well_formed_utf16(data, utf16Length, data);
   } else {
     KJ_DASSERT(lengthResult.error == simdutf::SUCCESS);
   }
 
   auto view = jsg::JsUint8Array::create(js, utf8_length);
   [[maybe_unused]] auto written =
-      simdutf::convert_utf16_to_utf8(data, length, view.asArrayPtr().asChars().begin());
+      simdutf::convert_utf16_to_utf8(data, utf16Length, view.asArrayPtr().asChars().begin());
   KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
   return view;
 }
