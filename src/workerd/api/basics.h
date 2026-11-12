@@ -285,6 +285,9 @@ class EventTarget: public jsg::Object {
 
   kj::Array<kj::StringPtr> getHandlerNames() const;
 
+  // Whether any listener is registered, for any type.
+  bool hasEventListeners() const;
+
   // What to do when a listener throws during dispatch.
   //
   // PROPAGATE is the historical workerd behavior: the first throwing listener ends the

@@ -46,6 +46,9 @@ let gate = null;
 let resolveGate = null;
 let stream = null;
 let pending = null;
+// The performance cases.
+let performanceAtTopLevel = null;
+let nowAtTopLevel = 0;
 // The finalization case's registry and what its cleanup callback did. The handler reads this
 // object, which keeps the registry reachable: an unreachable registry never runs its callback.
 const finalization = { registry: null, cleaned: [], headers: null };
@@ -90,6 +93,15 @@ switch (MODE) {
       },
     });
     pending = stream.cancel();
+    break;
+  case 'performance':
+    // Touching the global creates the Performance object, which the snapshot clones.
+    performanceAtTopLevel = performance;
+    nowAtTopLevel = performance.now();
+    break;
+  case 'performance-entries':
+    // A recorded entry is a jsg::Ref the clone cannot carry.
+    performance.mark('top-level');
     break;
   case 'gc':
     // Wrappers created and dropped before the snapshot: their collection in the zygote must not
@@ -221,6 +233,17 @@ async function checks() {
       await pending;
       result.pendingCancelSettled = true;
       break;
+    case 'performance':
+      result.performanceIdentity = performanceAtTopLevel === performance;
+      result.performanceNow = performance.now() >= nowAtTopLevel;
+      result.performanceMark =
+        performance.mark('request').name === 'request' &&
+        performance.getEntriesByName('request').length === 1;
+      break;
+    case 'performance-entries':
+      result.performanceEntries =
+        performance.getEntriesByName('top-level').length === 1;
+      break;
     case 'bindings':
       // Capability bindings. The RPC calls go through the wildcard property handler of the
       // Fetcher template and of a subclass's.
@@ -281,6 +304,7 @@ async function test(ctrl, env) {
     // same; only a C++ stream with a parked pull() would fail its zygote, and this module scope
     // has none.
     'cpp-streams',
+    'performance',
     ...(tsUrl ? ['searchparams'] : []),
   ];
   // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
@@ -294,6 +318,8 @@ async function test(ctrl, env) {
     // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
     'cpp-streams-pending-pull',
     'cpp-streams-pending-cancel',
+    // A recorded performance entry is JavaScript state the clone cannot carry.
+    'performance-entries',
   ];
 
   const run = async (name, expectedSnapshotUsed) => {
