@@ -575,6 +575,9 @@ IsolateBase::IsolateBase(V8System& system,
       jsSerializeModeKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
 
+      domExceptionNameKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_NAME_KEY)));
+
       auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
       errorPrototypeTemplate->SetIntrinsicDataProperty(
           v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
@@ -759,6 +762,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
+  domExceptionNameKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -1263,6 +1267,11 @@ v8::Local<v8::Value> IsolateBase::getErrorPrototype(
   return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
 }
 
+v8::Local<v8::Private> IsolateBase::getDomExceptionNameKey(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->domExceptionNameKey.Get(isolate);
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -1292,6 +1301,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
+    KJ_DEFER(domExceptionNameKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
     KJ_DEFER(zygoteRestoreTimeHolders = kj::none);
@@ -1388,8 +1398,8 @@ void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value
 // requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its name.
 bool IsolateBase::isJsApiWrapperNativeErrorCallback(
     v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  auto key = v8::Private::ForApi(isolate, v8StrIntern(isolate, DOM_EXCEPTION_NAME_KEY));
-  return jsg::check(object->HasPrivate(isolate->GetCurrentContext(), key));
+  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionNameKey(isolate))
+      .FromMaybe(false);
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {

@@ -40,9 +40,9 @@ implementation.
   frame the code that constructed it; `Error.prepareStackTrace` and
   `Error.captureStackTrace` apply.
 - **Native instances:** tunneled JSG errors, the serializer's
-  `DataCloneError`, abort reasons (which also carry `retryable: true`) and the
-  file system's errors are instances of the global `DOMException`, shaped as
-  constructed ones.
+  `DataCloneError`, the default abort and timeout reasons (which also carry
+  `retryable: true`) and the file system's errors are instances of the global
+  `DOMException`, shaped as constructed ones.
 - **Serialization:** name, message and stack (tag 8). Subclass instances come
   back as `DOMException`; other own properties, and own `name` or `message`
   properties shadowing the attributes, are not serialized. Tags 7 and 8 read
