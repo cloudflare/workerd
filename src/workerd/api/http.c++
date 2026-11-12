@@ -1581,6 +1581,7 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
     ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
     ctx.setTag("http.request.method"_kjc, kj::str(request.getMethodEnum()));
     if (urlList.size() == 1) {
+      // case: No redirect
       // The original URL also preserves legacy relative Durable Object requests.
       ctx.setTag("url.full"_kjc, request.getUrl());
     } else {
