@@ -207,13 +207,17 @@ MemoryCacheProvider::~MemoryCacheProvider() noexcept(false) = default;
 
 kj::Own<MemoryCacheUse> MemoryCacheProvider::getUse(
     kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
+  return kj::heap<MemoryCacheUseImpl>(bindForRust(cacheId, limits));
+}
+
+::rust::Box<rustCache::Binding> MemoryCacheProvider::bindForRust(
+    kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
   ::rust::Str name;
   bool isPrivate = cacheId == kj::none;
   KJ_IF_SOME(id, cacheId) {
     name = asRustStr(id);
   }
-  auto binding = impl->cacheNamespace->bind(name, isPrivate, toRustLimits(limits));
-  return kj::heap<MemoryCacheUseImpl>(kj::mv(binding));
+  return impl->cacheNamespace->bind(name, isPrivate, toRustLimits(limits));
 }
 
 kj::Maybe<kj::Own<CacheValue>> MemoryCacheUseImpl::getWithoutFallback(

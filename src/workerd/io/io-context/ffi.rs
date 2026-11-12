@@ -7,8 +7,8 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, the waitUntil and abort calls take V8 handles, and the trace span calls \
-              take literals that C++ does not copy"
+              set up, the waitUntil call takes a V8 handle, and the trace span calls take \
+              literals that C++ does not copy"
 )]
 
 use std::any::Any;
@@ -27,7 +27,6 @@ pub mod bridge {
         include!("workerd/rust/jsg/v8.rs.h");
 
         type Local = jsg::v8::ffi::Local;
-        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
     }
 
     #[namespace = "workerd"]
@@ -56,10 +55,13 @@ pub mod bridge {
         fn io_context_add_object(id: u64, slot: Box<IoOwnedSlot>) -> Result<KjOwn<IoOwnedObject>>;
         fn io_context_set_fail_open(id: u64) -> Result<()>;
 
-        // These two return false when they leave a JavaScript exception pending. The handles
-        // belong to the scope of the caller's lock.
+        // Returns false when it leaves a JavaScript exception pending. The handle belongs to the
+        // scope of the caller's lock.
         unsafe fn io_context_add_wait_until(id: u64, promise: Local) -> Result<bool>;
-        unsafe fn io_context_abort(id: u64, reason: MaybeLocal) -> Result<bool>;
+
+        fn io_context_check_current(id: u64) -> Result<()>;
+        fn io_context_abort(id: u64, reason: Box<AbortReason>) -> Result<()>;
+        fn io_context_abort_without_reason(id: u64) -> Result<()>;
 
         // The `&[u8]` names, keys and literal values below are NUL-terminated strings with the
         // NUL, which C++ requires and does not copy, so they must outlive the spans: the
@@ -128,6 +130,12 @@ pub mod bridge {
         type IoCallback;
         type IoOwnedSlot;
 
+        /// Carries the exception `IoContext::abort()` aborts with to C++. C++ calls `raise()`,
+        /// which returns it as `Err`; the bridge throws it as a `kj::Exception` with the same
+        /// type, description, location and details, and C++ catches that exception.
+        type AbortReason;
+        fn raise(self: &AbortReason) -> Result<()>;
+
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
         unsafe fn io_callback_run(
             isolate: usize,
@@ -149,15 +157,30 @@ pub fn add_wait_until<'s>(
     pending_unless(added)
 }
 
-/// `io_context_abort()`, failing with [`jsg::Error::pending`] if it left an exception pending.
+/// Aborts the `IoContext` that `id` identifies with `reason`, as [`jsg::Lock::exception_to_kj`]
+/// encodes it, or, without one, with `IoContext::abortWithoutReasonException()`. Fails before
+/// encoding `reason` unless `id` identifies the current `IoContext`, as C++ looks for the request
+/// first, and with the error encoding it fails with, which is pending if JavaScript threw.
 pub fn abort<'s>(
-    _lock: &mut jsg::Lock<'s>,
+    lock: &mut jsg::Lock<'s>,
     id: u64,
     reason: Option<v8::Local<'s, v8::Value>>,
 ) -> jsg::Result<()> {
-    // SAFETY: as in `add_wait_until()`.
-    let aborted = unsafe { bridge::io_context_abort(id, v8::Local::into_ffi_maybe(reason)) }?;
-    pending_unless(aborted)
+    let Some(reason) = reason else {
+        return Ok(bridge::io_context_abort_without_reason(id)?);
+    };
+    bridge::io_context_check_current(id)?;
+    let reason = AbortReason(lock.exception_to_kj(reason)?);
+    Ok(bridge::io_context_abort(id, Box::new(reason))?)
+}
+
+/// See `bridge::AbortReason`.
+pub struct AbortReason(cxx::KjError);
+
+impl AbortReason {
+    fn raise(&self) -> Result<(), cxx::KjError> {
+        Err(self.0.clone())
+    }
 }
 
 /// `Ok` if a shim that returns false when it leaves an exception pending returned true.
@@ -181,6 +204,15 @@ pub type IoCallbackFn =
 
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);
+
+// SAFETY: it holds a C++ `IoOwn`, whose destructor deletes the object at once on the thread of
+// its IoContext and otherwise queues it, through a mutex, to the IoContext's `DeleteQueue`, which a
+// `kj::Arc` keeps alive. It is never dereferenced.
+unsafe impl Send for bridge::IoOwnedObject {}
+
+// SAFETY: Rust has no method on it, so a shared reference to it can do nothing; it is only
+// dropped, through the `KjOwn` that holds it.
+unsafe impl Sync for bridge::IoOwnedObject {}
 
 /// A value that `IoContext::add_object()` hands to C++, which drops it with the `IoContext`.
 /// Dropping it drops the value it holds, unless Rust took the value first.

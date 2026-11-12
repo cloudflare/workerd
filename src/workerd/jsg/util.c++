@@ -698,14 +698,24 @@ void throwInternalError(
   }
 }
 
+bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description) {
+  static const constexpr kj::StringPtr NAMES[] = {
+#define V(name, _) name##_kj,
+    JS_ERROR_TYPES(V)
+#undef V
+        "DOMException"_kj,
+  };
+  for (auto name: NAMES) {
+    if (description.startsWith(name.asArray())) return true;
+  }
+  return false;
+}
+
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows a termination.
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
-    Serializer ser(js,
-        {// Make sure we don't break compatibility if V8 introduces a new version. This value can
-          // be bumped to match the new version once all of production is updated to understand it.
-          .version = 15});
+    Serializer ser(js, {.version = TUNNELED_EXCEPTION_SERIALIZATION_VERSION});
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
     if (js.isUsingEnhancedErrorSerialization()) {
@@ -761,16 +771,13 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   capnp::MallocMessageBuilder message;
   auto metadata = message.initRoot<JsExceptionMetadata>();
 
-  // Limit for user-controlled fields (4KB)
-  constexpr size_t MAX_FIELD_SIZE = 4096;
-
   // Extract error name (e.g., "Error", "TypeError", "RangeError")
   auto nameProp = errorObj.get(js, "name"_kj);
   if (nameProp.isString()) {
     auto errorType = nameProp.toString(js);
     // Truncate to 4KB if needed
-    if (errorType.size() > MAX_FIELD_SIZE) {
-      errorType = truncateUtf8(errorType, MAX_FIELD_SIZE);
+    if (errorType.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      errorType = truncateUtf8(errorType, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
     }
     metadata.setErrorType(errorType);
   }
@@ -780,8 +787,8 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   if (stackProp.isString()) {
     auto stackTrace = stackProp.toString(js);
     // Truncate to 4KB if needed
-    if (stackTrace.size() > MAX_FIELD_SIZE) {
-      stackTrace = truncateUtf8(stackTrace, MAX_FIELD_SIZE);
+    if (stackTrace.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      stackTrace = truncateUtf8(stackTrace, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
     }
     metadata.setStackTrace(stackTrace);
   }
@@ -791,8 +798,8 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   if (messageProp.isString()) {
     auto errorMessage = messageProp.toString(js);
     // Truncate to 4KB if needed
-    if (errorMessage.size() > MAX_FIELD_SIZE) {
-      errorMessage = truncateUtf8(errorMessage, MAX_FIELD_SIZE);
+    if (errorMessage.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
+      errorMessage = truncateUtf8(errorMessage, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
     }
     metadata.setMessage(errorMessage);
   }

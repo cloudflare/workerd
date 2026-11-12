@@ -169,6 +169,35 @@ fn errors_with_enhanced_error_serialization() {
     });
 }
 
+/// Without `preserve_stack_in_errors`, an error keeps the stack it gets when read, and its other
+/// properties, as `jsg::Deserializer` does without `preserveStackInErrors`.
+#[test]
+fn errors_without_their_stacks() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = eval(
+            lock,
+            ctx,
+            "Object.assign(new Error('e'), { stack: 'original', code: 42 })",
+        );
+        let data = jsg::ser::serialize(lock, value)?;
+        let options = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+        };
+        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+        ctx.set_global(lock, "v", copy);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "v instanceof Error && v.message === 'e' && v.code === 42 && \
+                 typeof v.stack === 'string' && v.stack !== 'original'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
 /// that the bytes stay the same.
 #[test]
@@ -486,6 +515,50 @@ fn nothing_runs_while_execution_is_terminating() {
             other => panic!("the script was not terminated: {other:?}"),
         }
         assert!(CHECKED_WHILE_TERMINATING.load(Ordering::SeqCst));
+        Ok(())
+    });
+}
+
+#[test]
+fn an_older_version_is_written_and_read_back() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr = "new Uint8Array([1, 2, 3])";
+        let check = "v instanceof Uint8Array && v[2] === 3";
+        let value = eval(lock, ctx, expr);
+        let latest = jsg::ser::serialize(lock, value).unwrap();
+        let options = jsg::ser::SerializeOptions { version: Some(13) };
+        let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        assert_eq!(data[..2], [0xff, 13]);
+        // Version 14 added the flags of an ArrayBufferView.
+        assert!(data.len() < latest.len());
+        for copy in [
+            jsg::ser::deserialize(lock, &data).unwrap(),
+            Harness::cpp_deserialize(lock, &data),
+        ] {
+            ctx.set_global(lock, "v", copy);
+            assert!(ctx.eval::<bool>(lock, check).unwrap());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_write_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let value = eval(lock, ctx, "1");
+        let caught = lock
+            .try_catch(|lock| {
+                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let result = jsg::ser::serialize_with_options(lock, value, options);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        ctx.set_global(lock, "e", caught.expect_err("serialization should throw"));
+        assert!(
+            ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
+                .unwrap()
+        );
         Ok(())
     });
 }

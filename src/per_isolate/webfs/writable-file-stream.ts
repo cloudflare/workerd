@@ -1,6 +1,6 @@
 'use strict';
 
-// FileSystemWritableFileStream — the File System Access API's writable file
+// FileSystemWritableFileStream - the File System Access API's writable file
 // handle.
 //
 // The file semantics are done by a native context obtained from
@@ -67,7 +67,7 @@ const {
 };
 
 // Gates the constructor. createWritable() is the only holder, so `new
-// FileSystemWritableFileStream()` from user code cannot produce an instance —
+// FileSystemWritableFileStream()` from user code cannot produce an instance -
 // matching `constructor() = delete` on the C++ class.
 const kConstruct = {};
 

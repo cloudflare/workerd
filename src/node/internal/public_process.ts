@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-// Process is implemented under node-internal: so that we can have node:process
-// resolve to node-internal:public_process OR node-internal:legacy_process depending
-// on whether the enable_nodejs_process_v2 compat flag is set.
+// The `process` object for the enable_nodejs_process_v2 flag: what the `process` global
+// returns, and the default export of node:process. node:process itself resolves to
+// node-internal:process_exports, which re-exports this module and adds the stdio streams
+// as named exports; node-internal:legacy_process serves the flag's off state.
 
 import { default as EventEmitter } from 'node-internal:events';
 import {
@@ -16,11 +17,7 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
-import { Buffer } from 'node-internal:internal_buffer';
 import { parseEnv } from 'node-internal:internal_utils';
-import { Writable } from 'node-internal:streams_writable';
-import { writeSync } from 'node-internal:internal_fs_sync';
-import { ReadStream } from 'node-internal:internal_fs_streams';
 import {
   platform,
   nextTick,
@@ -32,102 +29,11 @@ import {
 } from 'node-internal:internal_process';
 import { validateString } from 'node-internal:validators';
 import internalAssert from 'node-internal:internal_assert';
-import type { Readable } from 'node-internal:streams_readable';
+import type { Buffer } from 'node-internal:internal_buffer';
 import type * as NodeFS from 'node:fs';
+import type * as Stdio from 'node-internal:internal_process_stdio';
 
 export { platform, nextTick, emitWarning, env, features, config };
-
-// For stdin, we emulate `node foo.js < /dev/null`
-// In Node.js, process.stdin is a net.Socket (Duplex) with both readable and writable properties.
-// We use 'any' cast to assign socket-like properties without type conflicts.
-export const stdin = new ReadStream(null, {
-  fd: 0,
-  autoClose: false,
-}) as Readable & { fd: number };
-stdin.fd = 0;
-// In Node.js, process.stdin is a net.Socket (Duplex) with socket-like properties.
-// We add socket-like stub properties for compatibility, but avoid setting writable-related
-// properties that would cause the streams internals to treat this ReadStream as writable
-// (which would trigger calls to .end() that don't exist on ReadStream).
-/* eslint-disable @typescript-eslint/no-unsafe-assignment,
-   @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-explicit-any */
-const stdinAny = stdin as any;
-stdinAny.allowHalfOpen = false;
-stdinAny.bufferSize = 0;
-stdinAny.connecting = false;
-stdinAny.readyState = 'open';
-/* eslint-enable @typescript-eslint/no-unsafe-assignment,
-   @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-explicit-any */
-
-function chunkToBuffer(
-  chunk: Buffer | ArrayBufferView | DataView | string,
-  encoding: BufferEncoding
-): Buffer {
-  if (Buffer.isBuffer(chunk)) {
-    return chunk;
-  }
-  if (typeof chunk === 'string') {
-    return Buffer.from(chunk, encoding);
-  }
-  return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-}
-
-// For stdout, we emulate `nohup node foo.js`
-class SyncWriteStream extends Writable {
-  fd: number;
-  override readable: boolean = false;
-  _type = 'fs';
-  _isStdio = true;
-  constructor(fd: number) {
-    super({ autoDestroy: true });
-    this.fd = fd;
-  }
-  override _write(
-    chunk: string | Buffer | ArrayBufferView | DataView,
-    encoding: BufferEncoding,
-    cb: (error?: Error | null) => void
-  ): void {
-    try {
-      writeSync(this.fd, chunkToBuffer(chunk, encoding));
-    } catch (e: unknown) {
-      cb(e as Error);
-      return;
-    }
-    cb();
-  }
-}
-
-// In Node.js, process.stdout/stderr are net.Socket (TTY) instances with Duplex stream properties.
-// We assign socket-like stub properties for compatibility.
-/* eslint-disable @typescript-eslint/no-unsafe-assignment,
-   @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-explicit-any */
-function addSocketProperties(stream: SyncWriteStream): void {
-  const s = stream as any;
-  s.allowHalfOpen = false;
-  s.bufferSize = 0;
-  s.bytesRead = 0;
-  s.bytesWritten = 0;
-  s.connecting = false;
-  s.pending = false;
-  s.readableAborted = false;
-  s.readableDidRead = false;
-  s.readableEnded = false;
-  s.readableHighWaterMark = 16384;
-  s.readableLength = 0;
-  s.readableObjectMode = false;
-  s.readyState = 'open';
-}
-/* eslint-enable @typescript-eslint/no-unsafe-assignment,
-   @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-explicit-any */
-
-export const stdout = new SyncWriteStream(1);
-addSocketProperties(stdout);
-export const stderr = new SyncWriteStream(2);
-addSocketProperties(stderr);
 
 export function chdir(path: string | Buffer | URL): void {
   validateString(path, 'directory');
@@ -458,8 +364,18 @@ export function execve(
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.execve');
 }
 
-export function openStdin(): typeof stdin {
-  return stdin;
+// The stdio streams are built on the fs streams, whose module graph is large, so they
+// are loaded on first access and exposed as accessors on `process` (as Node.js does).
+let stdio: typeof Stdio | undefined;
+function getStdio(): typeof Stdio {
+  stdio ??= processImpl.getInternalModule(
+    'node-internal:internal_process_stdio'
+  ) as typeof Stdio;
+  return stdio;
+}
+
+export function openStdin(): typeof Stdio.stdin {
+  return getStdio().stdin;
 }
 
 export function _fatalException(_err: Error): boolean {
@@ -634,9 +550,9 @@ interface Process extends EventEmitter {
   traceDeprecation: typeof traceDeprecation;
   throwDeprecation: typeof throwDeprecation;
   sourceMapsEnabled: typeof sourceMapsEnabled;
-  stdin: typeof stdin;
-  stdout: typeof stdout;
-  stderr: typeof stderr;
+  stdin: typeof Stdio.stdin;
+  stdout: typeof Stdio.stdout;
+  stderr: typeof Stdio.stderr;
   threadCpuUsage: typeof threadCpuUsage;
   cpuUsage: typeof cpuUsage;
   execPath: typeof execPath;
@@ -737,9 +653,6 @@ const _process = {
   traceDeprecation,
   throwDeprecation,
   sourceMapsEnabled,
-  stdin,
-  stdout,
-  stderr,
   threadCpuUsage,
   cpuUsage,
   execPath,
@@ -780,6 +693,25 @@ Object.defineProperty(process, Symbol.toStringTag, {
   value: 'process',
   configurable: true,
 });
+
+for (const name of ['stdin', 'stdout', 'stderr'] as const) {
+  Object.defineProperty(process, name, {
+    configurable: true,
+    enumerable: true,
+    get(): (typeof Stdio)[typeof name] {
+      return getStdio()[name];
+    },
+    // Assignment replaces the stream, as it did when these were data properties.
+    set(value: unknown): void {
+      Object.defineProperty(process, name, {
+        value,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    },
+  });
+}
 
 // We lazily attach unhandled rejection and rejection handled listeners
 // to ensure performance optimizations remain in the no listener case

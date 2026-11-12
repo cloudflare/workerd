@@ -92,6 +92,20 @@ KJ_TEST("inside a request, current() finds it, and now() is its clock") {
   });
 }
 
+KJ_TEST("now_in_current_request() is the request's clock, without a lock") {
+  // A request clock that the system clock never reads.
+  constexpr int64_t fixedNanos = 1'000'000'000'000;
+  TestFixture fixture({.fixedNow = kj::UNIX_EPOCH + fixedNanos * kj::NANOSECONDS});
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_ASSERT(nanosNow(env.context) == fixedNanos);
+    KJ_EXPECT(now_in_current_request_nanos() == fixedNanos);
+  });
+}
+
+KJ_TEST("now_in_current_request() is none outside a request") {
+  KJ_EXPECT_THROW_MESSAGE("not in a request", now_in_current_request_nanos());
+}
+
 KJ_TEST("write_logfwdr() writes the message to the channel") {
   LogfwdrLog log;
   TestFixture fixture(recordingParams(log));
@@ -889,6 +903,65 @@ KJ_TEST("dropping an add_object() handle drops the value, at once only if its re
       *request, [&](const TestFixture::Environment&) { KJ_EXPECT(owned_value_dropped()); });
 
   fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("an add_object() value can be used in place only while its IoContext is current") {
+  constexpr kj::StringPtr OTHER_REQUEST = "Cannot perform I/O on behalf of a different request"_kj;
+  TestFixture fixture;
+  auto owner = fixture.newIncomingRequest();
+  auto other = fixture.newIncomingRequest();
+
+  fixture.enterContext(*owner, [&](const TestFixture::Environment& env) {
+    add_owned_value(isolateOf(env));
+    KJ_EXPECT(use_owned_value(isolateOf(env)) == 1);
+    KJ_EXPECT(use_owned_value(isolateOf(env)) == 2);
+  });
+  fixture.enterContext(*other, [&](const TestFixture::Environment& env) {
+    KJ_EXPECT_THROW_MESSAGE(OTHER_REQUEST, use_owned_value(isolateOf(env)));
+  });
+  fixture.enterContext(*owner, [&](const TestFixture::Environment& env) {
+    // The value went back into the handle after each use.
+    KJ_EXPECT(use_owned_value(isolateOf(env)) == 3);
+    KJ_EXPECT(!owned_value_dropped());
+    KJ_EXPECT(take_owned_value(isolateOf(env)));
+    KJ_EXPECT(use_owned_value(isolateOf(env)) == -1);
+  });
+  drop_owned_handle();
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
+KJ_TEST("a span given to its IoContext ends with it, though its handle outlives it") {
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    add_owned_span(isolateOf(env));
+    KJ_EXPECT(tag_owned_span(isolateOf(env)));
+  });
+  KJ_EXPECT(!KJ_ASSERT_NONNULL(records->find("owned_span")).ended);
+  fixture.drainAndDestroy(kj::mv(request));
+
+  auto& span = KJ_ASSERT_NONNULL(records->find("owned_span"));
+  KJ_EXPECT(span.ended);
+  KJ_EXPECT(records->parentName(span) == "request", records->parentName(span));
+  KJ_EXPECT(span.tags == "tagged=bool:true", span.tags);
+  drop_owned_span_handle();
+}
+
+KJ_TEST("a span given to its IoContext ends when its handle is dropped, once its request runs") {
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { add_owned_span(isolateOf(env)); });
+  // Outside the request, as when the garbage collector drops what holds the handle.
+  drop_owned_span_handle();
+  KJ_EXPECT(!KJ_ASSERT_NONNULL(records->find("owned_span")).ended);
+  fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+    KJ_EXPECT(KJ_ASSERT_NONNULL(records->find("owned_span")).ended);
+  });
   fixture.drainAndDestroy(kj::mv(request));
 }
 

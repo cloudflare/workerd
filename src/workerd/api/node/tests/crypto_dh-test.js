@@ -453,23 +453,93 @@ export const statelessDhX25591 = {
   },
 };
 
+// RFC 7748 section 6.1 test vector. The public keys are imported, so they
+// carry no private part.
+const x25519AlicePrivate =
+  '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a';
+const x25519AlicePublic =
+  '8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a';
+const x25519BobPrivate =
+  '5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb';
+const x25519BobPublic =
+  'de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f';
+const x25519Shared =
+  '4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742';
+
+function x25519PrivateKey(hex) {
+  return crypto.createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from('302e020100300506032b656e04220420', 'hex'),
+      Buffer.from(hex, 'hex'),
+    ]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+}
+
+function x25519PublicKey(hex, format) {
+  if (format === 'jwk') {
+    return crypto.createPublicKey({
+      key: {
+        kty: 'OKP',
+        crv: 'X25519',
+        x: Buffer.from(hex, 'hex').toString('base64url'),
+      },
+      format,
+    });
+  }
+  return crypto.createPublicKey({
+    key: Buffer.concat([
+      Buffer.from('302a300506032b656e032100', 'hex'),
+      Buffer.from(hex, 'hex'),
+    ]),
+    format: 'der',
+    type: 'spki',
+  });
+}
+
+export const statelessDhX25519ImportedPublicKey = {
+  test() {
+    for (const format of ['spki', 'jwk']) {
+      const sec1 = crypto.diffieHellman({
+        privateKey: x25519PrivateKey(x25519AlicePrivate),
+        publicKey: x25519PublicKey(x25519BobPublic, format),
+      });
+      const sec2 = crypto.diffieHellman({
+        privateKey: x25519PrivateKey(x25519BobPrivate),
+        publicKey: x25519PublicKey(x25519AlicePublic, format),
+      });
+      assert.strictEqual(sec1.toString('hex'), x25519Shared, format);
+      assert.strictEqual(sec2.toString('hex'), x25519Shared, format);
+    }
+  },
+};
+
+export const diffieHellmanDefaultExport = {
+  async test() {
+    const { default: defaultExport } = await import('node:crypto');
+    assert.strictEqual(defaultExport.diffieHellman, crypto.diffieHellman);
+  },
+};
+
 export const statelessDhEc = {
   test() {
-    // The Boringssl-based implementation currently does not support
-    // the mechanisms for stateless dh using named EC curve.
     const pair1 = crypto.generateKeyPairSync('ec', { namedCurve: 'secp224r1' });
     const pair2 = crypto.generateKeyPairSync('ec', { namedCurve: 'secp224r1' });
-    assert.throws(
-      () => {
-        crypto.diffieHellman({
-          publicKey: pair1.publicKey,
-          privateKey: pair2.privateKey,
-        });
-      },
-      {
-        message: /Failed to derive/,
-      }
-    );
+    const imported = crypto.createPublicKey({
+      key: pair1.publicKey.export({ format: 'der', type: 'spki' }),
+      format: 'der',
+      type: 'spki',
+    });
+    const sec1 = crypto.diffieHellman({
+      publicKey: imported,
+      privateKey: pair2.privateKey,
+    });
+    const sec2 = crypto.diffieHellman({
+      publicKey: pair2.publicKey,
+      privateKey: pair1.privateKey,
+    });
+    assert.deepStrictEqual(sec1, sec2);
   },
 };
 

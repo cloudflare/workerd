@@ -661,6 +661,14 @@ class Worker::Api {
     return kj::none;
   }
 
+  // Where V8 reads the source of the per-isolate bootstrap scripts from, if the embedder keeps
+  // it somewhere other than the compiled-in bundles; see jsg/module-source.h. The result must
+  // outlive every isolate. The embedder passes the same object when it registers its module
+  // bundles, so that every compiled-in source is served the same way.
+  virtual const jsg::ModuleSource* getModuleSource() const {
+    return nullptr;
+  }
+
   struct NewContextOptions {
     // If the worker is using the new module registry system, this is the registry to
     // install on the newly created context. If null, the old system is assumed.

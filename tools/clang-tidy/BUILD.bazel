@@ -6,6 +6,8 @@
     owner (kj::Rc, kj::Arc, or a kj::Own of a refcounted type).
   - `jsg-visit-for-gc`: validates JSG resource types correctly visit their
     GC roots.
+  - `jsg-js-reentry`: flags borrows into JSG-owned state used after a call
+    that can run JavaScript.
   - `workerd-angled-includes` - requires includes of workers/capnproto code from
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
@@ -49,6 +51,7 @@ filegroup(
         "angled-includes.c++",
         "consume.c++",
         "coroutine-hostile-raii.c++",
+        "js-reentry.c++",
         "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "shared-visit.c++",
@@ -68,6 +71,7 @@ filegroup(
         "angled-includes.h",
         "consume.h",
         "coroutine-hostile-raii.h",
+        "js-reentry.h",
         "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "shared-visit.h",
@@ -163,6 +167,22 @@ sh_test(
         ":coroutine-hostile-raii-negative-test.c++",
         ":coroutine-hostile-raii-positive-test.c++",
         ":toolchain-flags",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "js-reentry-test",
+    srcs = ["js-reentry-test.sh"],
+    data = [
+        ":js-reentry-negative-test.c++",
+        ":js-reentry-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],

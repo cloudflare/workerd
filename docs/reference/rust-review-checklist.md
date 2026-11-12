@@ -28,8 +28,11 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
   the caller is responsible for and why they hold at this call site.
 - **Always** verify that functions receiving raw pointers from C++ are declared `unsafe fn`**.
 - **Always** verify that `unsafe impl Send` / `unsafe impl Sync` are justified with a comment
-  explaining why the type is safe to share across threads. `jsg::Ref<T>` is explicitly not `Send`
-  (uses `Rc` + `UnsafeCell` internally) — flag any attempt to send it across threads.
+  explaining why the type is safe to share across threads. For an object that resource state
+  holds, check that nothing in it belongs to a thread or a KJ event loop, and that it is used and
+  destroyed only under the isolate lock, or else safely without it: a resource whose `jsg::Rc`
+  outlives its isolate is dropped after `Dispose`, with no lock (`src/rust/jsg/README.md`
+  §Dropping references).
 - **Always** verify that an `allow` or `expect` of `unsafe_code` covers no more than it needs. The
   build denies `unsafe_code` in first-party crates (`//build/rust:lints`); the crates derived from
   upstream cxx in `src/rust/cxx` keep upstream's lint levels. The exception belongs at the top of

@@ -147,22 +147,13 @@ These rules MUST be followed when writing or modifying JSG code:
     must check the same settings. It never reuses a module when either isolate
     has `wasm_source_url_support`, because the URL is the module's name in the
     loaded Worker's bundle.
-
-14. **Hold a heap object whose handles are visited in `jsg::TracedOwn<T>`**, not
-    `kj::Own<T>`, and move its elements out of a container one at a time. Moving a
-    `kj::Own` or a whole container leaves the handles traced with nothing visiting
-    them, so the GC can free their targets while they are in use. The
-    `jsg-traced-own` clang-tidy check flags both, including moving or swapping a
-    struct that holds such a container. Objects shared through `kj::Rc` fall under
-    invariant 15.
-
-15. **Don't visit through a shared owner.** A `kj::Rc`, `kj::Arc`, or `kj::Own` of a
+14. **Don't visit through a shared owner.** A `kj::Rc`, `kj::Arc`, or `kj::Own` of a
     refcounted type can have other owners that visit the same object, and a handle
     visited from two owners is strong or traced depending on which visited last (a
     `jsg::Ref` asserts instead). The `jsg-shared-visit` clang-tidy check flags such
     visits; a deliberate one carries `// NOLINT(jsg-shared-visit)` with the reason.
 
-16. **A `Wrappable` bound to an isolate MUST be destroyed under that isolate's lock.**
+15. **A `Wrappable` bound to an isolate MUST be destroyed under that isolate's lock.**
     It is bound when a wrapper is attached, or when a bound parent first visits a
     `Ref<T>` to it (`visitRef`). Until it is destroyed or isolate teardown unbinds it,
     it stays in one of its `HeapTracer`'s lists and is wrapped only in that isolate;
@@ -172,7 +163,7 @@ These rules MUST be followed when writing or modifying JSG code:
     so destroying a bound Wrappable off the lock aborts, and wrapping it in another
     isolate throws.
 
-17. **A resource type that can be alive when a Worker's top level has run MUST say how it
+16. **A resource type that can be alive when a Worker's top level has run MUST say how it
     crosses a startup snapshot.** Either `static constexpr bool jsgSnapshotStateless = true`
     (any fresh instance is interchangeable; the restored wrapper gets one from the type's
     `Lock&` or default constructor) or an override of `Wrappable::snapshotClone()` returning a
@@ -181,9 +172,28 @@ These rules MUST be followed when writing or modifying JSG code:
     leaves such an object reachable starts without a snapshot. See
     `docs/startup-snapshot.md` §Making a type transferable.
 
+17. **MUST NOT hold a borrow into JSG-owned state across a call that can run JavaScript.**
+    JavaScript run mid-method can drop the last reference to the object a local reference,
+    pointer, iterator, or view points into. Hold a strong reference (`addRef()`), iterate a
+    copy, or look the state up again after the call. Treat any call you pass `js` to as able
+    to run JavaScript. Mark a `jsg::Lock&`-taking primitive that never runs JavaScript with
+    `JSG_NO_JS`, and a function that runs JavaScript without taking the lock with
+    `JSG_MAY_RUN_JS` (both in `util.h`); see `README.md` §Calls That Run JavaScript.
+
+18. **Hold a heap object whose handles are visited in `jsg::TracedOwn<T>`**, not
+    `kj::Own<T>`, and move its elements out of a container one at a time. Moving a
+    `kj::Own` or a whole container leaves the handles traced with nothing visiting
+    them, so the GC can free their targets while they are in use. The
+    `jsg-traced-own` clang-tidy check flags both, including moving or swapping a
+    struct that holds such a container. Objects shared through `kj::Rc` fall under
+    invariant 14.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
+The `jsg-js-reentry` check reports violations of invariant 17. It runs on the directories
+listed in `build/tools/clang_tidy/check_path_filters.bzl`; run it elsewhere with
+`--config=clang-tidy-js-reentry`.
 
 ## CODE REVIEW RULE
 

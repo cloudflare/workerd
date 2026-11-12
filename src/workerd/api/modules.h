@@ -53,10 +53,12 @@ class EnvModule final: public jsg::Object {
   }
 };
 
+// `moduleSource`, if given, provides the storage V8 reads the compiled-in module sources from;
+// see jsg/module-source.h.
 template <class Registry>
 void registerModules(
-    Registry& registry, auto featureFlags, const node::ModuleSource* nodeModuleSource = nullptr) {
-  node::registerNodeJsCompatModules(registry, featureFlags, nodeModuleSource);
+    Registry& registry, auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
+  node::registerNodeJsCompatModules(registry, featureFlags, moduleSource);
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
@@ -67,7 +69,7 @@ void registerModules(
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
   registerMessageChannelModule(registry, featureFlags);
-  registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
+  registry.addBuiltinBundle(CLOUDFLARE_BUNDLE, kj::none, moduleSource);
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
   registerWrappedBindingModule(registry, featureFlags);
@@ -80,10 +82,9 @@ void registerModules(
 template <class TypeWrapper>
 void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
     auto featureFlags,
-    const node::ModuleSource* nodeModuleSource = nullptr) {
-  builder.add(
-      node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags, nodeModuleSource));
-  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags, nodeModuleSource));
+    const jsg::ModuleSource* moduleSource = nullptr) {
+  builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags, moduleSource));
+  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags, moduleSource));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));
@@ -106,7 +107,8 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
         jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builtinsBuilder, CLOUDFLARE_BUNDLE, moduleSource);
     builder.add(builtinsBuilder.finish());
   }
 
@@ -115,7 +117,8 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
         jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
     builtinsBuilder.addObject<FileSystemModule, TypeWrapper>("cloudflare-internal:filesystem"_url);
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builtinsBuilder, CLOUDFLARE_BUNDLE, moduleSource);
     builder.add(builtinsBuilder.finish());
   }
 }

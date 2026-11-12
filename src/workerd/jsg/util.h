@@ -23,6 +23,22 @@
 
 #include <typeinfo>
 
+#ifdef __clang__
+// Marks a function that can run JavaScript, or force a GC, before it returns. JavaScript run in the
+// middle of a C++ method can free the state the method borrowed, so the jsg-js-reentry clang-tidy
+// check reports borrows used after a call to a marked function. The check also treats any function
+// that takes a jsg::Lock&, V8's script entry points, and functions whose body in the same
+// translation unit calls one of those as running JavaScript, so this is needed only where none of
+// that is visible: type-erased calls, and functions that find the lock themselves.
+#define JSG_MAY_RUN_JS __attribute__((annotate("jsg_may_run_js")))
+// Marks a function that takes a jsg::Lock& but never runs JavaScript or forces a GC, such as an
+// accessor for a handle. The jsg-js-reentry check does not count calls to it, or to its overrides.
+#define JSG_NO_JS __attribute__((annotate("jsg_no_js")))
+#else
+#define JSG_MAY_RUN_JS
+#define JSG_NO_JS
+#endif
+
 namespace v8 {
 class Isolate;
 }
@@ -140,6 +156,20 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID = 0x
 
 // Detail type for JavaScript exception metadata (error type, message and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
+
+// The version of V8's serialization format in which addExceptionDetail() writes the value of a
+// tunneled exception. It is fixed so that we don't break compatibility if V8 introduces a new
+// version. It can be bumped to match the new version once all of production is updated to
+// understand it.
+constexpr uint32_t TUNNELED_EXCEPTION_SERIALIZATION_VERSION = 15;
+
+// The longest error type, stack trace or message that addJsExceptionMetadata() keeps, in bytes.
+constexpr size_t JS_EXCEPTION_METADATA_MAX_FIELD_SIZE = 4096;
+
+// Whether `description`, an object's description by v8::Value::ToDetailString(), starts with the
+// name of an error type whose description createTunneledException() keeps as it is, after "jsg."
+// (JS_ERROR_TYPES and DOMException). The description of any other value follows "jsg.Error: ".
+bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description);
 
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =

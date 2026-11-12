@@ -1588,6 +1588,8 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
  public:
   // Initialize `error` to cause writes to fail.
   kj::Maybe<kj::Exception> error;
+  // When set, counts calls to sync() and datasync().
+  kj::Maybe<uint&> syncCount;
 
   void write(uint64_t offset, kj::ArrayPtr<const byte> data) const override {
     KJ_IF_SOME(e, error) {
@@ -1602,9 +1604,11 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
     return inner->stat();
   }
   void sync() const override {
+    countSync();
     inner->sync();
   }
   void datasync() const override {
+    countSync();
     inner->datasync();
   }
   size_t read(uint64_t offset, kj::ArrayPtr<byte> buffer) const override {
@@ -1636,6 +1640,12 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
  private:
   kj::Own<const kj::File> inner = kj::newInMemoryFile(kj::nullClock());
 
+  void countSync() const {
+    KJ_IF_SOME(count, syncCount) {
+      ++count;
+    }
+  }
+
   kj::Own<const FsNode> cloneFsNode() const override {
     return kj::atomicAddRef(*this);
   }
@@ -1645,6 +1655,8 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRefcounted {
  public:
   kj::Maybe<kj::Exception> error;
+  // When set, counts the syncs of the files this creates, including removed ones.
+  kj::Maybe<uint&> syncCount;
   kj::Maybe<kj::Own<ErrorInjectableFile>> dbFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> walFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> journalFile;
@@ -1691,7 +1703,11 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
       }
     } else {
       if (kj::has(mode, kj::WriteMode::CREATE)) {
-        return slot.emplace(kj::atomicRefcounted<ErrorInjectableFile>())->clone();
+        auto& file = slot.emplace(kj::atomicRefcounted<ErrorInjectableFile>());
+        KJ_IF_SOME(count, syncCount) {
+          file->syncCount = count;
+        }
+        return file->clone();
       } else {
         return kj::none;
       }
@@ -1783,6 +1799,22 @@ KJ_TEST("SQLite open preserves directory VFS exceptions") {
   KJ_EXPECT(exception.getDescription() == "test-directory-vfs-error", exception);
   auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
   KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
+KJ_TEST("SQLite VFS skips syncs when its sync option is off") {
+  auto commitAndCountSyncs = [](SqliteDatabase::Vfs::Options options) {
+    uint syncs = 0;
+    auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+    dir->syncCount = syncs;
+    SqliteDatabase::Vfs vfs(*dir, options);
+    SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    db.run("CREATE TABLE t (x INTEGER)");
+    db.run("INSERT INTO t VALUES (123)");
+    KJ_EXPECT(db.run("SELECT x FROM t").getInt(0) == 123);
+    return syncs;
+  };
+  KJ_EXPECT(commitAndCountSyncs({}) > 0);
+  KJ_EXPECT(commitAndCountSyncs({.sync = false}) == 0);
 }
 
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {

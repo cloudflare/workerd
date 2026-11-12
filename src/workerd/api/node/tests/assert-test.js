@@ -46,7 +46,7 @@ import {
   AssertionError,
 } from 'node:assert';
 
-import { mock } from 'node:test';
+import { mock, MockTracker } from 'node:test';
 import util from 'node:util';
 
 import { default as assert } from 'node:assert';
@@ -1520,6 +1520,254 @@ export const setterFailsIfGetterOptionsIsTrue = {
     throws(() => {
       mock.setter({}, 'method', { getter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
+  },
+};
+
+// The mock.property() tests below are ported from Node.js
+// test/parallel/test-runner-mocking.js.
+export const spiesOnAProperty = {
+  test() {
+    const obj = { foo: 42 };
+    const prop = mock.property(obj, 'foo', 100);
+
+    strictEqual(obj.foo, 100);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, 100);
+
+    obj.foo = 200;
+    strictEqual(obj.foo, 200);
+    strictEqual(prop.mock.accesses.length, 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[1].value, 200);
+    strictEqual(prop.mock.accesses[2].type, 'get');
+    strictEqual(prop.mock.accesses[2].value, 200);
+
+    obj.foo = 300;
+    strictEqual(obj.foo, 300);
+    strictEqual(prop.mock.accessCount(), 5);
+    strictEqual(prop.mock.accesses[3].type, 'set');
+    strictEqual(prop.mock.accesses[3].value, 300);
+    strictEqual(prop.mock.accesses[4].type, 'get');
+    strictEqual(prop.mock.accesses[4].value, 300);
+
+    prop.mock.resetAccesses();
+    strictEqual(prop.mock.accessCount(), 0);
+
+    obj.foo = 500;
+    strictEqual(obj.foo, 500);
+    strictEqual(prop.mock.accessCount(), 2);
+    strictEqual(prop.mock.accesses[0].type, 'set');
+    strictEqual(prop.mock.accesses[1].type, 'get');
+
+    prop.mock.resetAccesses();
+    strictEqual(prop.mock.accessCount(), 0);
+
+    strictEqual(obj.foo, 500);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 42);
+  },
+};
+
+export const spiesOnAPropertyWithoutProvidingAValue = {
+  test() {
+    const obj = { foo: 123 };
+    const prop = mock.property(obj, 'foo');
+
+    strictEqual(obj.foo, 123);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, 123);
+
+    obj.foo = 456;
+    strictEqual(obj.foo, 456);
+    strictEqual(prop.mock.accessCount(), 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[1].value, 456);
+    strictEqual(prop.mock.accesses[2].type, 'get');
+    strictEqual(prop.mock.accesses[2].value, 456);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 123);
+  },
+};
+
+export const spiesOnASymbolProperty = {
+  test() {
+    const symbol = Symbol('foo');
+    const obj = { [symbol]: 123 };
+    const prop = mock.property(obj, symbol, 456);
+
+    strictEqual(obj[symbol], 456);
+    strictEqual(prop.mock.accessCount(), 1);
+
+    obj[symbol] = 789;
+    strictEqual(obj[symbol], 789);
+    strictEqual(prop.mock.accessCount(), 3);
+    strictEqual(prop.mock.accesses[1].type, 'set');
+    strictEqual(prop.mock.accesses[2].type, 'get');
+
+    prop.mock.restore();
+    strictEqual(obj[symbol], 123);
+  },
+};
+
+export const changesMockedPropertyValueDynamically = {
+  test() {
+    const obj = { foo: 1 };
+
+    const prop = mock.property(obj, 'foo', 2);
+    strictEqual(obj.foo, 2);
+    strictEqual(prop.mock.accessCount(), 1);
+
+    prop.mock.mockImplementation(99);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 3);
+
+    prop.mock.mockImplementationOnce(42);
+    strictEqual(obj.foo, 42);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 5);
+
+    throws(() => {
+      prop.mock.mockImplementationOnce(55, 4);
+    }, /The value of "onAccess" is out of range\. It must be >= 5/);
+
+    prop.mock.mockImplementationOnce(100, 5);
+    prop.mock.mockImplementationOnce(200, 6);
+    strictEqual(obj.foo, 100);
+    strictEqual(obj.foo, 200);
+    strictEqual(obj.foo, 99);
+    strictEqual(prop.mock.accessCount(), 8);
+
+    prop.mock.mockImplementationOnce(555, 10);
+    strictEqual(obj.foo, 99);
+    strictEqual(obj.foo, 99);
+    strictEqual(obj.foo, 555);
+
+    prop.mock.mockImplementation(undefined);
+    strictEqual(obj.foo, undefined);
+  },
+};
+
+export const mocksPropertyValueToUndefined = {
+  test() {
+    const obj = { foo: 123 };
+    const prop = mock.property(obj, 'foo', undefined);
+
+    strictEqual(obj.foo, undefined);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+    strictEqual(prop.mock.accesses[0].value, undefined);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 123);
+  },
+};
+
+export const resetAccessesDoesNotAffectPropertyValue = {
+  test() {
+    const obj = { foo: 1 };
+    const prop = mock.property(obj, 'foo', 2);
+
+    obj.foo = 5;
+    strictEqual(obj.foo, 5);
+    strictEqual(prop.mock.accessCount(), 2);
+
+    prop.mock.resetAccesses();
+    strictEqual(obj.foo, 5);
+    strictEqual(prop.mock.accessCount(), 1);
+    strictEqual(prop.mock.accesses[0].type, 'get');
+  },
+};
+
+export const restoresOriginalPropertyValue = {
+  test() {
+    const obj = {
+      foo: 10,
+    };
+
+    const prop = mock.property(obj, 'foo', 20);
+    strictEqual(obj.foo, 20);
+
+    prop.mock.restore();
+    strictEqual(obj.foo, 10);
+  },
+};
+
+export const throwsIfSettingANonWritableProperty = {
+  test() {
+    const obj = {};
+    Object.defineProperty(obj, 'bar', {
+      value: 1,
+      writable: false,
+      configurable: true,
+      enumerable: true,
+    });
+
+    mock.property(obj, 'bar', 2);
+    strictEqual(obj.bar, 2);
+
+    throws(
+      () => {
+        obj.bar = 3;
+      },
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+  },
+};
+
+export const throwsIfPropertyDoesNotExist = {
+  test() {
+    throws(
+      () => {
+        mock.property({}, 'doesNotExist', 1);
+      },
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+  },
+};
+
+export const throwsIfObjectIsNull = {
+  test() {
+    throws(
+      () => {
+        mock.property(null, 'foo', 1);
+      },
+      { code: 'ERR_INVALID_ARG_TYPE' }
+    );
+  },
+};
+
+// Node's "local property mocks are auto restored after the test finishes"
+// relies on per-test t.mock, which workerd's node:test does not provide, so
+// this exercises the same restore path through restoreAll() and reset().
+export const propertyMocksAreRestoredByRestoreAllAndReset = {
+  test() {
+    const tracker = new MockTracker();
+    const baz = () => 0;
+    const obj = { foo: 111, bar: 222, baz };
+
+    tracker.property(obj, 'foo', 888);
+    strictEqual(obj.foo, 888);
+    strictEqual(obj.bar, 222);
+
+    tracker.restoreAll();
+    strictEqual(obj.foo, 111);
+    strictEqual(obj.bar, 222);
+
+    tracker.property(obj, 'bar', 999);
+    const fn = tracker.method(obj, 'baz', () => 1);
+    strictEqual(obj.bar, 999);
+    strictEqual(obj.baz, fn);
+
+    tracker.reset();
+    strictEqual(obj.foo, 111);
+    strictEqual(obj.bar, 222);
+    strictEqual(obj.baz, baz);
   },
 };
 

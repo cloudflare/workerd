@@ -31,6 +31,7 @@ pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod tunnel;
 mod typed_promise;
 pub mod v8;
 mod wrappable;
@@ -96,6 +97,7 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+pub use tunnel::TunneledException;
 pub use typed_promise::Promise;
 pub use typed_promise::PromiseArgument;
 pub use typed_promise::PromiseResolver;
@@ -766,9 +768,49 @@ impl<'s> Lock<'s> {
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_null(self.isolate().as_ffi())) }
     }
 
+    /// Returns the global object of the entered context, `globalThis`.
+    ///
+    /// Corresponds to `v8::Context::Global()` and C++ JSG's `jsg::Lock::global()`.
+    pub fn global_object(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked, with a context entered.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::isolate_current_context_global(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
     pub fn new_object(&mut self) -> v8::Local<'s, v8::Object> {
         // SAFETY: Lock guarantees the isolate is valid and locked
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.isolate().as_ffi())) }
+    }
+
+    /// Creates an empty object whose prototype is `null`, like `Object.create(null)`. Setting
+    /// and reading its own properties runs no JavaScript, and nothing that resolves a promise
+    /// with it finds a `then` to follow.
+    pub fn new_object_with_null_prototype(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::local_new_object_with_null_prototype(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
+    /// Throws `exception`, as JavaScript's `throw` does, and returns the error that stands for
+    /// it (see [`Error::is_pending`]), for a callback to return. Throws nothing while execution
+    /// is terminating, so that the termination is never replaced by a catchable exception, nor
+    /// while an exception is pending, which then keeps propagating.
+    pub fn throw_value(&mut self, exception: v8::Local<'s, v8::Value>) -> Error {
+        let isolate = self.isolate().as_ffi();
+        // SAFETY: Lock guarantees the isolate is valid and locked; `exception` is a handle of
+        // its scope. The shim throws nothing while execution is terminating.
+        unsafe {
+            if !v8::ffi::isolate_has_pending_exception(isolate) {
+                v8::ffi::isolate_throw_exception(isolate, exception.into_ffi());
+            }
+        }
+        Error::pending()
     }
 
     /// Creates a JavaScript `Error` object with the given message.
@@ -1183,6 +1225,142 @@ impl<'s> Lock<'s> {
         assert!(terminating, "V8 did not terminate execution when asked");
         Error::pending()
     }
+
+    /// The KJ exception that stands for `exception`, a value JavaScript threw or rejected a
+    /// promise with, as C++ `jsg::Lock::exceptionToKj()` (`jsg::createTunneledException()`)
+    /// creates it, so that C++ that receives it, and JavaScript it is converted back for, see
+    /// what they would see for one from C++:
+    ///
+    /// - **Type:** `Overloaded` if the value is an object whose `overloaded` property is truthy,
+    ///   or else `Disconnected` if its `retryable` property is, or else `Failed`. A
+    ///   `DOMException` is always `Failed`.
+    /// - **Description:** for a `DOMException`, `jsg.DOMException(<name>): <message>`, with the
+    ///   name and message it was created with. Otherwise the value as
+    ///   [`v8::Local::<v8::Value>::to_detail_string`] describes it, up to its first NUL, after
+    ///   `jsg.` if it is an object described as an error of a type that C++ JSG tunnels (the
+    ///   JavaScript error types and `DOMException`), or after `jsg.Error: `. C++ that throws the
+    ///   exception back to JavaScript then throws an error of that type, with that message.
+    /// - **Details:** the value serialized as `jsg::Serializer` writes it, in version 15 of
+    ///   V8's format, with a marker if errors were serialized as host objects (the
+    ///   `enhanced_error_serialization` compatibility flag), unless the value can't be
+    ///   serialized. Then, for an object, its `name`, `stack` and `message`, if they are strings,
+    ///   each up to its first NUL and cut to at most 4096 bytes without splitting a character,
+    ///   and whether it is a native error, as a `JsExceptionMetadata` message
+    ///   (`workerd/jsg/exception-metadata.capnp`).
+    ///
+    /// The properties are read in that order, and reading them can run JavaScript (getters and
+    /// Proxy traps), as in C++. What serializing throws is caught: the exception then has no
+    /// serialized value.
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`Error::is_pending`] is true if reading `overloaded`,
+    /// `retryable`, `name`, `stack` or `message` throws, leaving the exception pending, as C++
+    /// throws `JsExceptionThrown` then, and if an exception or a termination is already pending
+    /// or execution terminates.
+    pub fn exception_to_kj(&mut self, exception: v8::Local<'s, v8::Value>) -> Result<cxx::KjError> {
+        exception.debug_assert_isolate(self);
+        let object = v8::Local::<v8::Object>::try_from(exception).ok();
+        let mut exception_type = cxx::KjExceptionType::Failed;
+        if let Some(object) = object {
+            let overloaded = object.get(self, "overloaded")?;
+            if bool::from_js(self, overloaded)? {
+                exception_type = cxx::KjExceptionType::Overloaded;
+            } else {
+                let retryable = object.get(self, "retryable")?;
+                if bool::from_js(self, retryable)? {
+                    exception_type = cxx::KjExceptionType::Disconnected;
+                }
+            }
+        }
+
+        let description =
+            if let Some((name, message)) = tunnel::try_unwrap_dom_exception(self, exception)? {
+                exception_type = cxx::KjExceptionType::Failed;
+                format!("jsg.DOMException({name}): {message}")
+            } else {
+                let detail = exception.to_detail_string(self)?;
+                // C++ copies the description out of V8 as a C string.
+                let detail = up_to_nul(&detail);
+                if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
+                    format!("jsg.{detail}")
+                } else {
+                    format!("jsg.Error: {detail}")
+                }
+            };
+
+        let mut details = Vec::new();
+        let options = ser::SerializeOptions {
+            version: Some(v8::ffi::tunneled_exception_serialization_version()),
+        };
+        if let Ok(data) =
+            self.try_catch(|lock| ser::serialize_with_options(lock, exception, options))?
+        {
+            details.push((v8::ffi::tunneled_exception_detail_id(), data));
+            if self.feature_flags().get_enhanced_error_serialization() {
+                details.push((v8::ffi::tunneled_exception_enhanced_detail_id(), vec![1]));
+            }
+        }
+        if let Some(object) = object {
+            details.push((
+                v8::ffi::js_exception_metadata_detail_id(),
+                exception_metadata(self, exception, object)?,
+            ));
+        }
+
+        Ok(cxx::KjError::new(exception_type, description)
+            .with_details(details)
+            .with_location(file!().to_owned(), line!()))
+    }
+}
+
+/// The `name`, `stack` and `message` of `exception`, which is `object`, and whether it is a native
+/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes.
+fn exception_metadata<'s>(
+    lock: &mut Lock<'s>,
+    exception: v8::Local<'s, v8::Value>,
+    object: v8::Local<'s, v8::Object>,
+) -> Result<Vec<u8>> {
+    let mut builder = capnp::message::Builder::new_default();
+    let mut metadata =
+        builder.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
+    let name = object.get(lock, "name")?;
+    if name.is_string() {
+        let name = String::from_js(lock, name)?;
+        metadata.set_error_type(capped(&name));
+    }
+    let stack = object.get(lock, "stack")?;
+    if stack.is_string() {
+        let stack = String::from_js(lock, stack)?;
+        metadata.set_stack_trace(capped(&stack));
+    }
+    let message = object.get(lock, "message")?;
+    if message.is_string() {
+        let message = String::from_js(lock, message)?;
+        metadata.set_message(capped(&message));
+    }
+    metadata.set_is_native_error(exception.is_native_error());
+    Ok(capnp::serialize::write_message_to_words(&builder))
+}
+
+/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to at most the
+/// length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last character boundary within
+/// it, as C++ cuts it.
+fn capped(text: &str) -> &str {
+    let text = up_to_nul(text);
+    let mut end = v8::ffi::js_exception_metadata_max_field_size();
+    if end >= text.len() {
+        return text;
+    }
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// `text` up to its first NUL.
+fn up_to_nul(text: &str) -> &str {
+    text.split_once('\0').map_or(text, |(head, _)| head)
 }
 
 /// Provides metadata about Rust types exposed to JavaScript.
@@ -1261,6 +1439,13 @@ impl From<u64> for ConstantValue {
     }
 }
 
+/// An object built into every context that a resource type's prototype can inherit from with
+/// [`inherit_intrinsic`], like C++ JSG's `JSG_INHERIT_INTRINSIC` with a `v8::Intrinsic`.
+///
+/// - `IteratorPrototype` — `Iterator.prototype` (`v8::kIteratorPrototype`). An iterator that
+///   inherits it gets the iterator helpers (`map()`, `filter()`, `toArray()`, ...) and a
+///   `[Symbol.iterator]()` that returns the iterator itself.
+pub use crate::v8::ffi::Intrinsic;
 /// Where a [`Member::Property`] is attached on the JavaScript object.
 ///
 /// This is a re-export of the CXX bridge type in [`v8::ffi`] so that callers
@@ -1368,6 +1553,13 @@ pub enum Member {
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.
     Callable {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.iterator]`, which makes instances iterable
+    /// with `for...of`, spread and `Array.from()`, like C++ JSG's `JSG_ITERABLE`. It returns the
+    /// iterator. Like a [`Member::Method`], it is registered with the type's `v8::Signature`;
+    /// unlike one, it is not enumerable. A type has at most one.
+    Iterable {
         callback: RawFunctionCallback,
     },
     /// Another resource type's constructor, as a property of this type's

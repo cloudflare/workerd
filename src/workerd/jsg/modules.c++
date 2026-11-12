@@ -65,7 +65,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
       if constexpr (!IsSourcePhase) {
         if (spec == "node:process") {
           auto specifierPath =
-              kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+              kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:process_exports"_kj
                                                            : "node-internal:legacy_process"_kj);
           KJ_IF_SOME(info,
               registry->resolve(

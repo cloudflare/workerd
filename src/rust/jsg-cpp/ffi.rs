@@ -297,6 +297,8 @@ impl<'s, T: CppResource> jsg::ToJS<'s> for Ref<T> {
 impl<'s, T: CppResource> jsg::FromJS<'s> for Ref<T> {
     type ResultType = Self;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
     fn type_name() -> String {
         T::class_name().to_owned()
     }

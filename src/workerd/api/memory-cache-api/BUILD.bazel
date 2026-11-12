@@ -1,0 +1,24 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# MemoryCache, the JavaScript API of the memory cache, in Rust. C++ creates it for a memory cache
+# binding when the RUST_MEMORY_CACHE autogate is on; memory-cache.c++ otherwise.
+wd_rust_crate(
+    name = "memory-cache-api",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/memory-cache/ffi:lib.rs@cxx",
+        "//src/workerd/util:thread-scopes",
+    ],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/memory-cache",
+        "//src/rust/memory-cache/ffi:memory-cache-ffi",
+        "//src/workerd/io/io-context",
+        "@crates_vendor//:tracing",
+    ],
+)

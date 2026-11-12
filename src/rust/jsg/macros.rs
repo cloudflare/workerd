@@ -11,6 +11,8 @@
 /// [`HoldsNoGcReferences`](crate::HoldsNoGcReferences) implementation. A generic type takes a
 /// call of its own, with its parameters first, each with at most one bound.
 ///
+/// `Traced` requires `Send`, so a generic type implements it only where it is `Send`.
+///
 /// # Example
 ///
 /// ```ignore
@@ -24,11 +26,14 @@
 #[macro_export]
 macro_rules! jsg_traced {
     (<$($g:ident $(: $b:path)?),+ $(,)?> $t:ty) => {
-        impl<$($g $(: $b)?),+> $crate::Traced for $t {
+        impl<$($g $(: $b)?),+> $crate::Traced for $t
+        where
+            $t: Send,
+        {
             fn trace(&self, _visitor: &mut $crate::v8::GcVisitor) {}
         }
 
-        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t {}
+        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t where $t: Send {}
     };
     ($($t:ty),* $(,)?) => {
         $(impl $crate::Traced for $t {
