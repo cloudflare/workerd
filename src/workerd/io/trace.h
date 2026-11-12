@@ -967,6 +967,8 @@ struct Onset final {
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
+  // Estimates the memory that this onset owns on the heap, not counting itself.
+  size_t size() const;
 };
 
 // Helper functions to copy onset info to/from rpc reader
