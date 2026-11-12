@@ -249,60 +249,36 @@ impl<'s> IoContext<'s> {
         })
     }
 
-    /// Waits for `promise` as part of this request, then resolves the returned future with what
-    /// `map` returns when called with the value it is fulfilled with, as C++
-    /// `IoContext::awaitJs(js, promise, func)` does. `map` runs in the reaction to the promise,
-    /// under the isolate lock. It is `Copy`, so that what it captures holds no GC references, and
-    /// `Send`, as the reactions' data must be. What it returns holds no GC references either
-    /// ([`jsg::HoldsNoGcReferences`]), as the result of C++ `awaitJs()` is a `kj::Promise`, which
-    /// holds no JavaScript handles: the wait keeps it where nothing traces it.
+    /// Waits for `promise` as part of this request, as C++ `IoContext::awaitJs(js, promise, func)`
+    /// does, and returns a future for the outcome, which can be waited for without the isolate
+    /// lock. Dropping the future cancels the wait: `map` then does not run.
     ///
-    /// The future fails with a [`cxx::KjException`], the `kj::Exception` C++ fails with, so that
-    /// an exception that C++ created, such as the abort's, reaches C++ as it is.
+    /// Once `promise` is fulfilled, `map` runs with its value, in the reaction to the promise and
+    /// under the isolate lock, and the future resolves with what `map` returns. `map` is `Copy`,
+    /// so that what it captures holds no GC references, and `Send`, as the reaction's data must
+    /// be. What it returns holds no GC references either ([`jsg::HoldsNoGcReferences`]), since
+    /// nothing traces it while the future holds it.
     ///
-    /// The future fails with the promise's rejection, or with what `map` throws, as C++ fails
-    /// with what `func` throws: what JavaScript threw in `map`, or the exception that throwing
-    /// `map`'s own error would throw ([`jsg::Lock::throw_exception`]), as C++ converts a KJ
-    /// exception from `func` to JavaScript. An internal error is redacted and logged as
-    /// [`jsg::Lock::throw_internal_error`] does, rather than as C++ `jsg::exceptionToJs()` logs a
-    /// KJ exception, with its origin and for Sentry. The reaction first logs that value as an
-    /// uncaught exception from [`UncaughtExceptionSource::InternalAsync`], as
-    /// [`log_uncaught_exception`](Self::log_uncaught_exception) does, then tunnels it as
-    /// [`jsg::Lock::exception_to_kj`] does. If either runs JavaScript that throws (a getter of the
-    /// rejection's `stack`, say), the reaction rejects with that exception, and the future fails
-    /// as for a promise that never settles, as in C++. As in C++, the promise must settle in
-    /// this request: its reactions are not run in another, and if the promise is
-    /// garbage-collected without settling, or this `IoContext` is destroyed first, the future
-    /// fails with an `Error` whose message is `Promise will never complete.`, unless the request
-    /// was aborted after the wait started (see below). If the isolate has excessively exceeded its
-    /// heap limit by then, it fails instead with C++ `IoContext::memoryLimitException()`, an
-    /// overloaded `Error` whose message is `Worker has exceeded memory limit.`, with the detail
-    /// that marks an out-of-memory outcome.
+    /// The future fails with a [`cxx::KjException`], so that an exception C++ created reaches C++
+    /// as it is:
     ///
-    /// As in C++, the wait is joined with the request's abort: if this `IoContext` is aborted
-    /// before the wait settles, the future fails with the exception it was aborted with, as C++
-    /// recorded it, stack trace included. The abort wins over a promise that settles later
-    /// in the same turn, though `map` then still runs. In a request that was already aborted when
-    /// the wait started, the future fails in a later turn, unless the promise settles first.
-    /// Once the abort has failed the wait, the promise's fulfillment runs no `map`, its rejection
-    /// is still logged, and the trace still reports how it settled.
+    /// - If `promise` rejects or `map` fails, with that exception, tunneled as
+    ///   [`jsg::Lock::exception_to_kj`] does, after it is logged as an uncaught exception from
+    ///   [`UncaughtExceptionSource::InternalAsync`].
+    /// - If this `IoContext` is aborted before the wait settles, with the exception it was
+    ///   aborted with. If it was already aborted when the wait started, the abort fails the wait
+    ///   in a later turn, unless the promise settles first.
+    /// - If the wait never settles, because `promise` is garbage-collected first, this
+    ///   `IoContext` is destroyed first, or logging or tunneling the exception throws, with an
+    ///   `Error` whose message is `Promise will never complete.`, or, if the isolate has
+    ///   excessively exceeded its heap limit by then, with C++
+    ///   `IoContext::memoryLimitException()`.
     ///
-    /// If the request has async tracing, the wait is recorded as C++ records it: as a `JS_TO_KJ`
-    /// resource named `awaitJs`, from C++ `IoContext::makeAwaitJsResource()`, which the reaction
-    /// settles as `OK` once the promise is fulfilled and `map` succeeds, or the promise is
-    /// fulfilled after the wait was cancelled, and as `ERROR` once the promise rejects or `map`
-    /// fails. A wait that never settles reports a `destroy` instead, once the half that settles it
-    /// is dropped.
+    /// The promise must settle in this request: a reaction that runs in another one rejects the
+    /// promise it returns, and settles nothing.
     ///
-    /// The reactions hold the half of the wait that settles it through an [`IoOwned`], which
-    /// gives it the lifetime C++ gives `AwaitJsFulfiller` through `IoOwn`:
-    ///
-    /// - A reaction takes it only in the request that started the wait. In any other, taking it
-    ///   fails with the error C++ throws for an I/O object of another request, which rejects the
-    ///   promise the reaction returns, as in C++.
-    /// - Dropping the reactions' data drops it through C++ `IoOwn`, so at once if the request
-    ///   that owns it is current, and otherwise through the request's delete queue, the next time
-    ///   it runs. The request drops it when it is destroyed.
+    /// If the request has async tracing, the wait is recorded as a `JS_TO_KJ` resource named
+    /// `awaitJs`, as C++ records it.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one, and with an
@@ -412,8 +388,10 @@ impl<'s> IoContext<'s> {
 
     /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
     /// C++ `IoContext::awaitJs()` and `IoContext::addWaitUntil()`: the request is not done until
-    /// `promise` settles. If `promise` rejects, the rejection is logged as an uncaught exception,
-    /// as for every JavaScript promise that C++ waits for, and the response is unaffected.
+    /// `promise` settles. The wait is an [`await_js`](Self::await_js), whose future C++
+    /// `addWaitUntil()` waits for. If `promise` rejects, the rejection is logged as an uncaught
+    /// exception, as for every JavaScript promise that C++ waits for, and the response is
+    /// unaffected.
     ///
     /// As with `awaitJs()`, `promise` must settle in this request. Its reactions run in the
     /// request that settles it, or, under the `handle_cross_request_promise_resolution`
@@ -437,12 +415,17 @@ impl<'s> IoContext<'s> {
         promise: impl Into<jsg::v8::Local<'s, jsg::v8::Promise>>,
     ) -> jsg::Result<()> {
         // JavaScript can't call `ctx.waitUntil()` while terminating, but Rust can call this after
-        // catching a termination. `awaitJs()` would then create objects, which fails a V8 debug
-        // check, and the request ends anyway.
-        if lock.is_execution_terminating() {
-            return Err(jsg::Error::pending());
-        }
-        ffi::add_wait_until(lock, self.id, promise.into())
+        // catching a termination. `await_js()` fails then, before creating anything, which would
+        // fail a V8 debug check, and the request ends anyway.
+        //
+        // As C++ `PromiseWrapper` converts the promise to a `kj::Promise<void>`, the value is
+        // discarded.
+        let wait = self.await_js(lock, promise, |_lock, _value| Ok(()))?;
+        let future = ffi::WaitUntilFuture(Box::pin(wait));
+        Ok(bridge::io_context_add_wait_until(
+            self.id,
+            Box::new(future),
+        )?)
     }
 
     /// Has the request fail open, as `ctx.passThroughOnException()` does through C++
@@ -745,6 +728,10 @@ struct AwaitJsSender<T> {
     abort_watcher: ThreadBoundAbortWatcher,
 }
 
+// The sender's own fields are C++ objects and an `Arc` of the wait's state, which holds GC
+// references only if `T` does, which the macro bounds out.
+jsg::jsg_traced_unchecked!(<T> AwaitJsSender<T>);
+
 /// The abort watcher of an [`AwaitJsSender`].
 struct ThreadBoundAbortWatcher(KjOwn<bridge::AbortWatcher>);
 
@@ -789,10 +776,6 @@ impl<T> AwaitJsSender<T> {
         }
     }
 }
-
-// The sender's own field is an `Arc` of the wait's state, which holds GC references only if `T`
-// does, which the macro bounds out.
-jsg::jsg_traced_unchecked!(<T> AwaitJsSender<T>);
 
 impl<T> Drop for AwaitJsSender<T> {
     /// Settles the wait as never settling, as `~AwaitJsFulfiller()` does, unless it has settled
@@ -873,11 +856,7 @@ impl<T> Future for AwaitJs<T> {
             AwaitJsState::Waiting(_) => unreachable!("returned above"),
             AwaitJsState::Fulfilled(value) => Poll::Ready(Ok(value)),
             AwaitJsState::Rejected(err) => Poll::Ready(Err(err)),
-            AwaitJsState::NeverSettled => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!("jsg.Error: {}", bridge::io_context_never_settled_message()),
-            )
-            .into())),
+            AwaitJsState::NeverSettled => Poll::Ready(Err(ffi::never_settled_exception())),
             AwaitJsState::MemoryLimitExceeded => Poll::Ready(Err(ffi::memory_limit_exception())),
             AwaitJsState::Cancelled | AwaitJsState::Done => {
                 unreachable!("an AwaitJs polled after it returned its outcome")

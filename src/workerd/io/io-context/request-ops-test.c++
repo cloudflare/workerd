@@ -322,6 +322,25 @@ kj::String readEvents(TestFixture& fixture) {
   return events;
 }
 
+// `events` without the " (I/O type: ...)" that C++ IoOwn appends to its error for I/O of another
+// request, naming the type it holds, which a Rust IoOwned doesn't. For C++ awaitJs(), that type
+// is its AwaitJsFulfiller, whose name means nothing to the Worker.
+kj::String withoutIoTypes(kj::StringPtr events) {
+  constexpr auto IO_TYPE = " (I/O type: "_kj;
+  kj::Vector<char> result;
+  size_t i = 0;
+  while (i < events.size()) {
+    if (events.slice(i).startsWith(IO_TYPE)) {
+      // The type name can contain parentheses; it ends at the end of the event.
+      while (i < events.size() && events[i] != ',') ++i;
+      continue;
+    }
+    result.add(events[i++]);
+  }
+  result.add('\0');
+  return kj::String(result.releaseAsArray());
+}
+
 // A worker running SCENARIOS, with `rustCtx` and `gate` set and `useRust` set for RUST.
 struct ScenarioWorker {
   kj::Own<RequestRecord> record = kj::refcounted<RequestRecord>();
@@ -428,14 +447,41 @@ kj::String withTunneledLocationsNormalized(kj::StringPtr text) {
   return kj::String(result.releaseAsArray());
 }
 
-// Runs `scenario` on both implementations, checks that they are observed alike, but for where
-// JSG creates the exceptions it tunnels, and returns the outcome.
+// `text` with the addresses of each logged exception's stack trace replaced by the same
+// placeholder. An exception records the address of each KJ promise it passes through, and those of
+// C++ and Rust differ, so only whether an exception has a trace is compared; that a Rust wait keeps
+// the trace an exception had is tested in io-context-test. A trace is the rest of its line, up to
+// the " | " between exceptions.
+kj::String withStackTracesNormalized(kj::StringPtr text) {
+  constexpr auto STACK = "stack: "_kj;
+  constexpr auto SEPARATOR = " | "_kj;
+  kj::Vector<char> result(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    if (text.slice(i).startsWith(STACK) && (i == 0 || text[i - 1] == '\n')) {
+      result.addAll("stack: <addresses>"_kj);
+      i += STACK.size();
+      while (i < text.size() && text[i] != '\n' && !text.slice(i).startsWith(SEPARATOR)) ++i;
+    } else {
+      result.add(text[i++]);
+    }
+  }
+  result.add('\0');
+  return kj::String(result.releaseAsArray());
+}
+
+// `outcome` as it is compared between the implementations: but for where JSG creates the
+// exceptions it tunnels, and for the addresses of stack traces.
+kj::String comparable(const Outcome& outcome) {
+  return withStackTracesNormalized(withTunneledLocationsNormalized(outcome.toString()));
+}
+
+// Runs `scenario` on both implementations, checks that they are observed alike (see
+// `comparable()`), and returns the outcome.
 Outcome runOnBoth(kj::StringPtr scenario, Flags flags = {}) {
   auto cpp = run(scenario, Implementation::CPP, flags);
   auto rust = run(scenario, Implementation::RUST, flags);
-  KJ_EXPECT(withTunneledLocationsNormalized(cpp.toString()) ==
-          withTunneledLocationsNormalized(rust.toString()),
-      scenario, cpp.toString(), rust.toString());
+  KJ_EXPECT(comparable(cpp) == comparable(rust), scenario, cpp.toString(), rust.toString());
   return cpp;
 }
 
@@ -456,6 +502,8 @@ Outcome runCrossRequest(Implementation implementation, Flags flags) {
 Outcome runCrossRequestOnBoth(Flags flags) {
   auto cpp = runCrossRequest(Implementation::CPP, flags);
   auto rust = runCrossRequest(Implementation::RUST, flags);
+  cpp.events = withoutIoTypes(cpp.events);
+  KJ_EXPECT(!rust.events.contains(" (I/O type: "_kj), rust.events);
   KJ_EXPECT(cpp.toString() == rust.toString(), cpp.toString(), rust.toString());
   return cpp;
 }
@@ -558,6 +606,8 @@ KJ_TEST("a waitUntil() promise that can never settle fails as in C++") {
   // Once nothing else can run, the request is canceled as hung.
   KJ_EXPECT(outcome.uncaughtExceptions.contains("detected that your Worker's code had hung"),
       outcome.uncaughtExceptions);
+  // The abort is logged with its stack trace, which Rust keeps, as C++ does.
+  KJ_EXPECT(outcome.uncaughtExceptions.contains("\nstack: "), outcome.uncaughtExceptions);
 }
 
 KJ_TEST("a waitUntil() promise settled by another request fails without "
@@ -731,9 +781,8 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
 
   auto second = fixture.newIncomingRequest();
   fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
-    auto promise = jsg::check(v8::Promise::Resolver::New(env.js.v8Context()))->GetPromise();
-    KJ_EXPECT_THROW_MESSAGE("not the one of the current request",
-        io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
+    KJ_EXPECT_THROW_MESSAGE(
+        "not the one of the current request", io_context_check_current(firstId));
     KJ_EXPECT_THROW_MESSAGE(
         "not the one of the current request", io_context_set_fail_open(firstId));
     KJ_EXPECT_THROW_MESSAGE(
@@ -743,9 +792,7 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
   });
 
   inWorkerContext(fixture, [&](jsg::Lock& js) {
-    auto promise = jsg::check(v8::Promise::Resolver::New(js.v8Context()))->GetPromise();
-    KJ_EXPECT_THROW_MESSAGE("there is no current request",
-        io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
+    KJ_EXPECT_THROW_MESSAGE("there is no current request", io_context_check_current(firstId));
     KJ_EXPECT_THROW_MESSAGE("there is no current request", io_context_set_fail_open(firstId));
     KJ_EXPECT_THROW_MESSAGE(
         "there is no current request", io_context_abort_without_reason(firstId));
