@@ -16,6 +16,8 @@ use jsg_macros::jsg_resource;
 use crate::EvalContext;
 use crate::Harness;
 
+mod js_classes;
+
 #[jsg_resource]
 struct Unserializable;
 
@@ -40,19 +42,24 @@ fn assert_round_trip(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str
     let value = eval(lock, ctx, expr);
     let data = jsg::ser::serialize(lock, value).unwrap();
     assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
+    assert_read(lock, ctx, &data, check);
+}
 
-    let copy = jsg::ser::deserialize(lock, &data).unwrap();
+/// Checks that what Rust JSG and C++ JSG read from `data` satisfies `check`, a JavaScript
+/// expression of `v`.
+fn assert_read(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, data: &[u8], check: &str) {
+    let copy = jsg::ser::deserialize(lock, data).unwrap();
     ctx.set_global(lock, "v", copy);
     assert!(
         ctx.eval::<bool>(lock, check).unwrap(),
-        "{expr}: Rust JSG read: {check}"
+        "Rust JSG read: {check}"
     );
 
-    let copy = Harness::cpp_deserialize(lock, &data);
+    let copy = Harness::cpp_deserialize(lock, data);
     ctx.set_global(lock, "v", copy);
     assert!(
         ctx.eval::<bool>(lock, check).unwrap(),
-        "{expr}: C++ JSG read: {check}"
+        "C++ JSG read: {check}"
     );
 }
 
@@ -325,94 +332,6 @@ fn unserializable_values_throw_data_clone_error() {
             "DataCloneError",
             "Could not serialize object of type \"Unserializable\". This type does not support \
              serialization.",
-        );
-        Ok(())
-    });
-}
-
-#[test]
-fn classes_implemented_in_javascript_throw_data_clone_error() {
-    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
-    harness.run_in_context(|lock, ctx| {
-        // Whatever the instance's mark, and even if it is a native error.
-        let cloneable = "({ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1, \
-                         deserialize: () => {} })";
-        for (expr, mark, class) in [
-            ("new (class Point {})()", cloneable, "Point"),
-            ("new (class Opaque {})()", "0", "Opaque"),
-            (
-                "new (class TestError extends Error {})('e')",
-                cloneable,
-                "TestError",
-            ),
-        ] {
-            let value = eval(lock, ctx, expr);
-            let mark = eval(lock, ctx, mark);
-            Harness::mark_js_serializable(lock, value, mark);
-            ctx.set_global(lock, "instance", value);
-            let exception = serialize_exception(lock, ctx, "[instance]");
-            assert_error(
-                lock,
-                ctx,
-                exception,
-                "DataCloneError",
-                &format!(
-                    "Could not serialize object of type \"{class}\". This type does not support \
-                     serialization."
-                ),
-            );
-        }
-
-        // Even a DOMException, such as the bootstrap's QuotaExceededError, which would otherwise
-        // be written as a plain DOMException.
-        let prototype = eval(
-            lock,
-            ctx,
-            "Object.create((class QuotaExceededError extends Error {}).prototype)",
-        );
-        let value =
-            Harness::new_bootstrap_dom_exception(lock, prototype, "QuotaExceededError", "m", "S");
-        let mark = eval(lock, ctx, cloneable);
-        Harness::mark_js_serializable(lock, value, mark);
-        ctx.set_global(lock, "instance", value);
-        let exception = serialize_exception(lock, ctx, "[instance]");
-        assert_error(
-            lock,
-            ctx,
-            exception,
-            "DataCloneError",
-            "Could not serialize object of type \"QuotaExceededError\". This type does not \
-             support serialization.",
-        );
-
-        // A mark on an object whose prototype is Object.prototype or null is ignored, as by
-        // jsg::Serializer.
-        for (expr, check) in [
-            ("({ a: 1 })", "v.a === 1"),
-            (
-                "Object.create(null)",
-                "Object.getPrototypeOf(v) === Object.prototype",
-            ),
-        ] {
-            let value = eval(lock, ctx, expr);
-            let mark = eval(lock, ctx, "0");
-            Harness::mark_js_serializable(lock, value, mark);
-            ctx.set_global(lock, "instance", value);
-            assert_round_trip(lock, ctx, "instance", check);
-        }
-
-        // What C++ JSG writes for one: V8's tag for a host object, jsg::Serializer's tag for an
-        // instance of a class implemented in JavaScript, its length-delimited deserializeInfo, and
-        // its flags.
-        let mut data = header(lock);
-        data.extend_from_slice(b"\\\x17\x0atest:Point\x00");
-        let exception = deserialize_exception(lock, &data);
-        assert_error(
-            lock,
-            ctx,
-            exception,
-            "DataCloneError",
-            "This deserializer does not support objects implemented in JavaScript.",
         );
         Ok(())
     });

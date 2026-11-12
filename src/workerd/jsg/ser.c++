@@ -173,13 +173,6 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
   return kj::none;
 }
 
-// The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
-constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
-constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
-constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
-constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
-    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
-
 // The message of the DataCloneError that a raw read throws when the data ends too soon. Like V8's
 // own error for malformed data, it is not an internal error: corrupt or crafted bytes are not a
 // bug in the reader.
@@ -900,7 +893,7 @@ size_t Deserializer::findJsSerializableClass(Lock& js, kj::String deserializeInf
   if (!deserialize->IsFunction()) return unknownClass();
 
   if (errorPrototype == kj::none) {
-    errorPrototype = js.v8Ref(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context()));
+    errorPrototype = js.v8Ref(check(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context())));
   }
   v8::Local<v8::Value> errorProto = KJ_ASSERT_NONNULL(errorPrototype).getHandle(js);
   // The bootstrap's DOMException.prototype inherits from Error.prototype, so it is found first.
@@ -1032,11 +1025,6 @@ v8::Maybe<bool> writeApiObject(
   try {
     auto& js = Lock::from(isolate);
     Serializer serializer(js, ser, Serializer::Borrowed{});
-    // Checked first, as WriteHostObject() checks it, since such a class may make DOMExceptions.
-    // No mark is undefined (see serialization.ts).
-    auto mark =
-        check(object->GetPrivate(js.v8Context(), IsolateBase::getJsSerializeModeKey(isolate)));
-    if (!mark->IsUndefined()) serializer.throwDataCloneErrorForObject(js, object);
     serializer.writeApiObject(js, object);
     return v8::Just(true);
   } catch (JsExceptionThrown&) {
@@ -1061,6 +1049,15 @@ v8::MaybeLocal<v8::Object> readApiObject(
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return {};
   }
+}
+
+kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(
+    v8::Isolate* isolate, kj::StringPtr specifier) {
+  auto& js = Lock::from(isolate);
+  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return kj::none);
+  return modules.tryGetLoadedExports(js, specifier).map([](JsValue exports) {
+    return v8::Local<v8::Value>(exports);
+  });
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {

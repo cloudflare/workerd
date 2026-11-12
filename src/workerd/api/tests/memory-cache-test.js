@@ -602,6 +602,28 @@ export const domExceptionValues = {
   },
 };
 
+export const quotaExceededErrorValues = {
+  async test(ctrl, env) {
+    // QuotaExceededError is defined only under the TS_DOM_EXCEPTION autogate.
+    const { QuotaExceededError } = globalThis;
+    if (QuotaExceededError === undefined) return;
+    // An instance of a class implemented in JavaScript is cached as one, with its data.
+    const error = new QuotaExceededError('m', { quota: 1, requested: 2 });
+    await env.CACHE.read('quotaExceededError', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('quotaExceededError', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof QuotaExceededError);
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'QuotaExceededError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.quota, 1);
+    strictEqual(cached.requested, 2);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('quotaExceededError');
+  },
+};
+
 export const fallbackReturnsThenable = {
   async test(ctrl, env) {
     // A thenable is followed only under unwrap_custom_thenables; otherwise it is the result.

@@ -1260,11 +1260,12 @@ v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) 
       ->jsSerializeModeKey.Get(isolate);
 }
 
-v8::Local<v8::Value> IsolateBase::getErrorPrototype(
+v8::MaybeLocal<v8::Value> IsolateBase::getErrorPrototype(
     v8::Isolate* isolate, v8::Local<v8::Context> context) {
   auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  auto holder = check(self.errorPrototypeTemplate.Get(isolate)->NewInstance(context));
-  return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
+  v8::Local<v8::Object> holder;
+  if (!self.errorPrototypeTemplate.Get(isolate)->NewInstance(context).ToLocal(&holder)) return {};
+  return holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY));
 }
 
 v8::Local<v8::Private> IsolateBase::getDomExceptionBrandKey(v8::Isolate* isolate) {

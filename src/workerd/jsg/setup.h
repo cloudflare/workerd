@@ -221,8 +221,9 @@ class IsolateBase {
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
 
   // Returns the Error.prototype of `context`, found without making an error, which would capture
-  // a stack trace. Runs no JavaScript.
-  static v8::Local<v8::Value> getErrorPrototype(
+  // a stack trace. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception
+  // pending.
+  static v8::MaybeLocal<v8::Value> getErrorPrototype(
       v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   // The V8 private symbol named DOM_EXCEPTION_BRAND_KEY, the brand of the bootstrap's

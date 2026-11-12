@@ -24,9 +24,12 @@ using Isolate = v8::Isolate;
 
 struct EvalResult;
 
+class TestBootstrapModules;
+
 class EvalContext {
  public:
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
+  ~EvalContext() noexcept(false);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
   // Catches an exception with a `v8::TryCatch` and then, without resetting it, evaluates `code`,
@@ -38,9 +41,16 @@ class EvalContext {
       ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
       ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
+  // Makes `exports` the exports of the loaded bootstrap module named `specifier`, among which the
+  // deserializer looks up classes implemented in JavaScript (jsg::BootstrapModules), until the
+  // context's callback returns.
+  void set_bootstrap_module(::rust::Str specifier, ::workerd::rust::jsg::Local exports) const;
 
   v8::Isolate* v8Isolate;
   v8::Global<v8::Context> v8Context;
+
+ private:
+  mutable kj::Maybe<kj::Own<TestBootstrapModules>> bootstrapModules;
 };
 
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
@@ -115,11 +125,13 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
-// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
-// exception if serialization throws.
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
+// Serializes `value` into `result` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's.
+// Returns false if serialization throws, leaving the exception pending.
+bool cpp_serialize(
+    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result);
 // Deserializes `data` with C++ JSG's jsg::Deserializer. Returns none if deserialization throws,
-// leaving the exception pending.
+// leaving the exception pending: a KJ exception becomes a JavaScript one, as a JSG method's glue
+// makes it one.
 ::workerd::rust::jsg::MaybeLocal cpp_deserialize(
     Isolate* isolate, ::rust::Slice<const uint8_t> data);
 // Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
@@ -131,11 +143,13 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 ::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
     Isolate* isolate, ::workerd::rust::jsg::Local exception);
 
-// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which is its
-// class's descriptor if it is cloneable (see jsg::Serializer). Throws a KJ exception if it is not
-// an object.
-void mark_js_serializable(
-    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark);
+// The key of the V8 private property `name`, as the per-isolate bootstrap's
+// utils.getPrivateSymbol() gives it to JavaScript.
+::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name);
+
+// Disallows JavaScript execution, as jsg::DisallowJavaScriptScope does for JSG code, without V8's
+// own guard, or allows it again.
+void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
 
 // Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
 // error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not

@@ -14,10 +14,12 @@
 //!   `enhanced_error_serialization` compatibility flag is on.
 //! - Workerd API objects whose C++ type is serializable, such as `Blob` and `Headers`, through
 //!   their own serializers, and a `DOMException`, whichever implementation made it, as C++ JSG
-//!   writes it. Rust resources are not serializable, and neither are instances of the runtime's
-//!   classes implemented in JavaScript (which `jsg::Serializer` writes through a protocol that
-//!   runs JavaScript on deserialization), even a `DOMException` subclass such as
-//!   `QuotaExceededError`: [`serialize`] and [`deserialize`] throw `DataCloneError` for them.
+//!   writes it. Rust resources are not serializable.
+//! - Instances of the runtime's classes implemented in JavaScript that opt into the per-isolate
+//!   bootstrap's protocol for them, such as `QuotaExceededError`. [`serialize`] writes the data
+//!   that the class's `clone` function returns for an instance, and [`deserialize`] makes the
+//!   copy from the class's prototype, without calling its constructor, and passes it the data
+//!   with the class's `deserialize` function once it has read the whole value.
 //!
 //! A `SharedArrayBuffer` is written as a reference that [`deserialize`] cannot resolve. Transfer
 //! lists, externals and the `jsg::Serializer` options other than `version` are not supported.
@@ -38,7 +40,8 @@ pub struct SerializeOptions {
 ///
 /// # Errors
 ///
-/// Serialization runs JavaScript (getters and Proxy traps). If it throws, or `value` can't be
+/// Serialization runs JavaScript (getters, Proxy traps, and the `clone` functions of classes
+/// implemented in JavaScript). If it throws, or `value` can't be
 /// serialized (a `DataCloneError`), or an exception or a termination is already pending, the
 /// exception stays pending and the error is one for which [`Error::is_pending`] is true. Return
 /// it, as for [`v8::Local::<v8::Function>::call`].
@@ -79,14 +82,19 @@ pub fn serialize_with_options<'s>(
 }
 
 /// Deserializes a value that [`serialize`] or `jsg::Serializer` wrote, as `jsg::Deserializer`
-/// does with its default options. Runs no JavaScript.
+/// does with its default options.
+///
+/// Runs no JavaScript but the `deserialize` functions of the classes implemented in JavaScript
+/// whose instances the value holds, once it has read the whole value.
 ///
 /// # Errors
 ///
-/// If `data` is malformed or names an unknown API type, or a type's deserializer throws, or an
-/// exception or a termination is already pending, the exception stays pending and the error is
-/// one for which [`Error::is_pending`] is true. If the header is missing or of an unsupported
-/// version, the error is an internal one.
+/// If `data` is malformed or names an unknown API type or class, or a type's deserializer or a
+/// class's `deserialize` function throws, or an exception or a termination is already pending,
+/// the exception stays pending and the error is one for which [`Error::is_pending`] is true. So
+/// it does, as a `DataCloneError`, if the value holds an instance of a class implemented in
+/// JavaScript while C++ code has disallowed JavaScript execution (`jsg::DisallowJavaScriptScope`).
+/// If the header is missing or of an unsupported version, the error is an internal one.
 pub fn deserialize<'s>(
     lock: &mut Lock<'s>,
     data: &[u8],

@@ -84,9 +84,30 @@ kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, Fas
   });
 }
 
+// Stands in for the per-isolate bootstrap's modules, as the exports of loaded modules.
+class TestBootstrapModules final: public ::workerd::jsg::BootstrapModules {
+ public:
+  kj::Maybe<::workerd::jsg::JsValue> tryGetLoadedExports(
+      ::workerd::jsg::Lock& js, kj::StringPtr specifier) override {
+    KJ_IF_SOME(exports, modules.find(specifier)) {
+      return ::workerd::jsg::JsValue(exports.Get(js.v8Isolate));
+    }
+    return kj::none;
+  }
+
+  kj::HashMap<kj::String, v8::Global<v8::Value>> modules;
+};
+
 EvalContext::EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context)
     : v8Isolate(isolate),
       v8Context(isolate, context) {}
+
+EvalContext::~EvalContext() noexcept(false) {
+  if (bootstrapModules != kj::none) {
+    ::workerd::jsg::setAlignedPointerInEmbedderData(
+        v8Context.Get(v8Isolate), ::workerd::jsg::ContextPointerSlot::BOOTSTRAP_STATE, nullptr);
+  }
+}
 
 void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const {
   auto ctx = v8Context.Get(v8Isolate);
@@ -94,6 +115,23 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
       v8Isolate, name.data(), v8::NewStringType::kNormal, static_cast<int>(name.size())));
   auto v8Value = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value));
   ::workerd::jsg::check(ctx->Global()->Set(ctx, key, v8Value));
+}
+
+void EvalContext::set_bootstrap_module(
+    ::rust::Str specifier, ::workerd::rust::jsg::Local exports) const {
+  if (bootstrapModules == kj::none) {
+    auto& created = bootstrapModules.emplace(kj::heap<TestBootstrapModules>());
+    ::workerd::jsg::setAlignedPointerInEmbedderData(v8Context.Get(v8Isolate),
+        ::workerd::jsg::ContextPointerSlot::BOOTSTRAP_STATE,
+        static_cast<::workerd::jsg::BootstrapModules*>(created.get()));
+  }
+  auto& modules = KJ_ASSERT_NONNULL(bootstrapModules)->modules;
+  v8::Global<v8::Value> handle(
+      v8Isolate, ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(exports)));
+  modules.upsert(kj::str(specifier), kj::mv(handle),
+      [](v8::Global<v8::Value>& existing, v8::Global<v8::Value>&& replacement) {
+    existing = kj::mv(replacement);
+  });
 }
 
 namespace {
@@ -325,25 +363,36 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+bool cpp_serialize(
+    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Serializer serializer(js);
-  serializer.write(
-      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
-  ::rust::Vec<uint8_t> result;
-  for (auto byte: serializer.release().data) {
-    result.push_back(byte);
+  try {
+    ::workerd::jsg::Serializer serializer(js);
+    serializer.write(js,
+        ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+    for (auto byte: serializer.release().data) {
+      result.push_back(byte);
+    }
+    return true;
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    return false;
   }
-  return result;
 }
 
 ::workerd::rust::jsg::MaybeLocal cpp_deserialize(
     Isolate* isolate, ::rust::Slice<const uint8_t> data) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   try {
-    ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
-    v8::Local<v8::Value> result = deserializer.readValue(js);
-    return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
+    JSG_TRY(js) {
+      ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+      v8::Local<v8::Value> result = deserializer.readValue(js);
+      return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
+    }
+    JSG_CATCH(exception) {
+      // Throws a KJ exception as a JSG method's glue does, such as the DataCloneError that
+      // readValue() throws once V8's reader has returned.
+      js.throwException(kj::mv(exception));
+    }
   } catch (::workerd::jsg::JsExceptionThrown&) {
     return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   }
@@ -372,15 +421,21 @@ bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
   }
 }
 
-void mark_js_serializable(
-    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark) {
+::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(object));
-  KJ_REQUIRE(handle->IsObject());
-  auto key = v8::Private::ForApi(
-      isolate, ::workerd::jsg::v8StrIntern(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY));
-  ::workerd::jsg::check(handle.As<v8::Object>()->SetPrivate(
-      js.v8Context(), key, ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(mark))));
+  // A template's property may be a private symbol, which reading it gives as a symbol value.
+  v8::Local<v8::String> slot = js.strIntern("key"_kj);
+  auto holder = v8::ObjectTemplate::New(isolate);
+  holder->Set(slot,
+      v8::Private::ForApi(isolate, js.str(kj::ArrayPtr<const char>(name.data(), name.size()))));
+  auto context = js.v8Context();
+  v8::Local<v8::Value> key = ::workerd::jsg::check(
+      ::workerd::jsg::check(holder->NewInstance(context))->Get(context, slot));
+  return ::workerd::rust::jsg::to_ffi(kj::mv(key));
+}
+
+void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed) {
+  ::workerd::jsg::Lock::from(isolate).setDisallowJavascriptExecution(disallowed);
 }
 
 void set_error_slots(

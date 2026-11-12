@@ -608,7 +608,8 @@ bool local_serialize(Isolate* isolate,
     kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result);
 // Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
-// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
+// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript
+// but the deserialize functions of classes implemented in JavaScript, once it has read the value.
 // Throws a KJ exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(
     Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors);

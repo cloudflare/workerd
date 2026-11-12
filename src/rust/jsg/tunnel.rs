@@ -141,7 +141,8 @@ impl TunneledException {
 
     /// Converts this back to a JavaScript exception, as `jsg::Lock::exceptionToJs()` converts a
     /// `kj::Exception` with its default options. Runs no JavaScript, except in setters of
-    /// `overloaded` or `retryable` on the copy's prototype chain.
+    /// `overloaded` or `retryable` on the copy's prototype chain and in the `deserialize`
+    /// functions of the classes implemented in JavaScript whose instances the copy holds.
     ///
     /// # Errors
     ///
