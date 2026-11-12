@@ -1155,10 +1155,10 @@ KJ_TEST("destroying the IoContext drops an unsettled await_js() with its wait") 
 constexpr kj::StringPtr MEMORY_LIMIT_OUTCOME =
     "rejected: jsg.Error: Worker has exceeded memory limit."_kj;
 
-// The exception the wait of the last await_js_start() failed with, as the bridge converts it.
+// The exception the wait of the last await_js_start() failed with. Call it once per wait.
 kj::Exception awaitedJsError() {
   return KJ_ASSERT_NONNULL(
-      kj::runCatchingExceptions([]() { raise_awaited_js_error(); }), "the wait has not failed");
+      kj::runCatchingExceptions([]() { take_awaited_js_error(); }), "the wait has not failed");
 }
 
 // `exception`'s details, as "<id>: <size>" each, separated by ", ".
@@ -2029,15 +2029,25 @@ KJ_TEST("await_js() reads a rejection's stack to log it only when KJ logs at INF
 constexpr kj::Exception::DetailTypeId ABORT_DETAIL_ID = 0xab07'0000'0000'0001ull;
 
 // The exception the tests below abort a request with. Its type is not FAILED, and it has a
-// detail, so that a wait that fails with it is seen to fail with this very exception.
+// detail and a stack trace, so that a wait that fails with it is seen to fail with this very
+// exception.
 kj::Exception abortException() {
   auto e = KJ_EXCEPTION(OVERLOADED, "jsg.Error: aborted by the test");
   e.setDetail(ABORT_DETAIL_ID, kj::heapArray<kj::byte>({1, 2, 3}));
+  e.addTrace(reinterpret_cast<void*>(0xab07));
   return e;
 }
 
-// Checks that `actual` is `expected`, as the bridge carries an exception: with its type,
-// description, location and details.
+// The first address of `exception`'s stack trace, in hex, or "none".
+kj::String traceOrigin(const kj::Exception& exception) {
+  auto trace = exception.getStackTrace();
+  if (trace.size() == 0) return kj::str("none");
+  return kj::str(kj::hex(reinterpret_cast<uintptr_t>(trace[0])));
+}
+
+// Checks that `actual` is `expected`: with its type, description, location and details, and, if
+// `expected` has a stack trace, with the trace starting where it does. Each KJ promise that an
+// exception passes through adds an address to its trace, and those differ between C++ and Rust.
 void expectSameException(const kj::Exception& actual, const kj::Exception& expected) {
   KJ_EXPECT(actual.getType() == expected.getType(), actual, expected);
   KJ_EXPECT(actual.getDescription() == expected.getDescription(), actual, expected);
@@ -2045,6 +2055,10 @@ void expectSameException(const kj::Exception& actual, const kj::Exception& expec
   KJ_EXPECT(actual.getLine() == expected.getLine(), actual, expected);
   KJ_EXPECT(describeDetails(actual) == describeDetails(expected), describeDetails(actual),
       describeDetails(expected));
+  if (expected.getStackTrace().size() > 0) {
+    KJ_EXPECT(
+        traceOrigin(actual) == traceOrigin(expected), traceOrigin(actual), traceOrigin(expected));
+  }
 }
 
 // The number of await_js() abort watchers alive on this thread.

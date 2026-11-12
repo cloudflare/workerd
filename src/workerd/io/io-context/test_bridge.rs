@@ -191,7 +191,7 @@ mod ffi {
         fn awaited_js_outcome() -> String;
         fn awaited_js_map_runs() -> u32;
         fn awaited_js_detail_ids() -> Vec<u64>;
-        fn raise_awaited_js_error() -> Result<()>;
+        fn take_awaited_js_error() -> Result<()>;
         fn poll_held_awaited_js() -> bool;
         unsafe fn log_uncaught_exception(
             isolate: usize,
@@ -838,7 +838,7 @@ static AWAITED_JS_OUTCOME: Mutex<String> = Mutex::new(String::new());
 /// How many times the conversion of the last `await_js_start()` ran.
 static AWAITED_JS_MAP_RUNS: AtomicU32 = AtomicU32::new(0);
 /// The exception the wait of the last `await_js_start()` failed with, if it failed.
-static AWAITED_JS_ERROR: Mutex<Option<cxx::KjError>> = Mutex::new(None);
+static AWAITED_JS_ERROR: Mutex<Option<cxx::KjException>> = Mutex::new(None);
 /// What cancels the wait of the last `await_js_start(Cancellable)`.
 static AWAITED_JS_CANCEL: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 /// The wait of the last `await_js_start(Held)`, until `poll_held_awaited_js()` finds it ended.
@@ -851,11 +851,11 @@ fn set_awaited_js_outcome(outcome: String) {
 }
 
 /// Records the exception the wait failed with, if it did, and returns how the wait ended.
-fn record_awaited_js(result: std::result::Result<f64, cxx::KjError>) -> String {
+fn record_awaited_js(result: std::result::Result<f64, cxx::KjException>) -> String {
     match result {
         Ok(value) => format!("fulfilled: {value}"),
         Err(err) => {
-            let outcome = format!("rejected: {}", err.description());
+            let outcome = format!("rejected: {}", err.what());
             *AWAITED_JS_ERROR
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner) = Some(err);
@@ -1052,18 +1052,18 @@ fn awaited_js_detail_ids() -> Vec<u64> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .and_then(cxx::KjError::details)
+        .and_then(cxx::KjException::details)
         .map(|details| details.iter().map(|(id, _)| *id).collect())
         .unwrap_or_default()
 }
 
-/// Fails with the exception the wait of the last `await_js_start()` failed with, which C++
-/// receives with its type, description, location and details, or succeeds if it has not failed.
-fn raise_awaited_js_error() -> std::result::Result<(), cxx::KjError> {
+/// Takes the exception the wait of the last `await_js_start()` failed with and fails with it,
+/// which C++ receives as that exception, or succeeds if it has not failed.
+fn take_awaited_js_error() -> std::result::Result<(), cxx::KjException> {
     AWAITED_JS_ERROR
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .clone()
+        .take()
         .map_or(Ok(()), Err)
 }
 

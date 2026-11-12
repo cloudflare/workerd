@@ -75,26 +75,23 @@ pub mod bridge {
 
         type IoOwnedObject;
         type IsolateWeakRef;
-        type AbortException;
         type AbortWatcher;
 
         fn io_context_no_request_message() -> &'static str;
         // TODO(soon): Define this message in Rust once C++ `IoContext::awaitJs()` is gone.
         fn io_context_never_settled_message() -> &'static str;
-        // Always fails, with C++ `IoContext::memoryLimitException()`.
-        fn io_context_throw_memory_limit_exception() -> Result<()>;
+        fn io_context_memory_limit_exception() -> KjException;
         fn io_context_isolate_weak_ref(id: u64) -> Result<KjOwn<IsolateWeakRef>>;
         fn isolate_weak_ref_has_excessively_exceeded_heap_limit(
             isolate: &IsolateWeakRef,
         ) -> Result<bool>;
         fn io_context_make_await_js_resource(id: u64) -> Result<KjMaybe<KjOwn<AsyncResource>>>;
-        // Always fails, with `exception`'s exception.
-        fn abort_exception_raise(exception: &AbortException) -> Result<()>;
         fn io_context_watch_abort(
             id: u64,
             callback: Box<AbortCallback>,
         ) -> Result<KjOwn<AbortWatcher>>;
-        fn abort_watcher_raise_pending_abort(watcher: &AbortWatcher) -> Result<()>;
+        fn abort_watcher_has_pending_abort(watcher: &AbortWatcher) -> bool;
+        fn abort_watcher_pending_abort(watcher: &AbortWatcher) -> Result<KjException>;
         fn io_context_try_current_id() -> KjMaybe<u64>;
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
@@ -202,7 +199,7 @@ pub mod bridge {
         /// What an `AbortWatcher` calls with the exception its `IoContext` was aborted with, on
         /// the `IoContext`'s thread, without the isolate lock and with no `IoContext` current.
         type AbortCallback;
-        fn aborted(self: &AbortCallback, exception: &AbortException);
+        fn aborted(self: &AbortCallback, exception: KjException);
 
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
         unsafe fn io_callback_run(
@@ -238,42 +235,30 @@ unsafe impl Send for bridge::AsyncResource {}
 // it, which requires the `IoContext` to be current.
 unsafe impl Send for bridge::AbortWatcher {}
 
-/// The exception `exception` carries, with its type, description, location and details, which
-/// the bridge's conversion of a thrown `kj::Exception` keeps.
-fn abort_exception(exception: &bridge::AbortException) -> cxx::KjError {
-    match bridge::abort_exception_raise(exception) {
-        Err(exception) => exception.into(),
-        Ok(()) => unreachable!("abort_exception_raise() always throws"),
+/// The exception `watcher`'s request was aborted with, if it was aborted after the watcher
+/// started; see `abort_watcher_has_pending_abort()`.
+pub fn pending_abort(watcher: &bridge::AbortWatcher) -> Option<cxx::KjException> {
+    if !bridge::abort_watcher_has_pending_abort(watcher) {
+        return None;
     }
-}
-
-/// The exception `watcher`'s request was aborted with, if it was aborted after the watcher started;
-/// see `abort_watcher_raise_pending_abort()`. It is converted as `abort_exception()`'s is.
-pub fn pending_abort(watcher: &bridge::AbortWatcher) -> Option<cxx::KjError> {
-    bridge::abort_watcher_raise_pending_abort(watcher)
-        .err()
-        .map(Into::into)
+    // It was just found, so this does not fail. This runs when a sender is dropped, which must
+    // not panic.
+    bridge::abort_watcher_pending_abort(watcher).ok()
 }
 
 /// See `bridge::AbortCallback`. The function must not panic, since the call comes from C++, and must
 /// not drop the `AbortWatcher` that runs it.
-pub struct AbortCallback(pub Box<dyn Fn(cxx::KjError) + Send>);
+pub struct AbortCallback(pub Box<dyn Fn(cxx::KjException) + Send>);
 
 impl AbortCallback {
-    fn aborted(&self, exception: &bridge::AbortException) {
-        (self.0)(abort_exception(exception));
+    fn aborted(&self, exception: cxx::KjException) {
+        (self.0)(exception);
     }
 }
 
-/// The exception that `io_context_throw_memory_limit_exception()` throws: C++
-/// `IoContext::memoryLimitException()`, with its type, description, location and details. C++
-/// thus defines the whole exception once, for itself and for Rust, which receives it through the
-/// bridge's conversion of a thrown `kj::Exception`.
-pub fn memory_limit_exception() -> cxx::KjError {
-    match bridge::io_context_throw_memory_limit_exception() {
-        Err(exception) => exception.into(),
-        Ok(()) => unreachable!("io_context_throw_memory_limit_exception() always throws"),
-    }
+/// C++ `IoContext::memoryLimitException()`, which C++ thus defines once, for itself and for Rust.
+pub fn memory_limit_exception() -> cxx::KjException {
+    bridge::io_context_memory_limit_exception()
 }
 
 /// `io_context_add_wait_until()`, failing with [`jsg::Error::pending`] if it left an exception

@@ -66,8 +66,8 @@ void setTag(Span& span, Literal key, Value value) {
   return IoContext::NEVER_SETTLED_MESSAGE.cStr();
 }
 
-void io_context_throw_memory_limit_exception() {
-  kj::throwFatalException(IoContext::memoryLimitException());
+kj::Exception io_context_memory_limit_exception() {
+  return IoContext::memoryLimitException();
 }
 
 kj::Own<IsolateWeakRef> io_context_isolate_weak_ref(uint64_t id) {
@@ -92,10 +92,6 @@ kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id)
   return kj::heap(kj::mv(resource));
 }
 
-void abort_exception_raise(const AbortException& exception) {
-  kj::throwFatalException(exception.exception.clone());
-}
-
 namespace {
 
 // AbortWatchers are created and destroyed only on the thread of the IoContext they watch.
@@ -110,7 +106,7 @@ AbortWatcher::AbortWatcher(IoContext& context, ::rust::Box<AbortCallback> callba
       // settles Rust's state and wakes its future, so it runs no JavaScript and needs no lock.
       watch(context.onAbort()
                 .catch_([callback = kj::mv(callback)](
-                            kj::Exception&& e) { callback->aborted(AbortException{kj::mv(e)}); })
+                            kj::Exception&& e) { callback->aborted(kj::mv(e)); })
                 .eagerlyEvaluate(nullptr)) {
   ++abortWatcherCount;
 }
@@ -126,10 +122,12 @@ kj::Maybe<kj::Exception> AbortWatcher::abortedSinceStart() const {
   return context.getAbortReason();
 }
 
-void abort_watcher_raise_pending_abort(const AbortWatcher& watcher) {
-  KJ_IF_SOME(exception, watcher.abortedSinceStart()) {
-    kj::throwFatalException(kj::mv(exception));
-  }
+bool abort_watcher_has_pending_abort(const AbortWatcher& watcher) {
+  return watcher.abortedSinceStart() != kj::none;
+}
+
+kj::Exception abort_watcher_pending_abort(const AbortWatcher& watcher) {
+  return KJ_REQUIRE_NONNULL(watcher.abortedSinceStart(), "the IoContext was not aborted since");
 }
 
 kj::Own<AbortWatcher> io_context_watch_abort(uint64_t id, ::rust::Box<AbortCallback> callback) {

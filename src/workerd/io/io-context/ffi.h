@@ -24,9 +24,8 @@ namespace workerd::io_context {
 // promise.
 ::rust::Str io_context_never_settled_message();
 
-// Throws IoContext::memoryLimitException(), which Rust receives as the error it fails with, with
-// the exception's type, description, location and details.
-void io_context_throw_memory_limit_exception();
+// IoContext::memoryLimitException().
+kj::Exception io_context_memory_limit_exception();
 
 // A weak reference to the Worker::Isolate of an IoContext, from Worker::Isolate::getWeakRef(), as
 // IoContext::awaitJs() takes one. It may outlive the isolate, and may be used and destroyed on
@@ -56,15 +55,6 @@ bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& 
 // thread other than its own (see AsyncTracker).
 kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id);
 
-// The exception an IoContext was aborted with, as IoContext::onAbort() rejects with it.
-struct AbortException {
-  kj::Exception exception;
-};
-
-// Throws `exception`, which Rust receives as the error it fails with, with the exception's type,
-// description, location and details.
-void abort_exception_raise(const AbortException& exception);
-
 // Rust type, defined in ffi.rs.
 struct AbortCallback;
 
@@ -81,7 +71,7 @@ class AbortWatcher final {
   KJ_DISALLOW_COPY_AND_MOVE(AbortWatcher);
 
   // The exception the IoContext was aborted with, if it was aborted after the watcher started.
-  // See abort_watcher_raise_pending_abort().
+  // See abort_watcher_has_pending_abort().
   kj::Maybe<kj::Exception> abortedSinceStart() const;
 
  private:
@@ -90,14 +80,18 @@ class AbortWatcher final {
   kj::Promise<void> watch;
 };
 
-// Throws the exception the watcher's IoContext was aborted with, if it was aborted after the
-// watcher started, whether or not the watcher has called its callback yet. In C++, such an abort
+// Whether the watcher's IoContext was aborted after the watcher started, whether or not the watcher
+// has called its callback yet. In C++, such an abort
 // wins the exclusiveJoin() in IoContext::awaitJsImpl() over a JavaScript promise that settles
 // later, even in the same turn: the abort's events are armed depth-first before the settling's
 // are. If the IoContext was aborted before the watcher started, onAbort() returns a broken promise,
 // whose event is armed breadth-first, so a promise that settles in the same turn wins instead, as
 // a Rust reaction that runs before the watcher's callback does. Call it on the IoContext's thread.
-void abort_watcher_raise_pending_abort(const AbortWatcher& watcher);
+bool abort_watcher_has_pending_abort(const AbortWatcher& watcher);
+
+// The exception the watcher's IoContext was aborted with, which abort_watcher_has_pending_abort()
+// must have found. Call it on the IoContext's thread.
+kj::Exception abort_watcher_pending_abort(const AbortWatcher& watcher);
 
 // Starts an AbortWatcher in the IoContext that `id` identifies. If the IoContext was already
 // aborted, `callback` is called in a later turn, as onAbort() then returns a rejected promise.

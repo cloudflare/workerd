@@ -252,6 +252,9 @@ impl<'s> IoContext<'s> {
     /// under the isolate lock. It is `Copy`, so that what it captures holds no GC references, and
     /// `Send`, as the reactions' data must be.
     ///
+    /// The future fails with a [`cxx::KjException`], the `kj::Exception` C++ fails with, so that
+    /// an exception that C++ created, such as the abort's, reaches C++ as it is.
+    ///
     /// The future fails with the promise's rejection, or with what `map` throws, as C++ fails
     /// with what `func` throws: what JavaScript threw in `map`, or the exception that throwing
     /// `map`'s own error would throw ([`jsg::Lock::throw_exception`]), as C++ converts a KJ
@@ -272,8 +275,8 @@ impl<'s> IoContext<'s> {
     /// that marks an out-of-memory outcome.
     ///
     /// As in C++, the wait is joined with the request's abort: if this `IoContext` is aborted
-    /// before the wait settles, the future fails with the exception it was aborted with, with its
-    /// type, description, location and details. The abort wins over a promise that settles later
+    /// before the wait settles, the future fails with the exception it was aborted with, as C++
+    /// recorded it, stack trace included. The abort wins over a promise that settles later
     /// in the same turn, though `map` then still runs. In a request that was already aborted when
     /// the wait started, the future fails in a later turn, unless the promise settles first.
     /// Once the abort has failed the wait, the promise's fulfillment runs no `map`, its rejection
@@ -659,7 +662,7 @@ enum AwaitJsState<T> {
     /// The promise was fulfilled with this value, converted.
     Fulfilled(T),
     /// The promise was rejected, converting its value failed, or the request was aborted first.
-    Rejected(cxx::KjError),
+    Rejected(cxx::KjException),
     /// The sender was dropped without settling the wait.
     NeverSettled,
     /// The sender was dropped without settling the wait while the isolate had excessively
@@ -815,7 +818,7 @@ pub struct AwaitJs<T> {
 }
 
 impl<T> Future for AwaitJs<T> {
-    type Output = Result<T, cxx::KjError>;
+    type Output = Result<T, cxx::KjException>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let state = {
@@ -839,7 +842,8 @@ impl<T> Future for AwaitJs<T> {
             AwaitJsState::NeverSettled => Poll::Ready(Err(cxx::KjError::new(
                 cxx::KjExceptionType::Failed,
                 format!("jsg.Error: {}", bridge::io_context_never_settled_message()),
-            ))),
+            )
+            .into())),
             AwaitJsState::MemoryLimitExceeded => Poll::Ready(Err(ffi::memory_limit_exception())),
             AwaitJsState::Cancelled | AwaitJsState::Done => {
                 unreachable!("an AwaitJs polled after it returned its outcome")
@@ -931,13 +935,13 @@ fn await_js_on_rejected<'a, T, M>(
 fn reject_with_js_exception<'a>(
     lock: &mut jsg::Lock<'a>,
     exception: v8::Local<'a, v8::Value>,
-) -> jsg::Result<cxx::KjError> {
+) -> jsg::Result<cxx::KjException> {
     IoContext::current(lock)?.log_uncaught_exception(
         lock,
         UncaughtExceptionSource::InternalAsync,
         exception,
     )?;
-    lock.exception_to_kj(exception)
+    Ok(lock.exception_to_kj(exception)?.into())
 }
 
 /// A value an `IoContext` owns, from [`IoContext::add_object`].
