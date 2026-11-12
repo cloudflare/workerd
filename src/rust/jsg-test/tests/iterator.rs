@@ -114,7 +114,7 @@ struct NextAttribute {
 #[jsg_resource]
 struct Attributes {
     /// `[name, value]` pairs.
-    attributes: Vec<Vec<String>>,
+    pairs: Vec<Vec<String>>,
     cursor: Cell<usize>,
     invalidated: Cell<bool>,
 }
@@ -129,7 +129,7 @@ impl Attributes {
             ));
         }
         let cursor = self.cursor.get();
-        let Some(pair) = self.attributes.get(cursor) else {
+        let Some(pair) = self.pairs.get(cursor) else {
             return Ok(NextAttribute {
                 done: true,
                 value: None,
@@ -157,7 +157,7 @@ fn attributes(lock: &mut jsg::Lock) -> jsg::Rc<Attributes> {
     jsg::Rc::new(
         lock,
         Attributes {
-            attributes: vec![
+            pairs: vec![
                 vec!["class".to_owned(), "a b".to_owned()],
                 vec!["id".to_owned(), "x".to_owned()],
                 vec!["href".to_owned(), "/".to_owned()],
