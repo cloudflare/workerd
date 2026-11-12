@@ -1312,6 +1312,165 @@ KJ_TEST("WritableStreamNativeSink close waits for the actor output gate") {
       kActorErrorsToIgnore);
 }
 
+KJ_TEST("JsWritableStream flush TS arm waits for the actor output gate") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-flush-gate");
+  SinkState state;
+  // Observed by continuations that run after the runInIoContext body has returned, so it
+  // must live at test scope.
+  kj::Pin<bool> flushed{};  // Value-initialized to false.
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& actor = env.context.getActorOrThrow();
+
+    // Nothing is queued on the stream, so only the gate can hold the flush back.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto stream = JsWritableStream::create(env.js, env.context, state.makeSink(), kj::none);
+    stream.forceFlush(env.js)
+        .then(env.js, [flushed = flushed.addWeak()](jsg::Lock& js) {
+      KJ_REQUIRE_NONNULL(flushed.tryGet(), "test state destroyed") = true;
+    }).markAsHandled(env.js);
+
+    co_await settleTurns(20);
+    KJ_EXPECT(!*flushed, "flush must not resolve while gated");
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(*flushed);
+  }),
+      kActorErrorsToIgnore);
+}
+
+KJ_TEST("JsWritableStream flush TS arm waits for an output lock taken after a write started") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-flush-gate-in-flight");
+  kj::Vector<kj::byte> written;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> sinkGate;
+  kj::Pin<bool> flushed{};  // Value-initialized to false.
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // `env` refers to the caller's frame, which is gone once the body first suspends.
+    auto& context = env.context;
+    auto& actor = context.getActorOrThrow();
+
+    auto stream =
+        JsWritableStream::create(env.js, context, kj::heap<GatedSink>(written, sinkGate), kj::none);
+    stream.writeForTest(env.js, jsg::JsValue(jsg::JsUint8Array::create(env.js, "hi"_kjb)))
+        .markAsHandled(env.js);
+    // The write passes the open gate and parks in the sink.
+    co_await settleTurns(20);
+    KJ_ASSERT(written.asPtr() == "hi"_kjb);
+
+    // The write consulted the gate before this lock was taken, so completing it must not
+    // release the flush queued behind it: the flush waits on the lock itself.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    // The isolate lock is not held across the co_await above; re-enter the isolate.
+    co_await context.run([&stream, flushed = flushed.addWeak()](Worker::Lock& lock) mutable {
+      jsg::Lock& js = lock;
+      stream.forceFlush(js)
+          .then(js, [flushed = kj::mv(flushed)](jsg::Lock& js) {
+        KJ_REQUIRE_NONNULL(flushed.tryGet(), "test state destroyed") = true;
+      }).markAsHandled(js);
+    });
+    KJ_ASSERT_NONNULL(sinkGate)->fulfill();
+
+    co_await settleTurns(20);
+    KJ_EXPECT(!*flushed, "flush must not resolve while gated");
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(*flushed);
+  }),
+      kActorErrorsToIgnore);
+}
+
+// What the output-gate flush tests below observe from continuations that run after the
+// runInIoContext body has returned.
+struct FlushObservations {
+  kj::Maybe<kj::String> flushOutcome;
+  kj::Maybe<kj::String> writeOutcome;
+};
+
+// Records how `promise` settles into `outcome`, through a weak reference to the test state.
+void recordOutcome(jsg::Lock& js,
+    jsg::Promise<void> promise,
+    kj::Weak<FlushObservations> observations,
+    kj::Maybe<kj::String> FlushObservations::*outcome) {
+  promise
+      .then(js, [observations, outcome](jsg::Lock& js) {
+    KJ_REQUIRE_NONNULL(observations.tryGet(), "test state destroyed").*outcome =
+        kj::str("fulfilled");
+  }, [observations, outcome](jsg::Lock& js, jsg::Value error) {
+    KJ_REQUIRE_NONNULL(observations.tryGet(), "test state destroyed").*outcome =
+        kj::str(jsg::JsValue(error.getHandle(js)));
+  }).markAsHandled(js);
+}
+
+KJ_TEST("JsWritableStream flush TS arm holds back writes queued behind it until it resolves") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-flush-gate-holds-writes");
+  SinkState state;
+  kj::Pin<FlushObservations> observations;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto& actor = env.context.getActorOrThrow();
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto flushPromise = stream.forceFlush(js);
+    // A write queued behind the flush, as when a Socket is written to after startTls().
+    recordOutcome(js,
+        stream.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, "late"_kjb))),
+        observations.addWeak(), &FlushObservations::writeOutcome);
+    // Like startTls(), detach once the flush resolves, which must cancel the later write
+    // before it reaches the sink.
+    recordOutcome(js, flushPromise.then(js,
+            JSG_VISITABLE_LAMBDA(
+                (stream = kj::mv(stream)), (stream), (jsg::Lock & js) mutable { stream.detach(js); })),
+        observations.addWeak(), &FlushObservations::flushOutcome);
+
+    co_await settleTurns(20);
+    KJ_EXPECT(observations->flushOutcome == kj::none, "flush must not resolve while gated");
+
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observations->flushOutcome) == "fulfilled");
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observations->writeOutcome) == "Error: Network connection lost.");
+    KJ_EXPECT(state.written.size() == 0, "the write behind the flush must not reach the sink");
+  }),
+      kActorErrorsToIgnore);
+}
+
+KJ_TEST("JsWritableStream flush TS arm rejects with the reason of an abort during the gate wait") {
+  auto fixture = makeTsStreamsActorFixture("test-actor-ts-flush-gate-abort");
+  SinkState state;
+  kj::Pin<FlushObservations> observations;
+  fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                             [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto& actor = env.context.getActorOrThrow();
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+    auto stream = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    recordOutcome(
+        js, stream.forceFlush(js), observations.addWeak(), &FlushObservations::flushOutcome);
+    stream.forceAbort(js, js.error("boom")).markAsHandled(js);
+
+    // The abort rejects the flush at once, without waiting for the gate.
+    co_await settleTurns(20);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observations->flushOutcome) == "Error: boom");
+
+    // The gate wait's settlement is then ignored.
+    paf.fulfiller->fulfill();
+    co_await settleTurns(20);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(observations->flushOutcome) == "Error: boom");
+    KJ_EXPECT(state.aborted);
+  }),
+      kActorErrorsToIgnore);
+}
+
 KJ_TEST("JsReadableStream pipeTo native+native rejects a close-queued destination") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;

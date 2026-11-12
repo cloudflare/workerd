@@ -358,6 +358,21 @@ class WritableStreamNativeSink final: public jsg::Object {
   // is defensive), the release is deferred to the write's settlement.
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
+  // The flush extension hook, called by the TS controller when a flush marker reaches the
+  // head of its queue, so every write ahead of the marker has completed. In a Durable
+  // Object, returns a promise that resolves once the output locks then pending are
+  // released; the controller holds back everything queued behind the marker until then.
+  // This is the legacy Flush event's output-lock wait, except that the legacy event records
+  // its lock when the flush is called: waiting from the head also covers every lock that
+  // was pending at the call. Returns undefined outside an actor, where there is nothing to
+  // wait for.
+  //
+  // Callers act on the connection directly once the flush resolves (for example,
+  // Socket::startTls() detaches the stream and starts the handshake), so the flush must not
+  // resolve while an output lock is pending, and a write queued behind it must not reach
+  // the sink first.
+  jsg::Optional<jsg::Promise<void>> flush(jsg::Lock& js);
+
   // The native+native pipe fast path, called by the TS pipeTo dispatch when both ends
   // carry extraction markers, no prevent* option is set, both endpoints are in their
   // normal flowing states, and no write or close is queued or in flight on the destination
@@ -388,6 +403,7 @@ class WritableStreamNativeSink final: public jsg::Object {
     JSG_METHOD(write);
     JSG_METHOD(close);
     JSG_METHOD(abort);
+    JSG_METHOD(flush);
     JSG_METHOD(pipeFrom);
     JSG_METHOD(detach);
 
