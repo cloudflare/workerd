@@ -20,9 +20,8 @@ namespace workerd::io_context {
 // The message of the error IoContext::current() throws outside a request.
 ::rust::Str io_context_no_request_message();
 
-// The message of the Error with which IoContext::awaitJs() fails if JavaScript never settles the
-// promise.
-::rust::Str io_context_never_settled_message();
+// IoContext::neverSettledException().
+kj::Exception io_context_never_settled_exception();
 
 // IoContext::memoryLimitException().
 kj::Exception io_context_memory_limit_exception();
@@ -119,6 +118,7 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
 struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
+struct WaitUntilFuture;
 
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and
@@ -185,12 +185,9 @@ void io_context_abort(uint64_t id, kj::Exception reason);
 // reason. Does not terminate execution.
 void io_context_abort_without_reason(uint64_t id);
 
-// The call below uses C++ JSG, as a reviewed exception; see "C++ JSG" in ffi.c++. It takes a
-// handle in the scope of the caller's lock, and returns false if JavaScript threw, leaving the
-// exception pending, which Rust turns into a jsg::Error for which is_pending() is true.
-
-// IoContext::addWaitUntil(IoContext::awaitJs(promise)), for ctx.waitUntil().
-bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise);
+// IoContext::addWaitUntil() for `future`, the Rust await_js() of the promise ctx.waitUntil() was
+// given.
+void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future);
 
 // Logs `message` as an error, as KJ_LOG(ERROR) does.
 void io_context_log_error(::rust::Str message);

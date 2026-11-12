@@ -612,13 +612,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       "operation within a handler. "
       "https://developers.cloudflare.com/workers/runtime-apis/handlers/"_kj;
 
-  // The message of the Error with which awaitJs() fails if JavaScript never settles the promise.
-  static constexpr kj::StringPtr NEVER_SETTLED_MESSAGE = "Promise will never complete."_kj;
+  // The exception with which awaitJs() fails if JavaScript never settles the promise: a FAILED
+  // Error whose message is "Promise will never complete.".
+  static kj::Exception neverSettledException();
 
   // The message of memoryLimitException().
   static constexpr kj::StringPtr MEMORY_LIMIT_MESSAGE = "Worker has exceeded memory limit."_kj;
 
-  // The exception with which awaitJs() fails, rather than with NEVER_SETTLED_MESSAGE, if
+  // The exception with which awaitJs() fails, rather than with neverSettledException(), if
   // JavaScript never settles the promise while the isolate has excessively exceeded its heap
   // limit: an OVERLOADED Error with MEMORY_LIMIT_MESSAGE, carrying MEMORY_LIMIT_DETAIL_ID, which
   // marks it as an out-of-memory outcome.
@@ -2136,7 +2137,7 @@ class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
     } else {
       // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
       // this promise.
-      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, NEVER_SETTLED_MESSAGE));
+      fulfiller->reject(neverSettledException());
     }
   }
 };

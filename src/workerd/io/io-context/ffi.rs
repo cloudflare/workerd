@@ -7,7 +7,7 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, the waitUntil and inspector calls take V8 handles, the trace span calls \
+              set up, the inspector call takes V8 handles, the trace span calls \
               take literals that C++ does not copy, and IsolateWeakRef, AsyncResource and \
               AbortWatcher are declared Send"
 )]
@@ -78,8 +78,7 @@ pub mod bridge {
         type AbortWatcher;
 
         fn io_context_no_request_message() -> &'static str;
-        // TODO(soon): Define this message in Rust once C++ `IoContext::awaitJs()` is gone.
-        fn io_context_never_settled_message() -> &'static str;
+        fn io_context_never_settled_exception() -> KjException;
         fn io_context_memory_limit_exception() -> KjException;
         fn io_context_isolate_weak_ref(id: u64) -> Result<KjOwn<IsolateWeakRef>>;
         fn isolate_weak_ref_has_excessively_exceeded_heap_limit(
@@ -104,9 +103,7 @@ pub mod bridge {
         fn io_context_add_object(id: u64, slot: Box<IoOwnedSlot>) -> Result<KjOwn<IoOwnedObject>>;
         fn io_context_set_fail_open(id: u64) -> Result<()>;
 
-        // Returns false when it leaves a JavaScript exception pending. The handle belongs to the
-        // scope of the caller's lock.
-        unsafe fn io_context_add_wait_until(id: u64, promise: Local) -> Result<bool>;
+        fn io_context_add_wait_until(id: u64, future: Box<WaitUntilFuture>) -> Result<()>;
 
         fn io_context_check_current(id: u64) -> Result<()>;
         fn io_context_abort(id: u64, reason: KjException) -> Result<()>;
@@ -201,7 +198,10 @@ pub mod bridge {
         type AbortCallback;
         fn aborted(self: &AbortCallback, exception: KjException);
 
+        type WaitUntilFuture;
+
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
+        async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<()>;
         unsafe fn io_callback_run(
             isolate: usize,
             callback: Box<IoCallback>,
@@ -256,21 +256,14 @@ impl AbortCallback {
     }
 }
 
+/// C++ `IoContext::neverSettledException()`, which C++ thus defines once, for itself and for Rust.
+pub fn never_settled_exception() -> cxx::KjException {
+    bridge::io_context_never_settled_exception()
+}
+
 /// C++ `IoContext::memoryLimitException()`, which C++ thus defines once, for itself and for Rust.
 pub fn memory_limit_exception() -> cxx::KjException {
     bridge::io_context_memory_limit_exception()
-}
-
-/// `io_context_add_wait_until()`, failing with [`jsg::Error::pending`] if it left an exception
-/// pending.
-pub fn add_wait_until<'s>(
-    _lock: &mut jsg::Lock<'s>,
-    id: u64,
-    promise: v8::Local<'s, v8::Promise>,
-) -> jsg::Result<()> {
-    // SAFETY: the handle belongs to the scope of `lock`, which is open throughout the call.
-    let added = unsafe { bridge::io_context_add_wait_until(id, promise.into_ffi()) }?;
-    pending_unless(added)
 }
 
 /// `io_context_send_exception_to_inspector()`, failing with [`jsg::Error::pending`] if the
@@ -319,6 +312,10 @@ fn pending_unless(succeeded: bool) -> jsg::Result<()> {
 /// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.
 pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>);
 
+/// The future that `io_context_add_wait_until()` waits for as a waitUntil task: an
+/// [`AwaitJs`](crate::AwaitJs) whose value is discarded.
+pub struct WaitUntilFuture(pub Pin<Box<dyn Future<Output = Result<(), cxx::KjException>> + Send>>);
+
 /// The output of an [`IoFuture`].
 pub struct IoOutput(Box<dyn Any + Send>);
 
@@ -346,12 +343,12 @@ pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn
 /// rather than unwinding into the KJ event loop, which would abort the process. A panic while
 /// dropping it, when the wait is cancelled, is logged.
 async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjError> {
-    let mut future = CatchDropPanic(Some(*future));
+    let mut future = CatchDropPanic(Some(future.0));
     std::future::poll_fn(move |cx| {
         let Some(inner) = future.0.as_mut() else {
             unreachable!("dropped only with the wait")
         };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.0.as_mut().poll(cx))) {
+        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
             Ok(poll) => poll.map(|output| Ok(Box::new(IoOutput(output)))),
             Err(payload) => Poll::Ready(Err(cxx::KjError::new(
                 cxx::KjExceptionType::Failed,
@@ -365,11 +362,35 @@ async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjE
     .await
 }
 
-/// Holds the future of an `io_future_wait()`, which kj-rs drops through an `extern "C"` function,
-/// where a panic would abort the process.
-struct CatchDropPanic(Option<IoFuture>);
+/// Waits for `future` as a waitUntil task. A panic while polling it fails the task, and a panic
+/// while dropping it is logged, as in `io_future_wait()`. The task fails with the future's
+/// exception as it is.
+async fn wait_until_future_wait(future: Box<WaitUntilFuture>) -> Result<(), cxx::KjException> {
+    let mut future = CatchDropPanic(Some(future.0));
+    std::future::poll_fn(move |cx| {
+        let Some(inner) = future.0.as_mut() else {
+            unreachable!("dropped only with the wait")
+        };
+        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
+            Ok(poll) => poll,
+            Err(payload) => Poll::Ready(Err(cxx::KjError::new(
+                cxx::KjExceptionType::Failed,
+                format!(
+                    "the future of a waitUntil task panicked: {}",
+                    panic_message(&*payload)
+                ),
+            )
+            .into())),
+        }
+    })
+    .await
+}
 
-impl Drop for CatchDropPanic {
+/// Holds the future of an `io_future_wait()` or `wait_until_future_wait()`, which kj-rs drops
+/// through an `extern "C"` function, where a panic would abort the process.
+struct CatchDropPanic<F>(Option<F>);
+
+impl<F> Drop for CatchDropPanic<F> {
     fn drop(&mut self) {
         let future = self.0.take();
         if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(future))) {

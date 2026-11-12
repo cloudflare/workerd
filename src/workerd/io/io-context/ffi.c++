@@ -62,8 +62,8 @@ void setTag(Span& span, Literal key, Value value) {
   return IoContext::NO_REQUEST_MESSAGE.cStr();
 }
 
-::rust::Str io_context_never_settled_message() {
-  return IoContext::NEVER_SETTLED_MESSAGE.cStr();
+kj::Exception io_context_never_settled_exception() {
+  return IoContext::neverSettledException();
 }
 
 kj::Exception io_context_memory_limit_exception() {
@@ -188,6 +188,14 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
   }
 }
 
+void io_context_add_wait_until(uint64_t id, ::rust::Box<WaitUntilFuture> future) {
+  currentWithId(id).addWaitUntil(wait_until_future_wait(kj::mv(future)));
+}
+
+// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This
+// function is the reviewed exception: it throws JsExceptionThrown, which is how IoContext::run()
+// learns of an exception the callback left pending in V8. That use is counted in
+// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within this function.
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
@@ -201,7 +209,7 @@ void io_context_await_io_and_run(
       case IoCallbackOutcome::Failed:
         // The exception, or termination, is pending in V8. JsExceptionThrown is how
         // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
-        // stack, and fails the task with it, as for C++ code it runs. See "C++ JSG" below.
+        // stack, and fails the task with it, as for C++ code it runs.
         throw jsg::JsExceptionThrown();
       case IoCallbackOutcome::Panicked:
         // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
@@ -383,38 +391,6 @@ bool io_context_send_exception_to_inspector(uint64_t id,
     return false;
   }
   return true;
-}
-
-// C++ JSG
-//
-// Rust JSG's shims don't use C++ JSG (src/rust/jsg/README.md, "Safety rules", rule 3). This file
-// has reviewed exceptions. io_context_await_io_and_run(), above, throws JsExceptionThrown, which
-// is how IoContext::run() learns of an exception. The function below calls IoContext::awaitJs(),
-// which ctx.waitUntil() calls, so that a Rust implementation matches C++ exactly rather than
-// reimplementing it over V8. Each use of C++ JSG, including getCurrentLock(), is counted in
-// src/rust/jsg/cpp-jsg-allowlist.txt, so it stays within these two functions.
-//
-// They rely on this invariant: once currentWithId() has passed, the IoContext is current, which
-// it is only inside IoContext::run() or a call from the JavaScript it runs, under the
-// Worker::Lock that getCurrentLock() returns. That is the isolate lock the caller's Rust
-// jsg::Lock stands for, so C++ JSG may use it, and the handles Rust passes belong to the
-// caller's open HandleScope, in the IoContext's context.
-//
-// When C++ JSG throws JsExceptionThrown, the JavaScript exception, or termination, is pending in
-// V8, where C++ JSG left it; the function returns false, and Rust passes the exception on.
-
-bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise) {
-  auto& context = currentWithId(id);
-  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Promise>(kj::mv(promise));
-  try {
-    jsg::Lock& js = context.getCurrentLock();
-    // As PromiseWrapper::tryUnwrap() does for a kj::Promise<void> argument once it has
-    // converted it to a jsg::Promise<void>, which Rust's VoidPromise has done.
-    context.addWaitUntil(context.awaitJs(js, jsg::Promise<void>(js.v8Isolate, handle)));
-    return true;
-  } catch (jsg::JsExceptionThrown&) {
-    return false;
-  }
 }
 
 void io_context_log_error(::rust::Str message) {

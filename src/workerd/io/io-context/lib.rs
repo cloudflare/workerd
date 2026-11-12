@@ -401,8 +401,10 @@ impl<'s> IoContext<'s> {
 
     /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
     /// C++ `IoContext::awaitJs()` and `IoContext::addWaitUntil()`: the request is not done until
-    /// `promise` settles. If `promise` rejects, the rejection is logged as an uncaught exception,
-    /// as for every JavaScript promise that C++ waits for, and the response is unaffected.
+    /// `promise` settles. The wait is an [`await_js`](Self::await_js), whose future C++
+    /// `addWaitUntil()` waits for. If `promise` rejects, the rejection is logged as an uncaught
+    /// exception, as for every JavaScript promise that C++ waits for, and the response is
+    /// unaffected.
     ///
     /// As with `awaitJs()`, `promise` must settle in this request. Its reactions run in the
     /// request that settles it, or, under the `handle_cross_request_promise_resolution`
@@ -426,12 +428,17 @@ impl<'s> IoContext<'s> {
         promise: impl Into<jsg::v8::Local<'s, jsg::v8::Promise>>,
     ) -> jsg::Result<()> {
         // JavaScript can't call `ctx.waitUntil()` while terminating, but Rust can call this after
-        // catching a termination. `awaitJs()` would then create objects, which fails a V8 debug
-        // check, and the request ends anyway.
-        if lock.is_execution_terminating() {
-            return Err(jsg::Error::pending());
-        }
-        ffi::add_wait_until(lock, self.id, promise.into())
+        // catching a termination. `await_js()` fails then, before creating anything, which would
+        // fail a V8 debug check, and the request ends anyway.
+        //
+        // As C++ `PromiseWrapper` converts the promise to a `kj::Promise<void>`, the value is
+        // discarded.
+        let wait = self.await_js(lock, promise, |_lock, _value| Ok(()))?;
+        let future = ffi::WaitUntilFuture(Box::pin(wait));
+        Ok(bridge::io_context_add_wait_until(
+            self.id,
+            Box::new(future),
+        )?)
     }
 
     /// Has the request fail open, as `ctx.passThroughOnException()` does through C++
@@ -839,11 +846,7 @@ impl<T> Future for AwaitJs<T> {
             AwaitJsState::Waiting(_) => unreachable!("returned above"),
             AwaitJsState::Fulfilled(value) => Poll::Ready(Ok(value)),
             AwaitJsState::Rejected(err) => Poll::Ready(Err(err)),
-            AwaitJsState::NeverSettled => Poll::Ready(Err(cxx::KjError::new(
-                cxx::KjExceptionType::Failed,
-                format!("jsg.Error: {}", bridge::io_context_never_settled_message()),
-            )
-            .into())),
+            AwaitJsState::NeverSettled => Poll::Ready(Err(ffi::never_settled_exception())),
             AwaitJsState::MemoryLimitExceeded => Poll::Ready(Err(ffi::memory_limit_exception())),
             AwaitJsState::Cancelled | AwaitJsState::Done => {
                 unreachable!("an AwaitJs polled after it returned its outcome")
