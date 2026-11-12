@@ -192,6 +192,7 @@ impl Resource for Flagged {
         }));
         if flags.get_cache_option_enabled() {
             registry.ts_override("FlaggedWithCache");
+            registry.inherit_intrinsic(crate::Intrinsic::IteratorPrototype);
             registry.add(crate::described_member(
                 || panic!("RTTI export built a member"),
                 move |_| Member::Property {
@@ -212,6 +213,7 @@ impl TypeInfo for Flagged {
             ts_root: true,
             ts_override: Some("FlaggedWithoutCache"),
             ts_define: Some("type FlaggedMode = string;"),
+            extends: None,
         };
         cx.structure::<Self>("Flagged", typescript, resource_members::<Self>)
     }
@@ -502,6 +504,111 @@ fn structure_without_callable_has_none() {
         .unwrap()
         .get(0);
     assert!(!structure.has_callable());
+}
+
+struct IteratorNode;
+
+impl TypeInfo for IteratorNode {
+    fn describe(cx: &mut Context) -> Type {
+        let typescript = TypeScript {
+            ts_root: true,
+            extends: Some(crate::Intrinsic::IteratorPrototype),
+            ..TypeScript::default()
+        };
+        cx.structure::<Self>("IteratorNode", typescript, |_, _| {
+            vec![
+                Member::Iterator {
+                    name: "entries",
+                    args: Vec::new(),
+                    result: Type::Object,
+                },
+                Member::Constant {
+                    name: "LIMIT",
+                    value: crate::ConstantValue::Number(1.0),
+                },
+            ]
+        })
+    }
+}
+
+fn only_structure(
+    message: &capnp::message::Reader<capnp::serialize::OwnedSegments>,
+) -> rtti_capnp::structure::Reader<'_> {
+    message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap()
+        .get_groups()
+        .unwrap()
+        .get(0)
+        .get_structures()
+        .unwrap()
+        .get(0)
+}
+
+// As C++ RTTI writes `JSG_ITERABLE` and `JSG_INHERIT_INTRINSIC`, the iterator method is the
+// structure's `iterator`, with `iterable` set, and the intrinsic is its `extends`, named as the
+// TypeScript generator expects; neither is one of its members.
+#[test]
+fn iterator_and_intrinsic_are_fields_of_the_structure() {
+    let mut cx = Context::default();
+    IteratorNode::describe(&mut cx);
+    let message = read_context(&cx);
+    let structure = only_structure(&message);
+    assert!(structure.get_iterable());
+    assert!(!structure.get_async_iterable());
+    let iterator = structure.get_iterator().unwrap();
+    assert_eq!(iterator.get_name().unwrap(), "entries");
+    assert!(matches!(
+        iterator.get_return_type().unwrap().which().unwrap(),
+        rtti_capnp::type_::Object(())
+    ));
+    assert_eq!(iterator.get_args().unwrap().len(), 0);
+    let rtti_capnp::type_::Intrinsic(intrinsic) = structure.get_extends().unwrap().which().unwrap()
+    else {
+        panic!("expected an intrinsic");
+    };
+    assert_eq!(
+        intrinsic.unwrap().get_name().unwrap(),
+        "v8::kIteratorPrototype"
+    );
+    let members = structure.get_members().unwrap();
+    assert_eq!(members.len(), 1);
+    assert!(matches!(
+        members.get(0).which().unwrap(),
+        rtti_capnp::member::Constant(_)
+    ));
+}
+
+#[test]
+fn structure_without_iterator_or_intrinsic_has_neither() {
+    let mut cx = Context::default();
+    Node::describe(&mut cx);
+    let message = read_context(&cx);
+    let structure = only_structure(&message);
+    assert!(!structure.get_iterable());
+    assert!(!structure.has_iterator());
+    assert!(!structure.has_extends());
+}
+
+// The intrinsic a registration inherits from under the context's flags is the structure's
+// `extends`, as for its TypeScript override.
+#[test]
+fn registration_sets_the_inherited_intrinsic() {
+    for (cache, extends) in [(false, None), (true, Some("v8::kIteratorPrototype"))] {
+        let mut cx = Context::with_flags(|mut flags| flags.set_cache_option_enabled(cache));
+        Flagged::describe(&mut cx);
+        let message = read_context(&cx);
+        let structure = only_structure(&message);
+        let name = structure.has_extends().then(|| {
+            let rtti_capnp::type_::Intrinsic(intrinsic) =
+                structure.get_extends().unwrap().which().unwrap()
+            else {
+                panic!("Flagged extends something other than an intrinsic");
+            };
+            intrinsic.unwrap().get_name().unwrap().to_string().unwrap()
+        });
+        assert_eq!(name.as_deref(), extends, "cache_option_enabled = {cache}");
+    }
 }
 
 #[test]
