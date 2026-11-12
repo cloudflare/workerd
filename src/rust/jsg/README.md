@@ -1635,8 +1635,9 @@ They behave as in C++ JSG:
   methods, and with the type's `v8::Signature`, so it throws `TypeError: Illegal invocation` on
   anything but an instance. It may also be a `#[jsg_method]`, as `entries()` often is; the two
   are separate functions. A type has at most one.
-- The iterator is an object with a `next()` that returns `{ done, value }`; a `#[jsg_struct]`
-  leaves `value` out when it is `None`, as C++ JSG's `jsg::Optional` does. An error that
+- The iterator is an object with a `next()` that returns `{ done, value }`; when `value` is
+  `None`, a `#[jsg_struct]` leaves it out without `fast_jsg_struct`, and makes it an own
+  `undefined` property with it, as C++ JSG does for a `jsg::Optional`. An error that
   `next()` returns is thrown to the code that is iterating, such as the `for...of` loop or an
   iterator helper, which stops.
 - With `inherit_intrinsic = IteratorPrototype`, `Iterator.prototype` is the [[Prototype]] of the
