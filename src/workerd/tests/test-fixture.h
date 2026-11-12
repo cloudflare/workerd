@@ -43,7 +43,7 @@ struct TestFixture {
     kj::Array<util::AutogateKey> autogateKeys;
     // If true, only the autogates above are enabled, even under WORKERD_ALL_AUTOGATES (as in the
     // @all-autogates test variant), e.g. to test the behavior with a gate disabled.
-    bool ignoreAllAutogatesEnv;
+    bool ignoreAllAutogatesEnv = false;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -52,10 +52,10 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> actorClassName;
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
-    bool useRealTimers;
+    bool useRealTimers = false;
     // If true, the actor's storage cache flushes writes to its stage, which is read-only, so a
     // write fails at flush time. Otherwise writes stay in the cache, as in a preview session.
-    bool flushActorStorage;
+    bool flushActorStorage = false;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
@@ -101,7 +101,10 @@ struct TestFixture {
     kj::Maybe<kj::Date> fixedNow;
   };
 
-  TestFixture(SetupParams&& params = {.useRealTimers = false});
+  // A default argument here would need SetupParams' member initializers before TestFixture is
+  // complete, so the parameterless constructor delegates instead.
+  TestFixture(): TestFixture(SetupParams()) {}
+  TestFixture(SetupParams&& params);
 
   struct V8Environment {
     v8::Isolate* isolate;
