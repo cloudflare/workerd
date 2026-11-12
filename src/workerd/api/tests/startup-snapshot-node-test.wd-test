@@ -9,6 +9,7 @@ const compatibilityFlags :List(Text) = [
   "nodejs_compat",
   "typescript_implemented_streams",
   "experimental",
+  "unsafe_module",
 ];
 
 const caseModules :List(Workerd.Worker.Module) = [
@@ -24,9 +25,10 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = .compatibilityFlags,
         bindings = [
-          (name = "SELF", service = "runner"),
           (name = "als", service = "als"),
           (name = "als-default", service = "als-default"),
+          (name = "async-resource", service = "async-resource"),
+          (name = "async-resource-frame", service = "async-resource-frame"),
           (name = "diagnostics-channel", service = "diagnostics-channel"),
         ],
       )
@@ -37,7 +39,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"als\""),
-          (name = "SELF", service = "als"),
         ],
       )
     ),
@@ -47,7 +48,24 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"als-default\""),
-          (name = "SELF", service = "als-default"),
+        ],
+      )
+    ),
+    ( name = "async-resource",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"async-resource\""),
+        ],
+      )
+    ),
+    ( name = "async-resource-frame",
+      worker = (
+        modules = .caseModules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"async-resource-frame\""),
         ],
       )
     ),
@@ -57,7 +75,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"diagnostics-channel\""),
-          (name = "SELF", service = "diagnostics-channel"),
         ],
       )
     ),
