@@ -450,10 +450,14 @@ function alloc(size: number, fill?: FillValue, encoding?: string): Buffer {
 
   const buffer = createBuffer(size);
   if (fill !== undefined) {
-    if (encoding !== undefined) {
-      validateString(encoding, 'encoding');
+    // encoding only applies when fill is a string (Node.js behavior).
+    if (typeof fill === 'string') {
+      if (encoding !== undefined) {
+        validateString(encoding, 'encoding');
+      }
+      return buffer.fill(fill, encoding);
     }
-    return buffer.fill(fill as any, encoding);
+    return buffer.fill(fill as any);
   }
   return buffer;
 }
