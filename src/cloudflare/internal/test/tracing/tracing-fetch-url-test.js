@@ -4,9 +4,32 @@
 
 import assert from 'node:assert/strict';
 
+export default {
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/start') {
+      return Response.redirect(
+        'http://origin/middle?hop=2#middle-fragment',
+        302
+      );
+    }
+    if (url.pathname === '/middle') {
+      return Response.redirect('http://other/final?hop=3#final-fragment', 307);
+    }
+    return new Response('response');
+  },
+};
+
+// Target of the legacy relative-URL fetch, which is made by the inline legacy-fetch-url service.
+export class Actor {
+  fetch() {
+    return new Response('relative response');
+  }
+}
+
 export const redirects = {
   async test(_controller, env) {
-    const response = await env.target.fetch('http://origin/start?hop=1');
+    const response = await env.SELF.fetch('http://origin/start?hop=1');
     assert.equal(response.url, 'http://other/final?hop=3');
     assert.equal(await response.text(), 'response');
   },
@@ -14,7 +37,7 @@ export const redirects = {
 
 export const fragment = {
   async test(_controller, env) {
-    const response = await env.target.fetch('http://origin/x#f');
+    const response = await env.SELF.fetch('http://origin/x#f');
     assert.equal(await response.text(), 'response');
   },
 };
