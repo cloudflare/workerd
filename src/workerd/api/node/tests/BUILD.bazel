@@ -332,6 +332,12 @@ wd_test(
 )
 
 wd_test(
+    src = "process-stdio-lazy-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-stdio-lazy-test.js"],
+)
+
+wd_test(
     src = "process-nodejs-test.wd-test",
     data = ["process-nodejs-test.js"],
 )
