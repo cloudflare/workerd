@@ -1102,10 +1102,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       }
     }
 
-    if (flags.getSpecCompliantUrlpattern()) {
-      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
-    } else {
-      JSG_NESTED_TYPE(URLPattern);
+    // Under the TS_URL_PATTERN autogate, the per-isolate bootstrap installs the TypeScript
+    // URLPattern instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL_PATTERN)) {
+      if (flags.getSpecCompliantUrlpattern()) {
+        JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+      } else {
+        JSG_NESTED_TYPE(URLPattern);
+      }
     }
 
     JSG_NESTED_TYPE(Blob);

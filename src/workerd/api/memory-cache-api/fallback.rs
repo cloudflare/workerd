@@ -5,10 +5,11 @@
 //! A read that waits for the cache: as the leader, until it runs its fallback, or as a waiter,
 //! until the read it waits for finishes.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use io_context::IoContext;
 use io_context::IoOwned;
+use io_context::IoOwnedSpan;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::v8;
@@ -105,7 +106,7 @@ impl PendingRead {
             return reject(lock, resolver, &err);
         };
         let fill = match Fill::new(lock, permit, &key, read) {
-            Ok(fill) => SharedFill(Rc::new(fill)),
+            Ok(fill) => SharedFill(Arc::new(fill)),
             Err(err) => return reject(lock, resolver, &err),
         };
         let fallback = fallback.as_local(lock);
@@ -125,7 +126,7 @@ impl PendingRead {
         // As memory-cache.c++ chains `.then()` and `.catch_()` to it, and returns the result to
         // awaitIo(), which resolves the read's promise with it.
         let filled = produced
-            .and_then(|promise| promise.then(lock, SharedFill(Rc::clone(&fill.0)), fulfilled))
+            .and_then(|promise| promise.then(lock, SharedFill(Arc::clone(&fill.0)), fulfilled))
             .and_then(|promise| promise.catch(lock, fill, rejected));
         match filled {
             Ok(filled) => {
@@ -158,15 +159,15 @@ struct Fill {
     /// The key, for the span of the write.
     key: String,
     /// Before its parent, so that it is released first, and ends first.
-    fallback_span: IoOwned<SpanBuilder>,
-    _read_span: IoOwned<SpanBuilder>,
+    fallback_span: IoOwnedSpan,
+    _read_span: IoOwnedSpan,
 }
 
 /// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
 /// its callback and spans. It holds no JavaScript values, so sharing it is sound.
-struct SharedFill(Rc<Fill>);
+struct SharedFill(Arc<Fill>);
 
-jsg::jsg_traced!(SharedFill);
+jsg::jsg_traced!(Fill, SharedFill);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never

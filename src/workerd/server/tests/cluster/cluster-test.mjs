@@ -1188,11 +1188,8 @@ test('cluster: a KV namespace survives its owner', async () => {
 
     assert.strictEqual((await bucket.list('services/kv/')).length, 1);
     await kv(survivor, 'put', { key: 'big', value: 'small' });
-    const collected = Date.now() + 10_000;
-    while ((await bucket.list('services/kv/')).length > 0) {
-      assert(Date.now() < collected, 'the replaced blob was never collected');
-      await sleep(100);
-    }
+    assert.strictEqual((await kv(survivor, 'gc', {})).status, 200);
+    assert.deepStrictEqual(await bucket.list('services/kv/'), []);
   });
 });
 

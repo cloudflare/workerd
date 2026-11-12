@@ -52,6 +52,23 @@ wpt_test(
     wpt_directory = "@wpt//:urlpattern@module",
 )
 
+# The TypeScript URLPattern, with each parser, against the same
+# expectations.
+wpt_test(
+    name = "urlpattern-ts",
+    autogates = ["workerd-autogate-ts-url-pattern"],
+    compat_date = "2025-04-09",
+    config = "urlpattern-test.ts",
+    wpt_directory = "@wpt//:urlpattern@module",
+)
+
+wpt_test(
+    name = "urlpattern-standard-ts",
+    autogates = ["workerd-autogate-ts-url-pattern"],
+    config = "urlpattern-standard-test.ts",
+    wpt_directory = "@wpt//:urlpattern@module",
+)
+
 wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
@@ -287,6 +304,8 @@ wpt_test(
         "@wpt//:wasm/resources@module",
     ],
     extra_wpt_files = ["@wpt//:wasm/incrementer.wasm"],
+    # Uses 1.6-2.3 cores on average, and up to 3.4.
+    tags = ["cpu:2"],
     wpt_directory = "@wpt//:wasm/jsapi@module",
 )
 

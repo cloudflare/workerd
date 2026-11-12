@@ -1,7 +1,8 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
-# Moves 25 MiB values, which takes most of 15 s on ASan and debug builds.
+# About 5 s in debug and ASan builds, which a loaded arm64 machine can make
+# more than 15 s.
 wd_test(
     size = "large",
     src = "kv-test.wd-test",

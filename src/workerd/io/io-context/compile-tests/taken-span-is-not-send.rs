@@ -2,12 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A span belongs to its request's thread, so the handle to one that the IoContext owns is not
-// `Send` either: it cannot go in the future given to `await_io_and_run`, which is `Send`.
+// The handle to a span that the IoContext owns is `Send`, but the span taken out of it is not: it
+// cannot go in the future given to `await_io_and_run`, which is `Send`.
 use io_context::IoContext;
-use io_context::IoOwned;
-use io_context::SpanBuilder;
+use io_context::IoOwnedSpan;
 
-pub fn t(context: &IoContext<'_>, span: IoOwned<SpanBuilder>) {
+pub fn t(lock: &mut jsg::Lock<'_>, context: &IoContext<'_>, owned: IoOwnedSpan) {
+    let span = owned.take(lock).ok().flatten();
     let _ = context.await_io_and_run(async move { drop(span) }, |_lock, ()| Ok(())); //~ ERROR future cannot be sent between threads safely
 }

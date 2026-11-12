@@ -104,22 +104,37 @@ use crate::v8;
 /// `Traced::trace` on every field — types with no GC-visible references
 /// use a no-op implementation, such as the one `jsg_traced!` generates.
 ///
+/// `Traced` requires `Send`, which keeps resources free of data races. Resources, function data
+/// and reaction data, including the values of typed promises, hold only `Traced` types, and the
+/// isolate lock is their mutex: one thread uses them at a time, but the lock passes between
+/// threads, and a thread that holds it can move a value out and keep it after releasing the lock.
+/// So they must be `Send`, for the reason `Mutex<T>: Sync` needs `T: Send`, but need not be
+/// `Sync`. [`jsg::Rc`](crate::Rc) and [`jsg::Weak`](crate::Weak) are `Send` because they touch
+/// their counts and their resource only under the lock of its isolate. `std::rc::Rc` is not
+/// `Send`, so it has no `Traced` impl. See `src/rust/jsg/README.md`, safety rule 5.
+///
+/// A hand-written impl must also visit every GC reference the value holds, keep traced state with
+/// its one GC owner, hold no [`v8::Global`] (safety rule 2), and change nothing but through the
+/// visitor. Breaking those leaks, panics or aborts, but can't cause undefined behaviour, so the
+/// trait is safe.
+///
 /// # Built-in implementations
 ///
-/// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
+/// - **Primitives** (`bool`, `String`, integers, floats, atomics, `()`) — no-op.
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
-///   `BTreeSet<T>`) — iterates elements/values and traces each.
-/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`** — only for
-///   `T: HoldsNoGcReferences`, so there is nothing in them to visit; see
-///   [`HoldsNoGcReferences`].
+///   `BTreeSet<T>`) — iterates elements/values and traces each. Map keys are not visited, so
+///   they must be [`HoldsNoGcReferences`].
+/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`**, **`std::sync::Mutex<T>`**,
+///   **`std::sync::Arc<T>`** — only for `T: HoldsNoGcReferences` (and `Sync`, for `Arc`), so
+///   there is nothing in them to visit; see [`HoldsNoGcReferences`].
 /// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — delegate to the
 ///   value, and detach it from the cell's owner as it leaves the cell; see
 ///   [`GcVisitor::is_detaching`](crate::v8::GcVisitor::is_detaching).
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
-pub trait Traced {
+pub trait Traced: Send {
     /// Visit GC-visible references held by this value.
     ///
     /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
@@ -129,10 +144,9 @@ pub trait Traced {
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
     /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
-    /// it is never collected. Don't keep a type that holds GC references behind an
-    /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
-    /// `README.md` §Safety rules, rule 2. Other than through `visitor`, it must not change the
-    /// value or anything that holds it: a [`crate::Cell`] visits its value in place.
+    /// it is never collected. Other than through `visitor`, it must not change the value or
+    /// anything that holds it: a [`crate::Cell`] visits its value in place, so writing into any
+    /// `jsg::Cell` during a visit panics.
     fn trace(&self, visitor: &mut crate::v8::GcVisitor);
 }
 
@@ -185,6 +199,17 @@ impl_traced_noop!(
     isize,
     f32,
     f64,
+    std::sync::atomic::AtomicBool,
+    std::sync::atomic::AtomicU8,
+    std::sync::atomic::AtomicU16,
+    std::sync::atomic::AtomicU32,
+    std::sync::atomic::AtomicU64,
+    std::sync::atomic::AtomicUsize,
+    std::sync::atomic::AtomicI8,
+    std::sync::atomic::AtomicI16,
+    std::sync::atomic::AtomicI32,
+    std::sync::atomic::AtomicI64,
+    std::sync::atomic::AtomicIsize,
     std::time::SystemTime,
     crate::v8::BackingStore,
     &str,
@@ -259,7 +284,9 @@ impl<V: Traced> Traced for Dict<V> {
 
 impl<V: HoldsNoGcReferences> HoldsNoGcReferences for Dict<V> {}
 
-impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+impl<K: HoldsNoGcReferences, V: Traced, S: std::hash::BuildHasher + Send> Traced
+    for std::collections::HashMap<K, V, S>
+{
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -267,12 +294,12 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
     }
 }
 
-impl<K, V: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
-    for std::collections::HashMap<K, V, S>
+impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences, S: std::hash::BuildHasher + Send>
+    HoldsNoGcReferences for std::collections::HashMap<K, V, S>
 {
 }
 
-impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+impl<K: HoldsNoGcReferences, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -280,9 +307,12 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     }
 }
 
-impl<K, V: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeMap<K, V> {}
+impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences> HoldsNoGcReferences
+    for std::collections::BTreeMap<K, V>
+{
+}
 
-impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+impl<T: Traced, S: std::hash::BuildHasher + Send> Traced for std::collections::HashSet<T, S> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -290,7 +320,7 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
     }
 }
 
-impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher + Send> HoldsNoGcReferences
     for std::collections::HashSet<T, S>
 {
 }
@@ -306,47 +336,38 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeSet<T> {}
 
 /// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` taken out of a std `Cell`
-/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`].
+/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`]. So there is
+/// nothing in it to visit.
 impl<T: HoldsNoGcReferences> Traced for std::cell::Cell<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // SAFETY: V8 GC tracing is single-threaded within an isolate and never
-        // re-entrant on the same object during a single GC cycle. We only read
-        // through the pointer.
-        unsafe {
-            (*self.as_ptr()).trace(visitor);
-        }
-    }
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::Cell<T> {}
 
 /// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` moved out through a std
 /// `RefCell`'s mutable borrow would be neither strong nor traced. A cell that holds one is a
-/// [`crate::RefCell`].
+/// [`crate::RefCell`]. So there is nothing in it to visit.
 impl<T: HoldsNoGcReferences> Traced for std::cell::RefCell<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // `T` holds no GC references, so a mutably borrowed cell can be skipped: a visit would
-        // find nothing in it. (`crate::RefCell` holds references, and makes them strong when it
-        // is mutably borrowed, so a visit can skip it too.)
-        if let Ok(inner) = self.try_borrow() {
-            inner.trace(visitor);
-        }
-    }
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::RefCell<T> {}
 
-/// Only for `T: HoldsNoGcReferences`: every owner of a shared `Rc` would trace what it holds, and
-/// a GC reference has a single parent. A `jsg::Rc` visited by two parents asserts, as a C++
-/// `jsg::Ref` does, and a `TracedGlobal` would stay alive only while the last one to visit it
-/// does. Share a resource through a `jsg::Rc` or `jsg::Weak` to it instead.
-impl<T: HoldsNoGcReferences> Traced for std::rc::Rc<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        (**self).trace(visitor);
-    }
+/// Only for `T: HoldsNoGcReferences`: every owner of a shared `Arc` would trace what it holds,
+/// though a GC reference has a single parent. Share a resource through a `jsg::Rc` or
+/// `jsg::Weak` to it instead.
+impl<T: HoldsNoGcReferences + Sync> Traced for std::sync::Arc<T> {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
-impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::rc::Rc<T> {}
+impl<T: HoldsNoGcReferences + Sync> HoldsNoGcReferences for std::sync::Arc<T> {}
+
+/// Only for `T: HoldsNoGcReferences`, as for `std::cell::RefCell`.
+impl<T: HoldsNoGcReferences> Traced for std::sync::Mutex<T> {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+}
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::sync::Mutex<T> {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)
@@ -448,6 +469,13 @@ pub trait FromJS<'s>: Sized {
     #[doc(hidden)]
     const UNION_MEMBER: UnionMember = UnionMember::Fallible;
 
+    /// Whether converting an object to this type can run script, such as a getter, a Proxy trap
+    /// or a `valueOf`. Converting a value that isn't an object must never run script. `Vec`
+    /// reads elements ahead of their conversion only while no conversion can run script, so a
+    /// type that reads nothing from an object it converts sets this to false.
+    #[doc(hidden)]
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = true;
+
     /// Converts `value` during `pass` of a union conversion, or returns
     /// `Ok(None)` if this type does not take part in `pass` or does not match.
     /// A union overrides this to try its own variants, which flattens nested
@@ -496,6 +524,7 @@ impl<'s> FromJS<'s> for bool {
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = UnionMember::Boolean;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: Self = false;
 
     fn type_name() -> String {
         "boolean".to_owned()
@@ -638,6 +667,7 @@ impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
     type ResultType = T;
 
     const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1139,6 +1169,8 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
 impl<'s, T: FromJS<'s>> FromJS<'s> for Option<T> {
     type ResultType = Option<T::ResultType>;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
+
     fn type_name() -> String {
         T::type_name()
     }
@@ -1186,6 +1218,8 @@ impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
 
     const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
+    // Converts only a value that `T::is_exact()` accepts, which is never an object.
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
     fn type_name() -> String {
         T::type_name()
@@ -1236,6 +1270,8 @@ impl<T: Type> Type for Nullable<T> {
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
+
     fn type_name() -> String {
         T::type_name()
     }
@@ -1265,6 +1301,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
 
 impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
     type ResultType = NullOrUndefined<T::ResultType>;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1303,6 +1341,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
 
 impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
     type ResultType = Lenient<T::ResultType>;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = T::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         T::type_name()
@@ -1377,9 +1417,9 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        let type_name = value.type_of(lock);
-        Self::try_from_js(lock, value)?
-            .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            Error::new_type_error(format!("Expected Array but got {}", value.type_of(lock)))
+        })
     }
 
     fn try_from_js(
@@ -1390,11 +1430,56 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             return Ok(None);
         };
 
-        let globals = array.iterate(lock)?;
-        let mut result = Self::with_capacity(globals.len());
-        for global in globals {
-            let local = global.as_local(lock);
-            result.push(T::from_js(lock, local)?);
+        // Web IDL and C++ JSG convert each element before reading the next. The elements are read
+        // ahead here instead, up to the first object if converting one can run script: only a
+        // conversion that runs script can change what a later read returns. The difference shows
+        // when a conversion throws, such as a Symbol's to a string: a getter on a later element
+        // has already run, and if it threw, its exception is the one that propagates.
+        let until = if T::OBJECT_CONVERSION_MAY_RUN_SCRIPT {
+            v8::ArrayIterateUntil::Object
+        } else {
+            v8::ArrayIterateUntil::End
+        };
+        let v8::ArrayElements { length, elements } = array.iterate(lock, until)?;
+        // Script sets the length, and a sparse array's can be up to 2^32 - 1 with no elements, so
+        // a failure to allocate is an error, not an abort.
+        let too_large = |length: usize| {
+            Error::new_range_error(format!("Array of length {length} is too large to convert"))
+        };
+        let mut result = Self::new();
+        result
+            .try_reserve_exact(length)
+            .map_err(|_| too_large(length))?;
+        // If reading stopped at an object, it is the last element read.
+        let stopped = until == v8::ArrayIterateUntil::Object
+            && elements
+                .last()
+                .is_some_and(|(_, element)| element.is_object());
+        for (index, element) in elements {
+            while result.len() < index {
+                let undefined = lock.undefined();
+                result.push(T::from_js(lock, undefined)?);
+            }
+            result.push(T::from_js(lock, element)?);
+        }
+        if stopped {
+            // The conversion can have changed the array, so the rest is read one element at a
+            // time, each after the previous one converts.
+            while result.len() < array.len() {
+                let Ok(index) = u32::try_from(result.len()) else {
+                    unreachable!("an array's length is a u32");
+                };
+                let element = array.get(lock, index)?;
+                let element = T::from_js(lock, element)?;
+                // A conversion can lengthen the array past the space reserved.
+                result.try_reserve(1).map_err(|_| too_large(array.len()))?;
+                result.push(element);
+            }
+        } else {
+            while result.len() < length {
+                let undefined = lock.undefined();
+                result.push(T::from_js(lock, undefined)?);
+            }
         }
         Ok(Some(result))
     }
@@ -1581,6 +1666,8 @@ where
 impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
     type ResultType = Self;
 
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
     fn type_name() -> String {
         // C++ JSG names `v8::Local<v8::Value>` after `v8::Value`.
         "Value".to_owned()
@@ -1654,6 +1741,7 @@ macro_rules! impl_handle_from_js {
             type ResultType = Self;
 
             const UNION_MEMBER: UnionMember = $member;
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> String {
                 // C++ JSG names `v8::Local<T>` after `T`.
@@ -1725,6 +1813,8 @@ where
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = <v8::Local<'s, M> as FromJS<'s>>::UNION_MEMBER;
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool =
+        <v8::Local<'s, M> as FromJS<'s>>::OBJECT_CONVERSION_MAY_RUN_SCRIPT;
 
     fn type_name() -> String {
         <v8::Local<'s, M> as FromJS<'s>>::type_name()

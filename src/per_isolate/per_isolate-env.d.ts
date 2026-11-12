@@ -210,6 +210,27 @@ declare const utils: {
   ): LegacyUrlHandle | undefined;
   // A handle with only an empty query: a URLSearchParams' own.
   createLegacySearchParams(): LegacyUrlHandle;
+  // The members of api/urlpattern-bootstrap.h. An init is the nine members
+  // protocol to hash, then baseURL, each undefined if absent. A compiled
+  // pattern is hasRegExpGroups, then for each component protocol to hash
+  // its pattern string, RegExp (undefined unless its type is 0, a regexp),
+  // group names, UrlPatternBootstrap::ComponentType and exact value.
+  // urlPatternCompile() throws "Failed to construct URLPattern";
+  // urlPatternProcessInit() returns the eight components, or undefined if
+  // the init does not process. The legacy members throw the legacy
+  // parser's TypeErrors instead.
+  urlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  urlPatternProcessInit(init: UrlPatternInitList): string[] | undefined;
+  legacyUrlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
   // The lowercased `type/subtype`, or undefined if not a MIME type.
   mimeTypeEssence(input: string): string | undefined;
   // Undefined for anything but a ReadableStream of either implementation.
@@ -236,6 +257,10 @@ declare interface AbortAlgorithmHandle {
   // Unregisters the algorithm. Idempotent.
   remove(): void;
 }
+
+// A URLPatternInit as utils' URLPattern members take it: protocol, username,
+// password, hostname, port, pathname, search, hash and baseURL.
+declare type UrlPatternInitList = (string | undefined)[];
 
 // The legacy URL, backing a TypeScript URL and its searchParams on the legacy
 // path, or a URLSearchParams of its own. Obtained only from utils; it has no

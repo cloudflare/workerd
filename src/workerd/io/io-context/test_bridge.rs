@@ -25,6 +25,7 @@ use execution_context::open_gate;
 use futures::channel::oneshot;
 use io_context::IoContext;
 use io_context::IoOwned;
+use io_context::IoOwnedSpan;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
@@ -575,7 +576,7 @@ fn awaited_future_dropped() -> bool {
 
 thread_local! {
     static OWNED: RefCell<Option<IoOwned<DropFlag>>> = const { RefCell::new(None) };
-    static OWNED_SPAN: RefCell<Option<IoOwned<SpanBuilder>>> = const { RefCell::new(None) };
+    static OWNED_SPAN: RefCell<Option<IoOwnedSpan>> = const { RefCell::new(None) };
     static HELD_SPAN: RefCell<Option<SpanBuilder>> = const { RefCell::new(None) };
 }
 

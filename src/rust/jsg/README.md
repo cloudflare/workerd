@@ -189,8 +189,8 @@ strong again, with no owner, so the reaction can keep it or put it in another ow
 impl that visits through it must handle). The `jsg::` cells below detach a value the same way.
 
 - Never put traced state inside an `std::rc::Rc`. A clone of the `Rc` held by a second GC owner
-  would trace the same state again, so `std::rc::Rc` is `Traced` only for types that hold no GC
-  references (`jsg::HoldsNoGcReferences`). For a `jsg::Rc`, C++ asserts a single owner
+  would trace the same state again. (`std::rc::Rc` isn't `Send`, so it isn't `Traced`; see
+  rule 5.) For a `jsg::Rc`, C++ asserts a single owner
   (`Wrappable::visitRef` in `src/workerd/jsg/wrappable.c++`), so the process aborts. For a
   `TracedGlobal`, nothing asserts, but whichever owner traces it last decides whether its handle
   is strong or weak. The value can then be collected while the other owner still uses it. To give
@@ -227,8 +227,8 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 `pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
-`gc-reference-in-std-cell-is-not-traced` and `gc-reference-in-std-rc-is-not-traced` compile
-tests, for a `jsg::Rc` or a `TracedGlobal` in a std cell or a std `Rc`. No test checks a
+`gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
+std cell. No test checks a
 hand-written `impl Traced` that shares traced state some other way or reaches it through
 another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
 whose `trace` visits something; reviewers check those.
@@ -308,7 +308,7 @@ Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*
 (`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
 `traced_global_lifetime.rs` and `gc.rs`.
 
-### 5. Only the isolate lock's holder reaches the state it guards
+### 5. State guarded by the isolate lock is `Send`
 
 This rule prevents data races: two threads using the same non-`Sync` state at once, at least one
 of them writing. Rust JSG shares state with no synchronization of its own: the reference counts
@@ -317,26 +317,51 @@ isolate lock keeps two threads from using that state at once.
 
 The isolate lock is a mutex over what the isolate's references reach: resources, the data of
 functions created with `Function::new`, and reaction data, including the values of typed
-promises. As with a `std::sync::Mutex`, one thread uses the state at a time. Code reaches it only
-through a `&Lock` of its isolate, and holding one proves that this thread holds that isolate's
-lock:
+promises. As with a `std::sync::Mutex`:
 
-- `Lock` is neither `Send` nor `Sync`, so no other thread can have it.
-- Every operation that reaches the state checks, in every build, that the lock is of the state's
-  isolate, and panics otherwise. Holding one isolate's lock excludes no thread from another's, so
-  this check is what makes the lock the right one, not a debugging aid.
-- Nothing in workerd releases the isolate lock while a `Lock` exists; there is no `v8::Unlocker`.
-- GC, which reads the state through `Traced::trace`, runs on the thread that holds the lock
-  (`--single-threaded-gc` in `src/workerd/jsg/setup.c++`).
+- One thread uses the state at a time. Code reaches it only through a `&Lock` of its isolate,
+  and holding one proves that this thread holds that isolate's lock:
+  - `Lock` is neither `Send` nor `Sync`, so no other thread can have it.
+  - Every operation that reaches the state checks, in every build, that the lock is of the
+    state's isolate, and panics otherwise. Holding one isolate's lock excludes no thread from
+    another's, so this check is what makes the lock the right one, not a debugging aid.
+  - Nothing in workerd releases the isolate lock while a `Lock` exists; there is no
+    `v8::Unlocker`.
+  - GC, which reads the state through `Traced::trace`, runs on the thread that holds the lock
+    (`--single-threaded-gc` in `src/workerd/jsg/setup.c++`).
+- The lock passes between threads, so state that one thread creates, another uses or drops.
+- A thread that holds the lock can move a value out of the state (`jsg::Cell::take`, the value
+  a typed promise passes to its reaction) and keep it after it releases the lock: send it to
+  another thread, or give it to a future polled without the lock.
 
-The references themselves must not reach the state without the lock. If a `jsg::Rc` could be
-dereferenced or cloned without one, a thread that holds the `Rc` but not the lock could read the
-resource or change its counts while the lock's holder does.
+The last two are what `Send` means. So, as `Mutex<T>` is `Sync` only for `T: Send`, the state is
+sound when every value in it is `Send`. It need not be `Sync`, since no two threads hold
+references to it at once: the `&R` that `jsg::Rc::get` returns lasts no longer than the lock's
+brand `'s`, and can reach another thread only if `R` is `Sync`.
+
+A value that isn't `Send` races in one of these ways:
+
+- It shares ownership without atomics. A resource holds an `std::rc::Rc<Cell<u32>>`; a thread
+  that holds the lock clones it and keeps the clone where the lock doesn't guard it, such as in a
+  `thread_local!` or a task on its event loop. The next thread to take the lock clones, drops or
+  writes through the field while the first uses its clone. `Arc<RefCell<_>>` races the same way,
+  through the `RefCell`.
+- It is bound to a thread. A `KjOwn<io_context::SpanBuilder>` holds a `kj::Rc` shared with other
+  objects on its `IoContext`'s thread. Another thread that drops it, holding the isolate lock,
+  changes that count while the `IoContext`'s thread may too.
+- It reaches the guarded state without the lock. If a `jsg::Rc` could be dereferenced or cloned
+  without one, a thread that holds the `Rc` but not the lock could read the resource or change
+  its counts while the lock's holder does.
 
 How the code keeps the rule:
 
-- `jsg::Rc`, `jsg::Weak` and `jsg_cpp::Ref` touch their counts and their resource only under the
-  lock of its isolate:
+- `Traced` requires `Send`, and the state holds only `Traced` types: `#[jsg_resource]`,
+  `#[jsg_struct]` and `#[jsg_oneof]` trace every field, and `Function::new` and typed promises
+  require `Traced` data and values. So the compiler rejects state that isn't `Send`. State a
+  resource shares with a future or another thread goes through an `Arc` of `Send + Sync` data,
+  such as `Arc<Mutex<_>>`.
+- `jsg::Rc`, `jsg::Weak` and `jsg_cpp::Ref` are `Send`, though their counts aren't atomic, since
+  they touch their counts and their resource only under the lock of its isolate:
   - Every operation but dropping that reaches the resource or a count takes a `&Lock` (`get`,
     `clone`, `downgrade`, `upgrade`, `is_alive`, `to_js`, `attach_to_this`, and `as_cpp` for a
     `jsg_cpp::Ref`), and panics for another isolate's, or once the isolate's `Realm` is dropped.
@@ -352,29 +377,44 @@ How the code keeps the rule:
     lock; once the isolate is disposed, one thread at a time releases what is queued. See
     [Dropping references](#dropping-references).
   - Equality, ordering and hashing use only the address, and `Debug` only the type.
+  - `R: Send`, since the resource is dropped by whichever thread releases its last reference.
   - Nothing else reaches the counts: `v8::WrappableRc`, whose `Clone` and `Drop` change the
     `Wrappable`'s count, is private to `jsg`, and so is the `jsg_cpp` bridge.
-
-  So they are `Send` when the resource is, though their counts aren't atomic: a thread that holds
-  one without the lock can only drop it. The resource must be `Send`, since it is dropped by
-  whichever thread releases its last reference.
 - A crate outside `jsg` that holds a value only the isolate lock guards, such as the C++
   `jsg::Ref` in a `jsg_cpp::Ref`, keeps it in a `jsg::LockGuarded`. It lends the value only under
   a lock of its isolate, checked as for a `jsg::Rc`, and drops it as a `jsg::Rc` drops its parts,
   rather than as C++ would: C++ destroys an object that has no wrapper at once, with or without
   the lock.
   Its constructor is `unsafe`: the value must be bound to no thread but through the lock.
+- A C++ object that a resource holds is `Send` only by an `unsafe impl` that says why the object
+  belongs to no thread, as for `ffi::InspectorSession` (`src/rust/api/inspector.rs`) and
+  `IoOwnedObject` (`src/workerd/io/io-context/ffi.rs`).
 
-Bad: a `jsg::Rc` method that reaches the resource or changes a count without a `&Lock`, or
-without checking that the lock is of the resource's isolate. Fix: take a `&Lock` and check its
-isolate, as `get` does.
+`Traced` is a safe trait: a hand-written `impl Traced` can't cause a data race, since the type
+must be `Send`. Its other duties, visiting every GC reference, following rule 2 and changing
+nothing but through the visitor, aren't about memory safety, and breaking them leaks, panics or
+aborts:
 
-Tested by: the `rc-needs-the-lock`, `lock-is-not-send`, `lock-is-not-sync` and
-`ok-send-resource-state` compile tests in `src/rust/jsg-compile-tests`;
-`await-io-future-cannot-borrow-a-resource` in `src/workerd/io/io-context/compile-tests`; the
-`wrappable-rc-is-private` and `cpp-ref-bridge-is-private` compile tests; and the tests of
-operations in another isolate, and of drops without the lock, in
-`src/rust/jsg-test/tests/isolates.rs` and `cpp_interop.rs`.
+- A `jsg::Rc` or `TracedGlobal` that `trace` doesn't visit stays strong, which leaks its target.
+- A `jsg::Rc` that two owners visit aborts in `Wrappable::visitRef`.
+- A `TracedGlobal` that two owners visit can have its value collected while one still uses it.
+  V8 then empties the handle, and `as_local` panics.
+- A `Global` in traced state leaks any cycle through it.
+- A write during a visit into a cell it reads panics: a `jsg::Cell` refuses writes on the thread
+  while a visit or a heap snapshot reads one in place, a `jsg::RefCell` is borrowed while it is
+  visited, and a std `Cell` or `RefCell`, which holds no GC references, is not read at all.
+
+Bad: a resource field `counter: std::rc::Rc<Cell<u32>>` cloned into a future, which doesn't
+compile. Fix: an `Arc<AtomicU32>`, or read the counter under the lock in the callback that runs
+when the future completes.
+
+Tested by: the `rc-needs-the-lock`, `lock-is-not-send`, `lock-is-not-sync`,
+`traced-requires-send` and `ok-send-resource-state` compile tests in `src/rust/jsg-compile-tests`;
+`await-io-future-cannot-borrow-a-resource` and `span-is-not-traced` in
+`src/workerd/io/io-context/compile-tests`; the `wrappable-rc-is-private` and
+`cpp-ref-bridge-is-private` compile tests; and the tests of operations in another isolate, and of
+drops without the lock, in `src/rust/jsg-test/tests/isolates.rs` and `cpp_interop.rs`. No test checks an `unsafe impl Send`;
+reviewers check those.
 
 ## Resources
 
@@ -456,8 +496,8 @@ its `jsg::Rc` fields. A field it later moves the `jsg::Rc` out of, for example t
 task, is a `jsg::Cell` or `jsg::RefCell` (here `tasks: jsg::RefCell<Vec<jsg::Rc<Task>>>`),
 which make the `jsg::Rc` strong on the way out; see [Cells](#cells).
 
-Don't give the callback the resource's state through an `std::rc::Rc` instead. Both rules are
-explained in [Safety rules](#safety-rules), rule 2.
+Don't give the callback the resource's state through an `std::rc::Rc` instead, which a resource
+can't hold anyway. See [Safety rules](#safety-rules), rules 2 and 5.
 
 The callback's `jsg::Rc` keeps the resource alive, even after JavaScript drops the resource.
 Cycles are fine if they go through a `TracedGlobal`: if the resource holds the callback in a
@@ -558,7 +598,8 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `jsg::v8::Global<T>` | Compile error — no `Traced` impl | Use `TracedGlobal<T>` in resource fields |
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
-| `std::rc::Rc<T>` where `T` holds a `jsg::Rc` or a `TracedGlobal` | Compile error — no `Traced` impl | Share a resource through a `jsg::Rc` or `jsg::Weak` instead (Safety rules, rule 2) |
+| `std::sync::Arc<T>`, `std::sync::Mutex<T>` | No | Only for `T: HoldsNoGcReferences`, and `Sync` for `Arc` |
+| `std::rc::Rc<T>` | Compile error — not `Send`, so not `Traced` | Share a resource through a `jsg::Rc` or `jsg::Weak`, and plain data with a future through an `Arc` (Safety rules, rules 2 and 5) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
@@ -835,13 +876,13 @@ once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `da
 lead back to the function. Two things break this:
 
 - A reference that `T::trace` does not visit, such as a `v8::Global` (which has no `Traced`
-  impl, but can hide inside a type with a hand-written one). If it can reach the function, the cycle is invisible to the garbage
-  collector, and the function and `data` are freed only when the isolate is torn down.
-- Another owner that the garbage collector also traces, such as a resource sharing part of
-  `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it traces:
-  tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal` traced from
-  two owners can be freed while one of them still uses it. To share state, hold a `jsg::Rc` or
-  `jsg::Weak` to the resource that owns it.
+  impl, but can hide inside a type with a hand-written one). If it can reach the function, the
+  cycle is invisible to the garbage collector, and the function and `data` are freed only when
+  the isolate is torn down.
+- Another owner that the garbage collector also traces. `data` must be the only owner that
+  traces what it traces: tracing one `jsg::Rc` from two owners fails an assertion, and a
+  `TracedGlobal` traced from two owners can be freed while one of them still uses it. To share
+  state, hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
 
 ```rust
 let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
