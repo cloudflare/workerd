@@ -116,6 +116,7 @@ http.archive(
     patch_strip = 1,
     patches = [
         "@workerd//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
+        "@workerd//:patches/wpt/0002-announce-raw-fixture-connection-close.patch",
     ],
     sha256 = "13178cd609d76494a3f04a7a6c3ab13d4b9c07b519b70b7b1388e6acf1e58636",
     strip_prefix = "wpt-2e4dc257c",

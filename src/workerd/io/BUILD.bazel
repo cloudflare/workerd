@@ -5,6 +5,13 @@ load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
+wd_cc_library(
+    name = "datagram-channel",
+    hdrs = ["datagram-channel.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj:kj-async-core"],
+)
+
 # TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
 # not encumbered with many dependencies.
 wd_cc_library(
@@ -99,6 +106,7 @@ wd_cc_library(
         ":cdp_capnp",
         ":compatibility-date",
         ":container_capnp",
+        ":datagram-channel",
         ":external-pusher",
         ":features",
         ":frankenvalue",

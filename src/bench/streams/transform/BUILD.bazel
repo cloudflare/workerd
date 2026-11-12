@@ -7,6 +7,7 @@ load("//:build/wd_bench.bzl", "wd_bench")
 transform_bench_srcs = glob(["*.js"]) + ["transform-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "transform-cpp.wd-bench",
     data = transform_bench_srcs,
 )

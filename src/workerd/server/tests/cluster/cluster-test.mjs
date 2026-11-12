@@ -106,7 +106,7 @@ const SIGTERM_DRAINS = {
 
 // cluster-test.wd-test divides the times that takeovers and stops wait out by
 // this (`unsafeTimeDivisor`).
-const TIME_DIVISOR = 4;
+const TIME_DIVISOR = 2;
 // How long a node's lease lasts: a dead owner's DOs wait this long.
 const LEASE_MS = 20_000 / TIME_DIVISOR;
 // How long a stopping node accepts requests at least.

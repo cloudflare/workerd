@@ -29,6 +29,7 @@ js_binary(
     name = "build_types_bin",
     data = [
         ":types_lib",
+        "//src/workerd/server:workerd",
     ],
     entry_point = "scripts/build-types.js",
     tags = ["manual"],
@@ -40,7 +41,6 @@ js_run_binary(
         "scripts/config.capnp",
         ":types_worker",
         "//:node_modules/prettier",
-        "//src/workerd/server:workerd",
     ],
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging

@@ -137,9 +137,14 @@ jobs:
           RUNNER_DEVELOPER_FLAGS: ${{ inputs.runner_developer_flags }}
           RUNNER_EXTRA_BAZEL_ARGS: ${{ inputs.runner_extra_bazel_args }}
           REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+          REMOTE_CACHE_READ_ONLY: ${{ secrets.BAZEL_CACHE_KEY == '' }}
         run: |
           # bazelflare is cache and executor in one, so it takes no separate remote cache.
           BAZELFLARE=false BAZEL_REMOTE_ARGS=--remote_cache=$REMOTE_CACHE
+          # Jobs without cache credentials can read the public cache but cannot upload.
+          if [ "$REMOTE_CACHE_READ_ONLY" = true ]; then
+            BAZEL_REMOTE_ARGS="$BAZEL_REMOTE_ARGS --noremote_upload_local_results"
+          fi
           if [ "$WANTS_BAZELFLARE" = true ]; then
             if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
               BAZELFLARE=true BAZEL_REMOTE_ARGS=
@@ -243,7 +248,8 @@ jobs:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
-        if: always() && runner.os != 'Windows'
+        # Bazel info can wait on a command interrupted by cancellation.
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         shell: bash
         run: |
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
@@ -256,7 +262,7 @@ jobs:
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
       - name: Report disk usage (in MB)
-        if: always() && runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           function Get-SizeMB($path) {
@@ -308,7 +314,7 @@ jobs:
           fi
 
       - name: Bazel shutdown
-        if: always()
+        if: ${{ !cancelled() }}
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
       - name: Drop unused bazelflare cache entries

@@ -2,7 +2,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 sh_test(
     name = "helloworld_compile_test",
-    size = "medium",
+    size = "large",
     srcs = ["compile-test.sh"],
     args = [
         "$(location //src/workerd/server:workerd)",

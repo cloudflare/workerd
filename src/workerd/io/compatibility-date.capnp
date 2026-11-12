@@ -1833,4 +1833,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
   # RPC. This flag is intended for internal testing only and may never have its experimental
   # annotation removed.
+
+  outboundUdpSockets @206 :Bool
+      $compatEnableFlag("outbound_udp_sockets")
+      $experimental;
+  # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of
+  # Uint8Array, with one chunk per packet. Also selects this chunk type for UDP ingress.
 }
