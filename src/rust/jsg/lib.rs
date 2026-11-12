@@ -1439,6 +1439,13 @@ impl From<u64> for ConstantValue {
     }
 }
 
+/// An object built into every context that a resource type's prototype can inherit from with
+/// [`inherit_intrinsic`], like C++ JSG's `JSG_INHERIT_INTRINSIC` with a `v8::Intrinsic`.
+///
+/// - `IteratorPrototype` — `Iterator.prototype` (`v8::kIteratorPrototype`). An iterator that
+///   inherits it gets the iterator helpers (`map()`, `filter()`, `toArray()`, ...) and a
+///   `[Symbol.iterator]()` that returns the iterator itself.
+pub use crate::v8::ffi::Intrinsic;
 /// Where a [`Member::Property`] is attached on the JavaScript object.
 ///
 /// This is a re-export of the CXX bridge type in [`v8::ffi`] so that callers
@@ -1546,6 +1553,13 @@ pub enum Member {
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.
     Callable {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.iterator]`, which makes instances iterable
+    /// with `for...of`, spread and `Array.from()`, like C++ JSG's `JSG_ITERABLE`. It returns the
+    /// iterator. Like a [`Member::Method`], it is registered with the type's `v8::Signature`;
+    /// unlike one, it is not enumerable. A type has at most one.
+    Iterable {
         callback: RawFunctionCallback,
     },
     /// Another resource type's constructor, as a property of this type's

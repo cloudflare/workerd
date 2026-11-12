@@ -1461,6 +1461,14 @@ void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
   isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(
       isolate, "Illegal constructor", v8::NewStringType::kInternalized)));
 }
+
+v8::Intrinsic v8Intrinsic(Intrinsic intrinsic) {
+  switch (intrinsic) {
+    case Intrinsic::IteratorPrototype:
+      return v8::kIteratorPrototype;
+  }
+  KJ_UNREACHABLE;
+}
 }  // namespace
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
@@ -1566,6 +1574,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
   KJ_IF_SOME(callback, descriptor.async_dispose) {
     setDisposer(v8::Symbol::GetAsyncDispose(isolate), callback);
+  }
+  // Mirrors ResourceTypeBuilder::registerIterable, which installs the method as a disposer is.
+  KJ_IF_SOME(callback, descriptor.iterable) {
+    setDisposer(v8::Symbol::GetIterator(isolate), callback);
   }
 
   // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
@@ -1700,6 +1712,17 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     instance->SetCallAsFunctionHandler(
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callable)));
     registerExternalRef(callable);
+  }
+
+  // Mirrors registerInheritIntrinsic() (resource.h): the constructor inherits from a template
+  // whose `prototype` is the intrinsic, so the intrinsic is the [[Prototype]] of the type's
+  // prototype in every context.
+  KJ_IF_SOME(intrinsic, descriptor.inherit_intrinsic) {
+    auto intrinsicPrototype = v8::FunctionTemplate::New(isolate);
+    intrinsicPrototype->RemovePrototype();
+    intrinsicPrototype->SetIntrinsicDataProperty(
+        ::workerd::jsg::v8StrIntern(isolate, "prototype"), v8Intrinsic(intrinsic));
+    constructor->Inherit(intrinsicPrototype);
   }
 
   auto result = scope.Escape(constructor);

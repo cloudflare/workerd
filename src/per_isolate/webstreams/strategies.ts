@@ -1,6 +1,6 @@
 'use strict';
 
-// ByteLengthQueuingStrategy and CountQueuingStrategy (WHATWG Streams §7).
+// ByteLengthQueuingStrategy and CountQueuingStrategy (WHATWG Streams section 7).
 
 import type { CommonHelpers } from './common';
 import type { SerializationHelpers } from '../serialization';
@@ -20,7 +20,7 @@ const { markUncloneable } = require('serialization') as SerializationHelpers;
 // Per spec, the size function is the SAME function object for every
 // strategy instance in the realm, and its name is 'size' (method shorthand
 // gives the right .name and .length). The byteLength read is a deliberate,
-// user-observable property access — that IS the specified behavior (the
+// user-observable property access - that IS the specified behavior (the
 // chunk is arbitrary user data, not a trusted view).
 const byteLengthSize = {
   size(chunk: ArrayBufferView): number {

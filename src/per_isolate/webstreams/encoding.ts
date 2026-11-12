@@ -1,13 +1,13 @@
 'use strict';
 
-// TextEncoderStream and TextDecoderStream — WHATWG Encoding Standard
+// TextEncoderStream and TextDecoderStream - WHATWG Encoding Standard
 // stream wrappers, implemented purely in JS/TS over the C++ codecs: the
 // captured TextDecoder, and utils.encodeUtf8, which encodes non-Latin-1
 // text with simdutf as the C++ TextEncoderStream does (TextEncoder.encode()
 // does only under an autogate). These are standard category-3
 // transforms (not elidable, not native-backed): the codec work
 // dominates, and the readable side yields values (strings for TDS,
-// Uint8Array for TES), not bytes — so they deliberately do NOT use
+// Uint8Array for TES), not bytes - so they deliberately do NOT use
 // the native-backed byte-stream path.
 //
 // The C++ stream wrappers these replace are legacy artifacts predating
@@ -82,7 +82,7 @@ let assertIsTextDecoderStream: (self: TextDecoderStream) => void;
 //
 // Encodes strings to UTF-8. Stateful: a lone high surrogate at the end
 // of a chunk is held and paired with the next chunk's leading low
-// surrogate (spec §10.1.1 "encode and enqueue a chunk"). If the stream
+// surrogate (spec section 10.1.1 "encode and enqueue a chunk"). If the stream
 // closes with a pending high surrogate, it's replaced with U+FFFD.
 
 class TextEncoderStream {
@@ -109,7 +109,7 @@ class TextEncoderStream {
       if (len === 0) return;
 
       // Check if the last code unit is a lone high surrogate
-      // (0xD800–0xDBFF). If so, hold it for the next chunk.
+      // (0xD800-0xDBFF). If so, hold it for the next chunk.
       const last = StringPrototypeCharCodeAt(text, len - 1) as number;
       if (last >= 0xd800 && last <= 0xdbff) {
         self.#pendingHighSurrogate = StringPrototypeSlice(

@@ -48,7 +48,7 @@ kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, const Url& spec) {
   auto normalized =
       spec.clone(Url::EquivalenceOption::IGNORE_SEARCH | Url::EquivalenceOption::IGNORE_FRAGMENTS);
   if (normalized.getHref() == "node:process"_kjb.asChars()) {
-    static const auto publicProcess = "node-internal:public_process"_url;
+    static const auto publicProcess = "node-internal:process_exports"_url;
     static const auto legacyProcess = "node-internal:legacy_process"_url;
     return isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess;
   }
@@ -1841,26 +1841,24 @@ kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback c
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
 
-void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle) {
-  getBuiltInBundleFromCapnp(builder, bundle, [](workerd::jsg::Module::Reader) { return true; });
-}
-
-void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-    Bundle::Reader bundle,
-    kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
-  addBuiltInBundleFromCapnp(
-      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
-  });
+void ModuleBundle::getBuiltInBundleFromCapnp(
+    BuiltinBuilder& builder, Bundle::Reader bundle, const ModuleSource* moduleSource) {
+  getBuiltInBundleFromCapnp(
+      builder, bundle, [](workerd::jsg::Module::Reader) { return true; }, moduleSource);
 }
 
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     Bundle::Reader bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter,
-    kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
+    const ModuleSource* moduleSource) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, getSource(module), module.getCompileCache().asBytes());
+    if (moduleSource != nullptr) {
+      builder.addEsm(
+          id, moduleSource->get(module.getSrc().asChars()), module.getCompileCache().asBytes());
+    } else {
+      builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
+    }
   });
 }
 
