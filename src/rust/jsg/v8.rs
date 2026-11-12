@@ -49,6 +49,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -84,6 +85,23 @@ pub mod ffi {
     #[derive(Debug, Clone, Copy, Default)]
     struct MaybeLocal {
         ptr: usize,
+    }
+
+    /// An element that exists in an array, and its index.
+    #[derive(Debug, Clone, Copy)]
+    struct ArrayElement {
+        index: u32,
+        value: Local,
+    }
+
+    /// Where [`Local::<Array>::iterate`](super::Local::iterate) stops reading.
+    #[repr(u8)]
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ArrayIterateUntil {
+        /// After the last element.
+        End,
+        /// After the first element that is an object, or after the last.
+        Object,
     }
 
     #[derive(Debug)]
@@ -537,12 +555,20 @@ pub mod ffi {
             index: u32,
             value: Local,
         ) -> bool;
+        // Leaves what a getter throws pending; see `call_into_js()`.
+        pub unsafe fn local_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: u32,
+        ) -> MaybeLocal;
         // Leaves what a getter or Proxy trap on an element throws pending; see
         // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            result: &mut Vec<Global>,
+            until: ArrayIterateUntil,
+            result: &mut Vec<ArrayElement>,
+            length: &mut u32,
         ) -> Result<bool>;
 
         // Local<TypedArray>
@@ -1007,6 +1033,10 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
+
+    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
+    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
+    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -2355,29 +2385,79 @@ impl<'s> Local<'s, Array> {
         })
     }
 
-    /// Iterates over array elements using V8's native `Array::Iterate()`.
-    /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
+    /// Reads element `index`, like JS `array[index]`: a hole reads through the prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a getter, on the array or its prototype chain, throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn get(self, lock: &mut Lock<'s>, index: u32) -> crate::Result<Local<'s, Value>> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_array_get(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    index,
+                ))
+            })
+        })
+    }
+
+    /// Reads every element that exists, using V8's native `Array::Iterate()`, as a handle in the
+    /// current scope, up to `until`. Each index below [`ArrayElements::length`] without an element
+    /// is a hole, which reads as `undefined`.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        let globals = call_into_js(lock, |lock| {
-            let mut globals = Vec::new();
+    pub fn iterate(
+        self,
+        lock: &mut Lock<'s>,
+        until: ArrayIterateUntil,
+    ) -> crate::Result<ArrayElements<'s>> {
+        call_into_js(lock, |lock| {
+            let mut elements = Vec::new();
+            let mut length = 0;
             // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
             let ok = unsafe {
-                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+                ffi::local_array_iterate(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    until,
+                    &mut elements,
+                    &mut length,
+                )
             }?;
-            Ok(ok.then_some(globals))
-        })?;
-        let state = lock.isolate_state();
-        Ok(globals
-            .into_iter()
-            .map(|g| TracedGlobal::from_ffi_in(g, Arc::clone(state)))
-            .collect())
+            Ok(ok.then(|| ArrayElements {
+                length: length as usize,
+                elements: elements
+                    .into_iter()
+                    .map(|element| {
+                        // SAFETY: the shim opened the elements in the current HandleScope.
+                        let value = unsafe { Local::from_ffi(element.value) };
+                        (element.index as usize, value)
+                    })
+                    .collect(),
+            }))
+        })
     }
+}
+
+/// The elements of an array, as [`Local::<Array>::iterate`] reads them.
+#[derive(Debug)]
+pub struct ArrayElements<'s> {
+    /// The number of elements the array converts to: its length, or more if a getter shortened
+    /// it after its element was read.
+    pub length: usize,
+    /// The elements that exist, with their indices, in index order. Each index below `length`
+    /// that isn't here is a hole.
+    pub elements: Vec<(usize, Local<'s, Value>)>,
 }
 
 // =============================================================================
@@ -3074,6 +3154,8 @@ macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
+
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> std::string::String {
                 $name.to_owned()
