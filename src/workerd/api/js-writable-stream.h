@@ -106,6 +106,10 @@ class JsWritableStream final {
   // required because it never dispatches to the JS backend.
   bool isNull() const;
 
+  // The JavaScript object of the stream, for C++ code that has no TypeWrapper to wrap it with, as
+  // a per-isolate bootstrap utility has none. Consumes this. Precondition: !isNull().
+  jsg::JsObject toJsObject(jsg::Lock& js) &&;
+
   // True if the underlying stream is currently locked to a writer. A null stream is never
   // locked. Not const: for the C++ backend this dispatches to WritableStream::isLocked(), which
   // is non-const.

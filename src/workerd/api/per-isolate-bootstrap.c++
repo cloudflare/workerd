@@ -445,6 +445,21 @@ static void MimeTypeParameter(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+static void NewIdentityPipe(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::newIdentityPipe(js));
+  });
+}
+
+static void PumpTo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::pumpTo(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
 static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -616,6 +631,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "mimeTypeParameter",
+    "newIdentityPipe",
+    "pumpTo",
     "readableStreamState",
     // A value, not a method; see Worker::Api::newHtmlRewriterUtils().
     "htmlRewriter",
@@ -661,6 +678,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, MimeTypeParameter),
+    getMethod(js, NewIdentityPipe),
+    getMethod(js, PumpTo),
     getMethod(js, ReadableStreamState),
     htmlRewriterUtils
         .map([](jsg::JsObject utils) -> v8::Local<v8::Value> {

@@ -429,3 +429,32 @@ if (compatFlags['expose_serialization_test_class']) {
     },
   });
 }
+
+// The TypeScript HTMLRewriter replaces the C++ one, which global-scope.h then
+// leaves out. Loaded after the streams globals above, whose streams it
+// produces and reads.
+if (autogates['ts-html-rewriter']) {
+  const { HTMLRewriter } = require('htmlrewriter/htmlrewriter');
+  // Installed as the MessageChannel classes above are, matching
+  // JSG_NESTED_TYPE.
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    HTMLRewriter: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: HTMLRewriter,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      HTMLRewriter: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: HTMLRewriter,
+      },
+    });
+  }
+}

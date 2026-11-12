@@ -1361,6 +1361,16 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# The TypeScript HTMLRewriter across a startup snapshot. The config turns the pipeline and the
+# TypeScript rewriter on in every variant. The @all-compat-flags variant would turn
+# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline.
+wd_test(
+    src = "startup-snapshot-htmlrewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-htmlrewriter-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
 # Capability bindings captured at module scope and used at request time, and the kinds that keep
 # a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline. The
 # @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of the
@@ -1911,6 +1921,11 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-legacy-streams-test.wd-test",
+    data = ["htmlrewriter-legacy-streams-test.js"],
 )
 
 wd_test(

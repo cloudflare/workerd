@@ -233,12 +233,149 @@ declare const utils: {
   legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
   // The lowercased `type/subtype`, or undefined if not a MIME type.
   mimeTypeEssence(input: string): string | undefined;
+  // The value of the MIME type's parameter `name`, or undefined if there is
+  // none (api/util.h: readContentTypeParameter()).
+  mimeTypeParameter(input: string, name: string): string | undefined;
+  // The ends of a native identity pipe, as C++ HTMLRewriter::transform()
+  // makes its transformed body (api/bootstrap-utils.h). A write completes
+  // once the readable side has read it, and fails once that side is
+  // canceled, with the reason converted as a native stream converts it.
+  // Throws outside a request.
+  newIdentityPipe(): [ReadableStream<Uint8Array>, WritableStream<Uint8Array>];
+  // Pumps `stream` to `sink` as native code pumps a body to a native sink
+  // (api/bootstrap-utils.h), resolving at the end of the pump. A write or
+  // end that fails cancels the stream with its error, converted through a
+  // KJ exception; abort() gets the reason the pump fails with. Throws
+  // outside a request, and for a locked stream.
+  pumpTo(stream: ReadableStream, sink: PumpSink): Promise<void>;
   // Undefined for anything but a ReadableStream of either implementation.
   readableStreamState(
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The native HTMLRewriter (Worker::Api::newHtmlRewriterUtils()), under the
+  // ts-html-rewriter autogate, if the embedder provides it.
+  htmlRewriter: HtmlRewriterUtils | undefined;
 };
+
+// What utils.pumpTo() writes to.
+declare interface PumpSink {
+  write(chunk: ArrayBuffer): Promise<void> | undefined;
+  end(): Promise<void> | undefined;
+  abort(reason: unknown): void;
+}
+
+// The native half of the TypeScript HTMLRewriter: lol-html, through the Rust
+// crate in src/workerd/api/html-rewriter/, whose lib.rs describes the
+// split. The methods are the static methods of a class that can't be
+// constructed, and none of the objects they return has a JS-reachable
+// constructor.
+declare interface HtmlRewriterUtils {
+  // Throws `TypeError: Parser error: ...` for an invalid selector.
+  parseSelector(selector: string): HtmlSelector;
+  // Throws `TypeError: Parser error: ...` for an unsupported encoding.
+  // `dispatcher(kind, id, token, output)` runs every handler: `kind` is a
+  // HandlerKind (rewriter.rs), `id` numbers the handlers, the content
+  // stream, or the end tag handler, `token` is valid until the dispatcher
+  // returns or the promise it returns settles, and `output` is what the
+  // rewriter produced since the previous call, if anything.
+  newRewriter(
+    elementHandlers: NativeElementHandlers[],
+    documentHandlers: NativeDocumentHandlers[],
+    encoding: string,
+    dispatcher: (
+      kind: number,
+      id: number,
+      token: unknown,
+      output: Uint8Array | undefined
+    ) => Promise<unknown> | undefined
+  ): HtmlRewriterHandle;
+}
+declare interface HtmlSelector {}
+declare interface NativeElementHandlers {
+  selector: HtmlSelector;
+  element: boolean;
+  comments: boolean;
+  text: boolean;
+}
+declare interface NativeDocumentHandlers {
+  doctype: boolean;
+  comments: boolean;
+  text: boolean;
+  end: boolean;
+}
+declare interface HtmlRewriterHandle {
+  // Each needs a request, and resolves to the output after the last
+  // handler. A handler's exception, or its promise's rejection, rejects it
+  // with that value, and fails the rewriter.
+  writeAsync(chunk: Uint8Array): Promise<Uint8Array>;
+  endAsync(): Promise<Uint8Array>;
+  // Fails the rewriter. Throws while a write is running.
+  abort(): void;
+}
+// The insertions common to the tokens that take streamed content.
+declare interface HtmlContentHandle {
+  before(content: string, html: boolean): void;
+  after(content: string, html: boolean): void;
+  prepend(content: string, html: boolean): void;
+  append(content: string, html: boolean): void;
+  replace(content: string, html: boolean): void;
+  setInnerContent(content: string, html: boolean): void;
+  beforeStream(id: number, html: boolean): void;
+  afterStream(id: number, html: boolean): void;
+  prependStream(id: number, html: boolean): void;
+  appendStream(id: number, html: boolean): void;
+  replaceStream(id: number, html: boolean): void;
+  setInnerContentStream(id: number, html: boolean): void;
+}
+declare interface HtmlElementHandle extends HtmlContentHandle {
+  tagName(): string;
+  setTagName(name: string): void;
+  namespaceUri(): string;
+  removed(): boolean;
+  getAttribute(name: string): string | undefined;
+  hasAttribute(name: string): boolean;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+  attributeCount(): number;
+  attribute(index: number): [string, string] | undefined;
+  remove(): void;
+  removeAndKeepContent(): void;
+  // Replaces any end tag handler registered before.
+  onEndTag(id: number): void;
+}
+declare interface HtmlEndTagHandle extends HtmlContentHandle {
+  name(): string;
+  setName(name: string): void;
+  remove(): void;
+}
+declare interface HtmlTextHandle extends HtmlContentHandle {
+  text(): string;
+  lastInTextNode(): boolean;
+  removed(): boolean;
+  remove(): void;
+}
+declare interface HtmlCommentHandle {
+  text(): string;
+  setText(text: string): void;
+  removed(): boolean;
+  before(content: string, html: boolean): void;
+  after(content: string, html: boolean): void;
+  replace(content: string, html: boolean): void;
+  remove(): void;
+}
+declare interface HtmlDoctypeHandle {
+  name(): string | undefined;
+  publicId(): string | undefined;
+  systemId(): string | undefined;
+}
+declare interface HtmlDocumentEndHandle {
+  append(content: string, html: boolean): void;
+}
+// Where streamed content goes: UTF-8 chunks, which lol-html checks.
+declare interface HtmlSinkHandle {
+  write(chunk: Uint8Array): void;
+}
 
 // The I/O of a bootstrap API, bound to the request that created it
 // (api/request-io.h: RequestIo). Every method but isCurrent() throws, as the

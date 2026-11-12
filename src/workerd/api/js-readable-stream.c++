@@ -1003,6 +1003,24 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
   return JsReadableStream();
 }
 
+jsg::JsObject JsReadableStream::toJsObject(jsg::Lock& js) && {
+  auto& impl = KJ_ASSERT_NONNULL(this->impl, "cannot wrap a null JsReadableStream");
+  KJ_SWITCH_ONEOF(impl.stream) {
+    KJ_CASE_ONEOF(legacy, jsg::Ref<ReadableStream>) {
+      // ReadableStream is a resource type, so the isolate has its handler whichever implementation is
+      // in use.
+      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStream>>(),
+          "ReadableStream is missing from the isolate type list");
+      return KJ_ASSERT_NONNULL(
+          jsg::JsValue(handler.wrap(js, kj::mv(legacy))).tryCast<jsg::JsObject>());
+    }
+    KJ_CASE_ONEOF(ts, jsg::JsRef<jsg::JsObject>) {
+      return ts.getHandle(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 bool JsReadableStream::isNull() const {
   return impl == kj::none;
 }

@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# HTMLRewriter without the stream constructors: the compat date of the
+# @ variant predates streams_enable_constructors and
+# transformstream_enable_standard_constructor, and neither flag is set, so
+# the rewriter must not depend on new ReadableStream() or new
+# TransformStream().
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-legacy-streams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "htmlrewriter-legacy-streams-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

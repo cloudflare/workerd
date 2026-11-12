@@ -2,7 +2,11 @@
 
 HTMLRewriter consuming stream bodies, producing a stream body, and
 reading streamed replacement content — under both stream
-implementations. **The tests are the normative artifact.** The general
+implementations, each with both HTMLRewriter implementations: the C++
+one (`src/workerd/api/html-rewriter.{h,c++}`) and the TypeScript one
+(`src/per_isolate/htmlrewriter/`, over the Rust crate in
+`src/workerd/api/html-rewriter/`, under the `TS_HTML_REWRITER`
+autogate). **The tests are the normative artifact.** The general
 rewriter surface (selectors, handler types, comments/doctype/text
 tokens, async handlers) is owned by `src/workerd/api/tests/
 htmlrewriter-test.js`; this suite owns the STREAMS interaction only.
@@ -10,6 +14,21 @@ htmlrewriter-test.js`; this suite owns the STREAMS interaction only.
 Unlike the api/tests rewriter files (which pin the pre-fixup behavior
 via `original-transform-stream-backpressure`), the cpp cell here runs
 under the MODERN `fixup-transform-stream-backpressure`.
+
+## Cells
+
+| Cell | Streams | HTMLRewriter |
+| --- | --- | --- |
+| `htmlrewriter-cpp` | C++ | C++ |
+| `htmlrewriter-ts` | TypeScript | C++ |
+| `htmlrewriter-cpp-ts-rewriter` | C++ | TypeScript |
+| `htmlrewriter-ts-ts-rewriter` | TypeScript | TypeScript |
+
+User code can't read the autogate, so each cell says which HTMLRewriter
+it runs through its `USING_TS_REWRITER` binding (`which-impl.js`), for a
+test that has to pin a difference between them. The
+C++ HTMLRewriter cells disable `@all-autogates`, which would swap in the
+TypeScript one.
 
 ## Coverage
 
@@ -27,9 +46,21 @@ under the MODERN `fixup-transform-stream-backpressure`.
 
 ## Divergences
 
+### Streams implementations (C++ HTMLRewriter)
+
 After the next source chunk wakes a canceled rewriter pump, C++ makes one
 additional pull while TypeScript makes two; these counts are pinned by
 `cancelReachesSourceAfterNextChunk`.
+
+### HTMLRewriter implementations
+
+None that this suite pins: both implementations pass it with the same
+expectations. The TypeScript one transforms through the same native
+parts as the C++ one (an identity pipe for the transformed body, and the
+native pump for the original body and streamed content), so reads,
+cancellation, error conversion and pull counts match. The header of
+`src/per_isolate/htmlrewriter/htmlrewriter.ts` lists its differences,
+none of which shows here.
 
 ## Known bugs
 

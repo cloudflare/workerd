@@ -1128,7 +1128,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(FixedLengthStream);
       JSG_NESTED_TYPE(IdentityTransformStream);
     }
-    JSG_NESTED_TYPE(HTMLRewriter);
+    // Under the TS_HTML_REWRITER autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript HTMLRewriter instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_HTML_REWRITER)) {
+      JSG_NESTED_TYPE(HTMLRewriter);
+    }
     if (flags.getWorkerdExperimental()) {
       JSG_NESTED_TYPE(Datagram);
     }
