@@ -9,7 +9,8 @@ use crate::Result;
 pub use crate::http::Payload;
 
 /// The identity of one stored version of an object: what a conditional
-/// write names to replace exactly that version. An S3 `ETag`.
+/// write names to replace exactly that version: an S3 `ETag`, a Cloud
+/// Storage generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version(pub(crate) String);
 
@@ -26,13 +27,16 @@ pub struct Entry {
     pub key: String,
 }
 
-/// An object store: S3's semantics for the calls the cluster makes.
+/// An object store: the calls the cluster makes, with the semantics S3 and
+/// Cloud Storage share.
 #[async_trait::async_trait(?Send)]
 pub trait Store {
     /// The object and its version; with `to`, the body goes to that file
     /// instead.
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>>;
-    /// `Ok(None)` when the guard failed and nothing was written.
+    /// `Ok(None)` when the guard failed and nothing was written. A write
+    /// without a guard never answers `Ok(None)`: the store refusing it is an
+    /// error.
     async fn put(
         &self,
         key: &str,
@@ -58,7 +62,7 @@ pub trait Store {
     }
     /// Idempotent: deleting an absent key succeeds.
     async fn delete(&self, key: &str) -> Result<()>;
-    /// See `S3::clock_skew_ms`.
+    /// See `Client::clock_skew_ms`.
     fn clock_skew_ms(&self) -> Option<i64> {
         None
     }
@@ -117,7 +121,7 @@ impl Bucket {
         self.store.put(&self.key(key), body, Some(guard), &[]).await
     }
 
-    /// Write `body` unconditionally, with `x-amz-meta-*` metadata.
+    /// Write `body` unconditionally, with user metadata.
     pub async fn put(&self, key: &str, body: Vec<u8>, metadata: &[(&str, String)]) -> Result<()> {
         let key = self.key(key);
         let body = Payload::Bytes(body.into());
@@ -130,7 +134,7 @@ impl Bucket {
         Ok(got.is_some())
     }
 
-    /// Writes the file `from` unconditionally, with `x-amz-meta-*` metadata.
+    /// Writes the file `from` unconditionally, with user metadata.
     pub async fn put_file(
         &self,
         key: &str,
@@ -199,6 +203,8 @@ pub mod memory {
         writes: Cell<u64>,
         /// As GCS's S3 API treats `If-Match` on a PUT.
         pub ignores_guards: Cell<bool>,
+        /// As a store whose `ETag`s are weak treats `If-Match`.
+        pub never_matches: Cell<bool>,
     }
 
     #[async_trait::async_trait(?Send)]
@@ -230,7 +236,9 @@ pub mod memory {
             let holds = match guard {
                 None => true,
                 Some(Guard::Absent) => current.is_none(),
-                Some(Guard::Match(version)) => current == Some(&version),
+                Some(Guard::Match(version)) => {
+                    current == Some(&version) && !self.never_matches.get()
+                }
             };
             if !holds && !self.ignores_guards.get() {
                 return Ok(None);

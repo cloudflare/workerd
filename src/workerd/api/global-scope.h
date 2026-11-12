@@ -1090,18 +1090,26 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(Navigator);
     }
 
-    if (flags.getSpecCompliantUrl()) {
-      JSG_NESTED_TYPE_NAMED(url::URL, URL);
-      JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
-    } else {
-      JSG_NESTED_TYPE(URL);
-      JSG_NESTED_TYPE(URLSearchParams);
+    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
+    // TypeScript URL and URLSearchParams instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL)) {
+      if (flags.getSpecCompliantUrl()) {
+        JSG_NESTED_TYPE_NAMED(url::URL, URL);
+        JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
+      } else {
+        JSG_NESTED_TYPE(URL);
+        JSG_NESTED_TYPE(URLSearchParams);
+      }
     }
 
-    if (flags.getSpecCompliantUrlpattern()) {
-      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
-    } else {
-      JSG_NESTED_TYPE(URLPattern);
+    // Under the TS_URL_PATTERN autogate, the per-isolate bootstrap installs the TypeScript
+    // URLPattern instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL_PATTERN)) {
+      if (flags.getSpecCompliantUrlpattern()) {
+        JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+      } else {
+        JSG_NESTED_TYPE(URLPattern);
+      }
     }
 
     JSG_NESTED_TYPE(Blob);

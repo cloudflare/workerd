@@ -296,7 +296,7 @@ fn expose<R: jsg::Resource>(
     name: &str,
     resource: &jsg::Rc<R>,
 ) -> Result<(), jsg::Error> {
-    let wrapper = resource.clone().to_js(lock)?;
+    let wrapper = resource.clone(lock).to_js(lock)?;
     ctx.set_global(lock, name, wrapper);
     Ok(())
 }
@@ -323,7 +323,7 @@ fn resource_node_reports_its_fields() {
 
         let name = snapshot.target(node, "name");
         assert_eq!(snapshot.name(name), "workerd / String");
-        assert_eq!(snapshot.size(name), parent.name.capacity());
+        assert_eq!(snapshot.size(name), parent.get(lock).name.capacity());
 
         let child = snapshot.target(node, "child");
         assert_eq!(snapshot.name(child), "workerd / Child");
@@ -341,7 +341,7 @@ fn resource_node_reports_its_fields() {
         assert!(snapshot.nodes[numbers].edges.is_empty());
         assert_eq!(
             snapshot.size(numbers),
-            parent.numbers.capacity() * size_of::<u32>()
+            parent.get(lock).numbers.capacity() * size_of::<u32>()
         );
 
         let cache = snapshot.target(node, "cache");
@@ -409,8 +409,8 @@ fn shared_resource_is_one_node() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let shared = new_child(lock);
-        let first = parent_of(lock, ctx, shared.clone());
-        let second = parent_of(lock, ctx, shared.clone());
+        let first = parent_of(lock, ctx, shared.clone(lock));
+        let second = parent_of(lock, ctx, shared.clone(lock));
         expose(lock, ctx, "first", &first)?;
         expose(lock, ctx, "second", &second)?;
         expose(lock, ctx, "shared", &shared)?;
@@ -430,7 +430,7 @@ fn cycle_of_resources_is_tracked_once() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = parent(lock, ctx);
-        *parent.child.parent.borrow_mut(lock) = Some(parent.clone());
+        *parent.get(lock).child.get(lock).parent.borrow_mut(lock) = Some(parent.clone(lock));
         expose(lock, ctx, "parent", &parent)?;
 
         let snapshot = Snapshot::take(lock);
@@ -440,7 +440,13 @@ fn cycle_of_resources_is_tracked_once() {
         assert_eq!(snapshot.target(child, "parent"), node);
 
         // Break the cycle, which GC cannot collect while Rust holds a strong reference.
-        parent.child.parent.borrow_mut(lock).take();
+        parent
+            .get(lock)
+            .child
+            .get(lock)
+            .parent
+            .borrow_mut(lock)
+            .take();
         Ok(())
     });
 }
@@ -658,7 +664,7 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             tree: BTreeMap::from([(1, "one".to_owned())]),
             plain_dict,
             dict,
-            weak: weak_target.downgrade(),
+            weak: weak_target.downgrade(lock),
             lenient: jsg::Lenient::Unconvertable(v8::TracedGlobal::new(lock, unconvertable)),
             global: global.to_global(lock),
             store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(),
@@ -670,13 +676,13 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
 
         // A snapshot taken while a cell is mutably borrowed skips the cell. Taking a snapshot runs
         // a GC first, so the cell holds no GC references, which the GC could not visit.
-        let borrow = fields.borrowed.borrow_mut();
+        let borrow = fields.get(lock).borrowed.borrow_mut();
         let snapshot = Snapshot::take(lock);
         drop(borrow);
         let node = snapshot.find("Fields");
-        check(&snapshot, node, &fields);
+        check(&snapshot, node, fields.get(lock));
         // Break the cycle of links, which would leak.
-        fields.ring.next.borrow_mut().take();
+        fields.get(lock).ring.next.borrow_mut().take();
         Ok(())
     });
 }
@@ -956,14 +962,20 @@ fn handle_and_resource_of_another_isolate_are_not_reported() {
     });
 
     let holder = holder.expect("set above");
-    // Each handle and resource is released under the lock of its own isolate.
-    a.run_in_context(|_lock, _ctx| {
-        drop(holder.handle.borrow_mut().take().expect("set above"));
-        drop(holder.resource.borrow_mut().take().expect("set above"));
+    // Each handle and resource is released under the lock of its own isolate. The holder lends
+    // them only under its own isolate's lock.
+    let mut held = None;
+    b.run_in_context(|lock, _ctx| {
+        let fields = holder.get(lock);
+        held = Some((
+            fields.handle.borrow_mut().take().expect("set above"),
+            fields.resource.borrow_mut().take().expect("set above"),
+        ));
+        drop(holder);
         Ok(())
     });
-    b.run_in_context(move |_lock, _ctx| {
-        drop(holder);
+    a.run_in_context(move |_lock, _ctx| {
+        drop(held);
         Ok(())
     });
 }
@@ -1280,7 +1292,7 @@ fn reporting_stops_at_max_depth() {
         assert_eq!(snapshot.targets(ring, ""), [ring]);
 
         // Break the cycle, which would leak.
-        deep.ring.next.borrow_mut().take();
+        deep.get(lock).ring.next.borrow_mut().take();
         Ok(())
     });
 }

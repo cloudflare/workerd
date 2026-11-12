@@ -158,8 +158,9 @@ struct DisposeFirst {
 impl DisposeFirst {
     #[jsg_dispose]
     #[jsg_method]
-    fn close(this: jsg::Rc<Self>, _lock: &mut jsg::Lock) {
-        this.closes.set(this.closes.get() + 1);
+    fn close(this: jsg::Rc<Self>, lock: &mut jsg::Lock) {
+        let closes = &this.get(lock).closes;
+        closes.set(closes.get() + 1);
     }
 
     #[jsg_property(readonly)]

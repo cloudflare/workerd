@@ -216,11 +216,14 @@ fn bad_values_are_usage_errors() {
         &["serve"],
         &["test", "c.capnp", "a", "b"],
         &["unknown"],
-        // A deploy needs the cluster's bucket, as s3://<bucket>[/<prefix>].
+        // A deploy needs the cluster's bucket, as s3://<bucket>[/<prefix>] or
+        // gs://<bucket>[/<prefix>].
         &["deploy"],
-        &["deploy", "--bucket=gs://cluster"],
+        &["deploy", "--bucket=az://cluster"],
         &["deploy", "--bucket=s3://"],
         &["deploy", "--bucket=s3:///prefix"],
+        &["deploy", "--bucket=gs://"],
+        &["deploy", "--bucket=gs:///prefix"],
         &["deploy", "--bucket=cluster"],
         &[
             "deploy",
@@ -302,7 +305,7 @@ fn deploy_invocation() {
     assert_eq!(deploy.import_paths, ["inc"]);
     assert_eq!(deploy.bucket, "s3://cluster/prefix");
     assert_eq!(
-        deploy.bucket_options(),
+        deploy.bucket_options().unwrap(),
         ["aws_endpoint=http://127.0.0.1:9000", "aws_region=auto"]
     );
     assert!(deploy.experimental);
@@ -321,7 +324,32 @@ fn deploy_invocation() {
     assert_eq!(project, ".");
     assert_eq!(const_name, None);
     assert_eq!(deploy.name, None);
-    assert!(deploy.bucket_options().is_empty());
+    assert!(deploy.bucket_options().unwrap().is_empty());
+}
+
+#[test]
+fn a_gs_bucket_refuses_s3_flags() {
+    let options = |args: &[&str]| {
+        let Command::Deploy { deploy, .. } = parse(args).command else {
+            panic!("expected deploy")
+        };
+        deploy.bucket_options()
+    };
+    assert_eq!(
+        options(&["deploy", "--bucket=gs://cluster"]),
+        Ok(Vec::new())
+    );
+    for (flag, name) in [
+        ("--endpoint=http://127.0.0.1:9000", "--endpoint"),
+        ("--region=auto", "--region"),
+    ] {
+        assert_eq!(
+            options(&["deploy", "--bucket=gs://cluster/prefix", flag]),
+            Err(format!(
+                "{name} is for an s3:// bucket. Remove it for the gs:// bucket."
+            ))
+        );
+    }
 }
 
 #[test]
@@ -332,7 +360,13 @@ fn deploy_bucket_and_endpoint_forms() {
         };
         deploy
     };
-    for bucket in ["s3://cluster", "s3://cluster/", "s3://cluster/a/b"] {
+    for bucket in [
+        "s3://cluster",
+        "s3://cluster/",
+        "s3://cluster/a/b",
+        "gs://cluster",
+        "gs://cluster/a/b",
+    ] {
         let flag = format!("--bucket={bucket}");
         assert_eq!(deploy(&["deploy", &flag]).bucket, bucket);
     }

@@ -493,6 +493,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // request as a fallback if none is given. Pass `incomingRequest` whenever the exception is known
   // to belong to a specific request, such as the failure of its event handler: in an actor, the
   // current incoming request may be a newer, unrelated one.
+  //
+  // Adding the exception to the trace does not take the isolate lock, so this does not wait for
+  // another thread that is running JavaScript in the isolate. Only reporting the exception to an
+  // attached inspector takes the lock, synchronously.
+  //
+  // With a tracer or an inspector attached, an internal exception is reported to the isolate's
+  // observer and to the observer of the request it is traced under, both without the lock.
   void logUncaughtExceptionAsync(UncaughtExceptionSource source,
       kj::Exception&& e,
       kj::Maybe<IncomingRequest&> incomingRequest);

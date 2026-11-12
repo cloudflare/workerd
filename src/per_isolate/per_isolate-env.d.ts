@@ -183,15 +183,60 @@ declare const utils: {
   parseUrl(
     input: string
   ): { readonly href: string; readonly origin: string } | undefined;
+  // The ada members of api/url-bootstrap.h. `out` is a Uint32Array of 9:
+  // jsg::Url::Components' offsets into the href, then the scheme type.
+  // `attribute` is a UrlBootstrap::Attribute, 0 (href) to 9 (hash).
+  urlParse(
+    input: string,
+    base: string | undefined,
+    out: Uint32Array
+  ): string | undefined;
+  urlCanParse(input: string, base?: string): boolean;
+  // Undefined only if the href setter rejected the value.
+  urlUpdate(
+    href: string,
+    attribute: number,
+    value: string,
+    out: Uint32Array
+  ): string | undefined;
+  urlOrigin(href: string): string;
+  // The legacy (kj::Url) members of api/url-bootstrap.h. createLegacyUrl()
+  // throws the legacy parser's TypeErrors; tryCreateLegacyUrl() returns
+  // undefined instead.
+  createLegacyUrl(input: string, base: string | undefined): LegacyUrlHandle;
+  tryCreateLegacyUrl(
+    input: string,
+    base: string | undefined
+  ): LegacyUrlHandle | undefined;
+  // A handle with only an empty query: a URLSearchParams' own.
+  createLegacySearchParams(): LegacyUrlHandle;
+  // The members of api/urlpattern-bootstrap.h. An init is the nine members
+  // protocol to hash, then baseURL, each undefined if absent. A compiled
+  // pattern is hasRegExpGroups, then for each component protocol to hash
+  // its pattern string, RegExp (undefined unless its type is 0, a regexp),
+  // group names, UrlPatternBootstrap::ComponentType and exact value.
+  // urlPatternCompile() throws "Failed to construct URLPattern";
+  // urlPatternProcessInit() returns the eight components, or undefined if
+  // the init does not process. The legacy members throw the legacy
+  // parser's TypeErrors instead.
+  urlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  urlPatternProcessInit(init: UrlPatternInitList): string[] | undefined;
+  legacyUrlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
   // The lowercased `type/subtype`, or undefined if not a MIME type.
   mimeTypeEssence(input: string): string | undefined;
   // Undefined for anything but a ReadableStream of either implementation.
   readableStreamState(
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
-  // TextEncoder.encode() for TextEncoderStream: a two-byte string goes
-  // through simdutf whatever the ENABLE_FAST_TEXTENCODER autogate says
-  // (api/encoding.h: encodeUtf8Chunk). Throws a TypeError for a non-string.
   encodeUtf8(str: string): Uint8Array;
 };
 
@@ -211,6 +256,61 @@ declare interface RequestIo {
 declare interface AbortAlgorithmHandle {
   // Unregisters the algorithm. Idempotent.
   remove(): void;
+}
+
+// A URLPatternInit as utils' URLPattern members take it: protocol, username,
+// password, hostname, port, pathname, search, hash and baseURL.
+declare type UrlPatternInitList = (string | undefined)[];
+
+// The legacy URL, backing a TypeScript URL and its searchParams on the legacy
+// path, or a URLSearchParams of its own. Obtained only from utils; it has no
+// JS-reachable constructor. See LegacyUrlHandle in src/workerd/api/url.h.
+//
+// Only setHref() reports a rejected value; the other setters leave the URL
+// unchanged on one. String arguments are converted to USVStrings natively.
+declare interface LegacyUrlHandle {
+  // Throws a TypeError for a URL that kj::Url cannot stringify.
+  getHref(): string;
+  setHref(value: string): boolean;
+  getOrigin(): string;
+  getProtocol(): string;
+  setProtocol(value: string): void;
+  getUsername(): string;
+  setUsername(value: string): void;
+  getPassword(): string;
+  setPassword(value: string): void;
+  getHost(): string;
+  setHost(value: string): void;
+  getHostname(): string;
+  setHostname(value: string): void;
+  getPort(): string;
+  setPort(value: string): void;
+  getPathname(): string;
+  setPathname(value: string): void;
+  getSearch(): string;
+  setSearch(value: string): void;
+  getHash(): string;
+  setHash(value: string): void;
+
+  // The query, as a URLSearchParams list.
+  size(): number;
+  append(name: string, value: string): void;
+  delete(name: string, value?: string): void;
+  get(name: string): string | null;
+  getAll(name: string): string[];
+  has(name: string, value?: string): boolean;
+  set(name: string, value: string): void;
+  sort(): void;
+  // Throw a RangeError for an index at or past size().
+  nameAt(index: number): string;
+  valueAt(index: number): string;
+  // URLSearchParams.toString().
+  serialize(): string;
+  // Replaces the query with `query` parsed as form data, after one leading
+  // '?'.
+  assignQueryString(query: string): void;
+  // Replaces the query; `pairs` alternates names and values.
+  assignQueryPairs(pairs: string[]): void;
 }
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only

@@ -28,6 +28,7 @@ import { mock } from 'node:test';
 import util, {
   inspect,
   callbackify,
+  diff,
   inherits,
   promisify,
   stripVTControlCharacters,
@@ -6161,5 +6162,61 @@ export const setTraceSigInt = {
   async test() {
     assert.strictEqual(namedSetTraceSigInt, util.setTraceSigInt);
     assert.strictEqual(util.setTraceSigInt(true), undefined);
+  },
+};
+
+// Ported from Node.js test/parallel/test-diff.js
+export const testDiff = {
+  test() {
+    assert.strictEqual(util.diff, diff);
+
+    assert.throws(() => diff({}, 'foo'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff('foo', {}), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "expected" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff(['1', { b: 2 }], ['1', '2']), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual[1]" argument must be of type string. Received an instance of Object',
+    });
+
+    assert.deepStrictEqual(diff('foo', 'foo'), []);
+
+    assert.deepStrictEqual(diff('12345678', '12!!5!7!'), [
+      [0, '1'],
+      [0, '2'],
+      [1, '3'],
+      [1, '4'],
+      [-1, '!'],
+      [-1, '!'],
+      [0, '5'],
+      [1, '6'],
+      [-1, '!'],
+      [0, '7'],
+      [1, '8'],
+      [-1, '!'],
+    ]);
+
+    assert.deepStrictEqual(diff(['1', '2', '3'], ['1', '3', '4']), [
+      [0, '1'],
+      [1, '2'],
+      [0, '3'],
+      [-1, '4'],
+    ]);
+
+    assert.deepStrictEqual(diff('', 'ab'), [
+      [-1, 'a'],
+      [-1, 'b'],
+    ]);
+    assert.deepStrictEqual(diff(['a', 'b'], []), [
+      [1, 'a'],
+      [1, 'b'],
+    ]);
   },
 };

@@ -139,7 +139,7 @@ impl DnsUtil {
     // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
     #[jsg_method]
     pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
-        watcher.targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
+        watcher.get(lock).targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
     }
 
     // Static — DnsUtil.create(…)
