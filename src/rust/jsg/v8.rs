@@ -815,8 +815,6 @@ pub mod ffi {
         pub fn tunneled_exception_serialization_version() -> u32;
         pub fn js_exception_metadata_max_field_size() -> usize;
         pub fn starts_with_tunneled_error_type(description: &str) -> bool;
-        pub fn tunneled_exception_file() -> &'static str;
-        pub fn tunneled_exception_line() -> u32;
 
         // TryCatch
         pub unsafe fn isolate_try_catch(

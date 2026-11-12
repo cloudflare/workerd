@@ -1890,16 +1890,6 @@ size_t js_exception_metadata_max_field_size() {
   return ::workerd::jsg::JS_EXCEPTION_METADATA_MAX_FIELD_SIZE;
 }
 
-::rust::Str tunneled_exception_file() {
-  // As the kj::Exception constructor records it.
-  auto file = kj::trimSourceFilename(::workerd::jsg::TUNNELED_EXCEPTION_FILE);
-  return ::rust::Str(file.begin(), file.size());
-}
-
-uint32_t tunneled_exception_line() {
-  return ::workerd::jsg::TUNNELED_EXCEPTION_LINE;
-}
-
 bool starts_with_tunneled_error_type(::rust::Str description) {
   return ::workerd::jsg::startsWithTunneledErrorType(
       kj::arrayPtr(description.data(), description.size()));

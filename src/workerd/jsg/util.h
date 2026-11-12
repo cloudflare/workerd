@@ -147,13 +147,7 @@ constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63
 // understand it.
 constexpr uint32_t TUNNELED_EXCEPTION_SERIALIZATION_VERSION = 15;
 
-// The location of the kj::Exception that createTunneledException() and Lock::exceptionToKj()
-// create for a JavaScript exception (in ExceptionWrapper::tryUnwrap()). Rust JSG's
-// Lock::exception_to_kj() reports the same location, so that logs show both alike.
-constexpr const char* TUNNELED_EXCEPTION_FILE = __FILE__;
-constexpr int TUNNELED_EXCEPTION_LINE = __LINE__;
-
-// The longest error type or stack trace that addJsExceptionMetadata() keeps, in bytes.
+// The longest error type, stack trace or message that addJsExceptionMetadata() keeps, in bytes.
 constexpr size_t JS_EXCEPTION_METADATA_MAX_FIELD_SIZE = 4096;
 
 // Whether `description`, an object's description by v8::Value::ToDetailString(), starts with the

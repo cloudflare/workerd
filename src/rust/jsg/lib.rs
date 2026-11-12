@@ -1268,11 +1268,7 @@ impl<'s> Lock<'s> {
 
         Ok(cxx::KjError::new(exception_type, description)
             .with_details(details)
-            // Where C++ JSG creates the exceptions it tunnels, so that logs show both alike.
-            .with_location(
-                v8::ffi::tunneled_exception_file().to_owned(),
-                v8::ffi::tunneled_exception_line(),
-            ))
+            .with_location(file!().to_owned(), line!()))
     }
 }
 

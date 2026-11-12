@@ -1446,8 +1446,7 @@ class ExceptionWrapper {
       KJ_IF_SOME(domException,
           wrapper.tryUnwrap(
               js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
-        return kj::Exception(kj::Exception::Type::FAILED, TUNNELED_EXCEPTION_FILE,
-            TUNNELED_EXCEPTION_LINE,
+        return KJ_EXCEPTION(FAILED,
             kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
       } else {
 
@@ -1465,8 +1464,7 @@ class ExceptionWrapper {
             reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }
-        return kj::Exception(
-            excType, TUNNELED_EXCEPTION_FILE, TUNNELED_EXCEPTION_LINE, kj::mv(reason));
+        return kj::Exception(excType, __FILE__, __LINE__, kj::mv(reason));
       }
     }();
 

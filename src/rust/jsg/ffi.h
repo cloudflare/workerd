@@ -660,10 +660,6 @@ uint64_t js_exception_metadata_detail_id();
 uint32_t tunneled_exception_serialization_version();
 size_t js_exception_metadata_max_field_size();
 bool starts_with_tunneled_error_type(::rust::Str description);
-// jsg::TUNNELED_EXCEPTION_FILE and jsg::TUNNELED_EXCEPTION_LINE, where C++ JSG creates the
-// exceptions it tunnels (value.h).
-::rust::Str tunneled_exception_file();
-uint32_t tunneled_exception_line();
 
 // TryCatch
 // Decides what `tryCatch` caught as jsg::Lock::tryCatch() does: stores a catchable exception in

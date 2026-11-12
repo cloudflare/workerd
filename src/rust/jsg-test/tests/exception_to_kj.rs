@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! `Lock::exception_to_kj`, checked against C++ JSG's `jsg::Lock::exceptionToKj()`: the type,
-//! description, details and location are the same, and so is what JavaScript sees it read.
+//! description and details are the same, and so is what JavaScript sees it read. Each records
+//! where it creates the exception, so the locations differ.
 
 use jsg::v8;
 
@@ -48,11 +49,6 @@ fn assert_same(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str) -> c
     assert_eq!(
         rust.details().cloned().unwrap_or_default(),
         cpp.details().cloned().unwrap_or_default(),
-        "{expr}"
-    );
-    assert_eq!(
-        (rust.file(), rust.line()),
-        (cpp.file(), cpp.line()),
         "{expr}"
     );
     rust

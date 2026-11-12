@@ -186,7 +186,8 @@ class RecordingRequestObserver final: public RequestObserver {
 
   void reportFailure(const kj::Exception& e, FailureSource) override {
     record->failures.add(kj::str(e.getType(), ": ", e.getDescription()));
-    // Logs show where the exception was created, so that must match too.
+    // Logs show where the exception was created, so that must match too, but for the location of
+    // a tunneled exception (withTunneledLocationsNormalized()).
     record->failureLocations.add(kj::str(e.getFile(), ":", e.getLine()));
   }
   void setFailedOpen(bool value) override {
@@ -375,12 +376,39 @@ Outcome run(kj::StringPtr scenario, Implementation implementation, Flags flags) 
   return worker.outcome(statusCode, log);
 }
 
-// Runs `scenario` on both implementations, checks that they are observed alike, and returns
-// the outcome.
+// `text` with the location of each exception that C++ or Rust JSG creates for a JavaScript
+// exception replaced by the same placeholder. Each records where it creates the exception, so
+// that is the one place where the logs of the two implementations differ.
+kj::String withTunneledLocationsNormalized(kj::StringPtr text) {
+  constexpr kj::StringPtr FILES[] = {"workerd/jsg/value.h:"_kj, "rust/jsg/lib.rs:"_kj};
+  kj::Vector<char> result(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    auto rest = text.slice(i);
+    bool replaced = false;
+    for (auto file: FILES) {
+      if (rest.startsWith(file)) {
+        result.addAll("<tunneled exception>"_kj);
+        i += file.size();
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) result.add(text[i++]);
+  }
+  result.add('\0');
+  return kj::String(result.releaseAsArray());
+}
+
+// Runs `scenario` on both implementations, checks that they are observed alike, but for where
+// JSG creates the exceptions it tunnels, and returns the outcome.
 Outcome runOnBoth(kj::StringPtr scenario, Flags flags = {}) {
   auto cpp = run(scenario, Implementation::CPP, flags);
   auto rust = run(scenario, Implementation::RUST, flags);
-  KJ_EXPECT(cpp.toString() == rust.toString(), scenario, cpp.toString(), rust.toString());
+  KJ_EXPECT(withTunneledLocationsNormalized(cpp.toString()) ==
+          withTunneledLocationsNormalized(rust.toString()),
+      scenario, cpp.toString(), rust.toString());
   return cpp;
 }
 
