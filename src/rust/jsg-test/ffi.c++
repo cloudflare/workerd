@@ -295,8 +295,7 @@ size_t rust_wrappable_size() {
   // Set the C++ wrappable tag (NOT the Rust tag) to simulate a C++ JSG object
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_WRAPPABLE_TAG);
   obj->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+      tagAddress, ::workerd::jsg::Wrappable::WRAPPABLE_MARKER_TAG);
 
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
 }

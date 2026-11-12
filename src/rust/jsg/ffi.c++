@@ -884,8 +884,7 @@ MaybeLocal wrap_resource(
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+      tagAddress, ::workerd::jsg::Wrappable::WRAPPABLE_MARKER_TAG);
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
@@ -901,8 +900,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+      tagAddress, ::workerd::jsg::Wrappable::WRAPPABLE_MARKER_TAG);
 }
 
 MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
@@ -983,8 +981,7 @@ kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Val
   if (v8_obj->InternalFieldCount() < ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT ||
       v8_obj->GetAlignedPointerFromInternalField(
           ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-          static_cast<v8::EmbedderDataTypeTag>(
-              ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) !=
+          ::workerd::jsg::Wrappable::WRAPPABLE_MARKER_TAG) !=
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
