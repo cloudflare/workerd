@@ -389,6 +389,21 @@ if (autogates['ts-url']) {
   });
 }
 
+// The TypeScript URLPattern replaces the C++ ones, which global-scope.h then
+// leaves out, installed as URL is.
+if (autogates['ts-url-pattern']) {
+  const { URLPattern } = require('urlpattern/urlpattern');
+  ObjectDefineProperties(globalThis, {
+    URLPattern: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLPattern,
+    },
+  });
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.
