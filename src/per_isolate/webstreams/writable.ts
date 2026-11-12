@@ -1,13 +1,13 @@
 'use strict';
 
 // WritableStream, WritableStreamDefaultWriter, WritableStreamDefaultController
-// (WHATWG Streams §5). Unlike the readable side, the writable side has a
-// single consumer (the sink), so there is no shared-queue/cursor machinery —
+// (WHATWG Streams section 5). Unlike the readable side, the writable side has a
+// single consumer (the sink), so there is no shared-queue/cursor machinery -
 // the controller keeps a simple spec-shaped FIFO of {chunk, size} plus a
 // running total for backpressure.
 //
-// The state machine follows the spec closely: states are 'writable' →
-// ('erroring' →) 'errored', or 'writable' → 'closed'; write/close requests
+// The state machine follows the spec closely: states are 'writable' ->
+// ('erroring' ->) 'errored', or 'writable' -> 'closed'; write/close requests
 // are promise pairs; at most one sink operation (write or close) is in
 // flight at a time.
 
@@ -95,7 +95,7 @@ const kCloseMarker: symbol = Symbol('close');
 const kFlushMarker: symbol = Symbol('flush');
 
 // A sink write() rejection wrapped in this marker rejects the WRITE
-// REQUEST but leaves the stream writable — the workerd-internal contract
+// REQUEST but leaves the stream writable - the workerd-internal contract
 // for the identity transforms (IdentityTransformStream, FixedLengthStream;
 // matching the C++ internal controllers), where an invalid chunk is a
 // per-write error, not a stream error. The standard CompressionStream pair
@@ -337,7 +337,7 @@ class WritableStream<W = unknown> {
   // 'errored'.
   #closedPromise?: PromiseWithResolversType<void> | undefined;
   // Back-reference to the native underlying sink (undefined for
-  // JS-backed streams). Kept for extraction — C++ unwraps the backing
+  // JS-backed streams). Kept for extraction - C++ unwraps the backing
   // class from the returned object.
   #nativeSink?: object | undefined;
   // The pending-closure gate (JsWritableStream::setPendingClosure): set by
@@ -412,7 +412,7 @@ class WritableStream<W = unknown> {
 
     // JS-to-C++ extraction for native-backed writable streams.
     // Mirrors extractNativeSource on the readable side: atomic
-    // validate → extract → lock. No "disturbed" concept on writable.
+    // validate -> extract -> lock. No "disturbed" concept on writable.
     extractNativeSink = function <W>(this: WritableStream<W>): object {
       assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
@@ -435,7 +435,7 @@ class WritableStream<W = unknown> {
     // neutralize the stream because its underlying connection is being
     // taken over (e.g. Socket startTls / takeConnectionStream). The
     // precondition errors match the legacy C++ arm EXACTLY
-    // (WritableStreamInternalController::detach, internal.c++) — they are
+    // (WritableStreamInternalController::detach, internal.c++) - they are
     // user-visible through the sockets API:
     //   locked            -> TypeError, text below (with trailing period)
     //   closed or closing -> TypeError "This WritableStream is closed."
@@ -550,7 +550,7 @@ class WritableStream<W = unknown> {
         stream.#abortHook = undefined;
         abortHook();
       }
-      // signalAbort dispatches 'abort' events SYNCHRONOUSLY — the sink may
+      // signalAbort dispatches 'abort' events SYNCHRONOUSLY - the sink may
       // have registered listeners on controller.signal, and that user code
       // can re-enter (write/error/close). Re-read the state, per spec.
       const stateNow = stream.#state;
@@ -729,7 +729,7 @@ class WritableStream<W = unknown> {
 
     // The non-fatal variant (see NonFatalWriteRejection): rejects the
     // in-flight write's request WITHOUT the deal-with-rejection state
-    // transition — the stream stays writable and the queue keeps going.
+    // transition - the stream stays writable and the queue keeps going.
     writableStreamFinishInFlightWriteWithNonFatalError = (stream, error) => {
       // assert: in-flight write request is set (caller guarantee)
       const request = stream.#inFlightWriteRequest as WriteRequest;
@@ -751,7 +751,7 @@ class WritableStream<W = unknown> {
       request.resolve();
       // assert: state 'writable' or 'erroring'
       if (stream.#state === 'erroring') {
-        // The close succeeded — the abort (if any) is moot.
+        // The close succeeded - the abort (if any) is moot.
         stream.#storedError = undefined;
         const abortRequest = stream.#pendingAbortRequest;
         if (abortRequest !== undefined) {
@@ -873,7 +873,7 @@ class WritableStream<W = unknown> {
   }
 
   // Node.js interop (see kIsClosedPromise): an object whose promise settles
-  // with the stream — fulfilled on close, rejected with the stored error.
+  // with the stream - fulfilled on close, rejected with the stored error.
   // Nothing may ever look at the rejection, so it is marked handled.
   get [kIsClosedPromise](): { promise: Promise<void> } {
     assertIsWritableStream(this);
@@ -892,8 +892,8 @@ class WritableStream<W = unknown> {
   // interop error hook, once this half is erroring: the entry half always
   // goes first, so the pair's rejections land writable-then-readable here
   // (TransformStreamError's land readable-then-writable; nothing depends on
-  // the order). The 'writable' check is what gates the hook — the
-  // controller's errorIfNeeded is already a no-op past 'writable' — so that
+  // the order). The 'writable' check is what gates the hook - the
+  // controller's errorIfNeeded is already a no-op past 'writable' - so that
   // an 'erroring' writable, whose pair is already being torn down, does not
   // fire it again with a second reason.
   [kControllerErrorFunction](reason: unknown): void {
@@ -1052,7 +1052,7 @@ class WritableStreamDefaultController<
       return request.promise;
     };
 
-    // WritableStreamDefaultControllerGetChunkSize (spec §5.5.4)
+    // WritableStreamDefaultControllerGetChunkSize (spec section 5.5.4)
     // Runs the strategy size algorithm; if it throws, errors the stream and
     // returns 1 (spec step 3).  Called BEFORE state checks / write-request
     // enqueue per WritableStreamDefaultWriterWrite step 4. The result is
@@ -1072,7 +1072,7 @@ class WritableStreamDefaultController<
       }
     };
 
-    // WritableStreamDefaultControllerWrite (spec §5.5.4)
+    // WritableStreamDefaultControllerWrite (spec section 5.5.4)
     // Enqueues chunk with pre-computed chunkSize (from controllerGetChunkSize),
     // updates backpressure, and advances the queue.
     controllerWrite = <W>(
@@ -1177,7 +1177,7 @@ class WritableStreamDefaultController<
   #errorIfNeeded(error: unknown): void {
     if (getWritableStreamState(this.#stream) !== 'writable') return;
     // WritableStreamDefaultControllerError: clear algorithms, start erroring.
-    // Note: the queue is NOT cleared here — it is cleared later during
+    // Note: the queue is NOT cleared here - it is cleared later during
     // WritableStreamFinishErroring (via controllerErrorSteps).
     this.#clearAlgorithms();
     writableStreamStartErroring(this.#stream, error);
@@ -1307,7 +1307,7 @@ class WritableStreamDefaultController<
         if (getWritableStreamState(stream) === 'closed') return;
         // Workerd-internal non-fatal rejection (identity-stream invalid
         // chunks): reject THIS write's request but keep the stream
-        // writable and continue with the queue — the fulfillment
+        // writable and continue with the queue - the fulfillment
         // bookkeeping with the request rejected instead of resolved.
         if (isNonFatalWriteRejection(e)) {
           this.#completeInFlightWrite(() => {
@@ -1391,7 +1391,7 @@ class WritableStreamDefaultWriter<
     getWriterClosedPromiseInternal = (writer) =>
       slotPromise(writer.#closedPromise);
 
-    // WritableStreamDefaultWriterWrite (spec §5.3.4)
+    // WritableStreamDefaultWriterWrite (spec section 5.3.4)
     // Step order is critical: size algorithm runs BEFORE state re-checks,
     // because size() can re-entrantly call close()/releaseLock()/error().
     writerWriteInternal = <W>(
@@ -1417,20 +1417,20 @@ class WritableStreamDefaultWriter<
       }
       const controller = getWritableStreamController(stream);
 
-      // Step 4: GetChunkSize — runs size() which may re-entrantly mutate
+      // Step 4: GetChunkSize - runs size() which may re-entrantly mutate
       // stream state (e.g. writer.close() called from size()).
       const chunkSize =
         controller !== undefined
           ? controllerGetChunkSize(controller, chunk)
           : 1;
 
-      // Step 5: Re-check writer.[[stream]] — size() may have called
+      // Step 5: Re-check writer.[[stream]] - size() may have called
       // releaseLock().
       if (writer.#stream !== stream) {
         return writeFailed(request, releasedWriterError());
       }
 
-      // Steps 6–9: State checks (AFTER size ran).
+      // Steps 6-9: State checks (AFTER size ran).
       const state = getWritableStreamState(stream);
       if (state === 'errored') {
         return writeFailed(request, getWritableStreamStoredError(stream));
@@ -1449,7 +1449,7 @@ class WritableStreamDefaultWriter<
       const promise = writableStreamAddWriteRequest(stream, request);
 
       // Step 12: ControllerWrite (with pre-computed chunkSize, no size()
-      // call — that already happened in step 4).
+      // call - that already happened in step 4).
       if (controller !== undefined) {
         controllerWrite(controller, chunk, chunkSize);
       }
@@ -1622,7 +1622,7 @@ class WritableStreamDefaultWriter<
   }
 }
 
-// Spec WritableStreamDefaultWriterCloseWithErrorPropagation — the pipe's
+// Spec WritableStreamDefaultWriterCloseWithErrorPropagation - the pipe's
 // close path: an already-closing/closed destination is success, an errored
 // one propagates its stored error.
 function writerCloseWithErrorPropagation<W>(
@@ -1684,10 +1684,10 @@ ObjectDefineProperties(WritableStreamDefaultController.prototype, {
 // WritableStreamInternalController::isClosedOrClosing(): closed, or a close
 // is queued / in flight. Deliberate deltas from the legacy heuristic, both
 // confined to the flag-guarded TS path:
-//   - errored / erroring answer false (both C++ controllers agree);
-//   - a PENDING FLUSH does not count (the legacy internal controller's
+//  - errored / erroring answer false (both C++ controllers agree);
+//  - a PENDING FLUSH does not count (the legacy internal controller's
 //     queue.back().isCloseOrFlush() quirk treats it as "closing");
-//   - #pendingClosure does not enter the query (matches C++, where the
+//  - #pendingClosure does not enter the query (matches C++, where the
 //     pending-closure flag is separate state).
 function isWritableStreamClosedOrClosing<W>(
   stream: WritableStream<W>
@@ -1811,7 +1811,7 @@ const cppExports = ObjectFreeze({
   // The RPC-transfer writer operations (JsWritableStream::serialize's
   // TsWriterSink): acquisition and per-operation dispatch go through these
   // internal algorithms rather than the public prototype methods, which are
-  // user-patchable — a replaced getWriter/write/close/abort must not be able
+  // user-patchable - a replaced getWriter/write/close/abort must not be able
   // to intercept or fake a stream's RPC transfer. Acquisition has the public
   // getWriter's exact semantics (the locked TypeError comes from the same
   // constructor path).
@@ -1909,7 +1909,7 @@ module.exports = {
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so
     // sinks that snapshot chunks in size() (identity, compression) consult
-    // this to skip copying for doomed writes — the FIFO stays aligned
+    // this to skip copying for doomed writes - the FIFO stays aligned
     // because everything between size() and the checks is synchronous, so
     // the answer cannot change before the machinery re-asks.
     willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
@@ -1930,7 +1930,7 @@ module.exports = {
     },
     // Wraps a sink write() rejection so it rejects only ITS write request,
     // leaving the stream writable (the identity streams' invalid-chunk
-    // contract — see NonFatalWriteRejection). The sink throws (or rejects
+    // contract - see NonFatalWriteRejection). The sink throws (or rejects
     // with) the wrapper; the write request rejects with `error`.
     nonFatalWriteRejection: (error: unknown): NonFatalWriteRejection =>
       new NonFatalWriteRejection(error),
