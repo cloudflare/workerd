@@ -341,6 +341,38 @@ pub mod ffi {
 
         fn c_get_use_count(weak: &WeakPtr<C>) -> usize;
 
+        // #[nothrow] declarations of functions declared above, one per way a value returns.
+        #[nothrow]
+        #[rust_name = "c_return_primitive_nothrow"]
+        fn c_return_primitive() -> usize;
+        #[nothrow]
+        #[rust_name = "c_return_shared_nothrow"]
+        fn c_return_shared() -> Shared;
+        #[nothrow]
+        #[rust_name = "c_return_mut_ptr_nothrow"]
+        fn c_return_mut_ptr(n: usize) -> *mut C;
+        #[nothrow]
+        #[rust_name = "c_return_ref_nothrow"]
+        unsafe fn c_return_ref<'a>(shared: &'a Shared) -> &'a usize;
+        #[nothrow]
+        #[rust_name = "c_return_str_nothrow"]
+        unsafe fn c_return_str<'a>(shared: &'a Shared) -> &'a str;
+        #[nothrow]
+        #[rust_name = "c_return_box_nothrow"]
+        fn c_return_box() -> Box<R>;
+        #[nothrow]
+        #[rust_name = "c_return_rust_string_nothrow"]
+        fn c_return_rust_string() -> String;
+        #[nothrow]
+        #[rust_name = "c_take_primitive_nothrow"]
+        fn c_take_primitive(n: usize);
+        #[nothrow]
+        #[rust_name = "get_nothrow"]
+        fn get(self: &C) -> usize;
+        #[nothrow]
+        #[rust_name = "set_nothrow"]
+        fn set(self: Pin<&mut C>, n: usize) -> usize;
+
         #[rust_name = "i32_overloaded_method"]
         fn cOverloadedMethod(&self, x: i32) -> String;
         #[rust_name = "str_overloaded_method"]

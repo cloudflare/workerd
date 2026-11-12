@@ -525,9 +525,14 @@ fn expand_cxx_function_decl(efn: &ExternFn, types: &Types) -> TokenStream {
         }
     });
     let all_args = receiver.chain(args);
-    // C++ functions always return a Result: an exception must never escape through the
-    // extern "C" boundary, so the C++ shim catches it and reports it here instead.
-    let ret = quote!(-> ::cxx::private::Result);
+    // A C++ function returns a Result: an exception must never escape through the extern "C"
+    // boundary, so the C++ shim catches it and reports it here instead. A #[nothrow] function's
+    // shim catches nothing; it is declared extern "C-unwind" instead.
+    let ret = if efn.nothrow {
+        quote!()
+    } else {
+        quote!(-> ::cxx::private::Result)
+    };
     let outparam = if indirect_return(efn)
         && let Some(ret) = &efn.ret
     {
@@ -681,6 +686,10 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
             quote_spanned! {span=>
                 #local_name(#(#vars,)* __return.as_mut_ptr()).into_result()?;
             }
+        } else if efn.nothrow {
+            quote_spanned! {span=>
+                #local_name(#(#vars,)* __return.as_mut_ptr());
+            }
         } else {
             // An infallible signature cannot report the exception to its caller, so
             // turn it into a panic rather than letting the process abort.
@@ -692,6 +701,10 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
     } else if efn.throws {
         quote_spanned! {span=>
             #local_name(#(#vars),*).into_result()
+        }
+    } else if efn.nothrow {
+        quote_spanned! {span=>
+            #local_name(#(#vars),*)
         }
     } else {
         quote_spanned! {span=>
@@ -796,8 +809,16 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
         _ => quote!(),
     };
     let arg_list = quote_spanned!(efn.sig.paren_token.span=> (#(#all_args,)*));
+    // An exception that escapes a #[nothrow] function unwinds into Rust, which aborts the
+    // process at the next frame that can't unwind or at `catch_unwind`, as Rust can't catch a
+    // foreign exception.
+    let abi = if efn.nothrow {
+        quote!("C-unwind")
+    } else {
+        quote!("C")
+    };
     let fn_body = quote_spanned!(span=> {
-        #UnsafeExtern extern "C" {
+        #UnsafeExtern extern #abi {
             #decl
         }
         #trampolines

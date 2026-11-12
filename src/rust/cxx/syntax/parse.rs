@@ -595,6 +595,7 @@ fn parse_extern_fn(
     let mut namespace = namespace.clone();
     let mut cxx_name = None;
     let mut rust_name = None;
+    let mut nothrow = false;
     let mut attrs = attrs.clone();
     attrs.extend(attrs::parse(
         cx,
@@ -605,6 +606,10 @@ fn parse_extern_fn(
             namespace: Some(&mut namespace),
             cxx_name: Some(&mut cxx_name),
             rust_name: Some(&mut rust_name),
+            nothrow: match lang {
+                Lang::Cxx => Some(&mut nothrow),
+                Lang::Rust => None,
+            },
             ..Default::default()
         },
     ));
@@ -765,6 +770,7 @@ fn parse_extern_fn(
         },
         semi_token,
         trusted: trusted.get(),
+        nothrow,
     }))
 }
 

@@ -43,6 +43,26 @@ Generated bridges use KJ's exception model:
 - `kj::CanceledException` is preserved in both directions.
 - Rust panics cross into C++ as `kj::Exception` rather than aborting the process.
 
+### `#[nothrow]` C++ functions
+
+Catching exceptions costs a few instructions per call, and stops LTO from inlining the call into
+Rust. An `extern "C++"` function that can't throw can opt out with `#[nothrow]`:
+
+```rust
+unsafe extern "C++" {
+    #[nothrow]
+    unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
+}
+```
+
+The bridge calls the function directly, with no `try`/`catch` and no error check. Its C++
+declaration needs no `noexcept`, and shouldn't have one: a `noexcept` function that calls anything
+not known not to throw gets an exception-handling personality (`__gxx_personality_v0`), and LLVM
+doesn't inline it into a Rust function, which has Rust's. If the function throws anyway, the
+exception unwinds into Rust (the bridge declares it `extern "C-unwind"`), which aborts the process
+at `catch_unwind` or at a function that can't unwind, as Rust can't catch a foreign exception.
+`#[nothrow]` can't be combined with a `Result` return, `async`, or a function pointer argument.
+
 ### KJ types
 
 The `kj-rs` bridge supports:
