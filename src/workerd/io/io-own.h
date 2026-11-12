@@ -121,6 +121,10 @@ class DeleteQueue: public kj::AtomicRefcounted {
   // and deletions are dropped. Useful for reclaiming registrations that target this queue.
   bool isDefunct() const;
 
+  // Resolves once the IoContext that owns this queue has been destroyed, or right away if it
+  // already has been. Callable from any thread; the promise belongs to the calling thread.
+  kj::Promise<void> whenDefunct() const;
+
   // The number of actions queued. For tests.
   size_t getQueuedActionCountForTest() const;
 
@@ -133,6 +137,12 @@ class DeleteQueue: public kj::AtomicRefcounted {
     // In particular, these actions are used to implement cross-context promise resolution.
     kj::Vector<kj::Function<void(jsg::Lock&)>> actions;
     kj::Maybe<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> crossThreadFulfiller;
+    // Fulfilled when the owning IoContext is destroyed. See whenDefunct().
+    kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> defunctFulfillers;
+    static constexpr size_t MIN_PRUNE_DEFUNCT_FULFILLERS_AT = 16;
+    // Size of defunctFulfillers at which whenDefunct() next drops the fulfillers whose promises
+    // have been canceled, so that a long-lived context doesn't accumulate them.
+    size_t pruneDefunctFulfillersAt = MIN_PRUNE_DEFUNCT_FULFILLERS_AT;
   };
 
   // Pointers from IoOwns that were dropped in other threads, and therefore should be deleted
@@ -193,6 +203,9 @@ class IoCrossContextExecutor {
 
   // True if the target IoContext has been destroyed, i.e. tryExecute() would drop the action.
   bool isTargetDestroyed() const;
+
+  // Resolves once the target IoContext has been destroyed. See DeleteQueue::whenDefunct().
+  kj::Promise<void> whenTargetDestroyed() const;
 
   // The number of actions queued for the target IoContext. For tests.
   size_t getQueuedActionCountForTest() const;
