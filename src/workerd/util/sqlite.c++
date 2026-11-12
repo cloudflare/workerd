@@ -992,6 +992,17 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
           applyChange(parseContext.stateChange);
 
           KJ_IF_SOME(p, prelude) {
+            // A statement that returned SQLITE_ROW stays busy until it is reset, and a busy
+            // statement cannot be executed again. sqlite3_reset() returns the error from the last
+            // step, and only SQLITE_DONE and SQLITE_ROW reach this point.
+            int resetResult = sqlite3_reset(result);
+            KJ_ASSERT(resetResult == SQLITE_OK, sqlite3_errstr(resetResult));
+
+            // sqlite3_reset() does not clear the row counters. Clear them so that the next run
+            // reports only its own rows, as Query::destroy() does after each run.
+            sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_READ, 1);
+            sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
+
             p.add(Statement(*this, regulator,
                 StatementAndEffect{.statement = kj::mv(ownResult),
                   .stateChange = kj::mv(parseContext.stateChange)}));
