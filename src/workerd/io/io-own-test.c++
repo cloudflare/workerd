@@ -458,7 +458,8 @@ KJ_TEST("whenTargetDestroyed() resolves once the target IoContext is destroyed")
 
   // Waits that are canceled get pruned as more are registered.
   for (auto i = 0; i < 100; ++i) {
-    executor.whenTargetDestroyed();
+    // Canceled at the end of each iteration.
+    auto canceled = executor.whenTargetDestroyed();
   }
   KJ_EXPECT(!destroyed.poll(fixture.getWaitScope()));
 
