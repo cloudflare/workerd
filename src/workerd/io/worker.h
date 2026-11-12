@@ -1147,6 +1147,9 @@ class Worker::Actor final: public kj::Refcounted {
   // Immediately, synchronously abort all work going on in the actor. All requests throw the
   // given exception. All background work stops. Any async task that holds a strong reference on
   // the Actor is canceled, so that there should be no more references floating around.
+  //
+  // When called from JavaScript, the IoContext is destroyed on the next turn of the event loop,
+  // which holds a reference on the Actor until then; the actor's database is still closed at once.
   void abort(const kj::Exception& error);
 
   // Get a promise that resolves when `shutdown()` has been called.
