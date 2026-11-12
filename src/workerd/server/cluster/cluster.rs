@@ -454,6 +454,10 @@ impl Cluster {
         let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
         match renew.await {
             Ok(Ok(_)) => {}
+            // The node left the cluster first: `deregister`, which runs at
+            // once on a node with nothing to hand off, published its record
+            // expired and draining.
+            Ok(Err(crate::Error::NotHere(_))) if self.registry.left() => {}
             Ok(Err(e)) => tracing::warn!("cluster: publishing the drain failed: {e}"),
             Err(_) => tracing::warn!("cluster: publishing the drain timed out"),
         }
