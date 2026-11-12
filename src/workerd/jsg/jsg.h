@@ -3198,9 +3198,14 @@ class Lock {
   virtual JsObject domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
-  // The DOMException that `value` unwraps as, as a `DOMException&` parameter unwraps it: `value`
-  // or the first object in its prototype chain that is one. Runs no JavaScript.
-  virtual kj::Maybe<DOMException&> tryUnwrapDOMException(v8::Local<v8::Value> value) = 0;
+  struct DomExceptionInfo {
+    kj::String name;
+    kj::String message;
+  };
+
+  // If `value` is a DOMException, returns the name and message it was created with, which own
+  // properties shadowing its attributes do not change. Does not run JavaScript.
+  virtual kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) = 0;
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //

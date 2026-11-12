@@ -126,9 +126,9 @@ struct DOMExceptionNameAndMessage {
   kj::String message;
 };
 
-// The name and message of the DOMException that `value` unwraps as, as Lock::tryUnwrapDOMException()
-// unwraps it, for native code that holds no jsg::Lock, such as Rust JSG's shims. Requires an
-// entered context. Runs no JavaScript.
+// If `value` is a DOMException, the name and message it was created with, as
+// Lock::tryGetDomExceptionInfo() returns them, for native code that holds no jsg::Lock, such as
+// Rust JSG's shims. Requires an entered context. Runs no JavaScript.
 //
 // Callers depend only on this signature, not on how DOMException is implemented.
 kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMExceptionNameAndMessage(
