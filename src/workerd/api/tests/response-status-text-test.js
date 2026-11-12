@@ -34,5 +34,11 @@ export const reasonPhraseOnTheWire = {
         .statusText,
       'Custom'
     );
+    // Frameworks rebuild Responses with `statusText: r.statusText`, which copies an unset status
+    // message as "". The status line still carries the conventional phrase.
+    strictEqual(
+      (await env.target.fetch(url({ status: 404, statusText: '' }))).statusText,
+      'Not Found'
+    );
   },
 };

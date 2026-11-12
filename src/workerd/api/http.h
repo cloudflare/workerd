@@ -1178,7 +1178,7 @@ class Response final: public Body {
   int getStatus();
   kj::StringPtr getStatusText();
   // The reason phrase for the HTTP status line and for error messages. Unlike getStatusText(), an
-  // unset status message falls back to the status code's conventional phrase.
+  // unset or empty status message falls back to the status code's conventional phrase.
   kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
@@ -1270,7 +1270,8 @@ class Response final: public Body {
  private:
   int statusCode;
   // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
-  // requires, while getReasonPhrase() derives the status code's conventional phrase.
+  // requires, while getReasonPhrase() derives the status code's conventional phrase, as it also
+  // does for an empty one.
   kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;

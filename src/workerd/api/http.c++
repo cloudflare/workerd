@@ -1369,7 +1369,12 @@ kj::StringPtr Response::getStatusText() {
 }
 kj::StringPtr Response::getReasonPhrase() {
   KJ_IF_SOME(text, statusText) {
-    return text;
+    // An empty status message also gets the conventional phrase. Code that rebuilds a Response
+    // with `{status: r.status, statusText: r.statusText}` copies an unset message as "", and the
+    // status line should not change because of that.
+    if (text.size() > 0) {
+      return text;
+    }
   }
   return defaultStatusText(statusCode);
 }
