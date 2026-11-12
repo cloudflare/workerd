@@ -92,6 +92,39 @@ kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id)
   return kj::heap(kj::mv(resource));
 }
 
+void abort_exception_raise(const AbortException& exception) {
+  kj::throwFatalException(exception.exception.clone());
+}
+
+AbortWatcher::AbortWatcher(IoContext& context, ::rust::Box<AbortCallback> callback)
+    : context(context),
+      abortedAtStart(context.getAbortReason() != kj::none),
+      // onAbort() never resolves: the IoContext only rejects its abort flag. The callback only
+      // settles Rust's state and wakes its future, so it runs no JavaScript and needs no lock.
+      watch(context.onAbort()
+                .catch_([callback = kj::mv(callback)](
+                            kj::Exception&& e) { callback->aborted(AbortException{kj::mv(e)}); })
+                .eagerlyEvaluate(nullptr)) {}
+
+AbortWatcher::~AbortWatcher() noexcept(false) {}
+
+kj::Maybe<kj::Exception> AbortWatcher::abortedSinceStart() const {
+  if (abortedAtStart) {
+    return kj::none;
+  }
+  return context.getAbortReason();
+}
+
+void abort_watcher_raise_pending_abort(const AbortWatcher& watcher) {
+  KJ_IF_SOME(exception, watcher.abortedSinceStart()) {
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+kj::Own<AbortWatcher> io_context_watch_abort(uint64_t id, ::rust::Box<AbortCallback> callback) {
+  return kj::heap<AbortWatcher>(currentWithId(id), kj::mv(callback));
+}
+
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });

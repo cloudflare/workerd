@@ -88,8 +88,11 @@ wd_cc_library(
 )
 
 # io-context inside a request of a real worker and in a Durable Object, and the IoContext that
-# Rust builtin modules see when a request resolves them.
+# Rust builtin modules see when a request resolves them. Large: most of its cases start a worker
+# of their own, which with every autogate on adds up to more than the moderate timeout in a debug
+# build.
 kj_test(
+    size = "large",
     src = "io-context-test.c++",
     deps = [
         ":ffi",
