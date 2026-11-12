@@ -25,6 +25,28 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
   if (!check(object->HasRealNamedProperty(context, key))) return kj::none;
   return check(object->GetRealNamedProperty(context, key));
 }
+
+// An instance of getBootstrapDomExceptionBase() whose prototype is `prototype`.
+JsObject newDomExceptionWrapper(Lock& js, JsObject prototype) {
+  auto context = js.v8Context();
+  auto tmpl = IsolateBase::getDomExceptionTemplate(js.v8Isolate);
+  auto object = check(tmpl->InstanceTemplate()->NewInstance(context));
+  check(object->SetPrototype(context, prototype));
+  return JsObject(object);
+}
+
+// Gives `object` V8's stack, unless `stack` is given, which becomes an own non-enumerable data
+// property.
+void setDomExceptionStack(Lock& js, JsObject object, kj::Maybe<JsString> stack) {
+  auto context = js.v8Context();
+  v8::Local<v8::Object> handle = object;
+  KJ_IF_SOME(s, stack) {
+    v8::Local<v8::String> stackName = js.strIntern("stack"_kj);
+    check(handle->DefineOwnProperty(context, stackName, s, v8::DontEnum));
+  } else {
+    check(v8::Exception::CaptureStackTrace(context, handle));
+  }
+}
 }  // namespace
 
 kj::Maybe<JsObject> tryGetBootstrapDomExceptionPrototype(Lock& js) {
@@ -54,22 +76,19 @@ JsObject newBootstrapDomException(Lock& js,
     kj::Maybe<kj::StringPtr> stack) {
   // As the TypeScript constructor makes one. V8 formats the stack's header lazily, from the name
   // and message the prototype's getters return.
-  auto context = js.v8Context();
-  auto tmpl = IsolateBase::getDomExceptionTemplate(js.v8Isolate);
-  auto object = check(tmpl->InstanceTemplate()->NewInstance(context));
-  check(object->SetPrototype(context, prototype));
-  auto result = JsObject(object);
+  auto result = newDomExceptionWrapper(js, prototype);
   // In the TypeScript constructor's order, so that both make instances of the same shape.
   result.setPrivate(js, DOM_EXCEPTION_BRAND_KEY, js.boolean(true));
   result.setPrivate(js, ERROR_NAME_KEY, js.str(name));
   result.setPrivate(js, ERROR_MESSAGE_KEY, js.str(message));
-  KJ_IF_SOME(s, stack) {
-    v8::Local<v8::String> stackName = js.strIntern("stack"_kj);
-    v8::Local<v8::String> stackValue = js.str(s);
-    check(object->DefineOwnProperty(context, stackName, stackValue, v8::DontEnum));
-  } else {
-    check(v8::Exception::CaptureStackTrace(context, object));
-  }
+  setDomExceptionStack(js, result, stack.map([&](kj::StringPtr s) { return js.str(s); }));
+  return result;
+}
+
+JsObject newUninitializedBootstrapDomException(
+    Lock& js, JsObject prototype, kj::Maybe<JsString> stack) {
+  auto result = newDomExceptionWrapper(js, prototype);
+  setDomExceptionStack(js, result, stack);
   return result;
 }
 

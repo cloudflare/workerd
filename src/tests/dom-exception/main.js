@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+/* global QuotaExceededError */
+
 // Entry point for the DOMException suite. Re-exports are explicit (not
 // `export *`) so a name collision between modules is a load-time
 // SyntaxError instead of a silently dropped test.
@@ -83,6 +85,17 @@ export {
 
 export { inspectInstance, inspectNested, inspectPrototype } from 'inspect';
 
+export {
+  quotaExceededErrorPlacement,
+  quotaExceededErrorShape,
+  quotaExceededErrorInstances,
+  quotaExceededErrorConversion,
+  quotaExceededErrorRangeErrors,
+  quotaExceededErrorBrandChecks,
+  quotaExceededErrorCloned,
+  quotaExceededErrorOverRpc,
+} from 'quota-exceeded-error';
+
 // The RPC binding's entrypoint (tunneling.js).
 export class DomExceptionRpc extends WorkerEntrypoint {
   throwDomException() {
@@ -104,6 +117,25 @@ export class DomExceptionRpc extends WorkerEntrypoint {
     const error = new DOMException('returned', 'AbortError');
     error.extra = 1;
     return error;
+  }
+
+  // The rest are only for the TypeScript implementation's QuotaExceededError
+  // (quota-exceeded-error.js).
+  returnQuotaExceededError() {
+    return new QuotaExceededError('returned', { quota: 1, requested: 2 });
+  }
+
+  describeQuotaExceededError(error) {
+    return [
+      error instanceof QuotaExceededError,
+      error.message,
+      error.quota,
+      error.requested,
+    ];
+  }
+
+  throwQuotaExceededError() {
+    throw new QuotaExceededError('thrown', { quota: 1 });
   }
 }
 

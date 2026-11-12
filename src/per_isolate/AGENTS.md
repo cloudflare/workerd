@@ -121,9 +121,10 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
     `per_isolate@eslint` test rejects TypeScript value exports, which
     compile to getters the deserializer can't call.
   - The deserializer makes an instance from `Export.prototype` without
-    calling the constructor (a native error if the prototype inherits from
-    `Error.prototype`), then calls `deserialize()` once the whole value has
-    been read. So the state `deserialize()` restores lives under V8-private
+    calling the constructor (a DOMException with neither brand, name nor
+    message if the prototype inherits from `DOMException.prototype`, and
+    otherwise a native error if it inherits from `Error.prototype`), then
+    calls `deserialize()` once the whole value has been read. So the state `deserialize()` restores lives under V8-private
     properties, not `#private` fields, which such an instance lacks, and is
     brand-checked the same way.
   - `deserialize()` validates its data completely, with primordials only:

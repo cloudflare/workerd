@@ -117,18 +117,21 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   serializes itself, such as a Map, even of a subclass: V8 never offers it to the Serializer.
 //
 // An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
-// of flags, followed, if it is a native error, by its `message` (flag 4) and its own `stack` (flag
-// 1), each if it is a string. Flag 2 says that the writer was not using enhanced error
+// of flags, followed, if it is an error as Error.isError() reports (a native error, or an instance
+// of the bootstrap's DOMException), by its `message` (flag 4) and its own `stack` (flag 1), each if
+// it is a string. Flag 2 says that the writer was not using enhanced error
 // serialization. A reader rejects flags it doesn't know, so that later versions can add fields.
 // The instance's `data` follows the top-level value (as in Node.js), so that it can refer back to
 // the instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
-// constructor's `prototype` without calling the constructor (as a native error if the prototype
-// inherits from Error.prototype), marks it with the descriptor, and calls `deserialize`, in the
-// order the instances were read, once the top-level value and every instance's `data` have been
-// read. The data may come from an untrusted source, so `deserialize` validates it.
+// constructor's `prototype` without calling the constructor, marks it with the descriptor, and
+// calls `deserialize`, in the order the instances were read, once the top-level value and every
+// instance's `data` have been read. If the prototype inherits from the bootstrap's DOMException's,
+// the instance is one made as newUninitializedBootstrapDomException() makes it (dom-exception.h),
+// and otherwise, if it inherits from Error.prototype, a native error. The data may come from an
+// untrusted source, so `deserialize` validates it.
 //
-// The deserializer, not the class, decides whether a native error made this way keeps the writer's
+// The deserializer, not the class, decides whether an error made this way keeps the writer's
 // stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
 // whenever the writer was not using enhanced error serialization (flag 2), as a native error that
 // such a writer writes in V8's own format does. Otherwise it keeps the stack captured when it was
@@ -460,8 +463,15 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     V8Ref<v8::Object> prototype;
     V8Ref<v8::Object> descriptor;
     V8Ref<v8::Function> deserialize;
-    // Whether the prototype inherits from Error.prototype, so that its instances are native errors.
-    bool isError;
+    // What readJsSerializable() makes the class's instances as, which the prototype decides.
+    enum class Kind : uint8_t {
+      OBJECT,
+      // The prototype inherits from Error.prototype.
+      NATIVE_ERROR,
+      // The prototype inherits from the bootstrap's DOMException's.
+      DOM_EXCEPTION,
+    };
+    Kind kind;
   };
 
   // Returns the index in jsSerializableClasses of the class that `deserializeInfo` names, or

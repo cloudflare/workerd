@@ -57,6 +57,14 @@ JsObject newBootstrapDomException(Lock& js,
     kj::StringPtr message,
     kj::Maybe<kj::StringPtr> stack);
 
+// Creates an instance of a subclass of the bootstrap's DOMException, whose prototype is
+// `prototype`, without running JavaScript or calling its constructor: an instance of
+// getBootstrapDomExceptionBase() with neither brand, name nor message, for the subclass to
+// initialize, as the deserializer makes an instance of a cloneable class (see ser.h). Its stack is
+// as newBootstrapDomException() gives it.
+JsObject newUninitializedBootstrapDomException(
+    Lock& js, JsObject prototype, kj::Maybe<JsString> stack);
+
 // The name and message of an instance of the bootstrap's DOMException.
 struct BootstrapDomExceptionInfo {
   JsString name;

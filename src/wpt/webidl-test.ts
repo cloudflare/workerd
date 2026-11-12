@@ -121,7 +121,7 @@ export default {
   'ecmascript-binding/support/create-realm.js': {},
   'idlharness.any.js': {
     comment:
-      'Remaining IDL failures: DOMException attribute/inherit checks and QuotaExceededError (not implemented)',
+      'The C++ DOMException fails attribute/inherit checks and has no QuotaExceededError',
     expectedFailures: [
       // The C++ DOMException's attributes (name, message, code) are instance properties
       // instead of prototype accessors, so both the attribute descriptor checks and inherit
@@ -134,8 +134,8 @@ export default {
             'DOMException interface: attribute code',
             /^DOMException interface: new DOMException.*must inherit property/,
           ]),
-      // QuotaExceededError is not implemented
-      /^QuotaExceededError interface/,
+      // Only the TypeScript implementation has QuotaExceededError.
+      ...(usingTsDomException ? [] : [/^QuotaExceededError interface/]),
     ],
   },
 } satisfies TestRunnerConfig;

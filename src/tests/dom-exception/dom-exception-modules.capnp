@@ -20,4 +20,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "serialization", esModule = embed "serialization.js"),
   (name = "tunneling", esModule = embed "tunneling.js"),
   (name = "inspect", esModule = embed "inspect.js"),
+  (name = "quota-exceeded-error", esModule = embed "quota-exceeded-error.js"),
 ];

@@ -21,10 +21,11 @@ cell needs `--experimental`, for
 
 What JavaScript cannot see is pinned in C++: the bytes a DOMException
 serializes to, what reading tags 7 and 8 creates, the `kj::Exception` it
-tunnels as and `reportError()`'s description, in
-`api/dom-exception-bootstrap-test.c++`, which runs with the per-isolate
-bootstrap; its `@all-autogates` variant runs them against the TypeScript
-implementation.
+tunnels as and `reportError()`'s description, and the bytes the TypeScript
+implementation's QuotaExceededError serializes to and what reading them does
+with either implementation, in `api/dom-exception-bootstrap-test.c++`, which
+runs with the per-isolate bootstrap; its `@all-autogates` variant runs them
+against the TypeScript implementation.
 
 ## Core semantics
 
@@ -44,7 +45,8 @@ implementation.
   `retryable: true`) and the file system's errors are instances of the global
   `DOMException`, shaped as constructed ones.
 - **Serialization:** name, message and stack (tag 8). Subclass instances come
-  back as `DOMException`; other own properties, and own `name` or `message`
+  back as `DOMException`, but for QuotaExceededError's (ledger #14); other
+  own properties, and own `name` or `message`
   properties shadowing the attributes, are not serialized. Tags 7 and 8 read
   back as `DOMException`s.
 - **Crossing workers:** thrown from a fetch handler (tunneled through its
@@ -72,3 +74,4 @@ WebIDL. Each row is pinned on both sides with a `usingTsImpl` branch.
 | 11 | `Symbol.toStringTag` | writable | not writable | `api-surface.js` |
 | 12 | Calling without `new` | JSG's `TypeError` message | the language's | `construction.js` |
 | 13 | `code` of `DOMStringSizeError`, `NoDataAllowedError`, `ValidationError` | 2, 6, 16 | 0: WebIDL's table of names has none of them, though their constants remain | `construction.js` |
+| 14 | `QuotaExceededError` (WebIDL section 2.8.3) | none; reading a serialized one throws `DataCloneError` | WebIDL's subclass, with `quota` and `requested`. It serializes as a class implemented in JavaScript (tag 23, as `dom-exception:QuotaExceededError`), with its message, stack and amounts, and so does a subclass's instance. Thrown across workers, it tunnels as a `DOMException` named `QuotaExceededError` | `quota-exceeded-error.js` |

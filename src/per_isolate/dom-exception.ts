@@ -17,10 +17,22 @@
 // The name and message are under the keys that jsg.h gives any error whose
 // name and message are accessors, so that native code can describe it for a
 // log. Native code finds the class through this module's exports.
+//
+// Under the autogate, the module also exports QuotaExceededError (WebIDL
+// section 2.8.3), the one DOMException-derived interface WebIDL predefines.
+// An instance is a DOMException that also holds its quota and requested
+// amount under private symbols. It is cloneable (serialization.ts) as
+// 'dom-exception:QuotaExceededError', which serialized data holds, so the
+// module and export names can never change. Native code knows nothing of the
+// class. The C++ implementation has none, so a reader without the autogate
+// can't read one.
+
+import type { SerializationHelpers } from './serialization';
 
 const {
   Error: ErrorCtor,
   ErrorCaptureStackTrace,
+  NumberIsFinite,
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectSetPrototypeOf,
@@ -28,15 +40,22 @@ const {
   SafeMap,
   SymbolFor,
   SymbolToStringTag,
+  RangeError: RangeErrorCtor,
   TypeError: TypeErrorCtor,
 } = primordials;
 
 const { getPrivateSymbol, DOMExceptionBase } = utils;
+const { getOwnDataProperty, makeCloneable, markCloneable } =
+  require('serialization') as SerializationHelpers;
 
 const kBrand = getPrivateSymbol('workerd:domException');
 const kName = getPrivateSymbol('workerd:errorName');
 const kMessage = getPrivateSymbol('workerd:errorMessage');
 const kPrototype = getPrivateSymbol('workerd:domExceptionPrototype');
+// A QuotaExceededError's quota and requested amount, each a number or null.
+// The quota is also its brand.
+const kQuota = getPrivateSymbol('workerd:quotaExceededErrorQuota');
+const kRequested = getPrivateSymbol('workerd:quotaExceededErrorRequested');
 
 type Slots = Record<symbol, unknown>;
 
@@ -125,6 +144,136 @@ class DOMException {
   }
 }
 
+function quotaSlotsOf(value: unknown): Slots {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    (value as Slots)[kQuota] === undefined
+  ) {
+    throw new TypeErrorCtor('Illegal invocation');
+  }
+  return value as Slots;
+}
+
+const kConstructQuota = "Failed to construct 'QuotaExceededError': ";
+
+// A member of the QuotaExceededErrorOptions dictionary, converted to a
+// WebIDL double, or null if it is not present.
+function toAmount(value: unknown, member: string): number | null {
+  if (value === undefined) return null;
+  // ToNumber, which throws for a Symbol or a BigInt, as Number() does not.
+  const amount = +(value as number);
+  if (!NumberIsFinite(amount)) {
+    throw new TypeErrorCtor(
+      `${kConstructQuota}Failed to read the '${member}' property from ` +
+        "'QuotaExceededErrorOptions': The provided double value is non-finite."
+    );
+  }
+  return amount;
+}
+
+class QuotaExceededError extends DOMException {
+  constructor(message: unknown = '', options: unknown = undefined) {
+    // The arguments are converted in order, the dictionary's members in
+    // lexicographic order, before any of the constructor steps.
+    const messageString = `${message as string}`;
+    let quota: number | null = null;
+    let requested: number | null = null;
+    if (options !== undefined && options !== null) {
+      if (typeof options !== 'object' && typeof options !== 'function') {
+        throw new TypeErrorCtor(
+          `${kConstructQuota}The provided value is not of type ` +
+            "'QuotaExceededErrorOptions'."
+        );
+      }
+      const dictionary = options as { quota?: unknown; requested?: unknown };
+      quota = toAmount(dictionary.quota, 'quota');
+      requested = toAmount(dictionary.requested, 'requested');
+    }
+    if (quota !== null && quota < 0) {
+      throw new RangeErrorCtor(`${kConstructQuota}The quota is negative.`);
+    }
+    if (requested !== null && requested < 0) {
+      throw new RangeErrorCtor(
+        `${kConstructQuota}The requested amount is negative.`
+      );
+    }
+    if (quota !== null && requested !== null && requested < quota) {
+      throw new RangeErrorCtor(
+        `${kConstructQuota}The requested amount is less than the quota.`
+      );
+    }
+    super(messageString, 'QuotaExceededError');
+    const self = this as unknown as Slots;
+    self[kQuota] = quota;
+    self[kRequested] = requested;
+    markCloneable(this, quotaExceededErrorCloneable);
+  }
+
+  get quota(): number | null {
+    return quotaSlotsOf(this)[kQuota] as number | null;
+  }
+
+  get requested(): number | null {
+    return quotaSlotsOf(this)[kRequested] as number | null;
+  }
+}
+
+// Whether `value` is a QuotaExceededError's quota or requested amount, as
+// the constructor stores it.
+function isAmount(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === 'number' && NumberIsFinite(value) && value >= 0)
+  );
+}
+
+// The data is the error's message, quota and requested amount. The
+// serializer writes the stack.
+const quotaExceededErrorCloneable = makeCloneable(
+  QuotaExceededError,
+  'dom-exception:QuotaExceededError',
+  (error) => {
+    const slots = quotaSlotsOf(error);
+    return {
+      message: slots[kMessage],
+      quota: slots[kQuota],
+      requested: slots[kRequested],
+    };
+  },
+  (error, data) => {
+    if (typeof data !== 'object' || data === null) {
+      throw invalidQuotaExceededErrorData();
+    }
+    const message = getOwnDataProperty(data, 'message');
+    const quota = getOwnDataProperty(data, 'quota');
+    const requested = getOwnDataProperty(data, 'requested');
+    // As the constructor allows them.
+    if (
+      typeof message !== 'string' ||
+      !isAmount(quota) ||
+      !isAmount(requested) ||
+      (quota !== null && requested !== null && requested < quota)
+    ) {
+      throw invalidQuotaExceededErrorData();
+    }
+    // In the constructors' order.
+    const slots = error as unknown as Slots;
+    slots[kBrand] = true;
+    slots[kName] = 'QuotaExceededError';
+    slots[kMessage] = message;
+    slots[kQuota] = quota;
+    slots[kRequested] = requested;
+  }
+);
+
+function invalidQuotaExceededErrorData(): DOMException {
+  return new DOMException(
+    'Deserialization failed: invalid QuotaExceededError data.',
+    'DataCloneError'
+  );
+}
+
 function constants(): PropertyDescriptorMap {
   const descriptors: PropertyDescriptorMap = {};
   for (const [constant, code] of kLegacyCodes) {
@@ -171,13 +320,46 @@ function install(): typeof DOMException {
   return DOMException;
 }
 
-const kDOMException: typeof DOMException = autogates['ts-dom-exception']
+function installQuotaExceededError(): typeof QuotaExceededError {
+  const proto = QuotaExceededError.prototype;
+  ObjectDefineProperties(proto, {
+    __proto__: null,
+    [kInternalClass]: {
+      __proto__: null,
+      value: kInternalClass,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    },
+    quota: { __proto__: null, enumerable: true },
+    requested: { __proto__: null, enumerable: true },
+  });
+  if (compatFlags['set_tostring_tag']) {
+    ObjectDefineProperties(proto, {
+      [SymbolToStringTag]: {
+        __proto__: null,
+        value: 'QuotaExceededError',
+        configurable: true,
+      },
+    });
+  }
+  return QuotaExceededError;
+}
+
+const kUsingTsImpl = autogates['ts-dom-exception'] === true;
+
+const kDOMException: typeof DOMException = kUsingTsImpl
   ? install()
   : (globalThis as unknown as { DOMException: typeof DOMException })
       .DOMException;
 
 export type DomExceptionModule = {
   DOMException: typeof DOMException;
+  // Only under the autogate.
+  QuotaExceededError: typeof QuotaExceededError | undefined;
 };
 
-module.exports = ObjectFreeze({ DOMException: kDOMException });
+module.exports = ObjectFreeze({
+  DOMException: kDOMException,
+  QuotaExceededError: kUsingTsImpl ? installQuotaExceededError() : undefined,
+});
