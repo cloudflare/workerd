@@ -685,6 +685,12 @@ coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no
 # a second spawn per test, with the same inputs, and needs every coverage output fetched.
 build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
 build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
+# Generated headers and Rust sources that editors read from bazel-bin, which
+# --remote_download_minimal otherwise leaves remote. The aspect (build/generated_srcs.bzl) generates
+# those of the built C++ and Rust targets and their dependencies, and the regex downloads them.
+build:bazelflare-generated --aspects=//:build/generated_srcs.bzl%generated_srcs_aspect
+build:bazelflare-generated --output_groups=+generated_srcs
+common:bazelflare-generated --remote_download_regex=bazel-out/(?![^/]*-exec)[^/]+/bin/(?!node_modules/).*[.](h|hh|hpp|hxx|h[+][+]|inc|rs)
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc
