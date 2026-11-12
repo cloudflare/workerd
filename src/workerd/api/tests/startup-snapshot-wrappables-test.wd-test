@@ -65,6 +65,7 @@ const unitTests :Workerd.Config = (
           (name = "span", service = "span"),
           (name = "webfs-tmp", service = "webfs-tmp"),
           (name = "webfs-bundle", service = "webfs-bundle"),
+          (name = "streamed-decoder", service = "streamed-decoder"),
           (name = "crypto-keys", service = "crypto-keys"),
           (name = "crypto-key-algorithm", service = "crypto-key-algorithm"),
           (name = "crypto-key-rsa", service = "crypto-key-rsa"),
@@ -232,6 +233,18 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"midstream-decoder\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "streamed-decoder",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"streamed-decoder\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

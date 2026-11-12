@@ -429,6 +429,19 @@ void IcuDecoder::reset() {
   return ucnv_reset(inner.get());
 }
 
+kj::Maybe<IcuDecoder> IcuDecoder::cloneForSnapshot(bool midStream) const {
+  if (midStream) {
+    if (encoding != Encoding::Utf8) return kj::none;
+    UErrorCode status = U_ZERO_ERROR;
+    if (ucnv_toUCountPending(inner.get(), &status) != 0 || U_FAILURE(status)) return kj::none;
+  }
+  KJ_IF_SOME(copy, create(encoding, fatal, ignoreBom)) {
+    copy.bomSeen = bomSeen;
+    return kj::mv(copy);
+  }
+  return kj::none;
+}
+
 Decoder& TextDecoder::getImpl() {
   KJ_SWITCH_ONEOF(decoder) {
     KJ_CASE_ONEOF(dec, LegacyDecoder) {
@@ -528,16 +541,18 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> TextDecoder::snapshotClone() const {
-  if (midStream) return kj::none;
   KJ_SWITCH_ONEOF(decoder) {
     KJ_CASE_ONEOF(dec, LegacyDecoder) {
+      // The Rust decoder's state mid-stream is opaque.
+      if (midStream) return kj::none;
       return ownAsWrappable(kj::refcounted<TextDecoder>(
           LegacyDecoder(dec.getEncoding(), DecoderFatal(ctorOptions.fatal)), ctorOptions));
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
-      KJ_IF_SOME(fresh,
-          IcuDecoder::create(dec.getEncoding(), ctorOptions.fatal, ctorOptions.ignoreBOM)) {
-        return ownAsWrappable(kj::refcounted<TextDecoder>(kj::mv(fresh), ctorOptions));
+      KJ_IF_SOME(copy, dec.cloneForSnapshot(midStream)) {
+        auto clone = kj::refcounted<TextDecoder>(kj::mv(copy), ctorOptions);
+        clone->midStream = midStream;
+        return ownAsWrappable(kj::mv(clone));
       }
       return kj::none;
     }
