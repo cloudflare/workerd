@@ -1348,15 +1348,16 @@ wd_test(
     ],
 )
 
-# Live API objects (Headers, URL, TextEncoder, crypto, navigator, performance, node:fs, bindings)
-# across a startup snapshot, and the cases that must fall back. Only the @all-autogates variant
-# runs the pipeline.
+# Live API objects (Headers, URL, TextEncoder, crypto, navigator, performance, node:fs, file system
+# handles, bindings) across a startup snapshot, and the cases that must fall back. Only the
+# @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-wrappables-test.wd-test",
     args = ["--experimental"],
     data = [
         "startup-snapshot-wrappables-fs-test.js",
         "startup-snapshot-wrappables-test.js",
+        "startup-snapshot-wrappables-webfs-test.js",
     ],
 )
 

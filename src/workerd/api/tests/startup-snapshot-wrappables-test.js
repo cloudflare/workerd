@@ -4,12 +4,12 @@
 
 // Live API objects across a startup snapshot. A case Worker's top level creates objects whose
 // native side has to travel through the snapshot (Headers, URL, TextEncoder, crypto, navigator,
-// the text/data/JSON bindings; node:fs in startup-snapshot-wrappables-fs-test.js) and at request
-// time reports whether they still hold their state and still work. Negative cases leave an object
-// the snapshot cannot carry reachable, or do not qualify for the pipeline, and must start as plain
-// Workers. The runner asserts the reports. Under the startup-snapshot autogate every service here
-// goes through the zygote; without it they are plain Workers and the same assertions hold with
-// snapshotUsed false.
+// the text/data/JSON bindings; node:fs in startup-snapshot-wrappables-fs-test.js, file system
+// handles in startup-snapshot-wrappables-webfs-test.js) and at request time reports whether they
+// still hold their state and still work. Negative cases leave an object the snapshot cannot carry
+// reachable, or do not qualify for the pipeline, and must start as plain Workers. The runner
+// asserts the reports. Under the startup-snapshot autogate every service here goes through the
+// zygote; without it they are plain Workers and the same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { DurableObject, WorkerEntrypoint, env } from 'cloudflare:workers';
@@ -305,6 +305,9 @@ async function test(ctrl, env) {
     // has none.
     'cpp-streams',
     'performance',
+    // File system handles: see startup-snapshot-wrappables-webfs-test.js.
+    'webfs-tmp',
+    'webfs-bundle',
     ...(tsUrl ? ['searchparams'] : []),
   ];
   // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The

@@ -1134,6 +1134,12 @@ void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8:
   zygoteRestoreTimeHolders = kj::none;
 }
 
+void IsolateBase::notifySnapshotContextReady(Lock& js) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  heapTracer.forEachLiveWrapper([&js](Wrappable& wrappable, v8::Object::Wrappable&,
+                                    v8::CppHeapPointerTag) { wrappable.snapshotContextReady(js); });
+}
+
 void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context) {
   KJ_REQUIRE(isStartingFromSnapshot());
   KJ_IF_SOME(index, finalizedSnapshotArtifact().restoreTimeGlobalsIndex) {

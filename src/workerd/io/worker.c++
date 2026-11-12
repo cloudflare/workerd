@@ -2471,6 +2471,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
             auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+            if (isolateBase.isStartingFromSnapshot()) {
+              // Objects restored from the snapshot were built before the context existed. Its
+              // embedder-data slots are all populated now, the VFS above being the last, and
+              // none of the Worker's JavaScript has run in it yet, so they bind to what the
+              // context carries (api::FileSystemHandle to the VFS).
+              isolateBase.notifySnapshotContextReady(js);
+            }
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.

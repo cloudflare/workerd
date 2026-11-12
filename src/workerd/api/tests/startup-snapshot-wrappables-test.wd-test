@@ -23,6 +23,16 @@ const performanceCompatibilityFlags :List(Text) = [
   "enable_global_performance_classes",
 ];
 
+# The webfs cases use navigator.storage.
+const webfsCompatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "global_navigator",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+  "enable_web_file_system",
+];
+
 const modules :List(Workerd.Worker.Module) = [
   (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
 ];
@@ -51,6 +61,8 @@ const unitTests :Workerd.Config = (
           (name = "cpp-streams-pending-cancel", service = "cpp-streams-pending-cancel"),
           (name = "performance", service = "performance"),
           (name = "performance-entries", service = "performance-entries"),
+          (name = "webfs-tmp", service = "webfs-tmp"),
+          (name = "webfs-bundle", service = "webfs-bundle"),
         ],
       )
     ),
@@ -266,6 +278,39 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .performanceCompatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"performance-entries\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # File system handles kept by the top level: to a file it creates under /tmp, and to
+    # config.txt, which the VFS serves under /bundle.
+    ( name = "webfs-tmp",
+      worker = (
+        modules = [
+          (name = "webfs.js", esModule = embed "startup-snapshot-wrappables-webfs-test.js"),
+          (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
+        ],
+        compatibilityFlags = .webfsCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"webfs-tmp\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "webfs-bundle",
+      worker = (
+        modules = [
+          (name = "webfs.js", esModule = embed "startup-snapshot-wrappables-webfs-test.js"),
+          (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
+          (name = "config.txt", text = "hello from the config"),
+        ],
+        compatibilityFlags = .webfsCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"webfs-bundle\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

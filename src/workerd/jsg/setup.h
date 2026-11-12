@@ -691,6 +691,11 @@ class IsolateBase {
   // JavaScript runs in it: re-applies the state the zygote recorded.
   void replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context);
 
+  // Restored context, once the embedder has populated its embedder-data slots and before any
+  // JavaScript runs in it: calls Wrappable::snapshotContextReady() on every object with a live
+  // wrapper. The caller has entered the context.
+  void notifySnapshotContextReady(Lock& js);
+
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
   }
