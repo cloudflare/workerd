@@ -755,7 +755,7 @@ fn workflows_services(
     let mut bindings = bundled_worker(service, &name, "workflows.js", flags, None, n + 1);
     for (i, w) in (0u32..).zip(workflows) {
         let mut b = bindings.reborrow().get(i);
-        b.set_name(&format!("workflow:{}", w.name));
+        b.set_name(format!("workflow:{}", w.name));
         let mut ns = b.init_durable_object_namespace();
         ns.set_class_name(workflow_namespace_key(&w.name));
         ns.set_service_name(target);
