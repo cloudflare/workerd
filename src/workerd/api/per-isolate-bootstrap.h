@@ -6,6 +6,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
 
 #include <kj/map.h>
@@ -74,13 +75,17 @@ class EmbedderBootstrap {
 // The bootstrap state (require cache, compat flags) is heap-allocated and stored
 // in the context's BOOTSTRAP_STATE embedder data slot, so that require() remains
 // usable for lazy evaluation after runPerIsolateBootstrap() returns. The state
-// refers to `embedder`, which must outlive the context.
+// refers to `embedder` and `moduleSource`, which must outlive the context.
+//
+// `moduleSource`, if given, provides the storage V8 reads the scripts' source from, in place of
+// the compiled-in bytes; see jsg/module-source.h.
 //
 // Throws kj::Exception on failure (compilation errors, missing scripts, cycles).
 // This is fatal for isolate creation since these are runtime-owned scripts.
 void runPerIsolateBootstrap(jsg::Lock& js,
     CompatibilityFlags::Reader flags,
-    kj::Maybe<const EmbedderBootstrap&> embedder = kj::none);
+    kj::Maybe<const EmbedderBootstrap&> embedder = kj::none,
+    const jsg::ModuleSource* moduleSource = nullptr);
 
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).

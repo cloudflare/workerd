@@ -9,18 +9,18 @@
 // ReadableStreamNativeSource in src/workerd/api/js-readable-stream.{h,c++},
 // which must conform; JS mocks in tests exercise the conduit
 // independently of it):
-//   - A native underlying source carries a V8-private kNativeSource
-//     marker whose value is true. Marker presence ⇒ native ⇒ BYTE CAPABLE
+//  - A native underlying source carries a V8-private kNativeSource
+//     marker whose value is true. Marker presence => native => BYTE CAPABLE
 //     (there is no separate byte flag).
-//   - The source implements the standard UnderlyingSource shape:
+//  - The source implements the standard UnderlyingSource shape:
 //     pull(controller) and cancel(reason) as regular methods ARE the
 //     hooks, driven by the standard pull algorithm (pulling/pullAgain
 //     serialization). `start` is IGNORED (assumed no-op). `type` and
 //     `autoAllocateChunkSize` are forbidden. Additional hooks (tee) are
-//     additional regular methods — safe because the native source object
+//     additional regular methods - safe because the native source object
 //     is never exposed to user code.
-//   - pull(controller) discriminates the read mode via the controller:
-//     controller.byobRequest !== null ⇒ BYOB read — fill the request's
+//  - pull(controller) discriminates the read mode via the controller:
+//     controller.byobRequest !== null => BYOB read - fill the request's
 //     view and call respond(bytesWritten), honoring `atLeast` (the
 //     read's minimum, in bytes) and `elementSize` (the read view's
 //     element size, in bytes): bytesWritten must be a whole number of
@@ -32,22 +32,22 @@
 //     memory (KJ tryRead semantics); buffer-swapping has no C++ analogue,
 //     and the default-read enqueue() path already covers source-allocated
 //     buffers.
-//     byobRequest === null ⇒ default read — the source allocates its OWN
+//     byobRequest === null => default read - the source allocates its OWN
 //     buffer and calls controller.enqueue(view). The view is never empty:
 //     as with respond(0), an empty answer would mean end-of-stream, for
 //     which close() is the verb, so enqueue() refuses one (TypeError).
-//   - The source calls enqueue-or-respond AT MOST ONCE per pull
+//  - The source calls enqueue-or-respond AT MOST ONCE per pull
 //     invocation and never pushes outside pull. desiredSize is exposed
 //     but the native source never consults it.
-//   - The source hands over memory it never touches again: each
+//  - The source hands over memory it never touches again: each
 //     enqueue()d chunk is a fresh buffer, never a SharedArrayBuffer, and
 //     the source stops writing to byobRequest.view once it responds.
 //     The conduit relies on this rather than checking it: it neither
 //     refuses a shared chunk nor transfers what it delivers, so the
 //     source's view of a responded read stays attached. The queued
 //     controller does both, because its source is user code.
-//   - PER-PULL CANCELLATION: pull receives an extension argument
-//     pull(controller, signal) — an AbortSignal that fires when the
+//  - PER-PULL CANCELLATION: pull receives an extension argument
+//     pull(controller, signal) - an AbortSignal that fires when the
 //     consumer abandons the read (releaseLock, cancel, tee). The source
 //     MUST check signal.aborted synchronously immediately before
 //     enqueue/respond; if aborted, it retains the bytes and redelivers
@@ -62,7 +62,7 @@
 //     waits, as a pull's rejection does in the spec.
 //     FUTURE OPTIMIZATION: reuse a single AbortController per conduit
 //     (reset between pulls) rather than allocating one per pull.
-//   - MIN-READ / UNDER-DELIVERY CONTRACT (KJ tryRead semantics): the
+//  - MIN-READ / UNDER-DELIVERY CONTRACT (KJ tryRead semantics): the
 //     respond is the source's COMPLETE answer for the read. Any internal
 //     accumulation toward `atLeast` happens inside the native source;
 //     the conduit never re-pulls an unsatisfied read. Responding with
@@ -70,25 +70,25 @@
 //     closes, the partial fill commits as { done: false, value:
 //     partialView }, and every subsequent read returns EOF (BYOB reads
 //     get a zero-length view over their transferred buffer). This is the
-//     C++-parity readAtLeast tail shape — the below-minimum
-//     tail is never fused with the done flag — and it matches the
+//     C++-parity readAtLeast tail shape - the below-minimum
+//     tail is never fused with the done flag - and it matches the
 //     queued backend's deferred end-of-data settlement, so consumers
 //     observe the same tail on both backends. The legacy C++ streams
 //     differ only in settling the tail before the stream closes, which
 //     happens at their next read. (Only an explicit same-turn
 //     respond(0)-after-close on the QUEUED backend produces the spec's
 //     fused { done: true, value: partial } fold; the native conduit has
-//     no respond(0) — close() is the EOF verb.)
-//   - Close is otherwise a fused close-commit: controller.close() may
-//     follow a respond() in the same pull turn — deliberately divergent
+//     no respond(0) - close() is the EOF verb.)
+//  - Close is otherwise a fused close-commit: controller.close() may
+//     follow a respond() in the same pull turn - deliberately divergent
 //     from the queued backend's drain-then-sentinel model.
-//   - tee(): returns a PAIR of new native source objects, leaving the
+//  - tee(): returns a PAIR of new native source objects, leaving the
 //     original source closed. The stream layer wraps each branch in a
 //     fresh ReadableStream; branches are fully independent (no composite
 //     cancel). tee() may arrive while an aborted pull's read is still
 //     running (the reader was released mid-pull); both branches must then
 //     deliver the bytes that read produces, ahead of anything later.
-//   - expectedLength (non-standard extension, optional): the TOTAL bytes
+//  - expectedLength (non-standard extension, optional): the TOTAL bytes
 //     the source promises to produce, a uint64 (the C++ source answers a
 //     bigint), read once at construction and converted to a bigint by
 //     normalizeExpectedLength (common.ts).
@@ -100,29 +100,29 @@
 //     property directly off the extracted source object.
 //
 // NATIVE-BACKEND INVARIANTS (binding on changes to this file; the queued
-// backend in queue.ts has a DIFFERENT set — do not port logic across the
+// backend in queue.ts has a DIFFERENT set - do not port logic across the
 // fence without checking both):
-//   - There is NO JS-side queue AND NO JS-SIDE OVERFLOW BUFFER: every
+//  - There is NO JS-side queue AND NO JS-SIDE OVERFLOW BUFFER: every
 //     read becomes demand on the unified request FIFO, satisfied
 //     directly by the source inside pull. Race buffering (the
 //     release-mid-pull case) lives SOURCE-SIDE via the abort signal
-//     contract — the source stashes and redelivers; the conduit never
+//     contract - the source stashes and redelivers; the conduit never
 //     holds data. Nothing here may assume entries, cursors, positions,
 //     or the CLOSE_SENTINEL exist.
-//   - JSG owns the source lifetime: no WeakRef owner tracking and no
+//  - JSG owns the source lifetime: no WeakRef owner tracking and no
 //     FinalizationRegistry backstop (the queued backend needs both).
-//   - The controller façade is consumed ONLY by the native source; it is
+//  - The controller facade is consumed ONLY by the native source; it is
 //     never handed to user code.
-//   - Stream-level state transitions cross the module fence through the
+//  - Stream-level state transitions cross the module fence through the
 //     injected NativeStreamHooks (readableStreamClose/Error on the far
-//     side) — never by touching stream internals from here.
-//   - The stream transitions before the reads it ends settle: every
+//     side) - never by touching stream internals from here.
+//  - The stream transitions before the reads it ends settle: every
 //     close or error the conduit makes calls its hook first, then
 //     settles the reads (spec ReadableStreamClose/ReadableStreamError:
 //     reader.closed first), so reader.closed and the C++ EOF signal
 //     precede the last read. (A cancel is closed by the stream layer
 //     before it reaches the conduit.)
-//   - A COMPLETION LATCH prevents busy-loop re-pulls: a pull that
+//  - A COMPLETION LATCH prevents busy-loop re-pulls: a pull that
 //     settles without delivering, closing, or erroring while requests
 //     are still pending errors the stream. Aborted pulls are exempt.
 //
@@ -210,14 +210,14 @@ function hasOwnMarker(
 // --- Writable-side markers (same conventions as the readable side) ---
 
 // A native underlying sink carries the corresponding V8-private marker.
-// Unlike the source side, native sinks need no new backend machinery — the standard
+// Unlike the source side, native sinks need no new backend machinery - the standard
 // WritableStream drives them via start/write/close/abort. The marker
 // exists for pipe dispatch (is the dest native?) and extraction (hand
 // the sink to C++ for the native+native fast path). Two extension hooks
 // beyond the standard sink surface:
-//   - pipeFrom(source, options): the native+native pipe fast path,
+//  - pipeFrom(source, options): the native+native pipe fast path,
 //     called by the pipe dispatch when both ends are native-backed.
-//   - detach(): called by detachWritableStream just before it drops its
+//  - detach(): called by detachWritableStream just before it drops its
 //     reference, releasing the C++ sink immediately (and cancelling a
 //     write in flight) when the underlying connection is taken over
 //     (e.g. Socket startTls). Returns the error the stream's pending
@@ -226,7 +226,7 @@ const kNativeSink = utils.getPrivateSymbol('kNativeSink');
 
 // Private extraction slot for native-backed WritableStream instances.
 // It holds a shared extractor function, one-shot via locked precondition.
-// Writable has no "disturbed" concept — locked is the only precondition.
+// Writable has no "disturbed" concept - locked is the only precondition.
 const kExtractNativeSink = utils.getPrivateSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
@@ -261,8 +261,8 @@ export interface NativeStreamHooks {
 // The unified request FIFO
 //
 // Default reads and BYOB reads share ONE queue so results resolve in
-// submission order. The head request's kind is what the controller façade
-// reflects to the source: byobRequest !== null ⇔ the head is a BYOB read.
+// submission order. The head request's kind is what the controller facade
+// reflects to the source: byobRequest !== null <=> the head is a BYOB read.
 
 interface NativeDefaultRequest {
   kind: 'default';
@@ -296,11 +296,11 @@ let getControllerConduit: (
 ) => NativePullConduit;
 
 // ---------------------------------------------------------------------------
-// The BYOB request façade
+// The BYOB request facade
 //
 // Wraps the head pull-into descriptor for the native source's consumption
 // during pull. Mirrors a subset of the global ReadableStreamBYOBRequest
-// (view/atLeast/respond, plus the elementSize extension — respondWithNewView
+// (view/atLeast/respond, plus the elementSize extension - respondWithNewView
 // is deliberately omitted; see the contract header) but is a distinct,
 // module-private class: it is only ever handed to the native source, never
 // to user code, so it needs no global registration or brand hardening
@@ -365,11 +365,11 @@ class NativeReadableStreamBYOBRequest {
 }
 
 // ---------------------------------------------------------------------------
-// The controller façade
+// The controller facade
 //
 // Occupies the stream's #controller slot and is passed to the native
 // source's pull(controller) per the standard pull algorithm. Consumed
-// ONLY by the native source — never handed to user code — but the methods
+// ONLY by the native source - never handed to user code - but the methods
 // brand-check anyway, matching the file-wide convention.
 
 let assertIsNativeReadableStreamController: (
@@ -399,7 +399,7 @@ class NativeReadableStreamController {
     this.#conduit = conduit;
   }
 
-  // Mode discrimination for the native source: non-null ⇔ the request at
+  // Mode discrimination for the native source: non-null <=> the request at
   // the head of the FIFO is a BYOB read.
   get byobRequest(): NativeReadableStreamBYOBRequest | null {
     assertIsNativeReadableStreamController(this);
@@ -457,7 +457,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // Set by a successful enqueue/respond, cleared at pull start. Used for
   // the once-per-pull delivery check AND the completion latch: a pull
   // that settles without delivering, closing, or erroring while requests
-  // are still pending is a broken source — the latch errors the stream
+  // are still pending is a broken source - the latch errors the stream
   // rather than busy-looping the re-pull. Aborted pulls are exempt.
   #deliveredThisPull: boolean = false;
   // The AbortController of the pull in flight, or undefined when none is;
@@ -501,7 +501,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#controller = new NativeReadableStreamController(this);
   }
 
-  // The façade the stream holds as its controller.
+  // The facade the stream holds as its controller.
   get controller(): NativeReadableStreamController {
     return this.#controller;
   }
@@ -558,7 +558,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       }
     });
     // ABORT SITE: if the released reader's reads were the only demand and
-    // a pull is in flight, abort it — the source contractually holds any
+    // a pull is in flight, abort it - the source contractually holds any
     // bytes and redelivers on the next pull.
     if (this.#requests.length === 0) this.#abortCurrentPull(reason);
   }
@@ -632,7 +632,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // requests are pending (effective high-water mark of zero), and
   // re-evaluate after each pull settles for the REMAINING requests, which
   // covers what the spec's [[pullAgain]] records. A single request never
-  // spans pulls (the respond is the complete answer for its read — see
+  // spans pulls (the respond is the complete answer for its read - see
   // the min-read contract).
   //
   // PER-PULL CANCELLATION: each pull invocation gets an unaborted
@@ -713,7 +713,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     AbortControllerAbort(ac, reason);
   }
 
-  // --- The source-facing operations (via the controller façade) -------------
+  // --- The source-facing operations (via the controller facade) -------------
 
   isHeadDesc(desc: PullIntoDescriptor): boolean {
     const head = this.#requests.peek();
@@ -805,7 +805,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     // Head is a BYOB read: the source must use the byobRequest instead.
     // (The fill could be emulated by copying, but the contract says the
-    // native side discriminates via byobRequest — keep the boundary firm.)
+    // native side discriminates via byobRequest - keep the boundary firm.)
     throw new TypeError(
       'enqueue while a BYOB read is pending; use byobRequest.respond()'
     );
@@ -821,7 +821,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     if (!this.isHeadDesc(desc)) {
       if (this.#requests.length === 0) {
-        // REFUSAL BACKSTOP: same as the enqueue case — the pull was
+        // REFUSAL BACKSTOP: same as the enqueue case - the pull was
         // aborted, the source should have checked signal.aborted.
         throw new TypeError(
           'delivery refused: the pull was aborted (the source must check ' +
@@ -860,13 +860,13 @@ class NativePullConduit implements ByteStreamConsumerType {
     // this read. Delivering fewer bytes than the requested minimum
     // (atLeast) signals end-of-stream: the stream closes, the partial fill
     // commits { done: false, value: partialView }, and every subsequent
-    // read returns EOF — the C++-parity readAtLeast tail shape. The
-    // conduit never re-pulls an unsatisfied read — any accumulation toward
+    // read returns EOF - the C++-parity readAtLeast tail shape. The
+    // conduit never re-pulls an unsatisfied read - any accumulation toward
     // the minimum happens inside the native source (tryRead-style). State
     // transitions before promise resolutions.
     //
     // EXPECTED-LENGTH: under-delivery is a close signal, so the
-    // exact-total contract applies — landing short of expectedLength is
+    // exact-total contract applies - landing short of expectedLength is
     // underflow and errors the stream instead of closing it. (Landing
     // exactly on it is a legitimate close-with-delivery.)
     const endsStream = filled < desc.minimumFill;
@@ -899,7 +899,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // The exact-total accounting: adds `byteLength` to the running total,
   // throwing RangeError on overflow (delivering past the declared
   // expectedLength). Called from both delivery paths before commit.
-  // On overflow, errors the stream explicitly before throwing — the
+  // On overflow, errors the stream explicitly before throwing - the
   // throw alone only reaches the caller, which may be an external sink
   // that only errors the writable side (leaving the readable hanging).
   #accountDelivery(byteLength: number): void {
@@ -941,7 +941,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   closeFromSource(): void {
     if (this.#status !== 'active') return; // late settle tolerated
     // EXPECTED-LENGTH CONTRACT: source-initiated close before reaching
-    // the declared total is underflow — an error, not a clean close.
+    // the declared total is underflow - an error, not a clean close.
     // (Consumer-initiated cancel/tee/extraction are exempt; the source
     // kept its promise, the consumer left.)
     if (
@@ -1003,7 +1003,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     if (this.#requests.length > 0) {
       // Unreachable through tee() (pending reads imply a locked stream,
-      // and tee() rejects locked streams upstream) — kept as a guard.
+      // and tee() rejects locked streams upstream) - kept as a guard.
       throw new TypeError('Cannot tee a native stream with pending reads');
     }
     // ABORT SITE: moot by construction (an in-flight pull at tee time
@@ -1248,7 +1248,7 @@ const nativeStreamInternals = {
   nativeControllerPeekSource,
 };
 
-// Type-only exports (fully erased at runtime — the loader sees only the
+// Type-only exports (fully erased at runtime - the loader sees only the
 // module.exports assignment below, matching the queue.ts pattern).
 // NativeStreamInternals lets the require() site in readable.ts cast the
 // untyped loader result back to the real shape, preserving the brand

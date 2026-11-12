@@ -49,7 +49,6 @@ wd_cc_library(
         "crypto.h",
         "diagnostics-channel.h",
         "module.h",
-        "module-source.h",
         "node.h",
         "process.h",
         "timers.h",

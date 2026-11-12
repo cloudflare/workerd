@@ -206,7 +206,7 @@ if (compatFlags['typescript_implemented_streams']) {
   // the TypeScript implementation so the hierarchy is consistent.
   //
   // JSG installs nested types on the prototype rather than the instance, so
-  // this reaches every `crypto.DigestStream` — including the lazily created
+  // this reaches every `crypto.DigestStream` - including the lazily created
   // `globalThis.crypto` singleton, which is deliberately not touched here.
   // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
   // with no attributes, i.e. all three true), so the swap is invisible to

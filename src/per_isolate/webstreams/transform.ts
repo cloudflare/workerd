@@ -1,6 +1,6 @@
 'use strict';
 
-// TransformStream and TransformStreamDefaultController (WHATWG Streams §6).
+// TransformStream and TransformStreamDefaultController (WHATWG Streams section 6).
 //
 // A TransformStream is a {readable, writable} pair: the writable side's sink
 // runs the transformer over incoming chunks, which enqueue results onto the
@@ -9,7 +9,7 @@
 //
 // The two inner streams are created with module-owned source/sink objects
 // (safe to property-read), and all cross-controller operations dispatch
-// through prototype methods CAPTURED at bootstrap — never through the
+// through prototype methods CAPTURED at bootstrap - never through the
 // user-patchable prototypes.
 
 import type {
@@ -225,7 +225,7 @@ class TransformStreamDefaultController<
 class TransformStream<I = unknown, O = unknown> {
   #readable: ReadableStreamType<O>;
   #writable: WritableStreamType<I>;
-  // Undefined for ELIDED (zero-algorithm) transforms — no controller is
+  // Undefined for ELIDED (zero-algorithm) transforms - no controller is
   // allocated when there are no transformer callbacks to receive it.
   // @ts-expect-error -- retained for debugging/future use
   #controller?: TransformStreamDefaultController<I, O> | undefined;
@@ -269,11 +269,11 @@ class TransformStream<I = unknown, O = unknown> {
       try {
         readableControllerEnqueue(readableController, chunk);
       } catch (e) {
-        // size() threw — error the writable side and unblock backpressure.
+        // size() threw - error the writable side and unblock backpressure.
         stream.#errorWritableAndUnblockWrite(e);
         // Spec step 5.2: throw stream.[[readable]].[[storedError]], not
         // the caught exception.  When size() calls controller.error(e1)
-        // then throws e2, the storedError is e1 — the first error wins.
+        // then throws e2, the storedError is e1 - the first error wins.
         // When size() closed the readable first (readable.cancel(),
         // terminate()), the readable has no stored error and this throws
         // undefined, as the spec and Node do.
@@ -304,7 +304,7 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   #setBackpressure(backpressure: boolean): void {
-    // Resolve the previous change promise and mint a fresh one — anyone
+    // Resolve the previous change promise and mint a fresh one - anyone
     // awaiting the old promise (the sink's write algorithm) proceeds.
     this.#backpressureChange.resolve();
     this.#backpressureChange = newHandledPending();
@@ -383,7 +383,7 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   #errorWritableAndUnblockWrite(reason: unknown): void {
-    // Spec: TransformStreamErrorWritableAndUnblockWrite step 1 —
+    // Spec: TransformStreamErrorWritableAndUnblockWrite step 1 -
     // TransformStreamDefaultControllerClearAlgorithms.  Prevents a
     // later readable.cancel() from invoking the transformer's cancel
     // callback after the stream has already errored/terminated.
