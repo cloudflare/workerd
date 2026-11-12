@@ -514,10 +514,10 @@ impl jsg::MemoryRetainer for Empty {
     fn memory_info(&self, _tracker: &mut jsg::MemoryTracker<'_>) {}
 }
 
-/// A retainer in a cycle through `std::rc::Rc`, which only its deduplication ends.
+/// A retainer in a cycle through `std::sync::Arc`, which only its deduplication ends.
 struct Link {
     name: String,
-    next: RefCell<Option<std::rc::Rc<Self>>>,
+    next: std::sync::Mutex<Option<std::sync::Arc<Self>>>,
 }
 
 impl jsg::MemoryRetainer for Link {
@@ -536,16 +536,16 @@ jsg::jsg_memory_retainer!(Outer, Inner, Empty, Link);
 jsg::jsg_traced!(Inner);
 
 /// Two links, each the other's `next`.
-fn new_ring() -> std::rc::Rc<Link> {
-    let first = std::rc::Rc::new(Link {
+fn new_ring() -> std::sync::Arc<Link> {
+    let first = std::sync::Arc::new(Link {
         name: "first".to_owned(),
-        next: RefCell::new(None),
+        next: std::sync::Mutex::new(None),
     });
-    let second = std::rc::Rc::new(Link {
+    let second = std::sync::Arc::new(Link {
         name: "second".to_owned(),
-        next: RefCell::new(Some(first.clone())),
+        next: std::sync::Mutex::new(Some(first.clone())),
     });
-    *first.next.borrow_mut() = Some(second);
+    *first.next.lock().unwrap() = Some(second);
     first
 }
 
@@ -568,9 +568,9 @@ struct Fields {
     pub optional_inners: Vec<Option<Inner>>,
     pub boxed_inner: Box<Inner>,
     pub boxed_optional_inner: Box<Option<Inner>>,
-    pub shared_a: std::rc::Rc<Cache>,
-    pub shared_b: std::rc::Rc<Cache>,
-    pub ring: std::rc::Rc<Link>,
+    pub shared_a: std::sync::Arc<Cache>,
+    pub shared_b: std::sync::Arc<Cache>,
+    pub ring: std::sync::Arc<Link>,
     pub boxed_child: Box<Option<jsg::Rc<Child>>>,
     pub boxed_number: Box<u64>,
     pub boxed_str: Box<str>,
@@ -588,6 +588,7 @@ struct Fields {
     pub global: v8::Global<v8::Value>,
     pub store: v8::BackingStore,
     pub borrowed: RefCell<String>,
+    pub locked: std::sync::Mutex<String>,
 }
 
 #[jsg_resource]
@@ -624,7 +625,7 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
         let dict = jsg::Dict::<jsg::Rc<Child>>::from_js(lock, dict)?;
         let plain_dict = ctx.eval_raw(lock, "({ a: 1, bb: 2 })").unwrap();
         let plain_dict = jsg::Dict::<u32>::from_js(lock, plain_dict)?;
-        let shared = std::rc::Rc::new(new_cache());
+        let shared = std::sync::Arc::new(new_cache());
         let fields = Fields {
             outer: Outer {
                 inner: new_inner("inner"),
@@ -669,20 +670,23 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             global: global.to_global(lock),
             store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(),
             borrowed: RefCell::new("borrowed".to_owned()),
+            locked: std::sync::Mutex::new("locked".to_owned()),
         };
         let fields = jsg::Rc::new(lock, fields);
         expose(lock, ctx, "fields", &fields)?;
         expose(lock, ctx, "weakTarget", &weak_target)?;
 
-        // A snapshot taken while a cell is mutably borrowed skips the cell. Taking a snapshot runs
-        // a GC first, so the cell holds no GC references, which the GC could not visit.
+        // A snapshot taken while a cell is mutably borrowed or a mutex is locked skips it. Taking a
+        // snapshot runs a GC first, so neither holds GC references, which the GC could not visit.
         let borrow = fields.get(lock).borrowed.borrow_mut();
+        let guard = fields.get(lock).locked.lock().unwrap();
         let snapshot = Snapshot::take(lock);
+        drop(guard);
         drop(borrow);
         let node = snapshot.find("Fields");
         check(&snapshot, node, fields.get(lock));
         // Break the cycle of links, which would leak.
-        fields.get(lock).ring.next.borrow_mut().take();
+        fields.get(lock).ring.next.lock().unwrap().take();
         Ok(())
     });
 }
@@ -907,8 +911,9 @@ fn handles_and_buffers() {
         assert_eq!(snapshot.name(store), "workerd / BackingStore");
         assert_eq!(snapshot.size(store), 4);
 
-        // The cell was mutably borrowed while the snapshot was taken.
+        // The cell was mutably borrowed and the mutex locked while the snapshot was taken.
         assert!(snapshot.targets(node, "borrowed").is_empty());
+        assert!(snapshot.targets(node, "locked").is_empty());
     });
 }
 
@@ -1046,7 +1051,7 @@ fn promises_and_frames_are_edges_into_the_v8_heap() {
 
 #[jsg_resource(memory_info, custom_trace)]
 struct Shared {
-    pub number: std::rc::Rc<u64>,
+    pub number: std::sync::Arc<u64>,
     pub string: std::sync::Arc<String>,
     pub copied: Cell<u32>,
 }
@@ -1063,7 +1068,7 @@ fn shared_pointers_count_their_allocations() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let shared = Shared {
-            number: std::rc::Rc::new(7),
+            number: std::sync::Arc::new(7),
             string: std::sync::Arc::new("a string".to_owned()),
             copied: Cell::new(1),
         };
@@ -1075,7 +1080,7 @@ fn shared_pointers_count_their_allocations() {
 
         // Plain data is a node of its size.
         let number = snapshot.target(node, "number");
-        assert_eq!(snapshot.name(number), "workerd / Rc");
+        assert_eq!(snapshot.name(number), "workerd / Arc");
         assert_eq!(snapshot.size(number), size_of::<u64>());
         assert!(snapshot.nodes[number].edges.is_empty());
 
@@ -1094,8 +1099,8 @@ fn shared_pointers_count_their_allocations() {
 /// A value that is not a retainer, two of whose pointers share each allocation: a ladder that
 /// reporting each pointer in full would visit `2^RUNGS` times.
 struct Rung {
-    left: Option<std::rc::Rc<Self>>,
-    right: Option<std::rc::Rc<Self>>,
+    left: Option<std::sync::Arc<Self>>,
+    right: Option<std::sync::Arc<Self>>,
 }
 
 impl jsg::MemoryInfo for Rung {
@@ -1113,9 +1118,9 @@ const RUNGS: usize = 64;
 
 #[jsg_resource(memory_info, custom_trace)]
 struct Ladder {
-    pub top: std::rc::Rc<Rung>,
-    pub number: std::rc::Rc<u64>,
-    pub same_number: std::rc::Rc<u64>,
+    pub top: std::sync::Arc<Rung>,
+    pub number: std::sync::Arc<u64>,
+    pub same_number: std::sync::Arc<u64>,
 }
 
 impl jsg::Traced for Ladder {
@@ -1129,17 +1134,17 @@ impl Ladder {}
 fn allocation_shared_through_rc_is_one_node() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let mut top = std::rc::Rc::new(Rung {
+        let mut top = std::sync::Arc::new(Rung {
             left: None,
             right: None,
         });
         for _ in 1..RUNGS {
-            top = std::rc::Rc::new(Rung {
+            top = std::sync::Arc::new(Rung {
                 left: Some(top.clone()),
                 right: Some(top),
             });
         }
-        let number = std::rc::Rc::new(7);
+        let number = std::sync::Arc::new(7);
         let ladder = Ladder {
             top,
             same_number: number.clone(),
@@ -1151,7 +1156,7 @@ fn allocation_shared_through_rc_is_one_node() {
         let snapshot = Snapshot::take(lock);
         let node = snapshot.find("Ladder");
         // One node for each rung's allocation, and one for the number's.
-        assert_eq!(snapshot.find_all("Rc").len(), RUNGS + 1);
+        assert_eq!(snapshot.find_all("Arc").len(), RUNGS + 1);
         let top = snapshot.target(node, "top");
         let next = snapshot.targets(top, "");
         assert_eq!(next.len(), 2);
@@ -1208,7 +1213,7 @@ fn new_list(len: usize) -> ListNode {
 /// A list of retainers, of which the last holds `payload`.
 struct Tail {
     next: Option<Box<Self>>,
-    payload: Option<std::rc::Rc<Inner>>,
+    payload: Option<std::sync::Arc<Inner>>,
 }
 
 impl jsg::MemoryRetainer for Tail {
@@ -1234,9 +1239,9 @@ impl Drop for Tail {
     }
 }
 
-/// A value that is not a retainer, in a cycle through `std::rc::Rc`.
+/// A value that is not a retainer, in a cycle through `std::sync::Arc`.
 struct Loop {
-    next: RefCell<Option<std::rc::Rc<Self>>>,
+    next: std::sync::Mutex<Option<std::sync::Arc<Self>>>,
 }
 
 impl jsg::MemoryInfo for Loop {
@@ -1252,7 +1257,7 @@ impl jsg::MemoryInfo for Loop {
 #[jsg_resource(memory_info, custom_trace)]
 struct Deep {
     pub list: ListNode,
-    pub ring: std::rc::Rc<Loop>,
+    pub ring: std::sync::Arc<Loop>,
 }
 
 impl jsg::Traced for Deep {
@@ -1273,10 +1278,10 @@ fn stops_at_max_depth(count: usize) -> bool {
 fn reporting_stops_at_max_depth() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let ring = std::rc::Rc::new(Loop {
-            next: RefCell::new(None),
+        let ring = std::sync::Arc::new(Loop {
+            next: std::sync::Mutex::new(None),
         });
-        *ring.next.borrow_mut() = Some(ring.clone());
+        *ring.next.lock().unwrap() = Some(ring.clone());
         let deep = Deep {
             list: new_list(10_000),
             ring,
@@ -1288,11 +1293,11 @@ fn reporting_stops_at_max_depth() {
         let lists = snapshot.find_all("ListNode").len();
         assert!(stops_at_max_depth(lists), "{lists} list nodes");
         // The allocation of the cycle is one node, which points to itself.
-        let ring = snapshot.find("Rc");
+        let ring = snapshot.find("Arc");
         assert_eq!(snapshot.targets(ring, ""), [ring]);
 
         // Break the cycle, which would leak.
-        deep.get(lock).ring.next.borrow_mut().take();
+        deep.get(lock).ring.next.lock().unwrap().take();
         Ok(())
     });
 }
@@ -1302,7 +1307,7 @@ fn reporting_stops_at_max_depth() {
 #[jsg_resource(memory_info, custom_trace)]
 struct DeepFirst {
     pub lists: Vec<Tail>,
-    pub payloads: Vec<std::rc::Rc<Inner>>,
+    pub payloads: Vec<std::sync::Arc<Inner>>,
 }
 
 impl jsg::Traced for DeepFirst {
@@ -1320,7 +1325,7 @@ fn retainer_reached_past_max_depth_is_reported_in_full_from_closer() {
         let mut lists = Vec::new();
         let mut payloads = Vec::new();
         for len in max - 8..=max {
-            let payload = std::rc::Rc::new(new_inner("payload"));
+            let payload = std::sync::Arc::new(new_inner("payload"));
             let mut list = Tail {
                 next: None,
                 payload: Some(payload.clone()),

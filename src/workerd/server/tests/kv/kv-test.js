@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { Buffer } from 'node:buffer';
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -16,8 +17,6 @@ async function blobs(env) {
   for (const dir of await ls('')) out.push(...(await ls(`${dir}/b/`)));
   return out.sort();
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const getPutDelete = {
   async test(ctrl, env) {
@@ -47,7 +46,11 @@ export const getPutDelete = {
 export const streamedPut = {
   async test(ctrl, env) {
     for (const size of [1000, 70_000, 2 * 1024 * 1024]) {
-      const value = Uint8Array.from({ length: size }, (_, i) => i % 251);
+      // A loop and Buffer.equals() rather than Uint8Array.from()'s callback
+      // and assert.deepStrictEqual(), which walks the array's own keys: at
+      // 2 MiB those take 20 s in debug builds.
+      const value = new Uint8Array(size);
+      for (let i = 0; i < size; i++) value[i] = i % 251;
       let sent = 0;
       const stream = new ReadableStream({
         pull(c) {
@@ -57,7 +60,8 @@ export const streamedPut = {
       });
       await env.KV.put(`stream/${size}`, stream);
       const got = await env.KV.get(`stream/${size}`, 'arrayBuffer');
-      assert.deepStrictEqual(new Uint8Array(got), value);
+      assert.strictEqual(got.byteLength, size);
+      assert.ok(Buffer.from(got).equals(value), `stream/${size} differs`);
     }
   },
 };
@@ -160,23 +164,24 @@ export const threshold = {
   },
 };
 
-// An overwritten or deleted blob is deleted once its grace period, shortened
-// by `TEST_CLOCK`, is over.
+// An overwritten or deleted blob is deleted once its grace period is over,
+// which `TEST_CLOCK`'s POST /gc skips to.
 export const blobGc = {
   async test(ctrl, env) {
-    await sleep(500);
+    const gc = () => env.KV_WORKER.fetch('http://kv/gc', { method: 'POST' });
+    await gc();
     const before = await blobs(env);
     const big = (c) => c.repeat(100_000);
     await env.KV.put('gc', big('a'));
     await env.KV.put('gc', big('b'));
     assert.strictEqual((await blobs(env)).length, before.length + 2);
     assert.strictEqual(await env.KV.get('gc'), big('b'));
-    await sleep(500);
+    await gc();
     assert.strictEqual((await blobs(env)).length, before.length + 1);
     await env.KV.put('gc', 'small');
     await env.KV.put('gc2', big('c'));
     await env.KV.delete('gc2');
-    await sleep(500);
+    await gc();
     assert.deepStrictEqual(await blobs(env), before);
     assert.strictEqual(await env.KV.get('gc'), 'small');
     assert.strictEqual(await env.KV.get('gc2'), null);

@@ -9,7 +9,10 @@
 #include <workerd/api/crypto/keys.h>
 
 #include <ncrypto.h>
+#include <openssl/bytestring.h>
 #include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/mem.h>
 
 #include <climits>
 #include <map>
@@ -600,6 +603,61 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   KJ_UNREACHABLE;
 }
 
+jsg::Ref<CryptoKey> CryptoImpl::toCryptoKey(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    kj::OneOf<kj::String, SubtleCrypto::ImportKeyAlgorithm> algorithmParam,
+    bool extractable,
+    kj::Array<kj::String> keyUsages) {
+  // The new key must not let JS read material that the source key keeps private.
+  JSG_REQUIRE(key->getExtractable() || !extractable, DOMInvalidAccessError,
+      "Cannot create an extractable CryptoKey from a non-extractable key.");
+
+  auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+
+  if (key->getType() == "secret"_kj) {
+    auto exported = key->impl->exportKey(js, "raw-secret"_kj);
+    auto& raw = KJ_ASSERT_NONNULL(exported.tryGet<jsg::JsRef<jsg::JsArrayBuffer>>());
+    return SubtleCrypto::importKeySync(js, "raw-secret"_kj,
+        jsg::JsBufferSource(raw.getHandle(js)).addRef(js), kj::mv(algorithm), extractable,
+        keyUsages);
+  }
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  auto evp = JSG_REQUIRE_NONNULL(
+      tryGetKey(key), DOMNotSupportedError, "Unsupported key type for toCryptoKey().");
+  bool isPrivate = key->getType() == "private"_kj;
+
+  // Web Crypto imports every asymmetric algorithm workerd supports from spki (public keys) and
+  // pkcs8 (private keys).
+  uint8_t* der = nullptr;
+  size_t derLen = 0;
+  KJ_DEFER(if (der != nullptr) {
+    OPENSSL_cleanse(der, derLen);
+    OPENSSL_free(der);
+  });
+  bssl::ScopedCBB cbb;
+  JSG_REQUIRE(CBB_init(cbb.get(), 0) &&
+          (isPrivate ? EVP_marshal_private_key(cbb.get(), evp.get())
+                     : EVP_marshal_public_key(cbb.get(), evp.get())) &&
+          CBB_finish(cbb.get(), &der, &derLen),
+      DOMNotSupportedError, "Unsupported key type for toCryptoKey().");
+
+  auto result = SubtleCrypto::importKeySync(js, isPrivate ? "pkcs8"_kj : "spki"_kj,
+      jsg::JsBufferSource(jsg::JsUint8Array::create(js, kj::arrayPtr(der, derLen))).addRef(js),
+      kj::mv(algorithm), extractable, keyUsages);
+
+  // The Ed25519 and X25519 importers accept any SPKI/PKCS8 key, so check here that the key
+  // material is of the requested type.
+  auto name = result->getAlgorithmName();
+  if (name == "Ed25519"_kj || name == "NODE-ED25519"_kj) {
+    JSG_REQUIRE(evp.id() == EVP_PKEY_ED25519, DOMDataError, "Invalid key type");
+  } else if (name == "X25519"_kj) {
+    JSG_REQUIRE(evp.id() == EVP_PKEY_X25519, DOMDataError, "Invalid key type");
+  }
+
+  return result;
+}
+
 CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
@@ -869,7 +927,7 @@ jsg::JsUint8Array CryptoImpl::statelessDH(
   KJ_ASSERT(privateKeyAlg == publicKeyAlg, "Mismatched public and private key types");
   KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
-      auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
+      auto data = ncrypto::DHPointer::stateless(pvtKey, pubKey);
       JSG_REQUIRE(data, Error, "Failed to derive shared diffie-hellman secret");
       kj::ArrayPtr<const kj::byte> ptr(static_cast<const kj::byte*>(data.get()), data.size());
       return jsg::JsUint8Array::create(js, ptr);

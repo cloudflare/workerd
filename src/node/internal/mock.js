@@ -144,9 +144,144 @@ export class MockFunctionContext {
   }
 }
 
-const { nextImpl, restore, trackCall } = MockFunctionContext.prototype;
+const {
+  nextImpl,
+  restore: restoreFn,
+  trackCall,
+} = MockFunctionContext.prototype;
 delete MockFunctionContext.prototype.trackCall;
 delete MockFunctionContext.prototype.nextImpl;
+
+class MockPropertyContext {
+  #object;
+  #propertyName;
+  #value;
+  #originalValue;
+  #descriptor;
+  #accesses;
+  #onceValues;
+
+  constructor(object, propertyName, value) {
+    this.#onceValues = new Map();
+    this.#accesses = [];
+    this.#object = object;
+    this.#propertyName = propertyName;
+    this.#originalValue = object[propertyName];
+    this.#value = arguments.length > 2 ? value : this.#originalValue;
+    this.#descriptor = Object.getOwnPropertyDescriptor(object, propertyName);
+    if (!this.#descriptor) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'propertyName',
+        propertyName,
+        'is not a property of the object'
+      );
+    }
+
+    const { configurable, enumerable } = this.#descriptor;
+    Object.defineProperty(object, propertyName, {
+      __proto__: null,
+      configurable,
+      enumerable,
+      get: () => {
+        const nextValue = this.#getAccessValue(this.#value);
+        const access = {
+          __proto__: null,
+          type: 'get',
+          value: nextValue,
+          stack: new Error(),
+        };
+        this.#accesses.push(access);
+        return nextValue;
+      },
+      set: this.mockImplementation.bind(this),
+    });
+  }
+
+  /**
+   * Gets an array of recorded accesses (get/set) to the property.
+   * @returns {Array} An array of access records.
+   */
+  get accesses() {
+    return this.#accesses.slice(0);
+  }
+
+  /**
+   * Retrieves the number of times the property was accessed (get or set).
+   * @returns {number} The total number of accesses.
+   */
+  accessCount() {
+    return this.#accesses.length;
+  }
+
+  /**
+   * Sets a new value for the property.
+   * @param {any} value - The new value to be set.
+   * @throws {Error} If the property is not writable.
+   */
+  mockImplementation(value) {
+    if (!this.#descriptor.writable) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'propertyName',
+        this.#propertyName,
+        'cannot be set'
+      );
+    }
+    const nextValue = this.#getAccessValue(value);
+    const access = {
+      __proto__: null,
+      type: 'set',
+      value: nextValue,
+      stack: new Error(),
+    };
+    this.#accesses.push(access);
+    this.#value = nextValue;
+  }
+
+  #getAccessValue(value) {
+    const accessIndex = this.#accesses.length;
+    let accessValue;
+    if (this.#onceValues.has(accessIndex)) {
+      accessValue = this.#onceValues.get(accessIndex);
+      this.#onceValues.delete(accessIndex);
+    } else {
+      accessValue = value;
+    }
+    return accessValue;
+  }
+
+  /**
+   * Sets a value to be used only for the next access (get or set), or a
+   * specific access index.
+   * @param {any} value - The value to be used once.
+   * @param {number} [onAccess] - The access index to be replaced.
+   */
+  mockImplementationOnce(value, onAccess) {
+    const nextAccess = this.#accesses.length;
+    const accessIndex = onAccess ?? nextAccess;
+    validateInteger(accessIndex, 'onAccess', nextAccess);
+    this.#onceValues.set(accessIndex, value);
+  }
+
+  /**
+   * Resets the recorded accesses to the property.
+   */
+  resetAccesses() {
+    this.#accesses = [];
+  }
+
+  /**
+   * Restores the original value of the property that was mocked.
+   */
+  restore() {
+    Object.defineProperty(this.#object, this.#propertyName, {
+      __proto__: null,
+      ...this.#descriptor,
+      value: this.#originalValue,
+    });
+  }
+}
+
+const { restore: restoreProperty } = MockPropertyContext.prototype;
 
 export class MockTracker {
   #mocks = [];
@@ -379,6 +514,38 @@ export class MockTracker {
   }
 
   /**
+   * Creates a property tracker for a specified object.
+   * @param {(object)} object - The object whose value is being tracked.
+   * @param {string} propertyName - The identifier of the property on object to be tracked.
+   * @param {any} value - An optional replacement value used as the mock value for object[valueName].
+   * @returns {ProxyConstructor} The mock property tracker.
+   */
+  property(object, propertyName, value) {
+    validateObject(object, 'object');
+    validateStringOrSymbol(propertyName, 'propertyName');
+
+    const ctx =
+      arguments.length > 2
+        ? new MockPropertyContext(object, propertyName, value)
+        : new MockPropertyContext(object, propertyName);
+    this.#mocks.push({
+      __proto__: null,
+      ctx,
+      restore: restoreProperty,
+    });
+
+    return new Proxy(object, {
+      __proto__: null,
+      get(target, property, receiver) {
+        if (property === 'mock') {
+          return ctx;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+  }
+
+  /**
    * Resets the mock tracker, restoring all mocks and clearing timers.
    */
   reset() {
@@ -392,7 +559,9 @@ export class MockTracker {
    */
   restoreAll() {
     for (let i = 0; i < this.#mocks.length; i++) {
-      restore.call(this.#mocks[i]);
+      const { ctx, restore } = this.#mocks[i];
+
+      restore.call(ctx);
     }
   }
 
@@ -456,7 +625,11 @@ export class MockTracker {
       },
     });
 
-    this.#mocks.push(ctx);
+    this.#mocks.push({
+      __proto__: null,
+      ctx,
+      restore: restoreFn,
+    });
     return mock;
   }
 }

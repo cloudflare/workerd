@@ -212,6 +212,15 @@ function addNumericalSeparator(val: string): string {
   return `${val.slice(0, i)}${res}`;
 }
 
+export class ERR_CONSOLE_WRITABLE_STREAM extends NodeTypeError {
+  constructor(name: string) {
+    super(
+      'ERR_CONSOLE_WRITABLE_STREAM',
+      `Console expects a writable stream instance for ${name}`
+    );
+  }
+}
+
 export class ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY extends NodeError {
   constructor() {
     super(

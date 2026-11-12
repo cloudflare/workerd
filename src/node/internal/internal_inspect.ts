@@ -97,7 +97,7 @@ const mapPrototypeSize: (this: Map<unknown, unknown>) => number =
 
 let maxStack_ErrorName: string;
 let maxStack_ErrorMessage: string;
-function isStackOverflowError(err: Error): boolean {
+export function isStackOverflowError(err: Error): boolean {
   if (maxStack_ErrorMessage === undefined) {
     try {
       function overflowStack() {

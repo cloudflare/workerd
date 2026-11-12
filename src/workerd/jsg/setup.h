@@ -1397,6 +1397,11 @@ class Isolate: public IsolateBase {
       });
     }
 
+    kj::Maybe<DOMException&> tryUnwrapDOMException(v8::Local<v8::Value> value) override {
+      return jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
+          *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none);
+    }
+
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
     //
     // Note there's a useful property of class constructor functions: A constructor's __proto__

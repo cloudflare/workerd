@@ -10,7 +10,6 @@
 //! aligned pointers from internal fields.
 
 use std::cell::Cell;
-use std::rc::Rc;
 
 use jsg::ExceptionType;
 use jsg::ToJS;
@@ -42,7 +41,7 @@ impl EchoResource {
 #[jsg_resource]
 struct DirectReturnResource {
     name: String,
-    counter: Rc<Cell<u32>>,
+    counter: Cell<u32>,
 }
 
 #[jsg_resource]
@@ -146,12 +145,11 @@ fn resource_method_accepts_str_ref_parameter() {
 fn resource_method_returns_non_result_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let counter = Rc::new(Cell::new(42));
         let resource = jsg::Rc::new(
             lock,
             DirectReturnResource {
                 name: "TestResource".to_owned(),
-                counter: counter.clone(),
+                counter: Cell::new(42),
             },
         );
         let wrapped = resource.to_js(lock)?;
@@ -170,7 +168,7 @@ fn resource_method_returns_non_result_values() {
 
         // Test incrementCounter returns undefined (we just check it doesn't error)
         let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()").unwrap();
-        assert_eq!(counter.get(), 43);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.getCounter()").unwrap(), 43);
 
         // Test maybeName returns string for Some
         let result: String = ctx.eval(lock, "resource.maybeName()").unwrap();
@@ -301,7 +299,7 @@ fn resource_method_returns_null_for_none() {
             lock,
             DirectReturnResource {
                 name: String::new(),
-                counter: Rc::new(Cell::new(0)),
+                counter: Cell::new(0),
             },
         );
         let wrapped = resource.to_js(lock)?;

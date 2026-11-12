@@ -45,12 +45,12 @@ in `src/rust/jsg/README.md`.
 resource struct (see `#[jsg_resource]`), and can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
-The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
-`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
-contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
-`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
-leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
-reference.
+The struct implements `jsg::HoldsNoGcReferences` when every field's type does, which lets it into a
+`std::cell::Cell`, `RefCell` or `std::sync::Mutex`, and into an `Arc` if it is also `Sync`. A
+recursive struct, or two that contain each other, can't derive it, since the trait solver reports
+the cycle as an overflow, so `custom_holds_no_gc_references` on one struct in the cycle keeps the
+generated `Traced` impl and leaves the marker to its author, who implements it only if no struct in
+the cycle holds a GC reference.
 
 ```rust
 #[jsg_struct]
@@ -169,14 +169,18 @@ generated `json()` method.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, `#[jsg_iterable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
+Use `#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` to make a `jsg::Intrinsic` the
+[[Prototype]] of the type's prototype (equivalent to `JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype)`);
+see [`#[jsg_iterable]`](#jsg_iterable).
 Each factory also describes its member for RTTI, which describes a resource type with the
 members its `Resource::members` registers, in registration order. Methods, properties,
-constructors, and constants are described; inspect and wildcard properties and disposers are not. Parameter
+constructors, constants, iterable methods and inherited intrinsics are described; inspect and
+wildcard properties and disposers are not. Parameter
 names are retained, injected `this` and lock parameters are excluded, and fallible return types
 describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
@@ -262,6 +266,7 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Disposer `close` (`#[jsg_dispose]`) | `Self::close_dispose_member()` |
 | Async disposer `close` (`#[jsg_async_dispose]`) | `Self::close_async_dispose_member()` |
 | Callable `call` | `Self::call_callable_member()` |
+| Iterable `entries` | `Self::entries_iterable_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -274,7 +279,9 @@ property with a setter panics when the template is created.
 Properties are registered in the order they are added to `registry`. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
-types itself, as `jsg::nested_type::<Foo>(name)`.
+types itself, as `jsg::nested_type::<Foo>(name)`. Neither can `inherit_intrinsic`; a custom
+`members` calls `registry.inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead, as it
+calls `registry.ts_override(..)`.
 
 A custom `members` can also choose the TypeScript customizations by compatibility flag, as C++
 does by calling `JSG_TS_OVERRIDE` conditionally in `JSG_RESOURCE_TYPE`.
@@ -544,6 +551,55 @@ impl Greeter {
 //     typeof greeter     // "function"
 ```
 
+## `#[jsg_iterable]`
+
+Makes the instances of a `#[jsg_resource]` type iterable, with the method as their
+`[Symbol.iterator]()`. Equivalent to C++ `JSG_ITERABLE`.
+
+The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape of
+a `#[jsg_method]`. It returns the iterator. The attribute takes no arguments. A type has at most
+one `#[jsg_iterable]`; with automatic registration a second is a compile error, and a custom
+`members` that registers two panics when the template is created. The macro generates
+`<name>_iterable_callback()` and, through `#[jsg_resource]`, the factory
+`<name>_iterable_member()`, which differ from a `#[jsg_method]`'s, so a method such as `entries`
+may also be a `#[jsg_method]`. See [Iterable resources](../jsg/README.md#iterable-resources) for
+how they behave.
+
+An iterator is usually a resource of its own. Its `next()` is a `#[jsg_method]` that returns a
+`#[jsg_struct]` with `done` and an optional `value`. With
+`#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` on its impl block it inherits
+`Iterator.prototype`, which gives it the iterator helpers and a `[Symbol.iterator]()` that
+returns the iterator.
+
+```rust
+use jsg_macros::{jsg_iterable, jsg_method, jsg_resource, jsg_struct};
+
+#[jsg_struct]
+pub struct Next { pub done: bool, pub value: Option<Vec<String>> }
+
+#[jsg_resource]
+pub struct Entries { entries: Vec<Vec<String>>, cursor: Cell<usize> }
+
+#[jsg_resource(inherit_intrinsic = IteratorPrototype)]
+impl Entries {
+    #[jsg_method]
+    pub fn next(&self) -> Next { … }
+
+    // Like C++ JSG iterators, which register `JSG_ITERABLE(self)` too.
+    #[jsg_iterable]
+    pub fn iterator(this: jsg::Rc<Self>) -> jsg::Rc<Self> { this }
+}
+
+#[jsg_resource]
+impl Headers {
+    #[jsg_iterable]
+    #[jsg_method]
+    pub fn entries(&self, lock: &mut jsg::Lock) -> jsg::Rc<Entries> { … }
+}
+// JS: for (const [name, value] of headers) …
+//     headers.entries().map(([name]) => name).toArray()
+```
+
 ## `#[jsg_oneof]`
 
 Generates `jsg::Type`, `jsg::FromJS`, `jsg::Traced` and `jsg::TypeInfo` for a union enum —
@@ -615,7 +671,8 @@ use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to in
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
-| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values; map keys are not visited, so they must be `jsg::HoldsNoGcReferences`, which the bounds require |
+| `std::rc::Rc<T>` | **Not allowed** — no `Traced` impl, since a clone could reach the resource's state without the isolate lock; share a resource through `jsg::Rc` or `jsg::Weak`, and plain data with a future through `Arc<T: Send + Sync>` |
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
 | `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
@@ -630,7 +687,8 @@ because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 
 For cases where default field-by-field `Traced` behavior is not enough, use
 `#[jsg_resource(custom_trace)]` to suppress the generated `Traced` impl and
-write your own.
+write your own. The impl must visit every GC reference, and the type must be `Send`, which
+`Traced` requires (see `jsg/README.md` §Safety rules, rules 2 and 5).
 
 The macro still generates:
 
@@ -789,7 +847,7 @@ A retainer held as a field of a resource without `custom_trace` is traced too, s
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
 capacity. A retainer reached twice is one node, and so is an allocation that several
-`std::rc::Rc`s or `std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
+`std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
 `jsg::MemoryTracker::MAX_DEPTH` deep: a node that would be that deep is a leaf with nothing inside
 it, or an edge to a resource's JavaScript wrapper, which bounds any long chain, and which is not
 deduplicated, so that a shorter path to the same value still reports it in full. A retainer type

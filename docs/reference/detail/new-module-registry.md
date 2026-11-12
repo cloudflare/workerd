@@ -659,7 +659,7 @@ pathname is the module identifier.
 When Node.js compat is enabled (`isNodeJsCompatEnabled(js)`):
 
 - Bare specifiers like `"buffer"` are prefixed to `"node:buffer"` via `checkNodeSpecifier`.
-- `"node:process"` is redirected to either `"node-internal:public_process"` or
+- `"node:process"` is redirected to either `"node-internal:process_exports"` or
   `"node-internal:legacy_process"` based on the `enable_nodejs_process_v2` flag.
 
 ## IsolateModuleRegistry — Per-Isolate Cache
