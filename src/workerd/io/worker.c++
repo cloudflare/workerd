@@ -1557,11 +1557,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       v8::Local<v8::Context> context;
       if (modular) {
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
-        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
-            {
-              .newModuleRegistry = impl->tryGetNewModuleRegistry(),
-              .schemaLoader = getSchemaLoader(),
-            }));
+        auto& mContext = impl->moduleContext.emplace(newContext(lock));
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
@@ -1761,6 +1757,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 void Worker::Script::installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const {
   jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::VIRTUAL_FILE_SYSTEM,
       const_cast<VirtualFileSystem*>(impl->vfs.get()));
+}
+
+jsg::JsContext<api::ServiceWorkerGlobalScope> Worker::Script::newContext(jsg::Lock& lock) const {
+  return isolate->getApi().newContext(lock,
+      {
+        .newModuleRegistry = impl->tryGetNewModuleRegistry(),
+        .schemaLoader = getSchemaLoader(),
+      });
 }
 
 const capnp::SchemaLoader& Worker::Script::getSchemaLoader() const {
@@ -2391,11 +2395,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         currentSpan.setTag("module_context"_kjc, true);
       } else {
         // Create a new context.
-        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
-            {
-              .newModuleRegistry = script->impl->tryGetNewModuleRegistry(),
-              .schemaLoader = script->getSchemaLoader(),
-            }));
+        jsContext = &this->impl->context.emplace(script->newContext(lock));
         freshContext = true;
       }
 
