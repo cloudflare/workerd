@@ -278,7 +278,7 @@ Two outcomes are possible for a Worker that qualifies:
   loaded Worker. No zygote runs.
 - **The zygote fails.** A KJ exception while compiling, evaluating, recording or serializing: a
   top-level exception or parse error (the `Worker` constructor throws before anything is
-  recorded), an unclonable type reachable from the context such as an `AbortController`, an
+  recorded), an unclonable type reachable from the context such as an aborted `AbortSignal`, an
   RPC method taken off a stub (`const { ping } = env.RPC`) or a C++ promise continuation that is
   still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
   left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register

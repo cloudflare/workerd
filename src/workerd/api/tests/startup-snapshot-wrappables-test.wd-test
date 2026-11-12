@@ -50,6 +50,7 @@ const unitTests :Workerd.Config = (
           (name = "state", service = "state"),
           (name = "state-url-standard", service = "state-url-standard"),
           (name = "fs", service = "fs"),
+          (name = "abort", service = "abort"),
           (name = "gc", service = "gc"),
           (name = "finalization", service = "finalization"),
           (name = "bindings", service = "bindings"),
@@ -127,6 +128,19 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "MODE", json = "\"fs\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # An AbortController and its signal kept at the top level.
+    ( name = "abort",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"abort\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

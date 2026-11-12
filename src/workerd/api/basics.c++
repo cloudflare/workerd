@@ -696,6 +696,17 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
       maybeAbortException(kj::mv(exception)),
       reason(kj::mv(maybeReason)) {}
 
+kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
+  if (aborting || maybeAbortException != kj::none || reason != kj::none || hasEventListeners() ||
+      nativeRegistrations.size() > 0 || abortAlgorithms.size() > 0 || dependent ||
+      dependentSignals.size() > 0 || sourceSignals.size() > 0 || rpcRegistrations.size() > 0 ||
+      rpcReceiverContext != kj::none || rpcSubscriptionRequested || rpcAbortPromise != kj::none ||
+      pendingReason != kj::none) {
+    return kj::none;
+  }
+  return ownAsWrappable(kj::refcounted<AbortSignal>(kj::none, kj::none, flag));
+}
+
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return getEventHandlerAttribute(js, kAbortEvent);
 }

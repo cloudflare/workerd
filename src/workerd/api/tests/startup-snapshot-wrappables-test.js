@@ -63,8 +63,9 @@ const finalization = { registry: null, cleaned: [], headers: null };
 
 switch (MODE) {
   case 'unclonable':
-    // Neither stateless nor clonable: the zygote rejects the snapshot.
-    controller = new AbortController();
+    // Neither stateless nor clonable: a signal that has aborted holds its reason, a JavaScript
+    // value, so the zygote rejects the snapshot.
+    controller = AbortSignal.abort('unclonable');
     break;
   case 'midstream-decoder':
     // A decoder with the first byte of a two-byte character pending.
@@ -118,6 +119,12 @@ switch (MODE) {
     span.setAttribute('key', 'value');
     endedSpan = tracing.startSpan('ended');
     endedSpan.end();
+    break;
+  case 'abort':
+    // An AbortController and its signal, both wrapped at the top level: the restored controller
+    // must still own the restored signal.
+    controller = new AbortController();
+    kept = controller.signal;
     break;
   case 'gc':
     // Wrappers created and dropped before the snapshot: their collection in the zygote must not
@@ -205,7 +212,7 @@ async function checks() {
   };
   switch (MODE) {
     case 'unclonable':
-      result.controller = !controller.signal.aborted;
+      result.controller = controller.aborted;
       break;
     case 'searchparams':
       result.params = params.get('query') === 'string';
@@ -216,6 +223,12 @@ async function checks() {
       break;
     case 'midstream-decoder':
       result.midStreamDecoder = kept.decode(new Uint8Array([0xa9])) === 'é';
+      break;
+    case 'abort':
+      result.abortSignalIdentity = controller.signal === kept;
+      result.abortNotYet = !kept.aborted;
+      controller.abort('now');
+      result.abortWorks = kept.aborted && kept.reason === 'now';
       break;
     case 'gc':
       collect();
@@ -344,6 +357,7 @@ async function test(ctrl, env) {
     'control',
     'state',
     'state-url-standard',
+    'abort',
     'gc',
     'finalization',
     'bindings',

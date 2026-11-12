@@ -782,6 +782,12 @@ class AbortSignal final: public EventTarget {
   // owning IoContext to be torn down.
   void dropRpcTriggersForTest();
 
+  // A signal that has not aborted and that nothing is attached to transfers as a fresh signal
+  // with the same flag. One that has aborted holds its reason, a JavaScript value no clone
+  // carries; one with listeners, abort algorithms, native or RPC registrations or
+  // AbortSignal.any() links would lose them. Both stay unclonable.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
@@ -993,6 +999,23 @@ class AbortController final: public jsg::Object {
   }
 
   void abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+
+  // The clone gets a fresh signal with the original's flag, then takes the restored signal behind
+  // the original's wrapper, if the snapshot carried one (snapshotRelink()), so that
+  // `controller.signal` is still the object the top level saw.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<AbortController>(jsg::Lock::current(), signal->flag));
+  }
+
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    return kj::arr(snapshotReferenceTo(*signal));
+  }
+
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(restoredSignal, snapshotRelinkedRef<AbortSignal>(restored[0])) {
+      signal = kj::mv(restoredSignal);
+    }
+  }
 
   JSG_RESOURCE_TYPE(AbortController, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
