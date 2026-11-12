@@ -1235,9 +1235,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
-    // Never in multi-tenant processes: the hook slows down every promise in the isolate.
+    // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
+    // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
+    // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
+    // the snapshot installs a hook of its own.
     KJ_IF_SOME(config, asyncTraceConfig) {
-      if (config.promises && asyncTraceIsolate != kj::none) {
+      if (config.promises && asyncTraceIsolate != kj::none && !lock->isPreparingSnapshot()) {
         if (isMultiTenantProcess()) {
           KJ_LOG(ERROR, "ignoring AsyncTraceConfig::promises in a multi-tenant process");
         } else {

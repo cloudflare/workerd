@@ -37,13 +37,10 @@ all of these hold:
   top-level code has to run there for DevTools to see its console output and stop at its
   breakpoints;
 - `supportsStartupSnapshot()` accepts the Worker: ES-modules syntax (not a service-worker
-  script), no Wasm modules, not a Python Worker, the `typescript_implemented_streams` flag, and
-  only bindings of kinds
-  that transfer (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). The C++
-  streams implementation leaves a pending `pull()` as a C++ promise continuation reachable from
-  the context, which `CreateBlob()` cannot serialize; the TypeScript implementation keeps it in
-  JavaScript. A dynamically loaded Worker (`dynamicSource`), whose `env` arrives as capabilities
-  rather than channel numbers, never qualifies.
+  script), no Wasm modules, not a Python Worker, and only bindings of kinds that transfer
+  (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). A dynamically loaded
+  Worker (`dynamicSource`), whose `env` arrives as capabilities rather than channel numbers,
+  never qualifies.
 
 ## The zygote (PREPARE_SNAPSHOT)
 
@@ -264,14 +261,19 @@ its base type.
 Two outcomes are possible for a Worker that qualifies:
 
 - **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a module
-  fallback service, a service-worker script, Wasm modules, Python, C++ streams, or a binding
+  fallback service, a service-worker script, Wasm modules, Python, or a binding
   of a kind that cannot transfer (`cryptoKey`, `memoryCache`, `wrapped`, logged at INFO as
   `startup snapshot skipped: a binding of this kind cannot be transferred`), or a dynamically
   loaded Worker. No zygote runs.
 - **The zygote fails.** A KJ exception while compiling, evaluating, recording or serializing: a
   top-level exception or parse error (the `Worker` constructor throws before anything is
-  recorded), an unclonable type reachable from the context such as an `AbortController` or an
-  RPC method taken off a stub (`const { ping } = env.RPC`), a restore-time global the top level
+  recorded), an unclonable type reachable from the context such as an `AbortController`, an
+  RPC method taken off a stub (`const { ping } = env.RPC`) or a C++ promise continuation that is
+  still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
+  left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
+  their callbacks as external references while a snapshot is prepared, so that the serializer
+  reports the continuation's opaque data instead of aborting on an unknown address), a
+  restore-time global the top level
   redefined, a listener registered with a `signal` option, FinalizationRegistry cleanups that
   keep dooming new objects or that become due only once the zygote's objects are destroyed, ...
   Or an error reported to the zygote's `ErrorReporter` without an exception (a module that does
@@ -324,7 +326,7 @@ once.
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, `node:diagnostics_channel`) across the snapshot |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and ineligible cases fall back |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

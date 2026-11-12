@@ -41,6 +41,11 @@ const dataAtTopLevel = env.DATA;
 let controller = null;
 let params = null;
 let kept = null;
+// The C++ streams cases: a promise the top level leaves pending, and the stream parked on it.
+let gate = null;
+let resolveGate = null;
+let stream = null;
+let pending = null;
 // The finalization case's registry and what its cleanup callback did. The handler reads this
 // object, which keeps the registry reachable: an unreachable registry never runs its callback.
 const finalization = { registry: null, cleaned: [], headers: null };
@@ -60,6 +65,31 @@ switch (MODE) {
     // created lazily, but a reference the top level keeps makes it reachable. The TypeScript one
     // (the TS_URL autogate) is a JavaScript object over its URL's LegacyUrlHandle, and travels.
     params = url.searchParams;
+    break;
+  case 'cpp-streams-pending-pull':
+    // A C++ stream whose pull() returns a promise the top level leaves pending: the controller
+    // chains a C++ continuation onto it, whose opaque data no snapshot can carry. Not an async
+    // pull(): a suspended async function fails the zygote earlier and for its own reason.
+    gate = new Promise((resolve) => (resolveGate = resolve));
+    stream = new ReadableStream({
+      pull(c) {
+        return gate.then((chunk) => {
+          c.enqueue(chunk);
+          c.close();
+        });
+      },
+    });
+    break;
+  case 'cpp-streams-pending-cancel':
+    // cancel() returns a promise the top level leaves pending: as with pull(), the C++ side chains
+    // a continuation onto it.
+    gate = new Promise((resolve) => (resolveGate = resolve));
+    stream = new ReadableStream({
+      cancel() {
+        return gate;
+      },
+    });
+    pending = stream.cancel();
     break;
   case 'gc':
     // Wrappers created and dropped before the snapshot: their collection in the zygote must not
@@ -182,6 +212,15 @@ async function checks() {
         finalization.headers.get('x-held') === 'b';
       break;
     }
+    case 'cpp-streams-pending-pull':
+      resolveGate(new TextEncoder().encode('ok'));
+      result.pendingPullRead = (await new Response(stream).text()) === 'ok';
+      break;
+    case 'cpp-streams-pending-cancel':
+      resolveGate();
+      await pending;
+      result.pendingCancelSettled = true;
+      break;
     case 'bindings':
       // Capability bindings. The RPC calls go through the wildcard property handler of the
       // Fetcher template and of a subclass's.
@@ -238,6 +277,10 @@ async function test(ctrl, env) {
     'gc',
     'finalization',
     'bindings',
+    // C++ streams: the pipeline takes a Worker without typescript_implemented_streams all the
+    // same; only a C++ stream with a parked pull() would fail its zygote, and this module scope
+    // has none.
+    'cpp-streams',
     ...(tsUrl ? ['searchparams'] : []),
   ];
   // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
@@ -248,7 +291,9 @@ async function test(ctrl, env) {
     'unclonable',
     ...(tsUrl ? [] : ['searchparams']),
     'midstream-decoder',
-    'no-ts-streams',
+    // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
+    'cpp-streams-pending-pull',
+    'cpp-streams-pending-cancel',
   ];
 
   const run = async (name, expectedSnapshotUsed) => {
