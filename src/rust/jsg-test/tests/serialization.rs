@@ -523,15 +523,18 @@ fn missing_or_unsupported_header_is_an_internal_error() {
 #[test]
 fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
     Harness::new().run_in_context(|lock, ctx| {
-        let value = eval(
-            lock,
-            ctx,
+        for expr in [
             "(() => { const b = new SharedArrayBuffer(1); return [b, new SharedArrayBuffer(2), b]; })()",
-        );
-        let data = jsg::ser::serialize(lock, value).unwrap();
-        assert_eq!(data, Harness::cpp_serialize(lock, value));
-        // No deserializer is given the buffers.
-        deserialize_exception(lock, &data);
+            // V8 hands the serializer each buffer in a handle scope that ends with the array that
+            // holds it, and the second buffer's handle takes the slot the first's had.
+            "[[0, new SharedArrayBuffer(1)], [new SharedArrayBuffer(2)]]",
+        ] {
+            let value = eval(lock, ctx, expr);
+            let data = jsg::ser::serialize(lock, value).unwrap();
+            assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
+            // No deserializer is given the buffers.
+            deserialize_exception(lock, &data);
+        }
         Ok(())
     });
 }

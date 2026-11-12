@@ -19,6 +19,7 @@
 #include <v8-value-serializer.h>
 
 #include <kj/debug.h>
+#include <kj/vector.h>
 
 #include <cstdlib>
 
@@ -94,13 +95,14 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   Serializer(v8::Isolate* isolate, bool errorsAreHostObjects)
       : isolate(isolate),
         errorsAreHostObjects(errorsAreHostObjects),
-        sharedArrayBuffers(isolate),
         prototypeOfObject(v8::Object::New(isolate)->GetPrototype()),
         jsSerializeModeKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY))),
         domExceptionBrandKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::DOM_EXCEPTION_BRAND_KEY))),
         ser(isolate, this) {}
+  // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
+  ~Serializer() noexcept(true) {}
 
   // Writes the header, of `version` if there is one, as jsg::Serializer does for its `version`
   // option. Returns false, leaving a DataCloneError pending, if V8 can't write that version.
@@ -177,10 +179,10 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // data refers to them by number, and no deserializer is given them.
   v8::Maybe<uint32_t> GetSharedArrayBufferId(
       v8::Isolate*, v8::Local<v8::SharedArrayBuffer> buffer) override {
-    for (auto i: kj::zeroTo(sharedArrayBuffers.size())) {
+    for (auto i: kj::indices(sharedArrayBuffers)) {
       if (sharedArrayBuffers[i] == buffer) return v8::Just(static_cast<uint32_t>(i));
     }
-    sharedArrayBuffers.push_back(buffer);
+    sharedArrayBuffers.add(isolate, buffer);
     return v8::Just(static_cast<uint32_t>(sharedArrayBuffers.size() - 1));
   }
 
@@ -248,7 +250,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   v8::Isolate* isolate;
   bool errorsAreHostObjects;
-  v8::LocalVector<v8::SharedArrayBuffer> sharedArrayBuffers;
+  // Globals, since V8 hands the delegate values in handle scopes of its own, which end before
+  // serialization does.
+  kj::Vector<v8::Global<v8::SharedArrayBuffer>> sharedArrayBuffers;
   v8::Local<v8::Value> prototypeOfObject;
   v8::Local<v8::Private> jsSerializeModeKey;
   v8::Local<v8::Private> domExceptionBrandKey;
