@@ -50,6 +50,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 pub use self::ffi::ArrayIterateUntil;
+pub use self::ffi::JsErrorType;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -162,6 +163,25 @@ pub mod ffi {
         ReferenceError,
     }
 
+    /// The JavaScript error types that C++ JSG tunnels through a `kj::Exception`, those of
+    /// `JS_ERROR_TYPES` in `jsg/util.h`, named as there.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum JsErrorType {
+        Error,
+        RangeError,
+        TypeError,
+        SyntaxError,
+        ReferenceError,
+        WasmCompileError,
+        WasmLinkError,
+        WasmRuntimeError,
+        WasmSuspendError,
+        AggregateError,
+        SuppressedError,
+        URIError,
+        EvalError,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -228,6 +248,7 @@ pub mod ffi {
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_object_with_null_prototype(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;
@@ -375,12 +396,7 @@ pub mod ffi {
         // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
         // coercion threw, leaving the exception pending; see `call_into_js()`.
         pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
-        // Describe with `v8::Value::ToDetailString()`, which runs no JavaScript, or return an
-        // empty handle, leaving an exception pending; see `call_into_js()`.
-        pub unsafe fn local_value_to_detail_string(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> MaybeLocal;
+        pub unsafe fn local_to_detail_string(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -771,7 +787,11 @@ pub mod ffi {
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
         // throws.
-        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+        pub unsafe fn value_deserialize(
+            isolate: *mut Isolate,
+            data: &[u8],
+            preserve_stack_in_errors: bool,
+        ) -> Result<MaybeLocal>;
 
         // JSON
         // Leave what parsing and stringifying throw pending; see `call_into_js()`.
@@ -798,17 +818,23 @@ pub mod ffi {
             name: &str,
             message: &[u8],
         ) -> MaybeLocal;
-        pub unsafe fn exception_create_internal(
+        // Infallible, as exception_create_from_bytes().
+        pub unsafe fn js_error_create_from_bytes(
             isolate: *mut Isolate,
-            internal_message: &str,
+            error_type: JsErrorType,
+            message: &[u8],
         ) -> Local;
-        // Runs no JavaScript (see ffi.h). Infallible: the strings are made lossily.
-        pub unsafe fn local_dom_exception_name_and_message(
+        // Fallible only if no context is entered.
+        pub unsafe fn dom_exception_try_unwrap(
             isolate: *mut Isolate,
             value: &Local,
             name: &mut String,
             message: &mut String,
-        ) -> bool;
+        ) -> Result<bool>;
+        pub unsafe fn exception_create_internal(
+            isolate: *mut Isolate,
+            internal_message: &str,
+        ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
         pub fn js_exception_metadata_detail_id() -> u64;
@@ -841,6 +867,9 @@ pub mod ffi {
         );
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
+        // The global object of the entered context (`v8::Context::Global()`). Requires a context
+        // to be entered. Runs no JavaScript.
+        pub unsafe fn isolate_current_context_global(isolate: *mut Isolate) -> Local;
 
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
@@ -2000,24 +2029,29 @@ impl<'s, T> Local<'s, T> {
         })
     }
 
-    /// Describes the value as V8 does in its own messages, which runs no JavaScript: a
-    /// primitive as `String()` converts it, an error by its name and message, and another
-    /// object by its class, such as `#<Object>`. If an exception or a termination is already
-    /// pending, fails with an error for which [`Error::is_pending`] is true.
+    /// Describes the value for a log or a trace, as C++ `kj::str()` of a `v8::Local` does: an
+    /// error as `"TypeError: message"`, a string as itself, and a plain object as
+    /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
+    /// method.
     ///
-    /// Corresponds to `v8::Value::ToDetailString()`, with which C++ JSG stringifies a handle
-    /// (`kj::str(handle)`).
-    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> Result<Local<'s, String>, Error> {
-        call_into_js(lock, |lock| {
-            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
-            // current HandleScope, and a non-empty result is a string in that scope.
+    /// Corresponds to `v8::Value::ToDetailString()`.
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, or V8 fails, which only happens if execution
+    /// is terminating, the error is one for which [`Error::is_pending`] is true.
+    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> crate::Result<std::string::String> {
+        let detail: Local<'s, String> = call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a string V8 created in that scope.
             Ok(unsafe {
-                Local::from_ffi_maybe(ffi::local_value_to_detail_string(
+                Local::from_ffi_maybe(ffi::local_to_detail_string(
                     lock.isolate().as_ffi(),
-                    self.into_ffi(),
+                    self.raw(),
                 ))
             })
-        })
+        })?;
+        Ok(detail.to_string(lock))
     }
 }
 

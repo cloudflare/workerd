@@ -36,6 +36,7 @@ struct IsolateState;
 struct GcVisitor;
 enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
+enum class JsErrorType : ::std::uint8_t;
 enum class PromiseState : ::std::uint8_t;
 enum class ArrayIterateUntil : ::std::uint8_t;
 enum class FastApiType : ::std::uint8_t;
@@ -195,6 +196,7 @@ Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
+Local local_new_object_with_null_prototype(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
 Local local_new_undefined(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
@@ -233,6 +235,7 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val);
 // Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
 // result in `result` and return true, or return false if the coercion threw, leaving the exception
 // pending.
@@ -242,11 +245,6 @@ bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 // Coerce with ToString (v8::Value::ToString()), or return an empty handle if the coercion threw,
 // leaving the exception pending.
 MaybeLocal local_value_to_string(Isolate* isolate, Local value);
-// Describe with v8::Value::ToDetailString(), as C++ JSG stringifies a handle (kj::str(handle)).
-// It runs no JavaScript: an object is described by its class, or, for an error, by its name and
-// message. Returns an empty handle while an exception or a termination is pending, and if V8
-// throws, leaving the exception pending.
-MaybeLocal local_value_to_detail_string(Isolate* isolate, Local value);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -609,10 +607,11 @@ bool local_serialize(Isolate* isolate,
     bool errors_are_host_objects,
     kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result);
-// Reads a value as jsg::Deserializer does with its default options, and returns it, or
-// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
-// exception if the header is missing or of an unsupported version.
-MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
+// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
+// Throws a KJ exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors);
 
 // JSON
 // As jsg::Lock::parseJson() and serializeJson(), through v8::JSON.
@@ -641,15 +640,17 @@ Local exception_create_from_bytes(
 // creating the DOMException threw.
 MaybeLocal dom_exception_create_from_bytes(
     Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message);
+// Builds an error of `error_type`, as v8::Exception does, with a message read from raw bytes as
+// exception_create_from_bytes() reads it. Never fails.
+Local js_error_create_from_bytes(
+    Isolate* isolate, JsErrorType error_type, ::rust::Slice<const uint8_t> message);
+// If `value` unwraps as a DOMException, as jsg::tryGetDOMExceptionNameAndMessage() unwraps it,
+// stores its name and message and returns true; otherwise returns false. Runs no JavaScript.
+bool dom_exception_try_unwrap(
+    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
-// If `value` is a DOMException, or an instance of a subclass, stores the name and message it was
-// created with in `name` and `message` and returns true, through jsg::tryGetDOMException(); returns
-// false otherwise, and while an exception or a termination is pending. Requires an entered context.
-// Runs no JavaScript.
-bool local_dom_exception_name_and_message(
-    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
 // The ids of the details jsg::createTunneledException() gives a kj::Exception (util.h).
 uint64_t tunneled_exception_detail_id();
 uint64_t tunneled_exception_enhanced_detail_id();
@@ -694,6 +695,9 @@ Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate);
 void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
+// The global object of the entered context (v8::Context::Global()). Requires a context to be
+// entered. Runs no JavaScript.
+Local isolate_current_context_global(Isolate* isolate);
 void ignore_leak(size_t ptr);
 
 }  // namespace workerd::rust::jsg

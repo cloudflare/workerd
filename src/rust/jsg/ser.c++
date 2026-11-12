@@ -240,8 +240,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
 class Deserializer final: public v8::ValueDeserializer::Delegate {
  public:
-  Deserializer(v8::Isolate* isolate, ::rust::Slice<const uint8_t> data)
+  Deserializer(v8::Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserveStackInErrors)
       : isolate(isolate),
+        preserveStackInErrors(preserveStackInErrors),
         deser(isolate, data.data(), data.size(), this) {}
 
   // Reads the header as jsg::Deserializer does. If it is missing or of an unsupported version,
@@ -276,8 +277,8 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // to by number.
 
  private:
-  // Reads an error that Serializer::writeError() wrote, as jsg::Deserializer does by default
-  // (with preserveStackInErrors). Runs no JavaScript.
+  // Reads an error that Serializer::writeError() wrote, as jsg::Deserializer does, restoring its
+  // `stack` only if preserveStackInErrors is set. Runs no JavaScript.
   v8::MaybeLocal<v8::Object> readError() {
     auto context = isolate->GetCurrentContext();
 
@@ -316,6 +317,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
         v8::Local<v8::Value> key;
         v8::Local<v8::Value> value;
         if (!keys->Get(context, i).ToLocal(&key)) return {};
+        if (!preserveStackInErrors && key->StrictEquals(newString(isolate, "stack"_kj))) continue;
         // A data property, rather than Set(), so that no setter on the error's prototype runs.
         if (!object->Get(context, key).ToLocal(&value) ||
             error->CreateDataProperty(context, key.As<v8::Name>(), value).IsNothing()) {
@@ -332,6 +334,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   }
 
   v8::Isolate* isolate;
+  bool preserveStackInErrors;
   v8::ValueDeserializer deser;
 };
 
@@ -351,9 +354,10 @@ bool local_serialize(Isolate* isolate,
   return true;
 }
 
-MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+MaybeLocal value_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors) {
   if (exceptionPending(isolate)) return {};
-  Deserializer deserializer(isolate, data);
+  Deserializer deserializer(isolate, data, preserve_stack_in_errors);
   if (!deserializer.readHeader(data)) return {};
   return maybe_local_to_ffi(deserializer.read());
 }

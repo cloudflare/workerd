@@ -210,6 +210,10 @@ pub struct IoCallback(pub IoCallbackFn);
 // `kj::Arc` keeps alive. It is never dereferenced.
 unsafe impl Send for bridge::IoOwnedObject {}
 
+// SAFETY: Rust has no method on it, so a shared reference to it can do nothing; it is only
+// dropped, through the `KjOwn` that holds it.
+unsafe impl Sync for bridge::IoOwnedObject {}
+
 /// A value that `IoContext::add_object()` hands to C++, which drops it with the `IoContext`.
 /// Dropping it drops the value it holds, unless Rust took the value first.
 pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn Send>);

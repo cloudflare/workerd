@@ -125,6 +125,11 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
 bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
 
+// Converts `exception` to a kj::Exception and back, as C++ JSG does. Returns none if converting it
+// threw, leaving that exception pending.
+::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
+    Isolate* isolate, ::workerd::rust::jsg::Local exception);
+
 // Marks `object` as an instance of a class implemented in JavaScript with `mark`, which is its
 // class's descriptor if it is cloneable (see jsg::Serializer). Throws a KJ exception if it is not
 // an object.

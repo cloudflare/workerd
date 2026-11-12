@@ -96,6 +96,9 @@ struct TestFixture {
     // If set, returned by the Api's getEmbedderBootstrap(), so that the per-isolate bootstrap runs
     // these scripts after workerd's. Must outlive the fixture.
     kj::Maybe<const EmbedderBootstrap&> embedderBootstrap;
+    // If set, and useRealTimers is not, the time the request clock always reads, so a test can
+    // tell it from the system clock. Otherwise the mock timer reads the system clock.
+    kj::Maybe<kj::Date> fixedNow;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});

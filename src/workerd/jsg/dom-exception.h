@@ -121,20 +121,18 @@ class DOMException: public Object {
 v8::MaybeLocal<v8::Object> newDOMException(
     v8::Isolate* isolate, kj::ArrayPtr<const char> name, v8::Local<v8::String> message);
 
-// The name and message a DOMException was created with. They are not its `name` and `message`
-// properties, which JavaScript can change.
+// The name and message of a DOMException.
 struct DOMExceptionNameAndMessage {
-  kj::StringPtr name;
-  kj::StringPtr message;
+  kj::String name;
+  kj::String message;
 };
 
-// The name and message of `value` if it is a DOMException, or an instance of a subclass, as C++ JSG
-// unwraps one, for native code that holds no jsg::Lock, such as Rust JSG's shims. Requires an
-// entered context. Runs no JavaScript. The strings belong to the DOMException, which `value` keeps
-// alive.
+// The name and message of the DOMException that `value` unwraps as, as Lock::tryUnwrapDOMException()
+// unwraps it, for native code that holds no jsg::Lock, such as Rust JSG's shims. Requires an
+// entered context. Runs no JavaScript.
 //
 // Callers depend only on this signature, not on how DOMException is implemented.
-kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMException(
+kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMExceptionNameAndMessage(
     v8::Isolate* isolate, v8::Local<v8::Value> value);
 
 }  // namespace workerd::jsg

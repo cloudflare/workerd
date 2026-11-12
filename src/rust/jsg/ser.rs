@@ -90,10 +90,45 @@ pub fn deserialize<'s>(
     lock: &mut Lock<'s>,
     data: &[u8],
 ) -> Result<v8::Local<'s, v8::Value>, Error> {
+    deserialize_with(lock, data, DeserializeOptions::default())
+}
+
+/// The options of [`deserialize_with`], those of `jsg::Deserializer::Options` that it supports.
+#[derive(Debug, Clone, Copy)]
+pub struct DeserializeOptions {
+    /// Whether an error read from the data gets the `stack` it was written with. If not, it
+    /// keeps the stack it gets when created. `true` by default, as in C++ JSG.
+    pub preserve_stack_in_errors: bool,
+}
+
+impl Default for DeserializeOptions {
+    fn default() -> Self {
+        Self {
+            preserve_stack_in_errors: true,
+        }
+    }
+}
+
+/// Deserializes as [`deserialize`] does, as `jsg::Deserializer` does with `options`.
+///
+/// # Errors
+///
+/// As for [`deserialize`].
+pub fn deserialize_with<'s>(
+    lock: &mut Lock<'s>,
+    data: &[u8],
+    options: DeserializeOptions,
+) -> Result<v8::Local<'s, v8::Value>, Error> {
     v8::call_into_js(lock, |lock| {
         // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active. The
         // result belongs to the lock's scope.
-        let value = unsafe { v8::ffi::value_deserialize(lock.isolate().as_ffi(), data) }?;
+        let value = unsafe {
+            v8::ffi::value_deserialize(
+                lock.isolate().as_ffi(),
+                data,
+                options.preserve_stack_in_errors,
+            )
+        }?;
         // SAFETY: as above.
         Ok(unsafe { v8::Local::from_ffi_maybe(value) })
     })

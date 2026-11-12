@@ -31,6 +31,7 @@ pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod tunnel;
 mod typed_promise;
 pub mod v8;
 mod wrappable;
@@ -96,6 +97,7 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+pub use tunnel::TunneledException;
 pub use typed_promise::Promise;
 pub use typed_promise::PromiseArgument;
 pub use typed_promise::PromiseResolver;
@@ -766,9 +768,49 @@ impl<'s> Lock<'s> {
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_null(self.isolate().as_ffi())) }
     }
 
+    /// Returns the global object of the entered context, `globalThis`.
+    ///
+    /// Corresponds to `v8::Context::Global()` and C++ JSG's `jsg::Lock::global()`.
+    pub fn global_object(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked, with a context entered.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::isolate_current_context_global(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
     pub fn new_object(&mut self) -> v8::Local<'s, v8::Object> {
         // SAFETY: Lock guarantees the isolate is valid and locked
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.isolate().as_ffi())) }
+    }
+
+    /// Creates an empty object whose prototype is `null`, like `Object.create(null)`. Setting
+    /// and reading its own properties runs no JavaScript, and nothing that resolves a promise
+    /// with it finds a `then` to follow.
+    pub fn new_object_with_null_prototype(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::local_new_object_with_null_prototype(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
+    /// Throws `exception`, as JavaScript's `throw` does, and returns the error that stands for
+    /// it (see [`Error::is_pending`]), for a callback to return. Throws nothing while execution
+    /// is terminating, so that the termination is never replaced by a catchable exception, nor
+    /// while an exception is pending, which then keeps propagating.
+    pub fn throw_value(&mut self, exception: v8::Local<'s, v8::Value>) -> Error {
+        let isolate = self.isolate().as_ffi();
+        // SAFETY: Lock guarantees the isolate is valid and locked; `exception` is a handle of
+        // its scope. The shim throws nothing while execution is terminating.
+        unsafe {
+            if !v8::ffi::isolate_has_pending_exception(isolate) {
+                v8::ffi::isolate_throw_exception(isolate, exception.into_ffi());
+            }
+        }
+        Error::pending()
     }
 
     /// Creates a JavaScript `Error` object with the given message.
@@ -1233,11 +1275,11 @@ impl<'s> Lock<'s> {
         }
 
         let description =
-            if let Some((name, message)) = dom_exception_name_and_message(self, exception) {
+            if let Some((name, message)) = tunnel::try_unwrap_dom_exception(self, exception)? {
                 exception_type = cxx::KjExceptionType::Failed;
                 format!("jsg.DOMException({name}): {message}")
             } else {
-                let detail = exception.to_detail_string(self)?.to_string(self);
+                let detail = exception.to_detail_string(self)?;
                 // C++ copies the description out of V8 as a C string.
                 let detail = up_to_nul(&detail);
                 if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
@@ -1270,28 +1312,6 @@ impl<'s> Lock<'s> {
             .with_details(details)
             .with_location(file!().to_owned(), line!()))
     }
-}
-
-/// The name and message that `value` was created with, if it is a `DOMException`. Runs no
-/// JavaScript.
-#[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
-fn dom_exception_name_and_message<'s>(
-    lock: &mut Lock<'s>,
-    value: v8::Local<'s, v8::Value>,
-) -> Option<(String, String)> {
-    let mut name = String::new();
-    let mut message = String::new();
-    // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active, and `value`
-    // belongs to its scope.
-    let found = unsafe {
-        v8::ffi::local_dom_exception_name_and_message(
-            lock.isolate().as_ffi(),
-            value.as_ffi(),
-            &mut name,
-            &mut message,
-        )
-    };
-    found.then_some((name, message))
 }
 
 /// The `name`, `stack` and `message` of `exception`, which is `object`, and whether it is a native
