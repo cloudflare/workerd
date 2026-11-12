@@ -48,6 +48,14 @@ kj::Own<IsolateWeakRef> io_context_isolate_weak_ref(uint64_t id);
 // the isolate.
 bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& weakRef);
 
+// The async trace resource of a new await_js() wait in the IoContext that `id` identifies, from
+// IoContext::makeAwaitJsResource(), or kj::none if it would be inert, as when the IoContext is not
+// traced, so that an untraced wait allocates nothing for it. The resource may outlive the
+// IoContext, and may be settled and destroyed on any thread without the isolate lock:
+// AsyncResource holds an atomically refcounted AsyncTracker, whose methods drop a call made on a
+// thread other than its own (see AsyncTracker).
+kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id);
+
 // IoContext::tryGetCurrentId(), as a uint64_t.
 kj::Maybe<uint64_t> io_context_try_current_id();
 

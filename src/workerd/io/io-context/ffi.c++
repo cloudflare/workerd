@@ -85,6 +85,13 @@ bool isolate_weak_ref_has_excessively_exceeded_heap_limit(const IsolateWeakRef& 
   }).orDefault(false);
 }
 
+kj::Maybe<kj::Own<AsyncResource>> io_context_make_await_js_resource(uint64_t id) {
+  auto resource = currentWithId(id).makeAwaitJsResource();
+  // An inert resource, whose id is 0, reports nothing.
+  if (resource.getId() == 0) return kj::none;
+  return kj::heap(kj::mv(resource));
+}
+
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });

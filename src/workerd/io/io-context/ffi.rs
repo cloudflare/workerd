@@ -8,7 +8,8 @@
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
               set up, the waitUntil and inspector calls take V8 handles, the trace span calls \
-              take literals that C++ does not copy, and IsolateWeakRef is declared Send"
+              take literals that C++ does not copy, and IsolateWeakRef and AsyncResource are \
+              declared Send"
 )]
 
 use std::any::Any;
@@ -44,13 +45,29 @@ pub mod bridge {
         ON_HIBERNATE_HANDLER,
     }
 
+    /// C++ `AsyncOutcome` (`workerd/rust/async-trace/listener.h`).
+    #[namespace = "workerd"]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(u8)]
+    enum AsyncOutcome {
+        OK,
+        ERROR,
+        CANCELED,
+    }
+
     #[namespace = "workerd"]
     unsafe extern "C++" {
+        include!("workerd/io/async-trace.h");
         include!("workerd/io/io-context.h");
 
+        type AsyncOutcome;
+        type AsyncResource;
         type SpanBuilder;
         type TraceContext;
         type UncaughtExceptionSource;
+
+        /// `AsyncResource::settle()`. Only the first settle is reported.
+        fn settle(self: &AsyncResource, outcome: AsyncOutcome);
     }
 
     unsafe extern "C++" {
@@ -68,6 +85,7 @@ pub mod bridge {
         fn isolate_weak_ref_has_excessively_exceeded_heap_limit(
             isolate: &IsolateWeakRef,
         ) -> Result<bool>;
+        fn io_context_make_await_js_resource(id: u64) -> Result<KjMaybe<KjOwn<AsyncResource>>>;
         fn io_context_try_current_id() -> KjMaybe<u64>;
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
@@ -189,6 +207,15 @@ pub mod bridge {
 // strong reference to the `kj::AtomicRefcounted` `Worker::Isolate`, and calls a `const` method of
 // its `IsolateLimitEnforcer`, which needs no isolate lock (see its declaration).
 unsafe impl Send for bridge::IsolateWeakRef {}
+
+// SAFETY: an `AsyncResource` holds only a `kj::Arc<AsyncTracker>` and an id. `AsyncTracker`'s
+// methods, which `settle()` and the destructor call, are `const` and may be called on any thread:
+// on a thread other than the tracker's own, they do nothing but count the call
+// (`AsyncTracker::onOwnerThread()`). `kj::Arc` is atomically refcounted, so the reference may be
+// released on any thread. Releasing the last one there destroys only a closed tracker, whose
+// sinks are gone: the IoContext holds a reference until `OwnedAsyncTracker` closes the tracker
+// on its own thread.
+unsafe impl Send for bridge::AsyncResource {}
 
 /// The exception that `io_context_throw_memory_limit_exception()` throws: C++
 /// `IoContext::memoryLimitException()`, with its type, description, location and details. C++
