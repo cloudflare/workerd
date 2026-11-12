@@ -185,6 +185,7 @@ mod ffi {
         unsafe fn await_js_start(isolate: usize, start: AwaitJsStart) -> Result<()>;
         unsafe fn settle_awaited_js(isolate: usize, fulfill: bool) -> Result<()>;
         unsafe fn reject_awaited_js(isolate: usize, reason: Local) -> Result<()>;
+        unsafe fn abort_request(isolate: usize, reason: Local) -> Result<()>;
         fn forget_awaited_js_resolver();
         fn cancel_awaited_js() -> bool;
         fn awaited_js_outcome() -> String;
@@ -906,7 +907,8 @@ fn count_and_fail_internally<'a>(
 }
 
 /// In a request, `IoContext::await_js()`s a new promise as `start` says, and records how the
-/// wait ends from the callback of an `await_io_and_run()` of it.
+/// wait ends from the future that an `await_io_and_run()` waits for, so that it is recorded even
+/// once the request is aborted, when the callback no longer runs.
 unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()> {
     set_awaited_js_outcome("pending".to_owned());
     AWAITED_JS_MAP_RUNS.store(0, Ordering::SeqCst);
@@ -956,17 +958,32 @@ unsafe fn await_js_start(isolate: usize, start: ffi::AwaitJsStart) -> Result<()>
     }
     let future = async move {
         let _held_cancel = held_cancel;
-        match futures::future::select(wait, cancelled).await {
+        let outcome = match futures::future::select(wait, cancelled).await {
             futures::future::Either::Left((result, _)) => record_awaited_js(result),
             futures::future::Either::Right(_) => "cancelled".to_owned(),
-        }
+        };
+        set_awaited_js_outcome(outcome);
     };
     context
-        .await_io_and_run(future, |_lock, outcome| {
-            set_awaited_js_outcome(outcome);
-            Ok(())
-        })
+        .await_io_and_run(future, |_lock, ()| Ok(()))
         .map_err(|err| to_io(&err))
+}
+
+/// In a request, aborts it as `ctx.abort(reason)` does, through `IoContext::abort()`, with
+/// `reason`, a handle in the caller's scope, and fails unless that leaves the termination pending,
+/// for C++ to cancel.
+unsafe fn abort_request(isolate: usize, reason: v8::ffi::Local) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a handle of the scope `lock` stands for.
+    let reason = unsafe { v8::Local::<v8::Value>::from_ffi(reason) };
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    let termination = context.abort(lock, Some(reason));
+    if termination.is_pending() {
+        Ok(())
+    } else {
+        Err(to_io(&termination))
+    }
 }
 
 /// Fulfills the promise of the last `await_js_start()` with 42, or rejects it with a

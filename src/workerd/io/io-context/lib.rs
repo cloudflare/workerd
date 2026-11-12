@@ -265,10 +265,19 @@ impl<'s> IoContext<'s> {
     /// as for a promise that never settles, as in C++. As in C++, the promise must settle in
     /// this request: its reactions are not run in another, and if the promise is
     /// garbage-collected without settling, or this `IoContext` is destroyed first, the future
-    /// fails with an `Error` whose message is `Promise will never complete.`. If the isolate has
-    /// excessively exceeded its heap limit by then, it fails instead with C++
-    /// `IoContext::memoryLimitException()`, an overloaded `Error` whose message is `Worker has
-    /// exceeded memory limit.`, with the detail that marks an out-of-memory outcome.
+    /// fails with an `Error` whose message is `Promise will never complete.`, unless the request
+    /// was aborted after the wait started (see below). If the isolate has excessively exceeded its
+    /// heap limit by then, it fails instead with C++ `IoContext::memoryLimitException()`, an
+    /// overloaded `Error` whose message is `Worker has exceeded memory limit.`, with the detail
+    /// that marks an out-of-memory outcome.
+    ///
+    /// As in C++, the wait is joined with the request's abort: if this `IoContext` is aborted
+    /// before the wait settles, the future fails with the exception it was aborted with, with its
+    /// type, description, location and details. The abort wins over a promise that settles later
+    /// in the same turn, though `map` then still runs. In a request that was already aborted when
+    /// the wait started, the future fails in a later turn, unless the promise settles first.
+    /// Once the abort has failed the wait, the promise's fulfillment runs no `map`, its rejection
+    /// is still logged, and the trace still reports how it settled.
     ///
     /// If the request has async tracing, the wait is recorded as C++ records it: as a `JS_TO_KJ`
     /// resource named `awaitJs`, from C++ `IoContext::makeAwaitJsResource()`, which the reaction
@@ -292,7 +301,8 @@ impl<'s> IoContext<'s> {
     /// error for which [`jsg::Error::is_pending`] is true if V8 fails to register the reactions
     /// or execution is terminating.
     //
-    // TODO(soon): Join the wait with the request's abort.
+    // TODO(someday): The join with the request's abort relies on C++ `IoContext::onAbort()`,
+    // through an `AbortWatcher`; a Rust IoContext will need its own abort signal.
     pub fn await_js<T, M>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -310,10 +320,18 @@ impl<'s> IoContext<'s> {
             return Err(jsg::Error::pending());
         }
         let shared = Arc::new(AwaitJsShared(Mutex::new(AwaitJsState::Waiting(None))));
+        // Weak, so that the watcher, which the sender holds, doesn't keep the wait alive.
+        let weak = Arc::downgrade(&shared);
+        let on_abort = ffi::AbortCallback(Box::new(move |err| {
+            if let Some(shared) = weak.upgrade() {
+                shared.settle(AwaitJsState::Rejected(err));
+            }
+        }));
         let sender = self.add_object(AwaitJsSender {
             shared: Arc::clone(&shared),
             isolate: bridge::io_context_isolate_weak_ref(self.id)?,
             async_trace: bridge::io_context_make_await_js_resource(self.id)?.into(),
+            abort_watcher: bridge::io_context_watch_abort(self.id, Box::new(on_abort))?,
         })?;
         promise.into().then_or_catch(
             lock,
@@ -640,7 +658,7 @@ enum AwaitJsState<T> {
     Waiting(Option<Waker>),
     /// The promise was fulfilled with this value, converted.
     Fulfilled(T),
-    /// The promise was rejected, or converting its value failed.
+    /// The promise was rejected, converting its value failed, or the request was aborted first.
     Rejected(cxx::KjError),
     /// The sender was dropped without settling the wait.
     NeverSettled,
@@ -678,10 +696,6 @@ impl<T> AwaitJsShared<T> {
         }
     }
 
-    fn is_cancelled(&self) -> bool {
-        matches!(*self.lock(), AwaitJsState::Cancelled)
-    }
-
     fn is_waiting(&self) -> bool {
         matches!(*self.lock(), AwaitJsState::Waiting(_))
     }
@@ -706,6 +720,15 @@ struct AwaitJsSender<T> {
     /// the `destroy` then, where C++ reports it once the reactions are collected. No other event
     /// differs.
     async_trace: Option<KjOwn<bridge::AsyncResource>>,
+    /// The watcher of the request's abort, which settles the wait with the exception the request
+    /// is aborted with, as the `onAbort()` branch of C++'s `exclusiveJoin()` does. It holds the
+    /// wait weakly, and is dropped with the sender, on the request's thread: in the reaction that
+    /// settles the wait, when GC collects the reactions, or when the request is destroyed. So it
+    /// is not dropped when the wait is cancelled, unlike C++'s branch, but it then settles nothing.
+    /// It is a plain `KjOwn` rather than an [`IoOwned`]: the request may drop the sender while it
+    /// unlinks the sender from its owned objects, and the sender must not then reentrantly unlink
+    /// another owned object from that list.
+    abort_watcher: KjOwn<bridge::AbortWatcher>,
 }
 
 impl<T> AwaitJsSender<T> {
@@ -714,6 +737,16 @@ impl<T> AwaitJsSender<T> {
     fn settle(&self, state: AwaitJsState<T>, outcome: bridge::AsyncOutcome) {
         self.shared.settle(state);
         self.settle_trace(outcome);
+    }
+
+    /// Settles the wait with the exception the request was aborted with, if it was aborted after
+    /// the wait started, as C++'s `exclusiveJoin()` has such an abort win over whatever settles
+    /// the wait after it, even before the abort watcher has called back. A reaction calls this
+    /// before it settles the wait, and so does dropping the sender unsettled.
+    fn settle_with_pending_abort(&self) {
+        if let Some(err) = ffi::pending_abort(&self.abort_watcher) {
+            self.shared.settle(AwaitJsState::Rejected(err));
+        }
     }
 
     /// Reports `outcome` for async tracing, if the request is traced. Only the first is reported.
@@ -737,8 +770,17 @@ impl<T> Drop for AwaitJsSender<T> {
     /// future, which builds the error once it is polled. Then the async trace resource is
     /// dropped, which reports to the tracker's sinks, as `~AwaitJsFulfiller()` destroys its
     /// `AsyncResource` in the same finalizers. Of workerd's sinks, only the inspector's calls V8,
-    /// and it ignores `JS_TO_KJ` resources (`async-trace-inspector.c++`).
+    /// and it ignores `JS_TO_KJ` resources (`async-trace-inspector.c++`). The abort watcher is
+    /// dropped last, which destroys a KJ promise and drops its Rust callback, and enters no V8.
+    ///
+    /// If the request was aborted after the wait started, the wait fails with the abort instead,
+    /// as C++'s join has the abort win over the rejection that `~AwaitJsFulfiller()` causes.
+    /// Checking that only reads the exception the `IoContext` was aborted with.
     fn drop(&mut self) {
+        if !self.shared.is_waiting() {
+            return;
+        }
+        self.settle_with_pending_abort();
         if !self.shared.is_waiting() {
             return;
         }
@@ -841,18 +883,24 @@ where
     let Some(sender) = reaction.sender.take(lock)? else {
         unreachable!("only one reaction to a promise runs, once");
     };
-    // As C++ does once the KJ promise is gone, `map` does not run for a cancelled wait, and the
-    // trace still reports how the JavaScript promise settled.
-    if sender.shared.is_cancelled() {
+    // As C++ does once the KJ promise is gone, `map` does not run for a wait that was cancelled or
+    // failed with the request's abort, and the trace still reports how the JavaScript promise
+    // settled.
+    if !sender.shared.is_waiting() {
         sender.settle_trace(bridge::AsyncOutcome::OK);
         return Ok(lock.undefined());
     }
     // `map`'s own error is caught as the exception that throwing it throws, as C++
     // `jsg::Lock::tryCatch()` converts a KJ exception from `func`.
+    // An abort that the watcher has not yet delivered still wins, though `map` ran, as in C++.
     match lock.try_catch(|lock| (reaction.map)(lock, value))? {
-        Ok(value) => sender.settle(AwaitJsState::Fulfilled(value), bridge::AsyncOutcome::OK),
+        Ok(value) => {
+            sender.settle_with_pending_abort();
+            sender.settle(AwaitJsState::Fulfilled(value), bridge::AsyncOutcome::OK);
+        }
         Err(exception) => {
             let err = reject_with_js_exception(lock, exception)?;
+            sender.settle_with_pending_abort();
             sender.settle(AwaitJsState::Rejected(err), bridge::AsyncOutcome::ERROR);
         }
     }
@@ -868,8 +916,10 @@ fn await_js_on_rejected<'a, T, M>(
     let Some(sender) = reaction.sender.take(lock)? else {
         unreachable!("only one reaction to a promise runs, once");
     };
-    // As in C++, the trace reports the rejection even if the wait was cancelled.
+    // As in C++, the rejection is logged and the trace reports it even if the wait was cancelled
+    // or failed with the request's abort.
     let err = reject_with_js_exception(lock, reason)?;
+    sender.settle_with_pending_abort();
     sender.settle(AwaitJsState::Rejected(err), bridge::AsyncOutcome::ERROR);
     Ok(lock.undefined())
 }

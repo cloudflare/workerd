@@ -8,8 +8,8 @@
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
               set up, the waitUntil and inspector calls take V8 handles, the trace span calls \
-              take literals that C++ does not copy, and IsolateWeakRef and AsyncResource are \
-              declared Send"
+              take literals that C++ does not copy, and IsolateWeakRef, AsyncResource and \
+              AbortWatcher are declared Send"
 )]
 
 use std::any::Any;
@@ -75,6 +75,8 @@ pub mod bridge {
 
         type IoOwnedObject;
         type IsolateWeakRef;
+        type AbortException;
+        type AbortWatcher;
 
         fn io_context_no_request_message() -> &'static str;
         // TODO(soon): Define this message in Rust once C++ `IoContext::awaitJs()` is gone.
@@ -86,6 +88,13 @@ pub mod bridge {
             isolate: &IsolateWeakRef,
         ) -> Result<bool>;
         fn io_context_make_await_js_resource(id: u64) -> Result<KjMaybe<KjOwn<AsyncResource>>>;
+        // Always fails, with `exception`'s exception.
+        fn abort_exception_raise(exception: &AbortException) -> Result<()>;
+        fn io_context_watch_abort(
+            id: u64,
+            callback: Box<AbortCallback>,
+        ) -> Result<KjOwn<AbortWatcher>>;
+        fn abort_watcher_raise_pending_abort(watcher: &AbortWatcher) -> Result<()>;
         fn io_context_try_current_id() -> KjMaybe<u64>;
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
@@ -190,6 +199,11 @@ pub mod bridge {
         type IoCallback;
         type IoOwnedSlot;
 
+        /// What an `AbortWatcher` calls with the exception its `IoContext` was aborted with, on
+        /// the `IoContext`'s thread, without the isolate lock and with no `IoContext` current.
+        type AbortCallback;
+        fn aborted(self: &AbortCallback, exception: &AbortException);
+
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
         unsafe fn io_callback_run(
             isolate: usize,
@@ -216,6 +230,40 @@ unsafe impl Send for bridge::IsolateWeakRef {}
 // sinks are gone: the IoContext holds a reference until `OwnedAsyncTracker` closes the tracker
 // on its own thread.
 unsafe impl Send for bridge::AsyncResource {}
+
+// SAFETY: an `AbortWatcher` must be used and destroyed on its `IoContext`'s thread, while the
+// `IoContext`'s abort exception is alive. Only an await_js() sender holds one, and the sender is
+// `Send` only because `IoContext::add_object` requires it: it is dropped either by its
+// `IoContext`, on the `IoContext`'s thread, before the abort exception, or by a reaction that takes
+// it, which requires the `IoContext` to be current.
+unsafe impl Send for bridge::AbortWatcher {}
+
+/// The exception `exception` carries, with its type, description, location and details, which
+/// the bridge's conversion of a thrown `kj::Exception` keeps.
+fn abort_exception(exception: &bridge::AbortException) -> cxx::KjError {
+    match bridge::abort_exception_raise(exception) {
+        Err(exception) => exception.into(),
+        Ok(()) => unreachable!("abort_exception_raise() always throws"),
+    }
+}
+
+/// The exception `watcher`'s request was aborted with, if it was aborted after the watcher started;
+/// see `abort_watcher_raise_pending_abort()`. It is converted as `abort_exception()`'s is.
+pub fn pending_abort(watcher: &bridge::AbortWatcher) -> Option<cxx::KjError> {
+    bridge::abort_watcher_raise_pending_abort(watcher)
+        .err()
+        .map(Into::into)
+}
+
+/// See `bridge::AbortCallback`. The function must not panic, since the call comes from C++, and must
+/// not drop the `AbortWatcher` that runs it.
+pub struct AbortCallback(pub Box<dyn Fn(cxx::KjError) + Send>);
+
+impl AbortCallback {
+    fn aborted(&self, exception: &bridge::AbortException) {
+        (self.0)(abort_exception(exception));
+    }
+}
 
 /// The exception that `io_context_throw_memory_limit_exception()` throws: C++
 /// `IoContext::memoryLimitException()`, with its type, description, location and details. C++

@@ -1229,7 +1229,12 @@ enum class HeapLimit { EXCEEDED, NOT_EXCEEDED };
 // its heap limit meanwhile as `heapLimit` says, and returns how the wait ended.
 kj::String destroyContextWithHeldWait(HeapLimit heapLimit) {
   TestFixture fixture;
-  auto request = fixture.newIncomingRequest();
+  auto watchersBefore = io_context_abort_watcher_count_for_test();
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  // The request waits for nothing that the event loop runs, and would be aborted as hung, which
+  // would fail the wait first.
+  auto pendingEvent = context->registerPendingEvent();
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     await_js_start(isolateOf(env), AwaitJsStart::Held);
   });
@@ -1237,6 +1242,10 @@ kj::String destroyContextWithHeldWait(HeapLimit heapLimit) {
   KJ_EXPECT(!poll_held_awaited_js());
   fixture.setHeapLimitExcessivelyExceeded(heapLimit == HeapLimit::EXCEEDED);
   fixture.drainAndDestroy(kj::mv(request));
+  pendingEvent = nullptr;
+  context = nullptr;
+  // The IoContext dropped the sender, and with it the abort watcher, which never saw an abort.
+  KJ_EXPECT(io_context_abort_watcher_count_for_test() == watchersBefore);
   fixture.setHeapLimitExcessivelyExceeded(false);
   KJ_EXPECT(poll_held_awaited_js());
   forget_awaited_js_resolver();
@@ -2015,6 +2024,578 @@ KJ_TEST("await_js() reads a rejection's stack to log it only when KJ logs at INF
   auto verbose = stackReads(LogLevel::INFO);
   auto quietReads = KJ_ASSERT_NONNULL(quiet.tryParseAs<int>(), quiet);
   KJ_EXPECT(verbose == kj::str(quietReads + 1), quiet, verbose);
+}
+
+constexpr kj::Exception::DetailTypeId ABORT_DETAIL_ID = 0xab07'0000'0000'0001ull;
+
+// The exception the tests below abort a request with. Its type is not FAILED, and it has a
+// detail, so that a wait that fails with it is seen to fail with this very exception.
+kj::Exception abortException() {
+  auto e = KJ_EXCEPTION(OVERLOADED, "jsg.Error: aborted by the test");
+  e.setDetail(ABORT_DETAIL_ID, kj::heapArray<kj::byte>({1, 2, 3}));
+  return e;
+}
+
+// Checks that `actual` is `expected`, as the bridge carries an exception: with its type,
+// description, location and details.
+void expectSameException(const kj::Exception& actual, const kj::Exception& expected) {
+  KJ_EXPECT(actual.getType() == expected.getType(), actual, expected);
+  KJ_EXPECT(actual.getDescription() == expected.getDescription(), actual, expected);
+  KJ_EXPECT(kj::StringPtr(actual.getFile()) == kj::StringPtr(expected.getFile()), actual, expected);
+  KJ_EXPECT(actual.getLine() == expected.getLine(), actual, expected);
+  KJ_EXPECT(describeDetails(actual) == describeDetails(expected), describeDetails(actual),
+      describeDetails(expected));
+}
+
+// The number of await_js() abort watchers alive on this thread.
+size_t abortWatchers() {
+  return io_context_abort_watcher_count_for_test();
+}
+
+// A wait of C++ IoContext::awaitJs(), recorded as await_js_start() records Rust's.
+struct RecordedCppAwaitJs {
+  kj::Maybe<jsg::Promise<double>::Resolver> resolver;
+  kj::Maybe<kj::Promise<void>> wait;
+  kj::String outcome = kj::str("pending");
+  kj::Maybe<kj::Exception> error;
+  // How many times the conversion ran, as awaited_js_map_runs() counts for Rust's.
+  static inline uint mapRuns = 0;
+
+  // The wait, which nothing waits for until waitHeld() is called; see startHeld().
+  kj::Maybe<kj::Promise<double>> held;
+
+  void start(const TestFixture::Environment& env) {
+    startHeld(env);
+    waitHeld();
+  }
+
+  // Starts the wait without waiting for it, as await_js_start(Held) does.
+  void startHeld(const TestFixture::Environment& env) {
+    auto paf = env.js.newPromiseAndResolver<double>();
+    resolver = kj::mv(paf.resolver);
+    held = env.context.awaitJs(env.js, kj::mv(paf.promise), [](jsg::Lock&, double value) {
+      ++mapRuns;
+      return value;
+    });
+  }
+
+  // Waits for the wait startHeld() started, recording its outcome.
+  void waitHeld() {
+    auto promise = KJ_ASSERT_NONNULL(kj::mv(held), "no held wait");
+    held = kj::none;
+    wait = kj::mv(promise)
+               .then([&outcome = outcome](double value) {
+      outcome = kj::str("fulfilled: ", value);
+    }, [&outcome = outcome, &error = error](kj::Exception&& e) {
+      outcome = kj::str("rejected: ", e.getDescription());
+      error = kj::mv(e);
+    }).eagerlyEvaluate(nullptr);
+  }
+
+  // Cancels the wait, recorded as Rust's cancelled wait is.
+  void cancel() {
+    wait = kj::none;
+    outcome = kj::str("cancelled");
+  }
+
+  // Fulfills the promise with 42, or rejects it with a TypeError, as settle_awaited_js() does.
+  void settle(jsg::Lock& js, bool fulfill) {
+    auto taken = KJ_ASSERT_NONNULL(kj::mv(resolver), "the resolver was not kept");
+    resolver = kj::none;
+    if (fulfill) {
+      taken.resolve(js, 42.0);
+    } else {
+      taken.reject(js, js.typeError("boom"));
+    }
+  }
+};
+
+// Runs `settle` outside any request, then has `context`, which was aborted and no longer runs,
+// run the reactions it queued with `context` current, as V8 runs them in the next microtask
+// checkpoint of the isolate: here, in the one `context` runs when it logs an uncaught exception
+// with the isolate lock, as it does when the isolate has an inspector.
+template <typename Func>
+void settleOnceAborted(TestFixture& fixture, IoContext& context, Func&& settle) {
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) { settle(js); });
+  });
+  KJ_EXPECT_LOG(ERROR, "draining the microtask queue");
+  context.logUncaughtExceptionAsync(UncaughtExceptionSource::INTERNAL,
+      KJ_EXCEPTION(FAILED, "draining the microtask queue"), kj::none);
+}
+
+// When the request a wait runs in is aborted, with IoContext::abort(), relative to the wait.
+enum class AbortedWait {
+  // While the wait is pending. Its promise never settles.
+  PENDING,
+  // While the wait is pending. Once the abort has reached the wait, its promise is fulfilled.
+  THEN_FULFILLED,
+  // As THEN_FULFILLED, but the promise is rejected.
+  THEN_REJECTED,
+  // While the wait is pending, in the turn that then fulfills its promise.
+  FULFILLED_IN_SAME_TURN,
+  // As FULFILLED_IN_SAME_TURN, but the promise is rejected.
+  REJECTED_IN_SAME_TURN,
+  // While the wait is pending, in the turn in which GC then collects its unsettled promise.
+  COLLECTED_IN_SAME_TURN,
+  // Before the wait starts, in the turn it starts in. Its promise never settles.
+  BEFORE_START,
+  // Before the wait starts, in the turn it starts in, which then fulfills its promise.
+  BEFORE_START_THEN_FULFILLED_IN_SAME_TURN,
+  // Once its promise has been fulfilled and the wait has ended.
+  AFTER_FULFILLED,
+  // Once the wait has been cancelled. Then its promise is fulfilled.
+  AFTER_CANCELLED,
+  // As THEN_FULFILLED, but nothing waits for the wait until its promise has been fulfilled.
+  THEN_FULFILLED_WAITED_LATE,
+  // As BEFORE_START, but the promise is fulfilled in a later turn, and nothing waits for the
+  // wait until then.
+  BEFORE_START_THEN_FULFILLED_WAITED_LATE,
+};
+
+kj::StringPtr nameOf(AbortedWait scenario) {
+  switch (scenario) {
+    case AbortedWait::PENDING:
+      return "PENDING"_kj;
+    case AbortedWait::THEN_FULFILLED:
+      return "THEN_FULFILLED"_kj;
+    case AbortedWait::THEN_REJECTED:
+      return "THEN_REJECTED"_kj;
+    case AbortedWait::FULFILLED_IN_SAME_TURN:
+      return "FULFILLED_IN_SAME_TURN"_kj;
+    case AbortedWait::REJECTED_IN_SAME_TURN:
+      return "REJECTED_IN_SAME_TURN"_kj;
+    case AbortedWait::COLLECTED_IN_SAME_TURN:
+      return "COLLECTED_IN_SAME_TURN"_kj;
+    case AbortedWait::BEFORE_START:
+      return "BEFORE_START"_kj;
+    case AbortedWait::BEFORE_START_THEN_FULFILLED_IN_SAME_TURN:
+      return "BEFORE_START_THEN_FULFILLED_IN_SAME_TURN"_kj;
+    case AbortedWait::AFTER_FULFILLED:
+      return "AFTER_FULFILLED"_kj;
+    case AbortedWait::AFTER_CANCELLED:
+      return "AFTER_CANCELLED"_kj;
+    case AbortedWait::THEN_FULFILLED_WAITED_LATE:
+      return "THEN_FULFILLED_WAITED_LATE"_kj;
+    case AbortedWait::BEFORE_START_THEN_FULFILLED_WAITED_LATE:
+      return "BEFORE_START_THEN_FULFILLED_WAITED_LATE"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+// What a wait whose request is aborted lets the test observe.
+struct AbortedWaitOutcome {
+  // As jsOutcome() describes it, once the abort and the settling have been handled.
+  kj::String outcome;
+  kj::Maybe<kj::Exception> error;
+  uint mapRuns;
+  // The events of its awaitJs resource, as traceAwaitJs() records them.
+  kj::String events;
+  // The uncaught exceptions logged from awaiting the promise, "Uncaught (in promise)".
+  kj::String inPromise;
+
+  // All but `error`, whose location differs by implementation unless it is the abort's.
+  kj::String toString() const {
+    return kj::str("outcome: ", outcome, "\nmap runs: ", mapRuns, "\nevents: ", events,
+        "\nuncaught (in promise): ", inPromise);
+  }
+};
+
+// Starts a wait in a traced request, whose isolate has an inspector, through C++ awaitJs() or
+// Rust's await_js(), aborts the request as `scenario` says, and returns what was observed.
+AbortedWaitOutcome abortWait(AbortedWait scenario, Implementation implementation) {
+  bool rust = implementation == Implementation::RUST;
+  auto watchersBefore = abortWatchers();
+  kj::Vector<kj::String> events;
+  UncaughtExceptionLog log;
+  AbortedWaitOutcome result;
+  {
+    capnp::MallocMessageBuilder flagsMessage;
+    auto params = inspectorParams(flagsMessage);
+    params.isolateObserver = kj::atomicRefcounted<TraceObserver<AwaitJsTraceListener>>(events);
+    TestFixture fixture(kj::mv(params));
+    auto context = fixture.newIoContext();
+    auto request = fixture.newIncomingRequest(*context);
+    // Once the wait ends, the request has nothing else to wait for, and would be aborted as hung.
+    auto pendingEvent = context->registerPendingEvent();
+    RecordedCppAwaitJs cpp;
+    RecordedCppAwaitJs::mapRuns = 0;
+
+    bool late = scenario == AbortedWait::THEN_FULFILLED_WAITED_LATE ||
+        scenario == AbortedWait::BEFORE_START_THEN_FULFILLED_WAITED_LATE;
+    auto start = [&](const TestFixture::Environment& env) {
+      if (!rust) {
+        if (late) {
+          cpp.startHeld(env);
+        } else {
+          cpp.start(env);
+        }
+      } else if (late) {
+        await_js_start(isolateOf(env), AwaitJsStart::Held);
+      } else if (scenario == AbortedWait::AFTER_CANCELLED) {
+        await_js_start(isolateOf(env), AwaitJsStart::Cancellable);
+      } else if (scenario == AbortedWait::COLLECTED_IN_SAME_TURN) {
+        await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+      } else {
+        await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+      }
+    };
+    auto settle = [&](jsg::Lock& js, bool fulfill) {
+      if (rust) {
+        settle_awaited_js(reinterpret_cast<uintptr_t>(js.v8Isolate), fulfill);
+      } else {
+        cpp.settle(js, fulfill);
+      }
+    };
+    auto abort = [&]() { context->abort(abortException()); };
+
+    switch (scenario) {
+      case AbortedWait::PENDING:
+      case AbortedWait::THEN_FULFILLED:
+      case AbortedWait::THEN_REJECTED:
+        fixture.enterContext(*request, start);
+        fixture.pollEventLoop();
+        abort();
+        fixture.pollEventLoop();
+        if (scenario != AbortedWait::PENDING) {
+          settleOnceAborted(fixture, *context,
+              [&](jsg::Lock& js) { settle(js, scenario == AbortedWait::THEN_FULFILLED); });
+          fixture.pollEventLoop();
+        }
+        break;
+      case AbortedWait::FULFILLED_IN_SAME_TURN:
+      case AbortedWait::REJECTED_IN_SAME_TURN:
+        fixture.enterContext(*request, start);
+        fixture.pollEventLoop();
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          abort();
+          settle(env.js, scenario == AbortedWait::FULFILLED_IN_SAME_TURN);
+        });
+        fixture.pollEventLoop();
+        break;
+      case AbortedWait::COLLECTED_IN_SAME_TURN:
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          start(env);
+          // Both promises are unreachable once their resolvers are dropped.
+          cpp.resolver = kj::none;
+        });
+        fixture.pollEventLoop();
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          abort();
+          env.isolate->LowMemoryNotification();
+          // GC collected the reactions, and with them the sender, which holds the watcher.
+          if (rust) KJ_EXPECT(abortWatchers() == watchersBefore, abortWatchers(), watchersBefore);
+        });
+        fixture.pollEventLoop();
+        break;
+      case AbortedWait::BEFORE_START:
+      case AbortedWait::BEFORE_START_THEN_FULFILLED_IN_SAME_TURN:
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          abort();
+          start(env);
+          if (scenario == AbortedWait::BEFORE_START_THEN_FULFILLED_IN_SAME_TURN) {
+            settle(env.js, true);
+          }
+        });
+        fixture.pollEventLoop();
+        break;
+      case AbortedWait::AFTER_FULFILLED:
+        fixture.enterContext(*request, start);
+        fixture.enterContext(
+            *request, [&](const TestFixture::Environment& env) { settle(env.js, true); });
+        fixture.pollEventLoop();
+        abort();
+        fixture.pollEventLoop();
+        break;
+      case AbortedWait::AFTER_CANCELLED:
+        fixture.enterContext(*request, start);
+        fixture.pollEventLoop();
+        if (rust) {
+          KJ_EXPECT(cancel_awaited_js());
+        } else {
+          cpp.cancel();
+        }
+        fixture.pollEventLoop();
+        abort();
+        fixture.pollEventLoop();
+        settleOnceAborted(fixture, *context, [&](jsg::Lock& js) { settle(js, true); });
+        fixture.pollEventLoop();
+        break;
+      case AbortedWait::THEN_FULFILLED_WAITED_LATE:
+      case AbortedWait::BEFORE_START_THEN_FULFILLED_WAITED_LATE:
+        if (scenario == AbortedWait::THEN_FULFILLED_WAITED_LATE) {
+          fixture.enterContext(*request, start);
+          fixture.pollEventLoop();
+          abort();
+        } else {
+          fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+            abort();
+            start(env);
+          });
+        }
+        fixture.pollEventLoop();
+        settleOnceAborted(fixture, *context, [&](jsg::Lock& js) { settle(js, true); });
+        fixture.pollEventLoop();
+        // Only now is the wait waited for.
+        if (rust) {
+          KJ_EXPECT(poll_held_awaited_js());
+        } else {
+          cpp.waitHeld();
+          fixture.pollEventLoop();
+        }
+        break;
+    }
+
+    if (rust) {
+      result.outcome = jsOutcome();
+      result.mapRuns = awaited_js_map_runs();
+      if (result.outcome.startsWith("rejected: ")) result.error = awaitedJsError();
+    } else {
+      result.outcome = kj::str(cpp.outcome);
+      result.mapRuns = RecordedCppAwaitJs::mapRuns;
+      result.error = kj::mv(cpp.error);
+    }
+    cpp.wait = kj::none;
+    forget_awaited_js_resolver();
+    pendingEvent = nullptr;
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+  result.events = kj::strArray(events, "\n");
+  kj::Vector<kj::StringPtr> inPromise;
+  for (auto& message: log.messages) {
+    if (message.contains(IN_PROMISE)) inPromise.add(message);
+  }
+  result.inPromise = kj::str(inPromise.size());
+  return result;
+}
+
+// Runs `scenario` through C++ awaitJs() and Rust's await_js(), checks that they are observed
+// alike, and returns what was observed of Rust's.
+AbortedWaitOutcome abortWaitOnBoth(AbortedWait scenario) {
+  auto cpp = abortWait(scenario, Implementation::CPP);
+  auto rust = abortWait(scenario, Implementation::RUST);
+  KJ_EXPECT(cpp.toString() == rust.toString(), nameOf(scenario), cpp.toString(), rust.toString());
+  KJ_IF_SOME(cppError, cpp.error) {
+    KJ_IF_SOME(rustError, rust.error) {
+      if (cppError.getDetail(ABORT_DETAIL_ID) != kj::none) {
+        expectSameException(rustError, cppError);
+      }
+    } else {
+      KJ_FAIL_EXPECT("only C++ failed", nameOf(scenario), cppError);
+    }
+  }
+  return rust;
+}
+
+constexpr kj::StringPtr ABORTED_OUTCOME = "rejected: jsg.Error: aborted by the test"_kj;
+
+// The events of the awaitJs resource of a wait whose promise settles as `last` says, or that is
+// destroyed unsettled with its request.
+kj::String expectedAbortedWaitEvents(kj::StringPtr last) {
+  return kj::str("init awaitJs#1 trigger=request exec=request\n", last);
+}
+
+KJ_TEST("await_js() fails with the exception its request is aborted with, as C++ awaitJs() does") {
+  auto outcome = abortWaitOnBoth(AbortedWait::PENDING);
+  KJ_EXPECT(outcome.outcome == ABORTED_OUTCOME, outcome.outcome);
+  expectSameException(KJ_ASSERT_NONNULL(outcome.error), abortException());
+  KJ_EXPECT(outcome.mapRuns == 0);
+  // The promise never settles, so the resource is destroyed with the request.
+  KJ_EXPECT(outcome.events == expectedAbortedWaitEvents("destroy awaitJs#1"), outcome.events);
+}
+
+KJ_TEST("once the abort has failed an await_js(), its promise's fulfillment runs no conversion and "
+        "settles the trace OK, as in C++") {
+  auto outcome = abortWaitOnBoth(AbortedWait::THEN_FULFILLED);
+  KJ_EXPECT(outcome.outcome == ABORTED_OUTCOME, outcome.outcome);
+  KJ_EXPECT(outcome.mapRuns == 0);
+  KJ_EXPECT(outcome.events == expectedAbortedWaitEvents("settle awaitJs#1 OK"), outcome.events);
+  KJ_EXPECT(outcome.inPromise == "0", outcome.inPromise);
+}
+
+KJ_TEST("once the abort has failed an await_js(), its promise's rejection is still logged and "
+        "settles the trace ERROR, as in C++") {
+  auto outcome = abortWaitOnBoth(AbortedWait::THEN_REJECTED);
+  KJ_EXPECT(outcome.outcome == ABORTED_OUTCOME, outcome.outcome);
+  KJ_EXPECT(outcome.events == expectedAbortedWaitEvents("settle awaitJs#1 ERROR"), outcome.events);
+  KJ_EXPECT(outcome.inPromise == "1", outcome.inPromise);
+}
+
+KJ_TEST("a promise that settles in the turn its request is aborted in loses to the abort, as in "
+        "C++") {
+  auto fulfilled = abortWaitOnBoth(AbortedWait::FULFILLED_IN_SAME_TURN);
+  KJ_EXPECT(fulfilled.outcome == ABORTED_OUTCOME, fulfilled.outcome);
+  auto rejected = abortWaitOnBoth(AbortedWait::REJECTED_IN_SAME_TURN);
+  KJ_EXPECT(rejected.outcome == ABORTED_OUTCOME, rejected.outcome);
+  KJ_EXPECT(rejected.inPromise == "1", rejected.inPromise);
+}
+
+KJ_TEST("a promise that GC collects in the turn its request is aborted in loses to the abort, as "
+        "in C++") {
+  auto outcome = abortWaitOnBoth(AbortedWait::COLLECTED_IN_SAME_TURN);
+  KJ_EXPECT(outcome.outcome == ABORTED_OUTCOME, outcome.outcome);
+  expectSameException(KJ_ASSERT_NONNULL(outcome.error), abortException());
+  KJ_EXPECT(outcome.events == expectedAbortedWaitEvents("destroy awaitJs#1"), outcome.events);
+}
+
+KJ_TEST("await_js() in a request that was already aborted fails with the abort in a later turn, as "
+        "in C++") {
+  auto pending = abortWaitOnBoth(AbortedWait::BEFORE_START);
+  KJ_EXPECT(pending.outcome == ABORTED_OUTCOME, pending.outcome);
+  expectSameException(KJ_ASSERT_NONNULL(pending.error), abortException());
+
+  // A promise that settles in the same turn settles the wait first.
+  auto fulfilled = abortWaitOnBoth(AbortedWait::BEFORE_START_THEN_FULFILLED_IN_SAME_TURN);
+  KJ_EXPECT(fulfilled.outcome == "fulfilled: 42", fulfilled.outcome);
+  KJ_EXPECT(fulfilled.mapRuns == 1);
+}
+
+KJ_TEST("when the abort fails an await_js() doesn't depend on when it is waited for, as in C++") {
+  // C++ joins the wait with onAbort() as the wait starts, and the first to fire wins, so an abort
+  // wins over a promise fulfilled after it even if nothing waited for the wait until then.
+  for (auto scenario: {AbortedWait::THEN_FULFILLED_WAITED_LATE,
+         AbortedWait::BEFORE_START_THEN_FULFILLED_WAITED_LATE}) {
+    auto outcome = abortWaitOnBoth(scenario);
+    KJ_EXPECT(outcome.outcome == ABORTED_OUTCOME, nameOf(scenario), outcome.outcome);
+    KJ_EXPECT(outcome.mapRuns == 0, nameOf(scenario));
+    KJ_EXPECT(outcome.events == expectedAbortedWaitEvents("settle awaitJs#1 OK"), nameOf(scenario),
+        outcome.events);
+    expectSameException(KJ_ASSERT_NONNULL(outcome.error), abortException());
+  }
+}
+
+KJ_TEST("an abort after await_js() has ended or been cancelled changes nothing, as in C++") {
+  auto fulfilled = abortWaitOnBoth(AbortedWait::AFTER_FULFILLED);
+  KJ_EXPECT(fulfilled.outcome == "fulfilled: 42", fulfilled.outcome);
+  KJ_EXPECT(fulfilled.mapRuns == 1);
+  KJ_EXPECT(fulfilled.events == expectedAbortedWaitEvents("settle awaitJs#1 OK"), fulfilled.events);
+
+  auto cancelled = abortWaitOnBoth(AbortedWait::AFTER_CANCELLED);
+  KJ_EXPECT(cancelled.outcome == "cancelled", cancelled.outcome);
+  KJ_EXPECT(cancelled.mapRuns == 0);
+  KJ_EXPECT(cancelled.events == expectedAbortedWaitEvents("settle awaitJs#1 OK"), cancelled.events);
+}
+
+KJ_TEST("await_js() fails with the reason Rust's ctx.abort(reason) aborts with, as C++ awaitJs() "
+        "does") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  RecordedCppAwaitJs cpp;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    cpp.start(env);
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+  });
+  fixture.pollEventLoop();
+  kj::Maybe<kj::Exception> abortReason;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto reason = runScript(env, R"(new RangeError("custom reason"))");
+    abort_request(isolateOf(env), ::workerd::rust::jsg::to_ffi(kj::mv(reason)));
+    env.isolate->CancelTerminateExecution();
+    abortReason = env.context.getAbortReason();
+  });
+  fixture.pollEventLoop();
+
+  auto& reason = KJ_ASSERT_NONNULL(abortReason, "the request was not aborted");
+  KJ_EXPECT(reason.getDescription() == "jsg.RangeError: custom reason", reason);
+  // The reason is tunneled as a JavaScript exception is.
+  KJ_EXPECT(reason.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID) != kj::none, reason);
+  KJ_EXPECT(jsOutcome() == "rejected: jsg.RangeError: custom reason", jsOutcome());
+  expectSameException(awaitedJsError(), reason);
+  expectSameException(KJ_ASSERT_NONNULL(cpp.error, "C++ awaitJs() has not failed"), reason);
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+  cpp.wait = kj::none;
+  forget_awaited_js_resolver();
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a settled await_js() releases its abort watcher in the reaction, and the abort then "
+        "changes nothing") {
+  TestFixture fixture;
+  auto before = abortWatchers();
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::KeepResolver);
+    KJ_EXPECT(abortWatchers() == before + 1);
+  });
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  // The reaction ran at the end of that turn, with the request current.
+  KJ_EXPECT(abortWatchers() == before, abortWatchers(), before);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "fulfilled: 42", jsOutcome());
+
+  request->getContext().abort(abortException());
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "fulfilled: 42", jsOutcome());
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(abortWatchers() == before);
+}
+
+KJ_TEST("a cancelled await_js() keeps its abort watcher until its sender is dropped, and the "
+        "abort then settles nothing") {
+  TestFixture fixture;
+  auto before = abortWatchers();
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  // As in "a cancelled await_js() does not run its conversion".
+  auto pendingEvent = context->registerPendingEvent();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::Cancellable);
+  });
+  KJ_EXPECT(cancel_awaited_js());
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+  // The request still owns the sender, which holds the watcher.
+  KJ_EXPECT(abortWatchers() == before + 1, abortWatchers(), before);
+
+  // The abort settles nothing, and the promise still runs no conversion.
+  context->abort(abortException());
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+  KJ_EXPECT(awaited_js_map_runs() == 0);
+
+  // Destroying the IoContext drops the sender, and the watcher with it.
+  forget_awaited_js_resolver();
+  fixture.drainAndDestroy(kj::mv(request));
+  pendingEvent = nullptr;
+  context = nullptr;
+  KJ_EXPECT(abortWatchers() == before, abortWatchers(), before);
+}
+
+KJ_TEST("an await_js() whose promise GC collects releases its abort watcher with its sender") {
+  TestFixture fixture;
+  auto before = abortWatchers();
+  auto owner = fixture.newIncomingRequest();
+  fixture.enterContext(*owner, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  collectGarbage(fixture, *owner);
+  // The sender was dropped in the collection, with the request current.
+  KJ_EXPECT(abortWatchers() == before, abortWatchers(), before);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  fixture.drainAndDestroy(kj::mv(owner));
+}
+
+KJ_TEST("an await_js() whose promise GC collects in another request releases its abort watcher "
+        "when its request next runs") {
+  TestFixture fixture;
+  auto before = abortWatchers();
+  auto owner = fixture.newIncomingRequest();
+  auto other = fixture.newIncomingRequest();
+  fixture.enterContext(*owner, [&](const TestFixture::Environment& env) {
+    await_js_start(isolateOf(env), AwaitJsStart::DropResolver);
+  });
+  // The sender is queued for its own request to drop, with the watcher.
+  collectGarbage(fixture, *other);
+  KJ_EXPECT(abortWatchers() == before + 1, abortWatchers(), before);
+  KJ_EXPECT(jsOutcome() == "pending");
+  fixture.enterContext(*owner, [&](const TestFixture::Environment&) {});
+  KJ_EXPECT(abortWatchers() == before, abortWatchers(), before);
+  fixture.pollEventLoop();
+  KJ_EXPECT(jsOutcome() == NEVER_SETTLED_OUTCOME, jsOutcome());
+  fixture.drainAndDestroy(kj::mv(other));
+  fixture.drainAndDestroy(kj::mv(owner));
 }
 
 constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;

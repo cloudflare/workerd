@@ -1444,6 +1444,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
+  // NOTE: This must also live below `abortException` and `abortFlag`: the half of a Rust
+  //   await_js() wait that settles it reads `abortException` when it is destroyed, and destroys a
+  //   branch of `abortFlag`.
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
