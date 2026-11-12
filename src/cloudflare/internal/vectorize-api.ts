@@ -321,10 +321,12 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   try {
     return JSON.parse(body) as T;
   } catch {
+    // \u2026 is the Unicode ellipsis used to mark truncation. The source must stay ASCII so
+    // the legacy Latin-1 loader and UTF-8 code-cache generator see the same source.
     throw new Error(
       `Failed to parse body as JSON, got: ${
         body.length > maxBodyLogChars
-          ? `${body.slice(0, maxBodyLogChars)}…`
+          ? `${body.slice(0, maxBodyLogChars)}\u2026`
           : body
       }`
     );

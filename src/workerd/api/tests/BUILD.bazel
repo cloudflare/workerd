@@ -1415,6 +1415,8 @@ wd_test(
 )
 
 wd_test(
+    # Accepting over 32768 WebSockets needs the same budget as the limit test above.
+    size = "large",
     src = "websocket-accept-limit-killswitch-test.wd-test",
     data = ["websocket-accept-limit-killswitch-test.js"],
 )

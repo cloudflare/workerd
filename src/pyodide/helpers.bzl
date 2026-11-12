@@ -132,6 +132,7 @@ def pyodide_static():
     wd_ts_bundle(
         name = "pyodide_static",
         eslintrc_json = "eslint.config.mjs",
+        gen_compile_cache = True,
         import_name = "pyodide",
         internal_data_modules = internal_data_modules,
         internal_modules = internal_modules,
