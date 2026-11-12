@@ -10,7 +10,7 @@
 // shrunk out from under, has no bytes: the typed-array getters report
 // byteOffset and byteLength 0 for it, but the DataView getters throw a
 // TypeError. These helpers give a DataView the typed arrays' answer, so
-// such a view reads as empty whichever kind it is — as it does in the C++
+// such a view reads as empty whichever kind it is - as it does in the C++
 // implementation, which treats it as zero-length. A detached ArrayBuffer
 // is empty too: its byteLength getter reports 0. Requires only common.
 

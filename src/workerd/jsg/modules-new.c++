@@ -1841,26 +1841,24 @@ kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback c
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
 
-void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle) {
-  getBuiltInBundleFromCapnp(builder, bundle, [](workerd::jsg::Module::Reader) { return true; });
-}
-
-void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-    Bundle::Reader bundle,
-    kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
-  addBuiltInBundleFromCapnp(
-      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
-  });
+void ModuleBundle::getBuiltInBundleFromCapnp(
+    BuiltinBuilder& builder, Bundle::Reader bundle, const ModuleSource* moduleSource) {
+  getBuiltInBundleFromCapnp(
+      builder, bundle, [](workerd::jsg::Module::Reader) { return true; }, moduleSource);
 }
 
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     Bundle::Reader bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter,
-    kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
+    const ModuleSource* moduleSource) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, getSource(module), module.getCompileCache().asBytes());
+    if (moduleSource != nullptr) {
+      builder.addEsm(
+          id, moduleSource->get(module.getSrc().asChars()), module.getCompileCache().asBytes());
+    } else {
+      builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
+    }
   });
 }
 
