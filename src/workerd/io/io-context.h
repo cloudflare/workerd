@@ -651,6 +651,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     bool operator==(const Id& other) const = default;
 
+    // Round-trip through a plain integer, for callers that must carry the Id in a form that is
+    // not a C++ object (e.g. as a JS BigInt in a v8::Function's data). An Id rebuilt from a
+    // value that was never handed out compares unequal to every live context.
+    uint64_t toRaw() const {
+      return value;
+    }
+    static constexpr Id fromRaw(uint64_t value) {
+      return Id(value);
+    }
+
    private:
     constexpr explicit Id(uint64_t value): value(value) {}
     uint64_t value;

@@ -34,13 +34,103 @@ void validateIoContext(jsg::Lock&, kj::Maybe<IoContext::Id> maybeIoContextId) {
   }
 }
 
-jsg::Function<void()> getValidator(jsg::Lock& js) {
-  return [maybeIoContextId = getIoContextId(js)](
-             jsg::Lock& js) { validateIoContext(js, maybeIoContextId); };
+// The functions AsyncLocalStorage.bind()/snapshot() and AsyncResource.bind() return are made with
+// jsg::newBoundFunction(): a static callback with the per-function state bound as its four leading
+// arguments [fn, thisArg, originIoContextId, frame]. `fn` is the wrapped function (undefined for
+// the snapshot form, which takes it as its first call argument), `originIoContextId` is undefined
+// or the BigInt of the IoContext::Id the function was created in, and `frame` is undefined (root)
+// or the opaque wrapper of the jsg::AsyncContextFrame to enter. No C++ state is captured, so such
+// a function can be created while preparing a startup snapshot: one bound in the root frame
+// transfers through it, while one bound inside a frame carries the frame's opaque wrapper, which
+// has no transfer.
+//
+// Positions of that state among the callback's arguments; the caller's follow at kBoundStateSize.
+constexpr int kBoundFnSlot = 0;
+constexpr int kBoundThisSlot = 1;
+constexpr int kBoundIoContextIdSlot = 2;
+constexpr int kBoundFrameSlot = 3;
+constexpr int kBoundStateSize = 4;
+
+v8::Local<v8::Function> makeBoundFunction(jsg::Lock& js,
+    v8::FunctionCallback callback,
+    v8::Local<v8::Value> fn,
+    kj::Maybe<v8::Local<v8::Value>> thisArg,
+    kj::Maybe<IoContext::Id> originIoContextId,
+    kj::Maybe<jsg::AsyncContextFrame&> frame) {
+  auto isolate = js.v8Isolate;
+  v8::Local<v8::Value> state[kBoundStateSize];
+  state[kBoundFnSlot] = fn;
+  state[kBoundThisSlot] = thisArg.orDefault(js.v8Context()->Global());
+  state[kBoundIoContextIdSlot] = v8::Undefined(isolate);
+  KJ_IF_SOME(id, originIoContextId) {
+    state[kBoundIoContextIdSlot] = v8::BigInt::NewFromUnsigned(isolate, id.toRaw());
+  }
+  state[kBoundFrameSlot] = v8::Undefined(isolate);
+  KJ_IF_SOME(f, frame) {
+    state[kBoundFrameSlot] = f.getJSWrapper(js);
+  }
+  return jsg::newBoundFunction(js, callback, state);
 }
 
-jsg::Function<void()> getValidator(kj::Maybe<IoContext::Id> maybeIoContextId) {
-  return [maybeIoContextId](jsg::Lock& js) { validateIoContext(js, maybeIoContextId); };
+struct BoundFunctionState {
+  v8::Local<v8::Value> fn;
+  v8::Local<v8::Value> thisArg;
+  kj::Maybe<IoContext::Id> originIoContextId;
+  kj::Maybe<jsg::AsyncContextFrame&> frame;
+};
+
+BoundFunctionState readBoundFunctionState(
+    jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  // jsg::newBoundFunction() only ever calls the callback with the state in front.
+  KJ_ASSERT(info.Length() >= kBoundStateSize);
+  BoundFunctionState state{.fn = info[kBoundFnSlot], .thisArg = info[kBoundThisSlot]};
+  auto id = info[kBoundIoContextIdSlot];
+  if (id->IsBigInt()) {
+    state.originIoContextId = IoContext::Id::fromRaw(id.As<v8::BigInt>()->Uint64Value());
+  }
+  state.frame = jsg::AsyncContextFrame::tryUnwrap(js.v8Isolate, info[kBoundFrameSlot]);
+  return state;
+}
+
+// Behind AsyncLocalStorage.bind() and AsyncResource.bind(): calls `fn` on `thisArg` in `frame`.
+void boundFunctionCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto state = readBoundFunctionState(js, info);
+    KJ_ASSERT(state.fn->IsFunction());
+    validateIoContext(js, state.originIoContextId);
+
+    v8::LocalVector<v8::Value> argv(js.v8Isolate, info.Length() - kBoundStateSize);
+    for (int n = kBoundStateSize; n < info.Length(); n++) {
+      argv[n - kBoundStateSize] = info[n];
+    }
+
+    jsg::AsyncContextFrame::Scope scope(js, state.frame);
+    return jsg::check(
+        state.fn.As<v8::Function>()->Call(js.v8Context(), state.thisArg, argv.size(), argv.data()));
+  });
+}
+
+// Behind AsyncLocalStorage.snapshot(): calls its first argument with the rest in `frame`.
+void snapshotFunctionCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  jsg::liftKj(info, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    auto state = readBoundFunctionState(js, info);
+    validateIoContext(js, state.originIoContextId);
+    auto context = js.v8Context();
+    constexpr int kCallbackSlot = kBoundStateSize;
+    JSG_REQUIRE(info.Length() > kCallbackSlot && info[kCallbackSlot]->IsFunction(), TypeError,
+        "The first argument must be a function");
+    auto fn = info[kCallbackSlot].As<v8::Function>();
+
+    v8::LocalVector<v8::Value> argv(js.v8Isolate, info.Length() - kCallbackSlot - 1);
+    for (int n = kCallbackSlot + 1; n < info.Length(); n++) {
+      argv[n - kCallbackSlot - 1] = info[n];
+    }
+
+    jsg::AsyncContextFrame::Scope scope(js, state.frame);
+    return jsg::check(fn->Call(context, context->Global(), argv.size(), argv.data()));
+  });
 }
 
 }  // namespace
@@ -95,15 +185,19 @@ kj::StringPtr AsyncLocalStorage::getName() {
 }
 
 v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Function> fn) {
-  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
-    return frame.wrap(js, fn, getValidator(js));
-  } else {
-    return jsg::AsyncContextFrame::wrapRoot(js, fn);
+  auto frame = jsg::AsyncContextFrame::current(js);
+  // A function bound in the root frame carries no request-bound storage, so it may be called
+  // from any request.
+  kj::Maybe<IoContext::Id> originIoContextId;
+  if (frame != kj::none) {
+    originIoContextId = getIoContextId(js);
   }
+  return makeBoundFunction(js, &boundFunctionCallback, fn, kj::none, originIoContextId, frame);
 }
 
 v8::Local<v8::Function> AsyncLocalStorage::snapshot(jsg::Lock& js) {
-  return jsg::AsyncContextFrame::wrapSnapshot(js, getValidator(js));
+  return makeBoundFunction(js, &snapshotFunctionCallback, v8::Undefined(js.v8Isolate), kj::none,
+      getIoContextId(js), jsg::AsyncContextFrame::current(js));
 }
 
 namespace {
@@ -147,12 +241,10 @@ v8::Local<v8::Function> AsyncResource::bind(jsg::Lock& js,
     v8::Local<v8::Function> fn,
     jsg::Optional<v8::Local<v8::Value>> thisArg,
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
-  v8::Local<v8::Function> bound;
-  KJ_IF_SOME(frame, getFrame()) {
-    bound = frame.wrap(js, fn, getValidator(originIoContextId), thisArg);
-  } else {
-    bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
-  }
+  // originIoContextId is only ever set together with a captured frame, so a root-frame resource
+  // yields a function callable from any request.
+  auto bound =
+      makeBoundFunction(js, &boundFunctionCallback, fn, thisArg, originIoContextId, getFrame());
 
   // Per Node.js documentation (https://nodejs.org/dist/latest-v19.x/docs/api/async_context.html#asyncresourcebindfn-thisarg), the returned function "will have an
   // asyncResource property referencing the AsyncResource to which the function

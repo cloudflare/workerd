@@ -441,8 +441,7 @@ impl Drop for Marker {
 impl Marker {}
 
 /// A frame in the data of a `v8::Function::new` function, which enters it to call its argument,
-/// like C++ JSG's `AsyncContextFrame::wrap()`, survives GC while the function is reachable, and
-/// is released with it.
+/// survives GC while the function is reachable, and is released with it.
 ///
 /// Each step runs under its own lock, and sets no globals, so that only the function keeps the
 /// frame alive across the GCs between them.

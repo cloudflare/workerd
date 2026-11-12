@@ -79,7 +79,12 @@ kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(v8::Isolate* iso
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
   auto value = isolate->GetContinuationPreservedEmbedderData();
-  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value.As<v8::Value>())) {
+  return tryUnwrap(isolate, value.As<v8::Value>());
+}
+
+kj::Maybe<AsyncContextFrame&> AsyncContextFrame::tryUnwrap(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
     AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(&wrappable);
     KJ_ASSERT(frame != nullptr);
     return *frame;
@@ -94,78 +99,6 @@ Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageE
 Ref<AsyncContextFrame> AsyncContextFrame::create(
     Lock& js, kj::ArrayPtr<StorageEntry> storageEntries) {
   return js.alloc<AsyncContextFrame>(js, storageEntries);
-}
-
-v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
-    V8Ref<v8::Function>& fn,
-    jsg::Function<void()> validate,
-    kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  return wrap(js, fn.getHandle(js), kj::mv(validate), thisArg);
-}
-
-v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js, jsg::Function<void()> validate) {
-  return js.wrapReturningFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((frame = AsyncContextFrame::currentRef(js), validate = kj::mv(validate)),
-          (frame, validate), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-            validate(js);
-            auto context = js.v8Context();
-            JSG_REQUIRE(args[0]->IsFunction(), TypeError, "The first argument must be a function");
-            auto fn = args[0].As<v8::Function>();
-            v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length() - 1);
-            for (int n = 1; n < args.Length(); n++) {
-            argv[n - 1] = args[n];
-            }
-
-            AsyncContextFrame::Scope scope(js, frame);
-            return check(fn->Call(context, context->Global(), argv.size(), argv.data()));
-          }));
-}
-
-v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
-    v8::Local<v8::Function> fn,
-    jsg::Function<void()> validate,
-    kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  auto context = js.v8Context();
-
-  return js.wrapReturningFunction(context,
-      JSG_VISITABLE_LAMBDA(
-          (frame = JSG_THIS, validate = kj::mv(validate),
-              thisArg = js.v8Ref(thisArg.orDefault(context->Global())), fn = js.v8Ref(fn)),
-          (frame, validate, thisArg, fn),
-          (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-            validate(js);
-            auto function = fn.getHandle(js);
-
-            v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
-            for (int n = 0; n < args.Length(); n++) {
-            argv[n] = args[n];
-            }
-
-            AsyncContextFrame::Scope scope(js, *frame.get());
-            return check(
-                function->Call(js.v8Context(), thisArg.getHandle(js), argv.size(), argv.data()));
-          }));
-}
-
-v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
-    Lock& js, v8::Local<v8::Function> fn, kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  auto context = js.v8Context();
-
-  return js.wrapReturningFunction(context,
-      JSG_VISITABLE_LAMBDA(
-          (thisArg = js.v8Ref(thisArg.orDefault(context->Global())), fn = js.v8Ref(fn)),
-          (thisArg, fn), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-            auto function = fn.getHandle(js);
-
-            v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
-            for (int n = 0; n < args.Length(); n++) {
-            argv[n] = args[n];
-            }
-
-            AsyncContextFrame::Scope scope(js, kj::none);
-            return check(
-                function->Call(js.v8Context(), thisArg.getHandle(js), argv.size(), argv.data()));
-          }));
 }
 
 kj::Maybe<Value&> AsyncContextFrame::get(const StorageKey& key) {
