@@ -270,6 +270,13 @@ impl<'s> IoContext<'s> {
     /// `IoContext::memoryLimitException()`, an overloaded `Error` whose message is `Worker has
     /// exceeded memory limit.`, with the detail that marks an out-of-memory outcome.
     ///
+    /// If the request has async tracing, the wait is recorded as C++ records it: as a `JS_TO_KJ`
+    /// resource named `awaitJs`, from C++ `IoContext::makeAwaitJsResource()`, which the reaction
+    /// settles as `OK` once the promise is fulfilled and `map` succeeds, or the promise is
+    /// fulfilled after the wait was cancelled, and as `ERROR` once the promise rejects or `map`
+    /// fails. A wait that never settles reports a `destroy` instead, once the half that settles it
+    /// is dropped.
+    ///
     /// The reactions hold the half of the wait that settles it through an [`IoOwned`], which
     /// gives it the lifetime C++ gives `AwaitJsFulfiller` through `IoOwn`:
     ///
@@ -285,7 +292,7 @@ impl<'s> IoContext<'s> {
     /// error for which [`jsg::Error::is_pending`] is true if V8 fails to register the reactions
     /// or execution is terminating.
     //
-    // TODO(soon): Join the wait with the request's abort, and record it for async tracing.
+    // TODO(soon): Join the wait with the request's abort.
     pub fn await_js<T, M>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -306,6 +313,7 @@ impl<'s> IoContext<'s> {
         let sender = self.add_object(AwaitJsSender {
             shared: Arc::clone(&shared),
             isolate: bridge::io_context_isolate_weak_ref(self.id)?,
+            async_trace: bridge::io_context_make_await_js_resource(self.id)?.into(),
         })?;
         promise.into().then_or_catch(
             lock,
@@ -686,6 +694,34 @@ struct AwaitJsSender<T> {
     /// The isolate of the request the wait was started in, weakly, as C++ `awaitJsImpl()` takes
     /// it, so that the wait never keeps the isolate alive. It is `Send`, as the sender must be.
     isolate: KjOwn<bridge::IsolateWeakRef>,
+    /// The wait's async trace resource, or `None` if the request is not traced. Settled with the
+    /// wait, as `AwaitJsFulfiller::settle()` does, and dropped with the sender, which reports a
+    /// `destroy` if it never settled. It is `Send`, as the sender must be.
+    ///
+    /// A reaction takes the sender, so a settled resource is released from the tracker, which
+    /// tells its sinks (`onRelease`), at the end of the reaction. C++ keeps its `AsyncResource`
+    /// until both reactions are dropped, and releases it then, or not at all if the tracker has
+    /// closed by then. Likewise, if the reaction fails before settling (logging the rejection
+    /// throws, or execution terminates), the sender is dropped with the reaction, which reports
+    /// the `destroy` then, where C++ reports it once the reactions are collected. No other event
+    /// differs.
+    async_trace: Option<KjOwn<bridge::AsyncResource>>,
+}
+
+impl<T> AwaitJsSender<T> {
+    /// Settles the wait with `state`, then reports `outcome` for async tracing, in that order, as
+    /// `AwaitJsFulfiller` does.
+    fn settle(&self, state: AwaitJsState<T>, outcome: bridge::AsyncOutcome) {
+        self.shared.settle(state);
+        self.settle_trace(outcome);
+    }
+
+    /// Reports `outcome` for async tracing, if the request is traced. Only the first is reported.
+    fn settle_trace(&self, outcome: bridge::AsyncOutcome) {
+        if let Some(resource) = &self.async_trace {
+            resource.settle(outcome);
+        }
+    }
 }
 
 impl<T> Drop for AwaitJsSender<T> {
@@ -698,7 +734,10 @@ impl<T> Drop for AwaitJsSender<T> {
     /// in a cppgc finalizer or the GC epilogue, so this must not enter V8, allocate on its heap,
     /// or panic. It only reads the isolate's limit enforcer, which does none of these (see
     /// `isolate_weak_ref_has_excessively_exceeded_heap_limit()`), sets the state and wakes the
-    /// future, which builds the error once it is polled.
+    /// future, which builds the error once it is polled. Then the async trace resource is
+    /// dropped, which reports to the tracker's sinks, as `~AwaitJsFulfiller()` destroys its
+    /// `AsyncResource` in the same finalizers. Of workerd's sinks, only the inspector's calls V8,
+    /// and it ignores `JS_TO_KJ` resources (`async-trace-inspector.c++`).
     fn drop(&mut self) {
         if !self.shared.is_waiting() {
             return;
@@ -802,15 +841,20 @@ where
     let Some(sender) = reaction.sender.take(lock)? else {
         unreachable!("only one reaction to a promise runs, once");
     };
-    // As C++ does once the KJ promise is gone, `map` does not run for a cancelled wait.
-    if !sender.shared.is_cancelled() {
-        // `map`'s own error is caught as the exception that throwing it throws, as C++
-        // `jsg::Lock::tryCatch()` converts a KJ exception from `func`.
-        let state = match lock.try_catch(|lock| (reaction.map)(lock, value))? {
-            Ok(value) => AwaitJsState::Fulfilled(value),
-            Err(exception) => AwaitJsState::Rejected(reject_with_js_exception(lock, exception)?),
-        };
-        sender.shared.settle(state);
+    // As C++ does once the KJ promise is gone, `map` does not run for a cancelled wait, and the
+    // trace still reports how the JavaScript promise settled.
+    if sender.shared.is_cancelled() {
+        sender.settle_trace(bridge::AsyncOutcome::OK);
+        return Ok(lock.undefined());
+    }
+    // `map`'s own error is caught as the exception that throwing it throws, as C++
+    // `jsg::Lock::tryCatch()` converts a KJ exception from `func`.
+    match lock.try_catch(|lock| (reaction.map)(lock, value))? {
+        Ok(value) => sender.settle(AwaitJsState::Fulfilled(value), bridge::AsyncOutcome::OK),
+        Err(exception) => {
+            let err = reject_with_js_exception(lock, exception)?;
+            sender.settle(AwaitJsState::Rejected(err), bridge::AsyncOutcome::ERROR);
+        }
     }
     Ok(lock.undefined())
 }
@@ -824,8 +868,9 @@ fn await_js_on_rejected<'a, T, M>(
     let Some(sender) = reaction.sender.take(lock)? else {
         unreachable!("only one reaction to a promise runs, once");
     };
+    // As in C++, the trace reports the rejection even if the wait was cancelled.
     let err = reject_with_js_exception(lock, reason)?;
-    sender.shared.settle(AwaitJsState::Rejected(err));
+    sender.settle(AwaitJsState::Rejected(err), bridge::AsyncOutcome::ERROR);
     Ok(lock.undefined())
 }
 

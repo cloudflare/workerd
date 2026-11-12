@@ -228,21 +228,25 @@ class BridgeListener final: public AsyncTraceListener {
   kj::Vector<kj::String>& events;
 };
 
-class BridgeObserver final: public IsolateObserver {
+// Enables async tracing, with a `Listener` that records into `events` as the sink.
+template <typename Listener>
+class TraceObserver final: public IsolateObserver {
  public:
-  explicit BridgeObserver(kj::Vector<kj::String>& events): events(events) {}
+  explicit TraceObserver(kj::Vector<kj::String>& events): events(events) {}
 
   kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
     return AsyncTraceConfig{};
   }
   void addAsyncTraceSinks(
       AsyncTraceSinks& sinks, kj::StringPtr, kj::Maybe<kj::StringPtr>) const override {
-    sinks.add(kj::heap<BridgeListener>(events));
+    sinks.add(kj::heap<Listener>(events));
   }
 
  private:
   kj::Vector<kj::String>& events;
 };
+
+using BridgeObserver = TraceObserver<BridgeListener>;
 
 KJ_TEST("await_io_and_run() is recorded for async tracing, as awaitIo() is") {
   kj::Vector<kj::String> events;
@@ -1281,6 +1285,339 @@ KJ_TEST("past the heap limit, await_js() fails with the exception C++ awaitJs() 
   KJ_EXPECT(describeDetails(rust) == describeDetails(cpp), rust, cpp);
   cppWait = kj::none;
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+// Records the init, settle and destroy events of the awaitJs resources an async tracker creates,
+// labelled as in async-trace-io-test.c++: "awaitJs#1" is the first, and "request" a request, so
+// that the events of different runs compare equal.
+class AwaitJsTraceListener final: public AsyncTraceListener {
+ public:
+  explicit AwaitJsTraceListener(kj::Vector<kj::String>& events): events(events) {}
+
+  void onInit(uint64_t, const AsyncInitEvent& e) override {
+    if (e.kind == AsyncKind::REQUEST) {
+      labels.insert(e.id, kj::str("request"));
+    } else if (e.kind == AsyncKind::JS_TO_KJ && e.name == "awaitJs"_kj.asArray()) {
+      auto label = kj::str("awaitJs#", ++awaitJsCount);
+      events.add(
+          kj::str("init ", label, " trigger=", labelOf(e.trigger), " exec=", labelOf(e.execution)));
+      labels.insert(e.id, kj::mv(label));
+    }
+  }
+  void onSettle(uint64_t, AsyncId id, AsyncOutcome outcome, uint64_t) override {
+    KJ_IF_SOME(label, awaitJsLabel(id)) {
+      events.add(kj::str("settle ", label, " ", nameOf(outcome)));
+    }
+  }
+  void onDestroy(uint64_t, AsyncId id, uint64_t) override {
+    KJ_IF_SOME(label, awaitJsLabel(id)) {
+      events.add(kj::str("destroy ", label));
+    }
+  }
+
+ private:
+  kj::Vector<kj::String>& events;
+  kj::HashMap<AsyncId, kj::String> labels;
+  uint awaitJsCount = 0;
+
+  kj::String labelOf(AsyncId id) {
+    if (id == 0) return kj::str("-");
+    KJ_IF_SOME(label, labels.find(id)) {
+      return kj::str(label);
+    }
+    return kj::str("?", id);
+  }
+
+  kj::Maybe<kj::StringPtr> awaitJsLabel(AsyncId id) {
+    KJ_IF_SOME(label, labels.find(id)) {
+      if (label.startsWith("awaitJs#")) return label.asPtr();
+    }
+    return kj::none;
+  }
+
+  static kj::StringPtr nameOf(AsyncOutcome outcome) {
+    switch (outcome) {
+      case AsyncOutcome::OK:
+        return "OK"_kj;
+      case AsyncOutcome::ERROR:
+        return "ERROR"_kj;
+      case AsyncOutcome::CANCELED:
+        return "CANCELED"_kj;
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
+// How the wait that traceAwaitJs() starts ends.
+enum class TracedWait {
+  FULFILLED,
+  REJECTED,
+  // The conversion fails with its own error, a KJ exception in C++.
+  MAP_FAILS,
+  // JavaScript throws in the conversion.
+  MAP_THROWS,
+  CANCELLED_THEN_FULFILLED,
+  CANCELLED_THEN_REJECTED,
+  // GC collects the promise of a cancelled wait, which never settles.
+  CANCELLED_THEN_COLLECTED,
+  // GC collects the promise, which never settles.
+  NEVER_SETTLED,
+};
+
+kj::StringPtr nameOf(TracedWait scenario) {
+  switch (scenario) {
+    case TracedWait::FULFILLED:
+      return "FULFILLED"_kj;
+    case TracedWait::REJECTED:
+      return "REJECTED"_kj;
+    case TracedWait::MAP_FAILS:
+      return "MAP_FAILS"_kj;
+    case TracedWait::MAP_THROWS:
+      return "MAP_THROWS"_kj;
+    case TracedWait::CANCELLED_THEN_FULFILLED:
+      return "CANCELLED_THEN_FULFILLED"_kj;
+    case TracedWait::CANCELLED_THEN_REJECTED:
+      return "CANCELLED_THEN_REJECTED"_kj;
+    case TracedWait::CANCELLED_THEN_COLLECTED:
+      return "CANCELLED_THEN_COLLECTED"_kj;
+    case TracedWait::NEVER_SETTLED:
+      return "NEVER_SETTLED"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+bool isCancelled(TracedWait scenario) {
+  return scenario == TracedWait::CANCELLED_THEN_FULFILLED ||
+      scenario == TracedWait::CANCELLED_THEN_REJECTED ||
+      scenario == TracedWait::CANCELLED_THEN_COLLECTED;
+}
+
+bool isCollected(TracedWait scenario) {
+  return scenario == TracedWait::NEVER_SETTLED || scenario == TracedWait::CANCELLED_THEN_COLLECTED;
+}
+
+bool fulfills(TracedWait scenario) {
+  return scenario != TracedWait::REJECTED && scenario != TracedWait::CANCELLED_THEN_REJECTED;
+}
+
+enum class Implementation { CPP, RUST };
+
+// A wait of C++ IoContext::awaitJs(), the counterpart of the one await_js_start() starts through
+// Rust's await_js(). Its resolver, if kept, must be taken in a request.
+struct CppAwaitJs {
+  kj::Maybe<jsg::Promise<double>::Resolver> resolver;
+  kj::Maybe<kj::Promise<void>> wait;
+  // How many times the conversion ran, as awaited_js_map_runs() counts for Rust's.
+  static inline uint mapRuns = 0;
+
+  // Starts the wait, with the conversion `scenario` calls for, and keeps the resolver unless GC
+  // is to collect the promise.
+  void start(const TestFixture::Environment& env, TracedWait scenario) {
+    switch (scenario) {
+      case TracedWait::MAP_FAILS:
+        startWith(env, scenario, [](jsg::Lock&, double) -> double {
+          ++mapRuns;
+          JSG_FAIL_REQUIRE(RangeError, "the conversion failed");
+        });
+        break;
+      case TracedWait::MAP_THROWS:
+        startWith(env, scenario, [](jsg::Lock& js, double) -> double {
+          ++mapRuns;
+          js.throwException(js.rangeError("thrown by JavaScript"));
+        });
+        break;
+      default:
+        startWith(env, scenario, [](jsg::Lock&, double value) {
+          ++mapRuns;
+          return value;
+        });
+        break;
+    }
+  }
+
+  // Fulfills the promise with 42, or rejects it with a TypeError, as `scenario` says, like
+  // settle_awaited_js().
+  void settle(const TestFixture::Environment& env, TracedWait scenario) {
+    auto taken = KJ_ASSERT_NONNULL(kj::mv(resolver), "the resolver was not kept");
+    resolver = kj::none;
+    if (fulfills(scenario)) {
+      taken.resolve(env.js, 42.0);
+    } else {
+      taken.reject(env.js, env.js.typeError("boom"));
+    }
+  }
+
+ private:
+  template <typename Func>
+  void startWith(const TestFixture::Environment& env, TracedWait scenario, Func func) {
+    auto paf = env.js.newPromiseAndResolver<double>();
+    wait = env.context.awaitJs(env.js, kj::mv(paf.promise), kj::mv(func))
+               .then([](double) {}, [](kj::Exception&&) {
+    }).eagerlyEvaluate(nullptr);
+    if (!isCollected(scenario)) resolver = kj::mv(paf.resolver);
+  }
+};
+
+// The way await_js_start() starts the Rust counterpart of `scenario`'s wait.
+AwaitJsStart rustStart(TracedWait scenario) {
+  switch (scenario) {
+    case TracedWait::FULFILLED:
+    case TracedWait::REJECTED:
+      return AwaitJsStart::KeepResolver;
+    case TracedWait::MAP_FAILS:
+      return AwaitJsStart::MapFails;
+    case TracedWait::MAP_THROWS:
+      return AwaitJsStart::MapThrows;
+    case TracedWait::CANCELLED_THEN_FULFILLED:
+    case TracedWait::CANCELLED_THEN_REJECTED:
+    case TracedWait::CANCELLED_THEN_COLLECTED:
+      return AwaitJsStart::Cancellable;
+    case TracedWait::NEVER_SETTLED:
+      return AwaitJsStart::DropResolver;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Starts a wait in a traced request through C++ awaitJs() or Rust's await_js(), has it go as
+// `scenario` says, and returns the events of its awaitJs resource, one per line. "settling" and
+// "settled" bracket the turn in which the promise settles or GC collects it, so the events show
+// that the resource is settled or destroyed in that turn, by the reaction or the collection.
+kj::String traceAwaitJs(TracedWait scenario, Implementation implementation) {
+  kj::Vector<kj::String> events;
+  {
+    TestFixture fixture({
+      .useRealTimers = false,
+      .isolateObserver = kj::atomicRefcounted<TraceObserver<AwaitJsTraceListener>>(events),
+    });
+    auto context = fixture.newIoContext();
+    auto request = fixture.newIncomingRequest(*context);
+    // A cancelled wait leaves the request nothing else to wait for, and it would be aborted as
+    // hung.
+    auto pendingEvent = context->registerPendingEvent();
+    CppAwaitJs cpp;
+    CppAwaitJs::mapRuns = 0;
+
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      if (implementation == Implementation::RUST) {
+        await_js_start(isolateOf(env), rustStart(scenario));
+        // A cancellable wait keeps its resolver; this one's promise is to be collected.
+        if (scenario == TracedWait::CANCELLED_THEN_COLLECTED) forget_awaited_js_resolver();
+      } else {
+        cpp.start(env, scenario);
+      }
+    });
+    fixture.pollEventLoop();
+
+    if (isCancelled(scenario)) {
+      if (implementation == Implementation::RUST) {
+        KJ_EXPECT(cancel_awaited_js());
+        fixture.pollEventLoop();
+        KJ_EXPECT(jsOutcome() == "cancelled", jsOutcome());
+      } else {
+        cpp.wait = kj::none;
+        fixture.pollEventLoop();
+      }
+    }
+
+    events.add(kj::str("settling"));
+    if (isCollected(scenario)) {
+      collectGarbage(fixture, *request);
+    } else {
+      fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+        if (implementation == Implementation::RUST) {
+          settle_awaited_js(isolateOf(env), fulfills(scenario));
+        } else {
+          cpp.settle(env, scenario);
+        }
+      });
+    }
+    events.add(kj::str("settled"));
+    fixture.pollEventLoop();
+    if (isCancelled(scenario)) {
+      auto mapRuns =
+          implementation == Implementation::RUST ? awaited_js_map_runs() : CppAwaitJs::mapRuns;
+      KJ_EXPECT(mapRuns == 0, nameOf(scenario), mapRuns);
+    }
+
+    cpp.wait = kj::none;
+    pendingEvent = nullptr;
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+  return kj::strArray(events, "\n");
+}
+
+// Runs `scenario` through C++ awaitJs() and Rust's await_js(), checks that their events are
+// the same, and returns them.
+kj::String traceAwaitJsOnBoth(TracedWait scenario) {
+  auto cpp = traceAwaitJs(scenario, Implementation::CPP);
+  auto rust = traceAwaitJs(scenario, Implementation::RUST);
+  KJ_EXPECT(cpp == rust, nameOf(scenario), cpp, rust);
+  return cpp;
+}
+
+// The events traceAwaitJs() expects when the wait's resource is created, then `last` happens in
+// the turn in which its promise settles or GC collects it.
+kj::String expectedAwaitJsEvents(kj::StringPtr last) {
+  return kj::str("init awaitJs#1 trigger=request exec=request\nsettling\n", last, "\nsettled");
+}
+
+KJ_TEST("await_js() is recorded for async tracing and settled OK when fulfilled, as in C++") {
+  auto events = traceAwaitJsOnBoth(TracedWait::FULFILLED);
+  KJ_EXPECT(events == expectedAwaitJsEvents("settle awaitJs#1 OK"), events);
+}
+
+KJ_TEST("await_js() is settled with an error for async tracing when the promise rejects or the "
+        "conversion fails, as in C++") {
+  for (auto scenario: {TracedWait::REJECTED, TracedWait::MAP_FAILS, TracedWait::MAP_THROWS}) {
+    auto events = traceAwaitJsOnBoth(scenario);
+    KJ_EXPECT(events == expectedAwaitJsEvents("settle awaitJs#1 ERROR"), nameOf(scenario), events);
+  }
+}
+
+KJ_TEST("a cancelled await_js() is still settled for async tracing as its promise settles, as in "
+        "C++") {
+  auto fulfilled = traceAwaitJsOnBoth(TracedWait::CANCELLED_THEN_FULFILLED);
+  KJ_EXPECT(fulfilled == expectedAwaitJsEvents("settle awaitJs#1 OK"), fulfilled);
+  auto rejected = traceAwaitJsOnBoth(TracedWait::CANCELLED_THEN_REJECTED);
+  KJ_EXPECT(rejected == expectedAwaitJsEvents("settle awaitJs#1 ERROR"), rejected);
+}
+
+KJ_TEST("an await_js() whose promise never settles is destroyed unsettled for async tracing, as "
+        "in C++") {
+  for (auto scenario: {TracedWait::NEVER_SETTLED, TracedWait::CANCELLED_THEN_COLLECTED}) {
+    auto events = traceAwaitJsOnBoth(scenario);
+    KJ_EXPECT(events == expectedAwaitJsEvents("destroy awaitJs#1"), nameOf(scenario), events);
+  }
+}
+
+// Starts a wait of Rust's await_js() as `start` says in a new request of `fixture`, which must
+// not be traced, fulfills its promise or has GC collect it, and returns how the wait ended.
+kj::String awaitJsUntraced(TestFixture& fixture, AwaitJsStart start) {
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_EXPECT(env.context.tryGetAsyncTracker() == kj::none);
+    KJ_EXPECT(io_context_make_await_js_resource(idOf(env.context)) == kj::none);
+    await_js_start(isolateOf(env), start);
+  });
+  if (start == AwaitJsStart::DropResolver) {
+    collectGarbage(fixture, *request);
+  } else {
+    fixture.enterContext(*request,
+        [&](const TestFixture::Environment& env) { settle_awaited_js(isolateOf(env), true); });
+  }
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+  return jsOutcome();
+}
+
+KJ_TEST("in an untraced request, await_js() creates no async trace resource and still settles") {
+  TestFixture fixture;
+  auto fulfilled = awaitJsUntraced(fixture, AwaitJsStart::KeepResolver);
+  KJ_EXPECT(fulfilled == "fulfilled: 42", fulfilled);
+  auto mapFailed = awaitJsUntraced(fixture, AwaitJsStart::MapFails);
+  KJ_EXPECT(mapFailed == "rejected: jsg.RangeError: the conversion failed", mapFailed);
+  auto neverSettled = awaitJsUntraced(fixture, AwaitJsStart::DropResolver);
+  KJ_EXPECT(neverSettled == NEVER_SETTLED_OUTCOME, neverSettled);
 }
 
 // Records the uncaught exceptions the worker logs, which it logs only at INFO level, while it

@@ -371,6 +371,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return asyncTracker.get();
   }
 
+  // The async trace resource of an awaitJs() wait, which the wait settles when the JavaScript
+  // promise settles. Inert if the context is not traced. The Rust io-context crate's await_js()
+  // creates its resource with this too.
+  AsyncResource makeAwaitJsResource() const {
+    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
+    }
+    return {};
+  }
+
   // Gets the actor, throwing if there isn't one.
   Worker::Actor& getActorOrThrow();
 
@@ -1578,8 +1588,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void resumeAfterIo(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
-  // Async trace resources for the awaitIo() and awaitJs() bridges. Inert if the context is not
-  // traced.
+  // The async trace resource for the awaitIo() bridge. Inert if the context is not traced.
+  // awaitJs()'s is makeAwaitJsResource().
   AsyncResource makeAwaitIoResource() const {
     KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
       KJ_IF_SOME(name, awaitIoOperationName) {
@@ -1595,12 +1605,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Set by AwaitIoOperation.
   mutable kj::Maybe<kj::StringPtr> awaitIoOperationName;
-  AsyncResource makeAwaitJsResource() const {
-    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
-      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
-    }
-    return {};
-  }
 
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.
