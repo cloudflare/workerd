@@ -54,6 +54,7 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
 import type { CommonHelpers, PromiseSlot, UnderlyingSinkDict } from './common';
+import type { SerializationHelpers } from '../serialization';
 const {
   isActualObject,
   kNullProtoObject,
@@ -71,6 +72,8 @@ const {
   extractSizeAlgorithm,
   convertUnderlyingSink,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteLength } =
@@ -799,6 +802,7 @@ class WritableStream<W = unknown> {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
     (this as unknown as Record<symbol, unknown>)[kWritableStreamBrand] = true;
+    markUncloneable(this);
 
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the sink is typed `object` (null and every other primitive
@@ -1108,6 +1112,7 @@ class WritableStreamDefaultController<
     sizeAlgorithm: (chunk: W) => number,
     highWaterMark: number
   ) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
@@ -1504,6 +1509,7 @@ class WritableStreamDefaultWriter<
   }
 
   constructor(stream: WritableStream<W>) {
+    markUncloneable(this);
     if (!isActualObject(stream)) {
       throw new TypeError('stream must be a WritableStream');
     }

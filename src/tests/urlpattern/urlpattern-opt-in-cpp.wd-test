@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+using UrlPatternModules = import "urlpattern-modules.capnp";
+
+# Runs the URLPattern suite against the C++ standard implementation with the dateless
+# opt-ins that move its surface toward WebIDL: it shows which of the
+# TypeScript implementation's ledger rows the C++ already matches with
+# them on. It has no TypeScript counterpart, which always matches WebIDL.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util) and expose_global_message_channel.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "urlpattern-opt-in-cpp",
+      worker = (
+        modules = UrlPatternModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "expose_global_message_channel",
+          "urlpattern_standard",
+          "set_tostring_tag",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
+      )
+    ),
+  ],
+);

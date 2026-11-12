@@ -267,6 +267,26 @@ size_t used_global_handles_size(Isolate* isolate) {
   return stats.used_global_handles_size();
 }
 
+::rust::String take_heap_snapshot(Isolate* isolate) {
+  kj::Vector<char> serialized;
+  ::workerd::jsg::HeapSnapshotActivity activity([](auto, auto) { return true; });
+  ::workerd::jsg::HeapSnapshotWriter writer([&](kj::Maybe<kj::ArrayPtr<char>> maybeChunk) {
+    KJ_IF_SOME(chunk, maybeChunk) {
+      serialized.addAll(chunk);
+    }
+    return true;
+  });
+  ::workerd::jsg::HeapSnapshotDeleter deleter;
+  auto snapshot = kj::Own<const v8::HeapSnapshot>(
+      isolate->GetHeapProfiler()->TakeHeapSnapshot(&activity, nullptr, true, true), deleter);
+  snapshot->Serialize(&writer, v8::HeapSnapshot::kJSON);
+  return ::rust::String(serialized.begin(), serialized.size());
+}
+
+size_t rust_wrappable_size() {
+  return sizeof(::workerd::rust::jsg::Wrappable);
+}
+
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
   auto tmpl = v8::ObjectTemplate::New(isolate);
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
@@ -321,6 +341,17 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
   v8::Local<v8::Value> result = deserializer.readValue(js);
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
+}
+
+void mark_js_serializable(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(object));
+  KJ_REQUIRE(handle->IsObject());
+  auto key = v8::Private::ForApi(
+      isolate, ::workerd::jsg::v8StrIntern(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY));
+  ::workerd::jsg::check(handle.As<v8::Object>()->SetPrivate(
+      js.v8Context(), key, ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(mark))));
 }
 
 bool isolates_share_group(Isolate* a, Isolate* b) {

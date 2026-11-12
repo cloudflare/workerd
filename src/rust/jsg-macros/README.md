@@ -41,15 +41,16 @@ construction keeps it in a `jsg::Cell` or `jsg::RefCell`, which make the handle 
 before the struct can leave; a `std::cell::Cell` or `RefCell` of it doesn't compile. See "Cells"
 in `src/rust/jsg/README.md`.
 
-`ts_root` marks a TypeScript generation root; it can be combined with `name`.
+`ts_root`, `ts_override` and `ts_define` customize the TypeScript declaration, as on a
+resource struct (see `#[jsg_resource]`), and can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
-The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
-`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
-contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
-`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
-leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
-reference.
+The struct implements `jsg::HoldsNoGcReferences` when every field's type does, which lets it into a
+`std::cell::Cell`, `RefCell` or `std::sync::Mutex`, and into an `Arc` if it is also `Sync`. A
+recursive struct, or two that contain each other, can't derive it, since the trait solver reports
+the cycle as an overflow, so `custom_holds_no_gc_references` on one struct in the cycle keeps the
+generated `Traced` impl and leaves the marker to its author, who implements it only if no struct in
+the cycle holds a GC reference.
 
 ```rust
 #[jsg_struct]
@@ -97,6 +98,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
   as the creator for an instance method and `None` for a static one, as C++ JSG passes
   `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A method, property or call handler that returns a promise (`jsg::Promise<T>` or
+  `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
+  conversion error included, when the isolate captures throws as rejections (the
+  `capture_async_api_throws` compatibility flag), as C++ JSG does; otherwise it throws. A
+  termination still propagates.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
@@ -133,7 +139,7 @@ impl DnsUtil {
     // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
     #[jsg_method]
     pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
-        watcher.targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
+        watcher.get(lock).targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
     }
 
     // Static — DnsUtil.create(…)
@@ -155,6 +161,11 @@ Generates JSG boilerplate for a resource type and its impl block.
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 The optional `ts_root` argument marks a TypeScript generation root.
+`ts_override = "..."` and `ts_define = "..."` customize the generated TypeScript declaration
+and add declarations next to it, like C++ `JSG_TS_OVERRIDE` and `JSG_TS_DEFINE`, using the
+override syntax described in the `## JSG_TS_OVERRIDE Rules` section of `src/workerd/jsg/README.md`.
+For example, `#[jsg_resource(ts_override = "{ json<T>(): Promise<T> }")]` replaces the
+generated `json()` method.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
@@ -270,6 +281,11 @@ data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
 types itself, as `jsg::nested_type::<Foo>(name)`. Neither can `inherit_intrinsic`; a custom
 `members` registers `jsg::inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead.
+
+A custom `members` can also choose the TypeScript customizations by compatibility flag, as C++
+does by calling `JSG_TS_OVERRIDE` conditionally in `JSG_RESOURCE_TYPE`.
+`registry.ts_override("...")` and `registry.ts_define("...")` replace the struct's
+`ts_override` and `ts_define` and any earlier call; template creation ignores them.
 
 ---
 
@@ -626,7 +642,11 @@ impl MyResource {
 `#[jsg_resource]` on a struct synthesises:
 
 - `impl jsg::Traced for MyType { fn trace(&self, visitor) { ... } }`
-- `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`
+- `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`, which with
+  `#[jsg_resource(memory_info)]` or `#[jsg_resource(custom_memory_info)]` also reports the
+  fields to heap snapshots (see [Heap Snapshots](#heap-snapshots))
+- with `#[jsg_resource(memory_info)]`, `impl jsg::VisitForMemoryInfo for MyType`, which
+  reports every named field not marked `#[jsg_memory_info(skip)]`
 
 The generated `Traced::trace` body simply calls `Traced::trace` on **every named
 field**:
@@ -650,7 +670,8 @@ use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to in
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
-| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values; map keys are not visited, so they must be `jsg::HoldsNoGcReferences`, which the bounds require |
+| `std::rc::Rc<T>` | **Not allowed** — no `Traced` impl, since a clone could reach the resource's state without the isolate lock; share a resource through `jsg::Rc` or `jsg::Weak`, and plain data with a future through `Arc<T: Send + Sync>` |
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
 | `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
@@ -665,7 +686,8 @@ because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 
 For cases where default field-by-field `Traced` behavior is not enough, use
 `#[jsg_resource(custom_trace)]` to suppress the generated `Traced` impl and
-write your own.
+write your own. The impl must visit every GC reference, and the type must be `Send`, which
+`Traced` requires (see `jsg/README.md` §Safety rules, rules 2 and 5).
 
 The macro still generates:
 
@@ -752,3 +774,95 @@ impl jsg::Traced for DynamicResource {
 ```
 
 `custom_trace` can be combined with `name`: `#[jsg_resource(name = "MyName", custom_trace)]`.
+
+## Heap Snapshots
+
+Every resource is a node in a V8 heap snapshot, as a C++ resource is: it is named after the
+struct (`workerd / MyType`), sized as the struct plus its C++ `Wrappable`, and linked to its
+JavaScript wrapper. To report its fields as well, as C++ `visitForMemoryInfo` does, add
+`memory_info` to the struct's `#[jsg_resource]`. It generates `jsg::VisitForMemoryInfo` from the
+named fields, as `Traced` is generated: each field is reported under its name, so a field added
+later is reported too, and a field whose type has no `jsg::MemoryInfo` does not compile.
+`#[jsg_memory_info(skip)]` leaves a field out. Without `memory_info` a resource reports no fields.
+
+```rust
+#[jsg_resource(memory_info)]
+pub struct EventRouter {
+    handlers: HashMap<String, jsg::Rc<Handler>>,
+    on_error: jsg::RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    name: String,
+    #[jsg_memory_info(skip)]
+    scratch: SomeTypeWithoutMemoryInfo,
+}
+```
+
+To write the impl yourself, for example to report a field under another name or a value that is
+not a field, use `custom_memory_info` instead and implement `jsg::VisitForMemoryInfo`; without
+the impl the resource does not compile:
+
+```rust
+#[jsg_resource(custom_memory_info)]
+pub struct EventRouter {
+    handlers: HashMap<String, jsg::Rc<Handler>>,
+}
+
+impl jsg::VisitForMemoryInfo for EventRouter {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"handlers", &self.handlers);
+    }
+}
+```
+
+`tracker.track_field` takes any `jsg::MemoryInfo`, the counterpart of C++
+`MemoryTracker::trackField`'s overloads: strings and collections are nodes of the memory they
+allocate, a `jsg::Rc` is an edge to the resource's node, a `TracedGlobal` an edge into the V8 heap,
+and a helper type that implements `jsg::MemoryRetainer` (C++ `JSG_MEMORY_INFO`) is a node of its
+own. Edge and node names are `c"..."` literals, since V8 reads them after the tracker's callback
+returns. See `src/rust/jsg/memory.rs` for the full list.
+
+A helper type registers its `MemoryRetainer` impl with `jsg::jsg_memory_retainer!`, which
+implements `jsg::MemoryInfo` for it, so that `track_field` takes it:
+
+```rust
+struct Cache {
+    entries: HashMap<String, String>,
+}
+
+impl jsg::MemoryRetainer for Cache {
+    fn memory_name(&self) -> &'static CStr {
+        c"Cache"
+    }
+
+    fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"entries", &self.entries);
+    }
+}
+
+jsg::jsg_memory_retainer!(Cache);
+```
+
+A retainer held as a field of a resource without `custom_trace` is traced too, so it also needs a
+`Traced` impl: `jsg::jsg_traced!(Cache);` for one that holds no GC references.
+
+A retainer's node counts its own bytes, so a collection of retainers counts only its spare
+capacity. A retainer reached twice is one node, and so is an allocation that several
+`std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
+`jsg::MemoryTracker::MAX_DEPTH` deep: a node that would be that deep is a leaf with nothing inside
+it, or an edge to a resource's JavaScript wrapper, which bounds any long chain, and which is not
+deduplicated, so that a shorter path to the same value still reports it in full. A retainer type
+is `'static`.
+
+The reporting code (`visit_for_memory_info`, `memory_info` and any `MemoryInfo` impl) follows the
+rules in `jsg::MemoryInfo`'s docs:
+
+- It must not panic. It runs in a callback from C++, where a panic aborts the process.
+- It must not write into anything it can reach. A `jsg::Cell<T>` is reported in place, and the
+  `set`, `replace` and `take` of any `jsg::Cell` on the thread panic while it is; a `RefCell` is
+  borrowed while its value is reported, so a `borrow_mut` panics; either aborts the process.
+  `MemoryInfo for std::cell::Cell<T>` exists only for `T: Copy` and reports nothing, as plain
+  data does; hold a retainer in a `jsg::Cell` instead.
+- It must not call into JavaScript.
+
+`memory_info` or `custom_memory_info` (not both) can be combined with `name`, `custom_trace`,
+`ts_root`, `ts_override` and `ts_define`. Any other flag on the struct, or one given twice, is a compile error, so a misspelled
+`memory_info` is not silently off.

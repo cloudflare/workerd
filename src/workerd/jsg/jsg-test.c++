@@ -647,6 +647,52 @@ KJ_TEST("strong jsg::Data destroyed after isolate teardown") {
   stored = kj::none;
 }
 
+// Calls `func` within a context of a ProtoIsolate that is destroyed when it returns.
+void runInShortLivedIsolate(kj::FunctionParam<void(ProtoIsolate::Lock&, Lock&)> func) {
+  ProtoIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](ProtoIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.newContext<ProtoContext>().getHandle(lock.v8Isolate),
+        [&](Lock& js) { func(lock, js); });
+  });
+}
+
+// Like a jsg::Data, a Ref<T> can outlive its isolate, and so can the Wrappable it points to. Once
+// the isolate is gone, destroying them must not touch it, whether or not the Wrappable ever had
+// a wrapper.
+
+KJ_TEST("Ref<T> to a child without a wrapper destroyed after isolate teardown") {
+  kj::Maybe<Ref<NumberBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto parent = js.alloc<BoxBox>(js.alloc<NumberBox>(1));
+    // Wrapping the parent visits the child, which has no wrapper of its own.
+    lock.getTypeHandler<Ref<BoxBox>>().wrap(js, parent.addRef());
+    stored = parent->inner.addRef();
+  });
+  stored = kj::none;
+}
+
+KJ_TEST("Ref<T> to a wrapped parent destroyed after isolate teardown") {
+  kj::Maybe<Ref<BoxBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto parent = js.alloc<BoxBox>(js.alloc<NumberBox>(1));
+    lock.getTypeHandler<Ref<BoxBox>>().wrap(js, parent.addRef());
+    stored = kj::mv(parent);
+  });
+  // Destroys the child too.
+  stored = kj::none;
+}
+
+KJ_TEST("Ref<T> whose wrapper was detached destroyed after isolate teardown") {
+  kj::Maybe<Ref<NumberBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto box = js.alloc<NumberBox>(1);
+    auto wrapper = lock.getTypeHandler<Ref<NumberBox>>().wrap(js, box.addRef());
+    detachWrapperForTest(js.v8Isolate, wrapper.As<v8::Object>());
+    stored = kj::mv(box);
+  });
+  stored = kj::none;
+}
+
 KJ_TEST("Memory Allocation Error Propagation") {
   class MyAllocator final: public v8::ArrayBuffer::Allocator {
    public:

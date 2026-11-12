@@ -28,8 +28,11 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
   the caller is responsible for and why they hold at this call site.
 - **Always** verify that functions receiving raw pointers from C++ are declared `unsafe fn`**.
 - **Always** verify that `unsafe impl Send` / `unsafe impl Sync` are justified with a comment
-  explaining why the type is safe to share across threads. `jsg::Ref<T>` is explicitly not `Send`
-  (uses `Rc` + `UnsafeCell` internally) — flag any attempt to send it across threads.
+  explaining why the type is safe to share across threads. For an object that resource state
+  holds, check that nothing in it belongs to a thread or a KJ event loop, and that it is used and
+  destroyed only under the isolate lock, or else safely without it: a resource whose `jsg::Rc`
+  outlives its isolate is dropped after `Dispose`, with no lock (`src/rust/jsg/README.md`
+  §Dropping references).
 - **Always** verify that an `allow` or `expect` of `unsafe_code` covers no more than it needs. The
   build denies `unsafe_code` in first-party crates (`//build/rust:lints`); the crates derived from
   upstream cxx in `src/rust/cxx` keep upstream's lint levels. The exception belongs at the top of
@@ -86,7 +89,7 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `TracedGlobal`, in `jsg::Cell` or `jsg::RefCell` fields (`src/rust/jsg/README.md` §Cells). A
   method or accessor can take `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its
   resource, for example to hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
-  the callback should hold `this` (or `this.downgrade()`) instead. Flag a
+  the callback should hold `this` (or `this.downgrade(lock)`) instead. Flag a
   `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it

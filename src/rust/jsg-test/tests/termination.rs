@@ -59,6 +59,22 @@ impl Terminator {
         Err(jsg::Error::new_type_error("thrown while terminating"))
     }
 
+    /// Is terminated and then fails with an `Error` of a `DOMException` type.
+    #[jsg_method]
+    fn terminate_then_fail_with_dom_error(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        crate::Harness::terminate_and_deliver(lock);
+        Err(jsg::Error::new_abort_error("thrown while terminating"))
+    }
+
+    /// Is terminated and then creates a `DOMException`, which creates nothing.
+    #[jsg_method]
+    fn terminate_then_create_dom_exception(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = lock.dom_exception("AbortError", "created while terminating");
+        assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+        result.map(drop)
+    }
+
     #[jsg_method]
     fn terminate_then_throw_error(&self, lock: &mut jsg::Lock) {
         crate::Harness::terminate_and_deliver(lock);
@@ -263,6 +279,16 @@ fn failing_while_terminating_keeps_the_termination() {
 }
 
 #[test]
+fn failing_with_a_dom_error_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenFailWithDomError");
+}
+
+#[test]
+fn creating_a_dom_exception_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenCreateDomException");
+}
+
+#[test]
 fn throw_error_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenThrowError");
 }
@@ -420,12 +446,16 @@ fn guarded_termination_survives(
                 saw_pending: Cell::new(None),
             },
         );
-        guarded = Some(obj.clone());
+        guarded = Some(obj.clone(lock));
         obj
     };
-    termination_survives_call(&crate::Harness::new(), new_guarded, call, check);
+    let harness = crate::Harness::new();
+    termination_survives_call(&harness, new_guarded, call, check);
     let guarded = guarded.expect("created by termination_survives_call");
-    assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(guarded.get(lock).saw_pending.get(), Some(true), "{call}");
+        Ok(())
+    });
 }
 
 #[test]

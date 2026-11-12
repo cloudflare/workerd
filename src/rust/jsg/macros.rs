@@ -11,6 +11,8 @@
 /// [`HoldsNoGcReferences`](crate::HoldsNoGcReferences) implementation. A generic type takes a
 /// call of its own, with its parameters first, each with at most one bound.
 ///
+/// `Traced` requires `Send`, so a generic type implements it only where it is `Send`.
+///
 /// # Example
 ///
 /// ```ignore
@@ -24,11 +26,14 @@
 #[macro_export]
 macro_rules! jsg_traced {
     (<$($g:ident $(: $b:path)?),+ $(,)?> $t:ty) => {
-        impl<$($g $(: $b)?),+> $crate::Traced for $t {
+        impl<$($g $(: $b)?),+> $crate::Traced for $t
+        where
+            $t: Send,
+        {
             fn trace(&self, _visitor: &mut $crate::v8::GcVisitor) {}
         }
 
-        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t {}
+        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t where $t: Send {}
     };
     ($($t:ty),* $(,)?) => {
         $(impl $crate::Traced for $t {
@@ -62,7 +67,11 @@ macro_rules! jsg_traced {
 ///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
 ///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
 ///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`. The variants from
+///   `OperationError` on are thrown as a `DOMException` with that name (see
+///   [`ExceptionType::is_dom_exception`](crate::v8::ffi::ExceptionType::is_dom_exception));
+///   `SyntaxError` is the JavaScript class. For another `DOMException` name, or
+///   `DOMException(SyntaxError)`, return [`Error::new_dom_exception`](crate::Error::new_dom_exception).
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_REQUIRE` which concatenates via `kj::str()`, this macro uses
 ///   Rust's standard `format!()` for string interpolation.
@@ -128,7 +137,11 @@ macro_rules! jsg_require {
 ///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
 ///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
 ///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`. The variants from
+///   `OperationError` on are thrown as a `DOMException` with that name (see
+///   [`ExceptionType::is_dom_exception`](crate::v8::ffi::ExceptionType::is_dom_exception));
+///   `SyntaxError` is the JavaScript class. For another `DOMException` name, or
+///   `DOMException(SyntaxError)`, return [`Error::new_dom_exception`](crate::Error::new_dom_exception).
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_FAIL_REQUIRE` which concatenates via `kj::str()`, this macro
 ///   uses Rust's standard `format!()` for string interpolation.

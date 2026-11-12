@@ -6,7 +6,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
@@ -279,10 +278,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   ActorRoutingMode routingMode = ActorRoutingMode::DEFAULT;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(r, o.retry) {
-      auto policy = toUserDefinedRetryPolicy(r);
-      if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-        retryPolicy = policy;
-      }
+      retryPolicy = toUserDefinedRetryPolicy(r);
     }
     KJ_IF_SOME(rm, o.routingMode) {
       JSG_REQUIRE(rm == "primary-only", RangeError, "unknown routingMode: ", rm);
@@ -494,6 +490,35 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
   }
 
   JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be deserialized in this context.");
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> ColoLocalActorNamespace::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<ColoLocalActorNamespace>(channel));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectId::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<DurableObjectId>(id->clone()));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObject::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectNamespace::snapshotClone() const {
+  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+    KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
+      return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
+          channelNumber, kj::mv(factory), actorCallRetriesAllowed, persistent));
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectClass::snapshotClone() const {
+  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+    return ownAsWrappable(kj::refcounted<DurableObjectClass>(channelNumber));
+  }
+  return kj::none;
 }
 
 }  // namespace workerd::api

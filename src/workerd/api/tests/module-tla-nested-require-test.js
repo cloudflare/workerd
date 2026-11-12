@@ -24,6 +24,58 @@ export const nestedDynamicImportDoesNotCrashSiblingTlaModule = {
   },
 };
 
+export const nestedDynamicImportOfCycleBackToImporterDoesNotCrash = {
+  async test() {
+    // Before the fix this aborted the process in V8's Module::PrepareInstantiate.
+    const entry = await import('cyc-entry');
+    const chunk = await entry.chunk;
+    strictEqual(chunk.b, 2);
+  },
+};
+
+export const deferredNestedDynamicImportSettlesTopLevelAwait = {
+  async test() {
+    const entry = await import('cyc-tla-entry');
+    const chunk = await entry.chunk;
+    strictEqual(chunk.b, 3);
+  },
+};
+
+export const deferredNestedDynamicImportRejectsWhenEvaluationThrows = {
+  async test() {
+    const entry = await import('cyc-throw-entry');
+    await rejects(entry.chunk, { message: 'deferred boom' });
+    // The module is left errored, so importing it again rethrows the same error.
+    await rejects(import('cyc-throw-chunk'), { message: 'deferred boom' });
+  },
+};
+
+export const deferredNestedDynamicImportRejectsWhenTopLevelAwaitThrows = {
+  async test() {
+    const entry = await import('cyc-tla-throw-entry');
+    await rejects(entry.chunk, { message: 'tla boom' });
+  },
+};
+
+export const deferredNestedDynamicImportRejectsWhenLinkFails = {
+  async test() {
+    const entry = await import('cyc-link-entry');
+    await rejects(entry.chunk, {
+      name: 'SyntaxError',
+      message: /does not provide an export named 'nope'/,
+    });
+  },
+};
+
+export const nestedRequireOfCycleBackToImporterThrows = {
+  async test() {
+    // Before the fix this aborted the process in V8's Module::PrepareInstantiate.
+    await rejects(import('req-cyc-entry'), {
+      message: /^Circular dependency when resolving module: /,
+    });
+  },
+};
+
 export const dynamicImportStillSettlesTopLevelAwait = {
   async test() {
     // The depth-0 drain is what settles this module's top-level await.

@@ -417,6 +417,15 @@ export class ERR_AMBIGUOUS_ARGUMENT extends NodeTypeError {
   }
 }
 
+export class ERR_CONSTRUCT_CALL_REQUIRED extends NodeTypeError {
+  constructor(name: string) {
+    super(
+      'ERR_CONSTRUCT_CALL_REQUIRED',
+      `Class constructor ${name} cannot be invoked without \`new\``
+    );
+  }
+}
+
 export class ERR_INVALID_RETURN_VALUE extends NodeTypeError {
   constructor(input: string, name: string, value: unknown) {
     super(

@@ -65,5 +65,64 @@ KJ_TEST("jsg::Lock domException") {
   });
 }
 
+KJ_TEST("newDOMException") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      v8::Local<v8::Object> handle;
+      KJ_ASSERT(
+          newDOMException(js.v8Isolate, "AbortError"_kj, js.str("aborted"_kj)).ToLocal(&handle));
+      auto exception = JsObject(handle);
+      auto domException =
+          KJ_ASSERT_NONNULL(js.global().get(js, "DOMException"_kj).tryCast<JsObject>());
+      KJ_ASSERT(exception.getPrototype(js) == domException.get(js, "prototype"_kj));
+      KJ_ASSERT(exception.get(js, "name"_kj).toString(js) == "AbortError"_kj);
+      KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "aborted"_kj);
+      KJ_ASSERT(exception.get(js, "code"_kj).toString(js) == "20"_kj);
+      KJ_ASSERT(exception.has(js, "stack"_kj));
+    });
+  });
+}
+
+KJ_TEST("newDOMException while terminating creates nothing and keeps the termination") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks that the termination stays.
+      v8::TryCatch tryCatch(js.v8Isolate);
+      try {
+        js.terminateExecutionNow();
+      } catch (JsExceptionThrown&) {}
+      KJ_ASSERT(js.v8Isolate->IsExecutionTerminating());
+      auto message = js.str("aborted"_kj);
+      KJ_ASSERT(newDOMException(js.v8Isolate, "AbortError"_kj, message).IsEmpty());
+      KJ_ASSERT(js.v8Isolate->IsExecutionTerminating());
+      js.v8Isolate->CancelTerminateExecution();
+    });
+  });
+}
+
+KJ_TEST("newDOMException while an exception is pending creates nothing and keeps it") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): the test only checks which exception is caught.
+      v8::TryCatch tryCatch(js.v8Isolate);
+      v8::Local<v8::Value> first = js.str("first"_kj);
+      js.v8Isolate->ThrowException(first);
+      auto message = js.str("aborted"_kj);
+      KJ_ASSERT(newDOMException(js.v8Isolate, "AbortError"_kj, message).IsEmpty());
+      KJ_ASSERT(tryCatch.HasCaught());
+      KJ_ASSERT(tryCatch.Exception()->StrictEquals(first));
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

@@ -49,6 +49,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::ArrayIterateUntil;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -86,6 +87,23 @@ pub mod ffi {
         ptr: usize,
     }
 
+    /// An element that exists in an array, and its index.
+    #[derive(Debug, Clone, Copy)]
+    struct ArrayElement {
+        index: u32,
+        value: Local,
+    }
+
+    /// Where [`Local::<Array>::iterate`](super::Local::iterate) stops reading.
+    #[repr(u8)]
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ArrayIterateUntil {
+        /// After the last element.
+        End,
+        /// After the first element that is an object, or after the last.
+        Object,
+    }
+
     #[derive(Debug)]
     struct Global {
         /// Strong `v8::Global<v8::Value>` handle. Always valid when non-zero.
@@ -117,6 +135,13 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
+    /// A JavaScript error class or a `DOMException` name. A `jsg::Error` holds a
+    /// `jsg::ErrorName`, which can also be a `DOMException` with a name that is not here, so a
+    /// variant is only worth adding for a name Rust code throws often. One must also be added to
+    /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
+    /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
+    /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is
+    /// not a compile error.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum ExceptionType {
         OperationError,
@@ -159,6 +184,17 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
+
+        /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
+        /// which C++ adds to the Wrappable's own.
+        unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
+
+        /// Called from C++ `Wrappable::jsgGetMemoryInfo` while a heap snapshot is taken, to
+        /// report the resource's fields to `tracker`.
+        unsafe fn wrappable_invoke_get_memory_info(
+            wrappable: &Wrappable,
+            tracker: Pin<&mut MemoryTracker>,
+        );
     }
 
     unsafe extern "C++" {
@@ -171,6 +207,9 @@ pub mod ffi {
         type PropertySetterCallbackInfo;
         type PropertyQueryCallbackInfo;
         type Wrappable;
+        /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
+        /// snapshot.
+        type MemoryTracker;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -516,12 +555,20 @@ pub mod ffi {
             index: u32,
             value: Local,
         ) -> bool;
+        // Leaves what a getter throws pending; see `call_into_js()`.
+        pub unsafe fn local_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: u32,
+        ) -> MaybeLocal;
         // Leaves what a getter or Proxy trap on an element throws pending; see
         // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            result: &mut Vec<Global>,
+            until: ArrayIterateUntil,
+            result: &mut Vec<ArrayElement>,
+            length: &mut u32,
         ) -> Result<bool>;
 
         // Local<TypedArray>
@@ -592,6 +639,54 @@ pub mod ffi {
         /// Makes a weak `v8::Global` strong again (`ClearWeak`), if it is not empty. `global`
         /// points to the `ptr` field of the `ffi::Global`.
         pub unsafe fn global_clear_weak(global: *mut usize);
+
+        // MemoryTracker
+        //
+        // Every name is a NUL-terminated string literal, or null: V8 reads the names after the
+        // heap snapshot's BuildEmbedderGraph callback returns. A null edge name is the empty
+        // name of a container's element, and a null node name is none.
+        pub unsafe fn memory_tracker_isolate(tracker: Pin<&mut MemoryTracker>) -> *mut Isolate;
+        pub unsafe fn memory_tracker_track_field_with_size(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            size: usize,
+            node_name: *const c_char,
+        );
+        pub unsafe fn memory_tracker_track_wrappable(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            wrappable: &Wrappable,
+        );
+        /// `wrappable` is a resource of the tracker's isolate.
+        pub unsafe fn memory_tracker_track_wrappable_leaf(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            wrappable: &Wrappable,
+        );
+        /// `global` is a handle of the tracker's isolate, or empty.
+        pub unsafe fn memory_tracker_track_global(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            global: &Global,
+        );
+        /// `address` and `type_tag` identify the retainer; an `address` of 0 identifies nothing.
+        pub unsafe fn memory_tracker_push_retainer(
+            tracker: Pin<&mut MemoryTracker>,
+            address: usize,
+            type_tag: usize,
+            name: *const c_char,
+            size: usize,
+            edge_name: *const c_char,
+        ) -> bool;
+        pub unsafe fn memory_tracker_push_container(
+            tracker: Pin<&mut MemoryTracker>,
+            name: *const c_char,
+            size: usize,
+            edge_name: *const c_char,
+        );
+        pub unsafe fn memory_tracker_pop_node(tracker: Pin<&mut MemoryTracker>);
+        /// How many nodes are being tracked, each inside the one before.
+        pub unsafe fn memory_tracker_depth(tracker: &MemoryTracker) -> usize;
 
         // Unwrappers
         //
@@ -690,6 +785,12 @@ pub mod ffi {
             exception_type: ExceptionType,
             message: &[u8],
         ) -> Local;
+        // Leaves what creating the DOMException throws pending (see ffi.h).
+        pub unsafe fn dom_exception_create_from_bytes(
+            isolate: *mut Isolate,
+            name: &str,
+            message: &[u8],
+        ) -> MaybeLocal;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
@@ -710,6 +811,7 @@ pub mod ffi {
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
             isolate: *mut Isolate,
         ) -> Local;
@@ -943,11 +1045,23 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
+
+    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
+    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
+    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ffi::ExceptionType {
+    /// The name of the error class or `DOMException` this type stands for.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
             Self::OperationError => "OperationError",
             Self::DataError => "DataError",
             Self::DataCloneError => "DataCloneError",
@@ -964,8 +1078,29 @@ impl std::fmt::Display for ffi::ExceptionType {
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
             _ => "Error",
-        };
-        write!(f, "{name}")
+        }
+    }
+
+    /// Whether an error of this type is thrown as a `DOMException` with this name, rather than
+    /// as a JavaScript error class.
+    ///
+    /// `SyntaxError` is the JavaScript `SyntaxError`, never `DOMException(SyntaxError)`.
+    #[must_use]
+    pub fn is_dom_exception(self) -> bool {
+        matches!(
+            self,
+            Self::OperationError
+                | Self::DataError
+                | Self::DataCloneError
+                | Self::InvalidAccessError
+                | Self::InvalidStateError
+                | Self::InvalidCharacterError
+                | Self::NotSupportedError
+                | Self::TimeoutError
+                | Self::TypeMismatchError
+                | Self::AbortError
+                | Self::NotFoundError
+        )
     }
 }
 
@@ -1899,14 +2034,14 @@ impl Function {
     /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
     /// traces may lead back to the function. Two things break this:
     ///
-    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
-    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
-    ///   collector, and the function and `data` are freed only when the isolate is torn down.
-    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
-    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
-    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
-    ///   traced from two owners can be freed while one of them still uses it. To share state,
-    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (which has no
+    ///   `Traced` impl, but can hide inside a type with a hand-written one). If it can reach the
+    ///   function, the cycle is invisible to the garbage collector, and the function and `data`
+    ///   are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces. `data` must be the only owner that
+    ///   traces what it traces: tracing one `jsg::Rc` from two owners fails an assertion, and a
+    ///   `TracedGlobal` traced from two owners can be freed while one of them still uses it. To
+    ///   share state, hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
     ///
     /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
     /// from `data`.
@@ -2262,29 +2397,79 @@ impl<'s> Local<'s, Array> {
         })
     }
 
-    /// Iterates over array elements using V8's native `Array::Iterate()`.
-    /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
+    /// Reads element `index`, like JS `array[index]`: a hole reads through the prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a getter, on the array or its prototype chain, throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn get(self, lock: &mut Lock<'s>, index: u32) -> crate::Result<Local<'s, Value>> {
+        self.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_array_get(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    index,
+                ))
+            })
+        })
+    }
+
+    /// Reads every element that exists, using V8's native `Array::Iterate()`, as a handle in the
+    /// current scope, up to `until`. Each index below [`ArrayElements::length`] without an element
+    /// is a hole, which reads as `undefined`.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        let globals = call_into_js(lock, |lock| {
-            let mut globals = Vec::new();
+    pub fn iterate(
+        self,
+        lock: &mut Lock<'s>,
+        until: ArrayIterateUntil,
+    ) -> crate::Result<ArrayElements<'s>> {
+        call_into_js(lock, |lock| {
+            let mut elements = Vec::new();
+            let mut length = 0;
             // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
             let ok = unsafe {
-                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+                ffi::local_array_iterate(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    until,
+                    &mut elements,
+                    &mut length,
+                )
             }?;
-            Ok(ok.then_some(globals))
-        })?;
-        let state = lock.isolate_state();
-        Ok(globals
-            .into_iter()
-            .map(|g| TracedGlobal::from_ffi_in(g, Arc::clone(state)))
-            .collect())
+            Ok(ok.then(|| ArrayElements {
+                length: length as usize,
+                elements: elements
+                    .into_iter()
+                    .map(|element| {
+                        // SAFETY: the shim opened the elements in the current HandleScope.
+                        let value = unsafe { Local::from_ffi(element.value) };
+                        (element.index as usize, value)
+                    })
+                    .collect(),
+            }))
+        })
     }
+}
+
+/// The elements of an array, as [`Local::<Array>::iterate`] reads them.
+#[derive(Debug)]
+pub struct ArrayElements<'s> {
+    /// The number of elements the array converts to: its length, or more if a getter shortened
+    /// it after its element was read.
+    pub length: usize,
+    /// The elements that exist, with their indices, in index order. Each index below `length`
+    /// that isn't here is a hole.
+    pub elements: Vec<(usize, Local<'s, Value>)>,
 }
 
 // =============================================================================
@@ -2981,6 +3166,8 @@ macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
+
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> std::string::String {
                 $name.to_owned()
@@ -3997,6 +4184,23 @@ impl<T> crate::Traced for TracedGlobal<T> {
     }
 }
 
+/// An edge to the value in the V8 heap, as C++ reports a `jsg::V8Ref`.
+impl<T> crate::MemoryInfo for TracedGlobal<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        if !tracker.can_track_object_of(&self.state) {
+            return;
+        }
+        // SAFETY: the handle belongs to the snapshot's isolate, as checked above, whose lock the
+        // snapshot holds, so reading the slot races with no GC. The handle is empty if it was
+        // weak and its value died.
+        unsafe { tracker.track_global(edge_name, &self.strong_handle()) };
+    }
+}
+
 // Note: TracedGlobal<T> intentionally does NOT implement the std Clone trait.
 // Cloning a V8 persistent handle requires an isolate pointer to create an
 // independent handle via v8::Global::New(isolate, original). The Clone trait
@@ -4140,6 +4344,21 @@ impl<T> Drop for Global<T> {
     fn drop(&mut self) {
         let handle = std::mem::replace(&mut self.handle, ffi::Global { ptr: 0 });
         self.state.drop_global(handle);
+    }
+}
+
+/// An edge to the value in the V8 heap, as C++ reports a strong `v8::Global`.
+impl<T> crate::MemoryInfo for Global<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        if !tracker.can_track_object_of(&self.state) {
+            return;
+        }
+        // SAFETY: the handle belongs to the snapshot's isolate, as checked above.
+        unsafe { tracker.track_global(edge_name, &self.handle) };
     }
 }
 
@@ -4592,6 +4811,30 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
     }
 }
 
+unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &ffi::Wrappable) -> usize {
+    // SAFETY: wrappable is valid, and a trait object that is not cleared is alive.
+    unsafe {
+        ffi::TraitObjectPtr::from_wrappable(wrappable)
+            .map_or(0, |trait_ptr| trait_ptr.as_gc_ref().memory_self_size())
+    }
+}
+
+unsafe fn wrappable_invoke_get_memory_info(
+    wrappable: &ffi::Wrappable,
+    tracker: Pin<&mut ffi::MemoryTracker>,
+) {
+    // SAFETY: wrappable is valid, and a trait object that is not cleared is alive.
+    unsafe {
+        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
+            return;
+        };
+        // A resource's fields are reported however deep its node is: what they hold is a leaf
+        // past `MAX_DEPTH`.
+        let mut tracker = crate::MemoryTracker::from_ffi(tracker);
+        trait_ptr.as_gc_ref().memory_info(&mut tracker);
+    }
+}
+
 /// Visitor for garbage collection tracing.
 ///
 /// `GcVisitor` wraps a C++ `jsg::GcVisitor` pointer. All GC visitation logic
@@ -4660,12 +4903,54 @@ impl GcVisitor {
     ///
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
+    ///
+    /// The visit changes the `jsg::Rc`'s counts, so it leaves alone an `Rc` of an isolate whose
+    /// lock this visit doesn't hold; see [`GcVisitor::may_change_in`].
+    ///
+    /// # Panics
+    /// Panics in a detaching visit if `r` belongs to an isolate other than the lock's, or to
+    /// one that is closed.
     pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
+        if !self.may_change_in(r.isolate_state(), "jsg::Rc") {
+            return;
+        }
         if self.is_detaching() {
             r.detach();
         } else {
             r.visit(self);
         }
+    }
+
+    /// Whether this visit may change a reference of the isolate of `state`, whose counts only
+    /// that isolate's lock guards:
+    ///
+    /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
+    ///   another, or of a closed isolate.
+    /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
+    ///   reference as it is: a strong reference stays strong, so its target leaks rather than
+    ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
+    ///   still runs until it is disposed.
+    /// - The visit for a resource's first strong reference has no isolate; it may change the
+    ///   reference only if this thread holds the lock of the reference's isolate.
+    pub(crate) fn may_change_in(&mut self, state: &IsolateState, what: &str) -> bool {
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                !state.is_closed() && state.belongs_to(isolate),
+                "attempt to use a {what} in an isolate other than the one it was created in"
+            );
+            return true;
+        }
+        // SAFETY: the visitor is valid for the duration of the visit.
+        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
+        if visiting.is_null() {
+            return state.this_thread_holds_lock();
+        }
+        let own = state.belongs_to(visiting);
+        debug_assert!(
+            own,
+            "a {what} was visited on behalf of an isolate other than its own"
+        );
+        own && !state.is_closed()
     }
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
@@ -4728,8 +5013,7 @@ impl GcVisitor {
     /// The visit makes the handle strong if the parent has strong Rust references, and weak if
     /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
     /// last visit wins, and the value can be collected while the other owner still uses it. So
-    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
-    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    /// a `TracedGlobal` must have exactly one GC owner; see `README.md` §Safety rules, rule 2.
     ///
     /// # Panics
     /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
@@ -4858,6 +5142,7 @@ impl IsolatePtr {
     }
 
     /// Returns the raw pointer to the V8 isolate.
+    #[inline]
     pub fn as_ffi(&self) -> *mut ffi::Isolate {
         self.handle.as_ptr()
     }
@@ -4880,51 +5165,54 @@ impl IsolatePtr {
 /// `Clone` / `Drop` only affect the `KjRc` refcount (`kj::Rc` reference counting).
 /// GC strong-ref tracking (`addStrongRef` / `removeStrongRef`) is handled by
 /// `Rc<R>`, not here.
+///
+/// It is private to the crate: its `Clone` and `Drop` change the `kj::Rc` count without checking
+/// the isolate lock, so it is used only under the lock, or by `Rc<R>` and `Weak<R>`, which
+/// release it as they release their other parts.
 #[derive(Clone)]
-pub struct WrappableRc {
+pub(crate) struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
 }
 
+/// Resolves the receiver `value` of a callback registered without a `v8::Signature`
+/// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
+/// a reference.
+///
+/// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+/// `value` is reachable, which a callback's `this` is for the duration of the call.
+#[doc(hidden)]
+pub fn resolve_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
+    let ptr = unsafe {
+        ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+    };
+    ptr?.resolve::<R>()
+}
+
+/// Like [`resolve_receiver`], for the receiver of a method registered with a
+/// `v8::Signature`.
+///
+/// # Safety
+///
+/// V8 must have checked `value` against the signature of a method of a resource type.
+#[doc(hidden)]
+pub unsafe fn resolve_method_receiver<R: 'static>(
+    lock: &mut Lock<'_>,
+    value: Local<'_, Value>,
+) -> Option<NonNull<R>> {
+    // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
+    // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
+    // keeps alive.
+    let ptr =
+        unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
+    ptr?.resolve::<R>()
+}
+
 impl WrappableRc {
-    /// Resolves the receiver `value` of a callback registered without a `v8::Signature`
-    /// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
-    /// a reference.
-    ///
-    /// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
-    /// `value` is reachable, which a callback's `this` is for the duration of the call.
-    #[doc(hidden)]
-    pub fn resolve_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
-        // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
-    /// Like [`Self::resolve_receiver`], for the receiver of a method registered with a
-    /// `v8::Signature`.
-    ///
-    /// # Safety
-    ///
-    /// V8 must have checked `value` against the signature of a method of a resource type.
-    #[doc(hidden)]
-    pub unsafe fn resolve_method_receiver<R: 'static>(
-        lock: &mut Lock<'_>,
-        value: Local<'_, Value>,
-    ) -> Option<NonNull<R>> {
-        // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
-        // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
-        // keeps alive.
-        let ptr = unsafe {
-            ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
-        };
-        ptr?.resolve::<R>()
-    }
-
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable
@@ -4932,8 +5220,7 @@ impl WrappableRc {
     ///
     /// The C++ `unwrap_resource` returns `None` when the value doesn't contain
     /// a Rust Wrappable.
-    #[doc(hidden)]
-    pub fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
+    pub(crate) fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); value handle is valid.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
             unsafe { ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) }.into();
@@ -4981,7 +5268,7 @@ impl WrappableRc {
     /// V8 has already created the `this` object from the `FunctionTemplate`'s
     /// `InstanceTemplate`; this method attaches the Wrappable to it via
     /// `CppgcShim` so that instance methods can resolve the resource.
-    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
+    pub(crate) fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
         // SAFETY: info is valid for the duration of the callback.
         let pin = unsafe { std::pin::Pin::new_unchecked(&mut *info.0) };
         // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches
@@ -5063,6 +5350,16 @@ impl WrappableRc {
     pub(crate) fn as_ptr(&self) -> NonNull<ffi::Wrappable> {
         // SAFETY: KjRc always holds a valid, non-null pointer.
         unsafe { NonNull::new_unchecked(self.handle.get().cast_mut()) }
+    }
+
+    /// Reports the Wrappable to a heap snapshot, as C++ reports a `jsg::Ref`.
+    pub(crate) fn track(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        // SAFETY: the KjRc keeps the Wrappable alive.
+        tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
     }
 
     /// Increments the strong reference count on the underlying Wrappable.

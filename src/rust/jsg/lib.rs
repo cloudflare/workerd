@@ -17,7 +17,9 @@ pub mod feature_flags;
 mod isolate_state;
 pub mod json;
 pub mod lenient;
+mod lock_guarded;
 pub mod macros;
+mod memory;
 pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
@@ -44,6 +46,11 @@ pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use lock_guarded::LockGuarded;
+pub use memory::MemoryInfo;
+pub use memory::MemoryRetainer;
+pub use memory::MemoryTracker;
+pub use memory::VisitForMemoryInfo;
 pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
 #[doc(hidden)]
@@ -135,11 +142,16 @@ mod ffi {
         /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
         unsafe fn realm_drain_awaiting_lock(isolate: *mut Isolate);
 
+        /// Records that the isolate is about to be disposed; see
+        /// `IsolateState::isolate_disposing`. `~IsolateBase` calls it just before
+        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
+        /// reference to the state that `realm_detach` was given.
+        unsafe fn isolate_disposing(state: *const IsolateState);
+
         /// Frees the slots of `TracedGlobal`s, and releases the references of `Rc`s and
         /// `Weak`s, dropped after the Realm; see `IsolateState::isolate_disposed`.
-        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the hook that
-        /// `realm_detach` installs, with the reference to the state that `realm_detach` was
-        /// given.
+        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
+        /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
@@ -158,15 +170,10 @@ mod ffi {
         /// Stores `realm` in the isolate's data slot and installs the deferred action hook
         /// that calls `realm_drain_awaiting_lock`.
         pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
-        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
-        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
-        /// the isolate is disposed.
+        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that passes
+        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposing` just
+        /// before the isolate is disposed, then hands it to `isolate_disposed` once it is.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
-
-        // Autogates
-        /// Whether the `JSG_INTEGER_ENFORCE_RANGE` autogate is enabled; see
-        /// `wrappable::integer_part_for_range_check`.
-        pub fn integer_enforce_range_autogate_enabled() -> bool;
     }
 }
 
@@ -195,9 +202,105 @@ impl From<&str> for ExceptionType {
     }
 }
 
+/// What an [`Error`] is thrown as: an instance of a JavaScript error class, or a `DOMException`
+/// with a name.
+///
+/// The two are separate because their names overlap: `SyntaxError` is both a JavaScript class
+/// and a `DOMException` name, and C++ throws either. An [`ExceptionType`] converts to the
+/// variant it is thrown as, so its `DOMException` names become [`ErrorName::DomException`], and
+/// the variants compare equal to the `ExceptionType`s they are thrown as.
+#[derive(Debug, Clone)]
+pub enum ErrorName {
+    /// An instance of the JavaScript error class: `Error`, `TypeError`, `RangeError`,
+    /// `ReferenceError` or `SyntaxError`. A `DOMException` name here (see
+    /// [`ExceptionType::is_dom_exception`]) is thrown as that `DOMException`, as
+    /// [`ErrorName::from`] would make it.
+    Class(ExceptionType),
+    /// A `DOMException` with this name, which may be any string, as for C++
+    /// `jsg::Lock::domException()`.
+    DomException(std::borrow::Cow<'static, str>),
+}
+
+impl ErrorName {
+    /// The `name` of the exception thrown.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Class(class) => class.as_str(),
+            Self::DomException(name) => name,
+        }
+    }
+
+    /// Whether this is thrown as a `DOMException`.
+    #[must_use]
+    pub fn is_dom_exception(&self) -> bool {
+        match self {
+            Self::Class(class) => class.is_dom_exception(),
+            Self::DomException(_) => true,
+        }
+    }
+
+    /// The JavaScript error class thrown, or `None` for a `DOMException`.
+    #[must_use]
+    pub fn class(&self) -> Option<ExceptionType> {
+        match *self {
+            Self::Class(class) if !class.is_dom_exception() => Some(class),
+            _ => None,
+        }
+    }
+
+    /// The JavaScript error class named `name`, or `Error` for any other name. Unlike
+    /// [`ExceptionType::from`], this never gives a `DOMException`: it is for the `name` of a
+    /// JavaScript error object, which is a class even when its name is a `DOMException` name.
+    fn class_named(name: &str) -> Self {
+        match ExceptionType::from(name) {
+            class if class.is_dom_exception() => Self::Class(ExceptionType::Error),
+            class => Self::Class(class),
+        }
+    }
+}
+
+impl From<ExceptionType> for ErrorName {
+    fn from(value: ExceptionType) -> Self {
+        if value.is_dom_exception() {
+            Self::DomException(std::borrow::Cow::Borrowed(value.as_str()))
+        } else {
+            Self::Class(value)
+        }
+    }
+}
+
+impl PartialEq for ErrorName {
+    /// Whether the two are thrown as the same exception: both as a `DOMException`, or both as
+    /// a JavaScript class, with the same name.
+    fn eq(&self, other: &Self) -> bool {
+        self.is_dom_exception() == other.is_dom_exception() && self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for ErrorName {}
+
+impl PartialEq<ExceptionType> for ErrorName {
+    fn eq(&self, other: &ExceptionType) -> bool {
+        self.is_dom_exception() == other.is_dom_exception() && self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<ErrorName> for ExceptionType {
+    fn eq(&self, other: &ErrorName) -> bool {
+        other == self
+    }
+}
+
+impl std::fmt::Display for ErrorName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Error {
-    pub name: ExceptionType,
+    pub name: ErrorName,
     pub message: String,
     /// If `true`, `message` must never reach guest JS verbatim: it may contain
     /// implementation details (a raw KJ exception description, a C++ source
@@ -229,7 +332,7 @@ macro_rules! impl_error_constructors {
             $(
                 pub fn $fn_name(message: impl Into<String>) -> Self {
                     Self {
-                        name: ExceptionType::$variant,
+                        name: ExceptionType::$variant.into(),
                         message: message.into(),
                         is_internal: false,
                         pending: false,
@@ -292,7 +395,10 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
+                // A `DOMException` is not a native error, so `name` names a class.
+                name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
+                    ErrorName::class_named(&n)
+                }),
                 message,
                 is_internal: false,
                 pending: false,
@@ -304,9 +410,11 @@ impl<'s> FromJS<'s> for Error {
 }
 
 impl Error {
+    /// An error of the [`ExceptionType`] named `name`, or `Error` for any other name. For a
+    /// `DOMException` with a name of its own, use [`Error::new_dom_exception`].
     pub fn new(name: &str, message: &str) -> Self {
         Self {
-            name: ExceptionType::from(name),
+            name: ExceptionType::from(name).into(),
             message: message.to_owned(),
             is_internal: false,
             pending: false,
@@ -323,7 +431,22 @@ impl Error {
     #[doc(hidden)]
     pub fn from_type(name: ExceptionType, message: impl Into<String>) -> Self {
         Self {
-            name,
+            name: name.into(),
+            message: message.into(),
+            is_internal: false,
+            pending: false,
+        }
+    }
+
+    /// An error thrown as a `DOMException` named `name`, which may be any name, as C++
+    /// `JSG_REQUIRE(..., DOMQuotaExceededError, ...)` throws one. This is the way to throw
+    /// `DOMException(SyntaxError)`, which [`ExceptionType::SyntaxError`] is not.
+    pub fn new_dom_exception(
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: ErrorName::DomException(name.into()),
             message: message.into(),
             is_internal: false,
             pending: false,
@@ -366,15 +489,27 @@ impl Error {
         self.pending
     }
 
-    /// Creates a V8 exception from this error.
+    /// Creates a V8 exception from this error: a `DOMException` if [`ErrorName::is_dom_exception`]
+    /// is true, as [`Lock::dom_exception`] creates it, and otherwise an instance of the
+    /// JavaScript error class.
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
     /// which does perform that check before falling back to this method. A message longer
     /// than V8's string limit is cut to fit; see [`Lock::error`].
-    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        lock.create_error_from_bytes(self.name, self.message.as_bytes())
-            .into()
+    ///
+    /// # Errors
+    ///
+    /// Only creating a `DOMException` can fail; see [`Lock::dom_exception`].
+    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
+        match self.name.class() {
+            Some(class) => Ok(lock
+                .create_error_from_bytes(class, self.message.as_bytes())
+                .into()),
+            None => lock
+                .create_dom_exception_from_bytes(self.name.as_str(), self.message.as_bytes())
+                .map(Into::into),
+        }
     }
 }
 
@@ -475,8 +610,10 @@ impl Error {
         if let Some(rest) = body.strip_prefix("DOMException(")
             && let Some((name, message)) = rest.split_once("): ")
         {
+            // Any name, as C++ `decodeTunneledException()` accepts: `SyntaxError` here is
+            // `DOMException(SyntaxError)`, and `QuotaExceededError` is not an `ExceptionType`.
             return Some(Self {
-                name: ExceptionType::from(name),
+                name: ErrorName::DomException(name.to_owned().into()),
                 message: message.to_owned(),
                 is_internal,
                 pending: false,
@@ -485,7 +622,7 @@ impl Error {
 
         let (ty, message) = body.split_once(": ")?;
         Some(Self {
-            name: ExceptionType::from(ty),
+            name: ExceptionType::from(ty).into(),
             message: message.to_owned(),
             is_internal,
             pending: false,
@@ -499,7 +636,7 @@ impl Error {
     /// `makeInternalError()`).
     pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::Error,
+            name: ErrorName::Class(ExceptionType::Error),
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -714,6 +851,44 @@ impl<'s> Lock<'s> {
         error
     }
 
+    /// Creates a `DOMException` with the given name and message.
+    ///
+    /// Mirrors C++ `jsg::Lock::domException()`, and accepts any name, as it does. It creates
+    /// what [`Error::to_local`] creates for [`Error::new_dom_exception`]; returning that error
+    /// throws the same `DOMException`, so use this only to attach properties before throwing.
+    /// A message longer than V8's string limit is cut to fit; see [`Lock::error`].
+    ///
+    /// # Errors
+    ///
+    /// Unlike creating an `Error`, this needs the current context, so it fails with an error for
+    /// which [`Error::is_pending`] is true if an exception or a termination is pending, or if
+    /// creating the `DOMException` throws (as it does when the stack is exhausted).
+    pub fn dom_exception(
+        &mut self,
+        name: &str,
+        message: &str,
+    ) -> Result<v8::Local<'s, v8::Object>> {
+        self.create_dom_exception_from_bytes(name, message.as_bytes())
+    }
+
+    fn create_dom_exception_from_bytes(
+        &mut self,
+        name: &str,
+        message: &[u8],
+    ) -> Result<v8::Local<'s, v8::Object>> {
+        let message = error_message_for_v8(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked; the result belongs to the
+        // lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(v8::ffi::dom_exception_create_from_bytes(
+                self.isolate().as_ffi(),
+                name,
+                message,
+            ))
+        }
+        .ok_or_else(Error::pending)
+    }
+
     /// Throws a JavaScript `Error` with the given message, as [`Lock::error`] creates it.
     ///
     /// Throws nothing while execution is terminating; see [`Lock::throw_exception`].
@@ -797,12 +972,14 @@ impl<'s> Lock<'s> {
             // the exception.
             return;
         }
+        // Creating a DOMException that fails leaves its exception pending, which then propagates
+        // in place of `err`.
+        let Ok(exception) = err.to_local(self) else {
+            return;
+        };
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_throw_exception(
-                self.isolate().as_ffi(),
-                err.to_local(self).into_ffi(),
-            );
+            v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), exception.into_ffi());
         }
     }
 
@@ -910,14 +1087,14 @@ impl<'s> Lock<'s> {
     /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
     /// pending in V8, and returning the error propagates it. While execution is terminating,
     /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
-    /// termination; an internal error's message is still logged.
+    /// termination; an internal error's message is still logged. Creating a `DOMException` can
+    /// fail too; see [`Lock::dom_exception`].
     pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
         if err.is_pending() {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Nothing could be rejected with the exception, so it is not created. (Creating it
-            // would be safe: creating an error object takes no context.)
+            // Nothing could be rejected with the exception, so it is not created.
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);
@@ -934,7 +1111,7 @@ impl<'s> Lock<'s> {
                 ))
             });
         }
-        Ok(err.to_local(self))
+        err.to_local(self)
     }
 
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
@@ -1012,19 +1189,12 @@ impl<'s> Lock<'s> {
 
 /// Provides metadata about Rust types exposed to JavaScript.
 ///
-/// This trait provides type information used for error messages, memory tracking,
-/// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
-/// `ToJS` (Rust → JS) and `FromJS` (JS → Rust).
-///
-/// TODO: Implement `memory_info(jsg::MemoryTracker)`
+/// This trait provides type information used for error messages and type validation (for
+/// `NonCoercible<T>`). The actual conversion logic is in `ToJS` (Rust → JS) and `FromJS`
+/// (JS → Rust). What a resource reports to heap snapshots is in [`GarbageCollected`].
 pub trait Type: Sized {
     /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
-
-    /// Same as jsgGetMemorySelfSize
-    fn memory_self_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
@@ -1234,11 +1404,13 @@ pub enum Member {
 /// Trait for types that participate in V8 garbage collection as tracked resources.
 ///
 /// Extends [`Traced`] (which provides the `trace` method for visiting nested
-/// GC-visible references) with a class name for heap snapshot tooling.
+/// GC-visible references) with what the resource reports to heap snapshots.
 ///
 /// `#[jsg_resource]` auto-derives both `Traced` and `GarbageCollected`.
 /// Use `#[jsg_resource(custom_trace)]` to suppress the generated `Traced`
-/// impl and provide your own.
+/// impl and provide your own, and `#[jsg_resource(memory_info)]` (generated) or
+/// `#[jsg_resource(custom_memory_info)]` (hand-written) to have `memory_info` call the resource's
+/// [`VisitForMemoryInfo`] impl.
 pub trait GarbageCollected: Traced {
     /// Class name for heap snapshots / debugging.
     ///
@@ -1246,6 +1418,16 @@ pub trait GarbageCollected: Traced {
     /// construct a `kj::StringPtr` directly from the NUL-terminated pointer without any
     /// allocation or caching. Implementations must not access `self`.
     fn memory_name(&self) -> &'static std::ffi::CStr;
+
+    /// The size of the resource in a heap snapshot, without what it allocates. C++ adds it to
+    /// the size of the resource's `Wrappable`.
+    fn memory_self_size(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+
+    /// Reports the resource's fields to a heap snapshot: the C++ `jsgGetMemoryInfo` of a
+    /// resource. Reports nothing by default.
+    fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
@@ -1354,6 +1536,18 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
 /// See the bridge declaration.
 #[expect(
     unsafe_code,
+    reason = "borrows the reference to the state that C++ holds"
+)]
+unsafe fn isolate_disposing(state: *const IsolateState) {
+    // SAFETY: `state` comes from `Arc::into_raw` in `Realm::drop`, and C++ holds it until it
+    // hands it to `isolate_disposed`, after this call.
+    let state = unsafe { &*state };
+    state.isolate_disposing();
+}
+
+/// See the bridge declaration.
+#[expect(
+    unsafe_code,
     reason = "takes back the reference to the state that C++ held"
 )]
 unsafe fn isolate_disposed(state: *const IsolateState) {
@@ -1388,6 +1582,43 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
 /// the `PREPARE_SNAPSHOT` pipeline.
 fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
     realm.resources.take_template_handles()
+}
+
+/// Runs `body`, the body of the generated callback of a method or property that returns a
+/// promise, as C++ JSG's `LiftKj_<v8::Local<v8::Promise>>` (`src/workerd/jsg/util.h`) runs one:
+/// if the isolate captures throws as rejections (the `capture_async_api_throws` compatibility
+/// flag), what `body` throws, an argument conversion error included, is caught and returned
+/// through `set_return_value` as a rejected promise instead. A termination is not caught.
+#[doc(hidden)]
+pub fn capture_throws_as_rejection<'s, A>(
+    lock: &mut Lock<'s>,
+    args: &mut A,
+    body: impl FnOnce(&mut Lock<'s>, &mut A),
+    set_return_value: impl FnOnce(&mut A, v8::Local<'s, v8::Value>),
+) {
+    if !lock.captures_throws_as_rejections() {
+        body(lock, args);
+        return;
+    }
+    let caught = lock.try_catch(|lock| {
+        body(lock, args);
+        // `body` throws rather than returning an error; a thrown exception is pending in the
+        // `TryCatch` of `try_catch` until it returns.
+        if lock.has_pending_exception() {
+            Err(Error::pending())
+        } else {
+            Ok(())
+        }
+    });
+    match caught {
+        Ok(Ok(())) => {}
+        Ok(Err(exception)) => match v8::Promise::rejected(lock, exception) {
+            Ok(promise) => set_return_value(args, promise.into()),
+            Err(err) => lock.throw_exception(&err),
+        },
+        // Execution is terminating, and the termination stays pending.
+        Err(err) => lock.throw_exception(&err),
+    }
 }
 
 /// Opens `scope` and runs `f` with its lock, catching any panic and converting it to a JS

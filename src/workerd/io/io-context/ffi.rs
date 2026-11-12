@@ -182,6 +182,11 @@ pub type IoCallbackFn =
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);
 
+// SAFETY: it holds a C++ `IoOwn`, whose destructor deletes the object at once on the thread of
+// its IoContext and otherwise queues it, through a mutex, to the IoContext's `DeleteQueue`, which a
+// `kj::Arc` keeps alive. It is never dereferenced.
+unsafe impl Send for bridge::IoOwnedObject {}
+
 /// A value that `IoContext::add_object()` hands to C++, which drops it with the `IoContext`.
 /// Dropping it drops the value it holds, unless Rust took the value first.
 pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn Send>);

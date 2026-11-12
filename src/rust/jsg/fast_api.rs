@@ -72,8 +72,7 @@ impl FastApiArg for f64 {
 // path's. V8's own integer argument types convert differently: by default with `ToInt32`'s
 // wrapping, and with `kEnforceRangeBit` they truncate before the range check, so that
 // `2 ** 31 - 0.5` is an `int32_t` and `-0.5` a `uint32_t`. `from_number` converts both like
-// that only with the `JSG_INTEGER_ENFORCE_RANGE` autogate (see `wrappable.rs`); without it, it
-// checks the range first and throws a `TypeError` for both. C++ JSG does the same in each state.
+// that too (see `wrappable.rs`), as C++ JSG's slow path (`jsg/value.h`) does.
 
 macro_rules! impl_fast_api_integer_arg {
     ($($type:ty),*) => {
@@ -298,9 +297,15 @@ unsafe fn run<T: FastApiReturn>(
 /// Throws `err` as [`crate::Lock::throw_exception`] does, and returns the value V8 ignores.
 ///
 /// A fast callback cannot call into JavaScript, so `err` never stands for a pending exception
-/// (see [`Error::is_pending`]). The throw functions throw nothing while execution is
+/// (see [`Error::is_pending`]). Nor is it a `DOMException`, which takes a context to create: a
+/// method that returns a `Result` has no fast callback, so `err` is a `TypeError` from the
+/// receiver or argument checks. The throw functions throw nothing while execution is
 /// terminating.
 unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Error) -> T {
+    debug_assert!(
+        !err.name.is_dom_exception(),
+        "a fast callback cannot throw a DOMException"
+    );
     // SAFETY: `options` comes from V8 (caller contract).
     unsafe {
         if err.is_internal {
@@ -308,7 +313,7 @@ unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Err
         } else {
             ffi::fast_api_throw_exception(
                 options,
-                err.name,
+                err.name.class().unwrap_or(crate::ExceptionType::Error),
                 crate::error_message_for_v8(err.message.as_bytes()),
             );
         }

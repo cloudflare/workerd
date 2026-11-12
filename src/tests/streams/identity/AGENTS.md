@@ -308,6 +308,7 @@ pattern; a change to either side fails its cell.
 | `cancel-reason-types.js` | the cancel-reason type matrix of ledger #19, asserted on both the pending write and the pending close |
 | `gc-interplay.js` | a writer keeps its collected stream wrapper's underlying stream alive and operable (`--expose-gc`) |
 | `pollution.js` | Object.prototype members (`type`, `autoAllocateChunkSize`, `expectedLength`, `start`, `size`, `highWaterMark`) reach neither the internal dictionaries nor an omitted strategy: ITS and FLS round-trip under pollution (neither implementation reads them) |
+| `transfer.js` | structuredClone() rejects DataCloneError for an IdentityTransformStream and a FixedLengthStream (parity); `{ transfer }` rejects TypeError (transferable streams unimplemented) |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors

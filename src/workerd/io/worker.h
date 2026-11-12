@@ -44,6 +44,7 @@ WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
+class Event;
 class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
@@ -467,6 +468,20 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // worker instance.
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
 
+  // A line that a PREPARE_SNAPSHOT zygote's top-level code wrote to the console. Whether the
+  // zygote's run counts is known only once its snapshot is accepted, so under ConsoleMode::STDOUT
+  // the zygote's lines wait here instead of going to stdout/stderr: the owner flushes them when
+  // the snapshot is used, and drops them with the isolate when the Worker starts without one and
+  // evaluates the top level itself.
+  struct DeferredConsoleLine {
+    kj::String text;
+    bool toStderr;
+  };
+  void deferConsoleLine(DeferredConsoleLine line) const;
+
+  // Writes the deferred lines to stdout/stderr in order and clears them.
+  void flushDeferredConsoleOutput();
+
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
 
@@ -557,6 +572,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void()>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Vector<DeferredConsoleLine>> deferredConsoleLines;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 
@@ -693,6 +709,17 @@ class Worker::Api {
   virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const;
 
+  // An event listener's callback (api::EventTarget::HandlerFunction).
+  using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
+
+  // Unwraps the callbacks of the top-level event listeners a Worker started from a startup
+  // snapshot re-registers. An Api without it (the default) keeps a zygote whose top level
+  // registered a global listener from producing a snapshot.
+  virtual kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&>
+  tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+    return kj::none;
+  }
+
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
@@ -789,11 +816,13 @@ class Worker::Lock {
       const jsg::JsMessage& message = jsg::JsMessage(),
       kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
-  // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
+  // Logs a kj::Exception to the debug console only, leaving the trace to the caller, which can
+  // add the exception to it without holding the lock. `error` is how jsg::describeAsJsError()
+  // described the exception. If the exception has a serialized JS error attached as a detail, that
   // error may be extracted and used.
-  void logUncaughtException(UncaughtExceptionSource source,
+  void logUncaughtExceptionToConsole(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
+      const jsg::JsErrorDescription& error);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
@@ -837,6 +866,10 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
+
+  // The part of logUncaughtException() that reports to the debug console.
+  void logUncaughtExceptionToConsole(
+      UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message);
 
   Worker& worker;
   kj::Own<Impl> impl;

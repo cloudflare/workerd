@@ -34,10 +34,14 @@ import {
 
 import { diffstr, diff, buildMessage } from 'node-internal:internal_diffs';
 
-import { isDeepStrictEqual } from 'node-internal:internal_comparisons';
+import {
+  isDeepEqual,
+  isDeepStrictEqual,
+} from 'node-internal:internal_comparisons';
 
 import {
   ERR_AMBIGUOUS_ARGUMENT,
+  ERR_CONSTRUCT_CALL_REQUIRED,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_RETURN_VALUE,
@@ -45,6 +49,26 @@ import {
 } from 'node-internal:internal_errors';
 
 import { inspect } from 'node-internal:internal_inspect';
+
+import { validateOneOf } from 'node-internal:validators';
+
+const kOptions = Symbol('options');
+
+export interface AssertOptions {
+  diff?: 'simple' | 'full' | undefined;
+  strict?: boolean | undefined;
+  skipPrototype?: boolean | undefined;
+}
+
+// Assertion functions are also methods of Assert instances. When called on
+// an instance they honour its options; otherwise (plain or destructured
+// calls) they fall back to the defaults.
+function shouldSkipPrototype(self: unknown): boolean {
+  return Boolean(
+    (self as { [kOptions]?: AssertOptions } | undefined)?.[kOptions]
+      ?.skipPrototype
+  );
+}
 
 interface ExtendedAssertionErrorConstructorOptions extends AssertionErrorConstructorOptions {
   generatedMessage?: boolean;
@@ -77,8 +101,8 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
   }
 }
 
-type Assert = (actual: unknown, message?: string | Error) => asserts actual;
-export const ok: Assert = assert;
+type AssertFn = (actual: unknown, message?: string | Error) => asserts actual;
+export const ok: AssertFn = assert;
 
 export function throws(
   fn: () => void,
@@ -324,6 +348,7 @@ export function notDeepEqual(
 }
 
 export function deepStrictEqual(
+  this: unknown,
   actual: unknown,
   expected: unknown,
   message?: string | Error
@@ -332,7 +357,7 @@ export function deepStrictEqual(
     throw new ERR_MISSING_ARGS('actual', 'expected');
   }
 
-  if (isDeepStrictEqual(actual, expected)) {
+  if (isDeepStrictEqual(actual, expected, shouldSkipPrototype(this))) {
     return;
   }
 
@@ -349,6 +374,7 @@ export function deepStrictEqual(
 }
 
 export function notDeepStrictEqual(
+  this: unknown,
   actual: unknown,
   expected: unknown,
   message?: string | Error
@@ -357,7 +383,7 @@ export function notDeepStrictEqual(
     throw new ERR_MISSING_ARGS('actual', 'expected');
   }
 
-  if (isDeepStrictEqual(actual, expected)) {
+  if (isDeepStrictEqual(actual, expected, shouldSkipPrototype(this))) {
     if (message) {
       message = `${message}`;
     } else {
@@ -371,6 +397,74 @@ export function notDeepStrictEqual(
       operator: 'notDeepStrictEqual',
     });
   }
+}
+
+// Loose (==) comparisons used by Assert instances created with
+// `strict: false`. The module-level equal, notEqual, deepEqual and
+// notDeepEqual are always strict.
+function looseEqual(
+  actual: unknown,
+  expected: unknown,
+  message?: string | Error
+): void {
+  requireActualAndExpected(arguments.length);
+  if (
+    actual != expected &&
+    (!Number.isNaN(actual) || !Number.isNaN(expected))
+  ) {
+    throwLooseAssertionError(actual, expected, message, '==');
+  }
+}
+
+function looseNotEqual(
+  actual: unknown,
+  expected: unknown,
+  message?: string | Error
+): void {
+  requireActualAndExpected(arguments.length);
+  if (actual == expected || (Number.isNaN(actual) && Number.isNaN(expected))) {
+    throwLooseAssertionError(actual, expected, message, '!=');
+  }
+}
+
+function looseDeepEqual(
+  actual: unknown,
+  expected: unknown,
+  message?: string | Error
+): void {
+  requireActualAndExpected(arguments.length);
+  if (!isDeepEqual(actual, expected)) {
+    throwLooseAssertionError(actual, expected, message, 'deepEqual');
+  }
+}
+
+function looseNotDeepEqual(
+  actual: unknown,
+  expected: unknown,
+  message?: string | Error
+): void {
+  requireActualAndExpected(arguments.length);
+  if (isDeepEqual(actual, expected)) {
+    throwLooseAssertionError(actual, expected, message, 'notDeepEqual');
+  }
+}
+
+function requireActualAndExpected(argumentCount: number): void {
+  if (argumentCount < 2) {
+    throw new ERR_MISSING_ARGS('actual', 'expected');
+  }
+}
+
+function throwLooseAssertionError(
+  actual: unknown,
+  expected: unknown,
+  message: string | Error | undefined,
+  operator: string
+): never {
+  if (message instanceof Error) {
+    throw message;
+  }
+  throw createAssertionError({ message, actual, expected, operator });
 }
 
 // Helper function to check if actual contains all properties from expected with deep strict equality
@@ -1060,48 +1154,113 @@ function isValidThenable(maybeThennable: any): boolean {
 
 export { AssertionError };
 
-Object.assign(strict, {
-  AssertionError,
-  deepEqual: deepStrictEqual,
-  deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal: strictEqual,
+// Assertion functions that Assert.prototype, assert.strict and the default
+// export all share. Each adds ok and its own equal, notEqual, deepEqual and
+// notDeepEqual.
+const sharedAssertions = {
   fail,
-  ifError,
-  match,
-  notDeepEqual: notDeepStrictEqual,
+  deepStrictEqual,
   notDeepStrictEqual,
-  notEqual: notStrictEqual,
-  notStrictEqual,
-  ok,
-  partialDeepStrictEqual,
-  rejects,
-  strict,
   strictEqual,
+  notStrictEqual,
+  partialDeepStrictEqual,
+  match,
+  doesNotMatch,
   throws,
+  rejects,
+  doesNotThrow,
+  doesNotReject,
+  ifError,
+};
+
+type SharedAssertions = typeof sharedAssertions;
+
+export interface Assert extends SharedAssertions {
+  readonly [kOptions]: AssertOptions;
+  AssertionError: typeof AssertionError;
+  ok(value: unknown, message?: string | Error): void;
+  equal(actual: unknown, expected: unknown, message?: string | Error): void;
+  notEqual(actual: unknown, expected: unknown, message?: string | Error): void;
+  deepEqual(actual: unknown, expected: unknown, message?: string | Error): void;
+  notDeepEqual(
+    actual: unknown,
+    expected: unknown,
+    message?: string | Error
+  ): void;
+}
+
+interface AssertConstructor {
+  new (options?: AssertOptions): Assert;
+  prototype: Assert;
+}
+
+export const Assert = function Assert(
+  this: Assert,
+  options?: AssertOptions
+): void {
+  if (!new.target) {
+    throw new ERR_CONSTRUCT_CALL_REQUIRED('Assert');
+  }
+
+  const opts: AssertOptions = Object.assign(
+    { __proto__: null, strict: true, skipPrototype: false },
+    options
+  );
+
+  if (opts.diff !== undefined) {
+    validateOneOf(opts.diff, 'options.diff', ['simple', 'full']);
+  }
+
+  this.AssertionError = AssertionError;
+  Object.defineProperty(this, kOptions, {
+    value: opts,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+
+  if (opts.strict) {
+    this.equal = this.strictEqual;
+    this.deepEqual = this.deepStrictEqual;
+    this.notEqual = this.notStrictEqual;
+    this.notDeepEqual = this.notDeepStrictEqual;
+  }
+} as unknown as AssertConstructor;
+
+Object.assign(Assert.prototype, {
+  ...sharedAssertions,
+  // A distinct function, since the default export attaches the module's
+  // assertion functions as properties of `assert` itself. Spreading the
+  // arguments keeps arguments.length for the no-argument check.
+  ok(...args: Parameters<AssertFn>): void {
+    assert(...args);
+  },
+  equal: looseEqual,
+  notEqual: looseNotEqual,
+  deepEqual: looseDeepEqual,
+  notDeepEqual: looseNotDeepEqual,
+});
+
+Object.assign(strict, {
+  ...sharedAssertions,
+  Assert,
+  AssertionError,
+  ok,
+  strict,
+  equal: strictEqual,
+  notEqual: notStrictEqual,
+  deepEqual: deepStrictEqual,
+  notDeepEqual: notDeepStrictEqual,
 });
 
 export default Object.assign(assert, {
+  ...sharedAssertions,
+  Assert,
   AssertionError,
-  deepEqual,
-  deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal,
-  fail,
-  ifError,
-  match,
-  notDeepEqual,
-  notDeepStrictEqual,
-  notEqual,
-  notStrictEqual,
   ok,
-  partialDeepStrictEqual,
-  rejects,
   strict,
-  strictEqual,
-  throws,
+  equal,
+  notEqual,
+  deepEqual,
+  notDeepEqual,
 });

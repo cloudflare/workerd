@@ -104,10 +104,126 @@ class V8System {
       JitCodeEventTracking);
 };
 
+// Properties V8 adds to a context only when it is not building a startup snapshot.
+//
+// V8's bootstrapper adds some properties to a context only in an isolate that is not building a
+// snapshot: Genesis::InstallSpecialObjects() (Error.stackTraceLimit, WebAssembly), which
+// Bootstrapper::InstallExtensions() skips in a serializer-enabled isolate, and
+// Genesis::InitializeExperimentalGlobal() (the Iterator helpers behind shipped flags,
+// SharedArrayBuffer), skipped there too. Both run on every context a normal isolate creates,
+// including one deserialized from a snapshot, through JSObject::AddProperty(), which assumes the
+// property is absent and the holder extensible: a name already present on a fast-mode holder
+// (Error, Iterator, Iterator.prototype) trips a release-mode CHECK in DescriptorArray::Append(),
+// a non-extensible holder the CHECK on AddDataProperty()'s result, and a name already present on
+// the dictionary-mode global object silently becomes a duplicate dictionary entry. The CHECKs
+// abort the process from inside v8::Context::New() of the Worker started from the snapshot,
+// after the zygote has succeeded, where nothing can catch them.
+//
+// The zygote's own top level creates those conditions, prompted by the very absence of the
+// properties: a write to Error.stackTraceLimit creates an own property,
+// `if (!Iterator.concat) Iterator.concat = ...` installs a polyfill a normal isolate never
+// would, `typeof WebAssembly === 'undefined'` bakes a wrong feature test into the snapshot, and
+// Object.freeze(Error) makes a holder non-extensible. Without Error.stackTraceLimit, new Error()
+// in the zygote also captures no stack at all (Isolate::GetStackTraceLimit() reads it as a data
+// property).
+//
+// IsolateBase makes the zygote context look like a normal isolate's before any JavaScript runs in
+// it, and look like what V8 expects again right before creating the snapshot:
+// * Error.stackTraceLimit is installed as the data property V8 installs. Its final state is
+//   recorded into the snapshot and the property removed. The restored context replays the
+//   recorded state after V8 has re-added the default. Node's mksnapshot does the same.
+// * Every other such property is installed as a native data property whose getter and setter
+//   throw and record the use on the isolate: top-level code can neither use nor capture it, so
+//   instead of baking a wrong feature test in, the zygote fails and the Worker starts without a
+//   snapshot. Catching the error, letting it reject a promise, or reading the property from C++
+//   under a v8::TryCatch changes nothing: the recorded use fails the zygote before CreateBlob().
+//   The property is removed before CreateBlob(). Deleting it is not a use: the deletion is
+//   recorded, and the restored context deletes what V8 added.
+// Either way, a property the top level (re)defined so that V8 cannot re-add it, and a
+// non-extensible holder, fail the zygote.
+//
+// Temporal is installed differently: InitializeGlobal_harmony_temporal() (part of
+// InitializeExperimentalGlobal()) defines it with JSObject::SetAccessor(), which replaces a
+// property of the same name instead of tripping a CHECK, so a top-level polyfill would be silently
+// overwritten on restore. In a context that has Temporal its names are FAIL_CLOSED. In one that
+// does not (NewContextOptions::enableTemporal is false, and newContext() deletes what V8
+// installed), they are absent in the zygote as in a normal context, and a property the top level
+// defines under one of them fails the zygote.
+
+// The intrinsic a restore-time property lives on; see RestoreTimeHolderHandles for how the zygote
+// captures them before any JavaScript runs.
+enum class RestoreTimeHolder {
+  GLOBAL,
+  ERROR_CTOR,
+  ITERATOR_CTOR,
+  ITERATOR_PROTOTYPE,
+  // Not captured: read as the prototype of a new v8::Date, which is the realm's intrinsic.
+  DATE_PROTOTYPE,
+};
+
+enum class RestoreTimeKind {
+  // Installed in the zygote as the data property V8 installs; its final state is recorded and
+  // replayed on the restored context.
+  DATA_DEFAULT,
+  // Installed in the zygote as a native data property whose getter and setter throw and record
+  // the use; a recorded use fails the zygote before the snapshot.
+  FAIL_CLOSED,
+  // FAIL_CLOSED in a context that has Temporal; absent, and required to stay so, in one that does
+  // not.
+  TEMPORAL,
+};
+
+struct RestoreTimeGlobal {
+  RestoreTimeHolder holder;
+  kj::StringPtr name;
+  RestoreTimeKind kind;
+};
+
+// Every property V8 adds on restore and not in the zygote, for the V8 version and flags workerd
+// builds with.
+constexpr RestoreTimeGlobal RESTORE_TIME_GLOBALS[] = {
+  // Genesis::InstallSpecialObjects()
+  {RestoreTimeHolder::ERROR_CTOR, "stackTraceLimit"_kj, RestoreTimeKind::DATA_DEFAULT},
+  {RestoreTimeHolder::GLOBAL, "WebAssembly"_kj, RestoreTimeKind::FAIL_CLOSED},
+  // Genesis::InitializeExperimentalGlobal()
+  {RestoreTimeHolder::GLOBAL, "SharedArrayBuffer"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "concat"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "zip"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "zipKeyed"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_PROTOTYPE, "join"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_PROTOTYPE, "includes"_kj, RestoreTimeKind::FAIL_CLOSED},
+  // Genesis::InitializeGlobal_harmony_temporal(), from InitializeExperimentalGlobal()
+  {RestoreTimeHolder::GLOBAL, "Temporal"_kj, RestoreTimeKind::TEMPORAL},
+  {RestoreTimeHolder::DATE_PROTOTYPE, "toTemporalInstant"_kj, RestoreTimeKind::TEMPORAL},
+};
+
+// The holder's JavaScript name ("globalThis", "Error", "Iterator.prototype", ...).
+kj::StringPtr jsNameOf(RestoreTimeHolder holder);
+
+// The holders a zygote captures before any JavaScript runs in its context, so that user code
+// rebinding their global names (`globalThis.Error = ...`) cannot divert the checks from the
+// objects V8 adds to. The global object and Date.prototype need no capture: they are reached
+// through the context and through a new Date.
+struct RestoreTimeHolderHandles {
+  v8::Global<v8::Context> context;
+  v8::Global<v8::Object> errorCtor;
+  v8::Global<v8::Object> iteratorCtor;
+  v8::Global<v8::Object> iteratorPrototype;
+};
+
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
 class IsolateBase {
  public:
+  // The V8 private symbol named JS_SERIALIZE_MODE_KEY (see Serializer), which every Serializer
+  // uses: looked up once per isolate, rather than once per Serializer.
+  static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
+
+  // Returns the Error.prototype of `context`, found without making an error, which would capture
+  // a stack trace. Runs no JavaScript.
+  static v8::Local<v8::Value> getErrorPrototype(
+      v8::Isolate* isolate, v8::Local<v8::Context> context);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -371,11 +487,13 @@ class IsolateBase {
     deferredActionHook = hook;
   }
 
-  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
-  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
-  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
-  // destructor may do it.
-  using DisposeHook = void (*)(void* data);
+  // A function that ~IsolateBase() calls with `data` twice: with DISPOSING just before the
+  // isolate is disposed, so that another layer stops using the isolate pointer, and with DISPOSED
+  // once it is, so that the layer can free memory that V8 may write into until then. The Rust JSG
+  // Realm, of which an isolate has at most one, sets it when it is dropped. Setting it does not
+  // allocate, so a destructor may do it.
+  enum class DisposeStage { DISPOSING, DISPOSED };
+  using DisposeHook = void (*)(void* data, DisposeStage stage);
   void setDisposeHook(DisposeHook hook, void* data) {
     disposeHook = hook;
     disposeHookData = data;
@@ -501,6 +619,58 @@ class IsolateBase {
     return false;
   }
 
+  // Pins `data` into the snapshot of `context` and returns its index, which the restored context
+  // later passes to extractOnceFromSnapshot(). Indices are assigned in call order.
+  // Only valid while preparing a snapshot; the caller is inside a handle scope.
+  size_t pinIntoSnapshot(v8::Local<v8::Context> context, v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(context, data);
+  }
+
+  // Isolate-level counterpart: pins `data` into the isolate's own snapshot data rather than a
+  // context's, so the restored isolate can read it back with
+  // v8::Isolate::GetDataFromSnapshotOnce() before any context exists.
+  // Same preconditions as above.
+  size_t pinIntoIsolateSnapshot(v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(data);
+  }
+
+  // Returns the object pinned into the snapshot of `context` under `index` by pinIntoSnapshot().
+  // V8 hands each pinned value out exactly once; asking for the same index again, or for an index
+  // nothing was pinned under, is a fatal error. Only valid when starting from a snapshot; the
+  // caller is inside a handle scope.
+  v8::Local<v8::Object> extractOnceFromSnapshot(v8::Local<v8::Context> context, size_t index) {
+    v8::Local<v8::Object> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Object>(index).ToLocal(&value),
+        "no object pinned into the snapshot under this index", index);
+    return value;
+  }
+
+  // As extractOnceFromSnapshot(), for a value that need not be an object.
+  v8::Local<v8::Value> extractValueOnceFromSnapshot(v8::Local<v8::Context> context, size_t index) {
+    v8::Local<v8::Value> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Value>(index).ToLocal(&value),
+        "no value pinned into the snapshot under this index", index);
+    return value;
+  }
+
+  // Zygote, right after `context` is created and before any JavaScript runs in it: captures the
+  // holders and installs the properties. `hasTemporal` is the context's
+  // NewContextOptions::enableTemporal.
+  void installRestoreTimeGlobalsForZygote(
+      Lock& js, v8::Local<v8::Context> context, bool hasTemporal);
+
+  // Zygote, after its top level has run and before CreateBlob(): records what the top level left
+  // of Error.stackTraceLimit into the snapshot, and removes every property so that V8 can add them
+  // on restore. Throws when the top level used a FAIL_CLOSED property, whether or not it caught
+  // the error, and when V8 could not add one (the top level defined a property in its place, made
+  // Error.stackTraceLimit non-configurable or an accessor, or made a holder non-extensible); the
+  // zygote then fails and the Worker starts without a snapshot.
+  void removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8::Context> context);
+
+  // Restored context, right after v8::Context::New() has re-added the defaults and before any
+  // JavaScript runs in it: re-applies the state the zygote recorded.
+  void replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context);
+
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
   }
@@ -513,20 +683,68 @@ class IsolateBase {
     return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
   }
 
-  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
-  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
+  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is
+  // inside a handle scope. `badTagFieldsCount` and `wrappablesMetadata` are the data of the
+  // serializer callbacks; both must stay alive until createSnapshotBlob() has checked them.
+  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+      uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
+
+  // Zygote only, right after its top level has run and before anything of the context is
+  // recorded for the snapshot. Runs the FinalizationRegistry cleanups the top level left due, the
+  // way the event loop would after the top level's job: a microtask checkpoint, the WeakRef kept
+  // objects cleared, a full GC, then every task V8 posted (its cleanup tasks among them), each
+  // followed by a checkpoint of its own, round after round until a GC posts nothing more. This is
+  // the last point at which the zygote runs JavaScript: the record steps that follow (listeners,
+  // bootstrap state, createSnapshotBlob()) capture state a cleanup callback could still change,
+  // and the shim addresses recordLiveWrappables() keys by are unique only while nothing allocates.
+  //
+  // The callbacks run without an IoContext, as they do at request time. An exception one throws
+  // is reported through the isolate's message listeners, as at request time, and does not fail
+  // the zygote. Returns early when execution is terminating (a startup limit cut a callback
+  // short); the caller decides what to do about it. Throws if the cleanups do not settle within
+  // a fixed number of rounds: callbacks that keep registering objects that die right away.
+  void settleFinalizationRegistriesForSnapshot(Lock& js);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
+  // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
+  // setSnapshotDefaultContext(); the metadata records the live wrappers right before CreateBlob()
+  // and both are checked afterwards. No JavaScript runs from the moment the metadata records the
+  // wrappers until CreateBlob() returns; the caller runs
+  // settleFinalizationRegistriesForSnapshot() beforehand.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
+  //
+  // `listenerRecords` carries the zygote global's event-listener records collected by the
+  // caller (which pinned each identity object via pinIntoSnapshot() while the global
+  // was still alive); they are stored in the SnapshotArtifact for the LOAD side to
+  // replay. Collected at the io layer because jsg cannot see api::EventTarget.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
+      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+      const uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata,
+      kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
+
+  // Start from snapshot, before Context::New(): builds the instance each serialized wrapper slot
+  // is restored to (a stateless type's recreate function or a stored clone's snapshotClone()) and
+  // pre-allocates its CppgcShim; see WrappableDeserializeMetadata. Throws only if one of those
+  // does, which their contracts forbid: nothing on this path catches it and the Worker fails to
+  // start.
+  void prepareWrappableDeserializeMetadata(Lock& js, WrappableDeserializeMetadata& metadata);
+  // After Context::New(): WrappableDeserializeMetadata::releaseSlotsWithChecks().
+  void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
     auto& artifact = mutableSnapshotArtifact();
     auto& refs = artifact.externalReferences;
     // The final slot must remain 0: V8 reads the table up to the 0 terminator.
+    // Callbacks reached through generic wrap paths (e.g. every jsg::Function of one signature
+    // shares one trampoline) register the same address many times; keep the table unique.
+    auto used = refs.first(artifact.externalReferenceCursor);
+    for (auto existing: used) {
+      if (existing == addr) return;
+    }
     KJ_REQUIRE(artifact.externalReferenceCursor < refs.size() - 1,
         "external_references table is full; bump kExternalReferencesCapacity");
     refs[artifact.externalReferenceCursor++] = addr;
@@ -540,6 +758,14 @@ class IsolateBase {
   virtual void iterateResourceTypeTemplates(
       kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
 
+  // The snapshot recreate function of the resource type tagged `tag`, or none.
+  // PREPARE_SNAPSHOT consults it to record stateless
+  // wrappers by tag alone and START_FROM_SNAPSHOT to rebuild them, so the producer and the
+  // consumer of a snapshot must be the same binary.
+  virtual kj::Maybe<SnapshotRecreateFn> snapshotRecreateFnFor(v8::CppHeapPointerTag tag) const {
+    return kj::none;
+  }
+
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
@@ -548,7 +774,42 @@ class IsolateBase {
   template <typename TypeWrapper>
   friend class Isolate;
 
+  v8::SnapshotCreator* getSnapshotCreator() {
+    return KJ_ASSERT_NONNULL(snapshotCreator).get();
+  }
+
+  // Pins every materialized handle of the context's (legacy) module registry into the snapshot
+  // and records (specifier, type, kind) -> index in SnapshotArtifact::moduleRecords, so the
+  // loading Worker can build its entries around the baked instances instead of compiling them
+  // again; otherwise the baked main-module graph and runtime import()/require() would produce
+  // two module graphs (e.g. two Buffer.prototype identities). Resets each handle in the same pass,
+  // including paired TracedReferences. Entries never instantiated in the zygote leaked no identity into the
+  // baked heap, so they are not pinned and are recompiled fresh at LOAD. The registry is owned
+  // by the context global's Wrappable.
+  void bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle);
+
+  // Bakes every materialized JSG_RESOURCE-type constructor template
+  // into the snapshot and records one index per slot, in enumeration order, in
+  // SnapshotArtifact, so the loading isolate pairs slots by position alone.
+  // Resets each slot in the same pass.
+  void bakeConstructorTemplatesIntoSnapshot();
+
+  // Restore previously baked (by bakeConstructorTemplatesIntoSnapshot)
+  // constructor templates from the snapshot artifact.
+  void restoreConstructorTemplatesFromSnapshot();
+
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
+
+  // Getter and setter of a FAIL_CLOSED restore-time property; the callback data is the property's
+  // index in RESTORE_TIME_GLOBALS. Both call failClosed().
+  static void failClosedGetter(
+      v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
+  static void failClosedSetter(v8::Local<v8::Name> property,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info);
+  // Records the use of `entry` in `restoreTimeGlobalUsed` and throws a JavaScript error, unless
+  // execution is terminating (a throw would replace the termination).
+  void failClosed(const RestoreTimeGlobal& entry);
 
   // The internals of a jsg::Ref<T> to be deleted.
   class RefToDelete {
@@ -600,6 +861,19 @@ class IsolateBase {
   //    to serialize a startup snapshot.
   //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
   kj::Maybe<SnapshotConfig> snapshotConfig;
+  // The first FAIL_CLOSED restore-time property the zygote's top level used, if any. Set by the
+  // property's getter or setter; removeRestoreTimeGlobalsBeforeSnapshot() fails the zygote on it.
+  kj::Maybe<const RestoreTimeGlobal&> restoreTimeGlobalUsed;
+
+  // Whether the zygote's context has Temporal, which decides how the RestoreTimeKind::TEMPORAL
+  // entries are handled. Set by installRestoreTimeGlobalsForZygote().
+  bool zygoteHasTemporal = false;
+
+  // The zygote context's restore-time holders, from installRestoreTimeGlobalsForZygote() until
+  // removeRestoreTimeGlobalsBeforeSnapshot() stores them in the record it pins into the snapshot,
+  // where the restored context finds them. Not kept in the context's embedder data, which has no
+  // slots to spare in every embedder's V8 build.
+  kj::Maybe<RestoreTimeHolderHandles> zygoteRestoreTimeHolders;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -665,6 +939,13 @@ class IsolateBase {
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
+
+  // The private symbol that getJsSerializeModeKey() returns.
+  v8::Global<v8::Private> jsSerializeModeKey;
+
+  // A template of an object whose one property is its context's Error.prototype, which
+  // getErrorPrototype() reads.
+  v8::Global<v8::ObjectTemplate> errorPrototypeTemplate;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
@@ -968,6 +1249,10 @@ class Isolate: public IsolateBase {
     wrapper->initTypeWrapper();
     fastApiEnabled = wrapper->isFastApiEnabled();
     wrappers[0] = kj::mv(wrapper);
+    // Whichever way the default wrapper is instantiated, an isolate started from a snapshot takes
+    // its constructor templates from the snapshot, or the baked wrappers fail every instanceof and
+    // receiver check against fresh ones.
+    restoreConstructorTemplatesFromSnapshot();
   }
 
   // Populates the IsolateBase type handler registry (see Lock::tryGetTypeHandler()) with
@@ -991,6 +1276,11 @@ class Isolate: public IsolateBase {
     } else {
       KJ_FAIL_ASSERT("Not yet implemented");
     }
+  }
+
+  kj::Maybe<SnapshotRecreateFn> snapshotRecreateFnFor(v8::CppHeapPointerTag tag) const override {
+    // Static on the wrapper type: every wrapper in `wrappers` is a TypeWrapper, with one numbering.
+    return TypeWrapper::snapshotRecreateFnFor(tag);
   }
 
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
@@ -1179,10 +1469,37 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
+      WrappableDeserializeMetadata metadata;
+      kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
+        options.internalFieldsDeserializer =
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
+        options.apiWrapperDeserializer =
+            v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
+        abortOnGc.emplace(v8Isolate, metadata);
+      }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      abortOnGc = kj::none;
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
+      KJ_REQUIRE(metadata.badTagFieldsCount == 0,
+          "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
+          "wrapper markers",
+          metadata.badTagFieldsCount);
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+      }
+      // V8 leaves some properties out of a context built in a serializer-enabled isolate and
+      // adds them to a context restored from the snapshot, see
+      // IsolateBase::installRestoreTimeGlobalsForZygote().
+      if (jsgIsolate.isPreparingSnapshot()) {
+        jsgIsolate.installRestoreTimeGlobalsForZygote(
+            *this, context.getHandle(v8Isolate), options.enableTemporal);
+      } else if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.replayRestoreTimeGlobalsAfterLoad(*this, context.getHandle(v8Isolate));
+      }
       return context;
     }
 

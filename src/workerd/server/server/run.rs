@@ -11,8 +11,10 @@ use std::io::Write;
 use std::rc::Rc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Either;
+use futures::future::FusedFuture;
 use futures::future::LocalBoxFuture;
 use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
@@ -24,6 +26,7 @@ use workerd_capnp::service;
 use workerd_capnp::socket;
 
 use crate::Result;
+use crate::actor;
 use crate::bench;
 use crate::bindings::Designator;
 use crate::bindings::len_u32;
@@ -47,6 +50,7 @@ use crate::listen::TcpTls;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
+use crate::worker::WorkerService;
 
 /// The command line's choices for a run.
 #[derive(Default)]
@@ -183,7 +187,7 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let listeners = FuturesUnordered::new();
+    let mut listeners = FuturesUnordered::new();
     let mut ports = Vec::new();
     let sockets = config.get_sockets().map_err(capnp_error)?;
     for (sock, bound) in sockets.iter().zip(bound.sockets) {
@@ -223,6 +227,7 @@ async fn start(
     for (name, port) in ports {
         control.listen(&name, port);
     }
+    listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
@@ -409,6 +414,10 @@ async fn serve_listeners(
 /// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
 /// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
 /// error returned.
+///
+/// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
+/// leaves the cluster, and accepts requests for a grace period at least; the cluster's
+/// `stopTimeoutMs` bounds all of it.
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -424,31 +433,87 @@ pub async fn run(
         return Ok(());
     };
 
+    // Whatever way this returns, the cluster port answers that this instance is not ready.
+    let _serving = server.cluster().map(ClusterNode::serving);
     let drain = std::pin::pin!(drain);
-    let serving = std::pin::pin!(serve_listeners(&mut listeners));
+    let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
+    let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
-    match futures::future::select(serving, drain).await {
+    match futures::future::select(serving.as_mut(), drain).await {
         Either::Left((result, _)) => result?,
-        Either::Right(((), serving)) => {
-            // A draining instance claims nothing more, lets its clustered objects go,
-            // `preventEviction` or not, and leaves the cluster, so peers take them over at their
-            // next listing while its connections finish. A request in flight on one could not
-            // commit anyway once a peer owns the object.
+        Either::Right(((), _)) => {
+            // A draining instance claims nothing more and hands its clustered objects off,
+            // `preventEviction` or not, while it serves on: a request for one waits for it and
+            // then goes where it runs next. Then it leaves the cluster, so peers take over what
+            // it did not hand off, accepts requests until the grace period ends, as load
+            // balancers may still send some, and lets its connections, peers' among them, finish.
             if let Some(node) = server.cluster() {
-                node.cluster.start_draining();
+                let deadlines = node.start_draining();
                 let workers = server
                     .services()
                     .filter_map(|(_, service)| service.as_worker());
-                let namespaces = workers.flat_map(|worker| worker.namespaces());
-                for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
-                    namespace.abort_all(None);
+                let namespaces: Vec<_> = workers
+                    .flat_map(|worker| worker.namespaces())
+                    .map(|(_, ns)| ns)
+                    .filter(|ns| ns.cluster().is_some())
+                    .collect();
+                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+                let stopped = match futures::future::select(serving.as_mut(), handoff).await {
+                    Either::Left((result, handoff)) => {
+                        result?;
+                        handoff.await
+                    }
+                    Either::Right((stopped, _)) => stopped,
+                };
+                // Released before the lease goes, so nothing is served after it. Until the
+                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
+                // that reads this node's record still finds it live and routes here again. With
+                // objects still running, which stopping very many can leave, it stays a member:
+                // peers take over every object it did not hand off once its lease expires, after
+                // this process exited.
+                if stopped {
+                    let deregister = node.cluster.deregister();
+                    match tokio::time::timeout_at(deadlines.connections, deregister).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
+                        Err(_) => tracing::warn!("leaving the cluster timed out"),
+                    }
+                } else {
+                    tracing::warn!(
+                        "Durable Objects still run at the release deadline: staying a cluster \
+                         member, so that peers take over its objects once this node's lease \
+                         expires"
+                    );
                 }
-                if let Err(e) = node.cluster.deregister().await {
-                    tracing::warn!("leaving the cluster: {e}");
+                let grace = std::pin::pin!(tokio::time::sleep_until(deadlines.grace));
+                if let Either::Left((result, _)) =
+                    futures::future::select(serving.as_mut(), grace).await
+                {
+                    result?;
                 }
+                stop = Some((Rc::clone(node), deadlines));
             }
             draining.send_replace(true);
-            serving.await?;
+            if let Some((node, deadlines)) = &stop {
+                let finished = async {
+                    if !serving.is_terminated() {
+                        serving.as_mut().await?;
+                    }
+                    node.peer_requests_done().await;
+                    Ok::<_, crate::Error>(())
+                };
+                let finished = tokio::time::timeout_at(deadlines.connections, finished);
+                if let Ok(result) = finished.await {
+                    result?;
+                } else {
+                    tracing::warn!(
+                        "stopping with requests in flight at the connections deadline: they end \
+                         as the process exits"
+                    );
+                }
+            } else {
+                serving.await?;
+            }
         }
     }
 
@@ -457,15 +522,30 @@ pub async fn run(
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
+    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
-        namespace.begin_container_cleanup();
+        namespace.begin_container_cleanup(until).await;
     }
-    Ok(ffi::factory_shutdown_containers(server.factory().raw()).await?)
+    let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
+    let Some((_, deadlines)) = stop else {
+        return Ok(cleanup.await?);
+    };
+    if let Ok(result) = tokio::time::timeout_at(deadlines.stop, cleanup).await {
+        return Ok(result?);
+    }
+    tracing::warn!("leaving containers behind at the stop deadline");
+    Ok(())
 }
 
-/// The entrypoints `workerd test` or `workerd bench` runs a handler of: the channel of each,
-/// and its name ("service" or "service:entrypoint").
-type Targets = Vec<(Rc<dyn Channel>, String)>;
+/// An entrypoint `workerd test` or `workerd bench` runs a handler of.
+struct Target {
+    channel: Rc<dyn Channel>,
+    /// "service" or "service:entrypoint".
+    name: String,
+    /// The entrypoint's service and its name.
+    service: (String, Rc<WorkerService>),
+}
+type Targets = Vec<Target>;
 
 /// Starts the server for `workerd test` or `workerd bench`, and selects the entrypoints that
 /// match the patterns (globs as the `glob` crate reads them, matched against the whole name) and
@@ -493,15 +573,20 @@ async fn start_local(
         let Some(worker) = service.as_worker() else {
             continue;
         };
+        let target = |channel: Rc<dyn Channel>, target_name: String| Target {
+            channel,
+            name: target_name,
+            service: (name.to_owned(), Rc::clone(worker)),
+        };
         if worker.has_handler(None, handler) && entrypoints.matches("default") {
-            targets.push((service.channel(), name.to_owned()));
+            targets.push(target(service.channel(), name.to_owned()));
         }
         for entrypoint in worker.entrypoint_names() {
             if entrypoints.matches(entrypoint)
                 && worker.has_handler(Some(entrypoint), handler)
                 && let Some(channel) = worker.entrypoint(Some(entrypoint), None, false)
             {
-                targets.push((channel, format!("{name}:{entrypoint}")));
+                targets.push(target(channel, format!("{name}:{entrypoint}")));
             }
         }
     }
@@ -568,7 +653,7 @@ pub async fn test(
     let (passed, failed) = running
         .alongside(async move {
             let (mut passed, mut failed) = (0u32, 0u32);
-            for (channel, name) in cases {
+            for Target { channel, name, .. } in cases {
                 if run_one(channel, name).await? {
                     passed += 1;
                 } else {
@@ -585,12 +670,17 @@ pub async fn test(
     Ok(Some(passed > 0 && failed == 0))
 }
 
-/// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns (see
-/// `start_local`), as `test()` runs `test()` handlers.
+/// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns.
 ///
-/// The handlers get `params`, an encoded `BenchParams` message (bench.capnp). Returns the
-/// report, with a group for each handler; `None` for a config `report` refuses, whose handlers
-/// do not run.
+/// The entrypoints are selected as in `start_local`, and their handlers run as `test()` runs
+/// `test()` handlers. Then the startup of each of their services' workers is timed in new
+/// isolates.
+///
+/// The handlers and the startup timing get `params`, an encoded `BenchParams` message
+/// (bench.capnp). Returns the report, with a group for each handler, then a startup group for
+/// each service; `None` for a config `report` refuses, whose handlers do not run. The startup
+/// groups go last so that the isolates they create and destroy don't disturb the handlers'
+/// measurements.
 pub async fn bench(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -610,11 +700,23 @@ pub async fn bench(
         return Ok(Some(bench::Report::new(0)));
     }
 
+    let mut services: Vec<(String, Rc<WorkerService>)> = Vec::new();
+    if !bench::skips_startup(&params)? {
+        for target in &targets {
+            if !services.iter().any(|(name, _)| *name == target.service.0) {
+                services.push(target.service.clone());
+            }
+        }
+    }
     let results = running
         .alongside(async move {
-            let mut results = bench::Report::new(len_u32(&targets));
-            for (channel, name) in targets {
+            let groups = len_u32(&targets) + len_u32(&services);
+            let mut results = bench::Report::new(groups);
+            for Target { channel, name, .. } in targets {
                 results.run_group(&*channel, &name, &params).await?;
+            }
+            for (name, worker) in services {
+                results.run_startup(&worker, &name, &params).await?;
             }
             Ok(results)
         })

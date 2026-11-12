@@ -15,3 +15,15 @@ export const test = {
     });
   },
 };
+
+export const staticImportAttributeLeavesGraphReusable = {
+  async test() {
+    // A failed link must not leave the graph half-linked for later imports.
+    const expected = {
+      message: /Unrecognized import attributes|Unsupported import attribute/,
+    };
+    await rejects(import('static-attr-root'), expected);
+    await rejects(import('static-attr-root'), expected);
+    await rejects(import('static-attr-sibling'), expected);
+  },
+};

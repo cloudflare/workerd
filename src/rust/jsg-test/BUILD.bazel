@@ -57,5 +57,6 @@ wd_rust_crate(
         "//src/rust/jsg",
         "//src/rust/jsg-cpp",
         "@crates_vendor//:capnp",
+        "@crates_vendor//:serde_json",
     ],
 )

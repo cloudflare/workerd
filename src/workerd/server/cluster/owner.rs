@@ -13,6 +13,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -134,6 +135,20 @@ pub struct Owners {
     /// Objects evicted with the bucket holding their epoch's session: this
     /// node's database file is that session's state.
     dormant: RefCell<HashMap<String, Object>>,
+    /// Objects whose compaction is in flight.
+    compacting: RefCell<HashSet<String>>,
+}
+
+/// An object's compaction in flight, until this is dropped.
+struct Compacting<'a> {
+    owners: &'a Owners,
+    key: String,
+}
+
+impl Drop for Compacting<'_> {
+    fn drop(&mut self) {
+        self.owners.compacting.borrow_mut().remove(&self.key);
+    }
 }
 
 fn object_key(ns: &str, actor: &str) -> String {
@@ -149,6 +164,7 @@ impl Owners {
             retiring: RefCell::new(HashMap::new()),
             evictions: tokio::sync::Semaphore::new(EVICT_CONCURRENCY),
             dormant: RefCell::new(HashMap::new()),
+            compacting: RefCell::new(HashSet::new()),
         }
     }
 
@@ -391,9 +407,15 @@ impl Owners {
     /// every owned object whose log outgrew its database. Runs off the
     /// commit path.
     pub async fn tier(&self) {
-        let objects: Vec<_> = self.objects.borrow().values().cloned().collect();
+        let objects: Vec<_> = self.objects.borrow().clone().into_iter().collect();
         stream::iter(objects)
-            .for_each_concurrent(TIER_CONCURRENCY, |object| async move {
+            .for_each_concurrent(TIER_CONCURRENCY, |(key, object)| async move {
+                // Marked before anything waits, and only while the object is
+                // served here: a handoff retires the object first, then waits
+                // for the mark to go before it releases it (`busy`).
+                let Some(_compacting) = self.start_compacting(&key, &object) else {
+                    return;
+                };
                 let (due, prune) = {
                     let mut guard = object.object.lock().await;
                     let prune = std::mem::take(&mut guard.prune);
@@ -406,10 +428,30 @@ impl Owners {
                     prune_older(&replica).await;
                 }
                 if due {
-                    self.compact(&object).await;
+                    self.compact(&key, &object).await;
                 }
             })
             .await;
+    }
+
+    /// Whether `slot` is still the object `key` this node serves.
+    fn serves(&self, key: &str, slot: &Rc<Slot>) -> bool {
+        let objects = self.objects.borrow();
+        objects
+            .get(key)
+            .is_some_and(|served| Rc::ptr_eq(served, slot))
+    }
+
+    /// Marks object `key` as compacting, unless this node no longer serves
+    /// it as `slot` or another compaction of it is in flight.
+    fn start_compacting(&self, key: &str, slot: &Rc<Slot>) -> Option<Compacting<'_>> {
+        if !self.serves(key, slot) || !self.compacting.borrow_mut().insert(key.to_owned()) {
+            return None;
+        }
+        Some(Compacting {
+            owners: self,
+            key: key.to_owned(),
+        })
     }
 
     /// Upload what the bucket lacks for one object.
@@ -434,12 +476,12 @@ impl Owners {
     /// Snapshot an epoch's session from its newest snapshot and the batches
     /// past it, and delete what the new one covers, so a takeover's restore
     /// reads one file, not one per upload. The snapshot replays the log,
-    /// never the live database, so it runs off the event loop.
-    async fn compact(&self, slot: &Slot) {
-        let (replica, epoch, plan, key) = {
+    /// never the live database, so it runs off the event loop. It stops once
+    /// the object is no longer served here.
+    async fn compact(&self, key: &str, slot: &Rc<Slot>) {
+        let (replica, epoch, plan) = {
             let guard = slot.object.lock().await;
-            let key = format!("{}/{}", guard.ns, guard.actor);
-            (guard.replica.clone(), guard.epoch, plan(&guard.files), key)
+            (guard.replica.clone(), guard.epoch, plan(&guard.files))
         };
         let snapshot = match merged(&replica, &plan).await {
             Ok(snapshot) => snapshot,
@@ -449,13 +491,16 @@ impl Owners {
         if snapshot.frame <= from {
             return tracing::warn!("cluster: {key} log has a gap after {from}");
         }
+        if !self.serves(key, slot) {
+            return;
+        }
         let snapshot = match upload(&replica, snapshot).await {
             Ok(snapshot) => snapshot,
             Err(e) => return tracing::warn!("cluster: {key} snapshot upload failed: {e}"),
         };
         let replaced: Vec<File> = {
             let mut guard = slot.object.lock().await;
-            if guard.epoch != epoch {
+            if guard.epoch != epoch || !self.serves(key, slot) {
                 return;
             }
             slot.tiered(&mut guard, snapshot.frame, Some(snapshot));
@@ -474,10 +519,43 @@ impl Owners {
             .await;
     }
 
+    /// Runs `f` while holding object `ns/actor`'s lock, as an upload would.
+    #[cfg(test)]
+    pub(crate) async fn while_locked<T>(
+        &self,
+        ns: &str,
+        actor: &str,
+        f: impl Future<Output = T>,
+    ) -> T {
+        let slot = self.objects.borrow()[&object_key(ns, actor)].clone();
+        let _guard = slot.object.lock().await;
+        f.await
+    }
+
     /// Whether an object is open here, or opened by its claim.
     pub fn holds(&self, ns: &str, actor: &str) -> bool {
         let key = object_key(ns, actor);
         self.objects.borrow().contains_key(&key) || self.opened.borrow().contains_key(&key)
+    }
+
+    /// Whether an object is open here, opened by its claim, uploading its
+    /// eviction, or compacting.
+    pub fn busy(&self, ns: &str, actor: &str) -> bool {
+        let key = object_key(ns, actor);
+        self.holds(ns, actor)
+            || self.retiring.borrow().contains_key(&key)
+            || self.compacting.borrow().contains(&key)
+    }
+
+    /// Forget an object this node handed off: its dormant state and its
+    /// copies of the log.
+    pub fn forget(&self, ns: &str, actor: &str) {
+        let dormant = self.dormant.borrow_mut().remove(&object_key(ns, actor));
+        if let Some(root) = dormant.as_ref().and_then(|o| o.replica.cache.parent())
+            && let Err(e) = remove_dir(root)
+        {
+            tracing::warn!("cluster: {ns}/{actor}: removing its log copies: {e}");
+        }
     }
 
     /// Stop serving an object workerd closed, keeping it for its eviction.

@@ -28,6 +28,9 @@ class ColoLocalActorNamespace: public jsg::Object {
 
   jsg::Ref<Fetcher> get(jsg::Lock& js, kj::String actorId);
 
+  // A binding transfers through a startup snapshot as its channel number.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
     JSG_METHOD(get);
   }
@@ -66,6 +69,10 @@ class DurableObjectId: public jsg::Object {
     return id->getJurisdiction();
   }
 
+  // An ID made at a Worker's top level (idFromName() and friends need no IoContext) transfers
+  // through a startup snapshot; the ActorId is plain data.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
     JSG_METHOD(equals);
@@ -99,6 +106,9 @@ class DurableObject final: public Fetcher {
   jsg::Optional<kj::StringPtr> getName() {
     return id->getName();
   }
+
+  // A stub is minted per request around an IoOwn: never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(DurableObject) {
     JSG_INHERIT(Fetcher);
@@ -246,8 +256,7 @@ class DurableObjectNamespace: public jsg::Object {
     jsg::Optional<VersionOptions> version;
 
     // Limits on how the runtime retries calls through the returned stub. Omitted fields use the
-    // runtime's defaults. Always validated, but applied only while DURABLE_OBJECT_RETRIES_USERLAND
-    // is on.
+    // runtime's defaults.
     //
     // The fields are non-coercible doubles so that the conversion can reject fractions and
     // out-of-range values itself, and non-numbers such as null throw instead of becoming 0.
@@ -308,6 +317,10 @@ class DurableObjectNamespace: public jsg::Object {
   // Creates a subnamespace with the jurisdiction hardcoded.
   jsg::Ref<DurableObjectNamespace> jurisdiction(
       jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction);
+
+  // A binding transfers through a startup snapshot as its channel number and a copy of its ID
+  // factory. A namespace built around a live factory belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
@@ -481,6 +494,10 @@ class DurableObjectClass: public jsg::Object {
       : channel(kj::mv(channel)) {}
 
   kj::Rc<IoChannelFactory::ActorClassChannel> getChannel(IoContext& ioctx);
+
+  // A binding transfers through a startup snapshot as its channel number. A class carried as a
+  // capability belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()

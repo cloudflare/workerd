@@ -2,10 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Encoding-pair dispatch and the conversion logic behind each pair, ported
-//! from `i18n.c++`'s `TranscodeDefault` / `TranscodeLatin1ToUTF16` /
-//! `TranscodeFromUTF16` / `TranscodeUTF16FromUTF8` / `TranscodeUTF8FromUTF16`
-//! and the `switch` in `transcode()` that picks between them.
+//! Encoding-pair dispatch, and the conversion logic behind each pair.
 //!
 //! A transcode runs in two steps. [`Transcoder::new`] validates the source,
 //! picks the conversion, and computes [`Transcoder::dest_len`] -- the exact
@@ -25,15 +22,14 @@ use crate::ffi::Encoding;
 use crate::ffi::Utf8Source;
 use crate::ffi::Utf16LeSource;
 
-/// An isolate has a 128MB memory limit, and thus so does any single
-/// destination buffer. Mirrors `ISOLATE_LIMIT` in `i18n.c++`.
+/// An isolate has a 128 MiB memory limit, and thus so does any single
+/// destination buffer.
 const ISOLATE_LIMIT: usize = 134_217_728;
 
-/// Fails with `error` unless `limit` is within [`ISOLATE_LIMIT`], mirroring
-/// `i18n.c++`'s `JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, ...)`.
+/// Fails with `error` unless `limit` is within [`ISOLATE_LIMIT`].
 ///
-/// Callers compute `limit` with saturating arithmetic, where the C++ path
-/// multiplies unchecked, so an overflowing size saturates and fails here.
+/// Callers compute `limit` with saturating arithmetic, so a size that would
+/// overflow saturates and fails here.
 const fn require_within_isolate_limit(
     limit: usize,
     error: TranscodeError,
@@ -62,24 +58,22 @@ pub struct Transcoder<'a> {
 /// ICU converters or measured simdutf sources [`Transcoder::new`] needed to
 /// size the destination.
 enum Conversion<'a> {
-    /// ICU `ucnv_convertEx` between two converters, mirroring
-    /// `TranscodeDefault`. Handles every pair the conversions below do not,
-    /// including all four identity pairs.
+    /// ICU `ucnv_convertEx` between two converters. Handles every pair the
+    /// conversions below do not, including all four identity pairs.
     ConvertEx { to: Converter, from: Converter },
-    /// Latin-1 to UTF-16, mirroring `TranscodeLatin1ToUTF16`.
+    /// Latin-1 to UTF-16LE, via simdutf.
     Latin1ToUtf16,
-    /// ICU `ucnv_fromUChars` from UTF-16LE into ASCII or Latin-1, mirroring
-    /// `TranscodeFromUTF16`.
+    /// ICU `ucnv_fromUChars` from UTF-16LE into ASCII or Latin-1.
     FromUtf16 { to: Converter },
-    /// UTF-8 to UTF-16LE, mirroring `TranscodeUTF16FromUTF8`.
+    /// UTF-8 to UTF-16LE, via simdutf.
     Utf16FromUtf8(Utf8Source<'a>),
-    /// UTF-16LE to UTF-8, mirroring `TranscodeUTF8FromUTF16`.
+    /// UTF-16LE to UTF-8, via simdutf.
     Utf8FromUtf16(Utf16LeSource<'a>),
 }
 
 impl<'a> Transcoder<'a> {
-    /// Prepares a transcode of `source` from `from` to `to`, matching the
-    /// dispatch table built by `i18n::transcode()` in `i18n.c++`.
+    /// Prepares a transcode of `source` from `from` to `to`, choosing the
+    /// conversion for that encoding pair.
     ///
     /// Returns an error if `from` is not a transcodable encoding, if `source`
     /// is malformed for `from`, or if the destination the conversion would
@@ -139,8 +133,8 @@ impl<'a> Transcoder<'a> {
             Conversion::Latin1ToUtf16 => {
                 // Every byte is valid Latin-1 and widens to exactly one UTF-16
                 // code unit, and `dest` was sized as two bytes per source byte.
-                // The C++ path checks simdutf's result for 0, which it can only
-                // return for an empty source, handled above.
+                // simdutf returns 0 only for an empty source, handled above, so
+                // there is no failure result to check for.
                 let units = ffi::convert_latin1_to_utf16(source, dest)
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
                 Ok(units * size_of::<u16>())
@@ -169,11 +163,9 @@ impl<'a> Transcoder<'a> {
                     .convert_to_utf8(dest)
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
                 // Invalid input writes 0 bytes, which fails this check because
-                // `expected_bytes` is nonzero here. The C++
-                // `TranscodeUTF8FromUTF16` checks for 0 only *after* requiring
-                // equality with the (nonzero) estimate, so that branch is dead
-                // there too: invalid input surfaces as a length mismatch, not
-                // "Unable to transcode buffer", unlike every other pair.
+                // `expected_bytes` is nonzero here. Invalid input therefore
+                // surfaces as a length mismatch rather than "Unable to
+                // transcode buffer", unlike every other pair.
                 if written != expected_bytes {
                     return Err(TranscodeError::Utf8LengthMismatch);
                 }
@@ -182,9 +174,9 @@ impl<'a> Transcoder<'a> {
         }
     }
 
-    /// Mirrors `TranscodeDefault`: ICU `ucnv_convertEx` between two
-    /// converters, substituting `?` for unmappable characters, sized at `to`'s
-    /// maximum bytes per character for every source byte.
+    /// ICU `ucnv_convertEx` between two converters, substituting `?` for
+    /// unmappable characters, sized at `to`'s maximum bytes per character for
+    /// every source byte.
     fn transcode_default(
         source: &'a [u8],
         from: Encoding,
@@ -207,8 +199,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// Mirrors `TranscodeLatin1ToUTF16`: widening of ASCII/Latin-1 into
-    /// UTF-16.
+    /// Widening of ASCII/Latin-1 into UTF-16LE.
     ///
     /// Taken for an `Ascii` source as well as a `Latin1` one, so source bytes
     /// `0x80`-`0xFF` widen to U+0080-U+00FF instead of being substituted.
@@ -223,9 +214,9 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// Mirrors `TranscodeFromUTF16`: ICU `ucnv_fromUChars` from UTF-16LE into
-    /// ASCII or Latin-1, substituting `?` for unmappable characters, sized at
-    /// `to`'s maximum bytes per character for every code unit.
+    /// ICU `ucnv_fromUChars` from UTF-16LE into ASCII or Latin-1, substituting
+    /// `?` for unmappable characters, sized at `to`'s maximum bytes per
+    /// character for every code unit.
     fn transcode_from_utf16(source: &'a [u8], to: Encoding) -> Result<Self, TranscodeError> {
         let to_conv = Converter::open(to)?;
         to_conv.set_subst_chars(&"?".repeat(to_conv.min_char_size()))?;
@@ -244,8 +235,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// Mirrors `TranscodeUTF16FromUTF8`: UTF-8 to UTF-16LE, sized from
-    /// [`Utf8Source::utf16_len`].
+    /// UTF-8 to UTF-16LE, sized from [`Utf8Source::utf16_len`].
     ///
     /// That estimate is zero for some non-empty inputs -- a source of nothing
     /// but UTF-8 continuation bytes, for instance -- which yields an empty
@@ -266,8 +256,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// Mirrors `TranscodeUTF8FromUTF16`: UTF-16LE to UTF-8, sized from
-    /// [`Utf16LeSource::utf8_len`].
+    /// UTF-16LE to UTF-8, sized from [`Utf16LeSource::utf8_len`].
     fn transcode_utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
         if !source.len().is_multiple_of(2) {
             return Err(TranscodeError::OddUtf16leInput);

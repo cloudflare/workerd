@@ -118,11 +118,26 @@ pub enum Member {
     InheritIntrinsic(crate::Intrinsic),
 }
 
+/// Customizations of a structure's TypeScript declaration.
+///
+/// These correspond to C++ `JSG_TS_ROOT`, `JSG_TS_OVERRIDE` and `JSG_TS_DEFINE`; see the
+/// `## JSG_TS_OVERRIDE Rules` section of `src/workerd/jsg/README.md` for the override syntax.
+/// The fields are named after the `rtti.capnp` fields they set.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TypeScript {
+    /// Whether the declaration is a root of the ambient declarations.
+    pub ts_root: bool,
+    /// A partial or complete TypeScript statement that customizes the generated declaration.
+    pub ts_override: Option<&'static str>,
+    /// TypeScript declarations emitted next to the generated declaration.
+    pub ts_define: Option<&'static str>,
+}
+
 struct Structure {
     identity: &'static str,
     name: &'static str,
     members: Vec<Member>,
-    root: bool,
+    typescript: TypeScript,
 }
 
 /// A deterministic, cycle-safe collection of reachable binding definitions.
@@ -185,8 +200,9 @@ impl Context {
 
     /// Describes the structure `T` the first time it is reached, and returns a reference to it.
     ///
-    /// The structure is interned before `members` runs, so members can refer to it
-    /// recursively.
+    /// `members` describes the structure's members, and can amend its TypeScript
+    /// customizations, as a resource's registration does. The structure is interned before
+    /// `members` runs, so members can refer to it recursively.
     ///
     /// # Panics
     ///
@@ -194,8 +210,8 @@ impl Context {
     pub fn structure<T: ?Sized + 'static>(
         &mut self,
         name: &'static str,
-        root: bool,
-        members: impl FnOnce(&mut Self) -> Vec<Member>,
+        typescript: TypeScript,
+        members: impl FnOnce(&mut Self, &mut TypeScript) -> Vec<Member>,
     ) -> Type {
         let identity = type_name::<T>();
         if !self.indices.contains_key(&TypeId::of::<T>()) {
@@ -209,10 +225,13 @@ impl Context {
                 identity,
                 name,
                 members: Vec::new(),
-                root,
+                typescript,
             });
-            let members = members(self);
-            self.structures[index].members = members;
+            let mut typescript = typescript;
+            let members = members(self, &mut typescript);
+            let structure = &mut self.structures[index];
+            structure.members = members;
+            structure.typescript = typescript;
         }
         Type::Structure { identity, name }
     }
@@ -257,7 +276,18 @@ impl Context {
             return;
         }
         nesting.push(index);
-        builder.set_ts_root(structure.root);
+        let TypeScript {
+            ts_root,
+            ts_override,
+            ts_define,
+        } = structure.typescript;
+        builder.set_ts_root(ts_root);
+        if let Some(ts_override) = ts_override {
+            builder.set_ts_override(ts_override);
+        }
+        if let Some(ts_define) = ts_define {
+            builder.set_ts_define(ts_define);
+        }
         // Template creation rejects a type with more than one of each of these, which are
         // fields of the structure rather than members.
         let mut members = Vec::new();
@@ -294,6 +324,7 @@ impl Context {
 /// The registry through which RTTI export collects the members of a resource type.
 struct DescribedMembers<'a> {
     cx: &'a mut Context,
+    typescript: &'a mut TypeScript,
     members: Vec<Member>,
 }
 
@@ -303,14 +334,26 @@ impl MemberRegistry for DescribedMembers<'_> {
             self.members.push(member);
         }
     }
+
+    fn ts_override(&mut self, ts_override: &'static str) {
+        self.typescript.ts_override = Some(ts_override);
+    }
+
+    fn ts_define(&mut self, ts_define: &'static str) {
+        self.typescript.ts_define = Some(ts_define);
+    }
 }
 
-/// Describes the members that `R` registers under the context's compatibility flags, in
-/// registration order. [`undescribed`](crate::undescribed) members are omitted.
-pub fn resource_members<R: Resource>(cx: &mut Context) -> Vec<Member> {
+/// Describes the members that `R` registers under the context's compatibility flags.
+///
+/// Members are described in registration order, and the TypeScript customizations `R`
+/// registers are applied to `typescript`. [`undescribed`](crate::undescribed) members are
+/// omitted.
+pub fn resource_members<R: Resource>(cx: &mut Context, typescript: &mut TypeScript) -> Vec<Member> {
     let flags = Rc::clone(&cx.flags);
     let mut registry = DescribedMembers {
         cx,
+        typescript,
         members: Vec::new(),
     };
     R::members(&mut registry, flags.reader());

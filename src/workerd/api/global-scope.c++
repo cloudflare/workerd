@@ -31,7 +31,6 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -204,9 +203,6 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
 }
 
 IsRetryableHandler ExportedHandler::isFetchRetryable(jsg::Lock& js) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    return IsRetryableHandler::NO;
-  }
   KJ_IF_SOME(f, fetch) {
     KJ_IF_SOME(handle, f.tryGetHandle(js.v8Isolate)) {
       return IsRetryableHandler(jsg::JsObject(handle).hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
@@ -1340,6 +1336,27 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
     // return undefined in this case.
     bufferValue = jsg::JsRef(js, js.undefined());
     return js.undefined();
+  }
+}
+
+kj::Maybe<jsg::JsObject> ServiceWorkerGlobalScope::getSnapshotState(jsg::Lock& js) {
+  if (processValue == kj::none && bufferValue == kj::none) return kj::none;
+  auto state = js.objNoProto();
+  KJ_IF_SOME(p, processValue) {
+    state.set(js, "process"_kj, p.getHandle(js));
+  }
+  KJ_IF_SOME(b, bufferValue) {
+    state.set(js, "Buffer"_kj, b.getHandle(js));
+  }
+  return state;
+}
+
+void ServiceWorkerGlobalScope::restoreSnapshotState(jsg::Lock& js, jsg::JsObject state) {
+  if (state.has(js, "process"_kj)) {
+    processValue = jsg::JsRef(js, state.get(js, "process"_kj));
+  }
+  if (state.has(js, "Buffer"_kj)) {
+    bufferValue = jsg::JsRef(js, state.get(js, "Buffer"_kj));
   }
 }
 

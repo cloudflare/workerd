@@ -1,11 +1,15 @@
 #include "events.h"
 
+#include "actor-state.h"
 #include "blob.h"
 #include "messagechannel.h"
+
+#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 
 namespace {
+constexpr kj::StringPtr kCloseEventName = "close"_kj;
 constexpr kj::StringPtr kDefaultErrorEventName = "error"_kj;
 constexpr kj::StringPtr kMessageEventName = "message"_kj;
 constexpr kj::StringPtr kOpenEventName = "open"_kj;
@@ -70,6 +74,50 @@ void MessagePort::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace messageevent
+
+void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
+  JSG_REQUIRE(
+      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
+  IoContext::current().addWaitUntil(kj::mv(promise));
+}
+
+jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
+  IoContext& context = IoContext::current();
+  return context.getActor().map([&](Worker::Actor& actor) {
+    auto& lock = context.getCurrentLock();
+    auto persistent = actor.makeStorageForSwSyntax(lock);
+    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
+  });
+}
+
+CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
+    : Event(kj::mv(ownType), Event::Init(init)),
+      detail(kj::mv(init.detail)) {}
+
+jsg::Ref<CustomEvent> CustomEvent::constructor(
+    jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
+  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+}
+
+jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
+  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.getHandle(js); });
+}
+
+CustomEvent::CustomEventInit::operator Event::Init() {
+  return {
+    .bubbles = this->bubbles.map([](auto& val) { return val; }),
+    .cancelable = this->cancelable.map([](auto& val) { return val; }),
+    .composed = this->composed.map([](auto& val) { return val; }),
+  };
+}
+
+void CustomEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("detail", detail);
+}
+
+void CustomEvent::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(detail);
+}
 
 // Runtime-only; always trusted.
 OpenEvent::OpenEvent(): Event(kOpenEventName, {}, Trusted::YES) {}
@@ -274,6 +322,47 @@ void ErrorEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(init.error);
+}
+
+// ======================================================================================
+CloseEvent::CloseEvent(uint code, kj::String reason, bool clean)
+    : Event(kCloseEventName, {}, Trusted::YES),
+      code(code),
+      reason(kj::mv(reason)),
+      clean(clean) {}
+
+CloseEvent::CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init)
+    : Event(kj::mv(type), kj::mv(init)),
+      code(code),
+      reason(kj::mv(reason)),
+      clean(clean) {}
+
+jsg::Ref<CloseEvent> CloseEvent::constructor(
+    jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
+  Initializer init = kj::mv(initializer).orDefault({});
+  return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+      kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
+      Event::Init{
+        .bubbles = init.bubbles,
+        .cancelable = init.cancelable,
+        .composed = init.composed,
+      });
+}
+
+int CloseEvent::getCode() {
+  return code;
+}
+
+kj::StringPtr CloseEvent::getReason() {
+  return reason;
+}
+
+bool CloseEvent::getWasClean() {
+  return clean;
+}
+
+void CloseEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("reason", reason);
 }
 
 // ======================================================================================

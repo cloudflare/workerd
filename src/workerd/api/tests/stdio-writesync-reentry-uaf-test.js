@@ -72,3 +72,76 @@ export const stdioWriteSyncReentryUafTest = {
     }
   },
 };
+
+// The tests below cover the caller's buffer rather than lineBuffer.
+// StdioFile::write() logs each complete line through console.log, which
+// can run user code. That code can detach or shrink the ArrayBuffer being
+// written. StdioFile::write() must not read the caller's bytes after the
+// first console.log call, so it copies them up front.
+
+// Writes `view` to stdout. The first console.log call runs `mutate`. Returns
+// the lines that reached console.log.
+function writeWithReentrantLog(view, mutate) {
+  const origLog = console.log;
+  const logged = [];
+  let fired = false;
+  console.log = (line) => {
+    logged.push(line);
+    if (!fired) {
+      fired = true;
+      mutate();
+    }
+  };
+  try {
+    fs.writeSync(1, view);
+  } finally {
+    console.log = origLog;
+  }
+  assert.ok(fired, 'console.log should have been called during the write');
+  return logged;
+}
+
+// Enough newline-terminated lines that the write keeps going long after
+// console.log first returns.
+const LINE_COUNT = 64;
+function fillLines(bytes) {
+  const text = new TextEncoder().encode('line\n'.repeat(LINE_COUNT));
+  bytes.set(text);
+  return text.length;
+}
+
+function assertAllLinesLogged(logged) {
+  assert.strictEqual(logged.length, LINE_COUNT);
+  // Each line may carry the configured stdout prefix, such as "stdout: ".
+  for (const line of logged) assert.match(line, /(^| )line$/);
+}
+
+export const stdioWriteSyncShrinkDuringLogTest = {
+  test() {
+    // Shrinking a resizable ArrayBuffer decommits its pages, so reading the
+    // old bytes faults even without ASAN.
+    const ab = new ArrayBuffer(0, { maxByteLength: 1024 * 1024 });
+    ab.resize(LINE_COUNT * 'line\n'.length);
+    const view = new Uint8Array(ab);
+    fillLines(view);
+    const logged = writeWithReentrantLog(view, () => ab.resize(0));
+    assert.strictEqual(ab.byteLength, 0);
+    assertAllLinesLogged(logged);
+  },
+};
+
+export const stdioWriteSyncTransferDuringLogTest = {
+  test() {
+    const ab = new ArrayBuffer(LINE_COUNT * 'line\n'.length);
+    const view = new Uint8Array(ab);
+    fillLines(view);
+    const logged = writeWithReentrantLog(view, () => {
+      // transfer() may hand the same backing store to the new buffer, so
+      // overwrite it: the write must still log the original bytes.
+      const moved = new Uint8Array(ab.transfer());
+      moved.fill(0x5a);
+    });
+    assert.ok(ab.detached);
+    assertAllLinesLogged(logged);
+  },
+};

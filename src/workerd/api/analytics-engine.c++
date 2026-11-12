@@ -57,4 +57,9 @@ void AnalyticsEngine::writeDataPointNoOutputLock(
     }
   });
 }
+kj::Maybe<kj::Own<jsg::Wrappable>> AnalyticsEngine::snapshotClone() const {
+  return ownAsWrappable(
+      kj::refcounted<AnalyticsEngine>(logfwdrChannel, kj::str(dataset), version, ownerId));
+}
+
 }  // namespace workerd::api
