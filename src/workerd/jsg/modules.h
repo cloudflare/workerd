@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/compilation.h>
 #include <workerd/jsg/function.h>
+#include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
@@ -469,8 +470,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   // If `wasmHolder` is given and `module` is a Wasm module, the module is instantiated from the
   // holder, so it is compiled only if no earlier registry using the holder has compiled it.
-  void addBuiltinModule(
-      Module::Reader module, kj::Maybe<const CompiledWasmModuleHolder&> wasmHolder = kj::none) {
+  // If `moduleSource` is given and `module` is a source module, V8 reads the source from the
+  // storage it provides (see jsg/module-source.h) instead of the compiled-in bytes.
+  void addBuiltinModule(Module::Reader module,
+      kj::Maybe<const CompiledWasmModuleHolder&> wasmHolder = kj::none,
+      const ModuleSource* moduleSource = nullptr) {
     if (module.which() != Module::SRC) {
       auto specifier = module.getName();
       switch (module.which()) {
@@ -526,14 +530,23 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           KJ_UNREACHABLE
       }
     }
+    if (moduleSource != nullptr) {
+      addBuiltinModule(module.getName(), moduleSource->get(module.getSrc().asChars()),
+          module.getType(), module.getCompileCache().asBytes());
+      return;
+    }
     // TODO: asChars() might be wrong for wide characters
     addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType(),
         module.getCompileCache().asBytes());
   }
 
-  void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
+  void addBuiltinBundle(Bundle::Reader bundle,
+      kj::Maybe<Type> maybeFilter = kj::none,
+      const ModuleSource* moduleSource = nullptr) {
     for (auto module: bundle.getModules()) {
-      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
+      if (module.getType() == maybeFilter.orDefault(module.getType())) {
+        addBuiltinModule(module, kj::none, moduleSource);
+      }
     }
   }
 
