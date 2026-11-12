@@ -1089,8 +1089,14 @@ serialized, and neither can instances of the runtime's classes implemented in Ja
 C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
 throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
 bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
-resolve, so data containing one can't be read back. Deserialization runs no JavaScript. Transfer
-lists, externals and the other options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+resolve, so data containing one can't be read back. Deserialization runs no JavaScript.
+
+Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
+`SerializeOptions::version`, the version of V8's format to write rather than the latest, as
+`jsg::Serializer::Options::version` does; a version V8 can't write throws `DataCloneError`.
+`jsg::ser::deserialize_with` takes `DeserializeOptions::preserve_stack_in_errors`, as
+`jsg::Deserializer::Options::preserveStackInErrors` does. Transfer lists, externals and the other
+options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
 
 ## JSON
 
