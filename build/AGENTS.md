@@ -40,6 +40,13 @@ that adds workerd-specific static checks:
   depending on which visited last. Suppress a deliberate shared visit with
   `// NOLINT(jsg-shared-visit)` plus the reason. Test:
   `//tools/clang-tidy:shared-visit-test`.
+- `jsg-js-reentry`: flags a local reference, pointer, iterator, or view into
+  JSG-owned state that is used after, or is the receiver of, a call that can run
+  JavaScript. A call can run JavaScript when its callee takes a `jsg::Lock&`, is
+  marked `JSG_MAY_RUN_JS`, is a V8 entry point that runs script, or has a body
+  in the translation unit that makes such a call; callees marked `JSG_NO_JS`
+  never do. Enabled for the directories listed in
+  `check_path_filters.bzl`; run it elsewhere with `--config=clang-tidy-js-reentry`.
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
   `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
