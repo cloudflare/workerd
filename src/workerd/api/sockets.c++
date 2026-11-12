@@ -1058,6 +1058,9 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }
 
   isClosing = true;
+  KJ_IF_SOME(a, acceptance) {
+    a->fail("The connect() handler's socket closed before it accepted the connection."_kj);
+  }
   writable.setPendingClosure(js);
   readable.setPendingClosure(js);
 
@@ -1097,6 +1100,70 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
     self->errorHandler(js, kj::mv(err));
   });
+}
+
+void ConnectAcceptance::accept() {
+  KJ_IF_SOME(failed, state.tryGet<Failed>()) {
+    JSG_FAIL_REQUIRE(Error, failed.reason);
+  }
+  KJ_IF_SOME(pending, state.tryGet<Pending>()) {
+    // Settle the state before answering, so that nothing the answer sets off can answer again.
+    auto& response = pending.response;
+    state = Accepted{};
+    response.accept(200, "OK", headers);
+    accepted.signal();
+  }
+}
+
+void ConnectAcceptance::setFailed(kj::StringPtr reason) {
+  state = Failed{kj::str(reason)};
+  accepted.reject(JSG_KJ_EXCEPTION(DISCONNECTED, Error, reason));
+}
+
+void ConnectAcceptance::fail(kj::StringPtr reason) {
+  KJ_IF_SOME(pending, state.tryGet<Pending>()) {
+    auto& response = pending.response;
+    setFailed(reason);
+    // The peer learns only that the connection failed: Socket::handleProxyStatus() reports every
+    // unsuccessful status the same way.
+    response.reject(502, "Bad Gateway", headers, static_cast<uint64_t>(0));
+  }
+}
+
+bool ConnectAcceptance::abandon(kj::StringPtr reason) {
+  if (isPending()) {
+    setFailed(reason);
+    return true;
+  }
+  return false;
+}
+
+kj::Maybe<kj::StringPtr> Socket::getRequestedSecureTransport() const {
+  return requestedSecureTransport.map([](SecureTransportKind kind) {
+    switch (kind) {
+      case SecureTransportKind::OFF:
+        return "off"_kj;
+      case SecureTransportKind::STARTTLS:
+        return "starttls"_kj;
+      case SecureTransportKind::ON:
+        return "on"_kj;
+    }
+    KJ_UNREACHABLE;
+  });
+}
+
+void Socket::initInbound(
+    SecureTransportKind requested, kj::Maybe<IoOwn<ConnectAcceptance>> pendingAcceptance) {
+  requestedSecureTransport = requested;
+  acceptance = kj::mv(pendingAcceptance);
+}
+
+void Socket::accept() {
+  JSG_REQUIRE(requestedSecureTransport != kj::none, TypeError,
+      "accept() can only be called on the socket passed to a connect() handler.");
+  KJ_IF_SOME(a, acceptance) {
+    a->accept();
+  }
 }
 
 jsg::Promise<void> Socket::proxyTo(
@@ -1614,6 +1681,12 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       JSG_FAIL_REQUIRE(DOMDataCloneError, "A Socket whose connection failed cannot be serialized.");
     case OpenedState::OPENED:
       break;
+  }
+  // Only the handler that received the connection can answer its peer.
+  KJ_IF_SOME(a, acceptance) {
+    JSG_REQUIRE(!a->isPending(), DOMDataCloneError,
+        "A Socket can only be serialized after its connection has been accepted. Call "
+        "`socket.accept()` before transferring the socket over RPC.");
   }
 
   // Serialize the socket metadata, referencing the stream externals

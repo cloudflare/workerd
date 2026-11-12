@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import { connect } from 'cloudflare:sockets';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { ok, strictEqual } from 'assert';
+import { ok, strictEqual, throws } from 'assert';
 
 export class ConnectProxy extends WorkerEntrypoint {
   async connect(socket) {
@@ -87,6 +87,111 @@ export class LocalAddressEndpoint extends WorkerEntrypoint {
         })
       )
     );
+    await writer.close();
+  }
+}
+
+// Serves the connect-tls TCP listener, which terminates TLS before the connection reaches this
+// handler. Answers one line with that line prefixed by `secure:`, so that its peer can tell the
+// reply came over the TLS connection.
+export class TlsEchoEndpoint extends WorkerEntrypoint {
+  async connect(socket) {
+    const reader = socket.readable.getReader();
+    const line = await readLine(reader);
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode(`secure:${line}`));
+    await writer.close();
+  }
+}
+
+// The handlers below are reached through service bindings from
+// connect-handler-immediate-tls-test.js, whose sockets ask for secureTransport 'on'. Neither end of
+// a service binding can run a handshake, so each handler makes the connection secure further
+// along, or fails to, before it accepts the connection.
+
+// The shape a binding Worker in front of a private network has: open the upstream with TLS, wait
+// for the handshake, accept, and relay.
+export class ImmediateTlsRelay extends WorkerEntrypoint {
+  async connect(socket) {
+    strictEqual(socket.requestedSecureTransport, 'on');
+    // The handler's own socket carries plaintext, which is what the peer writes and reads.
+    strictEqual(socket.secureTransport, 'off');
+
+    const upstream = connect(
+      `${this.env.SIDECAR_HOSTNAME}:${this.env.TLS_PORT}`,
+      { secureTransport: 'on' }
+    );
+    await upstream.opened;
+    socket.accept();
+    // A second accept() changes nothing.
+    socket.accept();
+    await socket.proxyTo(upstream);
+  }
+}
+
+// Checks that nothing the peer writes reaches the handler before the handler accepts the
+// connection, and that it all arrives afterwards.
+export class ImmediateTlsHoldsWrites extends WorkerEntrypoint {
+  async connect(socket) {
+    const reader = socket.readable.getReader();
+    const firstRead = reader.read();
+    // The peer wrote before its socket opened. If those bytes were let through, they would arrive
+    // well within this wait; that they don't is what accept() guarantees, so a slow run can't make
+    // this fail spuriously.
+    const early = await Promise.race([
+      firstRead.then(() => 'data'),
+      scheduler.wait(50).then(() => 'nothing'),
+    ]);
+    strictEqual(early, 'nothing');
+
+    socket.accept();
+    const { value, done } = await firstRead;
+    ok(!done);
+    const writer = socket.writable.getWriter();
+    await writer.write(
+      new TextEncoder().encode(`got:${new TextDecoder().decode(value)}`)
+    );
+    await writer.close();
+  }
+}
+
+// The upstream doesn't speak TLS, so the handshake fails and the handler throws before accepting.
+export class ImmediateTlsFailedHandshake extends WorkerEntrypoint {
+  async connect(socket) {
+    const upstream = connect(
+      `${this.env.SIDECAR_HOSTNAME}:${this.env.CONNECT_ENDPOINT_PORT}`,
+      { secureTransport: 'on' }
+    );
+    await upstream.opened;
+    socket.accept();
+    await socket.proxyTo(upstream);
+  }
+}
+
+// Returns without accepting.
+export class ImmediateTlsNeverAccepts extends WorkerEntrypoint {
+  async connect(socket) {}
+}
+
+// Closes its socket before accepting, and finds that the connection can no longer be accepted.
+export class ImmediateTlsClosesFirst extends WorkerEntrypoint {
+  async connect(socket) {
+    await socket.close();
+    throws(() => socket.accept(), {
+      message:
+        "The connect() handler's socket closed before it accepted the connection.",
+    });
+  }
+}
+
+// A peer that didn't ask for TLS gets its connection accepted on delivery, and accept() does
+// nothing.
+export class ImmediateTlsPlaintextPeer extends WorkerEntrypoint {
+  async connect(socket) {
+    strictEqual(socket.requestedSecureTransport, 'off');
+    socket.accept();
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode('plaintext-ok'));
     await writer.close();
   }
 }

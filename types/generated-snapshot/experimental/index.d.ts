@@ -3663,6 +3663,8 @@ interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
   proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  get requestedSecureTransport(): string | null;
+  accept(): void;
 }
 interface SocketOptions {
   secureTransport?: string;
