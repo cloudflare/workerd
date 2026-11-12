@@ -6,6 +6,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/observer.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/stream-utils.h>
 
@@ -302,6 +303,8 @@ enum class ResponseMode {
   UPSTREAM_END_FAILURE,
   // Port.connect() hands out a SubstreamFailingUp as `up` before it returns, then fails.
   PIPELINED_CONNECT_FAILURE,
+  // Port.connect() keeps `down`, then fails.
+  DOWN_HELD_CONNECT_FAILURE,
   // Port.connect() drops `down`, then fails.
   DOWN_DROPPED_CONNECT_FAILURE,
 };
@@ -455,12 +458,15 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
     if (mode == ResponseMode::CONNECT_FAILURE) {
       return JSG_KJ_EXCEPTION(FAILED, Error, "Testing error path");
     }
-    if (mode == ResponseMode::PIPELINED_CONNECT_FAILURE) {
+    if (mode == ResponseMode::PIPELINED_CONNECT_FAILURE ||
+        mode == ResponseMode::DOWN_HELD_CONNECT_FAILURE) {
       heldDown = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
-      capnp::PipelineBuilder<ConnectResults> pipeline;
-      pipeline.setUp(capnp::ByteStream::Client(
-          kj::heap<SubstreamFailingUp>(KJ_REQUIRE_NONNULL(upRecording).substreamRequested)));
-      context.setPipeline(pipeline.build());
+      if (mode == ResponseMode::PIPELINED_CONNECT_FAILURE) {
+        capnp::PipelineBuilder<ConnectResults> pipeline;
+        pipeline.setUp(capnp::ByteStream::Client(
+            kj::heap<SubstreamFailingUp>(KJ_REQUIRE_NONNULL(upRecording).substreamRequested)));
+        context.setPipeline(pipeline.build());
+      }
       // Fail once the caller has done all it does before connect() returns.
       return kj::yieldUntilQueueEmpty().then([]() -> kj::Promise<void> {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Testing error path");
@@ -600,6 +606,7 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
         case ResponseMode::UPSTREAM_FAILURE:
         case ResponseMode::UPSTREAM_END_FAILURE:
         case ResponseMode::PIPELINED_CONNECT_FAILURE:
+        case ResponseMode::DOWN_HELD_CONNECT_FAILURE:
         case ResponseMode::DOWN_DROPPED_CONNECT_FAILURE:
           KJ_UNREACHABLE;
         case ResponseMode::MALFORMED_KEEP_OPEN:
@@ -1738,7 +1745,7 @@ KJ_TEST("Container redirects `down` when a raw connect() is pumped into a capnp 
   KJ_EXPECT(substreamRequested);
 }
 
-KJ_TEST("Container preserves Port.connect() errors when `down` is redirected") {
+KJ_TEST("Container fails a redirected raw connect() pump with Port.connect()'s error") {
   // Dropping `down` after it has been redirected fails the pump with a generic error before
   // Port.connect() fails.
   auto fixture = makeFixture();
@@ -1764,24 +1771,103 @@ KJ_TEST("Container preserves Port.connect() errors when `down` is redirected") {
 
     auto connectPromise =
         client->connect("container"_kjc, headers, *pipe.ends[0], response, settings);
-    // Only connect()'s outcome is checked here, not the pump's.
-    auto pumpResponse = pipe.ends[1]->pumpTo(*destination).then([](uint64_t) -> kj::Promise<void> {
-      return kj::NEVER_DONE;
-    }, [](kj::Exception&&) -> kj::Promise<void> { return kj::NEVER_DONE; });
+    // Like a native pump of the socket's readable into a stream that is sent over RPC.
+    auto pumpResponse = pipe.ends[1]->pumpTo(*destination);
+
+    bool connectThrew = false;
+    try {
+      co_await connectPromise;
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      KJ_EXPECT(exception.getDescription() == "jsg.Error: Testing error path", exception);
+      connectThrew = true;
+    }
+    KJ_EXPECT(connectThrew, "expected connect() to fail");
+
+    bool pumpThrew = false;
+    try {
+      co_await pumpResponse;
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      KJ_EXPECT(exception.getDescription() == "jsg.Error: Testing error path", exception);
+      pumpThrew = true;
+    }
+    KJ_EXPECT(pumpThrew, "expected the socket's pump to fail");
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(substreamRequested);
+}
+
+// Opens a raw connect() through the HTTP client adapter, as a Worker's connect() does, and
+// consumes the socket from the start while Port.connect() fails. The socket is accepted first, so
+// only the consumer can see Port.connect()'s error.
+void runRawConnectFailureTest(
+    ResponseMode mode, kj::Function<kj::Promise<void>(kj::AsyncIoStream& socket)> consume) {
+  auto fixture = makeFixture();
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = env.js.alloc<Container>(rpc::Container::Client(kj::heap<TestContainerServer>(
+                                                 byteStreamFactory, mode, connectCount)),
+        true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = asHttpClient(fetcher->getClient(env.context, kj::none, "container"_kjc));
+    kj::HttpHeaders headers(env.context.getHeaderTable());
+    auto request = client->connect("container"_kj, headers, {.useTls = false});
+    auto consumed = consume(*request.connection);
+    auto status = co_await request.status;
+    KJ_EXPECT(status.statusCode == 200);
 
     bool threw = false;
     try {
-      co_await connectPromise.exclusiveJoin(kj::mv(pumpResponse));
+      co_await consumed;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       KJ_EXPECT(exception.getDescription() == "jsg.Error: Testing error path", exception);
       threw = true;
     }
-    KJ_EXPECT(threw, "expected connect() to fail");
+    KJ_EXPECT(threw, "expected the socket to fail with Port.connect()'s error");
   });
 
   KJ_EXPECT(connectCount == 1);
-  KJ_EXPECT(substreamRequested);
+}
+
+kj::Promise<void> readSocket(kj::AsyncIoStream& socket) {
+  auto buffer = kj::heapArray<kj::byte>(16);
+  auto read = socket.tryRead(buffer.begin(), 1, buffer.size());
+  return read.ignoreResult().attach(kj::mv(buffer));
+}
+
+KJ_TEST("Container fails a raw connect()'s read with Port.connect()'s error") {
+  runRawConnectFailureTest(ResponseMode::DOWN_HELD_CONNECT_FAILURE, readSocket);
+}
+
+KJ_TEST("Container fails a raw connect()'s read with Port.connect()'s error when `down` is dropped "
+        "first") {
+  runRawConnectFailureTest(ResponseMode::DOWN_DROPPED_CONNECT_FAILURE, readSocket);
+}
+
+// Pumps the socket from the start, like a native pump of the socket's readable into a stream that
+// is sent over RPC.
+void runRawConnectPumpFailureTest(ResponseMode mode) {
+  capnp::ByteStreamFactory byteStreamFactory;
+  runRawConnectFailureTest(mode, [&](kj::AsyncIoStream& socket) {
+    auto destination = byteStreamFactory.capnpToKjExplicitEnd(
+        byteStreamFactory.kjToCapnp(kj::heap<kj::NullStream>()));
+    auto pump = socket.pumpTo(*destination);
+    return pump.ignoreResult().attach(kj::mv(destination));
+  });
+}
+
+KJ_TEST("Container fails a raw connect()'s socket pump with Port.connect()'s error") {
+  runRawConnectPumpFailureTest(ResponseMode::DOWN_HELD_CONNECT_FAILURE);
+}
+
+KJ_TEST("Container fails a raw connect()'s socket pump with Port.connect()'s error when `down` is "
+        "dropped first") {
+  runRawConnectPumpFailureTest(ResponseMode::DOWN_DROPPED_CONNECT_FAILURE);
 }
 
 KJ_TEST("Container does not reuse tunnels for ports beyond the pool limit") {
