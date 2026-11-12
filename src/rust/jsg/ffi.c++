@@ -140,6 +140,11 @@ Local local_new_object(Isolate* isolate) {
   return to_ffi(kj::mv(object));
 }
 
+Local local_new_object_with_null_prototype(Isolate* isolate) {
+  v8::Local<v8::Object> object = v8::Object::New(isolate, v8::Null(isolate), nullptr, nullptr, 0);
+  return to_ffi(kj::mv(object));
+}
+
 Local local_new_null(Isolate* isolate) {
   v8::Local<v8::Primitive> null = v8::Null(isolate);
   return to_ffi(kj::mv(null));
@@ -324,6 +329,12 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(
       local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+}
+
+MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::Value>(val)->ToDetailString(isolate->GetCurrentContext()));
 }
 
 // Utf8Value
@@ -1834,6 +1845,53 @@ MaybeLocal dom_exception_create_from_bytes(
       isolate, kj::arrayPtr(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
 }
 
+Local js_error_create_from_bytes(
+    Isolate* isolate, JsErrorType error_type, ::rust::Slice<const uint8_t> message) {
+  auto text = errorMessageFromBytes(isolate, message);
+  switch (error_type) {
+    case JsErrorType::Error:
+      return to_ffi(v8::Exception::Error(text));
+    case JsErrorType::RangeError:
+      return to_ffi(v8::Exception::RangeError(text));
+    case JsErrorType::TypeError:
+      return to_ffi(v8::Exception::TypeError(text));
+    case JsErrorType::SyntaxError:
+      return to_ffi(v8::Exception::SyntaxError(text));
+    case JsErrorType::ReferenceError:
+      return to_ffi(v8::Exception::ReferenceError(text));
+    case JsErrorType::WasmCompileError:
+      return to_ffi(v8::Exception::WasmCompileError(text));
+    case JsErrorType::WasmLinkError:
+      return to_ffi(v8::Exception::WasmLinkError(text));
+    case JsErrorType::WasmRuntimeError:
+      return to_ffi(v8::Exception::WasmRuntimeError(text));
+    case JsErrorType::WasmSuspendError:
+      return to_ffi(v8::Exception::WasmSuspendError(text));
+    case JsErrorType::AggregateError:
+      return to_ffi(v8::Exception::AggregateError(text));
+    case JsErrorType::SuppressedError:
+      return to_ffi(v8::Exception::SuppressedError(text));
+    case JsErrorType::URIError:
+      return to_ffi(v8::Exception::URIError(text));
+    case JsErrorType::EvalError:
+      return to_ffi(v8::Exception::EvalError(text));
+  }
+  KJ_UNREACHABLE;
+}
+
+bool dom_exception_try_unwrap(
+    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message) {
+  // No exceptionPending() check: unwrapping passes no context to V8, and runs no JavaScript.
+  KJ_IF_SOME(exception,
+      ::workerd::jsg::tryGetDOMExceptionNameAndMessage(
+          isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    name = ::rust::String::lossy(exception.name.begin(), exception.name.size());
+    message = ::rust::String::lossy(exception.message.begin(), exception.message.size());
+    return true;
+  }
+  return false;
+}
+
 namespace {
 // Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
 // the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
@@ -1944,6 +2002,10 @@ bool isolate_is_locked(Isolate* isolate) {
 
 bool isolate_in_context(Isolate* isolate) {
   return isolate->InContext();
+}
+
+Local isolate_current_context_global(Isolate* isolate) {
+  return to_ffi(isolate->GetCurrentContext()->Global());
 }
 
 }  // namespace workerd::rust::jsg

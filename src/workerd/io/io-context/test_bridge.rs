@@ -25,6 +25,7 @@ use execution_context::open_gate;
 use futures::channel::oneshot;
 use io_context::IoContext;
 use io_context::IoOwned;
+use io_context::IoOwnedSpan;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
@@ -134,6 +135,10 @@ mod ffi {
         fn owned_value_dropped() -> bool;
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
+        unsafe fn use_owned_value(isolate: usize) -> Result<i32>;
+        unsafe fn add_owned_span(isolate: usize) -> Result<()>;
+        unsafe fn tag_owned_span(isolate: usize) -> Result<bool>;
+        fn drop_owned_span_handle();
         unsafe fn record_trace_spans(isolate: usize) -> Result<()>;
         unsafe fn hold_trace_span(isolate: usize) -> Result<()>;
         fn drop_held_trace_span();
@@ -147,6 +152,7 @@ mod ffi {
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
+        fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
     }
 }
@@ -197,6 +203,18 @@ unsafe fn now_nanos(isolate: usize) -> Result<i64> {
     let now = IoContext::current(lock)
         .and_then(|context| context.now())
         .map_err(|err| to_io(&err))?;
+    let nanos = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(std::io::Error::other)?
+        .as_nanos();
+    i64::try_from(nanos).map_err(std::io::Error::other)
+}
+
+/// `IoContext::now_in_current_request()`, in nanoseconds since the Unix epoch, failing outside a
+/// request. Takes no isolate, since it needs no lock.
+fn now_in_current_request_nanos() -> Result<i64> {
+    let now = IoContext::now_in_current_request()
+        .ok_or_else(|| std::io::Error::other("not in a request"))?;
     let nanos = now
         .duration_since(UNIX_EPOCH)
         .map_err(std::io::Error::other)?
@@ -558,13 +576,16 @@ fn awaited_future_dropped() -> bool {
 
 thread_local! {
     static OWNED: RefCell<Option<IoOwned<DropFlag>>> = const { RefCell::new(None) };
+    static OWNED_SPAN: RefCell<Option<IoOwnedSpan>> = const { RefCell::new(None) };
     static HELD_SPAN: RefCell<Option<SpanBuilder>> = const { RefCell::new(None) };
 }
 
 static OWNED_DROPPED: AtomicBool = AtomicBool::new(false);
 
-/// Sets `OWNED_DROPPED` when dropped.
-struct DropFlag;
+/// Sets `OWNED_DROPPED` when dropped, and counts its uses.
+struct DropFlag {
+    uses: i32,
+}
 
 impl Drop for DropFlag {
     fn drop(&mut self) {
@@ -578,7 +599,7 @@ unsafe fn add_owned_value(isolate: usize) -> Result<()> {
     // SAFETY: see the module documentation.
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     let owned = IoContext::current(lock)
-        .and_then(|context| context.add_object(DropFlag))
+        .and_then(|context| context.add_object(DropFlag { uses: 0 }))
         .map_err(|err| to_io(&err))?;
     OWNED.with(|cell| *cell.borrow_mut() = Some(owned));
     Ok(())
@@ -606,6 +627,63 @@ unsafe fn take_owned_value(isolate: usize) -> Result<bool> {
 /// Drops the handle `add_owned_value()` kept, without taking its value.
 fn drop_owned_handle() {
     OWNED.with(|cell| cell.borrow_mut().take());
+}
+
+/// Uses the value `add_owned_value()` gave its request, in place, and returns how many times it
+/// has been used, or -1 if it was taken.
+unsafe fn use_owned_value(isolate: usize) -> Result<i32> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    OWNED.with(|cell| {
+        let owned = cell.borrow();
+        let owned = owned
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("add_owned_value() has not been called"))?;
+        let uses = owned
+            .with(lock, |flag| {
+                flag.uses += 1;
+                flag.uses
+            })
+            .map_err(|err| to_io(&err))?;
+        Ok(uses.unwrap_or(-1))
+    })
+}
+
+/// In a request, starts the span `owned_span` and gives it to the request, keeping the handle
+/// on this thread.
+unsafe fn add_owned_span(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let owned = IoContext::current(lock)
+        .and_then(|context| {
+            let span = context.make_trace_span(c"owned_span")?;
+            context.add_span(span)
+        })
+        .map_err(|err| to_io(&err))?;
+    OWNED_SPAN.with(|cell| *cell.borrow_mut() = Some(owned));
+    Ok(())
+}
+
+/// Tags the span `add_owned_span()` gave its request with `tagged=bool:true`; false if it was
+/// taken.
+unsafe fn tag_owned_span(isolate: usize) -> Result<bool> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    OWNED_SPAN.with(|cell| {
+        let owned = cell.borrow();
+        let owned = owned
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("add_owned_span() has not been called"))?;
+        let tagged = owned
+            .with(lock, |span| span.set_tag(c"tagged", true))
+            .map_err(|err| to_io(&err))?;
+        Ok(tagged.is_some())
+    })
+}
+
+/// Drops the handle `add_owned_span()` kept.
+fn drop_owned_span_handle() {
+    OWNED_SPAN.with(|cell| cell.borrow_mut().take());
 }
 
 /// In a request, makes the spans `io-context-test.c++` expects, with a tag of each kind, and ends

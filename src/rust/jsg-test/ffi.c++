@@ -343,6 +343,19 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
+::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
+    Isolate* isolate, ::workerd::rust::jsg::Local exception) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  try {
+    auto tunneled = js.exceptionToKj(::workerd::jsg::JsValue(
+        ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(exception))));
+    v8::Local<v8::Value> result = js.exceptionToJsValue(kj::mv(tunneled)).getHandle(js);
+    return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
+}
+
 void mark_js_serializable(
     Isolate* isolate, ::workerd::rust::jsg::Local object, ::workerd::rust::jsg::Local mark) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
