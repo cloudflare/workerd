@@ -93,6 +93,17 @@ switch (MODE) {
     kept = new TextDecoder();
     kept.decode(new Uint8Array([0xc3]), { stream: true });
     break;
+  case 'streamed-decoder': {
+    // A UTF-8 decoder mid-stream between characters, past a BOM it stripped. What it carries is
+    // that it has seen the BOM, so a later one is kept.
+    const streamed = new TextDecoder();
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0xc3, 0xa9]);
+    kept = {
+      decoder: streamed,
+      first: streamed.decode(bytes, { stream: true }),
+    };
+    break;
+  }
   case 'crypto-keys': {
     // Keys whose Impl copies itself: secret key material, and asymmetric keys sharing their
     // EVP_PKEY. None of their `algorithm` or `usages` properties is read here. The top level may
@@ -314,6 +325,12 @@ async function checks() {
       result.abortNotYet = !kept.aborted;
       controller.abort('now');
       result.abortWorks = kept.aborted && kept.reason === 'now';
+      break;
+    case 'streamed-decoder':
+      result.streamedDecoder =
+        kept.first === 'é' &&
+        kept.decoder.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x61])) ===
+          '\ufeffa';
       break;
     case 'crypto-keys':
       Object.assign(result, await cryptoKeyChecks(kept));
@@ -539,6 +556,7 @@ async function test(ctrl, env) {
     // node:fs and node:url: the module scope reaches UrlUtil, a Rust JSG resource
     // (src/rust/api/url.rs) marked snapshot_stateless.
     'fs',
+    'streamed-decoder',
     'crypto-keys',
     ...(tsUrl ? ['searchparams'] : []),
   ];
