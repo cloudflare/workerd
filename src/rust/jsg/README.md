@@ -412,7 +412,9 @@ a pool of OS threads), so the future must not hold a value bound to the OS threa
 `thread_local!`-backed value, a `MutexGuard` or `tracing::span::Entered`, across an `.await`.
 Clippy rejects holding a std lock guard (`await_holding_lock`), or a guard of thread-local state
 that `clippy.toml` lists (`await_holding_invalid_type`), across an `.await`; nothing checks other
-values.
+values. Outside tests, clippy also rejects a `thread_local!` static unless an
+`#[expect(clippy::disallowed_types, reason = "...")]` on it says why its value may belong to the
+OS thread.
 
 Bad: a resource field `counter: std::rc::Rc<Cell<u32>>` cloned into a future, which doesn't
 compile. Fix: an `Arc<AtomicU32>`, or read the counter under the lock in the callback that runs

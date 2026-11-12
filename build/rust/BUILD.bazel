@@ -33,6 +33,17 @@ rust_lint_config(
     visibility = ["//visibility:public"],
 )
 
+# Lint levels for test targets and testonly crates, applied by the same macros. A test's
+# thread-locals don't live on a production event loop, so they need not justify themselves
+# (clippy.toml's disallowed types).
+rust_lint_config(
+    name = "test_lints",
+    clippy = {
+        "disallowed_types": "allow",
+    },
+    visibility = ["//visibility:public"],
+)
+
 # One toolchain per sanitizer and supported host. `--config=asan` and `--config=tsan` /
 # `--config=tsan-macos` (.bazelrc) list all of a sanitizer's toolchains in --extra_toolchains;
 # toolchain resolution picks the one matching the host.

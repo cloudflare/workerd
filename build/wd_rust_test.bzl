@@ -34,5 +34,6 @@ def wd_rust_test(
         ],
         malloc = "//src/workerd/server:malloc",
         tags = tags + ["no-coverage"],
+        lint_config = "@workerd//build/rust:test_lints",
         **kwargs
     )

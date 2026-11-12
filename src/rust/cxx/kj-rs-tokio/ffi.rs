@@ -35,6 +35,7 @@ thread_local! {
     // Initialized after Tokio's context TLS. During thread teardown this sentinel is therefore
     // destroyed first, making `try_with()` a reliable guard against touching Tokio's context
     // after its destructor has run.
+    #[expect(clippy::disallowed_types, reason = "it tracks the teardown of this OS thread's Tokio thread-locals")]
     static TOKIO_CONTEXT_SENTINEL: TokioContextSentinel = const { TokioContextSentinel };
 }
 

@@ -15,3 +15,11 @@ await-holding-invalid-types = [
   { path = "tokio::task::LocalEnterGuard", reason = "it enters the LocalSet on this OS thread only" },
   { path = "rand::rngs::ThreadRng", reason = "it shares this OS thread's generator, without synchronization" },
 ]
+# `thread_local!` declares each static as a `LocalKey`, so this makes each thread-local static
+# outside tests need `#[expect(clippy::disallowed_types, reason = "...")]` (`disallowed-macros`
+# cannot be expected below the crate root for it). Its value belongs to the OS thread, but an event
+# loop may move between OS threads, and KJ may resume a future on another. Test code is exempt
+# (`//build/rust:test_lints`).
+disallowed-types = [
+  { path = "std::thread::LocalKey", reason = "an event loop, and the futures it polls, may move between OS threads; state of either must not be thread-local" },
+]

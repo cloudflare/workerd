@@ -31,6 +31,7 @@ thread_local! {
     /// Registered by `TokioPort::new` and cleared on drop. Used by code (e.g. kj-rs-io) that
     /// needs to *enter* the runtime context so tokio resources can register with its I/O driver
     /// and timers.
+    #[expect(clippy::disallowed_types, reason = "a TokioPort is already bound to its OS thread, where it enters its Tokio runtime for its whole life")]
     static LOOP_RUNTIME_HANDLE: RefCell<Option<Handle>> = const { RefCell::new(None) };
 
     /// The `LocalSet` onto which [`spawn`] enqueues tasks, and which `wait_*`/`poll` drive. Held
@@ -41,6 +42,7 @@ thread_local! {
     /// task -- by [`TokioPort::cancel_spawned_tasks`], which the C++ `TokioEventPort` destructor
     /// calls while the KJ event loop and timer are still alive (spawned tasks may own KJ
     /// promises), with `TokioPort::drop` as the fallback.
+    #[expect(clippy::disallowed_types, reason = "a TokioPort is already bound to its OS thread, where it enters its Tokio runtime for its whole life")]
     static LOOP_LOCAL_SET: RefCell<Option<Rc<LocalSet>>> = const { RefCell::new(None) };
 }
 

@@ -59,6 +59,7 @@ thread_local! {
     /// One flag for the thread rather than one in each cell: a cell is not `Sync`, so only the
     /// thread that reads it in place can write it, and visiting and reporting code write into no
     /// cell at all.
+    #[expect(clippy::disallowed_types, reason = "set only for a synchronous visit or report, which stays on one OS thread")]
     static READING_IN_PLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

@@ -26,6 +26,7 @@ rust_library(
         ":test-own-bridge",
         ":test-promises",
     ],
+    lint_config = "//build/rust:test_lints",
     deps = [
         # TODO(cleanup): Why isn't :cxx transitive?
         "//src/rust/cxx",

@@ -104,7 +104,8 @@ def wd_rust_crate(
         cxx_bridge_visibility: visibility of the generated <bridge>@cxx libraries, for C++ in
             another package that includes a bridge's header (it must also link the crate).
         testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
-            C++ test). Like other test code, it is not held to //build/rust:lints.
+            C++ test). Like other test code, it is held to //build/rust:test_lints rather than
+            //build/rust:lints.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -175,7 +176,7 @@ def wd_rust_crate(
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
-        lint_config = None if testonly else "@workerd//build/rust:lints",
+        lint_config = "@workerd//build/rust:test_lints" if testonly else "@workerd//build/rust:lints",
         testonly = testonly,
         **library_kwargs
     )

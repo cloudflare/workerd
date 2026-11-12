@@ -180,6 +180,7 @@ pub mod scope_owner {
     };
 
     thread_local! {
+        #[expect(clippy::disallowed_types, reason = "a V8 scope belongs to the OS thread that opened it")]
         static STATE: Cell<State> = const { Cell::new(NONE) };
     }
 

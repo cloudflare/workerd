@@ -404,6 +404,7 @@ mod r#impl {
         //         cfg: AtomicPtr<super::Cfg>,
         //     }
         //
+        #[expect(clippy::disallowed_types, reason = "build-time code generation, with no event loop")]
         static CONST_DEREFS: RefCell<Map<Handle, Box<super::Cfg<'static>>>> = RefCell::default();
     }
 
