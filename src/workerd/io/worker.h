@@ -310,6 +310,9 @@ class Worker::Script: public kj::AtomicRefcounted {
 
   kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
 
+  // Creates a context for this script's code, with its module registry and schema loader.
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const;
+
   friend class Worker;
 
  public:  // pretend this is private (needs to be public because allocated through template)
