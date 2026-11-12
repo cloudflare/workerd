@@ -1299,7 +1299,10 @@ export class Engine extends DurableObject {
     if (options.rollback && m.status !== 'rollingBack') {
       // The `run()` in memory, if any, may not have reached them all yet.
       const rollbacks = await this.#replay(m);
-      if (!this.#live(m.generation)) return;
+      if (!this.#live(m.generation)) {
+        for (const undo of rollbacks) dispose(undo.fn);
+        return;
+      }
       this.#dropRollbacks(rollbacks);
       const e = error('Terminated', 'Instance terminated during rollback');
       return this.#undo('terminated', {}, e);

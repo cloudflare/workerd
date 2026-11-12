@@ -386,8 +386,6 @@ export let voidStep = {
 
 // A step's result is released once stored, and a timed-out attempt's
 // result when it comes.
-// A step's result is released once stored, and a timed-out attempt's
-// result when it comes.
 export let disposeResults = {
   async test(ctrl, env) {
     const instance = await create(env, 'dispose', 'dispose');
