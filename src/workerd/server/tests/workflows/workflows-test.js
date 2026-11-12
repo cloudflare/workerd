@@ -80,10 +80,10 @@ export class Flow extends WorkflowEntrypoint {
         return step.do('v', async () => {});
       case 'dispose':
       case 'late-result': {
-        // The disposer tells the instance, which waits for it.
-        const tell = async () =>
-          (await this.env.FLOW.get(id)).sendEvent({ type: 'disposed' });
-        const result = { [Symbol.dispose]: () => this.ctx.waitUntil(tell()) };
+        // The last step waits for the disposer. (I/O started in a disposer
+        // leaks under ASan.)
+        const disposed = signal(`${id}/disposed`);
+        const result = { [Symbol.dispose]: () => disposed.resolve() };
         if (event.payload.kind === 'dispose') {
           await step.do('d', async () => result);
         } else {
@@ -96,8 +96,7 @@ export class Flow extends WorkflowEntrypoint {
           const config = { retries, timeout: '1 second' };
           await step.do('late', config, late).catch(() => {});
         }
-        const wait = { type: 'disposed', timeout: '30 seconds' };
-        return step.waitForEvent('disposed', wait);
+        return step.do('after', () => disposed.promise);
       }
       case 'backoff': {
         const delay = ({ ctx }) => ctx.attempt * 2000;
@@ -111,7 +110,11 @@ export class Flow extends WorkflowEntrypoint {
       case 'delay-bad':
       case 'delay-throw': {
         const delay = {
-          'delay-hang': () => new Promise(() => {}),
+          // Returns too late, once the instance has failed.
+          'delay-hang': async () => {
+            await until(await this.env.FLOW.get(id), 'workflow_errored');
+            return 0;
+          },
           'delay-bad': () => 'soon',
           'delay-throw': () => {
             throw new Error('nope');
@@ -127,7 +130,10 @@ export class Flow extends WorkflowEntrypoint {
       }
       case 'slow': {
         const config = { retries: { limit: 0, delay: 0 }, timeout: '1 minute' };
-        return step.do('slow', config, () => signal(`${id}/slow`).promise);
+        // Returns too late, once the instance has failed.
+        const slow = async () =>
+          until(await this.env.FLOW.get(id), 'workflow_errored');
+        return step.do('slow', config, slow);
       }
       case 'hold':
         return step.do('held', () => signal(`${id}/held`).promise);

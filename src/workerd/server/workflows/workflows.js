@@ -416,7 +416,14 @@ export class Engine extends DurableObject {
     this.#log(EVENTS[status], extra);
   }
 
+  // Releases the rollbacks' stubs, for `next`.
+  #dropRollbacks(next = []) {
+    for (const undo of this.#rollbacks) dispose(undo.fn);
+    this.#rollbacks = next;
+  }
+
   #finish(status, fields = {}) {
+    this.#dropRollbacks();
     const { retention } = this.#meta;
     const keep = status === 'errored' ? retention.error : retention.success;
     this.#set(status, { ...fields, expires: clock() + keep });
@@ -543,7 +550,7 @@ export class Engine extends DurableObject {
     const run = (this.#drive = { generation: m.generation });
     this.#busy = 0;
     this.#counts = new Map();
-    this.#rollbacks = [];
+    this.#dropRollbacks();
     this.#steps = 0;
     if (!m.started) {
       this.#kv.put('meta', { ...m, started: true });
@@ -1164,6 +1171,7 @@ export class Engine extends DurableObject {
   }
 
   #destroy() {
+    this.#dropRollbacks();
     this.ctx.storage.deleteAll();
     this.#table = false;
     this.ctx.storage.deleteAlarm();
@@ -1292,7 +1300,7 @@ export class Engine extends DurableObject {
       // The `run()` in memory, if any, may not have reached them all yet.
       const rollbacks = await this.#replay(m);
       if (!this.#live(m.generation)) return;
-      this.#rollbacks = rollbacks;
+      this.#dropRollbacks(rollbacks);
       const e = error('Terminated', 'Instance terminated during rollback');
       return this.#undo('terminated', {}, e);
     }
