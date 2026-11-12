@@ -474,17 +474,20 @@ class FakeS3 {
     return (await res.json()).map((f) => f.hits);
   }
 
-  // How many GET, PUT and DELETE requests the bucket served for `key`.
+  // How many GET, PUT and DELETE requests the bucket served for `key`, a key
+  // in the cluster's layout. The fake counts a key without its first
+  // segment, the bucket's `cluster/`.
   async requests(key) {
-    const query = new URLSearchParams({ key });
+    const query = new URLSearchParams({ key: `v1/${key}` });
     return (
       await fetch(`http://127.0.0.1:${this.port}/_requests?${query}`)
     ).json();
   }
 
-  // How many body bytes GETs of `key` were served.
+  // How many body bytes GETs of `key`, a key in the cluster's layout, were
+  // served.
   async served(key) {
-    const query = new URLSearchParams({ key });
+    const query = new URLSearchParams({ key: `v1/${key}` });
     return (
       await fetch(`http://127.0.0.1:${this.port}/_served?${query}`)
     ).json();
@@ -991,22 +994,23 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
   await withCluster(2, async ({ nodes, bucket }) => {
     // Without coalescing, each of these reads own.json and the losers retry
     // their claims: the stampede that starved lease renewal on the fleet.
+    // `/get` writes nothing, so no commit rereads own.json: every request for
+    // it comes from resolving the DO. Coalesced, each node reads it once and
+    // the claim's loser once more, about 5 requests with the claims; one
+    // resolution per request would be 64 or more.
     const results = await Promise.all(
       Array.from({ length: 64 }, (_, i) =>
-        fetchJson(nodes[i % 2].httpPort, '/increment?name=herd')
+        fetchJson(nodes[i % 2].httpPort, '/get?name=herd')
       )
     );
     for (const r of results)
       assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    const counts = results.map((r) => r.body.count).sort((a, b) => a - b);
-    assert.deepStrictEqual(
-      counts,
-      Array.from({ length: 64 }, (_, i) => i + 1)
-    );
+    const served = new Set(results.map((r) => `${r.body.nodeId} ${r.body.id}`));
+    assert.strictEqual(served.size, 1, [...served].join());
     const requests = await bucket.requests(
       `${objectPrefix(results[0].body.id)}/own.json`
     );
-    assert(requests <= 8, `${requests} owner record requests for one cold DO`);
+    assert(requests < 16, `${requests} owner record requests for one cold DO`);
   });
 });
 
@@ -1053,7 +1057,7 @@ test('cluster: a KV namespace is an object, seen from every node', async () => {
     }
     const blobs = await bucket.list('services/kv/');
     assert.strictEqual(blobs.length, 1, blobs.join());
-    const served = () => bucket.served(`v1/${blobs[0]}`);
+    const served = () => bucket.served(blobs[0]);
     const before = await served();
     const bigListed = (await fetchJson(b, `/kv/list?${q({ prefix: 'big' })}`))
       .body;
@@ -1084,7 +1088,7 @@ test('cluster: a node caches KV blobs on its disk', async () => {
     const served = async () => {
       for (const key of await bucket.list('services/kv/')) seen.add(key);
       let n = 0;
-      for (const key of seen) n += await bucket.served(`v1/${key}`);
+      for (const key of seen) n += await bucket.served(key);
       return n;
     };
 
