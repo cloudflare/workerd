@@ -36,7 +36,9 @@
 //! [`is_default`], `eq_*`, `f32_bits_eq`, `f64_bits_eq` and [`enum_ordinal_eq`].
 //!
 //! JSON in bytes decodes faster through [`from_slice`] than through `serde_json::from_slice()`,
-//! with the same results.
+//! with the same results. [`from_codec_input`] also ends the input at a NUL byte, as the C++
+//! codec does; the parse functions of the cxx bridges that `capnpc-rust-serde-ffi` generates
+//! decode with it.
 //!
 //! # Differences from the C++ codec
 //!
@@ -920,6 +922,23 @@ pub fn from_slice<'de, T: Deserialize<'de>>(json: &'de [u8]) -> serde_json::Resu
         Ok(json) => serde_json::from_str(json),
         Err(_) => serde_json::from_slice(json),
     }
+}
+
+/// Deserializes a `T` from the JSON input `json` as `capnp::JsonCodec::decode()` does.
+///
+/// The C++ codec takes the input to end at its first NUL byte, so that a `kj::String`'s array,
+/// with its terminator, is a valid input. The document up to there is decoded with
+/// [`from_slice`].
+///
+/// # Errors
+///
+/// When the input up to its first NUL byte is not a valid document of `T`.
+pub fn from_codec_input<'de, T: Deserialize<'de>>(json: &'de [u8]) -> serde_json::Result<T> {
+    let end = json
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(json.len());
+    from_slice(&json[..end])
 }
 
 /// Whether `value` is its type's default: the `skip_serializing_if` predicate of a field whose

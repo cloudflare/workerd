@@ -13,3 +13,12 @@ fn output_path_replaces_the_extension() {
     assert_eq!(output_path("foo.capnp"), "foo_serde.rs");
     assert_eq!(output_path("a-b/c-d"), "a-b/c_d_serde.rs");
 }
+
+#[test]
+fn ffi_output_path_is_next_to_the_types() {
+    assert_eq!(
+        ffi::output_path("workerd/api/r2-api.capnp"),
+        "workerd/api/r2_api_serde_ffi.rs"
+    );
+    assert_eq!(ffi::output_path("foo.capnp"), "foo_serde_ffi.rs");
+}

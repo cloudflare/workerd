@@ -9,6 +9,10 @@
 //! it writes `foo_serde.rs`, which a crate `include!`s and which depends on the `serde`,
 //! `serde_json` and `capnp_serde` crates. Bazel's `wd_rust_serde_capnp_library()` does all of
 //! this. See `codegen.rs` for the mapping from schema to Rust.
+//!
+//! Built as `capnpc-rust-serde-ffi`, it also writes `foo_serde_ffi.rs`, a module of the same crate
+//! holding a cxx bridge through which C++ parses JSON into the types and reads them; see
+//! `ffi.rs`.
 
 mod codegen;
 mod names;
@@ -21,6 +25,10 @@ use anyhow::Context;
 use anyhow::Result;
 use capnp::message::ReaderOptions;
 use capnp::schema_capnp::code_generator_request;
+
+/// Whether to generate cxx bridges too: `capnpc-rust-serde-ffi` is this plugin built with
+/// `CAPNPC_RUST_SERDE_FFI` set, since the compiler passes plugins no options.
+const FFI: bool = option_env!("CAPNPC_RUST_SERDE_FFI").is_some();
 
 fn main() -> ExitCode {
     match run() {
@@ -39,7 +47,7 @@ fn run() -> Result<()> {
     let message = capnp::serialize::read_message(std::io::stdin().lock(), options)
         .context("reading the CodeGeneratorRequest")?;
     let request = message.get_root::<code_generator_request::Reader>()?;
-    for (path, contents) in codegen::generate(request)? {
+    for (path, contents) in codegen::generate(request, FFI)? {
         let path = Path::new(&path);
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;

@@ -169,6 +169,16 @@ fn from_slice_matches_serde_json() {
     }
 }
 
+#[test]
+fn codec_input_ends_at_nul() {
+    let text = |json: &[u8]| from_codec_input::<Text>(json).map(|value| value.text);
+    assert_eq!(text(b"{\"text\": \"a\"}").unwrap(), "a");
+    assert_eq!(text(b"{\"text\": \"a\"}\0").unwrap(), "a");
+    assert_eq!(text(b"{\"text\": \"a\"}\0garbage").unwrap(), "a");
+    assert!(text(b"{\"text\": \"a\0\"}").is_err());
+    assert!(text(b"\0{\"text\": \"a\"}").is_err());
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Color {
     Red,

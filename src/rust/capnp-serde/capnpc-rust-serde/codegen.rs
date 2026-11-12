@@ -80,9 +80,12 @@ const FIELD_SIGNATURE: &str = "fn field<'de, A: ::serde::de::MapAccess<'de>>(bui
 const FINISH_SIGNATURE: &str = "fn finish<E: ::serde::de::Error>(builder: Self::Builder) \
                                 -> ::core::result::Result<Self, E> {";
 
-/// Generates a Rust source file for each file the request asks for. Returns the files' paths,
-/// relative to the output directory, and contents.
-pub fn generate(request: code_generator_request::Reader) -> Result<Vec<(String, String)>> {
+/// Generates a Rust source file for each file the request asks for, and if `ffi`, its cxx bridge
+/// (see `ffi.rs`). Returns the files' paths, relative to the output directory, and contents.
+pub fn generate(
+    request: code_generator_request::Reader,
+    ffi: bool,
+) -> Result<Vec<(String, String)>> {
     let generator = Generator::new(request)?;
     let mut items = HashSet::new();
     let mut files = Vec::new();
@@ -100,6 +103,14 @@ pub fn generate(request: code_generator_request::Reader) -> Result<Vec<(String, 
             .gen_nested(&mut out, requested.get_id())
             .with_context(|| format!("generating {filename}"))?;
         files.push((output_path(filename), out.code));
+    }
+    if ffi {
+        for requested in request.get_requested_files()? {
+            let filename = requested.get_filename()?.to_str()?;
+            let code = ffi::generate(&generator, requested.get_id(), filename, &mut items)
+                .with_context(|| format!("generating the cxx bridge of {filename}"))?;
+            files.push((ffi::output_path(filename), code));
+        }
     }
     Ok(files)
 }
@@ -1860,6 +1871,9 @@ impl<'a> Generator<'a> {
         })
     }
 }
+
+#[path = "ffi.rs"]
+mod ffi;
 
 #[cfg(test)]
 #[path = "codegen-test.rs"]
