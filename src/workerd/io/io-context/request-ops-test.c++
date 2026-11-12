@@ -378,24 +378,33 @@ Outcome run(kj::StringPtr scenario, Implementation implementation, Flags flags) 
 
 // `text` with the location of each exception that C++ or Rust JSG creates for a JavaScript
 // exception replaced by the same placeholder. Each records where it creates the exception, so
-// that is the one place where the logs of the two implementations differ.
+// that is the one place where the logs of the two implementations differ. A location is a word,
+// which may start with a directory the build adds to the path, such as
+// `workerd/jsg/_virtual_includes/<target>/`, and ends with the line.
 kj::String withTunneledLocationsNormalized(kj::StringPtr text) {
   constexpr kj::StringPtr FILES[] = {"workerd/jsg/value.h:"_kj, "rust/jsg/lib.rs:"_kj};
   kj::Vector<char> result(text.size());
   size_t i = 0;
   while (i < text.size()) {
     auto rest = text.slice(i);
-    bool replaced = false;
-    for (auto file: FILES) {
+    kj::Maybe<size_t> matched;
+    for (const auto& file: FILES) {
       if (rest.startsWith(file)) {
-        result.addAll("<tunneled exception>"_kj);
-        i += file.size();
-        while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
-        replaced = true;
+        matched = file.size();
         break;
       }
     }
-    if (!replaced) result.add(text[i++]);
+    KJ_IF_SOME(size, matched) {
+      // Drop the rest of the word before the file, then the line after it.
+      while (!result.empty() && result.back() != ' ' && result.back() != '\n') {
+        result.removeLast();
+      }
+      result.addAll("<tunneled exception>"_kj);
+      i += size;
+      while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
+    } else {
+      result.add(text[i++]);
+    }
   }
   result.add('\0');
   return kj::String(result.releaseAsArray());
@@ -555,6 +564,20 @@ KJ_TEST("passThroughOnException() has a failing request fail open, as in C++") {
   KJ_EXPECT(control.subrequests == "");
   KJ_EXPECT(control.failedOpen == "");
   KJ_EXPECT(control.statusCode == 500);
+}
+
+KJ_TEST("withTunneledLocationsNormalized() replaces the whole location on every platform") {
+  auto expected = "failure locations: <tunneled exception> | io-context.c++:12\n"
+                  "exception = <tunneled exception>: failed: x"_kj;
+  for (const auto& prefix: {""_kj, "workerd/jsg/_virtual_includes/iterator/"_kj,
+         "workerd/jsg/_virtual_includes/iterator\\"_kj}) {
+    for (const auto& file: {"workerd/jsg/value.h:1467"_kj, "rust/jsg/lib.rs:1271"_kj}) {
+      auto location = kj::str(file.startsWith("rust") ? ""_kj : prefix, file);
+      auto text = kj::str("failure locations: ", location, " | io-context.c++:12\n",
+          "exception = ", location, ": failed: x");
+      KJ_EXPECT(withTunneledLocationsNormalized(text) == expected, text);
+    }
+  }
 }
 
 KJ_TEST("abort() without a reason aborts and terminates as C++ does") {
