@@ -61,10 +61,12 @@ pub enum Command {
             together. For an s3:// bucket, each `cluster.bucketOptions` setting falls back to an \
             environment variable: AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, \
             AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
-            takes no settings: its tokens come from the service account key \
-            GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
-            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
-            --cluster-addr."
+            takes no settings: its tokens come from the service account key, authorized_user or \
+            impersonated_service_account credentials file GOOGLE_APPLICATION_CREDENTIALS names, \
+            else from the file `gcloud auth application-default login` writes, else from the \
+            metadata server of the GCE VM or GKE pod (Workload Identity). \
+            GOOGLE_IMPERSONATE_SERVICE_ACCOUNT names a service account to impersonate with those. \
+            The cluster port must stay on a private network; see --cluster-addr."
     )]
     Serve {
         #[command(flatten)]
@@ -220,8 +222,11 @@ Bucket credentials use the same environment variables as the instances. For an s
     - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, plus AWS_SESSION_TOKEN for temporary credentials; or
     - AWS_CREDENTIALS_FILE.
 For a gs:// bucket:
-    - GOOGLE_APPLICATION_CREDENTIALS, a service account key; or
-    - the metadata server of the GCE VM or GKE pod the command runs on.
+    - GOOGLE_APPLICATION_CREDENTIALS, a service account key, or an authorized_user or
+      impersonated_service_account credentials file;
+    - else the file `gcloud auth application-default login` writes, when it exists;
+    - else the metadata server of the GCE VM or GKE pod the command runs on.
+GOOGLE_IMPERSONATE_SERVICE_ACCOUNT names a service account to impersonate with those.
 
 See `bucket` and `bucketOptions` in workerd.capnp for credential details. For an s3:// bucket, \
 --endpoint uses AWS_ENDPOINT_URL when the flag is absent, and --region uses AWS_REGION, then \

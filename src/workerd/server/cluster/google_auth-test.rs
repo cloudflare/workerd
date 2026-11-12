@@ -35,6 +35,15 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
+/// An environment of `vars`.
+fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+    let vars: Vec<(String, String)> = vars
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect();
+    move |name| vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+}
+
 fn parse(text: &str) -> std::result::Result<Source, String> {
     parse_file(text)
 }
@@ -131,7 +140,7 @@ fn token_endpoints_are_https_unless_on_loopback() {
         "http://[::1]:9/token",
         "http://[::1]/token",
     ] {
-        assert_eq!(check_token_uri(uri), Ok(()), "{uri}");
+        assert_eq!(check_url("token_uri", uri), Ok(()), "{uri}");
     }
     let cleartext = "must be https, or http on a loopback address";
     let userinfo = "must not hold a user name or password";
@@ -159,7 +168,7 @@ fn token_endpoints_are_https_unless_on_loopback() {
         ("", relative),
     ] {
         assert_eq!(
-            check_token_uri(uri),
+            check_url("token_uri", uri),
             Err(format!("token_uri {uri:?} {why}")),
             "{uri}"
         );
@@ -178,7 +187,7 @@ fn token_endpoints_are_https_unless_on_loopback() {
 #[test]
 fn credentials_files() {
     let file = service_account(r#", "private_key_id": "k1""#);
-    let credentials = Credentials::from_json(&file, Http::new().unwrap()).unwrap();
+    let credentials = Credentials::new(parse(&file).unwrap(), Http::new().unwrap());
     assert_eq!(
         credentials.describe(),
         "service account sa@p.iam.gserviceaccount.com"
@@ -197,6 +206,15 @@ fn credentials_files() {
     };
     assert_eq!(token_uri, "http://127.0.0.1:1/token");
 
+    let user = r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s",
+                   "refresh_token": "r"}"#;
+    let credentials = Credentials::new(parse(user).unwrap(), Http::new().unwrap());
+    assert_eq!(credentials.describe(), "authorized_user credentials");
+    assert_eq!(credentials.quota_project(), None);
+    let user = user.replace(r#""r""#, r#""r", "quota_project_id": "qp-1""#);
+    let credentials = Credentials::new(parse(&user).unwrap(), Http::new().unwrap());
+    assert_eq!(credentials.quota_project(), Some("qp-1"));
+
     for (file, error) in [
         (
             r#"{"type": "service_account", "client_email": "sa@p"}"#.to_owned(),
@@ -207,10 +225,14 @@ fn credentials_files() {
             "private_key: ",
         ),
         (
+            r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s"}"#.to_owned(),
+            "authorized_user credentials have no refresh_token",
+        ),
+        (
             r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s",
-                "refresh_token": "r"}"#
+                "refresh_token": "r", "quota_project_id": "q\r\nx: y"}"#
                 .to_owned(),
-            "credentials of type \"authorized_user\" are not supported",
+            "quota_project_id \"q\\r\\nx: y\" is not a project ID",
         ),
         (
             r#"{"type": "external_account"}"#.to_owned(),
@@ -229,7 +251,7 @@ fn credentials_files() {
 fn a_service_account_signs_its_assertion() {
     let key = test_key();
     let audience = "https://oauth2.googleapis.com/token";
-    let jwt = assertion(&key, "sa@p", Some("k1"), audience, 1_700_000_000).unwrap();
+    let jwt = assertion(&key, "sa@p", Some("k1"), audience, SCOPE, 1_700_000_000).unwrap();
     let parts: Vec<_> = jwt.split('.').collect();
     assert_eq!(parts.len(), 3);
     let decode = |part: &str| -> serde_json::Value {
@@ -254,12 +276,15 @@ fn a_service_account_signs_its_assertion() {
     let signed = format!("{}.{}", parts[0], parts[1]);
     public.verify(signed.as_bytes(), &signature).unwrap();
 
-    let jwt = assertion(&key, "sa@p", None, audience, 1_700_000_000).unwrap();
-    let header = jwt.split('.').next().unwrap();
+    // A token that impersonates another service account asks for every API.
+    let jwt = assertion(&key, "sa@p", None, audience, CLOUD_PLATFORM, 1_700_000_000).unwrap();
+    let parts: Vec<_> = jwt.split('.').collect();
     assert_eq!(
-        decode(header),
+        decode(parts[0]),
         serde_json::json!({ "alg": "RS256", "typ": "JWT" })
     );
+    let scope = "https://www.googleapis.com/auth/cloud-platform";
+    assert_eq!(decode(parts[1])["scope"], scope);
 }
 
 /// What a scripted token endpoint does with a request.
@@ -788,13 +813,6 @@ fn an_error_answer_names_its_status() {
 
 #[test]
 fn signs_of_google_cloud() {
-    let env = |vars: &'static [(&'static str, &'static str)]| {
-        move |name: &str| {
-            vars.iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, v)| (*v).to_owned())
-        }
-    };
     assert!(!google_cloud(&env(&[]), None));
     assert!(!google_cloud(&env(&[]), Some("Virtual Machine\n")));
     assert!(!google_cloud(&env(&[("GCE_METADATA_HOST", "")]), None));
@@ -850,8 +868,8 @@ fn nothing_at_the_metadata_server_fails_at_once() {
         assert!(message.starts_with(prefix), "{message}");
         assert!(
             message.ends_with(
-                "). Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
-                 Compute Engine or GKE"
+                "). Set GOOGLE_APPLICATION_CREDENTIALS to a credentials file, run `gcloud auth \
+                 application-default login`, or run on Compute Engine or GKE"
             ),
             "{message}"
         );
@@ -930,8 +948,8 @@ fn an_answer_that_is_not_googles_fails_at_once() {
                 "token from metadata server http://{}/computeMetadata/v1/instance/\
                  service-accounts/default/token: no credentials found: the {status} answer is \
                  not from Google's metadata server, having no `Metadata-Flavor: Google` \
-                 header. Set GOOGLE_APPLICATION_CREDENTIALS to a service account key, or run on \
-                 Compute Engine or GKE",
+                 header. Set GOOGLE_APPLICATION_CREDENTIALS to a credentials file, run `gcloud \
+                 auth application-default login`, or run on Compute Engine or GKE",
                 endpoint.host
             );
             assert_eq!(message, expected);
@@ -1001,5 +1019,674 @@ fn a_replacement_that_is_not_googles_fails() {
             )
         );
         assert_eq!(endpoint.requests(), 1);
+    });
+}
+
+#[test]
+fn where_gcloud_keeps_its_credentials() {
+    let file = |vars, windows| gcloud_credentials_file(&env(vars), windows);
+    let home = [
+        ("HOME", "/home/u"),
+        ("APPDATA", "C:\\Users\\u\\AppData\\Roaming"),
+    ];
+    assert_eq!(
+        file(&home, false),
+        Some(PathBuf::from(
+            "/home/u/.config/gcloud/application_default_credentials.json"
+        ))
+    );
+    assert_eq!(
+        file(&home, true),
+        Some(
+            PathBuf::from("C:\\Users\\u\\AppData\\Roaming")
+                .join("gcloud")
+                .join("application_default_credentials.json")
+        )
+    );
+    let config = [("HOME", "/home/u"), ("CLOUDSDK_CONFIG", "/etc/gcloud")];
+    let expected = Some(PathBuf::from(
+        "/etc/gcloud/application_default_credentials.json",
+    ));
+    assert_eq!(file(&config, false), expected);
+    assert_eq!(file(&config, true), expected);
+    assert_eq!(file(&[("HOME", ""), ("CLOUDSDK_CONFIG", "")], false), None);
+    assert_eq!(file(&[], true), None);
+}
+
+#[test]
+fn user_credentials_exchange_their_refresh_token() {
+    runtime().block_on(async {
+        let endpoint = tokens_after(Vec::new()).await;
+        // Google's refresh tokens start with `1//`.
+        let file = format!(
+            r#"{{"type": "authorized_user", "client_id": "c 1", "client_secret": "s+ /=",
+                 "refresh_token": "1//r+x=", "token_uri": "http://{}/token"}}"#,
+            endpoint.host
+        );
+        let credentials = Credentials::new(parse(&file).unwrap(), Http::new().unwrap());
+        assert_eq!(credentials.token().await.unwrap(), "t1");
+        let received = endpoint.received();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].path, "/token");
+        assert_eq!(
+            received[0].header("content-type"),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            String::from_utf8(received[0].body.clone()).unwrap(),
+            "grant_type=refresh_token&client_id=c%201&client_secret=s%2B%20%2F%3D&\
+             refresh_token=1%2F%2Fr%2Bx%3D"
+        );
+    });
+}
+
+const USER: &str = r#"{"type": "authorized_user", "client_id": "c", "client_secret": "s",
+    "refresh_token": "r"}"#;
+const TARGET: &str = "t@p.iam.gserviceaccount.com";
+
+/// An `impersonated_service_account` file of `fields`.
+fn impersonated_file(fields: &str) -> String {
+    format!(r#"{{"type": "impersonated_service_account" {fields}}}"#)
+}
+
+/// `generateAccessToken` for `TARGET` at `base`.
+fn iam_url(base: &str) -> String {
+    format!("{base}/v1/projects/-/serviceAccounts/{TARGET}:generateAccessToken")
+}
+
+#[test]
+fn impersonated_credentials_files() {
+    let url = iam_url("https://iamcredentials.googleapis.com");
+    let fields = format!(
+        r#", "service_account_impersonation_url": "{url}", "source_credentials": {USER},
+           "delegates": ["d1@p.iam.gserviceaccount.com",
+                         "projects/-/serviceAccounts/d2@p.iam.gserviceaccount.com"]"#
+    );
+    let file = impersonated_file(&fields);
+    let source = parse(&file).unwrap();
+    assert_eq!(
+        describe(&source),
+        format!("service account {TARGET}, impersonated with authorized_user credentials")
+    );
+    let Source::Impersonated {
+        source,
+        target,
+        delegates,
+        url: parsed,
+        quota_project,
+    } = source
+    else {
+        panic!("expected impersonation");
+    };
+    assert!(matches!(*source, Source::AuthorizedUser { .. }));
+    assert_eq!((target.as_str(), parsed), (TARGET, url.clone()));
+    assert_eq!(quota_project, None);
+    assert_eq!(
+        delegates,
+        [
+            "projects/-/serviceAccounts/d1@p.iam.gserviceaccount.com",
+            "projects/-/serviceAccounts/d2@p.iam.gserviceaccount.com"
+        ]
+    );
+
+    // A service account's key as the source asks for every API.
+    let key = service_account("");
+    let file = impersonated_file(&format!(
+        r#", "service_account_impersonation_url": "{url}", "source_credentials": {key}"#
+    ));
+    let Source::Impersonated {
+        source, delegates, ..
+    } = parse(&file).unwrap()
+    else {
+        panic!("expected impersonation");
+    };
+    assert!(delegates.is_empty());
+    let Source::ServiceAccount { scope, .. } = *source else {
+        panic!("expected a service account");
+    };
+    assert_eq!(scope, CLOUD_PLATFORM);
+    // Not as a credentials file of its own.
+    let Source::ServiceAccount { scope, .. } = parse(&key).unwrap() else {
+        panic!("expected a service account");
+    };
+    assert_eq!(scope, SCOPE);
+}
+
+/// The target and URL of an `impersonated_service_account` file whose
+/// `service_account_impersonation_url` is `url`.
+fn impersonation_of(url: &str) -> std::result::Result<(String, String), String> {
+    let file = impersonated_file(&format!(
+        r#", "service_account_impersonation_url": "{url}", "source_credentials": {USER}"#
+    ));
+    let Source::Impersonated { target, url, .. } = parse(&file)? else {
+        panic!("expected impersonation");
+    };
+    Ok((target, url))
+}
+
+#[test]
+fn only_the_account_of_an_impersonation_url_is_taken() {
+    let iam = iam_url("https://iamcredentials.googleapis.com");
+    // Another host, lookalikes among them, is not where the source token
+    // goes: IAM is.
+    for host in [
+        "https://iamcredentials.googleapis.com:443",
+        "https://IAMCREDENTIALS.googleapis.com",
+        "https://iamcredentials.googleapis.com.attacker.example",
+        "https://attacker.example",
+        "https://localhost.attacker.example",
+        "https://127.0.0.1.attacker.example",
+        "https://10.0.0.1",
+    ] {
+        let expected = (TARGET.to_owned(), iam.clone());
+        assert_eq!(impersonation_of(&iam_url(host)), Ok(expected), "{host}");
+    }
+    // A loopback one is, for an emulator or a test.
+    for host in [
+        "http://127.0.0.1:8080",
+        "http://localhost:1",
+        "https://[::1]:9",
+    ] {
+        let url = iam_url(host);
+        assert_eq!(impersonation_of(&url), Ok((TARGET.to_owned(), url.clone())));
+    }
+    // A unique ID.
+    let base = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/";
+    let id = format!("{base}1234:generateAccessToken");
+    assert_eq!(impersonation_of(&id), Ok(("1234".to_owned(), id.clone())));
+    // Any other path, or a query, is refused.
+    for url in [
+        format!("{iam}?x=1"),
+        format!("{iam}#x"),
+        format!("https://attacker.example/iamcredentials.googleapis.com{}", iam_url("")),
+        format!("https://iamcredentials.googleapis.com/{}", iam_url("")),
+        iam_url("https://iamcredentials.googleapis.com/x"),
+        "https://iamcredentials.googleapis.com/v1/projects/p/serviceAccounts/t@p:generateAccessToken"
+            .to_owned(),
+        format!("{base}t@p:generateIdToken"),
+        format!("{base}t@p:generateAccessToken/x"),
+        format!("{base}t@p/x:generateAccessToken"),
+        format!("{base}:generateAccessToken"),
+        format!("{base}@:generateAccessToken"),
+        format!("{base}t@p@q:generateAccessToken"),
+        format!("{base}t%40p:generateAccessToken"),
+    ] {
+        assert!(impersonation_of(&url).is_err(), "{url}");
+    }
+}
+
+#[test]
+fn impersonated_credentials_files_that_are_refused() {
+    let url = iam_url("https://iamcredentials.googleapis.com");
+    let with_url = |url: &str| {
+        impersonated_file(&format!(
+            r#", "service_account_impersonation_url": "{url}", "source_credentials": {USER}"#
+        ))
+    };
+    let cleartext = iam_url("http://iamcredentials.googleapis.com");
+    let userinfo = iam_url("http://localhost@attacker.example");
+    for (file, error) in [
+        (
+            impersonated_file(&format!(r#", "source_credentials": {USER}"#)),
+            "impersonated_service_account credentials have no service_account_impersonation_url"
+                .to_owned(),
+        ),
+        (
+            with_url(&cleartext),
+            format!(
+                "service_account_impersonation_url {cleartext:?} must be https, or http on a \
+                 loopback address"
+            ),
+        ),
+        (
+            with_url(&userinfo),
+            format!(
+                "service_account_impersonation_url {userinfo:?} must not hold a user name or password"
+            ),
+        ),
+        (
+            with_url("https://iamcredentials.googleapis.com/v1/token"),
+            "service_account_impersonation_url \"https://iamcredentials.googleapis.com/v1/token\" \
+             is not a service account's generateAccessToken URL"
+                .to_owned(),
+        ),
+        (
+            impersonated_file(&format!(
+                r#", "service_account_impersonation_url": "{url}""#
+            )),
+            "impersonated_service_account credentials have no source_credentials".to_owned(),
+        ),
+        (
+            with_url(&url).replace(
+                r#""source_credentials": {"type": "authorized_user""#,
+                r#""source_credentials": {"type": "impersonated_service_account""#,
+            ),
+            "source_credentials of type \"impersonated_service_account\" are not supported"
+                .to_owned(),
+        ),
+        (
+            with_url(&url).replace(
+                r#""source_credentials": {"type": "authorized_user""#,
+                r#""source_credentials": {"type": "external_account""#,
+            ),
+            "source_credentials: credentials of type \"external_account\" are not supported: use \
+             a service account key, authorized_user or impersonated_service_account \
+             credentials, or the metadata server"
+                .to_owned(),
+        ),
+        (
+            impersonated_file(&format!(
+                r#", "service_account_impersonation_url": "{url}", "source_credentials": {USER},
+                   "delegates": ["d1/x"]"#
+            )),
+            "\"d1/x\" is not a service account's email address or unique ID".to_owned(),
+        ),
+        (
+            with_url(&url).replace(
+                r#""refresh_token": "r""#,
+                r#""refresh_token": "r", "quota_project_id": "q\r\nx: y""#,
+            ),
+            "source_credentials: quota_project_id \"q\\r\\nx: y\" is not a project ID".to_owned(),
+        ),
+        (
+            impersonated_file(&format!(
+                r#", "service_account_impersonation_url": "{url}", "source_credentials": {USER},
+                   "quota_project_id": "Q""#
+            )),
+            "quota_project_id \"Q\" is not a project ID".to_owned(),
+        ),
+    ] {
+        let Err(message) = parse(&file) else {
+            panic!("{file} was accepted");
+        };
+        assert_eq!(message, error);
+    }
+}
+
+#[test]
+fn impersonation_from_the_environment() {
+    let metadata = || metadata_source("169.254.169.254", true);
+    let Source::Impersonated {
+        source,
+        target,
+        delegates,
+        url,
+        quota_project,
+    } = impersonate(metadata(), TARGET).unwrap()
+    else {
+        panic!("expected impersonation");
+    };
+    assert!(matches!(*source, Source::Metadata { .. }));
+    assert_eq!(target, TARGET);
+    assert!(delegates.is_empty());
+    assert_eq!(quota_project, None);
+    assert_eq!(url, iam_url("https://iamcredentials.googleapis.com"));
+
+    // gcloud's delegation chain: each impersonates the next, the last the
+    // target.
+    let chain = format!("a@p.iam.gserviceaccount.com, b@p.iam.gserviceaccount.com ,{TARGET}");
+    let Source::Impersonated {
+        target, delegates, ..
+    } = impersonate(metadata(), &chain).unwrap()
+    else {
+        panic!("expected impersonation");
+    };
+    assert_eq!(target, TARGET);
+    assert_eq!(
+        delegates,
+        [
+            "projects/-/serviceAccounts/a@p.iam.gserviceaccount.com",
+            "projects/-/serviceAccounts/b@p.iam.gserviceaccount.com"
+        ]
+    );
+
+    // A service account's key as the source asks for every API.
+    let Source::Impersonated { source, .. } =
+        impersonate(parse(&service_account("")).unwrap(), TARGET).unwrap()
+    else {
+        panic!("expected impersonation");
+    };
+    let Source::ServiceAccount { scope, .. } = *source else {
+        panic!("expected a service account");
+    };
+    assert_eq!(scope, CLOUD_PLATFORM);
+
+    let already = impersonate(metadata(), TARGET).unwrap();
+    let Err(message) = impersonate(already, "u@p.iam.gserviceaccount.com") else {
+        panic!("impersonating twice was accepted");
+    };
+    assert_eq!(
+        message,
+        format!("the credentials impersonate {TARGET} already")
+    );
+    // A unique ID, as a target or a delegate.
+    let chain = "projects/-/serviceAccounts/104,103";
+    let Source::Impersonated {
+        target, delegates, ..
+    } = impersonate(metadata(), chain).unwrap()
+    else {
+        panic!("expected impersonation");
+    };
+    assert_eq!(target, "103");
+    assert_eq!(delegates, ["projects/-/serviceAccounts/104"]);
+    for chain in [
+        "",
+        "t@p,",
+        "t",
+        "@",
+        "t@",
+        "@p",
+        "t@p@q",
+        "1 2",
+        "-1",
+        "t@p/x",
+        "t@p?x",
+        "t@p:generateAccessToken",
+        "t@p%2fx",
+    ] {
+        assert!(
+            impersonate(metadata(), chain).is_err(),
+            "{chain:?} was accepted"
+        );
+    }
+}
+
+#[test]
+fn rfc3339_times() {
+    let ms = |text: &str| parse_rfc3339_ms(text);
+    assert_eq!(ms("1970-01-01T00:00:00Z"), Some(0));
+    assert_eq!(ms("2099-12-31T23:59:59.999Z"), Some(4_102_444_799_999));
+    assert_eq!(ms("2026-11-10T01:02:03Z"), Some(1_794_272_523_000));
+    assert_eq!(ms("2026-11-10t01:02:03z"), Some(1_794_272_523_000));
+    assert_eq!(ms("2026-11-10T01:02:03.5Z"), Some(1_794_272_523_500));
+    assert_eq!(
+        ms("2026-11-10T01:02:03.123456789Z"),
+        Some(1_794_272_523_123)
+    );
+    assert_eq!(ms("2026-11-10T02:02:03+01:00"), Some(1_794_272_523_000));
+    assert_eq!(ms("2026-11-10T00:32:03-00:30"), Some(1_794_272_523_000));
+    // Leap days.
+    assert_eq!(ms("2028-02-29T00:00:00Z"), Some(1_835_395_200_000));
+    assert_eq!(ms("2000-02-29T00:00:00Z"), Some(951_782_400_000));
+    assert_eq!(ms("2026-12-31T00:00:00Z"), Some(1_798_675_200_000));
+    // A leap second, as at the end of a day.
+    assert_eq!(ms("2016-12-31T23:59:60Z"), Some(1_483_228_800_000));
+    for text in [
+        "",
+        "2026-11-10",
+        "2026-11-10T01:02:03",
+        "2026-11-10T01:02:03.Z",
+        "2026-11-10T01:02:03+0100",
+        "2026-11-10T01:02:03+01",
+        "2026-11-10T01:02:03+-1:00",
+        "2026-11-10T01:02:03++1:00",
+        "2026-11-10T01:02:03+01:-1",
+        "2026-11-10T01:02:03+01:+1",
+        "2026-11-10T01:02:03+0a:00",
+        "2026-02-31T01:02:03Z",
+        "2026-02-29T01:02:03Z",
+        "2100-02-29T01:02:03Z",
+        "2026-04-31T01:02:03Z",
+        "2026-11-00T01:02:03Z",
+        "2026-13-10T01:02:03Z",
+        "2026-11-10T24:02:03Z",
+        "2026-11-10T01:60:03Z",
+        "2026-11-10T12:00:60Z",
+        "2026-11-10T23:58:60Z",
+        "2026-11-10T22:59:60Z",
+        "2026-11-10T23:59:61Z",
+        "2026-11-10 01:02:03Z",
+        "x026-11-10T01:02:03Z",
+        "2026-11-10X01:02:03Z",
+        "2026-11-10T01:02:03Zjunk",
+        "+026-11-10T01:02:03Z",
+    ] {
+        assert_eq!(ms(text), None, "{text}");
+    }
+}
+
+#[test]
+fn impersonated_answers() {
+    let wall = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let now = Instant::now();
+    let answer = |token: &str, expires: &str| {
+        let body = serde_json::json!({ "accessToken": token, "expireTime": expires });
+        parse_impersonated(body.to_string().as_bytes(), None, wall, now)
+    };
+    let in_half_an_hour = "2023-11-14T22:43:20Z";
+    let token = answer("ya29.i", in_half_an_hour).unwrap();
+    assert_eq!(token.value, "ya29.i");
+    assert_eq!(token.expires_at - now, Duration::from_mins(30));
+    assert_eq!(token.refresh_at - now, Duration::from_mins(25));
+    // However long it claims to last, it lasts at most the hour asked for.
+    let token = answer("ya29.i", "2999-01-01T00:00:00Z").unwrap();
+    assert_eq!(token.expires_at - now, Duration::from_hours(1));
+    let expired = "2023-11-14T22:13:20Z";
+    assert_eq!(
+        answer("ya29.i", expired).unwrap_err(),
+        format!("the answer's token has expired (expireTime {expired})")
+    );
+    assert_eq!(
+        answer("ya29.i", "soon").unwrap_err(),
+        "the answer's expireTime \"soon\" is not a time"
+    );
+    assert_eq!(
+        answer("", in_half_an_hour).unwrap_err(),
+        "the answer has an empty accessToken"
+    );
+    assert!(parse_impersonated(b"{}", None, wall, now).is_err());
+}
+
+#[test]
+fn an_impersonated_tokens_lifetime_is_on_iams_clock() {
+    // IAM's clock says 1_700_000_000 s: it answers a token for an hour.
+    let iam_ms = 1_700_000_000_000;
+    let body = serde_json::json!({
+        "accessToken": "ya29.i",
+        "expireTime": "2023-11-14T23:13:20Z",
+    });
+    let body = body.to_string();
+    let now = Instant::now();
+    let lifetime = |date: Option<i64>, wall_ms: i64| {
+        let wall = UNIX_EPOCH + Duration::from_millis(wall_ms.try_into().unwrap());
+        let token = parse_impersonated(body.as_bytes(), date, wall, now);
+        token.map(|t| t.expires_at - now)
+    };
+    let hour = Duration::from_hours(1);
+    // With the answer's Date, the hour, whatever this machine's clock says.
+    for skew_ms in [0, 3_600_000, -3_600_000, 7_200_000] {
+        assert_eq!(
+            lifetime(Some(iam_ms), iam_ms + skew_ms),
+            Ok(hour),
+            "{skew_ms}"
+        );
+    }
+    // Without one, this machine's clock: an hour fast, the token seems to
+    // have expired; slow, it lasts no longer than the hour asked for.
+    assert!(lifetime(None, iam_ms + 3_600_000).is_err());
+    assert_eq!(lifetime(None, iam_ms - 3_600_000), Ok(hour));
+    assert_eq!(
+        lifetime(None, iam_ms + 600_000),
+        Ok(Duration::from_mins(50))
+    );
+}
+
+/// A token endpoint for `authorized_user` credentials and IAM's
+/// `generateAccessToken` for `TARGET`, on a real socket: they answer
+/// `source` and `impersonation`, or tokens when those are `None`. IAM's
+/// token expires half an hour after its answer's `Date`, which is years
+/// behind this machine's clock.
+async fn iam(source: Option<Answer>, impersonation: Option<Answer>) -> (Server, String) {
+    let server = Server::serving(move |request, _| {
+        if request.path == "/token" {
+            let token = serde_json::json!({ "access_token": "source", "expires_in": 3600 });
+            return source
+                .clone()
+                .unwrap_or_else(|| reply(200, &token.to_string()));
+        }
+        assert_eq!(request.path, iam_url(""));
+        if request.header("authorization") != Some("Bearer source") {
+            return reply(401, "");
+        }
+        let token = serde_json::json!({
+            "accessToken": "impersonated",
+            "expireTime": "2023-11-14T22:43:20Z",
+        });
+        impersonation.clone().unwrap_or_else(|| Answer::Reply {
+            status: 200,
+            headers: vec![("date", "Tue, 14 Nov 2023 22:13:20 GMT".into())],
+            body: token.to_string(),
+        })
+    })
+    .await;
+    let base = format!("http://{}", server.host);
+    let user = USER.replace(
+        r#""refresh_token": "r""#,
+        &format!(
+            r#""refresh_token": "r", "token_uri": "{base}/token", "quota_project_id": "qp-1""#
+        ),
+    );
+    let file = impersonated_file(&format!(
+        r#", "service_account_impersonation_url": "{}", "source_credentials": {user},
+           "delegates": ["d@p.iam.gserviceaccount.com"]"#,
+        iam_url(&base)
+    ));
+    (server, file)
+}
+
+/// Short pauses, for first tokens that fail on a real socket.
+fn failing() -> Timing {
+    Timing {
+        attempt: Duration::from_secs(5),
+        budget: Duration::from_millis(100),
+        pause: Duration::from_millis(10),
+        max_pause: Duration::from_millis(20),
+        ..patient()
+    }
+}
+
+#[test]
+fn an_impersonated_token_is_exchanged_for_a_source_token() {
+    runtime().block_on(async {
+        let (server, file) = iam(None, None).await;
+        let credentials = Credentials::over(parse(&file).unwrap(), Http::new().unwrap(), failing());
+        let token = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        assert_eq!(token.unwrap().unwrap(), "impersonated");
+        // The token lasts as long as its expireTime says by IAM's clock,
+        // within the time the requests took.
+        let left = credentials.shared.lock().token.as_ref().unwrap().expires_at - Instant::now();
+        assert!(left <= Duration::from_mins(30), "{left:?}");
+        assert!(left > Duration::from_mins(29), "{left:?}");
+
+        let received = server.received();
+        assert_eq!(received.len(), 2);
+        let (source, generate) = (&received[0], &received[1]);
+        assert_eq!(source.method, "POST");
+        assert_eq!(source.header("x-goog-user-project"), None);
+        // The source's quota project is billed for the call.
+        assert_eq!(generate.header("x-goog-user-project"), Some("qp-1"));
+        let form = String::from_utf8(source.body.clone()).unwrap();
+        assert!(form.starts_with("grant_type=refresh_token&"), "{form}");
+        assert_eq!(generate.method, "POST");
+        assert_eq!(generate.header("content-type"), Some("application/json"));
+        let body: serde_json::Value = serde_json::from_slice(&generate.body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "scope": ["https://www.googleapis.com/auth/devstorage.read_write"],
+                "lifetime": "3600s",
+                "delegates": ["projects/-/serviceAccounts/d@p.iam.gserviceaccount.com"],
+            })
+        );
+    });
+}
+
+#[test]
+fn a_service_account_key_bills_no_quota_project() {
+    runtime().block_on(async {
+        let (server, _) = iam(None, None).await;
+        let base = format!("http://{}", server.host);
+        let key = service_account(&format!(
+            r#", "token_uri": "{base}/token", "quota_project_id": "qp-2""#
+        ));
+        let file = impersonated_file(&format!(
+            r#", "service_account_impersonation_url": "{}", "source_credentials": {key},
+               "quota_project_id": "qp-3""#,
+            iam_url(&base)
+        ));
+        let credentials = Credentials::over(parse(&file).unwrap(), Http::new().unwrap(), failing());
+        // The file's quota project is for the bucket's requests.
+        assert_eq!(credentials.quota_project(), Some("qp-3"));
+        let token = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        assert_eq!(token.unwrap().unwrap(), "impersonated");
+        let received = server.received();
+        assert_eq!(received.len(), 2);
+        assert!(
+            received
+                .iter()
+                .all(|r| r.header("x-goog-user-project").is_none())
+        );
+    });
+}
+
+#[test]
+fn impersonation_errors_name_their_step() {
+    runtime().block_on(async {
+        let invalid = r#"{"error": "invalid_grant", "error_description": "Bad Request"}"#;
+        let denied = r#"{"error": {"code": 403, "status": "PERMISSION_DENIED",
+            "message": "Permission 'iam.serviceAccounts.getAccessToken' denied"}}"#;
+        let expired = serde_json::json!({
+            "accessToken": "impersonated",
+            "expireTime": "2000-01-01T00:00:00Z",
+        });
+        let prefix = format!(
+            "token from service account {TARGET}, impersonated with authorized_user credentials: "
+        );
+        for (source, impersonation, step) in [
+            (
+                Some(reply(400, invalid)),
+                None,
+                "source token: 400 invalid_grant: Bad Request (",
+            ),
+            (
+                None,
+                Some(reply(403, denied)),
+                "impersonation: 403 PERMISSION_DENIED: Permission \
+                 'iam.serviceAccounts.getAccessToken' denied (",
+            ),
+            (
+                None,
+                Some(reply(200, &expired.to_string())),
+                "impersonation: the answer's token has expired (expireTime \
+                 2000-01-01T00:00:00Z) (",
+            ),
+        ] {
+            let (_server, file) = iam(source, impersonation).await;
+            let credentials =
+                Credentials::over(parse(&file).unwrap(), Http::new().unwrap(), failing());
+            let answer = tokio::time::timeout(PATIENCE, credentials.token()).await;
+            let Ok(Err(Error::Http(message))) = answer else {
+                panic!("expected an error");
+            };
+            assert!(message.starts_with(&format!("{prefix}{step}")), "{message}");
+        }
+    });
+}
+
+#[test]
+fn impersonation_without_a_metadata_server_fails_at_once() {
+    runtime().block_on(async {
+        let source = impersonate(metadata_source("127.0.0.1:1", false), TARGET).unwrap();
+        let credentials = Credentials::over(source, Http::new().unwrap(), patient());
+        let answer = tokio::time::timeout(PATIENCE, credentials.token()).await;
+        let Ok(Err(Error::Http(message))) = answer else {
+            panic!("expected an error");
+        };
+        let prefix = format!(
+            "token from service account {TARGET}, impersonated with metadata server \
+             http://127.0.0.1:1/computeMetadata/v1/instance/service-accounts/default/token: \
+             source token: no credentials found: "
+        );
+        assert!(message.starts_with(&prefix), "{message}");
     });
 }

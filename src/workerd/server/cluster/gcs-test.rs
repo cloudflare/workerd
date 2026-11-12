@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -10,6 +11,8 @@ use super::*;
 use crate::Bucket;
 use crate::fake_http::Server;
 use crate::fake_http::reply;
+
+const TEST_KEY: &str = include_str!("google_auth-test.pem");
 
 fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let vars: Vec<(String, String)> = vars
@@ -94,6 +97,263 @@ fn where_requests_and_tokens_go() {
         Gcs::with_env("gs://b/p", &[], &vars, None),
         Err(Error::Config(_))
     ));
+}
+
+/// An empty directory of the test's own.
+fn scratch(name: &str) -> PathBuf {
+    let base = std::env::var("TEST_TMPDIR").map_or_else(|_| std::env::temp_dir(), PathBuf::from);
+    let dir = base.join(format!("gcs-test-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+const AUTHORIZED_USER: &str = r#"{"type": "authorized_user", "client_id": "c",
+    "client_secret": "s", "refresh_token": "r"}"#;
+
+#[test]
+fn gclouds_credentials_file_comes_before_the_metadata_server() {
+    let home = scratch("home");
+    let config = scratch("config");
+    let gcloud = home.join(".config").join("gcloud");
+    std::fs::create_dir_all(&gcloud).unwrap();
+    let in_home = gcloud.join("application_default_credentials.json");
+    let in_config = config.join("application_default_credentials.json");
+    let appdata = home.join(".config");
+    let (home, config) = (home.to_str().unwrap(), config.to_str().unwrap());
+    // `$HOME/.config/gcloud`, and `%APPDATA%\gcloud` on Windows: the same
+    // directory.
+    let user_vars = [("HOME", home), ("APPDATA", appdata.to_str().unwrap())];
+    let with = |more: &[(&'static str, &str)]| -> Vec<(&str, String)> {
+        let all = user_vars.iter().chain(more);
+        all.map(|(name, value)| (*name, (*value).to_owned()))
+            .collect()
+    };
+    let user = Some("authorized_user credentials".to_owned());
+
+    // No file: the metadata server.
+    assert_eq!(describe(&with(&[])).unwrap(), Some(metadata()));
+    std::fs::write(&in_home, AUTHORIZED_USER).unwrap();
+    assert_eq!(describe(&with(&[])).unwrap(), user);
+    // CLOUDSDK_CONFIG moves gcloud's configuration, and with it the file.
+    let moved = with(&[("CLOUDSDK_CONFIG", config)]);
+    assert_eq!(describe(&moved).unwrap(), Some(metadata()));
+    std::fs::write(&in_config, AUTHORIZED_USER).unwrap();
+    assert_eq!(describe(&moved).unwrap(), user);
+    // GOOGLE_APPLICATION_CREDENTIALS comes first.
+    let key = scratch("key").join("key.json");
+    let file = format!(
+        r#"{{"type": "service_account", "client_email": "sa@p", "private_key": {}}}"#,
+        serde_json::to_string(TEST_KEY).unwrap()
+    );
+    std::fs::write(&key, file).unwrap();
+    let named = with(&[("GOOGLE_APPLICATION_CREDENTIALS", key.to_str().unwrap())]);
+    assert_eq!(
+        describe(&named).unwrap(),
+        Some("service account sa@p".into())
+    );
+    // An emulator does not read it.
+    let emulator = with(&[("STORAGE_EMULATOR_HOST", "localhost:9023")]);
+    assert_eq!(describe(&emulator).unwrap(), None);
+
+    // A file of a type that is not supported is an error, not a reason to
+    // try the metadata server.
+    std::fs::write(&in_home, r#"{"type": "external_account"}"#).unwrap();
+    let Err(Error::Config(message)) = describe(&with(&[])) else {
+        panic!("an external_account file was accepted");
+    };
+    assert_eq!(
+        message,
+        format!(
+            "{}: credentials of type \"external_account\" are not supported: use a service \
+             account key, authorized_user or impersonated_service_account credentials, or the \
+             metadata server",
+            in_home.display()
+        )
+    );
+    // So is one that is there but cannot be read.
+    std::fs::remove_file(&in_home).unwrap();
+    std::fs::create_dir(&in_home).unwrap();
+    assert!(matches!(describe(&with(&[])), Err(Error::Config(_))));
+}
+
+/// The source a gs:// bucket's tokens come from, under the environment
+/// `vars`.
+fn describe(vars: &[(&str, String)]) -> Result<Option<String>> {
+    let vars: Vec<(&str, &str)> = vars.iter().map(|(n, v)| (*n, v.as_str())).collect();
+    let gcs = Gcs::with_env("gs://b/p", &[], &env(&vars), None).map(|(gcs, _)| gcs);
+    gcs.map(|gcs| {
+        gcs.dialect()
+            .credentials
+            .as_ref()
+            .map(Credentials::describe)
+    })
+}
+
+fn metadata() -> String {
+    let url = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token";
+    format!("metadata server {url}")
+}
+
+#[test]
+fn a_gcloud_file_out_of_reach_is_not_there() {
+    let vars = |home: &str| vec![("HOME", home.to_owned()), ("APPDATA", home.to_owned())];
+    // A home that is a file.
+    let file = scratch("home-file").join("file");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(
+        describe(&vars(file.to_str().unwrap())).unwrap(),
+        Some(metadata())
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(describe(&vars("/dev/null")).unwrap(), Some(metadata()));
+        // A home that this user may not enter, as /root with mode 0700 is to
+        // a container's other users.
+        let home = scratch("home-closed");
+        let gcloud = home.join(".config").join("gcloud");
+        std::fs::create_dir_all(&gcloud).unwrap();
+        let path = gcloud.join("application_default_credentials.json");
+        std::fs::write(&path, AUTHORIZED_USER).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reachable = std::fs::metadata(&path).is_ok();
+        let found = describe(&vars(home.to_str().unwrap()));
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Root enters it anyway.
+        if !reachable {
+            assert_eq!(found.unwrap(), Some(metadata()));
+        }
+    }
+}
+
+/// An `impersonated_service_account` file for `target`, whose source is
+/// `source` and whose tokens come from `generateAccessToken` at `base`.
+fn impersonated(target: &str, source: &serde_json::Value, base: &str) -> serde_json::Value {
+    let path = format!("/v1/projects/-/serviceAccounts/{target}:generateAccessToken");
+    serde_json::json!({
+        "type": "impersonated_service_account",
+        "service_account_impersonation_url": format!("{base}{path}"),
+        "source_credentials": source,
+    })
+}
+
+#[test]
+fn a_service_account_to_impersonate_from_the_environment() {
+    let target = "t@p.iam.gserviceaccount.com";
+    let named = [
+        ("GCE_METADATA_HOST", "127.0.0.1:8080".to_owned()),
+        ("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", target.to_owned()),
+    ];
+    assert_eq!(
+        describe(&named).unwrap().unwrap(),
+        format!(
+            "service account {target}, impersonated with metadata server \
+             http://127.0.0.1:8080/computeMetadata/v1/instance/service-accounts/default/token"
+        )
+    );
+    let bad = [("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", "t@p/x".to_owned())];
+    let Err(Error::Config(message)) = describe(&bad) else {
+        panic!("a bad address was accepted");
+    };
+    assert_eq!(
+        message,
+        "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: \"t@p/x\" is not a service account's email address \
+         or unique ID"
+    );
+    // An emulator ignores it unless a source is named for the emulator.
+    let emulator = ("STORAGE_EMULATOR_HOST", "localhost:9023".to_owned());
+    let unnamed = [emulator.clone(), named[1].clone()];
+    assert_eq!(describe(&unnamed).unwrap(), None);
+    let with_source = [emulator, named[0].clone(), named[1].clone()];
+    assert_eq!(describe(&with_source).unwrap(), describe(&named).unwrap());
+    // Nor does a file that impersonates already take another.
+    let path = scratch("impersonated").join("credentials.json");
+    let user: serde_json::Value = serde_json::from_str(AUTHORIZED_USER).unwrap();
+    let file = impersonated(target, &user, "https://iamcredentials.googleapis.com");
+    std::fs::write(&path, file.to_string()).unwrap();
+    let file = (
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        path.to_str().unwrap().to_owned(),
+    );
+    assert_eq!(
+        describe(std::slice::from_ref(&file)).unwrap().unwrap(),
+        format!("service account {target}, impersonated with authorized_user credentials")
+    );
+    let other = "u@p.iam.gserviceaccount.com".to_owned();
+    let twice = [file, ("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", other)];
+    let Err(Error::Config(message)) = describe(&twice) else {
+        panic!("impersonating twice was accepted");
+    };
+    assert_eq!(
+        message,
+        format!("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: the credentials impersonate {target} already")
+    );
+}
+
+#[test]
+fn an_impersonated_token_reaches_the_bucket() {
+    runtime().block_on(async {
+        let generate = "/v1/projects/-/serviceAccounts/t@p:generateAccessToken";
+        let server = Server::serving(move |request, _| {
+            let body = match request.path.as_str() {
+                "/token" => serde_json::json!({ "access_token": "source", "expires_in": 3600 }),
+                path if path == generate => serde_json::json!({
+                    "accessToken": "impersonated",
+                    "expireTime": "2999-01-01T00:00:00Z",
+                }),
+                _ => return reply(404, ""),
+            };
+            reply(200, &body.to_string())
+        })
+        .await;
+        let base = format!("http://{}", server.host);
+        let source = serde_json::json!({
+            "type": "authorized_user",
+            "client_id": "c",
+            "client_secret": "s",
+            "refresh_token": "r",
+            "token_uri": format!("{base}/token"),
+            "quota_project_id": "qp-source",
+        });
+        let mut file = impersonated("t@p", &source, &base);
+        file["quota_project_id"] = "qp-bucket".into();
+        let path = scratch("impersonated-bucket").join("credentials.json");
+        std::fs::write(&path, file.to_string()).unwrap();
+        let vars = env(&[
+            ("STORAGE_EMULATOR_HOST", &server.host),
+            ("GOOGLE_APPLICATION_CREDENTIALS", path.to_str().unwrap()),
+        ]);
+        let (gcs, prefix) = Gcs::with_env("gs://bkt/pre", &[], &vars, None).unwrap();
+        let bucket = Bucket::new(gcs, &prefix);
+        assert!(bucket.get("k").await.unwrap().is_none());
+        // The source's quota project is billed for the IAM call, the file's
+        // for the bucket's.
+        let requests: Vec<_> = server
+            .take()
+            .into_iter()
+            .map(|r| {
+                let header = |name| r.header(name).unwrap_or("").to_owned();
+                let headers = (header("authorization"), header("x-goog-user-project"));
+                (r.method.clone(), r.path.clone(), headers)
+            })
+            .collect();
+        let sent = |method: &str, path: &str, token: &str, project: &str| {
+            (
+                method.to_owned(),
+                path.to_owned(),
+                (token.to_owned(), project.to_owned()),
+            )
+        };
+        assert_eq!(
+            requests,
+            [
+                sent("POST", "/token", "", ""),
+                sent("POST", generate, "Bearer source", "qp-source"),
+                sent("GET", "/bkt/pre/k", "Bearer impersonated", "qp-bucket"),
+            ]
+        );
+    });
 }
 
 #[test]

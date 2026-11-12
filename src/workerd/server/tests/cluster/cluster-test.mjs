@@ -382,6 +382,7 @@ class FakeS3 {
       STORAGE_EMULATOR_HOST: host,
       GCE_METADATA_HOST: host,
       GOOGLE_APPLICATION_CREDENTIALS: undefined,
+      GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: undefined,
     };
   }
 
