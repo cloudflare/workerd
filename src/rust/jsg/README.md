@@ -241,8 +241,8 @@ leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are 
 allowlist described below, and are to be removed. The one exception is in
 `src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
 `JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way, and two shims call the C++ functions that `ctx.waitUntil()` and
-`ctx.abort()` call, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
+learns of exceptions no other way, and `io_context_add_wait_until()` calls the C++ function that
+`ctx.waitUntil()` calls, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
 explains why that is sound. Don't extend it.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
