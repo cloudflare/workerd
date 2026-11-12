@@ -38,6 +38,8 @@
 -isystembazel-bin/external/+git_repository+com_googlesource_chromium_icu/_virtual_includes/icu/third_party/icu/source/common
 -isystemexternal/zlib+
 -isystembazel-bin/src/rust/api/_virtual_includes/lib.rs@cxx
+-isystembazel-bin/src/rust/async-trace/_virtual_includes/ffi.rs@cxx
+-isystembazel-bin/src/rust/capnp-serde/tests/_virtual_includes/test_serde_ffi.rs@cxx
 -isystembazel-bin/src/rust/cxx-integration-test/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/cxx-integration/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/dns/_virtual_includes/lib.rs@cxx
@@ -60,6 +62,7 @@
 -isystembazel-bin/src/rust/worker/_virtual_includes/ffi.rs@cxx
 -isystembazel-bin/src/rust/worker/_virtual_includes/kill_switch.rs@cxx
 -isystembazel-bin/src/rust/worker/_virtual_includes/ok.rs@cxx
+-isystembazel-bin/src/workerd/api/_virtual_includes/r2_api_serde_ffi.rs@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -D_LIBCPP_NO_ABI_TAG
@@ -95,6 +98,7 @@
 -DV8_COMPRESS_POINTERS_IN_SHARED_CAGE
 -DV8_CONCURRENT_MARKING
 -DV8_DEPRECATION_WARNINGS
+-DV8_EMBEDDER_DATA_ARRAY_SIZE=10
 -DV8_ENABLE_CHECKS
 -DV8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
 -DV8_ENABLE_LAZY_SOURCE_POSITIONS

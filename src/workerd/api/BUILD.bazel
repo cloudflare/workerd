@@ -356,6 +356,7 @@ wd_cc_library(
     srcs = glob(["r2*.c++"]),
     hdrs = glob(["r2*.h"]),
     implementation_deps = [
+        ":r2-api-serde",
         ":r2-api_capnp",
     ],
     visibility = ["//visibility:public"],
@@ -563,10 +564,12 @@ wd_capnp_library(src = "r2-api.capnp")
 # For //src/rust/capnp-serde/tests, which checks r2-api-serde against the C++ JSON codec.
 exports_files(["r2-api.capnp"])
 
-# The R2 binding's JSON messages as Rust types (crate `r2_api_serde`).
+# The R2 binding's JSON messages as Rust types (crate `r2_api_serde`). r2-bucket.c++ decodes R2's
+# responses with them, through <workerd/api/r2_api_serde_ffi.rs.h>.
 wd_rust_serde_capnp_library(
     name = "r2-api-serde",
     srcs = ["r2-api.capnp"],
+    ffi = True,
     visibility = ["//visibility:public"],
 )
 
