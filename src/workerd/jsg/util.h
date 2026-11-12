@@ -655,6 +655,11 @@ v8::Local<v8::String> newExternalString(Lock& js, StaticExternalStringSource buf
 // Like the overload above. An Arc buffer is shared: the V8 string takes its own reference.
 v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& buf);
 
+// Copies `buf` into a buffer from the isolate's ExternalStringAllocator and returns an external
+// string over it. The buffer is freed when V8 disposes of the string.
+v8::Local<v8::String> copyToExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+v8::Local<v8::String> copyToExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.
 // - Use Unimplemented as a method parameter type or struct field type to mark that

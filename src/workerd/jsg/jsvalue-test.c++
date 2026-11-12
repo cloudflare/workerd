@@ -164,5 +164,70 @@ KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getProt
       "string", "RangeError: Maximum proxy chain length exceeded in getPrototype");
 }
 
+// Records the external string buffers the isolate asks for.
+class LoggingExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  LoggingExternalStringAllocator(
+      kj::Vector<kj::ArrayPtr<const char>>& allocated, kj::Vector<const void*>& freed)
+      : allocated(allocated),
+        freed(freed) {}
+
+  void* allocate(size_t size) override {
+    void* ptr = operator new(size);
+    allocated.add(kj::arrayPtr(static_cast<const char*>(ptr), size));
+    return ptr;
+  }
+  void deallocate(void* ptr) override {
+    freed.add(ptr);
+    operator delete(ptr);
+  }
+
+ private:
+  kj::Vector<kj::ArrayPtr<const char>>& allocated;
+  kj::Vector<const void*>& freed;
+};
+
+KJ_TEST("copyToExternalString copies into the isolate's allocator and frees with the string") {
+  kj::Vector<kj::ArrayPtr<const char>> allocated;
+  kj::Vector<const void*> freed;
+  static constexpr char TEXT[] = "copied text";
+  static constexpr uint16_t WIDE_TEXT[] = {u'w', u'i', u'd', u'e', 0x20ac};
+  auto text = kj::arrayPtr(TEXT, sizeof(TEXT) - 1);
+  auto wideText = kj::arrayPtr(WIDE_TEXT);
+  {
+    JsValueIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>(),
+        kj::heap<LoggingExternalStringAllocator>(allocated, freed));
+    isolate.runInLockScope([&](JsValueIsolate::Lock& js) {
+      auto oneByte = copyToExternalOneByteString(js, text);
+      auto* oneByteResource = oneByte->GetExternalOneByteStringResource();
+      KJ_ASSERT(oneByteResource != nullptr);
+      KJ_EXPECT(oneByteResource->data() != TEXT);
+      KJ_EXPECT(kj::arrayPtr(oneByteResource->data(), oneByteResource->length()) == text);
+
+      auto twoByte = copyToExternalTwoByteString(js, wideText);
+      auto* twoByteResource = twoByte->GetExternalStringResource();
+      KJ_ASSERT(twoByteResource != nullptr);
+      KJ_EXPECT(twoByteResource->data() != WIDE_TEXT);
+      KJ_EXPECT(kj::arrayPtr(twoByteResource->data(), twoByteResource->length()) == wideText);
+
+      KJ_ASSERT(allocated.size() == 2);
+      KJ_EXPECT(allocated[0].begin() == oneByteResource->data());
+      KJ_EXPECT(allocated[0].size() == text.size());
+      KJ_EXPECT(allocated[1].begin() == reinterpret_cast<const char*>(twoByteResource->data()));
+      KJ_EXPECT(allocated[1].size() == wideText.size() * sizeof(uint16_t));
+      KJ_EXPECT(freed.size() == 0);
+
+      // Copying nothing allocates nothing.
+      KJ_EXPECT(copyToExternalOneByteString(js, text.first(0))->Length() == 0);
+      KJ_EXPECT(allocated.size() == 2);
+    });
+  }
+  // Disposing of the isolate disposes of the strings, and with them their buffers.
+  KJ_ASSERT(freed.size() == 2);
+  KJ_EXPECT(freed[0] == allocated[0].begin() || freed[0] == allocated[1].begin());
+  KJ_EXPECT(freed[1] == allocated[0].begin() || freed[1] == allocated[1].begin());
+  KJ_EXPECT(freed[0] != freed[1]);
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

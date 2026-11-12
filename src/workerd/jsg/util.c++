@@ -1256,6 +1256,65 @@ v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& bu
   KJ_UNREACHABLE;
 }
 
+// An external string resource over characters from the isolate's ExternalStringAllocator. The
+// resource itself is on the process heap: V8 calls through its vtable, which must not be
+// writable from the sandbox.
+template <typename Type, typename Data>
+class AllocatedExternString final: public Type {
+ public:
+  AllocatedExternString(ExternalStringAllocator& allocator, kj::ArrayPtr<Data> chars)
+      : allocator(allocator),
+        chars(chars) {}
+  ~AllocatedExternString() noexcept(true) {
+    allocator.deallocate(chars.begin());
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(AllocatedExternString);
+
+  const Data* data() const override {
+    return chars.begin();
+  }
+  size_t length() const override {
+    return chars.size();
+  }
+
+ private:
+  ExternalStringAllocator& allocator;
+  kj::ArrayPtr<Data> chars;
+};
+
+template <typename Type, typename Data>
+v8::Local<v8::String> copyToExternalString(Lock& js, kj::ArrayPtr<const Data> buf) {
+  if (buf.size() == 0) return v8::String::Empty(js.v8Isolate);
+
+  auto& allocator = IsolateBase::from(js.v8Isolate).getExternalStringAllocator();
+  auto* chars = static_cast<Data*>(allocator.allocate(buf.size() * sizeof(Data)));
+  JSG_REQUIRE(chars != nullptr, RangeError, "String allocation failed");
+  memcpy(chars, buf.begin(), buf.size() * sizeof(Data));
+  auto* resource =
+      new AllocatedExternString<Type, Data>(allocator, kj::arrayPtr(chars, buf.size()));
+
+  v8::MaybeLocal<v8::String> str;
+  if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
+    str = v8::String::NewExternalOneByte(js.v8Isolate, resource);
+  } else {
+    str = v8::String::NewExternalTwoByte(js.v8Isolate, resource);
+  }
+  if (str.IsEmpty()) {
+    // Only a string over V8's maximum length fails.
+    delete resource;
+    JSG_FAIL_REQUIRE(RangeError, "String allocation failed");
+  }
+  return str.ToLocalChecked();
+}
+
+v8::Local<v8::String> copyToExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf) {
+  return copyToExternalString<v8::String::ExternalOneByteStringResource>(js, buf);
+}
+
+v8::Local<v8::String> copyToExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
+  return copyToExternalString<v8::String::ExternalStringResource>(js, buf);
+}
+
 // ======================================================================================
 // Module utilities
 
