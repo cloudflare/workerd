@@ -62,6 +62,7 @@ const unitTests :Workerd.Config = (
           (name = "process-assign", service = "process-assign"),
           (name = "buffer-assign", service = "buffer-assign"),
           (name = "process-env", service = "process-env"),
+          (name = "process-stdout", service = "process-stdout"),
         ],
       )
     ),
@@ -278,6 +279,15 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .nodeCompatV2Flags,
         bindings = [
           (name = "MODE", json = "\"process-env\""),
+        ],
+      )
+    ),
+    ( name = "process-stdout",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .nodeCompatV2Flags,
+        bindings = [
+          (name = "MODE", json = "\"process-stdout\""),
         ],
       )
     ),
