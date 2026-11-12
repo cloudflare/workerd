@@ -9,12 +9,14 @@
 //
 // DIFFERENCES FROM THE C++ IMPLEMENTATION
 //
-// - The output before each handler is written to the transformed body as
-//   the handler starts, and the rewriter goes on without waiting for it to
-//   be read until the end of the chunk. The C++ one writes it after the
-//   handler and waits for it to be read before going on, so that a canceled
-//   transformed body stops the rewrite at that handler; here, at the next
-//   handler after the failed write, or at the end of the chunk.
+// - The output is written to the transformed body at the end of each
+//   chunk, and before each handler that returns a promise, as the handler
+//   starts; the rewriter waits for it to be read only at the end of the
+//   chunk. The C++ one writes the output before each handler after the
+//   handler, and waits for it to be read before going on, so that a
+//   canceled transformed body stops the rewrite at that handler; here, at
+//   the next handler that returns a promise after the failed write, or at
+//   the end of the chunk.
 // - The token classes' properties (Element's tagName, attributes, removed
 //   and namespaceURI, and so on) are own accessors of each token, rather
 //   than the own data properties JSG makes for an instance property. They
@@ -43,8 +45,9 @@
 // handler lol-html runs, with a native token handle that it invalidates
 // once the handler (and the promise it returns, if any) is done; the
 // dispatcher wraps the handle in a fresh token object and calls the user's
-// handler. The output lol-html produces comes back from each write, and
-// with each dispatch for the output before it.
+// handler. The output lol-html produces comes back from each write, but
+// for the output before a handler that returns a promise, which the
+// dispatcher takes and writes as the handler starts.
 //
 // Content from a ReadableStream or a Response is numbered and passed to the
 // token's *Stream() method; lol-html dispatches the number when it writes
@@ -156,6 +159,11 @@ const kDocumentText = 5;
 const kDocumentEnd = 6;
 const kEndTag = 7;
 const kStream = 8;
+
+// The prototype of the module's constant records. A literal with
+// `__proto__: null` would make a dictionary-mode object, which is slower
+// to read, and the token constructors read their property descriptors.
+const kNullProtoObject: object = ObjectFreeze({ __proto__: null });
 
 // Lets the module construct the token classes, whose constructors are
 // otherwise illegal.
@@ -357,7 +365,7 @@ class Rewrite {
       elementFlags,
       documentFlags,
       encoding,
-      (kind, id, token, output) => this.#dispatch(kind, id, token, output)
+      (kind, id, token) => this.#dispatch(kind, id, token)
     );
   }
 
@@ -456,11 +464,22 @@ class Rewrite {
   #dispatch(
     kind: number,
     id: number,
-    token: unknown,
-    output: Uint8Array | undefined
+    token: unknown
   ): Promise<unknown> | undefined {
     if (this.#writeFailed) throw this.#writeError;
-    this.#write(output);
+    const result = this.#runHandler(kind, id, token);
+    // The output before a handler that waits is written while it waits.
+    // Otherwise the output stays in the rewriter until the end of the chunk,
+    // since a write per handler costs more than most handlers do.
+    if (result !== undefined) this.#write(this.handle.takeOutput());
+    return result;
+  }
+
+  #runHandler(
+    kind: number,
+    id: number,
+    token: unknown
+  ): Promise<unknown> | undefined {
     switch (kind) {
       case kElement: {
         const set = this.#elements[id] as ElementHandlerSet;
@@ -810,7 +829,7 @@ class AttributesIterator {
 ObjectSetPrototypeOf(AttributesIterator.prototype, IteratorPrototype);
 
 const kElementProperties = ObjectFreeze({
-  __proto__: null,
+  __proto__: kNullProtoObject,
   tagName: accessor(
     function (this: unknown): string {
       return elementHandle(this).tagName();
@@ -891,7 +910,7 @@ class EndTag {
 }
 
 const kEndTagProperties = ObjectFreeze({
-  __proto__: null,
+  __proto__: kNullProtoObject,
   name: accessor(
     function (this: unknown): string {
       return endTagHandle(this).name();
@@ -950,7 +969,7 @@ class Comment {
 }
 
 const kCommentProperties = ObjectFreeze({
-  __proto__: null,
+  __proto__: kNullProtoObject,
   text: accessor(
     function (this: unknown): string {
       return commentHandle(this).text();
@@ -1034,7 +1053,7 @@ class Text {
 }
 
 const kTextProperties = ObjectFreeze({
-  __proto__: null,
+  __proto__: kNullProtoObject,
   text: accessor(function (this: unknown): string {
     return textHandle(this).text();
   }),
@@ -1068,7 +1087,7 @@ class Doctype {
 }
 
 const kDoctypeProperties = ObjectFreeze({
-  __proto__: null,
+  __proto__: kNullProtoObject,
   name: accessor(function (this: unknown): string | null {
     return doctypeHandle(this).name() ?? null;
   }),
@@ -1135,7 +1154,7 @@ function accessor(
   setNameAndLength(get, '', 0);
   if (set !== undefined) setNameAndLength(set, '', 0);
   return ObjectFreeze({
-    __proto__: null,
+    __proto__: kNullProtoObject,
     get,
     set,
     enumerable: true,

@@ -11,9 +11,9 @@ use crate::HtmlRewriterUtils;
 /// `streams[id](sink)` writes the streaming content numbered `id`.
 /// `rewrite(chunks, ons, docs, encoding)` rewrites the document written in `chunks` (Latin-1
 /// strings) with the handlers of `on()` calls, `[selector, handlers]`, and of `onDocument()`
-/// calls, `handlers`, and returns the output, from the dispatcher and the calls together. A
-/// handler gets the token's handle and `endTags`, an array of end tag handlers that
-/// `onEndTag(index)` refers to. `error(f)` returns the message of what `f` throws.
+/// calls, `handlers`, and returns the output: what the dispatcher takes before each handler, and
+/// what the calls return after the last. A handler gets the token's handle and `endTags`, an
+/// array of end tag handlers that `onEndTag(index)` refers to. `error(f)` returns the message of what `f` throws.
 const PRELUDE: &str = r"
 const enc = (s) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const dec = (b) => (b === undefined ? '' : String.fromCharCode(...b));
@@ -28,12 +28,13 @@ function newRewriter(ons, docs, encoding, sink) {
   const document = docs.map((h) => ({
     doctype: !!h.doctype, comments: !!h.comments, text: !!h.text, end: !!h.end,
   }));
-  return utils.newRewriter(element, document, encoding ?? 'utf-8', (kind, id, token, output) => {
-    sink(dec(output));
+  const rewriter = utils.newRewriter(element, document, encoding ?? 'utf-8', (kind, id, token) => {
+    sink(dec(rewriter.takeOutput()));
     if (kind === 7) return endTags[id](token);
     if (kind === 8) return streams[id](token);
     return (kind < 3 ? ons[id][1] : docs[id])[names[kind]](token, endTags);
   });
+  return rewriter;
 }
 function rewrite(chunks, ons = [], docs = [], encoding) {
   let out = '';
@@ -187,7 +188,7 @@ fn end_tag_handlers_run_for_the_element_end_tag() {
 }
 
 #[test]
-fn the_dispatcher_gets_the_output_before_each_handler() {
+fn take_output_returns_the_output_before_the_handler() {
     assert_eq!(
         run(r"let parts = [];
             const rewriter = newRewriter([['p', { element() {} }]], [], 'utf-8', (s) => parts.push(s));
@@ -195,6 +196,18 @@ fn the_dispatcher_gets_the_output_before_each_handler() {
             parts.push('|' + dec(rewriter.end()));
             JSON.stringify(parts)"),
         r#"["<a></a>","|<p>x","|"]"#
+    );
+}
+
+#[test]
+fn a_call_returns_the_output_that_the_dispatcher_did_not_take() {
+    assert_eq!(
+        run(r"const element = [{
+              selector: utils.parseSelector('p'), element: true, comments: false, text: false,
+            }];
+            const rewriter = utils.newRewriter(element, [], 'utf-8', () => {});
+            dec(rewriter.write(enc('<a></a><p>x'))) + '|' + dec(rewriter.end())"),
+        "<a></a><p>x|"
     );
 }
 

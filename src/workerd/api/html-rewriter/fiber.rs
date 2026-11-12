@@ -202,7 +202,6 @@ impl Dispatcher for FiberDispatcher<'_> {
                 kind: call.kind,
                 id: call.id,
                 slot: Some(slot),
-                output: call.output,
             };
             bridge::run_on_main_stack(self.wait.as_mut(), &mut main)
         });
@@ -224,7 +223,6 @@ pub struct MainStackCall {
     id: u32,
     /// Taken by the handle the call creates.
     slot: Option<tokens::Slot>,
-    output: Vec<u8>,
 }
 
 impl MainStackCall {
@@ -240,22 +238,16 @@ impl MainStackCall {
         let call = Arc::clone(&self.call);
         let settler = Cell::new(Some(settler));
         let slot = self.slot.take();
-        let output = std::mem::take(&mut self.output);
         let (kind, id) = (self.kind, self.id);
         let result = call.frame.enter(lock, |lock| {
             lock.try_catch(|lock| {
                 let slot = slot
                     .ok_or_else(|| jsg::Error::new_internal_error("the handler call ran twice"))?;
                 let token = tokens::handle(lock, &call.shared, slot)?;
-                let output = if output.is_empty() {
-                    lock.undefined()
-                } else {
-                    output.to_js_typed_array(lock).into()
-                };
                 let kind = (kind as u8).to_js(lock)?;
                 let id = id.to_js(lock)?;
                 let function = call.function.as_local(lock);
-                let value = function.call(lock, None, &[kind, id, token, output])?;
+                let value = function.call(lock, None, &[kind, id, token])?;
                 if let Ok(promise) = v8::Local::<v8::Promise>::try_from(value) {
                     let reaction = Reaction {
                         settler: Cell::new(settler.take()),

@@ -16,9 +16,10 @@ namespace {
 
 // `rewriter(ons, docs, sink, encoding, streams)` creates a rewriter with the handlers of `on()`
 // calls, `[selector, handlers]`, and of `onDocument()` calls, `handlers`, for a document in
-// `encoding`; `sink` gets the output the dispatcher gets, as a string, and `streams[id](sink)`
-// writes the streaming content numbered `id`. `log` collects what the tests read, `error(f)` returns the
-// message of what `f` throws, and `enc` and `dec` convert between Latin-1 strings and bytes.
+// `encoding`; `sink` gets the output the dispatcher takes before each handler, as a string, and
+// `streams[id](sink)` writes the streaming content numbered `id`. `log` collects what the tests
+// read, `error(f)` returns the message of what `f` throws, and `enc` and `dec` convert between
+// Latin-1 strings and bytes.
 constexpr kj::StringPtr PRELUDE = R"(
 const enc = (s) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const dec = (b) => (b === undefined ? '' : String.fromCharCode(...b));
@@ -32,11 +33,12 @@ function rewriter(ons, docs = [], sink = () => {}, encoding = 'utf-8', streams =
   const document = docs.map((h) => ({
     doctype: !!h.doctype, comments: !!h.comments, text: !!h.text, end: !!h.end,
   }));
-  return utils.newRewriter(element, document, encoding, (kind, id, token, output) => {
-    sink(dec(output));
+  const handle = utils.newRewriter(element, document, encoding, (kind, id, token) => {
+    sink(dec(handle.takeOutput()));
     if (kind === 8) return streams[id](token);
     return (kind < 3 ? ons[id][1] : docs[id])[names[kind]](token);
   });
+  return handle;
 }
 function error(f) {
   try { f(); } catch (e) { return `${e.name}: ${e.message}`; }

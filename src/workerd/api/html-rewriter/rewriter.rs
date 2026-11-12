@@ -89,8 +89,6 @@ pub struct Call<'a, 'r, 'i> {
     pub kind: HandlerKind,
     pub id: u32,
     pub token: Token<'a, 'r, 'i>,
-    /// The output lol-html produced since the previous call.
-    pub output: Vec<u8>,
 }
 
 /// What a dispatcher returns when the handler failed, having kept why. lol-html stops on it.
@@ -150,13 +148,7 @@ impl Shared {
         id: u32,
         token: Token<'_, '_, '_>,
     ) -> HandlerResult {
-        let output = self.take_output();
-        let call = Call {
-            kind,
-            id,
-            token,
-            output,
-        };
+        let call = Call { kind, id, token };
         let result = self.dispatcher.with(|dispatcher| dispatcher.dispatch(call));
         self.resume();
         match result {
@@ -256,9 +248,10 @@ pub enum State {
 /// A rewriter, to which JavaScript writes the document in chunks.
 ///
 /// Each call returns the output. lol-html calls the dispatcher, a JavaScript function, for every
-/// handler: `dispatcher(kind, id, token, output)`, where `kind` is a [`HandlerKind`], `id`
-/// numbers the handlers, `token` is the token's handle, and `output` is a `Uint8Array` of the
-/// output since the previous call, or `undefined` if there is none.
+/// handler: `dispatcher(kind, id, token)`, where `kind` is a [`HandlerKind`], `id` numbers the
+/// handlers, and `token` is the token's handle. The output before the handler stays in the
+/// rewriter, where the call returns it, unless the dispatcher takes it with `takeOutput()`, as
+/// it does for a handler that waits.
 ///
 /// The dispatcher runs in the async context frame the rewriter was created in. `write()` and
 /// `end()` run it within the call, and fail if it returns a promise; the token is valid until it
@@ -443,6 +436,14 @@ impl HtmlRewriterHandle {
         self.start(lock, None)
     }
 
+    /// Returns the output lol-html produced since the previous call, or since this was last
+    /// called, which a call then no longer returns. A dispatcher calls it during a handler for
+    /// the output before the handler; the token's own output follows once the handler is done.
+    #[jsg_method]
+    pub fn take_output<'s>(&self, lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Uint8Array> {
+        self.shared.take_output().to_js_typed_array(lock)
+    }
+
     /// Discards the rewriter: later calls fail.
     #[jsg_method]
     pub fn abort(&self) -> jsg::Result<()> {
@@ -534,14 +535,9 @@ impl Dispatcher for SyncDispatcher<'_, '_> {
         let lock = &mut *self.lock;
         let function = self.function;
         let result = tokens::lend(lock, self.shared, call.token, |lock, token| {
-            let output = if call.output.is_empty() {
-                lock.undefined()
-            } else {
-                call.output.to_js_typed_array(lock).into()
-            };
             let kind = (call.kind as u8).to_js(lock)?;
             let id = call.id.to_js(lock)?;
-            let result = function.call(lock, None, &[kind, id, token, output])?;
+            let result = function.call(lock, None, &[kind, id, token])?;
             if result.is_promise() {
                 return Err(jsg::Error::new_type_error(
                     "HTMLRewriter handlers that return a promise are not supported yet.",

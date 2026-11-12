@@ -43,6 +43,7 @@ TypeScript one.
 | `cancelReachesSourceAfterNextChunk` | cancel remains pending at the source until another chunk wakes the pump, then reaches the source |
 | `erroringSourceRejectsConsumption` | source error surfaces from .text() |
 | `largeDocumentThroughHandler` | 1024 elements / ~264 KiB through a counting handler, byte-exact output |
+| `outputBeforeAWaitingHandler` | the output before an element whose handler waits on a promise, read while it waits |
 
 ## Divergences
 
@@ -54,13 +55,15 @@ additional pull while TypeScript makes two; these counts are pinned by
 
 ### HTMLRewriter implementations
 
-None that this suite pins: both implementations pass it with the same
-expectations. The TypeScript one transforms through the same native
-parts as the C++ one (an identity pipe for the transformed body, and the
-native pump for the original body and streamed content), so reads,
-cancellation, error conversion and pull counts match. The header of
-`src/per_isolate/htmlrewriter/htmlrewriter.ts` lists its differences,
-none of which shows here.
+The TypeScript one transforms through the same native parts as the C++
+one (an identity pipe for the transformed body, and the native pump for
+the original body and streamed content), so reads, cancellation, error
+conversion and pull counts match. It writes the output before a handler
+that returns a promise as the handler starts, where the C++ one writes it
+once the handler is done: `outputBeforeAWaitingHandler` reads it while the
+handler waits with the TypeScript one only. The header of
+`src/per_isolate/htmlrewriter/htmlrewriter.ts` lists the other
+differences, none of which shows here.
 
 ## Known bugs
 

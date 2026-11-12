@@ -274,11 +274,10 @@ declare interface HtmlRewriterUtils {
   // Throws `TypeError: Parser error: ...` for an invalid selector.
   parseSelector(selector: string): HtmlSelector;
   // Throws `TypeError: Parser error: ...` for an unsupported encoding.
-  // `dispatcher(kind, id, token, output)` runs every handler: `kind` is a
+  // `dispatcher(kind, id, token)` runs every handler: `kind` is a
   // HandlerKind (rewriter.rs), `id` numbers the handlers, the content
-  // stream, or the end tag handler, `token` is valid until the dispatcher
-  // returns or the promise it returns settles, and `output` is what the
-  // rewriter produced since the previous call, if anything.
+  // stream, or the end tag handler, and `token` is valid until the
+  // dispatcher returns or the promise it returns settles.
   newRewriter(
     elementHandlers: NativeElementHandlers[],
     documentHandlers: NativeDocumentHandlers[],
@@ -286,8 +285,7 @@ declare interface HtmlRewriterUtils {
     dispatcher: (
       kind: number,
       id: number,
-      token: unknown,
-      output: Uint8Array | undefined
+      token: unknown
     ) => Promise<unknown> | undefined
   ): HtmlRewriterHandle;
 }
@@ -310,6 +308,10 @@ declare interface HtmlRewriterHandle {
   // with that value, and fails the rewriter.
   writeAsync(chunk: Uint8Array): Promise<Uint8Array>;
   endAsync(): Promise<Uint8Array>;
+  // The output since the previous call, or since this was last called,
+  // which the call then doesn't return. During a handler, the output
+  // before it.
+  takeOutput(): Uint8Array;
   // Fails the rewriter. Throws while a write is running.
   abort(): void;
 }
