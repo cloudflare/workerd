@@ -5,10 +5,12 @@
 // Structured serialization for Rust JSG, in the format of C++ JSG's jsg::Serializer and
 // jsg::Deserializer (workerd/jsg/ser.c++), which can read what these shims write and the other
 // way round. They drive V8's serializer with delegates of their own and hand workerd API objects,
-// such as Blob and Headers, to C++ JSG through writeApiObject() and readApiObject().
+// such as Blob and Headers, and DOMExceptions, however they are implemented, to C++ JSG through
+// writeApiObject() and readApiObject().
 
 #include "ffi.h"
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/v8.rs.h>
@@ -96,6 +98,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
         prototypeOfObject(v8::Object::New(isolate)->GetPrototype()),
         jsSerializeModeKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY))),
+        domExceptionBrandKey(v8::Private::ForApi(
+            isolate, newString(isolate, ::workerd::jsg::DOM_EXCEPTION_BRAND_KEY))),
         ser(isolate, this) {}
 
   // Writes the header, of `version` if there is one, as jsg::Serializer does for its `version`
@@ -136,22 +140,33 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   bool HasCustomHostObject(v8::Isolate*) override {
     // V8 already treats objects with internal fields, such as API objects, as host objects, but
-    // not instances of classes implemented in JavaScript (jsg::Serializer) or native errors.
+    // not instances of classes implemented in JavaScript (jsg::Serializer), the bootstrap's
+    // DOMException, an API wrapper object without them, or native errors.
     return true;
   }
 
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
     if (object->InternalFieldCount() > 0) return v8::Just(true);
     bool isJsSerializable;
-    if (!isJsSerializableInstance(object).To(&isJsSerializable)) return v8::Nothing<bool>();
-    return v8::Just(isJsSerializable || (errorsAreHostObjects && object->IsNativeError()));
+    if (!hasPrivateUnlessPlain(object, jsSerializeModeKey).To(&isJsSerializable)) {
+      return v8::Nothing<bool>();
+    }
+    bool isDomException;
+    if (!hasPrivateUnlessPlain(object, domExceptionBrandKey).To(&isDomException)) {
+      return v8::Nothing<bool>();
+    }
+    return v8::Just(
+        isJsSerializable || isDomException || (errorsAreHostObjects && object->IsNativeError()));
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
-    // An instance of a class implemented in JavaScript is not supported, even if it is a native
-    // error: writeApiObject() throws DataCloneError for it.
+    // writeApiObject() writes a DOMException as jsg::Serializer does. An instance of a class
+    // implemented in JavaScript is not supported, even if it is a native error or a DOMException:
+    // writeApiObject() throws DataCloneError for it.
     bool isJsSerializable;
-    if (!isJsSerializableInstance(object).To(&isJsSerializable)) return v8::Nothing<bool>();
+    if (!hasPrivateUnlessPlain(object, jsSerializeModeKey).To(&isJsSerializable)) {
+      return v8::Nothing<bool>();
+    }
     if (!isJsSerializable && errorsAreHostObjects && object->IsNativeError()) {
       return writeError(object);
     }
@@ -220,14 +235,15 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     return ser.WriteValue(context, properties);
   }
 
-  // Whether `object` is an instance of a class implemented in JavaScript, which carries
-  // jsg::JS_SERIALIZE_MODE_KEY. As jsg::Serializer does, an object whose prototype is
-  // Object.prototype or null is not checked for it. Reading a private property runs no
+  // Whether `object` carries the private property `key`: jsg::JS_SERIALIZE_MODE_KEY on an instance
+  // of a class implemented in JavaScript, or jsg::DOM_EXCEPTION_BRAND_KEY on one of the
+  // bootstrap's DOMException. As jsg::Serializer does, an object whose prototype is
+  // Object.prototype or null is not checked for either. Reading a private property runs no
   // JavaScript.
-  v8::Maybe<bool> isJsSerializableInstance(v8::Local<v8::Object> object) {
+  v8::Maybe<bool> hasPrivateUnlessPlain(v8::Local<v8::Object> object, v8::Local<v8::Private> key) {
     auto prototype = object->GetPrototype();
     if (prototype == prototypeOfObject || prototype->IsNull()) return v8::Just(false);
-    return object->HasPrivate(isolate->GetCurrentContext(), jsSerializeModeKey);
+    return object->HasPrivate(isolate->GetCurrentContext(), key);
   }
 
   v8::Isolate* isolate;
@@ -235,6 +251,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   v8::LocalVector<v8::SharedArrayBuffer> sharedArrayBuffers;
   v8::Local<v8::Value> prototypeOfObject;
   v8::Local<v8::Private> jsSerializeModeKey;
+  v8::Local<v8::Private> domExceptionBrandKey;
   v8::ValueSerializer ser;
 };
 

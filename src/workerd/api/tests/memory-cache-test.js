@@ -585,6 +585,23 @@ export const fallbackResultReadAsReturned = {
   },
 };
 
+export const domExceptionValues = {
+  async test(ctrl, env) {
+    // A DOMException in a value is cached as one, with its name, message and stack.
+    const error = new DOMException('m', 'AbortError');
+    await env.CACHE.read('domException', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('domException', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'AbortError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.code, 20);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('domException');
+  },
+};
+
 export const fallbackReturnsThenable = {
   async test(ctrl, env) {
     // A thenable is followed only under unwrap_custom_thenables; otherwise it is the result.

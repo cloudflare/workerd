@@ -12,11 +12,12 @@
 //!
 //! - Native errors, as host objects with their own properties (including `stack`), when the
 //!   `enhanced_error_serialization` compatibility flag is on.
-//! - Workerd API objects whose C++ type is serializable, such as `Blob`, `Headers` and
-//!   `DOMException`, through their own serializers. Rust resources are not serializable, and
-//!   neither are instances of the runtime's classes implemented in JavaScript (which
-//!   `jsg::Serializer` writes through a protocol that runs JavaScript on deserialization):
-//!   [`serialize`] and [`deserialize`] throw `DataCloneError` for them.
+//! - Workerd API objects whose C++ type is serializable, such as `Blob` and `Headers`, through
+//!   their own serializers, and a `DOMException`, whichever implementation made it, as C++ JSG
+//!   writes it. Rust resources are not serializable, and neither are instances of the runtime's
+//!   classes implemented in JavaScript (which `jsg::Serializer` writes through a protocol that
+//!   runs JavaScript on deserialization), even a `DOMException` subclass such as
+//!   `QuotaExceededError`: [`serialize`] and [`deserialize`] throw `DataCloneError` for them.
 //!
 //! A `SharedArrayBuffer` is written as a reference that [`deserialize`] cannot resolve. Transfer
 //! lists, externals and the `jsg::Serializer` options other than `version` are not supported.

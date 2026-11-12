@@ -8,6 +8,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/async-context.h>
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
@@ -387,6 +388,24 @@ void set_error_slots(
       js.str(kj::ArrayPtr<const char>(name.data(), name.size())));
   jsObject.setPrivate(js, ::workerd::jsg::ERROR_MESSAGE_KEY,
       js.str(kj::ArrayPtr<const char>(message.data(), message.size())));
+}
+
+::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
+    ::workerd::rust::jsg::Local prototype,
+    ::rust::Str name,
+    ::rust::Str message,
+    ::rust::Str stack) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto handle = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(prototype));
+  KJ_REQUIRE(handle->IsObject());
+  auto toKj = [](::rust::Str s) { return kj::str(kj::ArrayPtr<const char>(s.data(), s.size())); };
+  auto nameString = toKj(name);
+  auto messageString = toKj(message);
+  auto stackString = toKj(stack);
+  v8::Local<v8::Value> result = ::workerd::jsg::newBootstrapDomException(js,
+      ::workerd::jsg::JsObject(handle.As<v8::Object>()), nameString, messageString,
+      stackString.asPtr());
+  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
 bool isolates_share_group(Isolate* a, Isolate* b) {

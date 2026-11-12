@@ -194,6 +194,19 @@ mod ffi {
             message: &str,
         ) -> Result<()>;
 
+        /// Creates an instance of the per-isolate bootstrap's `DOMException`, as
+        /// `jsg::newBootstrapDomException()` does, whose prototype is `prototype`, with `name`,
+        /// `message` and `stack`. Fails if `prototype` is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn new_bootstrap_dom_exception(
+            isolate: *mut Isolate,
+            prototype: Local,
+            name: &str,
+            message: &str,
+            stack: &str,
+        ) -> Result<Local>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -708,6 +721,38 @@ impl Harness {
         // open, which `object` belongs to.
         unsafe { ffi::set_error_slots(lock.isolate().as_ffi(), object.into_ffi(), name, message) }
             .expect("the value should be an object");
+    }
+
+    /// An instance of the per-isolate bootstrap's `DOMException`, as C++ JSG's
+    /// `jsg::newBootstrapDomException()` creates one: an API wrapper object without internal
+    /// fields, which holds its brand, `name` and `message` under private symbols, with `stack` as
+    /// an own data property. Its prototype is `prototype`. The harness has no bootstrap, so this
+    /// stands in for one, and C++ JSG reads a serialized one as its own `DOMException`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `prototype` is not an object.
+    pub fn new_bootstrap_dom_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        prototype: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
+        stack: &str,
+    ) -> v8::Local<'s, v8::Value> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `prototype` and the result belong to.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::new_bootstrap_dom_exception(
+                    lock.isolate().as_ffi(),
+                    prototype.into_ffi(),
+                    name,
+                    message,
+                    stack,
+                )
+                .expect("the prototype should be an object"),
+            )
+        }
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a

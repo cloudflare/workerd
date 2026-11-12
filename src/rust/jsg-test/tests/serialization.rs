@@ -263,6 +263,38 @@ fn workerd_api_objects_round_trip() {
 }
 
 #[test]
+fn bootstrap_dom_exceptions_round_trip() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        // An API wrapper object without internal fields, unlike the C++ DOMException, which V8
+        // would otherwise serialize as an empty plain object. The harness has no DOMException
+        // global, so its prototype stands in for the bootstrap's, and a copy, the C++ class's
+        // instance, is recognized by its code.
+        let prototype = eval(lock, ctx, "Object.create(Error.prototype)");
+        let exception =
+            Harness::new_bootstrap_dom_exception(lock, prototype, "AbortError", "m", "S");
+        ctx.set_global(lock, "exception", exception);
+        eval(
+            lock,
+            ctx,
+            "globalThis.isCopy = (e) => e.name === 'AbortError' && e.message === 'm' && \
+             e.code === 20 && e.stack === 'S'",
+        );
+        for (expr, check) in [
+            ("exception", "isCopy(v)"),
+            (
+                "({ exception, again: exception })",
+                "isCopy(v.exception) && v.again === v.exception",
+            ),
+            ("new Error('e', { cause: exception })", "isCopy(v.cause)"),
+        ] {
+            assert_round_trip(lock, ctx, expr, check);
+        }
+        Ok(())
+    });
+}
+
+#[test]
 fn unserializable_values_throw_data_clone_error() {
     Harness::new().run_in_context(|lock, ctx| {
         let exception = serialize_exception(lock, ctx, "({ f() {} }).f");
@@ -330,6 +362,28 @@ fn classes_implemented_in_javascript_throw_data_clone_error() {
                 ),
             );
         }
+
+        // Even a DOMException, such as the bootstrap's QuotaExceededError, which would otherwise
+        // be written as a plain DOMException.
+        let prototype = eval(
+            lock,
+            ctx,
+            "Object.create((class QuotaExceededError extends Error {}).prototype)",
+        );
+        let value =
+            Harness::new_bootstrap_dom_exception(lock, prototype, "QuotaExceededError", "m", "S");
+        let mark = eval(lock, ctx, cloneable);
+        Harness::mark_js_serializable(lock, value, mark);
+        ctx.set_global(lock, "instance", value);
+        let exception = serialize_exception(lock, ctx, "[instance]");
+        assert_error(
+            lock,
+            ctx,
+            exception,
+            "DataCloneError",
+            "Could not serialize object of type \"QuotaExceededError\". This type does not \
+             support serialization.",
+        );
 
         // A mark on an object whose prototype is Object.prototype or null is ignored, as by
         // jsg::Serializer.

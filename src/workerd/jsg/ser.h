@@ -285,7 +285,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
   friend v8::Maybe<bool> writeApiObject(
       v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
 
-  // Writes `object`, which is not a native error, through its type's serializer if it is a
+  // Writes `object`, which is not a native error: as DOMException's serialization tag if it is an
+  // instance of the bootstrap's DOMException, through its type's serializer if it is a
   // serializable workerd API object, or else throws a DataCloneError.
   void writeApiObject(Lock& js, v8::Local<v8::Object> object);
 
@@ -524,9 +525,11 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 // pending, if what it runs throws.
 
 // Writes `object` as Serializer's WriteHostObject() writes an object that is not a native error:
-// through its type's serializer if it is a serializable workerd API object, or else throws a
-// DataCloneError. Values the type's serializer writes go through `ser`, and so through its
-// delegate.
+// a DOMException, whichever implementation made it, as DOMException's serialization tag, and a
+// serializable workerd API object through its type's serializer. Values the type's serializer
+// writes go through `ser`, and so through its delegate. Throws a DataCloneError for anything else,
+// including an instance of a class implemented in JavaScript, which needs the Serializer's own
+// delegate, even if it is a DOMException.
 v8::Maybe<bool> writeApiObject(
     v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
 

@@ -142,6 +142,15 @@ void mark_js_serializable(
 void set_error_slots(
     Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message);
 
+// Creates an instance of the per-isolate bootstrap's DOMException, as
+// jsg::newBootstrapDomException() does, whose prototype is `prototype`, with `name`, `message` and
+// `stack`. Throws a KJ exception if `prototype` is not an object.
+::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
+    ::workerd::rust::jsg::Local prototype,
+    ::rust::Str name,
+    ::rust::Str message,
+    ::rust::Str stack);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 

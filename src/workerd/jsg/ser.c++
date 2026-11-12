@@ -325,18 +325,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
 
-    // Checked before DOMExceptions and native errors, since such a class may make them.
+    // Checked before native errors and DOMExceptions, since such a class may make them.
     KJ_IF_SOME(mark, tryGetJsSerializeMark(js, object)) {
       writeJsSerializable(js, object, mark);
-      return v8::Just(true);
-    }
-
-    // The bootstrap's DOMException, a native error, writes what the C++ class does.
-    KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(js, object)) {
-      writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
-      writeLengthDelimited(info.name.toString(js));
-      writeLengthDelimited(info.message.toString(js));
-      writeLengthDelimited(JsObject(object).get(js, "stack"_kj).toString(js));
       return v8::Just(true);
     }
 
@@ -399,6 +390,16 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
 }
 
 void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
+  // The bootstrap's DOMException, an API wrapper object without internal fields, writes what the
+  // C++ class does.
+  KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(js, object)) {
+    writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
+    writeLengthDelimited(info.name.toString(js));
+    writeLengthDelimited(info.message.toString(js));
+    writeLengthDelimited(JsObject(object).get(js, "stack"_kj).toString(js));
+    return;
+  }
+
   if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
       !Wrappable::isWorkerdApiObject(object)) {
     KJ_IF_SOME(eh, externalHandler) {
@@ -1031,6 +1032,11 @@ v8::Maybe<bool> writeApiObject(
   try {
     auto& js = Lock::from(isolate);
     Serializer serializer(js, ser, Serializer::Borrowed{});
+    // Checked first, as WriteHostObject() checks it, since such a class may make DOMExceptions.
+    // No mark is undefined (see serialization.ts).
+    auto mark =
+        check(object->GetPrivate(js.v8Context(), IsolateBase::getJsSerializeModeKey(isolate)));
+    if (!mark->IsUndefined()) serializer.throwDataCloneErrorForObject(js, object);
     serializer.writeApiObject(js, object);
     return v8::Just(true);
   } catch (JsExceptionThrown&) {
