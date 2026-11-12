@@ -156,6 +156,11 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     return kj::heap<EllipticKey>(kj::mv(publicKeyData), keyAlgorithm, rsSize, true);
   }
 
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(
+        kj::heap<EllipticKey>(shareKeyData(), keyAlgorithm, rsSize, isExtractable()));
+  }
+
   void requireSigningAbility() const {
     // This assert is internal to our WebCrypto implementation because we share the AsymmetricKey
     // implementation between ECDH & ECDSA (the former only supports deriveBits/deriveKey, not
@@ -846,6 +851,11 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
   kj::Own<CryptoKey::Impl> cloneAsPublicKey(
       jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
     return kj::heap<EdDsaKey>(kj::mv(publicKeyData), keyAlgorithm, true);
+  }
+
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(
+        kj::heap<EdDsaKey>(shareKeyData(), keyAlgorithm, isExtractable()));
   }
 
   kj::StringPtr chooseHash(

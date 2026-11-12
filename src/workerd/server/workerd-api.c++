@@ -514,8 +514,8 @@ WD_STRONG_BOOL(IsInternalBinding);
 // IoContext (a channel number, names, flags): creating it does no I/O, and it transfers through a
 // startup snapshot by its snapshotClone() (jsg::Wrappable) like any other live object. The
 // exceptions, whose kinds keep a Worker out of the pipeline:
-// * CRYPTO_KEY: a CryptoKey owns its key material in BoringSSL objects (an RSA key V8 handles
-//   too), which no snapshotClone() copies.
+// * CRYPTO_KEY: CryptoKey::snapshotClone() copies only some kinds of key (not RSA, whose
+//   algorithm holds a V8 buffer), and the configured key can be of any kind.
 // * MEMORY_CACHE: a MemoryCache holds a binding into the factory-wide shared cache, acquired
 //   from the provider at construction.
 // * WRAPPED: the binding is whatever JS an internal module returns, and the Hyperdrive wrapper

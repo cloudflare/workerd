@@ -179,6 +179,13 @@ class AesKeyBase: public CryptoKey::Impl {
   }
 
  protected:
+  // A copy of this key as a `Key`, for a subclass's snapshotClone().
+  template <typename Key>
+  kj::Own<CryptoKey::Impl> copyAs() const {
+    return kj::heap<Key>(
+        kj::heapArray(keyData.asPtr()), keyAlgorithm, isExtractable(), getUsages());
+  }
+
   ZeroOnFree keyData;
   CryptoKey::AesKeyAlgorithm keyAlgorithm;
 };
@@ -190,6 +197,10 @@ class AesGcmKey final: public AesKeyBase {
       bool extractable,
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
+
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<AesGcmKey>();
+  }
 
  private:
   jsg::JsArrayBuffer encrypt(jsg::Lock& js,
@@ -347,6 +358,10 @@ class AesCbcKey final: public AesKeyBase {
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<AesCbcKey>();
+  }
+
  private:
   jsg::JsArrayBuffer encrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
@@ -437,6 +452,10 @@ class AesCtrKey final: public AesKeyBase {
       bool extractable,
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
+
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<AesCtrKey>();
+  }
 
   jsg::JsArrayBuffer encrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
@@ -638,6 +657,10 @@ class AesKwKey final: public AesKeyBase {
       bool extractable,
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
+
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return copyAs<AesKwKey>();
+  }
 
   jsg::JsArrayBuffer wrapKey(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,

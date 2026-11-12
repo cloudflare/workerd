@@ -26,6 +26,11 @@ class HmacKey final: public CryptoKey::Impl {
         keyData(kj::mv(keyData)),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
+  kj::Maybe<kj::Own<CryptoKey::Impl>> snapshotClone() const override {
+    return kj::Own<CryptoKey::Impl>(kj::heap<HmacKey>(
+        kj::heapArray(keyData.asPtr()), keyAlgorithm, isExtractable(), getUsages()));
+  }
+
   kj::StringPtr jsgGetMemoryName() const override {
     return "HmacKey";
   }
