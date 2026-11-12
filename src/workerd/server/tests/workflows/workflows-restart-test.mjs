@@ -98,7 +98,7 @@ const config :Workerd.Config = (
           ( name = "workflows.js", bundled = "/workerd/workflows.js" ) ],
         compatibilityDate = "2026-01-01",
         bindings = [
-          ( name = "flow", durableObjectNamespace = (
+          ( name = "workflow:flow", durableObjectNamespace = (
               className = "miniflare-workflows-flow", serviceName = "app" ) ),
           ( name = "TEST_CLOCK", json = "true" ),
         ],

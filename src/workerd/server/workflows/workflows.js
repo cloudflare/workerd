@@ -248,12 +248,15 @@ function shownConfig(cfg) {
 }
 
 // What rolling back the step `name` runs.
-const undoOf = (rollback, name, ctx, record) => ({
+// A step's rollback: `stream` and `key` for a step that returned a stream.
+const undoOf = (rollback, name, ctx, record, key) => ({
   name,
   fn: rollback.rollback.dup?.() ?? rollback.rollback,
   config: rollback.rollbackConfig,
   ctx,
   output: record.value,
+  stream: record.stream,
+  key,
 });
 
 // The testing API's changes to how an instance runs, each a call into it.
@@ -371,6 +374,8 @@ export class Engine extends DurableObject {
   #gate = null;
   #counts = new Map();
   #rollbacks = [];
+  // The generation whose rollback runs in memory, else null.
+  #undoing = null;
   #steps = 0;
   #watchers = new Set();
   #alarm = null;
@@ -497,7 +502,7 @@ export class Engine extends DurableObject {
       return this.#arm();
     }
     // What the process was doing when it went away.
-    if (this.#drive?.generation !== m.generation) {
+    if (this.#lost(m)) {
       if (m.status === 'waitingForPause')
         this.#set('paused', { pausedAt: now });
       if (m.status === 'rollingBack') {
@@ -512,7 +517,7 @@ export class Engine extends DurableObject {
         w.wake(TIMEOUT);
       }
       const resting = m.dormant > now;
-      if (this.#drive?.generation !== m.generation && !resting) this.#run(m);
+      if (this.#lost(m) && !resting) this.#run(m);
     }
     this.#arm();
   }
@@ -526,8 +531,7 @@ export class Engine extends DurableObject {
     if (m && TERMINAL.has(m.status)) {
       next = m.expires;
     } else if (m && m.status !== 'paused') {
-      if (this.#drive?.generation !== m.generation)
-        next = m.dormant > clock() ? m.dormant : clock();
+      if (this.#lost(m)) next = m.dormant > clock() ? m.dormant : clock();
       for (const w of this.#waiters) next = Math.min(next, w.at);
       if (m.status !== 'waiting') next = Math.min(next, clock() + WATCH_MS);
     }
@@ -545,6 +549,15 @@ export class Engine extends DurableObject {
     this.#wake();
   }
 
+  // Whether nothing of `m`'s generation is in memory: neither its `run()`
+  // nor its rollback.
+  #lost(m) {
+    const { generation } = m;
+    return (
+      this.#drive?.generation !== generation && this.#undoing !== generation
+    );
+  }
+
   // Runs `run()` for the instance's generation, from the start.
   #run(m) {
     const run = (this.#drive = { generation: m.generation });
@@ -557,7 +570,7 @@ export class Engine extends DurableObject {
       this.#log('workflow_started', { params: m.params });
     }
     if (m.status === 'queued' || m.dormant !== undefined)
-      this.#set('running', { dormant: undefined });
+      this.#set('running', { dormant: undefined, wakesOn: undefined });
     const step = new Step({
       do: (...args) => this.#do(run, ...args),
       sleep: (name, duration, until) => this.#sleep(run, name, duration, until),
@@ -580,7 +593,18 @@ export class Engine extends DurableObject {
         this.#drive = null;
         return;
       }
-      if (failure === undefined) return this.#finish('complete', { output });
+      if (failure === undefined) {
+        try {
+          return this.#finish('complete', { output: structuredClone(output) });
+        } catch {
+          failure = fatalError(
+            'The execution of the Workflow instance was terminated, as ' +
+              'run() returned a value which is not serialisable'
+          );
+        } finally {
+          dispose(output);
+        }
+      }
       await this.#undo('errored', { error: failureOf(failure) }, failure);
     })();
     this.ctx.waitUntil(done);
@@ -753,7 +777,8 @@ export class Engine extends DurableObject {
       config: shown,
     });
     const undo =
-      rollback && undoOf(rollback, name, ctx(record.attempts ?? 1), record);
+      rollback &&
+      undoOf(rollback, name, ctx(record.attempts ?? 1), record, key);
     if (undo) this.#rollbacks.push(undo);
     const stepName = `${name}-${count}`;
     if (record.stream) return this.#replayStream(key, stepName, record.stream);
@@ -805,7 +830,10 @@ export class Engine extends DurableObject {
       const timeout = this.#wait(clock() + limit);
       const reading = {};
       const result = Promise.resolve()
-        .then(() => this.#mocked(stepName, attempt) ?? callback(ctx(attempt)))
+        .then(() => {
+          const mock = this.#mocked(stepName, attempt);
+          return mock ? mock.value : callback(ctx(attempt));
+        })
         .then((v) =>
           v instanceof ReadableStream
             ? this.#store(key, attempt, v, reading)
@@ -866,11 +894,7 @@ export class Engine extends DurableObject {
         }
       }
       if (failure === undefined) {
-        if (undo) {
-          undo.output = stream
-            ? this.#replayStream(key, stepName, stream)
-            : value;
-        }
+        if (undo) Object.assign(undo, stream ? { stream } : { output: value });
         this.#log('attempt_completed', { stepName, attempt });
         const sensitive = cfg.sensitive === 'output';
         const shown = stream ? stream.preview : value;
@@ -916,8 +940,10 @@ export class Engine extends DurableObject {
       try {
         retryDelayMs = await this.#delay(cfg, failure, ctx(attempt), attempt);
       } catch (e) {
+        if (!this.#owns(run)) throw aborted();
         throw fail(e);
       }
+      if (!this.#owns(run)) throw aborted();
       const skip = this.#x('delay', stepName);
       record.retryAt = clock() + (skip ? 0 : retryDelayMs);
       this.#kv.put(key, record);
@@ -1016,7 +1042,7 @@ export class Engine extends DurableObject {
         return event;
       }
       if (!this.#x('eventTimeout', stepName)) {
-        if (this.#rest(run, record.deadline)) throw aborted();
+        if (this.#rest(run, record.deadline, type)) throw aborted();
         if ((await this.#wait(record.deadline, type)) !== TIMEOUT) continue;
       }
       if (!(await this.#enter(run))) throw aborted();
@@ -1032,14 +1058,15 @@ export class Engine extends DurableObject {
 
   // Ends `run` rather than wait in it until `at`, when that is more than
   // `REST_MS` away and nothing else of it runs or waits: `run()` runs again
-  // at `at`, or when an event comes.
-  #rest(run, at) {
+  // at `at`, or when an event of `type` comes.
+  #rest(run, at, type) {
     if (at - clock() <= REST_MS || this.#busy > 0 || this.#waiters.size > 0)
       return false;
     this.#drive = null;
+    const rest = { dormant: at, wakesOn: type };
     if (this.#meta.status === 'waiting')
-      this.#kv.put('meta', { ...this.#meta, dormant: at });
-    else this.#set('waiting', { dormant: at });
+      this.#kv.put('meta', { ...this.#meta, ...rest });
+    else this.#set('waiting', rest);
     this.#arm();
     return true;
   }
@@ -1089,7 +1116,7 @@ export class Engine extends DurableObject {
             attempt: record.attempts || 1,
             config: shownConfig(stepConfig(config)),
           };
-          rollbacks.set(key, undoOf(rollback, name, ctx, record));
+          rollbacks.set(key, undoOf(rollback, name, ctx, record, key));
         }
         return result(record);
       },
@@ -1112,7 +1139,13 @@ export class Engine extends DurableObject {
     if (this.#rollbacks.length > 0) {
       this.#set('rollingBack', { ...fields, after: status });
       this.#release();
-      const ok = await this.#rollback(failure);
+      this.#undoing = this.#meta.generation;
+      let ok;
+      try {
+        ok = await this.#rollback(failure);
+      } finally {
+        this.#undoing = null;
+      }
       if (this.#meta?.status !== 'rollingBack') return;
       this.#log(ok ? 'rollback_completed' : 'rollback_errored');
     }
@@ -1141,7 +1174,10 @@ export class Engine extends DurableObject {
         if (this.#meta?.status !== 'rollingBack') return false;
         this.#log('rollback_attempt_started', { stepName, attempt });
         try {
-          const { ctx, output } = undo;
+          const { ctx, stream, key } = undo;
+          const output = stream
+            ? this.#replayStream(key, stepName, stream)
+            : undo.output;
           await undo.fn({ ctx, error: failure, output, stepName });
           this.#log('rollback_attempt_completed', { stepName, attempt });
           this.#log('rollback_step_completed', { stepName });
@@ -1379,7 +1415,7 @@ export class Engine extends DurableObject {
       w.wake();
       break;
     }
-    if (this.#meta?.dormant !== undefined)
+    if (this.#meta?.dormant !== undefined && this.#meta.wakesOn === type)
       this.#kv.put('meta', { ...this.#meta, dormant: undefined });
     this.#wake();
   }
@@ -1396,7 +1432,7 @@ export class Engine extends DurableObject {
   }
 
   // What `attempt` of `stepName` does instead of its callback, if mocked:
-  // fail, time out or return.
+  // fail, time out or return `{value}`.
   #mocked(stepName, attempt) {
     const e =
       this.#x('error', stepName) ??
@@ -1408,7 +1444,7 @@ export class Engine extends DurableObject {
     )
       throw error('WorkflowTimeoutError', 'Execution timed out after 0ms');
     const r = this.#kv.get(`x:result:${stepName}`);
-    if (r) return r.stream ? new Stored(r.stream) : r.value;
+    if (r) return { value: r.stream ? new Stored(r.stream) : r.value };
   }
 
   async #modify(op, step, arg, times) {
@@ -1639,8 +1675,14 @@ const reserved = (id) =>
 
 // A Workflow's API, `ctx.props.workflow` naming it.
 export class WorkflowBinding extends WorkerEntrypoint {
+  // The Workflow's instances, bound in the engine worker as
+  // `workflow:<name>`, apart from the engine's own bindings.
+  get #namespace() {
+    return this.env[`workflow:${this.ctx.props.workflow}`];
+  }
+
   #instance(id) {
-    return this.env[this.ctx.props.workflow].getByName(id);
+    return this.#namespace.getByName(id);
   }
 
   async #get(id) {
@@ -1741,7 +1783,7 @@ export class WorkflowBinding extends WorkerEntrypoint {
   // Deletes an instance by its object's ID, as hex: whether it had one.
   async unsafeDeletePersistedInstance(hex) {
     this.#test();
-    const ns = this.env[this.ctx.props.workflow];
+    const ns = this.#namespace;
     const instance = ns.get(ns.idFromString(hex));
     if (!(await instance.exists())) return false;
     await instance.abort().catch(() => {});

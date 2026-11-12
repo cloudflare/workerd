@@ -43,7 +43,7 @@ const unitTests :Workerd.Config = (
           ( name = "workflows.js", bundled = "/workerd/workflows.js" ) ],
         compatibilityFlags = ["rpc", "streams_enable_constructors"],
         bindings = [
-          ( name = "flow",
+          ( name = "workflow:flow",
             durableObjectNamespace = (
               className = "miniflare-workflows-flow",
               serviceName = "workflows-test",

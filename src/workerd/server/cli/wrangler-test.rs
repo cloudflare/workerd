@@ -656,7 +656,10 @@ fn workflows_run_on_the_workflows_worker() {
         "WorkflowBinding"
     );
     let instances = worker(1).get_bindings().unwrap().get(0);
-    assert_eq!(instances.get_name().unwrap().to_str().unwrap(), "reports");
+    assert_eq!(
+        instances.get_name().unwrap().to_str().unwrap(),
+        "workflow:reports"
+    );
     let worker::binding::Which::DurableObjectNamespace(ns) = instances.which().unwrap() else {
         panic!("reports is not a namespace");
     };

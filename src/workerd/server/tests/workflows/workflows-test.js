@@ -11,6 +11,9 @@ const ranBy = (id) => ran.filter((r) => r.startsWith(`${id}/`));
 
 const branched = new Set();
 
+// How many times each instance's `run()` started.
+const runs = new Map();
+
 // Promises a test and a Flow share, by name.
 const signals = new Map();
 function signal(name) {
@@ -26,6 +29,7 @@ function signal(name) {
 export class Flow extends WorkflowEntrypoint {
   async run(event, step) {
     const id = event.instanceId;
+    runs.set(id, (runs.get(id) ?? 0) + 1);
     const once = (name, value = name) =>
       step.do(name, async () => {
         ran.push(`${id}/${name}`);
@@ -76,6 +80,18 @@ export class Flow extends WorkflowEntrypoint {
         await step.sleep('nap', '1 hour');
         return `${text.length}:${text.slice(-3)}`;
       }
+      case 'rest-undo': {
+        // Fails its first attempt.
+        const rollback = async ({ output }) => {
+          ran.push(`${id}/undo ${output}`);
+          if (ranBy(id).length === 1) throw new Error('once');
+        };
+        const rollbackConfig = { retries: { limit: 1, delay: '1 second' } };
+        await step.do('a', async () => 'A', { rollback, rollbackConfig });
+        return step.sleep('nap', '1 hour');
+      }
+      case 'bad-output':
+        return () => 1;
       case 'void':
         return step.do('v', async () => {});
       case 'dispose':
@@ -294,6 +310,7 @@ export let testingApi = {
     let m = await modifier('mocked');
     await m.disableSleeps();
     await m.mockStepResult({ name: 'a' }, 'A');
+    await m.mockStepResult({ name: 'b' }, null);
     await assert.rejects(
       m.mockStepError({ name: 'a' }, new Error('no')),
       /after mocking its result/
@@ -301,12 +318,12 @@ export let testingApi = {
     await create(env, 'mocked', 'sleep');
     await api.unsafeWaitForStatus('mocked', 'complete');
     assert.strictEqual(await api.unsafeWaitForStepResult('mocked', 'a'), 'A');
-    assert.strictEqual(await api.unsafeGetOutputOrError('mocked', true), 'b');
-    assert.deepEqual(ranBy('mocked'), ['mocked/b']);
+    assert.strictEqual(await api.unsafeGetOutputOrError('mocked', true), null);
+    assert.deepEqual(ranBy('mocked'), []);
     const { __LOCAL_DEV_STEP_OUTPUTS } = await env.FLOW.get('mocked').then(
       (i) => i.status()
     );
-    assert.deepEqual(__LOCAL_DEV_STEP_OUTPUTS, ['A', 'b']);
+    assert.deepEqual(__LOCAL_DEV_STEP_OUTPUTS, ['A', null]);
     // The local explorer's calls, by object ID.
     const object = env.ENGINE.idFromName('mocked');
     const meta = await env.ENGINE.get(object).getInstanceMetadata();
@@ -373,6 +390,35 @@ export let testingApi = {
     assert.strictEqual(await api.unsafeDeletePersistedInstance(hex), true);
     assert.strictEqual(await api.unsafeDeletePersistedInstance(hex), false);
     await assert.rejects(env.FLOW.get('mocked'), /not_found/);
+  },
+};
+
+// A terminate with rollbacks of an instance at rest is not taken for a
+// lost run.
+export let restingRollback = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'rest-undo', 'rest-undo');
+    await until(instance, 'workflow_waiting');
+    const terminated = instance.terminate({ rollback: true });
+    await until(instance, 'rollback_attempt_errored');
+    await instance.status();
+    await advance(env, instance, 1000);
+    await terminated;
+    const types = ['rollback_completed', 'rollback_errored'];
+    assert.deepEqual(await history(instance, types), [['rollback_completed']]);
+    assert.deepEqual(ranBy('rest-undo'), [
+      'rest-undo/undo A',
+      'rest-undo/undo A',
+    ]);
+  },
+};
+
+// An output that cannot be stored fails the instance.
+export let badOutput = {
+  async test(ctrl, env) {
+    const instance = await create(env, 'bad-output', 'bad-output');
+    const { error } = await until(instance, 'workflow_errored');
+    assert.match(error.message, /run\(\) returned a value which is not/);
   },
 };
 
@@ -555,9 +601,15 @@ export let rest = {
     const instance = await create(env, 'rest', 'rest');
     await until(instance, 'workflow_waiting');
     assert.strictEqual((await instance.status()).status, 'waiting');
+    // An event it does not wait for does not run it again.
+    await instance.sendEvent({ type: 'unrelated', payload: 0 });
+    await instance.pause();
+    await instance.resume();
+    assert.strictEqual((await instance.status()).status, 'waiting');
     await advance(env, instance, 60 * 60 * 1000);
     await until(instance, 'workflow_completed');
     assert.deepEqual(ranBy('rest'), ['rest/a', 'rest/b']);
+    assert.strictEqual(runs.get('rest'), 2);
     assert.match(
       await signal('rest/rested').promise,
       /run of the instance has ended/
