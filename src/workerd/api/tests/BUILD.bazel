@@ -1718,12 +1718,25 @@ wd_test(
 )
 
 wd_test(
-    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    # Fetches Pyodide.
-    tags = ["requires-network"],
+)
+
+# Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
+# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+wd_test(
+    size = "enormous",
+    src = "worker-loader-python-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-python-test.js"],
+    tags = [
+        "cpu:2",
+        "no-coverage",
+        "python",
+        # Fetches Pyodide.
+        "requires-network",
+    ],
 )
 
 wd_test(
