@@ -154,11 +154,12 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
 
-        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
-        /// throws.
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Returns none if
+        /// deserialization throws, leaving the exception pending, and fails if the header is
+        /// missing or of an unsupported version.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
         /// `value`, or returns false if creating it threw, leaving the exception pending.
@@ -783,13 +784,31 @@ impl Harness {
     ///
     /// Panics if deserialization throws.
     pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        Self::cpp_try_deserialize(lock, data).expect("C++ JSG should deserialize the data")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, as [`Self::cpp_deserialize`]
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if deserialization throws.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the header is missing or of an unsupported version.
+    pub fn cpp_try_deserialize<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
         // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
         unsafe {
-            v8::Local::from_ffi(
+            v8::Local::from_ffi_maybe(
                 ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
-                    .expect("C++ JSG should deserialize the data"),
+                    .expect("C++ JSG should read the header"),
             )
         }
+        .ok_or_else(jsg::Error::pending)
     }
 
     /// The KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for `value`, to compare

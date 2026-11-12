@@ -118,9 +118,10 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
 // exception if serialization throws.
 ::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
-// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
-// deserialization throws.
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Returns none if deserialization throws,
+// leaving the exception pending.
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data);
 // Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
 // comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
 bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);

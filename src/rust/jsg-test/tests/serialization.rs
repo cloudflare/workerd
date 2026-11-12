@@ -465,31 +465,55 @@ fn deserialize_exception<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local
     caught.expect_err("deserialization should throw")
 }
 
+/// Deserializes `data` with Rust JSG and with C++ JSG, both of which must throw `name: message`.
+fn assert_deserialization_throws(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    data: &[u8],
+    name: &str,
+    message: &str,
+) {
+    let exception = deserialize_exception(lock, data);
+    assert_error(lock, ctx, exception, name, message);
+    let caught = lock
+        .try_catch(|lock| Harness::cpp_try_deserialize(lock, data))
+        .unwrap();
+    let exception = caught.expect_err("C++ JSG should throw");
+    assert_error(lock, ctx, exception, name, message);
+}
+
 #[test]
 fn malformed_data_throws() {
     Harness::new().run_in_context(|lock, ctx| {
-        // V8's tag for a host object, then the tag of no workerd API type.
+        // V8's tag for a host object, then the tag of no workerd API type, which means version
+        // skew: an internal error.
         let mut data = header(lock);
         data.extend_from_slice(b"\\\x63");
         let exception = deserialize_exception(lock, &data);
         let err = jsg::Error::from_js(lock, exception).unwrap();
         assert!(err.message.starts_with("internal error"), "{}", err.message);
 
-        // A native error, cut short before its type.
-        let mut data = header(lock);
-        data.extend_from_slice(b"\\\x0a");
-        let exception = deserialize_exception(lock, &data);
-        let err = jsg::Error::from_js(lock, exception).unwrap();
-        assert!(err.message.starts_with("internal error"), "{}", err.message);
+        // A host object cut short before its tag, and a native error before its type, which are
+        // not errors in the reader.
+        for bytes in [&b"\\"[..], b"\\\x0a"] {
+            let mut data = header(lock);
+            data.extend_from_slice(bytes);
+            assert_deserialization_throws(
+                lock,
+                ctx,
+                &data,
+                "DataCloneError",
+                "Deserialization failed: the data is malformed.",
+            );
+        }
 
         // A native error whose message is not a string.
         let mut data = header(lock);
         data.extend_from_slice(b"\\\x0a\x01_");
-        let exception = deserialize_exception(lock, &data);
-        assert_error(
+        assert_deserialization_throws(
             lock,
             ctx,
-            exception,
+            &data,
             "DataCloneError",
             "Deserialization failed: error message is not a string",
         );

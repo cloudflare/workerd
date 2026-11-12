@@ -32,6 +32,10 @@ constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
 constexpr uint32_t ERROR_TAG_UNKNOWN = 0;
 // The oldest version of V8's format that jsg::Serializer writes.
 constexpr uint32_t MIN_SERIALIZATION_VERSION = 13;
+// The message of the DataCloneError that jsg::Deserializer throws when a host object's data ends
+// too soon.
+constexpr kj::StringPtr MALFORMED_DATA_MESSAGE =
+    "Deserialization failed: the data is malformed."_kj;
 
 struct ErrorType {
   kj::StringPtr name;
@@ -289,7 +293,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
 
   v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate*) override {
     uint32_t tag;
-    if (!deser.ReadUint32(&tag)) return throwCorrupt();
+    if (!deser.ReadUint32(&tag)) return throwMalformed();
     if (tag == SERIALIZATION_TAG_NATIVE_ERROR) return readError();
     return ::workerd::jsg::readApiObject(isolate, deser, tag);
   }
@@ -304,7 +308,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     auto context = isolate->GetCurrentContext();
 
     uint32_t tag;
-    if (!deser.ReadUint32(&tag)) return throwCorrupt();
+    if (!deser.ReadUint32(&tag)) return throwMalformed();
     v8::Local<v8::Value> name;
     if (tag == ERROR_TAG_UNKNOWN && !deser.ReadValue(context).ToLocal(&name)) return {};
 
@@ -349,8 +353,10 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     return error;
   }
 
-  v8::MaybeLocal<v8::Object> throwCorrupt() {
-    isolate_throw_internal_error(isolate, "deserialization failure, possible corruption");
+  // Throws a DataCloneError, as jsg::Deserializer does, rather than an internal error: like V8's
+  // own error for malformed data, since corrupt or crafted bytes are not a bug in the reader.
+  v8::MaybeLocal<v8::Object> throwMalformed() {
+    throwDataCloneError(isolate, newString(isolate, MALFORMED_DATA_MESSAGE));
     return {};
   }
 

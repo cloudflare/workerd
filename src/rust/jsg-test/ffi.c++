@@ -337,11 +337,16 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return result;
 }
 
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
-  v8::Local<v8::Value> result = deserializer.readValue(js);
-  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
+  try {
+    ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+    v8::Local<v8::Value> result = deserializer.readValue(js);
+    return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  }
 }
 
 bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value) {
