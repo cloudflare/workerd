@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+using BodyModules = import "body-modules.capnp";
+
+# Runs the htmlRewriter group (the filter in BUILD.bazel) against the legacy C++
+# streams implementation and the TypeScript HTMLRewriter
+# (src/per_isolate/htmlrewriter/), under the TS_HTML_REWRITER autogate
+# alone, with the same modules as body-cpp.wd-bench, whose htmlRewriter
+# cases run the C++ HTMLRewriter.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-body-cpp-ts-rewriter",
+      worker = (
+        modules = BodyModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-body-cpp-ts-rewriter" ),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-html-rewriter"],
+);
