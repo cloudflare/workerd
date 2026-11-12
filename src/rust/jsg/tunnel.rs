@@ -93,12 +93,17 @@ impl TunneledException {
     /// terminating; see [`Error::is_pending`].
     pub fn from_js<'s>(lock: &mut Lock<'s>, exception: v8::Local<'s, v8::Value>) -> Result<Self> {
         let object = v8::Local::<v8::Object>::try_from(exception).ok();
-        let kind = match object {
+        let mut kind = match object {
             Some(object) if truthy(lock, object, "overloaded")? => Kind::Overloaded,
             Some(object) if truthy(lock, object, "retryable")? => Kind::Disconnected,
             _ => Kind::Failed,
         };
         let dom_exception = try_unwrap_dom_exception(lock, exception)?;
+        if dom_exception.is_some() {
+            // C++ JSG reads `overloaded` and `retryable` of a DOMException too, but gives its
+            // `kj::Exception` the type FAILED whatever they say, as `Lock::exception_to_kj` does.
+            kind = Kind::Failed;
+        }
         let description = if let Some((name, message)) = &dom_exception {
             format!("{JSG_PREFIX}DOMException({name}): {message}")
         } else {

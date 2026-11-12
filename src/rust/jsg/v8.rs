@@ -824,6 +824,7 @@ pub mod ffi {
             error_type: JsErrorType,
             message: &[u8],
         ) -> Local;
+        // Returns false, calling nothing in V8, while an exception or a termination is pending.
         // Fallible only if no context is entered.
         pub unsafe fn dom_exception_try_unwrap(
             isolate: *mut Isolate,

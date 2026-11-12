@@ -77,6 +77,13 @@ KJ_TEST("newDOMException") {
       KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "aborted"_kj);
       KJ_ASSERT(exception.get(js, "code"_kj).toString(js) == "20"_kj);
       KJ_ASSERT(exception.has(js, "stack"_kj));
+
+      // A NUL in the name or message is kept, with what follows it.
+      KJ_ASSERT(
+          newDOMException(js.v8Isolate, "Data\0Error"_kj, js.str("a\0b"_kj)).ToLocal(&handle));
+      auto info = KJ_ASSERT_NONNULL(tryGetDOMExceptionNameAndMessage(js.v8Isolate, handle));
+      KJ_ASSERT(info.name == "Data\0Error"_kj);
+      KJ_ASSERT(info.message == "a\0b"_kj);
     });
   });
 }

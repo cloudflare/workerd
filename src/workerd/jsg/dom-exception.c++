@@ -215,7 +215,10 @@ v8::MaybeLocal<v8::Object> newDOMException(
   try {
     KJ_REQUIRE(isolate->InContext(), "creating a DOMException requires an entered context");
     auto& js = Lock::from(isolate);
-    v8::Local<v8::Object> exception = js.domException(kj::str(name), kj::str(message));
+    // JsString::toString() copies the whole message, where kj::str() of a handle would stop at
+    // its first NUL.
+    v8::Local<v8::Object> exception =
+        js.domException(kj::str(name), JsString(message).toString(js));
     return exception;
   } catch (JsExceptionThrown&) {
     // Creating the DOMException threw, for instance because the stack is exhausted; that

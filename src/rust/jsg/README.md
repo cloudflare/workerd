@@ -252,13 +252,15 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
+them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
 `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
-JavaScript among the bootstrap's modules, and
-`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
-through which Rust creates and reads DOMExceptions without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
+JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
+in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
+depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
+which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
+JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources

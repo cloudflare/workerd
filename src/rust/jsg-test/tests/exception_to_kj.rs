@@ -42,7 +42,7 @@ fn assert_same(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str) -> c
 
 /// Converts `value`, which `expr` describes, with Rust JSG and C++ JSG, checks that the
 /// exceptions are the same, and returns Rust JSG's.
-fn assert_same_value<'s>(
+pub(super) fn assert_same_value<'s>(
     lock: &mut jsg::Lock<'s>,
     value: v8::Local<'s, v8::Value>,
     expr: &str,
