@@ -20,12 +20,17 @@ import {
   parse,
   parseExpressionAt,
   type AnyNode,
+  type AssignmentExpression,
+  type BlockStatement,
   type CallExpression,
   type Declaration,
   type ExportNamedDeclaration,
   type Expression,
+  type ExpressionStatement,
   type FunctionDeclaration,
+  type FunctionExpression,
   type Identifier,
+  type IfStatement,
   type ModuleDeclaration,
   type NewExpression,
   type Node,
@@ -470,6 +475,125 @@ const STACK_SWITCH_GC_HOTFIX_314_0_6: Patch[] = [
   }),
 ];
 
+/** Matches `API.runPythonInternal(<code>)` with exactly this string literal. */
+function isRunPythonInternalOf(
+  node: AnyNode,
+  code: string
+): node is CallExpression {
+  return (
+    isCallOf(node, 'API.runPythonInternal') &&
+    node.arguments.length === 1 &&
+    node.arguments[0]?.type === 'Literal' &&
+    node.arguments[0].value === code
+  );
+}
+
+// Applies https://github.com/pyodide/pyodide/pull/6534: API.finalizeBootstrap gets the Python
+// objects it needs through `_pyodide._base` instead of compiling and running Python source, and
+// skips `import _pyodide_core` when restoring a snapshot, which already has it in sys.modules.
+const FINALIZE_BOOTSTRAP_314_0_6: Patch[] = [
+  patch({
+    name: 'finalizeBootstrap: eval_code("{}") -> builtins.dict()',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallOf(node, 'API._pyodide._base.eval_code') &&
+      node.arguments.length === 1 &&
+      node.arguments[0]?.type === 'Literal' &&
+      node.arguments[0].value === '{}',
+    replace: () => expr('API._pyodide._base.builtins.dict()'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import importlib; importlib") -> import_module',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isRunPythonInternalOf(node, 'import importlib; importlib'),
+    replace: () => expr('API._pyodide._base.import_module("importlib")'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import __main__; __main__.__dict__") -> import_module',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isRunPythonInternalOf(node, 'import __main__; __main__.__dict__'),
+    replace: () =>
+      expr('API._pyodide._base.import_module("__main__").__dict__'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import builtins; builtins.__dict__") -> builtins.__dict__',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isRunPythonInternalOf(node, 'import builtins; builtins.__dict__'),
+    replace: () => expr('API._pyodide._base.builtins.__dict__'),
+  }),
+  patch({
+    // `let [err, stderr] = API.rawRun("import _pyodide_core"); err && API.fatal_loading_error(...)`
+    // becomes `if (!snapshotConfig) { ... }`.
+    name: 'finalizeBootstrap: import _pyodide_core only when not restoring a snapshot',
+    expected: 1,
+    match: (
+      node
+    ): node is AssignmentExpression & { right: FunctionExpression } =>
+      node.type === 'AssignmentExpression' &&
+      memberPath(node.left) === 'API.finalizeBootstrap' &&
+      node.right.type === 'FunctionExpression',
+    replace: (node) => {
+      const [snapshotConfig] = node.right.params;
+      if (snapshotConfig?.type !== 'Identifier') {
+        throw new Error(
+          'API.finalizeBootstrap has no snapshotConfig parameter'
+        );
+      }
+      const body = node.right.body.body;
+      const index = body.findIndex(
+        (statement) =>
+          statement.type === 'VariableDeclaration' &&
+          statement.declarations.length === 1 &&
+          statement.declarations[0]?.init != null &&
+          isCallOf(statement.declarations[0].init, 'API.rawRun')
+      );
+      const [declaration, check] = body.slice(index, index + 2);
+      if (
+        index === -1 ||
+        declaration === undefined ||
+        check?.type !== 'ExpressionStatement'
+      ) {
+        throw new Error(
+          'API.finalizeBootstrap does not run `import _pyodide_core`'
+        );
+      }
+      // The minifier joins the error check and the statements after it into one sequence
+      // expression; only the check belongs in the guard.
+      const [checkExpression, ...rest] =
+        check.expression.type === 'SequenceExpression'
+          ? check.expression.expressions
+          : [check.expression];
+      if (
+        checkExpression?.type !== 'LogicalExpression' ||
+        !isCallOf(checkExpression.right, 'API.fatal_loading_error')
+      ) {
+        throw new Error(
+          'API.finalizeBootstrap does not check `import _pyodide_core`'
+        );
+      }
+      const guard = stmt(`if (!${snapshotConfig.name}) {}`) as IfStatement;
+      (guard.consequent as BlockStatement).body = [
+        declaration,
+        synthetic<ExpressionStatement>({
+          type: 'ExpressionStatement',
+          expression: checkExpression,
+        }),
+      ];
+      const after = rest.map((expression) =>
+        synthetic<ExpressionStatement>({
+          type: 'ExpressionStatement',
+          expression,
+        })
+      );
+      body.splice(index, 2, guard, ...after);
+      return node;
+    },
+  }),
+];
+
 // pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
 // When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
 // automatically.
@@ -518,7 +642,10 @@ function patchesForVersion(version: string): Patch[] {
   if (version === '0.26.0a2') {
     patches.push(...PATCHES_0_26_0A2);
   } else if (version === '314.0.6') {
-    patches.push(...STACK_SWITCH_GC_HOTFIX_314_0_6);
+    patches.push(
+      ...STACK_SWITCH_GC_HOTFIX_314_0_6,
+      ...FINALIZE_BOOTSTRAP_314_0_6
+    );
   }
   patches.push(
     ...(COMMONJS_VERSIONS.includes(version)
