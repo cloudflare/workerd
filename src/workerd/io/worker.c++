@@ -927,6 +927,10 @@ struct Worker::Script::Impl {
 
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> moduleContext;
 
+  // A service worker script is compiled in the context that its first Worker then takes, so
+  // that no throwaway context is deserialized before it.
+  kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> firstWorkerContext;
+
   // If set, then any attempt to use this script shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
 
@@ -1537,6 +1541,11 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      KJ_IF_SOME(c, implToDestroy->firstWorkerContext) {
+        recordedLock.disposeContext(kj::mv(c));
+      } else {
+        // Else block to avoid dangling else clang warning.
+      }
       discardDeferredCodeCaches(lock);
     });
 
@@ -1604,16 +1613,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         }
       } else {
-        // Although we're going to compile a script independent of context, V8 requires that
-        // there be an active context, otherwise it will segfault, I guess. So we create a
-        // dummy context. (Undocumented, as usual.)
-        context =
-            v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
-        // We need to set the highest used index in every context we create to be a nullptr
-        // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
-        // a fatal error if the array is smaller than the given index.
-        jsg::setAlignedPointerInEmbedderData(
-            context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
+        // The script is compiled independent of any context, but V8 requires an active one.
+        // Compile in the context that the first Worker will run in, rather than deserializing
+        // a throwaway context first.
+        context = impl->firstWorkerContext.emplace(newContext(lock)).getHandle(lock);
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
@@ -1833,6 +1836,9 @@ Worker::Script::~Script() noexcept(false) {
     Isolate::Impl::Lock recordedLock(
         *isolate, Worker::Lock::TakeSynchronously(kj::none), stackScope);
     KJ_IF_SOME(c, impl->moduleContext) {
+      recordedLock.disposeContext(kj::mv(c));
+    }
+    KJ_IF_SOME(c, impl->firstWorkerContext) {
       recordedLock.disposeContext(kj::mv(c));
     }
     impl = nullptr;
@@ -2394,8 +2400,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         jsContext = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(&c);
         currentSpan.setTag("module_context"_kjc, true);
       } else {
-        // Create a new context.
-        jsContext = &this->impl->context.emplace(script->newContext(lock));
+        // Take the context the script was compiled in, if no other Worker has, or else create
+        // a new one. const_cast OK because guarded by `lock`.
+        auto& scriptImpl = *const_cast<Script&>(*script).impl;
+        KJ_IF_SOME(c, scriptImpl.firstWorkerContext) {
+          jsContext = &this->impl->context.emplace(kj::mv(c));
+          scriptImpl.firstWorkerContext = kj::none;
+        } else {
+          jsContext = &this->impl->context.emplace(script->newContext(lock));
+        }
         freshContext = true;
       }
 
