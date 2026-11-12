@@ -805,6 +805,9 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_internal_error(
     Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log);
+// Records that a Rust resource's `Drop` panicked in the isolate; see
+// IsolateBase::setResourceDropPanicked().
+void isolate_set_resource_drop_panicked(Isolate* isolate);
 void isolate_terminate_execution(Isolate* isolate);
 // Terminates execution and has V8 deliver the termination before returning, so that it is
 // pending, as jsg::Lock::terminateExecutionNow() does. Requires a context to be entered. Returns

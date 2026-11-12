@@ -120,7 +120,20 @@ kj::Rc<Wrappable> Wrappable::allocate(size_t size, size_t align, uintptr_t& stor
 }
 
 Wrappable::~Wrappable() {
-  wrappable_invoke_drop(*this);
+  // The cxx bridge turns a panic in the resource's `Drop` into a kj::Exception. This destructor
+  // runs from the cppgc sweep, among other places, where a throw would terminate the process, so
+  // the panic is logged and the resource's isolate marked (see
+  // IsolateBase::setResourceDropPanicked()).
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { wrappable_invoke_drop(*this); })) {
+    LOG_EXCEPTION("rustResourceDropPanic", e);
+    KJ_IF_SOME(isolate, kj::_::readMaybe(getIsolate())) {
+      // A bound Wrappable is destroyed under its isolate's lock, and teardown unbinds it.
+      ::workerd::jsg::IsolateBase::from(&isolate).setResourceDropPanicked();
+    } else {
+      // An unbound one is released by Rust, which knows its isolate and marks it.
+      wrappable_note_unbound_drop_panic();
+    }
+  }
 }
 
 void Wrappable::jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) {
@@ -2326,6 +2339,10 @@ void isolate_throw_internal_error(
     return;
   }
   isolate->ThrowException(createInternalError(isolate, internalMessage, log));
+}
+
+void isolate_set_resource_drop_panicked(Isolate* isolate) {
+  ::workerd::jsg::IsolateBase::from(isolate).setResourceDropPanicked();
 }
 
 void isolate_terminate_execution(Isolate* isolate) {
