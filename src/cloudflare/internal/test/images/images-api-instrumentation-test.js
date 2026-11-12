@@ -763,6 +763,11 @@ const expectedSpans = [
   {
     name: 'images_output',
     'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.binding.type': 'Images',
     'cloudflare.images.canvas.type': 'image',
     closed: true,
   },
@@ -776,11 +781,6 @@ const expectedSpans = [
       'multipart/form-data; boundary=<dynamic>',
     'http.response.status_code': 200n,
     'http.response.body.size': 60n,
-    closed: true,
-  },
-  {
-    name: 'images_output',
-    'cloudflare.binding.type': 'Images',
     closed: true,
   },
 ];
