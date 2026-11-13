@@ -41,7 +41,7 @@ const unitTests :Workerd.Config = (
           (name = "worker.js", esModule = embed "startup-snapshot-new-module-registry-case-test.js"),
           (name = "lib.js", esModule = "globalThis.__libEvaluations = (globalThis.__libEvaluations ?? 0) + 1; export const token = {};"),
           (name = "lazy.js", esModule = "export { token } from './lib.js'; export const url = import.meta.url; export const main = import.meta.main;"),
-          (name = "variant.js", esModule = "globalThis.__variantEvaluations = (globalThis.__variantEvaluations ?? 0) + 1; export const url = import.meta.url; export const resolve = import.meta.resolve;"),
+          (name = "variant.js", esModule = "globalThis.__variantEvaluations = (globalThis.__variantEvaluations ?? 0) + 1; export const url = import.meta.url; export const resolve = import.meta.resolve; export const load = () => import('./lib.js');"),
           (name = "data.json", json = "{\"answer\": 42}"),
         ],
         compatibilityFlags = .compatibilityFlags,

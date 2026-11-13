@@ -21,6 +21,10 @@ async function checks() {
   const dynVariantQuery = await import('./variant.js?q');
   const dynVariantFragment = await import('./variant.js#f');
   const dynBuffer = await import('node:buffer');
+  // V8 reports a module's canonical URL as the referrer of an import() in it, which for these is
+  // file:///bundle/variant.js; the registry maps that back to the specifier it was imported under.
+  const libFromVariantQuery = await variantQuery.load();
+  const libFromVariantFragment = await variantFragment.load();
   const dynWorkers = await import('cloudflare:workers');
   // Not loaded at the top level: resolved, evaluated and given its import.meta at request time.
   const lazy = await import('./lazy.js');
@@ -34,6 +38,8 @@ async function checks() {
     variantFragmentUrl: variantFragment.url.endsWith('/variant.js#f'),
     // import.meta.resolve, taken at the top level, is a function the snapshot carries.
     variantResolve: variantQuery.resolve('./lib.js').endsWith('/lib.js'),
+    variantQueryImports: libFromVariantQuery === lib,
+    variantFragmentImports: libFromVariantFragment === lib,
     variantNotReEvaluated:
       globalThis.__variantEvaluations === variantEvaluations,
     builtinNamespace: dynBuffer === buffer,
