@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "0cbb903a094d4276917e938215f89fe2c57b7f9008e4d3ff72c0b1887d855f57",
+  "checksum": "825692ad90398af9f1f5eceade32827bcdd59a8cd38054a0cbb4027f3b8a0634",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -155,7 +155,7 @@
       "build_script_attrs": {
         "deps": [
           {
-            "id": "cc 1.11.1",
+            "id": "cc 1.11.2",
             "target": "cc"
           },
           {
@@ -1273,7 +1273,7 @@
       ],
       "version": "0.2.4"
     },
-    "cc 1.11.1": {
+    "cc 1.11.2": {
       "common_attrs": {
         "crate_features": [
           "parallel"
@@ -1333,8 +1333,8 @@
       "package_url": "https://github.com/rust-lang/cc-rs",
       "repository": {
         "Http": {
-          "sha256": "4ff2a8126fff0f8c839080d619675a585e61720bb12d2baceae45769fd66f155",
-          "url": "https://static.crates.io/crates/cc/1.11.1/download"
+          "sha256": "33ef9e3e8154a45c7a95cff4c1299702106ad94062d7bb85fdc5d3a5afd91d45",
+          "url": "https://static.crates.io/crates/cc/1.11.2/download"
         }
       },
       "targets": [
@@ -1345,7 +1345,7 @@
           }
         }
       ],
-      "version": "1.11.1"
+      "version": "1.11.2"
     },
     "cfg-if 1.0.5": {
       "common_attrs": {
@@ -2816,7 +2816,7 @@
             "target": "capnpc"
           },
           {
-            "id": "cc 1.11.1",
+            "id": "cc 1.11.2",
             "target": "cc"
           },
           {
@@ -7084,7 +7084,7 @@
       ],
       "version": "0.9.1"
     },
-    "mio 1.2.4": {
+    "mio 1.2.5": {
       "common_attrs": {
         "crate_features": {
           "common": [
@@ -7150,8 +7150,8 @@
       "package_url": "https://github.com/tokio-rs/mio",
       "repository": {
         "Http": {
-          "sha256": "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee",
-          "url": "https://static.crates.io/crates/mio/1.2.4/download"
+          "sha256": "20521a903f02b0a573cd6840e9d0a5a0cc043d361fe924092cd70f8556cc9c4a",
+          "url": "https://static.crates.io/crates/mio/1.2.5/download"
         }
       },
       "targets": [
@@ -7162,7 +7162,7 @@
           }
         }
       ],
-      "version": "1.2.4"
+      "version": "1.2.5"
     },
     "multiversion_no_op 1.0.0": {
       "common_attrs": {
@@ -7331,7 +7331,7 @@
                 "target": "kqueue"
               },
               {
-                "id": "mio 1.2.4",
+                "id": "mio 1.2.5",
                 "target": "mio"
               }
             ],
@@ -7341,7 +7341,7 @@
                 "target": "inotify"
               },
               {
-                "id": "mio 1.2.4",
+                "id": "mio 1.2.5",
                 "target": "mio"
               }
             ],
@@ -9152,7 +9152,7 @@
       "build_script_attrs": {
         "deps": [
           {
-            "id": "cc 1.11.1",
+            "id": "cc 1.11.2",
             "target": "cc"
           }
         ],
@@ -11939,7 +11939,7 @@
       ],
       "version": "2.0.0"
     },
-    "swc_ecma_parser 47.0.1": {
+    "swc_ecma_parser 47.0.2": {
       "common_attrs": {
         "crate_features": [
           "typescript",
@@ -12004,8 +12004,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "e2df5fd9367abbe9d4d2db5608df599b1d9f425a690e4ca61b304f7a23961410",
-          "url": "https://static.crates.io/crates/swc_ecma_parser/47.0.1/download"
+          "sha256": "d844422a916ff71cec4b5e4835e57c6dd72bc9aadbc6a16d1f405d7f95e633f3",
+          "url": "https://static.crates.io/crates/swc_ecma_parser/47.0.2/download"
         }
       },
       "targets": [
@@ -12016,9 +12016,9 @@
           }
         }
       ],
-      "version": "47.0.1"
+      "version": "47.0.2"
     },
-    "swc_ecma_transforms_base 51.0.1": {
+    "swc_ecma_transforms_base 51.0.2": {
       "common_attrs": {
         "deps": [
           {
@@ -12062,7 +12062,7 @@
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_parser 47.0.1",
+            "id": "swc_ecma_parser 47.0.2",
             "target": "swc_ecma_parser"
           },
           {
@@ -12089,8 +12089,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "dc5dc7a85486a27483a9eb19737fd91cc31f74409e896ff950df522d5ce6179c",
-          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/51.0.1/download"
+          "sha256": "0a3086e42c44eb333f3d6d37a39abb1d168b32ffbf6e6f4413388b6af25e41b5",
+          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/51.0.2/download"
         }
       },
       "targets": [
@@ -12101,7 +12101,7 @@
           }
         }
       ],
-      "version": "51.0.1"
+      "version": "51.0.2"
     },
     "swc_ecma_transforms_react 57.0.2": {
       "common_attrs": {
@@ -12160,11 +12160,11 @@
             "target": "swc_ecma_hooks"
           },
           {
-            "id": "swc_ecma_parser 47.0.1",
+            "id": "swc_ecma_parser 47.0.2",
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.1",
+            "id": "swc_ecma_transforms_base 51.0.2",
             "target": "swc_ecma_transforms_base"
           },
           {
@@ -12235,7 +12235,7 @@
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.1",
+            "id": "swc_ecma_transforms_base 51.0.2",
             "target": "swc_ecma_transforms_base"
           },
           {
@@ -12599,11 +12599,11 @@
             "target": "swc_ecma_codegen"
           },
           {
-            "id": "swc_ecma_parser 47.0.1",
+            "id": "swc_ecma_parser 47.0.2",
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.1",
+            "id": "swc_ecma_transforms_base 51.0.2",
             "target": "swc_ecma_transforms_base"
           },
           {
@@ -13301,7 +13301,7 @@
               "target": "bytes"
             },
             {
-              "id": "mio 1.2.4",
+              "id": "mio 1.2.5",
               "target": "mio"
             },
             {
@@ -15843,7 +15843,7 @@
     "bytes 1.12.1",
     "capnp 0.27.3",
     "capnpc 0.27.0",
-    "cc 1.11.1",
+    "cc 1.11.2",
     "clang-ast 0.1.36",
     "clap 4.6.7",
     "codespan-reporting 0.13.1",
