@@ -434,6 +434,33 @@ if (autogates['ts-structured-clone']) {
   });
 }
 
+// The TypeScript SubtleCrypto replaces the C++ one, which global-scope.h then
+// leaves out. Installed as EventSource is, matching JSG_NESTED_TYPE.
+// `crypto.subtle` is the module's getSubtleCrypto().
+if (autogates['ts-webcrypto']) {
+  const { SubtleCrypto } = require('crypto/subtle');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    SubtleCrypto: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: SubtleCrypto,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      SubtleCrypto: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: SubtleCrypto,
+      },
+    });
+  }
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

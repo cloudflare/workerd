@@ -8,6 +8,7 @@
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/crypto/subtle-bootstrap.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
@@ -142,9 +143,14 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // into every script. Provides prototype-pollution-safe references to built-in
   // methods and constructors.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
+  // The native half of the TypeScript SubtleCrypto (api/crypto/subtle-bootstrap.h), created with
+  // the context under the ts-webcrypto autogate and injected as the `cryptoBackend` pseudo-global.
+  // Undefined when the autogate is off.
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> cryptoBackend;
 };
 
 #define VALUE_METHOD_MAP(V)                                                                        \
+  V(Array)                                                                                         \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
   V(DataView)                                                                                      \
@@ -755,6 +761,7 @@ constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
   "exports"_kj,
   "primordials"_kj,
   "utils"_kj,
+  "cryptoBackend"_kj,
 };
 constexpr size_t PSEUDO_GLOBAL_COUNT = kj::size(PSEUDO_GLOBAL_NAMES);
 
@@ -768,11 +775,11 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
       {
         js.v8Undefined(),  // require
         v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
-        v8::Local<v8::Value>(moduleObj),
+        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)), v8::Local<v8::Value>(moduleObj),
         v8::Local<v8::Value>(exportsObj),
         js.v8Undefined(),  // primordials
         v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
+        js.v8Undefined(),  // cryptoBackend
       });
   KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
 
@@ -781,6 +788,9 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
   }
   KJ_IF_SOME(primordials, state.primordials) {
     values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+  }
+  KJ_IF_SOME(cryptoBackend, state.cryptoBackend) {
+    values[7] = v8::Local<v8::Value>(cryptoBackend.getHandle(js));
   }
   return values;
 }
@@ -1031,6 +1041,7 @@ constexpr kj::StringPtr STASH_COMPAT_FLAGS = "compatFlags"_kj;
 constexpr kj::StringPtr STASH_AUTOGATES = "autogates"_kj;
 constexpr kj::StringPtr STASH_UTILS = "utils"_kj;
 constexpr kj::StringPtr STASH_PRIMORDIALS = "primordials"_kj;
+constexpr kj::StringPtr STASH_CRYPTO_BACKEND = "cryptoBackend"_kj;
 // A null-prototype object mapping each normalized specifier in the require() cache to its
 // module.exports.
 constexpr kj::StringPtr STASH_CACHE = "cache"_kj;
@@ -1072,6 +1083,7 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
     state->embedderRequireFn = fn.addRef(js);
   }
   state->primordials = bag.get(js, STASH_PRIMORDIALS).addRef(js);
+  state->cryptoBackend = bag.get(js, STASH_CRYPTO_BACKEND).addRef(js);
 
   auto maybeCache = JSG_TRY_CAST_OBJECT(bag.get(js, STASH_CACHE));
   auto& cache =
@@ -1104,6 +1116,10 @@ void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFla
     auto result =
         state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
     state->primordials = result.addRef(js);
+  }
+
+  if (util::Autogate::isEnabled(util::AutogateKey::TS_WEBCRYPTO)) {
+    state->cryptoBackend = api::createSubtleCryptoBackend(js).addRef(js);
   }
 
   {
@@ -1223,6 +1239,9 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
       bag.set(js, STASH_PRIMORDIALS,
           KJ_REQUIRE_NONNULL(state.primordials, "bootstrap did not load primordials")
               .getHandle(js));
+      if (state.cryptoBackend != kj::none) {
+        bag.set(js, STASH_CRYPTO_BACKEND, KJ_ASSERT_NONNULL(state.cryptoBackend).getHandle(js));
+      }
       bag.set(js, STASH_CACHE, cache);
       auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
       isolateBase.mutableSnapshotArtifact().bootstrapStateIndex =
