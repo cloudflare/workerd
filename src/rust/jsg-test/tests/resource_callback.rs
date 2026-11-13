@@ -1314,6 +1314,88 @@ fn constructor_with_wrong_resource_type_throws_type_error() {
 }
 
 // =============================================================================
+// attach_to_this tests
+// =============================================================================
+
+/// An object that wraps a resource keeps it: its methods borrow the resource from the wrapper
+/// while they run. `attach_to_this` outside a constructor call panics.
+#[test]
+fn attach_to_this_keeps_the_resource_of_a_wrapper() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Greeting>(lock).unwrap();
+        ctx.set_global(lock, "Greeting", constructor);
+        let rebind = v8::Function::new(lock, (), |lock, (), args| {
+            let other = jsg::Rc::new(
+                lock,
+                Greeting {
+                    message: "other".to_owned(),
+                },
+            );
+            other.attach_to_this(lock, args);
+            Ok(args.this())
+        })
+        .unwrap();
+        ctx.set_global(lock, "rebind", v8::Local::<v8::Value>::from(rebind));
+
+        let wrapper = ctx
+            .eval_raw(lock, "globalThis.greeting = new Greeting('hello')")
+            .unwrap();
+        let greeting = <jsg::Rc<Greeting> as jsg::FromJS>::from_js(lock, wrapper)?;
+
+        let err = ctx
+            .eval_raw(lock, "rebind.call(greeting)")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert!(err.message.contains("internal error"), "{}", err.message);
+
+        let resource = v8::resolve_receiver::<Greeting>(lock, wrapper).unwrap();
+        assert!(std::ptr::eq(resource.as_ptr(), greeting.get(lock)));
+        assert_eq!(greeting.get(lock).message, "hello");
+        Ok(())
+    });
+}
+
+/// Attaches two resources to the object of one constructor call.
+#[jsg_resource]
+struct TwiceAttached;
+
+#[jsg_resource(custom_members)]
+impl TwiceAttached {}
+
+impl jsg::Resource for TwiceAttached {
+    fn members(
+        registry: &mut impl jsg::MemberRegistry,
+        _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
+    ) {
+        registry.add(jsg::resource::undescribed(jsg::Member::Constructor {
+            callback: jsg::function_callback(|lock, args| {
+                jsg::Rc::new(lock, Self).attach_to_this(lock, args);
+                jsg::Rc::new(lock, Self).attach_to_this(lock, args);
+            }),
+            length: 0,
+        }));
+    }
+}
+
+/// A constructor's object takes one resource. A second `attach_to_this` panics.
+#[test]
+fn attach_to_this_twice_in_a_constructor_panics() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<TwiceAttached>(lock).unwrap();
+        ctx.set_global(lock, "TwiceAttached", constructor);
+
+        let err = ctx
+            .eval_raw(lock, "new TwiceAttached()")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert!(err.message.contains("internal error"), "{}", err.message);
+        Ok(())
+    });
+}
+
+// =============================================================================
 // Fallible constructor tests
 // =============================================================================
 

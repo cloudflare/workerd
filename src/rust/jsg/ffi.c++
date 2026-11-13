@@ -905,6 +905,15 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   auto* isolate = args.GetIsolate();
   auto object = args.This();
 
+  // Only the new object of a construct call, which wraps nothing yet, takes a Wrappable. An object
+  // that wraps one keeps it alive through its one CppHeap pointer, and the callbacks running on
+  // the object borrow from it, so it is never replaced.
+  KJ_REQUIRE(args.IsConstructCall(), "a resource is attached to `this` only in a construct call");
+  KJ_REQUIRE(object->InternalFieldCount() == ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT,
+      "`this` was not made from a resource's instance template");
+  KJ_REQUIRE(::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, object) == nullptr,
+      "`this` already wraps a resource");
+
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
