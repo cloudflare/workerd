@@ -19,12 +19,12 @@ wd_rust_test(
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = ["@crates_vendor//:libc"],
+    deps = ["@crates_vendor//libc"],
 )
 
 wd_rust_test(
     name = "tokio_test",
     srcs = ["tokio_test.rs"],
     edition = "2024",
-    deps = ["@crates_vendor//:tokio"],
+    deps = ["@crates_vendor//tokio"],
 )

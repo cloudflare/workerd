@@ -19,6 +19,6 @@ wd_rust_crate(
         "//src/rust/memory-cache",
         "//src/rust/memory-cache/ffi:memory-cache-ffi",
         "//src/workerd/io/io-context",
-        "@crates_vendor//:tracing",
+        "@crates_vendor//tracing",
     ],
 )

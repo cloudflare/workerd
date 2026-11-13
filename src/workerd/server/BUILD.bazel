@@ -94,18 +94,18 @@ wd_rust_crate(
         "//src/rust/cxx/kj-rs-io",
         "//src/workerd/server/cluster",
         "//src/workerd/server/server:workerd-server",
-        "@crates_vendor//:capnp",
-        "@crates_vendor//:clap",
-        "@crates_vendor//:serde",
-        "@crates_vendor//:serde_json",
-        "@crates_vendor//:socket2",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//capnp",
+        "@crates_vendor//clap",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
+        "@crates_vendor//socket2",
+        "@crates_vendor//tokio",
     ] + select({
         "@platforms//os:windows": [
-            "@crates_vendor//:libc",
-            "@crates_vendor//:windows-sys",
+            "@crates_vendor//libc",
+            "@crates_vendor//windows-sys",
         ],
-        "//conditions:default": ["@crates_vendor//:libc"],
+        "//conditions:default": ["@crates_vendor//libc"],
     }),
 )
 

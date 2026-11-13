@@ -16,7 +16,7 @@ rust_library(
         ":bridge",
     ],
     proc_macro_deps = [
-        "@crates_vendor//:async-trait",
+        "@crates_vendor//async-trait",
     ],
     deps = [
         "//src/rust/cxx",
@@ -25,8 +25,8 @@ rust_library(
         "//src/rust/cxx/kj-rs-io",
         "//src/rust/cxx/kj-rs-tokio",
         "//src/rust/kj",
-        "@crates_vendor//:futures",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//futures",
+        "@crates_vendor//tokio",
     ],
 )
 

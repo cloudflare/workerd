@@ -32,7 +32,7 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx",
-        "@crates_vendor//:static_assertions",
+        "@crates_vendor//static_assertions",
     ],
 )
 

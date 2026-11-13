@@ -36,7 +36,7 @@ rust_library(
     deps = [
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//tokio",
     ],
 )
 
