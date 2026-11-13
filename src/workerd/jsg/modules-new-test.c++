@@ -2602,31 +2602,30 @@ KJ_TEST("ESM compile cache is reused across isolates") {
   bundleBuilder.addEsmModule("foo", "export default 123;"_kjc);
   auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
 
-  {
+  auto compileInNewIsolate = [&]() {
     PREAMBLE([&](Lock& js) {
       auto attached = registry->attachToIsolate(js, observer);
       KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
     });
-  }
+  };
 
+  // The first isolate does not serialize: no other isolate may ever compile the module.
+  compileInNewIsolate();
   auto first = observer.getCounts();
-  KJ_ASSERT(first.cacheGenerated == 1);
+  KJ_ASSERT(first.cacheGenerated == 0);
   KJ_ASSERT(first.cacheFound == 0);
-  KJ_ASSERT(first.cacheRejected == 0);
-  KJ_ASSERT(first.cacheGenerationFailed == 0);
 
-  {
-    PREAMBLE([&](Lock& js) {
-      auto attached = registry->attachToIsolate(js, observer);
-      KJ_ASSERT(ModuleRegistry::resolve(js, "foo").isNumber());
-    });
-  }
-
+  compileInNewIsolate();
   auto second = observer.getCounts();
   KJ_ASSERT(second.cacheGenerated == 1);
-  KJ_ASSERT(second.cacheFound == 1);
-  KJ_ASSERT(second.cacheRejected == 0);
-  KJ_ASSERT(second.cacheGenerationFailed == 0);
+  KJ_ASSERT(second.cacheFound == 0);
+
+  compileInNewIsolate();
+  auto third = observer.getCounts();
+  KJ_ASSERT(third.cacheGenerated == 1);
+  KJ_ASSERT(third.cacheFound == 1);
+  KJ_ASSERT(third.cacheRejected == 0);
+  KJ_ASSERT(third.cacheGenerationFailed == 0);
 }
 
 // ======================================================================================
