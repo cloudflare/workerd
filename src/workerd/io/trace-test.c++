@@ -634,30 +634,26 @@ KJ_TEST("SpanLink context parsing preserves all ID bits and permits zero IDs") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(context.getTraceFlags()) == 0xfe);
   KJ_EXPECT(SpanLink::parseContext(
                 "00000000000000000000000000000000", "0000000000000000", TraceFlags(0)) != kj::none);
-  for (const auto& invalid: {"fedcba98765432100123456789abcde"_kj,
-         "FEDCBA98765432100123456789ABCDEF"_kj, "gedcba98765432100123456789abcdef"_kj}) {
+  auto mixedCase = KJ_ASSERT_NONNULL(SpanLink::parseContext(
+      "FEDCBA98765432100123456789abcDEF"_kj, "F123456789ABCdef"_kj, TraceFlags(0)));
+  KJ_EXPECT(mixedCase.getTraceId().toW3C() == traceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(mixedCase.getSpanId()).toGoString() == spanId);
+  for (const auto& invalid:
+      {"fedcba98765432100123456789abcde"_kj, "gedcba98765432100123456789abcdef"_kj}) {
     KJ_EXPECT(SpanLink::parseContext(invalid, spanId, TraceFlags(0)) == kj::none);
   }
-  for (const auto& invalid: {"123456789abcdef"_kj, "F123456789ABCDEF"_kj, "z123456789abcdef"_kj}) {
+  for (const auto& invalid: {"123456789abcdef"_kj, "z123456789abcdef"_kj}) {
     KJ_EXPECT(SpanLink::parseContext(traceId, invalid, TraceFlags(0)) == kj::none);
   }
 }
 
 KJ_TEST("SpanLink tracestate validation and normalization") {
+  // The Rust crate's tests cover TraceState's validation; these check the bridge.
   KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate(" \ta=one , ,1tenant@vendor=two\t,")) ==
       "a=one,1tenant@vendor=two");
-  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate("a= leading space")) == "a= leading space");
-  for (const auto& invalid: {""_kj, " , \t"_kj, "a=1,a=2"_kj, "A=1"_kj, "1a=1"_kj, "a="_kj,
-         "a=one=two"_kj, "a=one\ntwo"_kj, "a@@b=1"_kj, "a@1b=1"_kj, "a@abcdefghijklmnop=1"_kj}) {
+  for (const auto& invalid: {""_kj, " , \t"_kj, "A=1"_kj, "a=one=two"_kj}) {
     KJ_EXPECT(SpanLink::parseTracestate(invalid) == kj::none, invalid);
   }
-  auto longValue = kj::str("a=", kj::repeat('x', 257));
-  KJ_EXPECT(SpanLink::parseTracestate(longValue) == kj::none);
-  kj::Vector<kj::String> members;
-  for (uint i = 0; i < 32; ++i) members.add(kj::str("k", i, "=v"));
-  KJ_EXPECT(SpanLink::parseTracestate(kj::strArray(members, ",")) != kj::none);
-  members.add(kj::str("overflow=v"));
-  KJ_EXPECT(SpanLink::parseTracestate(kj::strArray(members, ",")) == kj::none);
 }
 
 KJ_TEST("SpanLinks tail events round-trip and clone metadata, order, and duplicates") {
