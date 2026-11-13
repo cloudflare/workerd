@@ -1,6 +1,8 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_cc_library(
@@ -71,6 +73,48 @@ wd_cc_benchmark(
         "//src/workerd/api:r2-api_capnp",
         "@capnp-cpp//src/kj",
     ],
+)
+
+# serde_json parser of the R2 binding's JSON, with the types capnpc-rust-serde generates
+# (//src/workerd/api:r2-api-serde), and the documents that :bench-r2-json decodes.
+wd_rust_crate(
+    name = "r2-json-serde",
+    testonly = True,
+    srcs = glob(["r2-json-serde/**/*.rs"]),
+    crate_root = "r2-json-serde/lib.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "r2-json-serde/ffi.rs",
+    deps = [
+        "//src/rust/capnp-serde",
+        "//src/workerd/api:r2-api-serde",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
+    ],
+)
+
+# capnp's JsonCodec against serde_json, decoding the R2 binding's JSON:
+#   bazel run --config=benchmark //src/workerd/tests:bench-r2-json
+wd_cc_benchmark(
+    name = "bench-r2-json",
+    srcs = ["bench-r2-json.c++"],
+    # A full run takes minutes in a fastbuild; the smoke test covers it. CodSpeed also excludes
+    # manual benchmarks.
+    tags = ["manual"],
+    deps = [
+        ":r2-json-serde",
+        "//src/workerd/api:r2-api_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
+)
+
+sh_test(
+    name = "bench-r2-json-smoke-test",
+    size = "large",
+    srcs = ["bench-r2-json-smoke-test.sh"],
+    args = ["$(location :bench-r2-json)"],
+    data = [":bench-r2-json"],
+    # Builds the benchmark executable, so CI configurations that skip benchmarks skip it too.
+    tags = ["workerd-benchmark"],
 )
 
 wd_cc_benchmark(

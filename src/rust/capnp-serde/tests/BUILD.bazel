@@ -1,0 +1,46 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_rust_serde_capnp_library.bzl", "wd_rust_serde_capnp_library")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
+
+wd_rust_serde_capnp_library(
+    name = "capnp-serde-test-schema",
+    testonly = True,
+    srcs = ["test.capnp"],
+    ffi = True,
+)
+
+# Checks the generated types against the C++ JsonCodec, which `capnp convert` runs, and the
+# plugin's errors.
+wd_rust_test(
+    name = "capnp-serde-test",
+    srcs = ["capnp-serde-test.rs"],
+    data = [
+        "test.capnp",
+        "//src/rust/capnp-serde/capnpc-rust-serde",
+        "//src/workerd/api:r2-api.capnp",
+        "@capnp-cpp//src/capnp:capnp_system_library",
+        "@capnp-cpp//src/capnp:capnp_tool",
+    ],
+    env = {
+        "CAPNP_SYSTEM": "$(rootpaths @capnp-cpp//src/capnp:capnp_system_library)",
+        "CAPNP_TOOL": "$(rootpath @capnp-cpp//src/capnp:capnp_tool)",
+        "PLUGIN": "$(rootpath //src/rust/capnp-serde/capnpc-rust-serde)",
+        "R2_SCHEMA": "$(rootpath //src/workerd/api:r2-api.capnp)",
+        "TEST_SCHEMA": "$(rootpath test.capnp)",
+    },
+    deps = [
+        ":capnp-serde-test-schema",
+        "//src/workerd/api:r2-api-serde",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
+    ],
+)
+
+# C++ reads the types of test.capnp through their generated cxx bridge.
+kj_test(
+    src = "capnp-serde-ffi-test.c++",
+    deps = [
+        ":capnp-serde-test-schema",
+        "//src/rust/cxx/kj-rs",
+    ],
+)

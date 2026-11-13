@@ -1,0 +1,26 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# The Cap'n Proto compiler plugin behind wd_rust_serde_capnp_library().
+wd_rust_binary(
+    name = "capnpc-rust-serde",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:capnp",
+    ],
+)
+
+# The same plugin, which also writes the cxx bridges of wd_rust_serde_capnp_library(ffi = True).
+# The compiler passes plugins no options, so the choice is made when the plugin is built.
+wd_rust_binary(
+    name = "capnpc-rust-serde-ffi",
+    crate_root = "main.rs",
+    rustc_env = {"CAPNPC_RUST_SERDE_FFI": "1"},
+    # capnpc-rust-serde_test runs the unit tests.
+    test = False,
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:capnp",
+    ],
+)

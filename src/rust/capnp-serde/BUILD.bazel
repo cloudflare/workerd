@@ -1,0 +1,17 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Runtime support for the crates that wd_rust_serde_capnp_library() generates with
+# //src/rust/capnp-serde/capnpc-rust-serde.
+wd_rust_crate(
+    name = "capnp-serde",
+    srcs = [
+        "lib.rs",
+        "lib-test.rs",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:data-encoding",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
+    ],
+)
