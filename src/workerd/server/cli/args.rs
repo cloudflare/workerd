@@ -437,9 +437,9 @@ pub struct ServeArgs {
     /// balancers can go on sending new connections for a while after they learn a server is
     /// stopping: a cloud load balancer in front of Kubernetes, for up to about 20 seconds. A second
     /// SIGTERM starts the drain at once. A cluster instance keeps its Durable Objects and its lease
-    /// until the drain. The supervisor must give the process more time than the delay and the drain
-    /// together: in cluster mode, set Kubernetes' `terminationGracePeriodSeconds` above the delay
-    /// plus `cluster.stopTimeoutMs`.
+    /// until the drain, while `GET /ready` on its cluster port answers 503. The supervisor must
+    /// give the process more time than the delay and the drain together: in cluster mode, set
+    /// Kubernetes' `terminationGracePeriodSeconds` above the delay plus `cluster.stopTimeoutMs`.
     #[arg(long, value_name = "seconds", default_value_t = 0)]
     pub shutdown_delay: u32,
 }

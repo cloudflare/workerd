@@ -37,6 +37,7 @@ use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
 use crate::cluster::Deadlines;
+use crate::cluster::Ready;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -445,14 +446,21 @@ pub async fn run(
         return Ok(());
     };
 
-    // Whatever way this returns, the cluster port answers that this instance is not ready.
-    let _serving = server.cluster().map(ClusterNode::serving);
+    // The cluster port answers ready until the instance is told to drain or this returns.
+    let ready = server.cluster().map(ClusterNode::ready);
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
     let signal = until_drain(&server, signalled, serving.as_mut(), drain.as_mut()).await?;
     if let Some(signalled) = signal {
-        delay_drain(&server, delay, signalled, serving.as_mut(), drain.as_mut()).await?;
+        delay_drain(
+            &server,
+            (delay, signalled),
+            ready,
+            serving.as_mut(),
+            drain.as_mut(),
+        )
+        .await?;
         // A draining instance claims nothing more and hands its clustered objects off,
         // `preventEviction` or not, while it serves on: a request for one waits for it and
         // then goes where it runs next. Then it leaves the cluster, so peers take over what
@@ -570,14 +578,16 @@ async fn until_drain(
 /// Serves on until `delay` (`--shutdown-delay`) has passed since the drain signal arrived at
 /// `signalled`, or until `drain`'s next item, as load balancers go on sending connections for a
 /// while: they are served as before, and a cluster node keeps its Durable Objects and its place in
-/// the cluster. A listener failing meanwhile is fatal.
+/// the cluster. Its readiness probe fails from the signal on (`ready` is dropped), so that what
+/// routes by it sends no more. A listener failing meanwhile is fatal.
 async fn delay_drain(
     server: &Server,
-    delay: Duration,
-    signalled: Duration,
+    (delay, signalled): (Duration, Duration),
+    ready: Option<Ready>,
     serving: Pin<&mut impl Future<Output = Result<()>>>,
     mut drain: Pin<&mut impl Stream<Item = Duration>>,
 ) -> Result<()> {
+    drop(ready);
     let factory = server.factory();
     let remaining = delay.saturating_sub(factory.now().saturating_sub(signalled));
     if remaining.is_zero() {

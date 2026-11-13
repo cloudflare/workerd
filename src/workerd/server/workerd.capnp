@@ -307,6 +307,11 @@ struct ClusterConfig {
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+  #
+  # `workerd serve --shutdown-delay` puts a delay between SIGTERM and all of this, during which the
+  # instance serves as before and keeps its objects, but `GET /ready` answers 503: for load
+  # balancers that go on sending requests for a while, as a cloud load balancer in front of
+  # Kubernetes does. The supervisor's grace period must then cover the delay plus this timeout.
 
   unsafeTimeDivisor @7 :UInt32 = 1;
   # For tests: divides by this the times that a takeover and a stop wait out, which tests would
