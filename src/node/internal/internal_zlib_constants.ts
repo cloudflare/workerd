@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { default as zlibUtil } from 'node-internal:zlib';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 const {
   CONST_Z_OK,
@@ -28,6 +29,7 @@ Object.defineProperties(
       .map(([k, v]) => [
         k.slice(constPrefix.length),
         {
+          __proto__: kNullProtoObject,
           value: v,
           writable: false,
           configurable: false,
