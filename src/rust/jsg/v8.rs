@@ -4857,6 +4857,11 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         // Clone before clearing — clear_wrappable_data zeroes data_ptr.
         let saved = trait_ptr.clone();
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
+        // The resource is alive until `drop_rc`.
+        let resource = saved.as_gc_ref();
+        if resource.has_drop_impl() {
+            GcVisitor::detach_for_drop(resource);
+        }
         saved.drop_rc();
     }
 }
@@ -4931,6 +4936,9 @@ pub(crate) enum VisitMode {
     /// To detach the value from its owner, under the lock of the given isolate; see
     /// [`GcVisitor::is_detaching`].
     Detach(*mut ffi::Isolate),
+    /// To detach the references of a resource that is being dropped from it, before its `Drop`
+    /// runs; see [`GcVisitor::detach_for_drop`].
+    DetachForDrop,
 }
 
 impl GcVisitor {
@@ -4965,12 +4973,32 @@ impl GcVisitor {
         value.trace(&mut visitor);
     }
 
+    /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
+    /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
+    /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
+    /// next owner's visit asserts against. Every `jsg::Rc` and C++ `jsg::Ref` of an isolate whose
+    /// lock this thread holds becomes strong again and forgets its parent, as a moved C++
+    /// `jsg::Ref` does; the others are left as they are, as is every `TracedGlobal`. This can run
+    /// during the garbage collector's sweep, when the value of a weak `TracedGlobal` may already
+    /// be dead, so making one strong could revive a freed value.
+    ///
+    /// A child without a wrapper is visited once here, to make what it holds strong, and again
+    /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
+    /// resources that each implement `Drop` costs time quadratic in its length.
+    pub(crate) fn detach_for_drop(resource: &dyn GarbageCollected) {
+        let mut visitor = Self {
+            handle: ffi::GcVisitor { ptr: 0 },
+            mode: VisitMode::DetachForDrop,
+        };
+        resource.trace(&mut visitor);
+    }
+
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
     /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        matches!(self.mode, VisitMode::Detach(_))
+        matches!(self.mode, VisitMode::Detach(_) | VisitMode::DetachForDrop)
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -5000,6 +5028,8 @@ impl GcVisitor {
     ///
     /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
     ///   another, or of a closed isolate.
+    /// - A drop visit (see [`GcVisitor::detach_for_drop`]) changes the reference only if this
+    ///   thread holds the lock of the reference's isolate, and otherwise leaves it as it is.
     /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
     ///   reference as it is: a strong reference stays strong, so its target leaks rather than
     ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
@@ -5013,6 +5043,9 @@ impl GcVisitor {
                 "attempt to use a {what} in an isolate other than the one it was created in"
             );
             return true;
+        }
+        if self.mode == VisitMode::DetachForDrop {
+            return state.this_thread_holds_lock();
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
@@ -5093,9 +5126,9 @@ impl GcVisitor {
     /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
     /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
-        if global.state.is_closed() {
-            // The isolate is being torn down, and its handles are left to `Dispose`, as those
-            // of a dropped `TracedGlobal` are.
+        // Once the isolate is being torn down, its handles are left to `Dispose`, as those of a
+        // dropped `TracedGlobal` are. A drop visit leaves them as well; see `detach_for_drop`.
+        if global.state.is_closed() || self.mode == VisitMode::DetachForDrop {
             return;
         }
         if let VisitMode::Detach(isolate) = self.mode {

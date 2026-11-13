@@ -1598,6 +1598,14 @@ pub trait GarbageCollected: Traced {
     /// Reports the resource's fields to a heap snapshot: the C++ `jsgGetMemoryInfo` of a
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
+
+    /// Whether the resource type implements `Drop` itself. If so, its references are made strong
+    /// and forget their parent before its `Drop` runs, so that `Drop` may move them out (see
+    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
+    /// type with its own `Drop` must override it to return `true`.
+    fn has_drop_impl(&self) -> bool {
+        false
+    }
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
