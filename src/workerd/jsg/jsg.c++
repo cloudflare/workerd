@@ -538,6 +538,11 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // making such a change, and that's us, and we're not.
     KJ_ASSERT(v8::Locker::IsLocked(target));
 
+    if (amount < 0) {
+      decreaseNow(target, amount);
+      return;
+    }
+
     // We use AdjustAmountOfExternalAllocatedMemoryImpl() instead of ExternalMemoryAccounter
     // because we explicitly want external memory to be allowed to live beyond the isolate
     // in some cases. The Impl variant bypasses the destructor check that
@@ -559,8 +564,41 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
+  if (isolate.load(std::memory_order_relaxed) != js.v8Isolate) {
+    // The memory was counted against another isolate, or one already destroyed, so it must not
+    // reach this one. maybeDeferAdjustment() treats it as made without that isolate's lock.
+    maybeDeferAdjustment(amount);
+    return;
+  }
   checkReasonableExternalMemoryDelta(amount);
+  if (amount < 0) {
+    decreaseNow(js.v8Isolate, amount);
+    return;
+  }
   js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
+}
+
+void ExternalMemoryTarget::decreaseNow(v8::Isolate* target, int64_t amount) const {
+  // V8 aborts if its total would fall below zero. A decrease can release memory whose increase is
+  // still pending: an adjustment made without the lock and moved to this thread. So the pending
+  // total is netted into the decrease. Every adjustment's reported changes sum to zero or more,
+  // so V8's total plus the pending total plus this decrease is zero or more too.
+  //
+  // V8 never gets a rise from here: a rise can make it start or force a GC, and a decrease often
+  // runs in a destructor, including a cppgc finalizer while V8 sweeps. If the pending total
+  // exceeds the decrease, the net rise goes back to the pending total for the next lock, and V8's
+  // total, which is zero or more, is left as it is.
+  int64_t net = amount;
+  // A moved adjustment's increase happened before the move, so this load sees it.
+  if (pendingExternalMemoryUpdate.load(std::memory_order_relaxed) != 0) {
+    net += pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  }
+  if (net > 0) {
+    pendingExternalMemoryUpdate.fetch_add(net, std::memory_order_relaxed);
+  } else if (net < 0) {
+    // We use AdjustAmountOfExternalAllocatedMemoryImpl(); see maybeDeferAdjustment().
+    target->AdjustAmountOfExternalAllocatedMemoryImpl(net);
+  }
 }
 
 ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
