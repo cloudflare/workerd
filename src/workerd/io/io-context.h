@@ -78,19 +78,27 @@ class IoContext;
 
 // Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
 // share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
-// an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
-// tracing events remain attributed to the request that created the async context.
+// an older continuation resumes. Keeping the span, tracer, invocation context, and the request's
+// root user span together ensures tracing events remain attributed to the request that created the
+// async context.
 class UserTraceAsyncContext final {
  public:
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
-      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
+      SpanParent root = nullptr)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
-        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+        invocationSpanContext(kj::mv(invocationSpanContext)),
+        root(kj::mv(root)) {}
 
   SpanParent getSpan() {
     return span.addRef();
+  }
+
+  // The root user span of the request that created this async context.
+  SpanParent getRoot() {
+    return root.addRef();
   }
 
   kj::Maybe<workerd::WeakRef<BaseTracer>&> getTracer() {
@@ -108,6 +116,7 @@ class UserTraceAsyncContext final {
   SpanParent span;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  SpanParent root;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
@@ -1326,6 +1335,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
+  // Like getRootUserTraceSpan(), but for the request that created the current async context, which
+  // in a Durable Object can be older than the current request.
+  SpanParent getCurrentRootUserTraceSpan();
+
   // Returns the invocation's invocationId paired with the currently-active user span's spanId
   // (as pushed by `ctx.tracing.enterSpan`) and traceId, falling back to the invocation root's
   // context when no user span is active.
@@ -1368,6 +1381,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
  private:
   jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
   jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
+  // Which span of the current async context's UserTraceAsyncContext to return.
+  enum class UserTraceSpanKind { ACTIVE, ROOT };
+  // Implements getCurrentUserTraceSpan() and getCurrentRootUserTraceSpan().
+  SpanParent getUserTraceSpanFromAsyncContext(UserTraceSpanKind kind);
 
   void logWarningLaterImpl(kj::String description, WarnOnce once);
 

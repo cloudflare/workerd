@@ -106,10 +106,17 @@ export function createTailStreamHandler(state) {
  *
  * The returned state shape is:
  *   state.spans: Map<spanKey, {
- *     name, spanId, parentSpanId, invocationId, closed, ...attributes
+ *     name, spanId, parentSpanId, traceId, invocationId, session, closed, closeTraceId,
+ *     ...attributes
  *   }>
  *   state.topLevelSpans: Map<invocationId, topLevelSpanId>
  *     (the span ID from the onset event, i.e. the implicit request root)
+ *   state.sessions: Array<{ invocationId, traceId, parentSpanId, topLevelSpanId, url }>
+ *     One per tail session, i.e. per invocation, indexed by the `session` of its spans and logs.
+ *     Invocation IDs can repeat in tests, so use this to tell invocations apart. parentSpanId is
+ *     the span that triggered the invocation, if it inherited a span context, and url is the
+ *     request URL of a fetch invocation.
+ *   state.logs: Array<{ message, traceId, spanId, invocationId, session }>
  *
  * @returns {{state: Object, tailStream: Function, waitForCompletion: Function}}
  */
@@ -118,11 +125,21 @@ export function createHierarchyAwareCollector() {
     invocationPromises: [],
     spans: new Map(),
     topLevelSpans: new Map(),
+    sessions: [],
+    logs: [],
   };
 
   const tailStream = (event, env, ctx) => {
     // Record the onset event's spanId as the top-level span for this invocation.
     state.topLevelSpans.set(event.invocationId, event.event.spanId);
+    const session = state.sessions.length;
+    state.sessions.push({
+      invocationId: event.invocationId,
+      traceId: event.spanContext.traceId,
+      parentSpanId: event.spanContext.spanId,
+      topLevelSpanId: event.event.spanId,
+      url: event.event.info?.url,
+    });
 
     let resolveFn;
     state.invocationPromises.push(
@@ -132,7 +149,7 @@ export function createHierarchyAwareCollector() {
     );
 
     return (event) => {
-      const spanKey = `${event.invocationId}#${event.event.spanId || event.spanContext.spanId}`;
+      const spanKey = `${session}#${event.event.spanId || event.spanContext.spanId}`;
       switch (event.event.type) {
         case 'spanOpen':
           // event.event.spanId is the new span's id; event.spanContext.spanId is the
@@ -141,7 +158,9 @@ export function createHierarchyAwareCollector() {
             name: event.event.name,
             spanId: event.event.spanId,
             parentSpanId: event.spanContext.spanId,
+            traceId: event.spanContext.traceId,
             invocationId: event.invocationId,
+            session,
           });
           break;
         case 'attributes': {
@@ -156,8 +175,18 @@ export function createHierarchyAwareCollector() {
           const span = state.spans.get(spanKey);
           if (!span) break;
           span.closed = true;
+          span.closeTraceId = event.spanContext.traceId;
           break;
         }
+        case 'log':
+          state.logs.push({
+            message: event.event.message,
+            traceId: event.spanContext.traceId,
+            spanId: event.spanContext.spanId,
+            invocationId: event.invocationId,
+            session,
+          });
+          break;
         case 'outcome':
           resolveFn();
           break;

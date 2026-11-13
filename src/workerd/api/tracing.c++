@@ -8,6 +8,8 @@
 #include <workerd/io/tracer.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <kj/encoding.h>
+
 namespace workerd::api::user_tracing {
 
 namespace {
@@ -351,6 +353,50 @@ class NoopSpanState final: public SpanState {
   }
 };
 
+// The span that withActiveSpanContext() makes active: a span created elsewhere, or none for an
+// invalid span context, which reports an all-zero context. Like OpenTelemetry's NonRecordingSpan,
+// it records nothing. `parent` is what new spans are created from while it is active.
+class RemoteSpanState final: public SpanState {
+ public:
+  RemoteSpanState(kj::Maybe<tracing::SpanContext> context, workerd::SpanParent parent)
+      : context(kj::mv(context)),
+        parent(kj::mv(parent)) {}
+
+  void end() override {}
+
+  bool getIsTraced() override {
+    return false;
+  }
+
+  kj::Maybe<tracing::SpanContext> getSpanContext() override {
+    return context.map(
+        [](const tracing::SpanContext& value) { return tracing::SpanContext::clone(value); });
+  }
+
+  workerd::SpanParent makeSpanParent() override {
+    return parent.addRef();
+  }
+
+  void updateName(kj::ConstString) override {}
+
+  void setStatus(tracing::SpanStatus) override {}
+
+ protected:
+  bool canRecordAttributes() override {
+    return false;
+  }
+
+  void recordAttribute(kj::String, TagValue) override {}
+
+  void recordExceptionImpl(
+      kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
+  }
+
+ private:
+  kj::Maybe<tracing::SpanContext> context;
+  workerd::SpanParent parent;
+};
+
 // ======================================================================================
 // Span
 
@@ -600,19 +646,16 @@ CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
     .span = kj::mv(span), .childSpanForAsyncContext = kj::mv(childSpanForAsyncContext)};
 }
 
-// Runs `func` with `span` as the active span. The JS span object is stored for getActiveSpan(), and
-// `parent`, if any, becomes the current user trace span that built-in instrumentation and new user
-// spans attach to (via IoContext::getCurrentUserTraceSpan()). The StorageScope RAII objects restore
-// the prior async-context storage on scope exit; any async continuations captured during `func`
-// will already have snapshotted the new frame and will see `span` as "current".
+// Runs `func` with `activeSpan` as the active span. The JS span object, or null for no active span,
+// is stored for getActiveSpan(), and `parent`, if any, becomes the current user trace span that
+// built-in instrumentation and new user spans attach to (via IoContext::getCurrentUserTraceSpan()).
+// The StorageScope RAII objects restore the prior async-context storage on scope exit; any async
+// continuations captured during `func` will already have snapshotted the new frame and will see
+// `activeSpan` as "current".
 template <typename Func>
-v8::Local<v8::Value> runWithActiveSpan(jsg::Lock& js,
-    jsg::Ref<user_tracing::Span>& span,
-    kj::Maybe<SpanParent> parent,
-    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
-    Func&& func) {
+v8::Local<v8::Value> runWithActiveSpanValue(
+    jsg::Lock& js, v8::Local<v8::Value> activeSpan, kj::Maybe<SpanParent> parent, Func&& func) {
   auto runWithJsSpan = [&]() -> v8::Local<v8::Value> {
-    auto activeSpan = spanHandler.wrap(js, span.addRef());
     jsg::AsyncContextFrame::StorageScope activeSpanScope(js,
         jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(), js.v8Ref(activeSpan));
     return func();
@@ -628,6 +671,16 @@ v8::Local<v8::Value> runWithActiveSpan(jsg::Lock& js,
   }
 }
 
+template <typename Func>
+v8::Local<v8::Value> runWithActiveSpan(jsg::Lock& js,
+    jsg::Ref<user_tracing::Span>& span,
+    kj::Maybe<SpanParent> parent,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
+    Func&& func) {
+  return runWithActiveSpanValue(
+      js, spanHandler.wrap(js, span.addRef()), kj::mv(parent), kj::fwd<Func>(func));
+}
+
 // Calls callback(...args) with the global object as `this`.
 v8::Local<v8::Value> invokeCallback(
     jsg::Lock& js, v8::Local<v8::Function> callback, jsg::Arguments<jsg::Value>& args) {
@@ -637,6 +690,23 @@ v8::Local<v8::Value> invokeCallback(
   }
   auto v8Context = js.v8Context();
   return jsg::check(callback->Call(v8Context, v8Context->Global(), argv.size(), argv.data()));
+}
+
+// Converts a JS span context to the runtime's representation. Returns kj::none if it is invalid
+// (a missing, malformed, or all-zero trace or span ID), which OpenTelemetry treats as no parent.
+// As in OpenTelemetry, traceFlags isn't validated: if it is missing or not a byte, it counts as 0.
+kj::Maybe<tracing::SpanContext> parseSpanContext(
+    const user_tracing::TracingSpanContextInput& context) {
+  auto& traceId = KJ_UNWRAP_OR_RETURN(context.traceId, kj::none);
+  auto& spanId = KJ_UNWRAP_OR_RETURN(context.spanId, kj::none);
+  kj::byte flags = 0;
+  KJ_IF_SOME(value, context.traceFlags) {
+    if (value >= 0 && value <= 255) {
+      flags = static_cast<kj::byte>(value);
+    }
+  }
+  return tracing::SpanContext::tryFromTraceparent(
+      kj::str("00-", traceId, "-", spanId, "-", kj::encodeHex(kj::arrayPtr(flags))));
 }
 
 v8::Local<v8::Value> runSpan(jsg::Lock& js,
@@ -748,6 +818,56 @@ v8::Local<v8::Value> Tracing::withActiveSpan(jsg::Lock& js,
       [&]() -> v8::Local<v8::Value> { return invokeCallback(js, callback, args); });
 }
 
+v8::Local<v8::Value> Tracing::withActiveSpanContext(jsg::Lock& js,
+    jsg::Optional<user_tracing::TracingSpanContextInput> spanContext,
+    v8::Local<v8::Function> callback,
+    jsg::Arguments<jsg::Value> args,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
+  kj::Maybe<tracing::SpanContext> remoteContext;
+  KJ_IF_SOME(value, spanContext) {
+    remoteContext = parseSpanContext(value);
+  }
+
+  // The root user span of the request this async context belongs to, from which the parent for
+  // spans created inside the callback is made. It is unobserved if the request is not traced.
+  SpanParent root(nullptr);
+  bool hasIoContext = IoContext::hasCurrent();
+  if (hasIoContext) {
+    root = IoContext::current().getCurrentRootUserTraceSpan();
+  }
+
+  // Spans created inside the callback are children of the remote span, or with no valid context
+  // each starts a new trace. If the request isn't traced, they keep their usual parent.
+  auto activeParent = root.forActiveContext(remoteContext);
+  kj::Maybe<SpanParent> parent;
+  if (activeParent.isObserved()) {
+    parent = activeParent.addRef();
+  }
+  kj::Own<user_tracing::SpanState> state;
+  KJ_IF_SOME(context, remoteContext) {
+    state = kj::refcounted<user_tracing::RemoteSpanState>(
+        tracing::SpanContext::clone(context), kj::mv(activeParent));
+  } else if (spanContext != kj::none) {
+    // An invalid context is still the active span, as in OpenTelemetry: a non-recording span with
+    // an all-zero context. Activating it again starts new traces too.
+    state = kj::refcounted<user_tracing::RemoteSpanState>(kj::none, kj::mv(activeParent));
+  }
+
+  v8::Local<v8::Value> activeSpan = v8::Null(js.v8Isolate);
+  if (state.get() != nullptr) {
+    auto span = [&]() -> jsg::Ref<user_tracing::Span> {
+      if (hasIoContext) {
+        return js.alloc<user_tracing::Span>(IoContext::current().addObject(kj::mv(state)));
+      }
+      return js.alloc<user_tracing::Span>(kj::mv(state));
+    }();
+    activeSpan = spanHandler.wrap(js, kj::mv(span));
+  }
+
+  return runWithActiveSpanValue(js, activeSpan, kj::mv(parent),
+      [&]() -> v8::Local<v8::Value> { return invokeCallback(js, callback, args); });
+}
+
 jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
   // case: a user has an active span
@@ -758,7 +878,12 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     auto key = jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey();
     KJ_IF_SOME(value, frame.get(*key)) {
-      KJ_IF_SOME(span, spanHandler.tryUnwrap(js, value.getHandle(js))) {
+      auto handle = value.getHandle(js);
+      // case: withActiveSpanContext(undefined, ...) left no active span
+      if (handle->IsNull()) {
+        return kj::none;
+      }
+      KJ_IF_SOME(span, spanHandler.tryUnwrap(js, handle)) {
         return kj::mv(span);
       }
     }

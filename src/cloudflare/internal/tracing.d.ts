@@ -109,8 +109,9 @@ declare const tracing: {
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
 
-  // Returns the span associated with the current async context. Returns undefined
-  // outside an invocation or when execution is detached into the root async context.
+  // Returns the span associated with the current async context. Returns undefined when no
+  // span is active: outside an invocation, when execution is detached into the root async
+  // context, or directly inside withActiveSpanContext(undefined, ...).
   getActiveSpan(): Span | undefined;
 
   // Makes `span` the active span while invoking `callback(...args)`, then restores the previous
@@ -123,6 +124,27 @@ declare const tracing: {
   // spans.
   withActiveSpan<T, A extends unknown[]>(
     span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
+
+  // Invokes `callback(...args)` with a span context from elsewhere, such as one read from a queue
+  // message, as the active parent. Returns the callback result as-is. This is OpenTelemetry's
+  // `context.with(trace.setSpanContext(context.active(), spanContext), callback)`.
+  //
+  // With a valid `spanContext`, `getActiveSpan()` returns a non-recording span with that context
+  // inside the callback, and user spans and built-in instrumentation created inside it, including
+  // after `await`, are its children, in its trace. They are recorded regardless of its
+  // `traceFlags`.
+  //
+  // If `spanContext` is undefined or invalid (a missing, malformed, or all-zero ID), there is no
+  // parent: each span created inside the callback that would otherwise have no parent starts a new
+  // trace, and `getActiveSpan()` returns undefined, or a non-recording span with an all-zero
+  // context for an invalid one. As in OpenTelemetry, a missing or out-of-range `traceFlags` counts
+  // as 0, and `null` is an invalid context. Throws a TypeError if `spanContext` is any other
+  // non-object.
+  withActiveSpanContext<T, A extends unknown[]>(
+    spanContext: TracingSpanContext | undefined,
     callback: (...args: A) => T,
     ...args: A
   ): T;
