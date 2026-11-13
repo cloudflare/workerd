@@ -4,6 +4,8 @@
 
 #include "jsg-test.h"
 
+#include <workerd/util/autogate.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -112,7 +114,58 @@ class ValueBox: public jsg::Object {
   }
 };
 
+// A heap object whose handles the queue holding it visits.
+struct QueuedItem {
+  kj::Maybe<jsg::Value> value;
+  kj::Maybe<jsg::Ref<GcDetector>> detector;
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(value, detector);
+  }
+};
+
+class ItemQueue: public jsg::Object {
+ public:
+  static jsg::Ref<ItemQueue> constructor(jsg::Lock& js) {
+    return js.alloc<ItemQueue>();
+  }
+
+  void pushValue(jsg::Value value) {
+    items.add(TracedOwn(kj::heap(QueuedItem{.value = kj::mv(value)})));
+  }
+
+  void pushDetector(jsg::Ref<GcDetector> detector) {
+    items.add(TracedOwn(kj::heap(QueuedItem{.detector = kj::mv(detector)})));
+  }
+
+  kj::Vector<TracedOwn<QueuedItem>> items;
+
+  JSG_RESOURCE_TYPE(ItemQueue) {
+    JSG_METHOD(pushValue);
+    JSG_METHOD(pushDetector);
+  }
+
+ private:
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visitAll(items);
+  }
+};
+
 struct TraceTestContext: public Object, public ContextGlobal {
+  // An item taken out of an ItemQueue. Nothing visits it.
+  kj::Maybe<kj::Own<QueuedItem>> taken;
+
+  void take(jsg::Ref<ItemQueue> queue) {
+    auto item = kj::mv(queue->items.back());
+    queue->items.removeLast();
+    taken = item.release();
+  }
+
+  void putBack(jsg::Ref<ItemQueue> queue) {
+    queue->items.add(TracedOwn(KJ_ASSERT_NONNULL(kj::mv(taken))));
+    taken = kj::none;
+  }
+
   kj::Maybe<jsg::Ref<NumberBox>> strongRef;
   // A strong reference to a NumberBox which may be get and set.
 
@@ -149,6 +202,9 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(NumberBoxHolder);
     JSG_NESTED_TYPE(GcDetector);
     JSG_NESTED_TYPE(ValueBox);
+    JSG_NESTED_TYPE(ItemQueue);
+    JSG_METHOD(take);
+    JSG_METHOD(putBack);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD_NAMED(assert, assert_);
@@ -162,7 +218,8 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBoxHolder,
     GcDetector,
     GcDetectorBox,
-    ValueBox);
+    ValueBox,
+    ItemQueue);
 
 KJ_TEST("GC collects objects when expected") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
@@ -264,6 +321,68 @@ KJ_TEST("GC collects objects when expected") {
     gc({type: "minor"});
 
     assert(b.siblingCollected, "minor GC did not collect jsg::Value");
+  )",
+      "undefined", "undefined");
+}
+
+KJ_TEST("TracedOwn keeps an object's handles alive after it leaves the owner that visited it") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+  util::Autogate::initAutogateForTest({util::AutogateKey::GC_COMPLETE_TRACING});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  // A jsg::Value taken out of a traced queue stays alive after the queue is collected.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      queue.pushValue(pair[0]);
+      pair = null;
+      gc();  // traces the queued value
+      take(queue);
+    })();
+    gc();
+    assert(!b.siblingCollected, "a value taken out of a traced queue was collected");
+  )",
+      "undefined", "undefined");
+
+  // So does a jsg::Ref, and a different queue can then visit it.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      queue.pushDetector(pair[0]);
+      pair = null;
+      gc();
+      take(queue);
+    })();
+    gc();
+    assert(!b.siblingCollected, "a Ref taken out of a traced queue was collected");
+    (() => {
+      const other = new ItemQueue();
+      putBack(other);
+      gc();
+      assert(!b.siblingCollected, "a Ref put in a live queue was collected");
+    })();
+    gc();
+    assert(b.siblingCollected, "a Ref left in a dead queue was not collected");
+  )",
+      "undefined", "undefined");
+
+  // A value still in the queue is collected with the queue, even when it refers to the queue.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      pair[0].queue = queue;
+      queue.pushValue(pair[0]);
+      pair = null;
+      gc();  // A handle added to an object that has a wrapper stays strong until a trace visits it.
+    })();
+    gc();
+    assert(b.siblingCollected, "a queue holding a cycle through its items was not collected");
   )",
       "undefined", "undefined");
 }

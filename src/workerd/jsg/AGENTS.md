@@ -180,6 +180,14 @@ These rules MUST be followed when writing or modifying JSG code:
     `JSG_NO_JS`, and a function that runs JavaScript without taking the lock with
     `JSG_MAY_RUN_JS` (both in `util.h`); see `README.md` §Calls That Run JavaScript.
 
+18. **Hold a heap object whose handles are visited in `jsg::TracedOwn<T>`**, not
+    `kj::Own<T>`, and move its elements out of a container one at a time. Moving a
+    `kj::Own` or a whole container leaves the handles traced with nothing visiting
+    them, so the GC can free their targets while they are in use. The
+    `jsg-traced-own` clang-tidy check flags both, including moving or swapping a
+    struct that holds such a container. Objects shared through `kj::Rc` fall under
+    invariant 14.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.

@@ -202,6 +202,46 @@ KJ_TEST("ReadableStream read all text (byte readable)") {
   });
 }
 
+KJ_TEST("ReadableStream detach of a readable stream hands its data to the new stream") {
+  preamble([](jsg::Lock& js) {
+    for (auto bytes: {false, true}) {
+      uint checked = 0;
+      auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+      // clang-format off
+      rs->getController().setup(js, UnderlyingSource{
+        .type = bytes ? kj::Maybe<kj::String>(kj::str("bytes")) : kj::none,
+        .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+          checked++;
+          KJ_SWITCH_ONEOF(controller) {
+            KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+              c->enqueue(js, toBytes(js, kj::str("Hello, world!")));
+              c->close(js);
+            }
+            KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+              c->enqueue(js, toBufferSource(js, kj::str("Hello, world!")));
+              c->close(js);
+            }
+          }
+          return js.resolvedPromise();
+        }
+      }, StreamQueuingStrategy{.highWaterMark = 0});
+      // clang-format on
+
+      auto detached = js.alloc<ReadableStream>(rs->getController().detach(js, false));
+      KJ_ASSERT(rs->isLocked());
+      KJ_ASSERT(rs->getController().isClosed());
+
+      auto promise = detached->getController().readAllText(js, 20).then(
+          js, [&](jsg::Lock& js, kj::String&& text) {
+        KJ_ASSERT(text == "Hello, world!"_kjc);
+        checked++;
+      });
+      js.runMicrotasks();
+      KJ_ASSERT(checked == 2);
+    }
+  });
+}
+
 KJ_TEST("ReadableStream read all bytes (value readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;

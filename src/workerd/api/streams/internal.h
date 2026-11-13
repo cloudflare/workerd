@@ -524,14 +524,14 @@ class WritableStreamInternalController: public WritableStreamController {
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<Write, kj::Own<Pipe>, Close, Flush> event;
+    kj::OneOf<Write, jsg::TracedOwn<Pipe>, Close, Flush> event;
 
     bool isCloseOrFlush() const {
       return event.is<Close>() || event.is<Flush>();
     }
 
     bool isPipe() const {
-      return event.is<kj::Own<Pipe>>();
+      return event.is<jsg::TracedOwn<Pipe>>();
     }
 
     JSG_MEMORY_INFO(WriteEvent) {
@@ -542,7 +542,7 @@ class WritableStreamInternalController: public WritableStreamController {
         KJ_CASE_ONEOF(w, Write) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
+        KJ_CASE_ONEOF(p, jsg::TracedOwn<Pipe>) {
           tracker.trackField("inner", *p);
         }
         KJ_CASE_ONEOF(c, Close) {

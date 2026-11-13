@@ -465,10 +465,12 @@ void onConsumerClose(jsg::Lock& js) override {
   (`jsg::Data::moveFromTraced`, `jsg::Ref`'s move constructor). Moving the _container_
   (`RingBuffer`, `std::list`) only transfers its storage and leaves every entry weak and
   unreached, so a GC before the entries are settled collects them.
-- **Rule**: Move each handle out individually before the entry leaves the container. A
-  non-movable heap entry (`kj::Own<Pipe>`) cannot be re-strengthened that way: it must
-  stay in the container, where it is still traced, while any JS can run, with reentrant
-  teardown guarded by a weak ref.
+- **Rule**: Move each handle out individually before the entry leaves the container, or
+  hold a heap entry in a `jsg::TracedOwn` (as `Pipe` is), which makes the entry's handles
+  strong when it moves. A `TracedOwn` does so only with the `gc-complete-tracing` autogate
+  enabled, and a heap entry held through a plain `kj::Own` cannot be made strong at all, so
+  until the gate is removed such an entry must stay in the container, where it is still
+  traced, while any JS can run.
 
 ```cpp
 while (!queue.empty()) {
