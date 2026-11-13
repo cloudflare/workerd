@@ -1329,9 +1329,9 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     }
     return wsPromise;
   } else KJ_IF_SOME(jsBody, getBody(js)) {
-    auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    auto encodings = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
-    if (encoding != StreamEncoding::IDENTITY) {
+    if (encodings.size() != 0) {
       KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {
         KJ_IF_SOME(mimeType, MimeType::extract(contentType)) {
           if (mimeType == MimeType::EVENT_STREAM) {
@@ -1340,10 +1340,13 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
         }
       }
     }
-    auto maybeLength = jsBody.tryGetLength(js, encoding);
+    // The length is known whenever the body will reach the wire in exactly the coding chain the
+    // headers advertise -- including a proxied body whose chain passes through untouched. A body
+    // that genuinely has to be re-encoded reports no length and is sent chunked.
+    auto maybeLength = jsBody.tryGetLength(js, encodings.asPtr());
     auto stream = newSystemStream(
-        outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), encoding, context,
-        flushAfterWrite);
+        outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), kj::mv(encodings),
+        context, flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
