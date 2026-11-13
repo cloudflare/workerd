@@ -250,6 +250,12 @@ wd_test(
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
+wd_test(
+    src = "durable-object-restore-kvdata-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-restore-kvdata-test.js"],
+)
+
 # The TCP sockets of connect-handler-test and tail-worker-test, each listening on a port assigned
 # when the test runs (see listen_port_bindings in build/wd_test.bzl).
 CONNECT_HANDLER_PORT_BINDINGS = {

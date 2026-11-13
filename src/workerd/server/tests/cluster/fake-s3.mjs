@@ -8,20 +8,24 @@
 // own process, so that it answers at once however slow the instances under
 // test are: their leases are short in tests, and a bucket that lags their
 // renewals fences them. A conditional write checks and writes with nothing in
-// between, so it is atomic. Requests are not authenticated.
+// between, so it is atomic. An object's ETag is the MD5 of its body, as S3's
+// is for an object written in one piece. Requests are not authenticated.
 //
 // A test arms faults with `POST /_faults` and a JSON array: each delays the
 // requests whose key starts with `prefix` (and does not end with `except`)
 // and whose method is `method` by `delayMs`, then answers `status` instead if
-// given, for the next `times` of them. `GET /_faults` lists them, with `hits`.
+// given, for the next `times` of them; with `after`, it serves the request
+// first and answers `status` instead of its answer. `GET /_faults` lists
+// them, with `hits`.
 // `GET /_rejected?key=` counts the writes to a key whose precondition failed.
 //
 // With the dialect "gcs", it speaks Cloud Storage's XML API instead: an
-// object's version is its generation, answered in `x-goog-generation`, and a
-// PUT is conditional on `x-goog-if-generation-match` (0: the object must not
-// exist), not on If-Match or If-None-Match, which Cloud Storage ignores on a
-// PUT. Every request needs a bearer token that has not expired, unless it
-// carries `x-fake-admin`. Tokens come from:
+// object's version is its generation, unique to each write and answered in
+// `x-goog-generation`, and a PUT is conditional on
+// `x-goog-if-generation-match` (0: the object must not exist), not on If-Match
+// or If-None-Match, which Cloud Storage ignores on a PUT. Every request needs
+// a bearer token that has not expired, unless it carries `x-fake-admin`.
+// Tokens come from:
 //   - GET /computeMetadata/v1/instance/service-accounts/default/token, the
 //     metadata server's endpoint, with `Metadata-Flavor: Google`, a header
 //     its answers carry too;
@@ -32,7 +36,7 @@
 // seconds and the service account; `GET /_gcs` counts the tokens issued
 // (`metadata`, `jwt`) and the requests refused for a token (`refused`).
 
-import { createPublicKey, randomUUID, verify } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -150,11 +154,12 @@ export class FakeS3Server {
       fault.hits++;
       await sleep(fault.delayMs ?? 0);
       if (generation !== this.#generation) return send(503);
-      if (fault.status !== undefined) return send(fault.status);
+      if (fault.status !== undefined && !fault.after) return send(fault.status);
     }
+    const reply = fault?.after ? () => send(fault.status) : send;
 
     if (req.method === 'GET' && key === '') {
-      return send(200, this.#list(url.searchParams));
+      return reply(200, this.#list(url.searchParams));
     }
 
     const counted = key.slice(key.indexOf('/') + 1);
@@ -164,27 +169,27 @@ export class FakeS3Server {
     const object = this.#objects.get(key);
     switch (req.method) {
       case 'GET':
-        if (!object) return send(404);
+        if (!object) return reply(404);
         this.#served.set(
           counted,
           (this.#served.get(counted) ?? 0) + object.body.length
         );
-        return send(200, object.body, this.#version(object));
+        return reply(200, object.body, this.#version(object));
       case 'PUT': {
         if (!this.#holds(req, object)) {
           this.#rejected.set(key, (this.#rejected.get(key) ?? 0) + 1);
-          return send(412);
+          return reply(412);
         }
-        const etag = `"${Date.now()}-${this.#next}"`;
+        const etag = `"${createHash('md5').update(body).digest('hex')}"`;
         // Decimal, unique, and never 0.
         const generation = `${Date.now()}${String(this.#next++).padStart(6, '0')}`;
         const stored = { etag, generation, body };
         this.#objects.set(key, stored);
-        return send(200, null, this.#version(stored));
+        return reply(200, null, this.#version(stored));
       }
       case 'DELETE':
         this.#objects.delete(key);
-        return send(204);
+        return reply(204);
     }
     return send(405);
   }

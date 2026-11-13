@@ -951,10 +951,10 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   incomingRequest->delivered("scheduled"_kj);
 
   // Scheduled handlers run entirely in waitUntil() tasks.
-  context.addWaitUntil(context.run([scheduledTime, cron, entrypointName = entrypointName.clone(),
-                                       versionInfo = kj::mv(versionInfo), props = kj::mv(props),
-                                       &metrics = incomingRequest->getMetrics()](
-                                       Worker::Lock& lock, IoContext& context) mutable {
+  context.addWaitUntil(
+      context.run([scheduledTime, cron = kj::str(cron), entrypointName = entrypointName.clone(),
+                      versionInfo = kj::mv(versionInfo),
+                      props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
     auto traceScope = context.makeRequestTraceScope(lock);
 
@@ -1054,8 +1054,10 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
           auto handler = lock.getExportedHandler(
               asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
-          return lock.getGlobalScope().runAlarm(
-              scheduledTime, timeout, retryCount, incomingRequest, lock, handler);
+          // runAlarm()'s continuation refers to the handler, which may be a per-event heap copy.
+          return lock.getGlobalScope()
+              .runAlarm(scheduledTime, timeout, retryCount, incomingRequest, lock, handler)
+              .attach(kj::mv(handler));
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
@@ -1172,7 +1174,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
 
   context.addWaitUntil(
       context.run([entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-                      props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
+                      props = kj::mv(props)](
                       Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
     auto traceScope = context.makeRequestTraceScope(lock);
