@@ -2189,7 +2189,7 @@ void handleLog(jsg::Lock& js,
           }
         }
         kj::StringPtr text = label;
-        if (text == ""_kj && issueErrors.size() > 0) text = issueErrors[0].message;
+        if (text == ""_kj && !issueErrors.empty()) text = issueErrors[0].message;
         issues::Field fields[] = {{"level"_kj, logLevelToString(level)}};
         issues::Attachment attachments[] = {{"args"_kj, [&]() { return message(); }}};
         observer.reportIssue(issues::ERROR_LOG, text, fields, issueErrors.asPtr(), attachments);
