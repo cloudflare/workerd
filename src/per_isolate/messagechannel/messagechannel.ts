@@ -54,6 +54,9 @@
 //
 // The peer is held weakly, so dropping one port of a pair lets it be
 // collected; the MessageChannel holds both strongly.
+//
+// main.ts loads this module on first use, so its top level runs after user
+// code and reads nothing that code can change (see EventTargetHeritage).
 
 import type {
   EventTargetInternals,
@@ -65,8 +68,10 @@ const {
   ArrayIsArray,
   ArrayPrototypePush,
   Error,
+  EventTargetPrototype,
   ObjectDefineProperties,
   ObjectGetOwnPropertyDescriptor,
+  ObjectSetPrototypeOf,
   Symbol,
   TypeError,
   WeakRef,
@@ -146,7 +151,15 @@ let entangle: (port1: MessagePort, port2: MessagePort) => void;
 // port, primitives and undefined included, is an illegal invocation.
 let requirePort: (receiver: unknown) => void;
 
-class MessagePort extends EventTarget {
+// This module loads on first use, when user code may already have replaced
+// EventTarget.prototype, which `extends EventTarget` would read. MessagePort
+// is defined over this stand-in instead, whose `prototype` is the one the
+// bootstrap captured, and then inherits from EventTarget itself, which is
+// what super() calls: it looks the parent constructor up when it runs.
+function EventTargetHeritage(): void {}
+EventTargetHeritage.prototype = EventTargetPrototype;
+
+class MessagePort extends (EventTargetHeritage as unknown as typeof EventTarget) {
   #state: PortState = 'pending';
   #pending: unknown[] = [];
   #peer: WeakRef<MessagePort> | undefined = undefined;
@@ -312,6 +325,7 @@ class MessagePort extends EventTarget {
     }
   }
 }
+ObjectSetPrototypeOf(MessagePort, EventTarget);
 
 class MessageChannel {
   constructor() {

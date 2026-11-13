@@ -30,6 +30,16 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- `main.ts` defines `MessageChannel` and `MessagePort` (`messagechannel/`)
+  under `expose_global_message_channel`, as lazy data properties
+  (`utils.defineLazyDataProperty()`): `messagechannel/messagechannel` loads
+  on first use, through them or through `cloudflare-internal:messagechannel`
+  (`requireBootstrapExport()` in `per-isolate-bootstrap.h`), which
+  `node:worker_threads` uses. Use the same for any other global few Workers
+  need. A module loaded on first use runs after user code, so its top level
+  must not read what user code can change, such as a constructor's
+  `prototype`, which `extends` reads; see `EventTargetHeritage` in
+  `messagechannel/messagechannel.ts`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which

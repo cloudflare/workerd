@@ -8,7 +8,9 @@ the C++ EventTarget through the seam in
 `src/per_isolate/events/event-target-internals.ts` and clone messages with
 the runtime's serializer. `cloudflare-internal:messagechannel`
 (`src/workerd/api/messagechannel.h`) hands the same classes to
-`node:worker_threads`.
+`node:worker_threads`. The bootstrap loads the implementation on first use;
+`src/workerd/api/messagechannel-bootstrap-test.c++` pins when, which
+JavaScript cannot see.
 
 ## Interface
 

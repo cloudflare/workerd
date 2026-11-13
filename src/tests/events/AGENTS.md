@@ -50,6 +50,8 @@ tested in `src/workerd/api/event-target-bootstrap-test.c++`.
 
 - `src/workerd/api/tests/messageport-postmessage-uaf-test.js`: a security
   regression single, deliberately not merged into the suite.
+- `src/workerd/api/messagechannel-bootstrap-test.c++`: when the bootstrap
+  loads MessageChannel and MessagePort, which only C++ can observe.
 - `messagePortLegacyRedispatch` and `eventSourceLegacyError` in
   `src/workerd/api/tests/legacy-dispatch-exceptions-test.js`, which pins
   the legacy dispatch policy across several APIs at once.

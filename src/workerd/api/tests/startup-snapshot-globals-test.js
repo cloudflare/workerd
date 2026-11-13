@@ -4,11 +4,12 @@
 
 // Top-level code that touches what V8 adds to a context only when it is not building a startup
 // snapshot: Error.stackTraceLimit, WebAssembly, SharedArrayBuffer, the Iterator helpers behind
-// shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h). One service per case: MODE selects the
-// case's top-level behaviour, and each case reports what its Worker sees at request time. The
-// runner asserts the reports. Under the startup-snapshot autogate every service here goes through
-// the zygote; without it they are plain Workers and the same assertions hold with snapshotUsed
-// false.
+// shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h), and the globals the runtime
+// defines in ways a snapshot must carry: process and Buffer, and the lazy MessageChannel and
+// MessagePort. One service per case: MODE selects the case's top-level behaviour, and each case
+// reports what its Worker sees at request time. The runner asserts the reports. Under the
+// startup-snapshot autogate every service here goes through the zygote; without it they are plain
+// Workers and the same assertions hold with snapshotUsed false.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 import { env } from 'cloudflare:workers';
@@ -130,6 +131,13 @@ switch (MODE) {
   case 'process-stdout':
     topLevel.stdoutWritable = typeof process.stdout.write;
     break;
+  // The MessageChannel and MessagePort globals are lazy data properties, which load their module
+  // when first read (src/per_isolate/main.ts). Left unread, they are still lazy in the snapshot.
+  case 'message-channel':
+    break;
+  case 'message-channel-read':
+    topLevel.messageChannelType = typeof MessageChannel;
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -187,9 +195,42 @@ const NATIVE_TYPES = {
   join: 'function',
 };
 
-async function fetch() {
-  return Response.json(report());
+// The classes the globals hold must be the restored context's: the ones node:worker_threads gets
+// from cloudflare-internal:messagechannel, extending its EventTarget.
+async function reportMessageChannel() {
+  const workerThreads = await import('node:worker_threads');
+  const { port1, port2 } = new MessageChannel();
+  const received = new Promise((resolve) => {
+    port2.onmessage = (event) => resolve(event.data);
+  });
+  port1.postMessage('ping');
+  const data = await received;
+  port1.close();
+  port2.close();
+  return {
+    sameAsWorkerThreads:
+      MessageChannel === workerThreads.MessageChannel &&
+      MessagePort === workerThreads.MessagePort,
+    extendsEventTarget:
+      Object.getPrototypeOf(MessagePort) === EventTarget &&
+      port1 instanceof EventTarget,
+    received: data,
+  };
 }
+
+async function fetch() {
+  const r = report();
+  if (MODE.startsWith('message-channel')) {
+    r.messageChannel = await reportMessageChannel();
+  }
+  return Response.json(r);
+}
+
+const MESSAGE_CHANNEL_WORKS = {
+  sameAsWorkerThreads: true,
+  extendsEventTarget: true,
+  received: 'ping',
+};
 
 async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
@@ -243,6 +284,13 @@ async function test(ctrl, env) {
     // transferable; process-stdout below shows what touching one costs.
     'process-env'(r) {
       strictEqual(r.processEnv, 'yes');
+    },
+    'message-channel'(r) {
+      deepStrictEqual(r.messageChannel, MESSAGE_CHANNEL_WORKS);
+    },
+    'message-channel-read'(r) {
+      strictEqual(r.topLevel.messageChannelType, 'function');
+      deepStrictEqual(r.messageChannel, MESSAGE_CHANNEL_WORKS);
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top

@@ -30,6 +30,17 @@ const nodeCompatV2Flags :List(Text) = [
   "unsafe_module",
 ];
 
+# The variants' oldest compatibility date predates expose_global_message_channel. The case compares
+# the globals with what node:worker_threads hands out.
+const messageChannelFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+  "expose_global_message_channel",
+  "enable_nodejs_worker_threads_module",
+];
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "runner",
@@ -63,6 +74,8 @@ const unitTests :Workerd.Config = (
           (name = "buffer-assign", service = "buffer-assign"),
           (name = "process-env", service = "process-env"),
           (name = "process-stdout", service = "process-stdout"),
+          (name = "message-channel", service = "message-channel"),
+          (name = "message-channel-read", service = "message-channel-read"),
         ],
       )
     ),
@@ -288,6 +301,24 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .nodeCompatV2Flags,
         bindings = [
           (name = "MODE", json = "\"process-stdout\""),
+        ],
+      )
+    ),
+    ( name = "message-channel",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .messageChannelFlags,
+        bindings = [
+          (name = "MODE", json = "\"message-channel\""),
+        ],
+      )
+    ),
+    ( name = "message-channel-read",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .messageChannelFlags,
+        bindings = [
+          (name = "MODE", json = "\"message-channel-read\""),
         ],
       )
     ),

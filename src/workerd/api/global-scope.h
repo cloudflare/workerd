@@ -1031,7 +1031,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ErrorEvent);
 
     // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // defines MessageChannel and MessagePort; the TypeScript override below declares them.
+    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
+    // declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);

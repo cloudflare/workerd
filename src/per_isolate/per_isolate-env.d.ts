@@ -177,6 +177,16 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // Defines key on target as a writable, configurable data property,
+  // enumerable if enumerable is true, whose value is the key export of the
+  // bootstrap module specifier, required when the property is first read (V8's
+  // lazy data property). A read that throws leaves it lazy.
+  defineLazyDataProperty(
+    target: object,
+    key: string | symbol,
+    specifier: string,
+    enumerable: boolean
+  ): void;
   // The request-bound I/O handle (api/request-io.h), bound to the current
   // request, or undefined outside of one.
   createRequestIo(): RequestIo | undefined;
