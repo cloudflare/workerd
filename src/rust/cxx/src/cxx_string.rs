@@ -334,7 +334,10 @@ impl StackString {
     /// # Safety
     /// The storage must not hold a string yet, and the returned reference must not be used
     /// once the string is destroyed.
-    #[allow(clippy::mut_from_ref)]
+    #[expect(
+        clippy::mut_from_ref,
+        reason = "the storage is interior-mutable, and the caller answers for its uniqueness"
+    )]
     pub unsafe fn init(&self, value: impl AsRef<[u8]>) -> Pin<&mut CxxString> {
         let value = value.as_ref();
         // Safety: the bridge representation and ownership invariants satisfy this operation.

@@ -81,11 +81,11 @@ fn test_initializer_returns_early() {
 #[test]
 fn test_initializer_panics() {
     #[inline(never)]
-    #[allow(unused_variables)]
-    fn init() {
-        let_cxx_string!(s = None::<&[u8]>.unwrap());
+    fn len(value: Option<&[u8]>) -> usize {
+        let_cxx_string!(s = value.unwrap());
+        s.len()
     }
 
     dirty_stack();
-    assert!(panic::catch_unwind(init).is_err());
+    assert!(panic::catch_unwind(|| len(None)).is_err());
 }
