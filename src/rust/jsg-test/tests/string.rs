@@ -238,6 +238,56 @@ fn string_write_one_byte_into_buffer() {
 }
 
 #[test]
+fn string_write_null_terminate() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        let mut wide = vec![1u16; 3];
+        s.write(lock, 0, 2, &mut wide, WriteFlags::NullTerminate);
+        assert_eq!(wide, vec!['h' as u16, 'i' as u16, 0]);
+        let mut narrow = vec![1u8; 3];
+        s.write_one_byte(lock, 0, 2, &mut narrow, WriteFlags::NullTerminate);
+        assert_eq!(narrow, b"hi\0");
+        Ok(())
+    });
+}
+
+/// The terminator needs a buffer element of its own, and the range must lie within the string.
+#[test]
+fn string_write_out_of_bounds_panics() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        let cases: [(u32, u32, usize, WriteFlags); 5] = [
+            (0, 2, 2, WriteFlags::NullTerminate),
+            (0, 2, 2, WriteFlags::NullTerminateAndReplaceInvalidUtf8),
+            (0, 0, 0, WriteFlags::NullTerminate),
+            (1, 2, 2, WriteFlags::None),
+            (u32::MAX, 2, 2, WriteFlags::None),
+        ];
+        for (offset, length, buffer_len, flags) in cases {
+            let mut wide = vec![0u16; buffer_len];
+            let wide_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write(lock, offset, length, &mut wide, flags);
+            }));
+            assert!(
+                wide_result.is_err(),
+                "write({offset}, {length}) into {buffer_len} with {flags:?} must panic"
+            );
+            let mut narrow = vec![0u8; buffer_len];
+            let narrow_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write_one_byte(lock, offset, length, &mut narrow, flags);
+            }));
+            assert!(
+                narrow_result.is_err(),
+                "write_one_byte({offset}, {length}) into {buffer_len} with {flags:?} must panic"
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
 fn string_write_utf8_into_buffer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {

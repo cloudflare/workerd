@@ -3382,6 +3382,10 @@ impl WriteFlags {
     pub fn bits(self) -> i32 {
         self as i32
     }
+
+    fn null_terminates(self) -> bool {
+        self.bits() & Self::NullTerminate.bits() != 0
+    }
 }
 
 impl std::ops::BitOr for WriteFlags {
@@ -3487,7 +3491,8 @@ impl<'s> Local<'s, String> {
     ///
     /// # Panics
     ///
-    /// Panics if `buffer.len() < length`.
+    /// Panics if `offset + length` exceeds the string's length, or if `buffer` has fewer than
+    /// `length` elements, plus one when `flags` includes [`WriteFlags::NullTerminate`].
     ///
     /// Corresponds to `v8::String::Write()`.
     pub fn write(
@@ -3498,11 +3503,9 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u16],
         flags: WriteFlags,
     ) {
-        assert!(
-            buffer.len() >= length as usize,
-            "buffer too small for requested length"
-        );
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        self.assert_write_range(offset, length, buffer.len(), flags);
+        // SAFETY: Lock guarantees the isolate is locked; the range lies within the string and
+        // buffer has room for it and any terminator.
         unsafe {
             ffi::local_string_write_v2(
                 lock.isolate().as_ffi(),
@@ -3522,7 +3525,8 @@ impl<'s> Local<'s, String> {
     ///
     /// # Panics
     ///
-    /// Panics if `buffer.len() < length`.
+    /// Panics if `offset + length` exceeds the string's length, or if `buffer` has fewer than
+    /// `length` elements, plus one when `flags` includes [`WriteFlags::NullTerminate`].
     ///
     /// Corresponds to `v8::String::WriteOneByte()`.
     pub fn write_one_byte(
@@ -3533,11 +3537,9 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u8],
         flags: WriteFlags,
     ) {
-        assert!(
-            buffer.len() >= length as usize,
-            "buffer too small for requested length"
-        );
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        self.assert_write_range(offset, length, buffer.len(), flags);
+        // SAFETY: Lock guarantees the isolate is locked; the range lies within the string and
+        // buffer has room for it and any terminator.
         unsafe {
             ffi::local_string_write_one_byte_v2(
                 lock.isolate().as_ffi(),
@@ -3548,6 +3550,20 @@ impl<'s> Local<'s, String> {
                 flags.bits(),
             );
         }
+    }
+
+    // V8 checks neither bound in release builds.
+    fn assert_write_range(self, offset: u32, length: u32, buffer_len: usize, flags: WriteFlags) {
+        assert!(
+            offset
+                .checked_add(length)
+                .is_some_and(|end| i64::from(end) <= i64::from(self.length())),
+            "offset + length exceeds string length"
+        );
+        assert!(
+            buffer_len >= length as usize + usize::from(flags.null_terminates()),
+            "buffer too small for requested length"
+        );
     }
 
     /// Writes the string as UTF-8 into `buffer`.
