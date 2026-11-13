@@ -1,13 +1,15 @@
 using Workerd = import "/workerd/workerd.capnp";
 using MessageChannelModules = import "messagechannel-modules.capnp";
 
-# Unflagged legacy cell, TypeScript implementation, with the same modules
-# and flags as messagechannel-cpp-legacy.wd-test: the TypeScript
-# implementation honors every flag that cell turns off.
+# Unflagged legacy cell: without expose_global_message_channel the classes
+# are reached through node:worker_threads, without set_tostring_tag they
+# are untagged, and without spec_compliant_dispatch_exceptions a listener
+# exception is redispatched as a 'message'. See legacy-*.js. The three flags
+# are pinned off by their disable names, so the cell holds at every date.
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "events-messagechannel-ts-legacy",
+    ( name = "events-messagechannel-legacy",
       worker = (
         modules = MessageChannelModules.legacyModules,
         compatibilityFlags = [
@@ -17,9 +19,7 @@ const unitTests :Workerd.Config = (
           "do_not_set_tostring_tag",
           "no_spec_compliant_dispatch_exceptions",
         ],
-        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
-  autogates = ["workerd-autogate-ts-message-channel"],
 );

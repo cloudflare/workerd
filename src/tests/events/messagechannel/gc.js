@@ -3,13 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Messages queued on a pending port survive garbage collection, including
-// one run while start() is delivering them. (In C++ the queue is a list of
-// JsRefs the port traces, which start() must make strong again as it moves
-// them into its untraced continuation.)
+// one run while start() is delivering them.
 //
-// Not pinned: what happens when one port of a pair is collected. Both
-// implementations then close the other without a 'close' event, at a time
-// that depends on the collector (divergence #4 in AGENTS.md).
+// Not pinned: what happens when one port of a pair is collected. The other
+// then closes without a 'close' event, at a time that depends on the
+// collector.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 

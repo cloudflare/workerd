@@ -1,46 +1,59 @@
 'use strict';
 
-// MessageChannel and MessagePort, under the TS_MESSAGE_CHANNEL autogate. They
-// replace the C++ classes in api/messagechannel.h, whose header lists where
-// both depart from the HTML standard (no transfer lists, no serialization of
-// ports, the extra messageerror event, a queue that follows every 'message'
-// listener). This implementation keeps every one of those behaviors; only
-// the differences below are its own. src/tests/events/messagechannel/
-// runs one suite against both implementations, and its AGENTS.md records
-// where each difference is pinned.
+// MessageChannel and MessagePort, an approximation of the HTML standard's
+// that departs from it as follows:
 //
-// DIFFERENCES FROM THE C++ IMPLEMENTATION
+// - Transfer lists are not supported. postMessage() converts and reads its
+//   options but throws for a non-empty list, and a port cannot be
+//   serialized, so it cannot be sent anywhere.
+// - A message that cannot be serialized makes postMessage() throw, rather
+//   than making the receiving port dispatch 'messageerror'. Instead, a
+//   throwing 'message' listener, whose exception is reported per spec,
+//   makes the port additionally dispatch a 'messageerror' event carrying
+//   the exception as its data, which the spec does not do.
+// - The port message queue follows the port's 'message' listeners, as in
+//   Node.js. While the port has any, whether assigned to onmessage or added
+//   with addEventListener() (which per spec does not enable the queue),
+//   messages are delivered; once the last is removed, they are queued until
+//   another arrives or start() is called. Queued messages are held as JS
+//   values, with no memory accounting of their own, and do not keep their
+//   port from being collected.
+// - close() fires 'close' on both ports, as Node.js does; the spec removed
+//   that event. A port whose peer is collected closes without one, when it
+//   next looks for the peer (posting, closing, starting, or a change in its
+//   'message' listeners), at a time that depends on the collector.
+// - Unlike in Node.js, an open port keeps nothing running, though closing
+//   ports when done with them is still best.
 //
-// - MessagePort's constructor inherits from EventTarget's, as WebIDL
-//   requires (C++ leaves its [[Prototype]] at Function.prototype), and both
-//   constructors' `prototype` is non-writable even without
-//   immutable_api_prototypes. Calling either without `new` throws the
-//   language's TypeError rather than JSG's.
-// - A port whose peer is garbage collected is closed when it next looks for
-//   the peer (posting, closing, starting, or a change in its 'message'
-//   listeners), rather than when the peer's destructor runs. Either way the
-//   port closes without a 'close' event, at a time that depends on the
-//   collector, and no further message can reach it.
-// - postMessage() always deserializes the message, even when the peer turns
-//   out to be gone, since the peer is looked for only after serialization,
-//   which runs user code that may close a port.
-// - An array passed as postMessage()'s options is recognized by
-//   Array.isArray(), which sees through a proxy; JSG does not.
+// Some webmessaging WPTs fail because of these, and many more need windows,
+// workers or BroadcastChannel; src/wpt/webmessaging-test.ts records which
+// run, and why the others do not pass.
+//
+// Otherwise the classes look as JSG's do (see the end of this file), except
+// that MessagePort's constructor inherits from EventTarget's, as WebIDL
+// requires, where a JSG constructor's [[Prototype]] is Function.prototype;
+// both constructors' `prototype` is non-writable even without
+// immutable_api_prototypes; calling either without `new` throws the
+// language's TypeError rather than JSG's; and an array passed as
+// postMessage()'s options is recognized by Array.isArray(), which sees
+// through a proxy, where JSG's conversion does not.
+//
+// src/tests/events/messagechannel/ specifies the behavior, and its AGENTS.md
+// indexes which test pins what.
 //
 // HOW IT FITS TOGETHER
 //
 // A port is a real EventTarget, extending the C++ one through
 // events/event-target-internals. Its listener-count hook on 'message' starts
 // the port when the first listener arrives and returns it to queueing when
-// the last leaves, as listenerCountChanged() does in C++. Messages are cloned
-// with utils.cloneMessageData() and dispatched from reactions scheduled with
-// utils.queueReaction(), as C++ schedules them on js.resolvedPromise(), so a
-// throw that escapes a delivery is an unhandled rejection in both. Each port
-// is branded "workerd:MessagePort" so that C++ accepts it as a MessageEvent's
-// source or one of its ports.
+// the last leaves. Messages are cloned with utils.cloneMessageData() and
+// dispatched from reactions scheduled with utils.queueReaction(), so a throw
+// that escapes a delivery is an unhandled rejection. Each port is branded
+// "workerd:MessagePort" so that C++ accepts it as a MessageEvent's source or
+// one of its ports.
 //
-// The peer is held weakly, as C++ holds it, so dropping one port of a pair
-// lets it be collected; the MessageChannel holds both strongly.
+// The peer is held weakly, so dropping one port of a pair lets it be
+// collected; the MessageChannel holds both strongly.
 
 import type {
   EventTargetInternals,
@@ -75,7 +88,8 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 
-// JSG's messages, so that misuse reads the same as with the C++ classes.
+// JSG's messages, so that misuse reads as it does with the runtime's C++
+// classes.
 const kIllegalInvocation =
   'Illegal invocation: function called with incorrect `this` reference. ' +
   'See https://developers.cloudflare.com/workers/observability/errors/' +
@@ -106,9 +120,9 @@ function transferListLength(list: unknown[]): number {
   return length;
 }
 
-// Converts postMessage()'s second argument, as JSG converts the C++
-// method's `jsg::Optional<kj::OneOf<TransferList, PostMessageOptions>>`,
-// and reports whether it names anything to transfer.
+// Converts postMessage()'s second argument, an optional
+// `(sequence<any> or PostMessageOptions)`, as JSG converts such a union, and
+// reports whether it names anything to transfer.
 function hasTransfer(options: unknown): boolean {
   if (options === undefined || options === null) return false;
   if (ArrayIsArray(options)) {
@@ -196,8 +210,7 @@ class MessagePort extends EventTarget {
   }
 
   // The peer, or undefined once this port is closed. A peer that has been
-  // collected closes this port, without a 'close' event, as the C++ peer's
-  // destructor does.
+  // collected closes this port, without a 'close' event.
   #livePeer(): MessagePort | undefined {
     if (this.#peer === undefined) return undefined;
     const peer = WeakRefPrototypeDeref(this.#peer) as MessagePort | undefined;
@@ -215,8 +228,8 @@ class MessagePort extends EventTarget {
     const peer = this.#livePeer();
     if (this.#state === 'closed') return;
     this.#closeQuietly();
-    // The peer's 'close' event fires first, as C++ closes the peer through
-    // its public close(); a throw from its listeners ends this close().
+    // The peer's 'close' event fires first; a throw from its listeners ends
+    // this close().
     if (peer !== undefined) peer.#close();
     dispatchEvent(this, createTrustedEvent('close'), 'propagate');
   }

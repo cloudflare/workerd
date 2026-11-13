@@ -1,9 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 using MessageChannelModules = import "messagechannel-modules.capnp";
 
-# Runs the MessageChannel suite against the C++ implementation
-# (api/messagechannel.h); messagechannel-ts.wd-test runs the identical
-# modules against the TypeScript one.
+# Runs the MessageChannel suite (src/per_isolate/messagechannel/).
 #
 # No compatibilityDate: the wd_test variants supply the date axis and the
 # tests must hold at both extremes. Date-gated semantics are pinned by flag:
@@ -17,7 +15,7 @@ using MessageChannelModules = import "messagechannel-modules.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "events-messagechannel-cpp",
+    ( name = "events-messagechannel",
       worker = (
         modules = MessageChannelModules.modules,
         compatibilityFlags = [
@@ -27,7 +25,6 @@ const unitTests :Workerd.Config = (
           "set_tostring_tag",
           "spec_compliant_dispatch_exceptions",
         ],
-        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],
