@@ -9,8 +9,8 @@ namespace workerd::api {
 // cloudflare-internal:messagechannel, through which built-in modules like node:worker_threads
 // reach MessageChannel and MessagePort whether or not the expose_global_message_channel compat
 // flag makes them globals. Both classes are implemented in TypeScript
-// (src/per_isolate/messagechannel/); the per-isolate bootstrap loads them in every context, and
-// this module hands out the bootstrap's exports.
+// (src/per_isolate/messagechannel/). The bootstrap module that defines them is loaded on first
+// use, by this module's properties or the globals, and both hand out its exports.
 class MessageChannelModule final: public jsg::Object {
  public:
   MessageChannelModule() = default;

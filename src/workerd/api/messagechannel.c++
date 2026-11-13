@@ -7,9 +7,8 @@ namespace workerd::api {
 namespace {
 
 jsg::JsValue getBootstrapClass(jsg::Lock& js, kj::StringPtr name) {
-  // main.ts requires the module in every context.
-  auto exports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "messagechannel/messagechannel"_kj),
-      "the per-isolate bootstrap did not load messagechannel/messagechannel");
+  // Loaded on first use, here or through the globals main.ts defines.
+  auto exports = requireBootstrapExport(js, "messagechannel/messagechannel"_kj);
   return KJ_ASSERT_NONNULL(exports.tryCast<jsg::JsObject>()).get(js, name);
 }
 

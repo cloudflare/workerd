@@ -327,52 +327,25 @@ if (compatFlags['typescript_implemented_streams']) {
   }
 }
 
-// MessageChannel and MessagePort are loaded whether or not they become
-// globals: cloudflare-internal:messagechannel (used by node:worker_threads)
-// reads them from this module's exports (MessageChannelModule in
-// api/messagechannel.h).
-const {
-  MessageChannel,
-  MessagePort,
-} = require('messagechannel/messagechannel');
+// MessageChannel and MessagePort are loaded on first use, since few Workers
+// use them: through the globals defined here, or through
+// cloudflare-internal:messagechannel (MessageChannelModule in
+// api/messagechannel.h), which node:worker_threads uses. Whichever comes first
+// loads the module; the other finds it in the require() cache.
 if (compatFlags['expose_global_message_channel']) {
-  // Installed as JSG_NESTED_TYPE installs a global class: always on the
-  // global scope's prototype, with all three attributes true, and under
+  const { defineLazyDataProperty } = utils;
+  const specifier = 'messagechannel/messagechannel';
+  // Defined as JSG_NESTED_TYPE defines a global class: always on the global
+  // scope's prototype, with all three attributes true, and under
   // spec_compliant_property_attributes also as own properties of the global,
-  // non-enumerable per Web IDL.
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-    MessageChannel: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: MessageChannel,
-    },
-    MessagePort: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: MessagePort,
-    },
-  });
+  // non-enumerable per Web IDL. Each is a lazy data property, an ordinary data
+  // property once read.
+  const globalPrototype = ObjectGetPrototypeOf(globalThis) as object;
+  defineLazyDataProperty(globalPrototype, 'MessageChannel', specifier, true);
+  defineLazyDataProperty(globalPrototype, 'MessagePort', specifier, true);
   if (compatFlags['spec_compliant_property_attributes']) {
-    ObjectDefineProperties(globalThis, {
-      MessageChannel: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: MessageChannel,
-      },
-      MessagePort: {
-        __proto__: null,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: MessagePort,
-      },
-    });
+    defineLazyDataProperty(globalThis, 'MessageChannel', specifier, false);
+    defineLazyDataProperty(globalThis, 'MessagePort', specifier, false);
   }
 }
 
