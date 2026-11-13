@@ -272,9 +272,9 @@ kj::Promise<void> ReplConfigServer::closeServer() {
     // channel would keep the factory alive.
     auto reason = kj::str("The server for ", source.path, " was closed.");
     s->revoke(toRust(reason));
-    auto closing = close_in_process_server(kj::mv(s));
+    auto closed = close_in_process_server(kj::mv(s));
     server = kj::none;
-    co_await closing;
+    co_await closed;
   }
 }
 
