@@ -127,7 +127,7 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool tailWorkers = true;
     // Whether Durable Object storage on disk is synced (see SqliteDatabase::VfsOptions::sync).
     // `workerd test` turns this off, since a test's storage need not survive a crash of the
-    // machine.
+    // machine. A cluster's namespaces never sync (see `ActorStorage::Impl::vfs`).
     bool syncStorage = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;

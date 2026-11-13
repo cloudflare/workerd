@@ -599,11 +599,6 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
-        if self.cluster().is_some() {
-            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
-            // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
-        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())

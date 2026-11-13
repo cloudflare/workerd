@@ -1330,6 +1330,37 @@ test('cluster: Durable Objects from before cluster mode are refused', async () =
   });
 });
 
+test('cluster: a node starts over an unreadable alarm database', async () => {
+  // An instance does not sync its disk, so a crash of the machine can leave
+  // the alarm scheduler's database torn; it holds only an earlier process's
+  // alarms, which peers adopt.
+  await withCluster(1, async ({ bucket }) => {
+    const local = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+    const dir = join(local, 'counter-test-namespace');
+    await mkdir(dir);
+    await writeFile(join(dir, '.cluster'), '');
+    await writeFile(join(dir, 'metadata.sqlite'), randomBytes(8192));
+    await writeFile(join(dir, 'metadata.sqlite-wal'), randomBytes(8192));
+    const node = new ClusterNode({
+      binary: env.WORKERD_BINARY,
+      config: env.WD_TEST_CONFIG,
+      configName: 'config',
+      localPath: local,
+      s3Port: bucket.port,
+      nodeId: 'restarted',
+    });
+    try {
+      await node.start();
+      const res = await fetchJson(node.httpPort, '/increment?name=torn');
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.strictEqual(res.body.count, 1);
+    } finally {
+      await node.stop({ signal: 'SIGKILL', timeoutMs: 5000 });
+      await rm(local, { recursive: true, force: true });
+    }
+  });
+});
+
 test('cluster: each running instance holds a lease record', async () => {
   await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
     const records = await bucket.nodes();

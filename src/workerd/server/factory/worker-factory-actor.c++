@@ -174,19 +174,34 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
       sqliteDirectory(actors->replicated()
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
-      vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
+      // A cluster's files are not synced: a sync guards against a crash of the machine, and none
+      // of them is read after one. A commit is acknowledged once the bucket holds it, and an
+      // object reuses its local files only when this process evicted it and wakes it again;
+      // every other open clears them and restores the bucket's copy. The alarm scheduler's
+      // database is removed at startup, below. A sync would stall the thread that renews this
+      // instance's lease, for seconds on a busy disk.
+      vfs(*sqliteDirectory,
+          {.sync = factory.getImpl().options->syncStorage && !actors->replicated()}),
       uniqueKey(kj::mv(uniqueKey)),
-      alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
-          factory.getImpl().timer,
-          vfs,
-          kj::Path({"metadata.sqlite"}),
-          [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
-            // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
-            auto id = ActorIdFactoryImpl(this->uniqueKey)
-                          .idFromStringNamed(kj::str(actor.actorId),
-                              actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
-            return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
-          })) {}
+      alarmScheduler([&] {
+        if (actors->replicated()) {
+          // An earlier process's alarms: its objects may live elsewhere now, and peers adopt its
+          // alarms from the bucket. The database starts empty rather than being opened and
+          // cleared, since unsynced it may not have survived a crash of the machine.
+          for (const auto& suffix: {""_kj, "-wal"_kj, "-shm"_kj}) {
+            vfsDirectory->tryRemove(kj::Path({kj::str("metadata.sqlite", suffix)}));
+          }
+        }
+        return kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(), factory.getImpl().timer,
+            vfs, kj::Path({"metadata.sqlite"}),
+            [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
+          // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
+          auto id = ActorIdFactoryImpl(this->uniqueKey)
+                        .idFromStringNamed(kj::str(actor.actorId),
+                            actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
+          return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
+        });
+      }()) {}
 
 kj::Maybe<kj::Own<FacetTreeIndex>> ActorStorage::Impl::getFacetTreeIndexIfNotEmpty(
     const kj::Directory& dir, kj::StringPtr rootKey) {
@@ -252,7 +267,7 @@ void ActorStorage::Impl::cloneFacet(const kj::Directory& dir,
   // A cluster captures a database's commits from its WAL's start, so the copy's WAL is folded
   // into it, out of the cluster's sight.
   if (actors->replicated()) {
-    SqliteDatabase::Vfs vfs(dir);
+    SqliteDatabase::Vfs vfs(dir, {.sync = false});  // Unsynced, as `Impl::vfs` explains.
     SqliteDatabase(vfs, getSqlitePath(rootKey, dstId), kj::WriteMode::MODIFY)
         .run("PRAGMA wal_checkpoint(TRUNCATE);");
     dir.tryRemove(getSqlitePath(rootKey, dstId, "-wal"));

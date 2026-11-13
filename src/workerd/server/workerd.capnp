@@ -110,7 +110,11 @@ struct ClusterConfig {
   # bumps its ownership epoch. Instances need no shared filesystem: `durableObjectStorage.localDisk`
   # is each instance's own disk. Durable Objects stored in memory stay local to each instance. The
   # bucket's copy of an object replaces the instance's, so a `localDisk` already holding Durable
-  # Objects from before cluster mode is refused at startup; they are not imported.
+  # Objects from before cluster mode is refused at startup; they are not imported. An instance does
+  # not sync its Durable Objects' files to its disk, since it never reads them after a crash of the
+  # machine: a commit is acknowledged once the bucket holds it, an object reuses its files only
+  # where the same process evicted it, and the alarm scheduler's database starts empty each time
+  # the instance starts.
   #
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
