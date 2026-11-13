@@ -230,6 +230,12 @@ build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
+# Enable Rust pipelining so dependent crates can start building without needing to fully compile a
+# crate resulting in a shorter critical path. This should be a bit faster and reliable once
+# https://github.com/bazelbuild/rules_rust/issues/3977 is implemented. Appears to be unstable on
+# Windows, perhaps due to missing sandbox support.
+build:unix --@rules_rust//rust/settings:pipelined_compilation=True
+
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
