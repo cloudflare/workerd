@@ -112,7 +112,7 @@ fn check_type(cx: &mut Check, ty: &Type) {
         Type::Array(array) => check_type_array(cx, array),
         Type::Fn(ty) => check_type_fn(cx, ty),
         Type::SliceRef(ty) => check_type_slice_ref(cx, ty),
-        Type::Str(_) | Type::Void(_) | Type::KjDate(_) => {}
+        Type::Str(_) | Type::Void(_) | Type::KjDate(_) | Type::KjException(_) => {}
         Type::Future(ty) => check_type_future(cx, ty),
     }
 }
@@ -371,7 +371,23 @@ fn check_type_cxx_vector(cx: &mut Check, ptr: &Ty1) {
     cx.error(ptr, "unsupported vector element type");
 }
 
+// A `KjException` crosses the bridge as an owned `kj::Exception*` that the receiving side takes
+// over, so it can only be a function's argument or return value, by value.
+const KJ_EXCEPTION_BY_VALUE_ONLY: &str =
+    "KjException is only supported by value, as a function argument or return value";
+
+fn reject_nested_kj_exception(cx: &mut Check, inner: &Type, outer: impl ToTokens) {
+    if let Type::KjException(_) = inner {
+        cx.error(outer, KJ_EXCEPTION_BY_VALUE_ONLY);
+    }
+}
+
 fn check_type_ref(cx: &mut Check, ty: &Ref) {
+    if let Type::KjException(_) = ty.inner {
+        cx.error(ty, KJ_EXCEPTION_BY_VALUE_ONLY);
+        return;
+    }
+
     if ty.mutable
         && !ty.pinned
         && let Some(requires_pin) = match &ty.inner {
@@ -404,6 +420,11 @@ fn check_type_ref(cx: &mut Check, ty: &Ref) {
 }
 
 fn check_type_ptr(cx: &mut Check, ty: &Ptr) {
+    if let Type::KjException(_) = ty.inner {
+        cx.error(ty, KJ_EXCEPTION_BY_VALUE_ONLY);
+        return;
+    }
+
     match ty.inner {
         Type::Fn(_) | Type::Void(_) => {}
         Type::Ref(_) => {
@@ -417,6 +438,11 @@ fn check_type_ptr(cx: &mut Check, ty: &Ptr) {
 }
 
 fn check_type_slice_ref(cx: &mut Check, ty: &SliceRef) {
+    if let Type::KjException(_) = ty.inner {
+        cx.error(ty, KJ_EXCEPTION_BY_VALUE_ONLY);
+        return;
+    }
+
     let supported = !is_unsized(cx, &ty.inner)
         || match &ty.inner {
             Type::Ident(ident) => {
@@ -438,6 +464,11 @@ fn check_type_slice_ref(cx: &mut Check, ty: &SliceRef) {
 }
 
 fn check_type_array(cx: &mut Check, ty: &Array) {
+    if let Type::KjException(_) = ty.inner {
+        cx.error(ty, KJ_EXCEPTION_BY_VALUE_ONLY);
+        return;
+    }
+
     let supported = !is_unsized(cx, &ty.inner);
 
     if !supported {
@@ -450,7 +481,12 @@ fn check_type_fn(cx: &mut Check, ty: &Signature) {
         cx.error(ty, "function pointer returning Result is not supported yet");
     }
 
+    if let Some(ret) = &ty.ret {
+        reject_nested_kj_exception(cx, ret, ret);
+    }
+
     for arg in &ty.args {
+        reject_nested_kj_exception(cx, &arg.ty, arg);
         if let Type::Ptr(_) = arg.ty
             && ty.unsafety.is_none()
         {
@@ -487,7 +523,9 @@ fn check_api_struct(cx: &mut Check, strct: &Struct) {
     }
 
     for field in &strct.fields {
-        if let Type::Fn(_) = field.ty {
+        if let Type::KjException(_) = field.ty {
+            cx.error(field, KJ_EXCEPTION_BY_VALUE_ONLY);
+        } else if let Type::Fn(_) = field.ty {
             cx.error(
                 field,
                 "function pointers in a struct field are not implemented yet",
@@ -780,6 +818,7 @@ fn check_reserved_name(cx: &mut Check, ident: &Ident) {
         || ident == "WeakPtr"
         || ident == "Vec"
         || ident == "CxxVector"
+        || ident == "KjException"
         || ident == "str"
         || Atom::from(ident).is_some()
     {
@@ -813,6 +852,7 @@ fn check_generics(cx: &mut Check, generics: &Generics) {
 }
 
 fn check_type_future(cx: &mut Check, f: &Future) {
+    reject_nested_kj_exception(cx, &f.output, &f.output);
     check_type(cx, &f.output);
 }
 
@@ -837,6 +877,7 @@ fn is_unsized(cx: &mut Check, ty: &Type) -> bool {
         | Type::Ptr(_)
         | Type::Str(_)
         | Type::KjDate(_)
+        | Type::KjException(_)
         | Type::SliceRef(_) => false,
         Type::Future(_) => false,
     }
@@ -914,6 +955,7 @@ fn describe(cx: &mut Check, ty: &Type) -> String {
         Type::WeakPtr(_) => "weak_ptr".to_owned(),
         Type::KjMaybe(_) => "kj::Maybe".to_owned(),
         Type::KjDate(_) => "kj::Date".to_owned(),
+        Type::KjException(_) => "kj::Exception".to_owned(),
         Type::Ref(_) => "reference".to_owned(),
         Type::Ptr(_) => "raw pointer".to_owned(),
         Type::Str(_) => "&str".to_owned(),

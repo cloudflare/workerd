@@ -57,10 +57,8 @@ kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> e
   };
 }
 
-void custom_event_failed(kj::Own<CustomEvent> event, ::rust::Box<Error> error) {
-  // error->raise() throws through the bridge's KjError -> kj::Exception conversion, so the
-  // exception passed to the event keeps the error's type, description, location and details.
-  event->failed(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { error->raise(); })));
+void custom_event_failed(kj::Own<CustomEvent> event, kj::Exception exception) {
+  event->failed(exception);
 }
 
 kj::Own<WorkerInterface> wrapper_into_kj(::rust::Box<Wrapper> wrapper) {

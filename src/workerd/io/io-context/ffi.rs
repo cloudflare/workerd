@@ -60,7 +60,7 @@ pub mod bridge {
         unsafe fn io_context_add_wait_until(id: u64, promise: Local) -> Result<bool>;
 
         fn io_context_check_current(id: u64) -> Result<()>;
-        fn io_context_abort(id: u64, reason: Box<AbortReason>) -> Result<()>;
+        fn io_context_abort(id: u64, reason: KjException) -> Result<()>;
         fn io_context_abort_without_reason(id: u64) -> Result<()>;
 
         // The `&[u8]` names, keys and literal values below are NUL-terminated strings with the
@@ -130,12 +130,6 @@ pub mod bridge {
         type IoCallback;
         type IoOwnedSlot;
 
-        /// Carries the exception `IoContext::abort()` aborts with to C++. C++ calls `raise()`,
-        /// which returns it as `Err`; the bridge throws it as a `kj::Exception` with the same
-        /// type, description, location and details, and C++ catches that exception.
-        type AbortReason;
-        fn raise(self: &AbortReason) -> Result<()>;
-
         async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>>;
         unsafe fn io_callback_run(
             isolate: usize,
@@ -170,17 +164,8 @@ pub fn abort<'s>(
         return Ok(bridge::io_context_abort_without_reason(id)?);
     };
     bridge::io_context_check_current(id)?;
-    let reason = AbortReason(lock.exception_to_kj(reason)?);
-    Ok(bridge::io_context_abort(id, Box::new(reason))?)
-}
-
-/// See `bridge::AbortReason`.
-pub struct AbortReason(cxx::KjError);
-
-impl AbortReason {
-    fn raise(&self) -> Result<(), cxx::KjError> {
-        Err(self.0.clone())
-    }
+    let reason = cxx::KjException::from(lock.exception_to_kj(reason)?);
+    Ok(bridge::io_context_abort(id, reason)?)
 }
 
 /// `Ok` if a shim that returns false when it leaves an exception pending returned true.

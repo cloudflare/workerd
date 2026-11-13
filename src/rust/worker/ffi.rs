@@ -101,12 +101,6 @@ pub mod bridge {
         )]
         fn new_promised_interface(start: KjOwn<WorkerPromise>) -> Box<Wrapper>;
 
-        /// Carries a `KjError` to C++. C++ calls `raise()`, which returns the error as `Err`;
-        /// the bridge throws it as a `kj::Exception` with the same type, description, location
-        /// and details, and C++ catches that exception.
-        type Error;
-        fn raise(self: &Error) -> Result<()>;
-
         async unsafe fn request<'a>(
             self: &'a mut Wrapper,
             method: HttpMethod,
@@ -229,9 +223,9 @@ pub mod bridge {
         -> Result<CustomEventResult>;
 
         /// Calls `event->failed(exception)` to tell an event why its target never ran it,
-        /// before the event is dropped. The exception is the full `kj::Exception` for `error`
-        /// (see `Error`). Returns `Result` because `failed()` is virtual and may throw.
-        fn custom_event_failed(event: KjOwn<CustomEvent>, error: Box<Error>) -> Result<()>;
+        /// before the event is dropped. Returns `Result` because `failed()` is virtual and may
+        /// throw.
+        fn custom_event_failed(event: KjOwn<CustomEvent>, exception: KjException) -> Result<()>;
 
         /// A `kj::Promise<kj::Own<WorkerInterface>>`: a worker that is still starting.
         type WorkerPromise;
@@ -265,22 +259,6 @@ fn new_promised_interface(start: KjOwn<bridge::WorkerPromise>) -> Box<Wrapper> {
     crate::Interface::into_ffi(crate::PromisedInterface::new(async move {
         Ok(bridge::worker_promise_await(start).await?)
     }))
-}
-
-/// See `bridge::Error`.
-pub struct Error {
-    error: cxx::KjError,
-}
-
-impl Error {
-    #[must_use]
-    pub fn new(error: cxx::KjError) -> Self {
-        Self { error }
-    }
-
-    fn raise(&self) -> Result<()> {
-        Err(self.error.clone())
-    }
 }
 
 impl Wrapper {

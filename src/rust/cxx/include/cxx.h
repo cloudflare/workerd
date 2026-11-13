@@ -108,6 +108,23 @@ struct Result final {
   }
 };
 
+// A `KjException` bridge argument or return value crosses the boundary as a `kj::Exception*`
+// allocated with `new`, which the receiving side owns (`cxx::KjException` on the Rust side).
+
+// Takes over an exception that Rust handed to C++, as the `kj::Exception` the C++ function
+// receives by value. Frees the heap copy at once, so the exception is destroyed with that value
+// whether or not the callee consumes it.
+inline kj::Exception takeException(kj::Exception *exception) noexcept {
+  kj::Exception result = kj::mv(*exception);
+  delete exception;
+  return result;
+}
+
+// Hands an exception to Rust, which takes over the returned pointer.
+inline kj::Exception *releaseException(kj::Exception &&exception) {
+  return new kj::Exception(kj::mv(exception));
+}
+
 }  // namespace repr
 
 #ifndef CXXBRIDGE1_RUST_STRING

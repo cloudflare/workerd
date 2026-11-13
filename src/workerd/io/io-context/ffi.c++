@@ -204,11 +204,8 @@ void io_context_check_current(uint64_t id) {
   currentWithId(id);
 }
 
-void io_context_abort(uint64_t id, ::rust::Box<AbortReason> reason) {
-  auto& context = currentWithId(id);
-  // reason->raise() throws through the bridge's KjError -> kj::Exception conversion, so the
-  // exception keeps the type, description, location and details Rust encoded.
-  context.abort(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { reason->raise(); })));
+void io_context_abort(uint64_t id, kj::Exception reason) {
+  currentWithId(id).abort(kj::mv(reason));
 }
 
 void io_context_abort_without_reason(uint64_t id) {

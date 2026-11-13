@@ -40,6 +40,18 @@ Generated bridges use KJ's exception model:
   signatures.
 - Rust `Result<T, E>` errors cross into C++ as `kj::Exception` values.
 - `cxx::KjError` allows Rust code to control the KJ exception type and description.
+- `KjException` in a bridge signature passes an exception as a value, in either direction: a
+  function can take one as an argument or return one, also as the value of a `Result` return
+  (`-> Result<KjException>`), and C++ sees a `kj::Exception` by value. On the Rust side it is
+  `cxx::KjException` (`cxx::KjException::from(kj_error)` builds one), which owns a heap
+  `kj::Exception`; ownership moves with the call, and the receiving side takes over the
+  exception before the callee runs. It keeps the type, description, file, line and every detail.
+  It is rejected anywhere else: behind a reference or pointer, in a slice, array, `Vec`, `Box`,
+  `KjMaybe` or other container, in a struct field or a function pointer, and as the output of an
+  `async fn`.
+- A Rust function or future whose error is a `cxx::KjException` (`Result<T, cxx::KjException>`
+  in its Rust signature) fails in C++ with that exception as it is, stack trace included, rather
+  than with a new `FAILED` exception holding only its description.
 - `kj::CanceledException` is preserved in both directions.
 - Rust panics cross into C++ as `kj::Exception` rather than aborting the process.
 

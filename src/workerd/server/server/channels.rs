@@ -184,18 +184,6 @@ pub struct ActorNamespaceHandle(pub Weak<ActorNamespace>);
 /// was started through may live on with an open WebSocket.
 pub struct ActorHooks(pub Weak<ActorContainer>);
 
-/// The reason an actor is aborted for (`actor_abort`); none when it is only shut down.
-///
-/// `raise` returns the reason as the `Err`, which the bridge throws as the equivalent
-/// `kj::Exception`.
-pub struct AbortReason(pub Option<crate::Error>);
-
-impl AbortReason {
-    pub(crate) fn raise(&self) -> Result<()> {
-        self.0.clone().map_or(Ok(()), Err)
-    }
-}
-
 /// What a request keeps alive until its interface is dropped.
 pub struct KeepAlive {
     _keep: Box<dyn Any>,

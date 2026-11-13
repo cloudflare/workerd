@@ -848,6 +848,77 @@ size_t c_cancel_roundtrip_return_primitive() {
   return 2020; // Should not reach here
 }
 
+namespace {
+
+// `<type>|<description>|<file>:<line>|<id>=<bytes>;...`, as Rust's
+// `describe_kj_exception()` writes it.
+kj::String describeException(const kj::Exception &exception) {
+  auto details = KJ_MAP(detail, exception.getDetails()) {
+    return kj::str(detail.id, "=", detail.value.asChars());
+  };
+  return kj::str(exception.getType(), "|", exception.getDescription(), "|",
+                 exception.getFile(), ":", exception.getLine(), "|",
+                 kj::strArray(details, ";"));
+}
+
+rust::String toRustString(kj::StringPtr str) {
+  return rust::String(str.cStr(), str.size());
+}
+
+kj::Exception cppException() {
+  auto exception = kj::Exception(kj::Exception::Type::DISCONNECTED,
+                                 "tests/ffi/tests.cc", 4321,
+                                 kj::str("c++ exception by value"));
+  exception.setDetail(44, kj::heapArray("fourth"_kjb));
+  exception.setDetail(55, kj::heapArray("fifth"_kjb));
+  return exception;
+}
+
+// How often a tracked exception's detail was destroyed on this thread. Rust
+// runs tests on several threads at once.
+thread_local size_t trackedDisposals = 0;
+
+class CountingDisposer final : public kj::ArrayDisposer {
+public:
+  void disposeImpl(void *firstElement, size_t, size_t, size_t,
+                   void (*)(void *)) const override {
+    ++trackedDisposals;
+    delete[] static_cast<kj::byte *>(firstElement);
+  }
+};
+
+const CountingDisposer countingDisposer;
+
+} // namespace
+
+rust::String c_describe_kj_exception(kj::Exception exception) {
+  return toRustString(describeException(exception));
+}
+
+kj::Exception c_return_kj_exception() { return cppException(); }
+
+kj::Exception c_try_return_kj_exception() { return cppException(); }
+
+kj::Exception c_roundtrip_kj_exception(kj::Exception exception) {
+  return exception;
+}
+
+void c_drop_kj_exception(kj::Exception exception) {}
+
+void c_throw_before_consuming_kj_exception(kj::Exception exception) {
+  KJ_FAIL_REQUIRE("thrown before consuming the exception");
+}
+
+kj::Exception c_return_tracked_kj_exception() {
+  auto exception = KJ_EXCEPTION(FAILED, "tracked exception");
+  auto bytes = new kj::byte[7];
+  memcpy(bytes, "tracked", 7);
+  exception.setDetail(66, kj::Array<kj::byte>(bytes, 7, countingDisposer));
+  return exception;
+}
+
+size_t c_tracked_kj_exception_disposals() { return trackedDisposals; }
+
 // The functions below throw even though their bridge signature is infallible.
 // Rust cannot report the exception to its caller, so it panics instead. None of
 // them may terminate the process.
@@ -1178,6 +1249,48 @@ extern "C" const char *cxx_run_test() noexcept {
     KJ_ASSERT(details[1].id == 456);
     KJ_ASSERT(details[1].value.size() == 13);
     KJ_ASSERT(memcmp(details[1].value.begin(), "rust detail 2", 13) == 0);
+  }
+
+  // kj::Exception by value between C++ and Rust.
+  {
+    constexpr auto cppDescription = "disconnected|c++ exception by value|"
+                                    "tests/ffi/tests.cc:4321|44=fourth;55=fifth";
+    constexpr auto rustDescription =
+        "overloaded|rust exception by value|rust/cxx/tests/ffi/lib.rs:1234|"
+        "11=first;22=;33=third";
+    ASSERT(std::string(r_describe_kj_exception(cppException())) ==
+           cppDescription);
+    ASSERT(describeException(r_return_kj_exception()) == rustDescription);
+    ASSERT(describeException(r_try_return_kj_exception()) == rustDescription);
+    ASSERT(describeException(r_roundtrip_kj_exception(cppException())) ==
+           cppDescription);
+
+    // Failing with a kj::Exception throws that exception, stack trace included.
+    {
+      auto exception = cppException();
+      exception.addTrace(reinterpret_cast<void *>(0x1234));
+      KJ_IF_SOME(thrown, kj::runCatchingExceptions([&]() {
+                   r_fail_with_kj_exception(kj::mv(exception));
+                 })) {
+        ASSERT(describeException(thrown) == cppDescription);
+        ASSERT(thrown.getStackTrace().size() == 1);
+        ASSERT(thrown.getStackTrace()[0] == reinterpret_cast<void *>(0x1234));
+      } else {
+        ASSERT(false);
+      }
+    }
+
+    // Whatever Rust does with the exception, it is destroyed exactly once.
+    auto disposals = trackedDisposals;
+    r_drop_kj_exception(c_return_tracked_kj_exception());
+    ASSERT(trackedDisposals == disposals + 1);
+    r_describe_kj_exception(c_return_tracked_kj_exception());
+    ASSERT(trackedDisposals == disposals + 2);
+    {
+      auto exception = r_roundtrip_kj_exception(c_return_tracked_kj_exception());
+      ASSERT(trackedDisposals == disposals + 2);
+    }
+    ASSERT(trackedDisposals == disposals + 3);
   }
 
   auto r = r_return_box();

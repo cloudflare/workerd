@@ -16,7 +16,6 @@
 )]
 
 pub use crate::actor::MovedHook;
-pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
@@ -453,9 +452,11 @@ pub mod ffi {
         /// Resolves when the actor breaks (an uncaught error, an eviction request, a storage
         /// failure); the error is the reason.
         async fn actor_broken(broken: KjOwn<ActorBroken>) -> Result<()>;
-        /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
-        /// actor is shut down instead: its background work stops, and nothing is failed.
-        fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        /// Aborts the actor with `reason`; every in-flight request fails.
+        fn actor_abort(actor: &ActorHandle, reason: KjException);
+        /// Shuts the actor down without a reason: its background work stops, and nothing is
+        /// failed.
+        fn actor_stop(actor: &ActorHandle);
         fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
         fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
@@ -608,10 +609,9 @@ pub mod ffi {
         #[namespace = "kj"]
         type Exception;
         fn exception_throw(exception: &Exception) -> Result<()>;
-        /// The error `error` holds, the way KJ prints an exception (`kj::str`): `file:line: type:
-        /// description`, the location being the bridge's if the error was made in Rust. Without
-        /// a stack trace, which a `KjError` does not carry.
-        fn exception_text(error: &AbortReason) -> String;
+        /// `error` the way KJ prints an exception (`kj::str`): `file:line: type: description`.
+        /// Without a stack trace, which a `KjError` does not carry.
+        fn exception_text(error: KjException) -> String;
 
         /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
         /// class or a dynamic worker's env.
@@ -1019,11 +1019,6 @@ pub mod ffi {
         /// A Rust future C++ awaits with `result_task_run`.
         type ResultTask;
         async fn result_task_run(task: Box<ResultTask>) -> Result<()>;
-
-        /// The reason of an `actor_abort`. `raise` returns it as the `Err`, which C++ catches as
-        /// the equivalent `kj::Exception`; `Ok` when there is none.
-        type AbortReason;
-        fn raise(self: &AbortReason) -> Result<()>;
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;

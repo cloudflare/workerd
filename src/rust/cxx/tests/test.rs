@@ -849,3 +849,78 @@ fn test_rust_to_cpp_to_rust_cancellation() {
         );
     }
 }
+
+const CPP_KJ_EXCEPTION: &str =
+    "disconnected|c++ exception by value|tests/ffi/tests.cc:4321|44=fourth;55=fifth";
+const RUST_KJ_EXCEPTION: &str =
+    "overloaded|rust exception by value|rust/cxx/tests/ffi/lib.rs:1234|11=first;22=;33=third";
+
+#[test]
+fn test_kj_exception_by_value() {
+    use cxx_test_suite::describe_kj_exception;
+    use cxx_test_suite::rust_kj_exception;
+
+    assert_eq!(
+        RUST_KJ_EXCEPTION,
+        ffi::c_describe_kj_exception(rust_kj_exception())
+    );
+    assert_eq!(
+        CPP_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_return_kj_exception())
+    );
+    assert_eq!(
+        CPP_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_try_return_kj_exception().unwrap())
+    );
+    assert_eq!(
+        RUST_KJ_EXCEPTION,
+        describe_kj_exception(&ffi::c_roundtrip_kj_exception(rust_kj_exception()))
+    );
+}
+
+#[test]
+fn test_kj_exception_by_value_from_kj_error_without_location() {
+    let error = cxx::KjError::new(cxx::KjExceptionType::Failed, "no location".to_owned());
+    let line = line!() + 1;
+    let exception = cxx::KjException::from(error);
+    // kj::Exception drops everything up to the last `src/` directory from the file name, which
+    // need not be the first component: workerd may be built as an external repository.
+    let file = file!();
+    let file = file.rsplit_once("src/").map_or(file, |(_, rest)| rest);
+    assert_eq!(
+        format!("failed|no location|{file}:{line}|"),
+        ffi::c_describe_kj_exception(exception)
+    );
+}
+
+#[test]
+fn test_kj_exception_by_value_is_destroyed_once() {
+    let disposals = ffi::c_tracked_kj_exception_disposals();
+
+    // Rust drops it.
+    drop(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 1, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ drops it without consuming it.
+    ffi::c_drop_kj_exception(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 2, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ throws before consuming it.
+    let error = ffi::c_throw_before_consuming_kj_exception(ffi::c_return_tracked_kj_exception())
+        .unwrap_err();
+    assert!(
+        error
+            .what()
+            .contains("thrown before consuming the exception"),
+        "{}",
+        error.what()
+    );
+    assert_eq!(disposals + 3, ffi::c_tracked_kj_exception_disposals());
+
+    // C++ hands it back, and Rust owns it again.
+    let exception = ffi::c_roundtrip_kj_exception(ffi::c_return_tracked_kj_exception());
+    assert_eq!(disposals + 3, ffi::c_tracked_kj_exception_disposals());
+    assert_eq!(Some(vec![(66, b"tracked".to_vec())]), exception.details());
+    drop(exception);
+    assert_eq!(disposals + 4, ffi::c_tracked_kj_exception_disposals());
+}

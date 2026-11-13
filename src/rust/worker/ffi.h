@@ -31,7 +31,6 @@ struct ScheduledResult;
 struct AlarmResult;
 struct CustomEventResult;
 struct Wrapper;
-struct Error;
 
 kj::Own<WorkerInterface> wrapper_into_kj(::rust::Box<Wrapper> wrapper);
 
@@ -90,6 +89,6 @@ kj::Promise<AlarmResult> worker_run_alarm(
 kj::Promise<CustomEventResult> worker_custom_event(
     WorkerInterface& worker, kj::Own<CustomEvent> event);
 kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> event);
-void custom_event_failed(kj::Own<CustomEvent> event, ::rust::Box<Error> error);
+void custom_event_failed(kj::Own<CustomEvent> event, kj::Exception exception);
 
 }  // namespace workerd::rust::worker

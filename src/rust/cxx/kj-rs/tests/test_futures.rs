@@ -19,6 +19,12 @@ use crate::Result;
 use crate::ffi::CloningAction;
 use crate::ffi::WakingAction;
 
+/// An `Error` with the description of `exception`, the C++ exception a KJ promise rejected with.
+#[expect(clippy::needless_pass_by_value, reason = "used as `map_err(io_error)`")]
+fn io_error(exception: cxx::KjException) -> Error {
+    Error::other(exception.what().to_owned())
+}
+
 pub async fn new_pending_future_void() {
     std::future::pending().await
 }
@@ -182,7 +188,7 @@ pub async fn new_joined_waker_future_void() -> Result<()> {
         promise.as_mut().poll(cx)
     })
     .await
-    .map_err(Error::other)?;
+    .map_err(io_error)?;
 
     future::poll_fn(|cx| {
         if JOINED_WAKER_READY.with(std::cell::Cell::get) {
@@ -250,10 +256,10 @@ pub fn clear_retained_waker() {
 pub async fn new_layered_ready_future_void() -> Result<()> {
     crate::ffi::new_ready_promise_void()
         .await
-        .map_err(Error::other)?;
+        .map_err(io_error)?;
     crate::ffi::new_coroutine_promise_void()
         .await
-        .map_err(Error::other)?;
+        .map_err(io_error)?;
     Ok(())
 }
 
@@ -282,7 +288,7 @@ pub async fn new_naive_select_future_void() -> Result<()> {
         ),
     )
     .await
-    .map_err(Error::other)
+    .map_err(io_error)
 }
 
 struct WrappedWaker(Waker);
@@ -312,7 +318,7 @@ pub async fn new_wrapped_waker_future_void() -> Result<()> {
         }
     })
     .await
-    .map_err(Error::other)
+    .map_err(io_error)
 }
 
 pub async fn new_errored_future_void() -> Result<()> {
@@ -359,7 +365,7 @@ pub async fn new_ready_future_i32(value: i32) -> Result<i32> {
 pub async fn new_future_awaiting_cancellable_promise() -> Result<()> {
     crate::ffi::new_cancellation_detecting_promise_void()
         .await
-        .map_err(Error::other)?;
+        .map_err(io_error)?;
     Ok(())
 }
 
@@ -369,10 +375,10 @@ pub async fn new_future_awaiting_cancellable_promise() -> Result<()> {
 pub async fn new_two_step_cancellable_future() -> Result<()> {
     crate::ffi::new_coroutine_promise_void()
         .await
-        .map_err(Error::other)?;
+        .map_err(io_error)?;
     crate::ffi::new_cancellation_detecting_promise_void()
         .await
-        .map_err(Error::other)?;
+        .map_err(io_error)?;
     Ok(())
 }
 
@@ -385,7 +391,7 @@ pub async fn new_select_with_cancellation() -> Result<()> {
         crate::ffi::new_cancellation_detecting_promise_void().into_future(),
     )
     .await
-    .map_err(Error::other)
+    .map_err(io_error)
 }
 
 // =======================================================================================
@@ -437,7 +443,7 @@ pub async fn poll_and_stash_promise_future() -> Result<()> {
 /// Phase 2: Retrieve the stashed future and await it to completion under a new `FuturePollEvent`.
 pub async fn unstash_and_await_promise_future() -> Result<()> {
     let future = STASHED_FUTURE.with(|f| f.borrow_mut().take().expect("no stashed future"));
-    future.await.map_err(Error::other)?;
+    future.await.map_err(io_error)?;
     Ok(())
 }
 

@@ -35,6 +35,7 @@ impl Types<'_> {
             | Type::SharedPtr(_)
             | Type::WeakPtr(_)
             | Type::CxxVector(_)
+            | Type::KjException(_)
             | Type::Void(_) => false,
             Type::Ref(_)
             | Type::Str(_)
