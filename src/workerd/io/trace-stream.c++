@@ -821,8 +821,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
     });
 
     auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [self = addRefToThis(), &fulfiller = *paf.fulfiller,
+    // Shared by both continuations and the cancellation check below.
+    auto fulfiller = kj::refcountedWrapper(kj::mv(paf.fulfiller));
+    promise = promise.then(
+        [fulfiller = kj::addRef(*fulfiller)]() mutable { fulfiller->getWrapped().fulfill(); },
+        [self = addRefToThis(), fulfiller = kj::addRef(*fulfiller),
             ownReportContext = kj::mv(ownReportContext),
             results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
       // This is the top level exception catcher for tail events being delivered. We do not want to
@@ -837,19 +840,19 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
         }
       }
       // We still fulfill this fulfiller to disarm the cancellation check below
-      fulfiller.fulfill();
+      fulfiller->getWrapped().fulfill();
       results->setStop(true);
       self->doneReceiving = true;
       self->doneFulfiller->reject(kj::mv(e));
     });
-    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-      if (fulfiller->isWaiting()) {
+    promise = promise.attach(kj::defer([fulfiller = kj::mv(fulfiller)]() mutable {
+      if (fulfiller->getWrapped().isWaiting()) {
         // The promise above was canceled before completing, which happens when the destination
         // IoContext is destroyed (e.g. the tail worker's isolate was evicted/terminated) while
         // we're still delivering tail events. This is a benign disconnection race, so reject with
         // a DISCONNECTED exception to keep it out of Sentry (see isInterestingException()) rather
         // than treating it as an internal failure.
-        fulfiller->reject(JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+        fulfiller->getWrapped().reject(JSG_KJ_EXCEPTION(DISCONNECTED, Error,
             "The destination execution context for this tail session was canceled while the "
             "call was still running."));
       }

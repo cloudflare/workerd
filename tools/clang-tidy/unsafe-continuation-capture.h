@@ -58,6 +58,11 @@ class UnsafeContinuationCaptureCheck: public clang::tidy::ClangTidyCheck {
   void onEndOfTranslationUnit() override;
 
  private:
+  // Checks one lambda passed directly to `Call`.
+  void checkLambda(const clang::LambdaExpr *Lambda,
+      const clang::CallExpr *Call,
+      const clang::ast_matchers::MatchFinder::MatchResult &Result);
+
   // Raw option strings (preserved verbatim for storeOptions()).
   std::string AsyncSinksRaw;
   std::string OwningCaptureTypesRaw;

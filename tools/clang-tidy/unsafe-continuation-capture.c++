@@ -991,6 +991,11 @@ struct SinkLists {
   const std::vector<std::string> &resultOwning;
   // Out-parameter: every lambda the analysis returned through, on any path.
   std::vector<CrossedLambda> *crossed = nullptr;
+  // Out-parameters: the receiver of a sink that stores the chain, if any:
+  // `ctx.addWaitUntil(chain)` sets `storingReceiver` to `ctx`, and
+  // `addTask(chain)` in a member function sets `storedByThis`.
+  const VarDecl **storingReceiver = nullptr;
+  bool *storedByThis = nullptr;
 };
 
 enum class Escape {
@@ -1012,6 +1017,22 @@ enum class Escape {
   // outlive under the promise parameter contract.
   Returned,
 };
+
+// The variable a member call is made on (`ctx` in `ctx.addTask(p)`), if
+// the receiver names one directly.
+static const VarDecl *memberCallReceiverVar(const CXXMemberCallExpr *mce) {
+  const auto *me = dyn_cast<MemberExpr>(mce->getCallee());
+  if (!me) return nullptr;
+  const Expr *base = me->getBase()->IgnoreImplicit()->IgnoreParens();
+  const auto *dre = dyn_cast<DeclRefExpr>(base);
+  return dre ? dyn_cast<VarDecl>(dre->getDecl()) : nullptr;
+}
+
+// True iff a member call is made on `*this`, implicitly or explicitly.
+static bool memberCallOnThis(const CXXMemberCallExpr *mce) {
+  const auto *me = dyn_cast<MemberExpr>(mce->getCallee());
+  return me && isa<CXXThisExpr>(me->getBase()->IgnoreImplicit()->IgnoreParens());
+}
 
 // Forward decl.
 static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth, const SinkLists &sinks);
@@ -1514,6 +1535,11 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth, const S
         // before the returned promise resolves -- so if that returned
         // promise is locally consumed, our argument chain's captures
         // cannot dangle. Recurse on the call.
+        //
+        // A sink that returns nothing (e.g. `IoContext::addWaitUntil()` or
+        // `IoContext::addTask()`) stores the promise instead, so the chain
+        // outlives this activation. Only the receiver, which owns it, is
+        // known to live as long.
         std::string qn;
         if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(md->getParent())) {
           if (const auto *td = spec->getSpecializedTemplate()) {
@@ -1522,6 +1548,11 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth, const S
         }
         if (qn.empty()) qn = md->getQualifiedNameAsString();
         if (isAsyncSink(qn, sinks.async) || isPromiseOwningMethod(qn)) {
+          if (md->getReturnType()->isVoidType()) {
+            if (sinks.storingReceiver) *sinks.storingReceiver = memberCallReceiverVar(mce);
+            if (sinks.storedByThis) *sinks.storedByThis = memberCallOnThis(mce);
+            return Escape::Escapes;
+          }
           current = mce;
           continue;
         }
@@ -1934,28 +1965,34 @@ void UnsafeContinuationCaptureCheck::registerMatchers(MatchFinder *Finder) {
   // The argument position alone is the cheap structural filter for
   // "non-immediate"; we then verify the callee is an async sink in
   // check(). Anchoring on the call (rather than walking ancestors from
-  // the lambda) ensures the matcher fires exactly once per (lambda,
-  // call) pair, regardless of how deeply the lambda is nested inside
-  // other expressions.
-  Finder->addMatcher(
-      callExpr(unless(cxxOperatorCallExpr()),
-          hasAnyArgument(ignoringImplicit(ignoringParenCasts(lambdaExpr().bind("lambda")))))
-          .bind("call"),
+  // the lambda) ensures the matcher fires exactly once per call,
+  // regardless of how deeply the lambda is nested inside other
+  // expressions.
+  Finder->addMatcher(callExpr(unless(cxxOperatorCallExpr()),
+                         hasAnyArgument(ignoringImplicit(ignoringParenCasts(lambdaExpr()))))
+                         .bind("call"),
       this);
 }
 
 void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Result) {
-  const auto *Lambda = Result.Nodes.getNodeAs<LambdaExpr>("lambda");
   const auto *Call = Result.Nodes.getNodeAs<CallExpr>("call");
-  if (!Lambda || !Call) return;
+  if (!Call) return;
 
+  // `hasAnyArgument()` stops at the first argument that matches, so walk
+  // them all here. Otherwise a second lambda in the same call, like the
+  // error handler of `promise.then(onSuccess, onError)`, goes unchecked.
+  for (const Expr *arg: Call->arguments()) {
+    if (const auto *lambda = dyn_cast<LambdaExpr>(arg->IgnoreImplicit()->IgnoreParenCasts())) {
+      checkLambda(lambda, Call, Result);
+    }
+  }
+}
+
+void UnsafeContinuationCaptureCheck::checkLambda(
+    const LambdaExpr *Lambda, const CallExpr *Call, const MatchFinder::MatchResult &Result) {
   // Don't lint generated code.
   auto &SM = *Result.SourceManager;
   if (SM.isInSystemHeader(Lambda->getBeginLoc())) return;
-
-  // The matcher's `hasAnyArgument(ignoringImplicit(ignoringParenCasts(...)))`
-  // already guarantees the lambda is a direct argument of this call;
-  // no further argument-list scan is needed.
 
   // Identify the callee. A member of a class-template specialization has a
   // qualified name like `kj::Promise<int>::then`; `calleeQualifiedName`
@@ -1970,7 +2007,10 @@ void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Resul
   // `co_await`-ed, or used only by other locally-consumed promises), the
   // captures cannot outlive the current function activation. Suppress.
   std::vector<CrossedLambda> crossed;
-  SinkLists sinks{ExtraSinks, ExtraSyncSinks, ExtraResultOwningSinks, &crossed};
+  const VarDecl *storingReceiver = nullptr;
+  bool storedByThis = false;
+  SinkLists sinks{
+    ExtraSinks, ExtraSyncSinks, ExtraResultOwningSinks, &crossed, &storingReceiver, &storedByThis};
   Escape escape = promiseEscape(Call, *Result.Context, sinks);
   if (escape == Escape::Local && crossed.empty()) {
     return;
@@ -2006,14 +2046,7 @@ void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Resul
   // suppress those captures below.
   const VarDecl *receiverVar = nullptr;
   if (const auto *mce = dyn_cast<CXXMemberCallExpr>(Call)) {
-    if (const auto *me = dyn_cast<MemberExpr>(mce->getCallee())) {
-      const Expr *base = me->getBase()->IgnoreImplicit()->IgnoreParens();
-      if (const auto *dre = dyn_cast<DeclRefExpr>(base)) {
-        if (const auto *vd = dyn_cast<VarDecl>(dre->getDecl())) {
-          receiverVar = vd;
-        }
-      }
-    }
+    receiverVar = memberCallReceiverVar(mce);
   }
 
   // Walk captures and report each unsafe one.
@@ -2037,6 +2070,9 @@ void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Resul
     // Suppress: this capture is kept alive by a downstream `.attach()`.
     if (cap.capturesThis() && bound.boundThis) continue;
 
+    // Suppress: `*this` stores the chain, so it outlives it.
+    if (cap.capturesThis() && storedByThis) continue;
+
     // Suppress: the referent has static storage duration.
     if (safety == CaptureSafety::UnsafeBareReference && cap.capturesVariable() &&
         referenceBoundToStaticStorage(dyn_cast_or_null<VarDecl>(cap.getCapturedVar()), 0)) {
@@ -2058,11 +2094,12 @@ void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Resul
     if (cap.capturesThis() && escape == Escape::StoredAsSelfMember) continue;
 
     // Suppress: the capture is a reference (or value) of the same
-    // variable that is the receiver of the matched sink call. The
-    // receiver owns the continuation, so its lifetime envelops the
-    // capture.
-    if (!diesWithCrossedLambda && receiverVar && cap.capturesVariable() &&
-        cap.getCapturedVar() == receiverVar) {
+    // variable that is the receiver of the matched sink call, or of the
+    // sink that stores the chain. The receiver owns the continuation, so
+    // its lifetime envelops the capture.
+    if (!diesWithCrossedLambda && cap.capturesVariable() &&
+        (cap.getCapturedVar() == receiverVar || cap.getCapturedVar() == storingReceiver) &&
+        cap.getCapturedVar() != nullptr) {
       continue;
     }
     if (cap.capturesVariable()) {

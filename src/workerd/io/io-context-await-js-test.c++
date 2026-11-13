@@ -101,8 +101,8 @@ KJ_TEST("awaitJs() hands the continuation's result to KJ in the same microtask")
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
 
-  bool destroyed = false;
-  bool ran = false;
+  kj::Pin<bool> destroyed;  // Value-initialized to false.
+  kj::Pin<bool> ran;        // Value-initialized to false.
   bool destroyedWhenDropped = false;
   kj::Maybe<kj::Promise<kj::Own<Tracked>>> kjPromise;
   context
@@ -110,15 +110,17 @@ KJ_TEST("awaitJs() hands the continuation's result to KJ in the same microtask")
     auto& js = jsg::Lock::from(lock.getIsolate());
     // The JS promise is already resolved, so the continuation is queued immediately, ahead of
     // the microtask below.
-    kjPromise = context.awaitJs(js, js.resolvedPromise(), [&](jsg::Lock&) {
-      ran = true;
-      return kj::heap<Tracked>(destroyed);
+    kjPromise = context.awaitJs(js, js.resolvedPromise(),
+        [weakRan = ran.addWeak(), weakDestroyed = destroyed.addWeak()](jsg::Lock&) {
+      KJ_REQUIRE_NONNULL(weakRan.tryGet(), "test ended before the continuation ran") = true;
+      return kj::heap<Tracked>(
+          KJ_REQUIRE_NONNULL(weakDestroyed.tryGet(), "test ended before the continuation ran"));
     });
     js.resolvedPromise().then(js, [&](jsg::Lock&) {
-      KJ_ASSERT(ran);
-      KJ_ASSERT(!destroyed);
+      KJ_ASSERT(*ran);
+      KJ_ASSERT(!*destroyed);
       kjPromise = kj::none;
-      destroyedWhenDropped = destroyed;
+      destroyedWhenDropped = *destroyed;
     });
   }).wait(fixture.getWaitScope());
 

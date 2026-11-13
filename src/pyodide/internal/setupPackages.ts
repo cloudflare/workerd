@@ -4,7 +4,6 @@
 
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import {
-  invalidateCaches,
   PythonWorkersInternalError,
   simpleRunPython,
 } from 'pyodide-internal:util';
@@ -139,7 +138,6 @@ export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
-  invalidateCaches(Module);
 }
 
 /**

@@ -1,8 +1,12 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // This is https://github.com/pyodide/pyodide/blob/main/src/core/jsverror.ts.
 // It goes into `pyodide.js` not `pyodide.asm.mjs`. We don't use `pyodide.js` so we have to reproduce
 // it here.
 
-import { wasmInstantiate } from 'pyodide-internal:pool/builtin_wrappers';
+import { wasmInstantiate } from 'pyodide-internal:builtin_wrappers';
 
 // Per https://github.com/tc39/proposal-arraybuffer-base64/issues/51#issuecomment-3010378969, we
 // should be able to replace `decodeBase64()` with `Uint8Array.fromBase64()` once we update to a v8

@@ -5,7 +5,9 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::Duration;
 
+use cluster_logic::lease::Timing;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -31,6 +33,12 @@ pub struct NodeRecord {
     /// choose it for none.
     #[serde(default)]
     pub draining: bool,
+    /// Counts this process's writes of the record, so that no two have
+    /// one body: S3's version of an object (its `ETag`) is a hash of the
+    /// body, and a version that came back would let a late write of ours
+    /// replace a record it was not sent for. Older processes write none.
+    #[serde(default)]
+    pub write: u64,
 }
 
 /// This instance's membership: it publishes its own record and reads its
@@ -54,6 +62,11 @@ pub struct Registry {
     left: Cell<bool>,
     /// This instance drains, which its record says from its next renewal.
     draining: Cell<bool>,
+    /// The last `NodeRecord::write`.
+    writes: Cell<u64>,
+    /// How long a renewal waits to write again when its guard failed on a
+    /// version that is still current.
+    contended_pause: Duration,
 }
 
 fn node_key(node: &str) -> String {
@@ -76,7 +89,23 @@ impl Registry {
             dead: RefCell::new(Vec::new()),
             left: Cell::new(false),
             draining: Cell::new(false),
+            writes: Cell::new(0),
+            contended_pause: Duration::from_millis(Timing::DEFAULT.contended_pause_ms),
         }
+    }
+
+    /// With `Timing::contended_pause_ms` for a lease whose times are not
+    /// the default.
+    #[must_use]
+    pub const fn contended_pause(mut self, pause: Duration) -> Self {
+        self.contended_pause = pause;
+        self
+    }
+
+    /// The next `NodeRecord::write`.
+    fn next_write(&self) -> u64 {
+        self.writes.set(self.writes.get() + 1);
+        self.writes.get()
     }
 
     pub fn node(&self) -> &str {
@@ -119,21 +148,46 @@ impl Registry {
                 expires_ms,
                 instance: self.instance,
                 draining: self.draining.get(),
+                write: self.next_write(),
             })?;
-            if let Some(version) = self.bucket.put_if(&key, body, guard).await? {
-                self.own.replace(Some(version));
-                return Ok(expires_ms);
+            let sent = match &guard {
+                Guard::Match(version) => Some(version.clone()),
+                Guard::Absent => None,
+            };
+            match self.bucket.put_if(&key, body, guard).await {
+                Ok(Some(version)) => {
+                    self.own.replace(Some(version));
+                    return Ok(expires_ms);
+                }
+                Ok(None) | Err(Error::OutcomeUnknown(_)) => {}
+                Err(error) => return Err(error),
             }
-            // Not the version we know. If this process wrote it, earlier
-            // renewals landed and only their answers were lost (timed-out
-            // rounds on the fleet), and one may land between our read and
-            // write: retry. Anything else is another writer.
+            // Not the version we know, or a refusal of this renewal's own
+            // write, whose first answer was lost. If this process wrote it,
+            // earlier renewals landed and only their answers were lost
+            // (timed-out rounds on the fleet, or a request sent again after
+            // it stalled that landed first), and one may land between our
+            // read and write: retry. Anything else is another writer. The
+            // record tells this process's writes from others', not one of
+            // them from another, and need not: only a write that answers its
+            // version renews the lease. Each of our writes names the version
+            // it replaces, and no two of our writes have one body
+            // (`NodeRecord::write`), so no version of ours comes back once
+            // replaced: a late write lands only while the version it names
+            // is current, and is refused after.
             let Some((current, version)) = self.bucket.get(&key).await? else {
                 return Err(Error::Fenced(self.node.clone()));
             };
             let current: NodeRecord = serde_json::from_slice(&current)?;
             if current.instance != self.instance {
                 return Err(Error::Fenced(self.node.clone()));
+            }
+            // Refused, but the version it named is still there: a write of
+            // ours to it is in progress, which the bucket answered with a
+            // conflict (R2's 409), and the read does not show yet. Writing
+            // again at once would race it again.
+            if sent.as_ref() == Some(&version) {
+                tokio::time::sleep(self.contended_pause).await;
             }
             guard = Guard::Match(version);
         }
@@ -148,24 +202,22 @@ impl Registry {
         let Some(mut version) = self.own.take() else {
             return Ok(());
         };
-        let record = NodeRecord {
-            node: self.node.clone(),
-            address: self.address.clone(),
-            expires_ms: 0,
-            instance: self.instance,
-            draining: true,
-        };
-        let body = serde_json::to_vec(&record)?;
         let key = node_key(&self.node);
         for _ in 0..DEREGISTER_ATTEMPTS {
+            let record = NodeRecord {
+                node: self.node.clone(),
+                address: self.address.clone(),
+                expires_ms: 0,
+                instance: self.instance,
+                draining: true,
+                write: self.next_write(),
+            };
+            let body = serde_json::to_vec(&record)?;
             let guard = Guard::Match(version);
-            if self
-                .bucket
-                .put_if(&key, body.clone(), guard)
-                .await?
-                .is_some()
-            {
-                return Ok(());
+            match self.bucket.put_if(&key, body, guard).await {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) | Err(Error::OutcomeUnknown(_)) => {}
+                Err(error) => return Err(error),
             }
             let Some((current, current_version)) = self.bucket.get(&key).await? else {
                 return Ok(());
@@ -237,7 +289,9 @@ impl Registry {
             // afternoon of fleet tests. One this long expired belongs to a
             // process that fenced long ago; were it still running, its next
             // renewal's conditional write would fail and fence it. It stays
-            // while it has alarms, so that survivors find them.
+            // while it has alarms, so that survivors find them. No process
+            // takes its node id again, so a late copy of this deletion
+            // (`http::Repeat::Delete`) deletes nothing written since.
             self.bucket.delete(&node_key(node)).await?;
         }
         if record.expires_ms <= now_ms {

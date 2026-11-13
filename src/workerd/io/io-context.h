@@ -2184,7 +2184,10 @@ auto IoContext::makeReentryCallbackWeak(Func func) {
 
 template <IoContext::TopUpFlag topUp, typename Func>
 auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
-  auto ioFunc = addObjectReverse(kj::heap(kj::fwd<Func>(func)));
+  // Refcounted so that a run() still in flight keeps the function alive after the callback is
+  // dropped.
+  auto ioFunc =
+      kj::refcountedWrapper<ReverseIoOwn<Func>>(addObjectReverse(kj::heap(kj::fwd<Func>(func))));
 
   return [self = getWeakRef(), cs = getCriticalSection(), attachment = kj::mv(attachment),
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
@@ -2197,11 +2200,11 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+        [ioFunc = kj::addRef(*ioFunc), ... params = kj::fwd<decltype(params)>(params)](
             Worker::Lock& lock, IoContext& ctx) mutable {
       using ResultType = kj::Decay<decltype(func(lock, ctx, kj::fwd<decltype(params)>(params)...))>;
 
-      auto& func = *ioFunc;
+      auto& func = *ioFunc->getWrapped();
 
       if constexpr (kj::isSameType<ResultType, void>()) {
         func(lock, ctx, kj::fwd<decltype(params)>(params)...);

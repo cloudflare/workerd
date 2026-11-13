@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The legacy dependency resolution of Python workflows, which passes dependencies in the order of
+# the `depends` parameter. See workflow-entrypoint.wd-test for why this is a separate test.
+
+const config :Workerd.Config = (
+  services = [
+    (name = "pyOld", worker = .pyWorkerOld),
+    (name = "js", worker = .jsWorker),
+  ],
+);
+
+const pyWorkerOld :Workerd.Worker = (
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies"],
+
+  modules = [
+    (name = "workflow-old.py", pythonModule = embed "workflow-old.py"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
+  ],
+);
+
+const jsWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "worker-old.js"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
+  ],
+);
