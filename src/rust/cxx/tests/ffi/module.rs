@@ -29,6 +29,7 @@ pub mod ffi2 {
         type D = crate::other::D;
         type E = crate::other::E;
         type ThrowingCopy = crate::other::ThrowingCopy;
+        type OverAligned = crate::other::OverAligned;
         #[namespace = "F"]
         type F = crate::other::f::F;
         #[namespace = "G"]
@@ -89,4 +90,6 @@ pub mod ffi2 {
     impl UniquePtr<F> {}
     impl UniquePtr<G> {}
     impl Vec<ThrowingCopy> {}
+    impl UniquePtr<OverAligned> {}
+    impl SharedPtr<OverAligned> {}
 }

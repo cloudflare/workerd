@@ -122,6 +122,11 @@ struct ThrowingCopy {
   ThrowingCopy(ThrowingCopy &&) = default;
 };
 
+// Aligned more strictly than `operator new(std::size_t)` guarantees.
+struct alignas(64) OverAligned {
+  uint64_t value;
+};
+
 struct E {
   uint64_t e;
   std::string e_str;
