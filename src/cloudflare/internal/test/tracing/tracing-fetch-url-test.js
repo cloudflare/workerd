@@ -16,6 +16,18 @@ export default {
     if (url.pathname === '/middle') {
       return Response.redirect('http://other/final?hop=3#final-fragment', 307);
     }
+    if (url.pathname === '/credentials') {
+      return Response.redirect(
+        'http://user:secret@other/after-credentials',
+        302
+      );
+    }
+    if (url.pathname === '/encoded') {
+      return Response.redirect(
+        'http://origin/after-encoded#caf%C3%A9%20%25x',
+        302
+      );
+    }
     return new Response('response');
   },
 };
@@ -31,6 +43,20 @@ export const redirects = {
   async test(_controller, env) {
     const response = await env.SELF.fetch('http://origin/start?hop=1');
     assert.equal(response.url, 'http://other/final?hop=3');
+    assert.equal(await response.text(), 'response');
+  },
+};
+
+export const redirectCredentials = {
+  async test(_controller, env) {
+    const response = await env.SELF.fetch('http://origin/credentials');
+    assert.equal(await response.text(), 'response');
+  },
+};
+
+export const redirectEncodedFragment = {
+  async test(_controller, env) {
+    const response = await env.SELF.fetch('http://origin/encoded');
     assert.equal(await response.text(), 'response');
   },
 };

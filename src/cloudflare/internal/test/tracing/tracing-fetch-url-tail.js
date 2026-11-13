@@ -21,6 +21,12 @@ export const validate = {
         'http://origin/start?hop=1',
         'http://origin/middle?hop=2#middle-fragment',
         'http://other/final?hop=3#final-fragment',
+        'http://origin/credentials',
+        // The redirect's userinfo is not reported.
+        'http://other/after-credentials',
+        'http://origin/encoded',
+        // The fragment is reported as the Location header encoded it.
+        'http://origin/after-encoded#caf%C3%A9%20%25x',
         'http://origin/x#f',
       ].sort()
     );
