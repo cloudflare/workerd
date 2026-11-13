@@ -11,6 +11,7 @@ const runnerCompatibilityFlags :List(Text) = [
   "nodejs_compat",
   "typescript_implemented_streams",
   "experimental",
+  "unsafe_module",
 ];
 
 const compatibilityFlags :List(Text) = [
@@ -18,6 +19,7 @@ const compatibilityFlags :List(Text) = [
   "typescript_implemented_streams",
   "new_module_registry",
   "experimental",
+  "unsafe_module",
 ];
 
 const unitTests :Workerd.Config = (
@@ -29,7 +31,6 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = .runnerCompatibilityFlags,
         bindings = [
-          (name = "SELF", service = "runner"),
           (name = "case", service = "case"),
         ],
       )
@@ -40,12 +41,10 @@ const unitTests :Workerd.Config = (
           (name = "worker.js", esModule = embed "startup-snapshot-new-module-registry-case-test.js"),
           (name = "lib.js", esModule = "globalThis.__libEvaluations = (globalThis.__libEvaluations ?? 0) + 1; export const token = {};"),
           (name = "lazy.js", esModule = "export { token } from './lib.js'; export const url = import.meta.url; export const main = import.meta.main;"),
+          (name = "variant.js", esModule = "globalThis.__variantEvaluations = (globalThis.__variantEvaluations ?? 0) + 1; export const url = import.meta.url; export const resolve = import.meta.resolve;"),
           (name = "data.json", json = "{\"answer\": 42}"),
         ],
         compatibilityFlags = .compatibilityFlags,
-        bindings = [
-          (name = "SELF", service = "case"),
-        ],
       )
     ),
   ],

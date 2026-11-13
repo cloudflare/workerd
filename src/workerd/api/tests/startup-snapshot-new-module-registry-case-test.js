@@ -5,25 +5,39 @@
 // The case of startup-snapshot-new-module-registry-test.js.
 
 import { env } from 'cloudflare:workers';
+import unsafe from 'workerd:unsafe';
 import * as lib from './lib.js';
 import data from './data.json';
-
-// Whether this Worker was started from a startup snapshot rather than running its top level
-// itself. In the zygote's env a service binding is an `undefined` placeholder (the started Worker
-// supplies the value: isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF
-// is undefined exactly when this code runs in the zygote, and the constant is baked into the
-// snapshot.
-const snapshotUsed = typeof env.SELF === 'undefined';
+// The registry records a resolution under its full specifier, query and fragment included, and
+// restores it next to the definition it names (see IsolateModuleRegistry::restoreFromSnapshot()).
+import * as variantQuery from './variant.js?q';
+import * as variantFragment from './variant.js#f';
+import * as buffer from 'node:buffer';
 
 async function checks() {
+  const variantEvaluations = globalThis.__variantEvaluations;
   const dynLib = await import('./lib.js');
   const dynData = await import('./data.json');
+  const dynVariantQuery = await import('./variant.js?q');
+  const dynVariantFragment = await import('./variant.js#f');
+  const dynBuffer = await import('node:buffer');
+  const dynWorkers = await import('cloudflare:workers');
   // Not loaded at the top level: resolved, evaluated and given its import.meta at request time.
   const lazy = await import('./lazy.js');
   return {
     libNamespace: dynLib === lib,
     libEvaluatedOnce: globalThis.__libEvaluations === 1,
     jsonDefault: dynData.default === data,
+    variantQueryNamespace: dynVariantQuery === variantQuery,
+    variantFragmentNamespace: dynVariantFragment === variantFragment,
+    variantQueryUrl: variantQuery.url.endsWith('/variant.js?q'),
+    variantFragmentUrl: variantFragment.url.endsWith('/variant.js#f'),
+    // import.meta.resolve, taken at the top level, is a function the snapshot carries.
+    variantResolve: variantQuery.resolve('./lib.js').endsWith('/lib.js'),
+    variantNotReEvaluated:
+      globalThis.__variantEvaluations === variantEvaluations,
+    builtinNamespace: dynBuffer === buffer,
+    workersEnv: dynWorkers.env === env,
     lazyLinksToLib: lazy.token === lib.token,
     lazyUrl: lazy.url.endsWith('/lazy.js'),
     lazyNotMain: lazy.main === false,
@@ -35,6 +49,9 @@ async function checks() {
 
 export default {
   async fetch() {
-    return Response.json({ snapshotUsed, checks: await checks() });
+    return Response.json({
+      snapshotUsed: unsafe.startedFromStartupSnapshot(),
+      checks: await checks(),
+    });
   },
 };

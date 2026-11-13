@@ -1339,6 +1339,59 @@ v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
   }
 }
 
+// The import.meta.resolve(...) function is effectively a shortcut for
+// new URL(specifier, import.meta.url).href. The idea is that it allows
+// resolving import specifiers relative to the current modules base URL.
+// Note that we do not validate that the resolved URL actually matches
+// anything in the registry. A functor with a clone() rather than a lambda, so
+// that a startup snapshot can carry the function of a module whose top level
+// touched import.meta (jsg::WrappableFunctionImpl's snapshotClone()).
+struct ImportMetaResolve {
+  kj::String href;
+
+  ImportMetaResolve clone() const {
+    return {kj::str(href)};
+  }
+
+  JsValue operator()(Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+    // Node.js and the HTML spec both require import.meta.resolve to be called
+    // with a specifier argument; calling it with none is a TypeError rather
+    // than silently resolving the string "undefined".
+    JSG_REQUIRE(args.Length() >= 1, TypeError, "import.meta.resolve requires a specifier argument");
+    // Note that we intentionally use ToString here to coerce whatever value is given
+    // into a string or throw if it cannot be coerced.
+    auto specifier = js.toString(args[0]);
+    // If Node.js Compat mode is enabled, a bare specifier naming a Node.js
+    // built-in (e.g. "fs") — or any "node:"-prefixed specifier — must resolve
+    // to the canonical "node:" URL, exactly as import() and require() do.
+    // Without this, import.meta.resolve("fs") would incorrectly resolve the
+    // bare specifier against the module's base URL (e.g. "file:///bundle/fs").
+    if (isNodeJsCompatEnabled(js)) {
+      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
+        specifier = kj::mv(nodeSpec);
+      }
+    }
+    KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href.asArray())) {
+      // import.meta.resolve is specified to be equivalent to
+      // `new URL(specifier, import.meta.url).href` (see the comment above).
+      // The WHATWG URL parser already collapses dot segments (including the
+      // percent-encoded "%2e"/"%2E" forms) during tryParse, so we can return
+      // the resolved href directly.
+      //
+      // We must NOT apply NORMALIZE_PATH here: normalizePathEncoding
+      // percent-decodes every escape whose byte is not in the path
+      // percent-encode set (e.g. "%66" -> "f"), which is not what
+      // `new URL(...).href` produces. Doing so silently rewrites an
+      // already-encoded specifier and diverges from Node.js/HTML, which
+      // leave such percent-encoding intact.
+      return js.str(resolved.getHref());
+    }
+    // Node.js/HTML import.meta.resolve throws when the specifier cannot be
+    // resolved to a URL; it must not return null.
+    js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
+  }
+};
+
 // Set up the special `import.meta` property for the module.
 void importMeta(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module, v8::Local<v8::Object> meta) {
@@ -1393,51 +1446,7 @@ void importMeta(
           }
         }
 
-        // The import.meta.resolve(...) function is effectively a shortcut for
-        // new URL(specifier, import.meta.url).href. The idea is that it allows
-        // resolving import specifiers relative to the current modules base URL.
-        // Note that we do not validate that the resolved URL actually matches
-        // anything in the registry.
-        auto resolve = js.wrapReturningFunction(js.v8Context(),
-            [href = kj::mv(href)](
-                Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> JsValue {
-          // Node.js and the HTML spec both require import.meta.resolve to be called
-          // with a specifier argument; calling it with none is a TypeError rather
-          // than silently resolving the string "undefined".
-          JSG_REQUIRE(
-              args.Length() >= 1, TypeError, "import.meta.resolve requires a specifier argument");
-          // Note that we intentionally use ToString here to coerce whatever value is given
-          // into a string or throw if it cannot be coerced.
-          auto specifier = js.toString(args[0]);
-          // If Node.js Compat mode is enabled, a bare specifier naming a Node.js
-          // built-in (e.g. "fs") — or any "node:"-prefixed specifier — must resolve
-          // to the canonical "node:" URL, exactly as import() and require() do.
-          // Without this, import.meta.resolve("fs") would incorrectly resolve the
-          // bare specifier against the module's base URL (e.g. "file:///bundle/fs").
-          if (isNodeJsCompatEnabled(js)) {
-            KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
-              specifier = kj::mv(nodeSpec);
-            }
-          }
-          KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href)) {
-            // import.meta.resolve is specified to be equivalent to
-            // `new URL(specifier, import.meta.url).href` (see the comment above).
-            // The WHATWG URL parser already collapses dot segments (including the
-            // percent-encoded "%2e"/"%2E" forms) during tryParse, so we can return
-            // the resolved href directly.
-            //
-            // We must NOT apply NORMALIZE_PATH here: normalizePathEncoding
-            // percent-decodes every escape whose byte is not in the path
-            // percent-encode set (e.g. "%66" -> "f"), which is not what
-            // `new URL(...).href` produces. Doing so silently rewrites an
-            // already-encoded specifier and diverges from Node.js/HTML, which
-            // leave such percent-encoding intact.
-            return js.str(resolved.getHref());
-          }
-          // Node.js/HTML import.meta.resolve throws when the specifier cannot be
-          // resolved to a URL; it must not return null.
-          js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
-        });
+        auto resolve = js.wrapReturningFunction(js.v8Context(), ImportMetaResolve{kj::str(href)});
 
         if (meta->CreateDataProperty(
                     js.v8Context(), v8::Local<v8::String>(js.strIntern("resolve"_kj)), resolve)
