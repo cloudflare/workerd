@@ -238,7 +238,9 @@ impl<R: Resource> Rc<R> {
     /// can resolve the resource via `resolve_resource`.
     ///
     /// # Panics
-    /// Panics if `lock` belongs to an isolate other than the resource's.
+    /// Panics if `lock` belongs to an isolate other than the resource's, if `info` is not a
+    /// construct call of a resource type's constructor, or if its `this` already wraps a
+    /// resource: an object keeps the resource it wraps, which its methods borrow while they run.
     pub fn attach_to_this(&self, lock: &Lock<'_>, info: &mut v8::FunctionCallbackInfo<'_>) {
         self.assert_in_isolate_of(lock);
         self.wrappable.attach_to_this(info);
