@@ -4191,6 +4191,11 @@ interface Tracing {
     callback: (...args: A) => T,
     ...args: A
   ): T;
+  withActiveSpanContext<T, A extends unknown[]>(
+    spanContext: TracingSpanContext | undefined,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 declare abstract class Span {

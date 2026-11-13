@@ -63,6 +63,18 @@ struct TracingSpanContext {
   JSG_STRUCT(traceId, spanId, traceFlags);
 };
 
+// The span context that withActiveSpanContext() accepts. As in OpenTelemetry, missing or malformed
+// IDs make the context invalid rather than throwing, and a missing or out-of-range traceFlags
+// counts as 0. Typed as TracingSpanContext in TypeScript.
+struct TracingSpanContextInput {
+  jsg::Optional<kj::String> traceId;
+  jsg::Optional<kj::String> spanId;
+  jsg::Optional<double> traceFlags;
+
+  JSG_STRUCT(traceId, spanId, traceFlags);
+  JSG_STRUCT_TS_OVERRIDE(type TracingSpanContextInput = never);
+};
+
 // Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
 // no-op spans, while sharing JS-side attribute byte-limit enforcement.
 class SpanState: public kj::Refcounted {
@@ -236,8 +248,9 @@ class Tracing final: public jsg::Object {
   jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
 
   // Returns the span associated with the current async context, or the invocation span when no
-  // user-created span is active. Returns undefined outside an invocation or when execution is
-  // detached into the root async context.
+  // user-created span is active. Returns undefined when no span is active: outside an invocation,
+  // when execution is detached into the root async context, or directly inside
+  // withActiveSpanContext(undefined, ...).
   jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
@@ -254,12 +267,37 @@ class Tracing final: public jsg::Object {
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Invokes callback(...args) with a span context from elsewhere as the active parent, like
+  // OpenTelemetry's context.with(trace.setSpanContext(ctx, spanContext), callback). Returns the
+  // callback result as-is.
+  //
+  // If `spanContext` is valid, getActiveSpan() returns a non-recording span with that context
+  // inside the callback, like OpenTelemetry's NonRecordingSpan, and new user spans and built-in
+  // instrumentation are its children, in its trace. They are recorded regardless of its trace
+  // flags.
+  //
+  // If `spanContext` is undefined or invalid (a missing, malformed, or all-zero ID), there is no
+  // parent: each span created inside the callback that would otherwise have no parent starts a new
+  // trace. getActiveSpan() returns undefined, or a non-recording span with an all-zero context for
+  // an invalid one, as in OpenTelemetry. `null` is an invalid context; any other non-object throws
+  // a TypeError.
+  //
+  // If the embedder can't report spans outside the invocation's trace, spans stay in it: with a
+  // valid context, new spans keep their usual parent; otherwise they are children of the
+  // invocation span.
+  v8::Local<v8::Value> withActiveSpanContext(jsg::Lock& js,
+      jsg::Optional<user_tracing::TracingSpanContextInput> spanContext,
+      v8::Local<v8::Function> callback,
+      jsg::Arguments<jsg::Value> args,
+      const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
     JSG_METHOD(withActiveSpan);
+    JSG_METHOD(withActiveSpanContext);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -285,6 +323,11 @@ class Tracing final: public jsg::Object {
       getActiveSpan(): Span | undefined;
       withActiveSpan<T, A extends unknown[]>(
         span: Span,
+        callback: (...args: A) => T,
+        ...args: A
+      ): T;
+      withActiveSpanContext<T, A extends unknown[]>(
+        spanContext: TracingSpanContext | undefined,
         callback: (...args: A) => T,
         ...args: A
       ): T;
@@ -314,4 +357,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
   api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData,                         \
-      api::user_tracing::TracingSpanStatus, api::user_tracing::TracingSpanContext
+      api::user_tracing::TracingSpanStatus, api::user_tracing::TracingSpanContext,                 \
+      api::user_tracing::TracingSpanContextInput
