@@ -465,11 +465,11 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
         tracing::InvocationSpanContext(context.getTraceId(), context.getInvocationId(),
             parentSpanId.orDefault(tracing::SpanId::nullId), context.getTraceFlags());
 
-    // Not applying size accounting for Onset since it is sent separately
-    writer->report(onsetContext,
-        kj::heap<tracing::Onset>(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
-            attributes.releaseAsArray()),
-        timestamp, 0);
+    // The tail event owns the onset on the heap.
+    auto onset = kj::heap<tracing::Onset>(
+        context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray());
+    auto onsetSize = sizeof(tracing::Onset) + onset->size();
+    writer->report(onsetContext, kj::mv(onset), timestamp, onsetSize);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
