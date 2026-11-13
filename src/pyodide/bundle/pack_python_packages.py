@@ -4,7 +4,7 @@
 The CPython stdlib modules (and the shared libraries they depend on) used to be downloaded and
 unpacked at request time. Instead we extract every file from each wheel here, at build time, and
 embed them directly into the Pyodide bundle as a single PythonPackages message (schema in
-src/pyodide/python_packages.capnp). The runtime mounts these files directly, with no gzip/tar work.
+src/pyodide/bundle/python_packages.capnp). The runtime mounts these files directly, with no gzip/tar work.
 
 Each wheel's `install_dir` (from the pre-filtered lock file) determines where its files mount in the
 worker filesystem ("site"/"stdlib" -> site-packages, "dynlib" -> /usr/lib).

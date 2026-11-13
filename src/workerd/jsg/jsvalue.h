@@ -141,9 +141,9 @@ class JsValue final {
   bool operator==(const JsValue& other) const;
   bool strictEquals(const JsValue& other) const;
 
-  bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
   JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
@@ -154,7 +154,7 @@ class JsValue final {
   static JsValue fromJson(Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
   static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
-  JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<JsValue> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
   JsValue structuredClone(
@@ -204,7 +204,7 @@ class JsBase {
   explicit JsBase(v8::Local<T> inner): inner(inner) {
     requireOnStack(this);
   }
-  JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<Self> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
  private:
@@ -611,8 +611,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
 
 class JsString final: public JsBase<v8::String, JsString> {
  public:
-  int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
@@ -620,7 +620,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
-  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -698,7 +698,7 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
 
-  void markAsHandled(Lock& js);
+  JSG_NO_JS void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
@@ -976,11 +976,12 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   }
 
   // Calls the function with the given receiver and arguments.
-  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue call(
+      Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function with a null receiver and arguments. When null is passed
   // as the receiver, the global object is used instead.
-  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function as a constructor with the given arguments, returning the
   // new object.
@@ -1046,12 +1047,12 @@ class JsRef final {
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 
-  T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
     JsValue handle(value.getHandle(js));
     return KJ_ASSERT_NONNULL(handle.tryCast<T>());
   }
 
-  JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
     return JsRef<T>(js, getHandle(js));
   }
 
@@ -1130,7 +1131,7 @@ class WeakJsRef final {
     });
   }
 
-  T getHandle(Lock& js) const {
+  JSG_NO_JS T getHandle(Lock& js) const {
     return KJ_ASSERT_NONNULL(tryGetHandle(js), "attempt to access collected jsg::WeakJsRef target");
   }
 

@@ -30,6 +30,8 @@ use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::gcs::Gcs;
 use crate::hmac_sha256;
+use crate::http::Repeat;
+use crate::http::prompt;
 use crate::namespace_hash;
 use crate::owner::Layout;
 use crate::owner::Owners;
@@ -95,12 +97,13 @@ impl Cluster {
 
     /// Over `bucket`, not the one `setup` names.
     pub(crate) fn over(bucket: Bucket, setup: Setup) -> Rc<Self> {
-        let registry = Rc::new(Registry::new(
+        let registry = Registry::new(
             bucket.clone(),
             &setup.node,
             &setup.address,
             setup.timing.lease_ms,
-        ));
+        );
+        let registry = Rc::new(registry.contended_pause(ms(setup.timing.contended_pause_ms)));
         Rc::new(Self {
             alarms: Index::new(
                 bucket.clone(),
@@ -398,7 +401,7 @@ impl Cluster {
             };
             let mut step = self.lease.borrow().before_renew(&observed);
             if step == Step::Renew {
-                let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
+                let renew = timeout(ms(timing.renew_timeout_ms), self.renew_round(&timing));
                 let result = match renew.await {
                     Ok(Ok(until)) => Ok(until),
                     Ok(Err(e)) => Err(e.to_string()),
@@ -421,7 +424,7 @@ impl Cluster {
             };
             // A stale listing only delays routing to a new peer: its
             // failure is logged, never fatal.
-            match timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await {
+            match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
                 Err(_) => tracing::warn!("listing the cluster timed out"),
@@ -451,11 +454,36 @@ impl Cluster {
     /// drains too. Peers that list it before learn of it from its answers.
     pub async fn announce_draining(&self) {
         let timing = self.lease.borrow().timing;
-        let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
-        if !matches!(renew.await, Ok(Ok(_))) {
-            tracing::warn!("cluster: publishing the drain failed");
+        let renew = timeout(ms(timing.renew_timeout_ms), self.renew_round(&timing));
+        match renew.await {
+            Ok(Ok(_)) => {}
+            // The node left the cluster first: `deregister`, which runs at
+            // once on a node with nothing to hand off, published its record
+            // expired and draining.
+            Ok(Err(crate::Error::NotHere(_))) if self.registry.left() => {}
+            Ok(Err(e)) => tracing::warn!("cluster: publishing the drain failed: {e}"),
+            Err(_) => tracing::warn!("cluster: publishing the drain timed out"),
         }
-        let _ = timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await;
+        let _ = timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await;
+    }
+
+    /// A lease round's renewal. A request of it that stalls is sent once
+    /// more (`http::prompt`), so that one slow answer does not time the
+    /// round out: two rounds timed out in a row fence the node. The
+    /// renewal's guarded writes may be: it rereads on a refusal
+    /// (`Registry::renew`).
+    async fn renew_round(&self, timing: &Timing) -> Result<u64> {
+        let repeat = &[Repeat::Read, Repeat::GuardedWrite];
+        prompt(ms(timing.renew_attempt_ms), repeat, self.renew(now_ms())).await
+    }
+
+    /// A lease round's listing, its stalled requests sent again as the
+    /// renewal's are, after a shorter wait. Its deletions may be: it
+    /// deletes only long-dead node records, whose node ids no process
+    /// takes again (`Registry::fetch`).
+    async fn list_round(&self, timing: &Timing) -> Result<Vec<crate::NodeRecord>> {
+        let repeat = &[Repeat::Read, Repeat::Delete];
+        prompt(ms(timing.list_attempt_ms), repeat, self.peers(now_ms())).await
     }
 
     /// Whether `start_draining` ran: this node claims nothing more.
@@ -529,16 +557,18 @@ pub fn now_ms() -> u64 {
 /// Refuse a store that ignores write preconditions: fencing and the
 /// deployment catalog rest on them. GCS's S3 API, for one, ignores
 /// `If-Match` on a PUT. `key` is an object only this check writes. Each
-/// write's body differs, so that no two writes could share an S3 `ETag`.
+/// write's body differs, so that no two writes could share an S3 `ETag`,
+/// and so that what the object holds says which write an unknown outcome
+/// was (`Bucket::put_if_settled`).
 pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
-    let created = bucket.put_if(key, b"1".to_vec(), Guard::Absent).await?;
-    let again = bucket.put_if(key, b"2".to_vec(), Guard::Absent).await?;
+    let put = |body: &[u8], guard| bucket.put_if_settled(key, body.to_vec(), guard);
+    let created = put(b"1", Guard::Absent).await?;
+    let again = put(b"2", Guard::Absent).await?;
     let (replaced, stale) = match &created {
         Some(first) => {
-            let replaced = bucket.put_if(key, b"3".to_vec(), Guard::Match(first.clone()));
-            let replaced = replaced.await?;
-            let stale = bucket.put_if(key, b"4".to_vec(), Guard::Match(first.clone()));
-            (replaced, stale.await?)
+            let replaced = put(b"3", Guard::Match(first.clone())).await?;
+            let stale = put(b"4", Guard::Match(first.clone())).await?;
+            (replaced, stale)
         }
         None => (None, None),
     };
@@ -564,43 +594,5 @@ pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Resu
 }
 
 #[cfg(test)]
-mod tests {
-    use futures::executor::block_on;
-
-    use super::check_conditional_writes;
-    use crate::Bucket;
-    use crate::Error;
-    use crate::bucket::memory::Memory;
-
-    #[test]
-    fn a_bucket_that_ignores_preconditions_is_refused() {
-        block_on(async {
-            assert!(
-                check_conditional_writes(&Bucket::memory(""), "n.probe")
-                    .await
-                    .is_ok()
-            );
-            let message = |store: Memory| async {
-                let bucket = Bucket::new(store, "");
-                match check_conditional_writes(&bucket, "n.probe").await {
-                    Err(Error::Config(message)) => message,
-                    other => panic!("expected a config error, not {other:?}"),
-                }
-            };
-            let lax = Memory::default();
-            lax.ignores_guards.set(true);
-            assert!(
-                message(lax)
-                    .await
-                    .starts_with("the bucket ignores conditional writes")
-            );
-            let weak = Memory::default();
-            weak.never_matches.set(true);
-            assert!(
-                message(weak)
-                    .await
-                    .starts_with("the bucket refused a conditional write whose condition held")
-            );
-        });
-    }
-}
+#[path = "cluster-test.rs"]
+mod tests;

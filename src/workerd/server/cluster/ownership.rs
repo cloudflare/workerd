@@ -20,6 +20,15 @@ use crate::registry::NodeRecord;
 
 /// One Durable Object's record in `do/<namespace>/<actor>/own.json`, the only
 /// authority for who owns it and whose log holds its latest commits.
+///
+/// A write of the record whose outcome is unknown is settled by reading it
+/// back (`Bucket::put_if_settled`): a record that holds the bytes written
+/// says what the write meant, whoever wrote them. Only this instance writes
+/// those bytes: each of its writes names it, or, a release, the epoch only
+/// it owned, and an object's epochs only go up. Two of its writes may put
+/// the same bytes under the same guard, as concurrent claims here do; one
+/// lands, and both read back the same. Each write changes the record it
+/// guards on, as `put_if_settled` requires.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct OwnerRecord {
     /// The owning instance (`NodeRecord::node`); empty for none.
@@ -249,7 +258,7 @@ impl Ownership {
                 Some(Guard::Absent)
             } else {
                 let body = serde_json::to_vec(&record)?;
-                let version = self.bucket.put_if(&key, body, guard).await?;
+                let version = self.bucket.put_if_settled(&key, body, guard).await?;
                 version.map(Guard::Match)
             };
             // Draining may have started during the write: the object it
@@ -338,7 +347,7 @@ impl Ownership {
         let body = serde_json::to_vec(&released)?;
         let written = self
             .bucket
-            .put_if(&key, body, Guard::Match(version))
+            .put_if_settled(&key, body, Guard::Match(version))
             .await?;
         Ok(written.is_some())
     }
@@ -396,7 +405,11 @@ impl Ownership {
         }
         record.from = epoch;
         let body = serde_json::to_vec(&record)?;
-        Ok(self.bucket.put_if(&key, body, guard).await?.is_some())
+        Ok(self
+            .bucket
+            .put_if_settled(&key, body, guard)
+            .await?
+            .is_some())
     }
 
     /// Move this instance's open epoch to the next, which recovers the one
@@ -418,7 +431,7 @@ impl Ownership {
         let body = serde_json::to_vec(&record)?;
         let Some(version) = self
             .bucket
-            .put_if(&key, body, Guard::Match(version))
+            .put_if_settled(&key, body, Guard::Match(version))
             .await?
         else {
             return Ok(None);

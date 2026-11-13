@@ -147,7 +147,6 @@ These rules MUST be followed when writing or modifying JSG code:
     must check the same settings. It never reuses a module when either isolate
     has `wasm_source_url_support`, because the URL is the module's name in the
     loaded Worker's bundle.
-
 14. **Don't visit through a shared owner.** A `kj::Rc`, `kj::Arc`, or `kj::Own` of a
     refcounted type can have other owners that visit the same object, and a handle
     visited from two owners is strong or traced depending on which visited last (a
@@ -173,9 +172,20 @@ These rules MUST be followed when writing or modifying JSG code:
     leaves such an object reachable starts without a snapshot. See
     `docs/startup-snapshot.md` §Making a type transferable.
 
+17. **MUST NOT hold a borrow into JSG-owned state across a call that can run JavaScript.**
+    JavaScript run mid-method can drop the last reference to the object a local reference,
+    pointer, iterator, or view points into. Hold a strong reference (`addRef()`), iterate a
+    copy, or look the state up again after the call. Treat any call you pass `js` to as able
+    to run JavaScript. Mark a `jsg::Lock&`-taking primitive that never runs JavaScript with
+    `JSG_NO_JS`, and a function that runs JavaScript without taking the lock with
+    `JSG_MAY_RUN_JS` (both in `util.h`); see `README.md` §Calls That Run JavaScript.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
+The `jsg-js-reentry` check reports violations of invariant 17. It runs on the directories
+listed in `build/tools/clang_tidy/check_path_filters.bzl`; run it elsewhere with
+`--config=clang-tidy-js-reentry`.
 
 ## CODE REVIEW RULE
 

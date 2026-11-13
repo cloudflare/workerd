@@ -31,6 +31,16 @@ compile-commands:
   rm -f compile_commands.json
   gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
 
+# Downloads the generated headers and Rust sources of the targets (Cap'n Proto, cxx bridges,
+# _virtual_includes) that editors read from bazel-bin and bazelflare builds leave remote; builds
+# only the output group of --config=bazelflare-generated, so nothing else is compiled or
+# downloaded. e.g. just fetch-generated //src/workerd/io/...
+# A fallback for builds without the config: there's no need to run it when the config is enabled
+# for every bazelflare build (see docs/development.md), and then it fails, since Bazel rejects the
+# config's aspect when it is added twice.
+fetch-generated *args="//src/...":
+  bazel build --config=bazelflare --config=bazelflare-generated --output_groups=generated_srcs --norun_validations --keep_going {{args}}
+
 clean:
   rm -f compile_commands.json
 
@@ -190,7 +200,7 @@ eslint:
     //src/node:node@eslint \
     //src/per_isolate:per_isolate@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/pyodide/tools:patch_pyodide_asm_lib@eslint \
+    //src/pyodide/bundle:patch_pyodide_asm_lib@eslint \
     //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 

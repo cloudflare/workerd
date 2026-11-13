@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Module identity and import.meta across a startup snapshot with the new module registry; see
+# startup-snapshot-new-module-registry-test.js. The runner's test() fetches the case service and
+# asserts its report. The @all-autogates variant turns the startup-snapshot autogate on, so both
+# services go through the zygote; the @ variant runs them as plain Workers.
+
+# The runner keeps the legacy registry, so that whether it was started from a snapshot says
+# whether the pipeline is on, whatever happens to the case.
+const runnerCompatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "new_module_registry",
+  "experimental",
+  "unsafe_module",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-new-module-registry-test.js"),
+        ],
+        compatibilityFlags = .runnerCompatibilityFlags,
+        bindings = [
+          (name = "case", service = "case"),
+        ],
+      )
+    ),
+    ( name = "case",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-new-module-registry-case-test.js"),
+          (name = "lib.js", esModule = "globalThis.__libEvaluations = (globalThis.__libEvaluations ?? 0) + 1; export const token = {};"),
+          (name = "lazy.js", esModule = "export { token } from './lib.js'; export const url = import.meta.url; export const main = import.meta.main;"),
+          (name = "variant.js", esModule = "globalThis.__variantEvaluations = (globalThis.__variantEvaluations ?? 0) + 1; export const url = import.meta.url; export const resolve = import.meta.resolve; export const load = () => import('./lib.js');"),
+          (name = "data.json", json = "{\"answer\": 42}"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

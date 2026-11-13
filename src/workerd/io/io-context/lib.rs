@@ -107,9 +107,11 @@ impl<'s> IoContext<'s> {
     /// `IoContext`, with a new lock. It wraps C++ `IoContext::awaitIoAndRun()`, which shares its
     /// implementation with `IoContext::awaitIo()`, and behaves as it does:
     ///
-    /// - `future` is polled by this `IoContext`'s thread's event loop, without the isolate lock
-    ///   and with no `IoContext` current. Only its wake-ups may come from other threads. It must
-    ///   not block, which would stall every request on the thread.
+    /// - `future` is first polled in this call, under the isolate lock and with this `IoContext`
+    ///   current, as the KJ promise passed to C++ `awaitIo()` has already run up to its first
+    ///   wait. Later polls run on this `IoContext`'s thread's event loop, without the isolate
+    ///   lock and with no `IoContext` current. Only its wake-ups may come from other threads. It
+    ///   must not block, which would stall every request on the thread.
     /// - `callback` runs in the async context frame that was current when this was called, the
     ///   one the I/O was started in, rather than whichever is current when `future` completes.
     ///   In a Durable Object it waits for the input gate, or runs in the critical section that
@@ -127,7 +129,8 @@ impl<'s> IoContext<'s> {
     /// is logged as an uncaught exception and recorded in the request's `waitUntil()` status. A
     /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
-    /// `future` and its output are `Send` because the future is polled without the isolate lock.
+    /// `future` and its output are `Send` because the future's later polls run without the
+    /// isolate lock.
     /// A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since every other use takes a
     /// [`jsg::Lock`], which the future doesn't have.
     ///
