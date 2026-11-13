@@ -1,5 +1,6 @@
 use alloc::borrow::Cow;
 use alloc::string::String;
+use core::cell::UnsafeCell;
 use core::cmp::Ordering;
 use core::ffi::CStr;
 use core::ffi::c_char;
@@ -86,12 +87,16 @@ pub struct CxxString {
 #[macro_export]
 macro_rules! let_cxx_string {
     ($var:ident = $value:expr $(,)?) => {
-        let mut cxx_stack_string = $crate::private::StackString::new();
+        let cxx_stack_string = $crate::private::StackString::new();
         #[allow(unused_mut, unused_unsafe)]
         let mut $var = match $value {
             // Safety: the bridge representation and ownership invariants satisfy this operation.
             let_cxx_string => unsafe { cxx_stack_string.init(let_cxx_string) },
         };
+        // Safety: `init` returned, so the storage holds a string, which this guard destroys
+        // before the storage goes out of scope.
+        #[allow(unused_unsafe)]
+        let _cxx_stack_string_drop_guard = unsafe { cxx_stack_string.drop_guard() };
     };
 }
 
@@ -308,38 +313,58 @@ impl std::io::Write for Pin<&mut CxxString> {
 pub struct StackString {
     // Static assertions in cxx.cc validate that this is large enough and
     // aligned enough.
-    space: MaybeUninit<[usize; 8]>,
+    space: UnsafeCell<MaybeUninit<[usize; 8]>>,
 }
 
+// Safety: only `init` and the guard from `drop_guard` touch the storage, and their callers
+// answer for how the string they make and destroy is shared.
+unsafe impl Sync for StackString {}
+
 impl StackString {
-    /// Creates uninitialized storage for a C++ string.
+    /// Creates uninitialized storage for a C++ string. Dropping it destroys nothing: the guard
+    /// from [`StackString::drop_guard`] destroys the string, once there is one.
     pub fn new() -> Self {
         Self {
-            space: MaybeUninit::uninit(),
+            space: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 
     /// Initializes the storage and returns its pinned C++ string.
     ///
     /// # Safety
-    /// The returned reference must not outlive this `StackString`.
-    pub unsafe fn init(&mut self, value: impl AsRef<[u8]>) -> Pin<&mut CxxString> {
+    /// The storage must not hold a string yet, and the returned reference must not be used
+    /// once the string is destroyed.
+    #[expect(
+        clippy::mut_from_ref,
+        reason = "the storage is interior-mutable, and the caller answers for its uniqueness"
+    )]
+    pub unsafe fn init(&self, value: impl AsRef<[u8]>) -> Pin<&mut CxxString> {
         let value = value.as_ref();
         // Safety: the bridge representation and ownership invariants satisfy this operation.
         unsafe {
-            let this = &mut *self.space.as_mut_ptr().cast::<MaybeUninit<CxxString>>();
+            let this = &mut *self.space.get().cast::<MaybeUninit<CxxString>>();
             string_init(this, value.as_ptr(), value.len());
             Pin::new_unchecked(&mut *this.as_mut_ptr())
         }
     }
-}
 
-impl Drop for StackString {
-    fn drop(&mut self) {
-        // Safety: the bridge representation and ownership invariants satisfy this operation.
-        unsafe {
-            let this = &mut *self.space.as_mut_ptr().cast::<MaybeUninit<CxxString>>();
-            string_destroy(this);
+    /// Returns a guard that destroys the C++ string when it is dropped.
+    ///
+    /// # Safety
+    /// [`StackString::init`] must have returned, and only one guard may be made.
+    pub unsafe fn drop_guard(&self) -> impl Drop + '_ {
+        struct StackStringDropGuard<'a>(&'a StackString);
+
+        impl Drop for StackStringDropGuard<'_> {
+            fn drop(&mut self) {
+                // Safety: the storage holds a string (guaranteed by `drop_guard`'s caller).
+                unsafe {
+                    let this = &mut *self.0.space.get().cast::<MaybeUninit<CxxString>>();
+                    string_destroy(this);
+                }
+            }
         }
+
+        StackStringDropGuard(self)
     }
 }
