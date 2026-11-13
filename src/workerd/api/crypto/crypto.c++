@@ -1539,16 +1539,17 @@ kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
   // carried over from the previous chunk so a pair split across the boundary is
   // seen here as the single code point it is.
   size_t prefix = pendingLead == kj::none ? 0 : 1;
-  size_t end = prefix + str.length(js);
+  auto utf16 = kj::heapArray<char16_t>(prefix + str.length(js));
+  auto dest =
+      kj::arrayPtr(reinterpret_cast<uint16_t*>(utf16.begin() + prefix), utf16.size() - prefix);
+  // Only the prefix that writeInto() reports as written is initialized; see
+  // JsString::writeInto().
+  size_t end = prefix + str.writeInto(js, dest).written;
   if (end == 0) return kj::String();
-
-  auto utf16 = kj::heapArray<char16_t>(end);
   KJ_IF_SOME(lead, pendingLead) {
     utf16[0] = lead;
     pendingLead = kj::none;
   }
-  auto dest = utf16.slice(prefix);
-  str.writeInto(js, kj::arrayPtr(reinterpret_cast<uint16_t*>(dest.begin()), dest.size()));
 
   // A lead surrogate at the very end may pair with whatever comes next, so it
   // cannot be encoded until the next chunk (or flush()) settles the question.

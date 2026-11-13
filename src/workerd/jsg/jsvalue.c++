@@ -406,27 +406,27 @@ JsString::WriteIntoStatus JsString::writeInto(
   return result;
 }
 
+// The length is read once: in a V8 sandbox build it lives in sandbox memory, so a second read may
+// disagree with the count V8 is asked to copy.
+//
+// Write() and WriteOneByte() put a requested terminator at buffer[count] whatever the buffer's
+// size, so one element is reserved for it. As in WriteUtf8(), the terminator counts as written.
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options) const {
-  WriteIntoStatus result = {0, 0};
-  if (buffer.size() > 0) {
-    result.written = kj::min(buffer.size(), length(js));
-    inner->Write(js.v8Isolate, 0, result.written, buffer.begin(), options);
-    result.read = length(js);
-  }
-  return result;
+  if (buffer.size() == 0) return {};
+  size_t terminator = (options & NULL_TERMINATION) ? 1 : 0;
+  size_t count = kj::min(buffer.size() - terminator, length(js));
+  inner->Write(js.v8Isolate, 0, count, buffer.begin(), options);
+  return {.read = count, .written = count + terminator};
 }
 
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options) const {
-  WriteIntoStatus result = {0, 0};
-  if (buffer.size() > 0) {
-    result.written = kj::min(buffer.size(), length(js));
-    inner->WriteOneByte(
-        js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
-    result.read = length(js);
-  }
-  return result;
+  if (buffer.size() == 0) return {};
+  size_t terminator = (options & NULL_TERMINATION) ? 1 : 0;
+  size_t count = kj::min(buffer.size() - terminator, length(js));
+  inner->WriteOneByte(js.v8Isolate, 0, count, buffer.begin(), options);
+  return {.read = count, .written = count + terminator};
 }
 
 bool JsString::isFlat() const {
