@@ -1887,4 +1887,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-12-16");
   # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
   # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
+
+  webSocketCloseAfterError @211 :Bool
+      $compatEnableFlag("web_socket_close_after_error")
+      $compatDisableFlag("no_web_socket_close_after_error")
+      $compatEnableDate("2027-01-15");
+  # When a WebSocket's read loop ends with an error other than a plain disconnect, for example a
+  # protocol violation by the peer or a message listener that threw, a close event with code 1006
+  # and wasClean false follows the error event, as the WebSocket standard requires. Without the
+  # flag only the error event fires and no close event ever arrives for that WebSocket.
 }
