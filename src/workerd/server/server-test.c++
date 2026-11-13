@@ -9926,6 +9926,106 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
   conn.httpGet200("/", "DO actor test passed!");
 }
 
+KJ_TEST("Server: actor body over the debug port keeps its order when returned over JS RPC") {
+  // A WorkerEntrypoint gets a streamed body from a Durable Object reached over a capnp connection
+  // and returns it over JS RPC. Returning it pumps one ByteStream into another, which shortens the
+  // path while the object's writes are still arriving; the bytes must still arrive in order.
+  TestServer test(R"((
+    services = [
+      ( name = "main",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {DurableObject, WorkerEntrypoint} from "cloudflare:workers";
+                `
+                `// 32-bit words that count up, so a misplaced chunk is easy to spot.
+                `const words = new Uint32Array(128 * 1024);
+                `for (let i = 0; i < words.length; i++) words[i] = i;
+                `const bytes = new Uint8Array(words.buffer);
+                `
+                `export class Relay extends DurableObject {
+                `  fetch(request) {
+                `    const params = new URL(request.url).searchParams;
+                `    const chunks = Number(params.get("chunks"));
+                `    const size = Number(params.get("size"));
+                `    const {readable, writable} = new IdentityTransformStream();
+                `    const writer = writable.getWriter();
+                `    this.ctx.waitUntil((async () => {
+                `      const writes = [];
+                `      for (let i = 0; i < chunks; i++) {
+                `        writes.push(writer.write(bytes.subarray(i * size, (i + 1) * size)));
+                `      }
+                `      writes.push(writer.write(bytes.subarray(chunks * size)));
+                `      await Promise.all(writes);
+                `      await writer.close();
+                `    })());
+                `    return new Response(readable);
+                `  }
+                `}
+                `
+                `export class Noop extends WorkerEntrypoint {
+                `  noop() {}
+                `}
+                `
+                `export class Rpc extends WorkerEntrypoint {
+                `  async relayBody(chunks, size, hops) {
+                `    const client = await this.env.debugPort.connect("debug-addr");
+                `    const actor = client.getActor("main", "Relay", "0".repeat(64));
+                `    const response = await actor.fetch(
+                `        `http://relay/?chunks=${chunks}&size=${size}`);
+                `    for (let i = 0; i < hops; i++) await this.env.NOOP.noop();
+                `    return new Response(response.body);
+                `  }
+                `}
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    const failures = [];
+                `    for (const [chunks, size] of [[64, 4096], [512, 16]]) {
+                `      for (let hops = 0; hops < 15; hops++) {
+                `        const response = await env.RPC.relayBody(chunks, size, hops);
+                `        const got = new Uint32Array(await response.arrayBuffer());
+                `        const first = got.findIndex((word, i) => word !== i);
+                `        if (got.length !== words.length || first !== -1) {
+                `          failures.push(`size=${size} hops=${hops}: length ${got.length}, ` +
+                `              `word ${first} is ${got[first]}`);
+                `        }
+                `      }
+                `    }
+                `    return new Response(failures.length ? failures.join("\n") : "in order");
+                `  }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Relay", uniqueKey = "relay-key" )
+          ],
+          durableObjectStorage = (inMemory = void),
+          bindings = [
+            ( name = "debugPort", workerdDebugPort = void ),
+            ( name = "RPC", service = ( name = "main", entrypoint = "Rpc" ) ),
+            ( name = "NOOP", service = ( name = "main", entrypoint = "Noop" ) )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "main" )
+    ]
+  ))"_kj);
+
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "in order");
+}
+
 KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
   // This test verifies that a WebSocket obtained via the debug port can be passed through
   // a service binding response (from a WorkerEntrypoint). This was previously broken because
