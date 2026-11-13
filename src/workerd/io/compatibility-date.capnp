@@ -1833,4 +1833,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
   # RPC. This flag is intended for internal testing only and may never have its experimental
   # annotation removed.
+
+  requestTimeWebAssemblyCompilation @206 :Bool
+      $compatEnableFlag("request_time_webassembly_compilation")
+      $experimental;
+  # Enables request-time WebAssembly compilation after retaining the exact input bytes.
 }
