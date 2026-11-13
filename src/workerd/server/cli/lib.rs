@@ -636,6 +636,7 @@ fn serve_options<T: CommandFactory>(
         debug_port: serve.debug_port,
         cluster_address: serve.cluster_address,
         cluster_advertise: serve.cluster_advertise,
+        shutdown_delay: std::time::Duration::from_secs(serve.shutdown_delay.into()),
         ..run_options(serve_or_test)
     };
     (options, inherited)

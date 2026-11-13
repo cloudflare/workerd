@@ -418,6 +418,15 @@ class Server: public kj::PtrTarget {
   void enableDebugPort(kj::String addr) {
     debugPort = kj::str("loopback:", addr);
   }
+  // `--shutdown-delay`.
+  void setShutdownDelay(kj::Duration delay) {
+    shutdownDelay = delay;
+  }
+  // Calls `callback` once the server exists, before it starts, as SIGTERM can arrive while the
+  // process starts: it may send the drain signal and let time pass.
+  void beforeStart(kj::Function<void()> callback) {
+    beforeStartCallback = kj::mv(callback);
+  }
   // Marks `service` in the config as defined by cluster deployment `deployment`, as
   // `workerd serve` composes deployments into the config.
   void addDeploymentService(kj::StringPtr deployment, kj::StringPtr service) {
@@ -432,14 +441,23 @@ class Server: public kj::PtrTarget {
       config::Config::Reader config,
       kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     auto& server = start(v8System, config);
+    KJ_IF_SOME(callback, beforeStartCallback) {
+      callback();
+    }
     // `get()` returns the server started above: `start()` isn't called again while `drain` is
     // pending, and TestServer drops `drain` before `close()`.
     auto drain = drainWhen
                      .then([weakThis = addWeakToThis()]() {
       KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test server destroyed before drain").get().drain();
     }).eagerlyEvaluate(nullptr);
-    return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
+    return server
+        .run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>(), shutdownDelay / kj::MILLISECONDS)
         .attach(kj::mv(drain), reports(server));
+  }
+
+  // Sends the server the drain signal, as SIGTERM does.
+  void drain() {
+    get().drain();
   }
 
   kj::Promise<bool> test(jsg::V8System& v8System,
@@ -504,6 +522,8 @@ class Server: public kj::PtrTarget {
   kj::EntropySource& entropySource;
   kj::Own<WorkerFactory::Options> options = kj::heap<WorkerFactory::Options>();
   kj::String debugPort;
+  kj::Duration shutdownDelay = 0 * kj::SECONDS;
+  kj::Maybe<kj::Function<void()>> beforeStartCallback;
   kj::Function<void(kj::String)> reportConfigError;
   kj::Function<void(kj::String)> reportConfigWarning;
   kj::Vector<std::pair<kj::String, kj::String>> deploymentServices;
@@ -5490,6 +5510,122 @@ KJ_TEST("Server: drain incoming HTTP connections") {
     hello)"_blockquote);
 
   // And then the connection is, in fact, closed.
+  KJ_EXPECT(conn2.isEof());
+}
+
+KJ_TEST("Server: the shutdown delay serves on after the drain signal, then drains") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("hello"));
+        `})
+  ))"_kj));
+  test.server.setShutdownDelay(20 * kj::SECONDS);
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "hello");
+
+  test.server.drain();
+
+  // Until the delay ends, open connections and new ones are served as before.
+  conn.httpGet200("/", "hello");
+  KJ_EXPECT(!conn.isEof());
+  test.wait(19);
+  conn.httpGet200("/", "hello");
+  auto conn2 = test.connect("test-addr");
+  conn2.httpGet200("/", "hello");
+  conn2.send("GET");
+
+  // Then the server drains: idle connections close, the one with a request in progress finishes
+  // it, and new ones are not accepted.
+  test.wait(1);
+  KJ_EXPECT(conn.isEof());
+  KJ_EXPECT(!conn2.isEof());
+  KJ_EXPECT(test.connectHangs("test-addr"));
+  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
+  conn2.recv(R"(
+    HTTP/1.1 200 OK
+    Connection: close
+    Content-Length: 5
+    Content-Type: text/plain;charset=UTF-8
+
+    hello)"_blockquote);
+  KJ_EXPECT(conn2.isEof());
+}
+
+KJ_TEST("Server: the shutdown delay runs from a drain signal that arrived during startup") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("hello"));
+        `})
+  ))"_kj));
+  test.server.setShutdownDelay(20 * kj::SECONDS);
+  // The signal arrives 5 s before the server is up.
+  test.server.beforeStart([&]() {
+    test.server.drain();
+    test.timer.advanceTo(test.timer.now() + 5 * kj::SECONDS);
+  });
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "hello");
+  test.wait(14);
+  conn.httpGet200("/", "hello");
+  auto conn2 = test.connect("test-addr");
+  conn2.httpGet200("/", "hello");
+  conn2.send("GET");
+
+  // 20 s after the signal, the server drains.
+  test.wait(1);
+  KJ_EXPECT(conn.isEof());
+  KJ_EXPECT(!conn2.isEof());
+  KJ_EXPECT(test.connectHangs("test-addr"));
+  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
+  conn2.recv(R"(
+    HTTP/1.1 200 OK
+    Connection: close
+    Content-Length: 5
+    Content-Type: text/plain;charset=UTF-8
+
+    hello)"_blockquote);
+  KJ_EXPECT(conn2.isEof());
+}
+
+KJ_TEST("Server: a second drain signal cuts the shutdown delay short") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response("hello"));
+        `})
+  ))"_kj));
+  test.server.setShutdownDelay(1000 * kj::SECONDS);
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  auto conn2 = test.connect("test-addr");
+  test.server.drain();
+  conn.httpGet200("/", "hello");
+  conn2.httpGet200("/", "hello");
+  conn2.send("GET");
+  KJ_EXPECT(!conn.isEof());
+
+  test.server.drain();
+  KJ_EXPECT(conn.isEof());
+  KJ_EXPECT(!conn2.isEof());
+  KJ_EXPECT(test.connectHangs("test-addr"));
+  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
+  conn2.recv(R"(
+    HTTP/1.1 200 OK
+    Connection: close
+    Content-Length: 5
+    Content-Type: text/plain;charset=UTF-8
+
+    hello)"_blockquote);
   KJ_EXPECT(conn2.isEof());
 }
 

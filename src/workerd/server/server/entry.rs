@@ -25,7 +25,9 @@ use std::future::Future;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
+use futures::Stream;
 use futures::future::Either;
 use futures::future::LocalBoxFuture;
 use kj_rs::KjOwn;
@@ -213,26 +215,36 @@ async fn with_watch<T>(
     }
 }
 
-/// Resolves on SIGTERM, or on Windows on Ctrl-Break (`CTRL_BREAK_EVENT`, the console event a
-/// parent can send a process group, where Ctrl-C is the interactive interrupt): the signal to
-/// drain gracefully. The handler is installed by the call, so that a signal during startup drains
-/// the server once it is up.
-fn sigterm() -> impl Future<Output = ()> {
+/// SIGTERM, or on Windows Ctrl-Break (`CTRL_BREAK_EVENT`, the console event a parent can send a
+/// process group, where Ctrl-C is the interactive interrupt): the signal to drain gracefully, with
+/// when the stream saw it on `factory`'s timer. Signals that arrive before the stream is polled
+/// again count as one. The handler is installed by the call, so that a signal during startup
+/// drains the server once it is up.
+fn sigterm(factory: &Rc<Factory>) -> impl Stream<Item = Duration> {
     #[cfg(unix)]
     let signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
     #[cfg(windows)]
     let signal = tokio::signal::windows::ctrl_break();
-    async move {
-        match signal {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(e) => {
-                tracing::error!("drain signal handler: {e}");
-                std::future::pending::<()>().await;
-            }
+    let signal = match signal {
+        Ok(signal) => Some(signal),
+        Err(e) => {
+            tracing::error!("drain signal handler: {e}");
+            None
         }
-    }
+    };
+    // Without a handler the stream waits forever rather than end. Once the handler stops
+    // receiving (`recv()` answers `None`), it yields one last signal, then waits forever.
+    let factory = Rc::clone(factory);
+    futures::stream::unfold(signal, move |signal| {
+        let factory = Rc::clone(&factory);
+        async move {
+            let Some(mut signal) = signal else {
+                return std::future::pending().await;
+            };
+            let received = signal.recv().await;
+            Some((factory.now(), received.map(|()| signal)))
+        }
+    })
 }
 
 /// `workerd serve`: serves `factory`'s config until SIGTERM drains it (or a `--watch` reload
@@ -248,7 +260,7 @@ async fn server_serve(
     let report = reporter(watch.is_some(), structured, deployments);
     let factory = Rc::new(Factory::new(factory));
     let result = with_watch(
-        crate::run::run(Rc::clone(&factory), options, report, sigterm()),
+        crate::run::run(Rc::clone(&factory), options, report, sigterm(&factory)),
         watch.as_mut(),
     )
     .await;
