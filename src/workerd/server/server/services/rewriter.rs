@@ -17,10 +17,11 @@ use http::Uri;
 use kj::http::HeaderId;
 use kj::http::HeaderTable;
 use kj::http::HeadersRef;
-use kj_rs::KjOwn;
 use workerd_capnp::http_options;
 
 use crate::Result;
+use crate::bridge;
+use crate::bridge::EditedHeaders;
 use crate::bridge::ffi;
 use crate::config::capnp_error;
 use crate::config::optional_text;
@@ -44,10 +45,10 @@ pub struct HttpRewriter {
 }
 
 /// A request as the options leave it.
-pub struct Rewritten {
+pub struct Rewritten<'a> {
     pub url: String,
     /// The headers to use in place of the request's, when the options change any.
-    pub headers: Option<KjOwn<ffi::HttpHeaders>>,
+    pub headers: Option<EditedHeaders<'a>>,
 }
 
 fn injected(
@@ -126,29 +127,29 @@ impl HttpRewriter {
 
     /// `headers` with `edits` and then the injected request headers applied; none when that
     /// changes nothing.
-    fn edited(
+    fn edited<'a>(
         &self,
         table: &HeaderTable,
-        headers: HeadersRef<'_>,
+        headers: HeadersRef<'a>,
         edits: &[ffi::HeaderEdit],
-    ) -> Result<Option<KjOwn<ffi::HttpHeaders>>> {
+    ) -> Result<Option<EditedHeaders<'a>>> {
         let injected = &self.request_headers;
         if edits.is_empty() && injected.is_empty() {
             return Ok(None);
         }
-        let edited = ffi::edit_headers(table, headers.as_ffi(), edits, injected)?;
+        let edited = bridge::edit_headers(table, headers.as_ffi(), edits, injected)?;
         Ok(Some(edited))
     }
 
     /// Rewrites a request leaving for an external server. `url` is what the worker asked for: a
     /// proxy-form URL.
-    pub fn rewrite_outgoing_request(
+    pub fn rewrite_outgoing_request<'a>(
         &self,
         table: &HeaderTable,
         url: &str,
-        headers: HeadersRef<'_>,
+        headers: HeadersRef<'a>,
         cf_blob_json: Option<&str>,
-    ) -> Result<Rewritten> {
+    ) -> Result<Rewritten<'a>> {
         let mut url = url.to_owned();
         let mut edits = Vec::new();
         if self.style == Style::Host {
@@ -184,13 +185,13 @@ impl HttpRewriter {
     /// is the socket's ("http" or "https"). Returns the request to give the worker and the cf
     /// blob it carried, if the options name a header for it; none for a request the options can
     /// make no sense of, to be answered with 400.
-    pub fn rewrite_incoming_request(
+    pub fn rewrite_incoming_request<'a>(
         &self,
         table: &HeaderTable,
         url: &str,
         physical_protocol: &str,
-        headers: HeadersRef<'_>,
-    ) -> Result<Option<(Rewritten, Option<String>)>> {
+        headers: HeadersRef<'a>,
+    ) -> Result<Option<(Rewritten<'a>, Option<String>)>> {
         let mut url = url.to_owned();
         let mut edits = Vec::new();
         if self.style == Style::Host {

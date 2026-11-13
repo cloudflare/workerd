@@ -1,3 +1,4 @@
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # The Rust server. Everything that needs the isolate is behind the C++ worker factory
@@ -64,4 +65,15 @@ wd_rust_crate(
         "@platforms//os:windows": ["@crates_vendor//:windows-sys"],
         "//conditions:default": [],
     }),
+)
+
+# Snippets that must not compile against the server; each annotates the errors it expects. See
+# build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [
+        ":workerd-server",
+        "//src/rust/kj",
+    ],
 )

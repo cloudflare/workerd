@@ -105,8 +105,17 @@ pub mod ffi {
         type HttpHeaderTable;
         type HttpHeaders;
         fn new_http_header_table() -> KjOwn<HttpHeaderTable>;
-        fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
-        fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
+        /// # Safety
+        ///
+        /// The headers keep a reference to `table`, which the `KjOwn` does not carry: the caller
+        /// keeps `table` alive for as long as they exist (`Headers::new` does).
+        unsafe fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
+        /// # Safety
+        ///
+        /// The clone keeps references to the table of `this_` and to the names and values it
+        /// holds, which the `KjOwn` does not carry: the caller keeps `this_` alive and unchanged
+        /// for as long as the clone exists (`HeadersRef::clone_shallow` does).
+        unsafe fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
         fn clear_headers(this_: Pin<&mut HttpHeaders>);
         fn set_header(this_: Pin<&mut HttpHeaders>, id: BuiltinIndicesEnum, value: &str);
         unsafe fn get_header<'a>(
@@ -295,7 +304,8 @@ impl HeadersRef<'_> {
     #[must_use]
     pub fn clone_shallow(&self) -> Headers<'_> {
         Headers {
-            own: ffi::clone_shallow(self.0),
+            // SAFETY: the clone borrows `self`, and so the headers it refers to.
+            own: unsafe { ffi::clone_shallow(self.0) },
             _marker: PhantomData,
         }
     }
@@ -338,7 +348,8 @@ impl<'a> Headers<'a> {
     #[must_use]
     pub fn new(table: &'a HeaderTable) -> Self {
         Self {
-            own: ffi::new_http_headers(table),
+            // SAFETY: the headers borrow `table` for `'a`.
+            own: unsafe { ffi::new_http_headers(table) },
             _marker: PhantomData,
         }
     }

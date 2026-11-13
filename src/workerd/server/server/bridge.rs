@@ -12,7 +12,7 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers` and `rewriting_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
 )]
 
 pub use crate::actor::MovedHook;
@@ -697,7 +697,12 @@ pub mod ffi {
         // The listeners' shims (worker-factory-listen.c++).
 
         /// A copy of `headers` with `edits` and then `injected` applied in order.
-        fn edit_headers(
+        ///
+        /// # Safety
+        ///
+        /// The copy keeps a reference to the header table of `headers`, which the `KjOwn` does
+        /// not carry: the caller keeps that table alive for as long as the copy exists.
+        unsafe fn edit_headers(
             table: &HttpHeaderTable,
             headers: &HttpHeaders,
             edits: &[HeaderEdit],
@@ -1074,6 +1079,36 @@ pub fn rewriting_response<'a>(
     Ok(RewritingResponse {
         response,
         _inner: std::marker::PhantomData,
+    })
+}
+
+/// The headers `edit_headers` returns. Borrows the headers they were copied from, whose header
+/// table they share.
+pub struct EditedHeaders<'a> {
+    headers: kj_rs::KjOwn<ffi::HttpHeaders>,
+    _source: std::marker::PhantomData<&'a ffi::HttpHeaders>,
+}
+
+impl std::ops::Deref for EditedHeaders<'_> {
+    type Target = ffi::HttpHeaders;
+
+    fn deref(&self) -> &ffi::HttpHeaders {
+        &self.headers
+    }
+}
+
+/// See `ffi::edit_headers`.
+pub fn edit_headers<'a>(
+    table: &ffi::HttpHeaderTable,
+    headers: &'a ffi::HttpHeaders,
+    edits: &[ffi::HeaderEdit],
+    injected: &[ffi::HeaderEdit],
+) -> crate::Result<EditedHeaders<'a>> {
+    // SAFETY: the wrapper returned borrows `headers`, and their table outlives them.
+    let headers = unsafe { ffi::edit_headers(table, headers, edits, injected) }?;
+    Ok(EditedHeaders {
+        headers,
+        _source: std::marker::PhantomData,
     })
 }
 
