@@ -30,7 +30,9 @@
 //
 // With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock for
 // planning and re-arms every schedule by it, returning once each has, and
-// once any run in progress has finished; alarms keep the real clock.
+// once any run in progress has finished; alarms keep the real clock. It
+// answers `{now, at}`: this process's time, and the time each schedule's
+// alarm is planned for, by name, on the clock of the node that planned it.
 //
 // Expressions are Cloudflare's dialect, in UTC, as its parser (saffron)
 // reads them: weekdays 1 to 7 from Sunday, so `1-5` is Sunday to Thursday,
@@ -286,27 +288,32 @@ const crons = (name) => schedules[name] ?? [];
 let skew = 0;
 const clock = () => Date.now() + skew;
 
-// Each schedule arms on its own: one failing never cancels another.
+// Each schedule arms on its own: one failing never cancels another. Resolves
+// to the time each one's alarm is planned for, by name.
 async function armAll() {
+  const names = Object.keys(schedules);
   const results = await Promise.allSettled(
-    Object.keys(schedules).map((name) =>
+    names.map((name) =>
       env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name)
     )
   );
   const errors = results.flatMap((r) => r.reason ?? []);
   if (errors.length > 0) throw new AggregateError(errors, 'not armed');
+  return Object.fromEntries(names.map((name, i) => [name, results[i].value]));
 }
 
 export default {
-  scheduled: armAll,
+  async scheduled() {
+    await armAll();
+  },
   async fetch(request) {
     const url = new URL(request.url);
     if (!env.TEST_CLOCK || url.pathname !== '/clock') {
       return new Response(null, { status: 404 });
     }
     skew += Number(url.searchParams.get('advance'));
-    await armAll();
-    return Response.json({ now: clock() });
+    const at = await armAll();
+    return Response.json({ now: clock(), at });
   },
 };
 
@@ -334,12 +341,14 @@ export class Schedule extends DurableObject {
     await storage.setAlarm(p.armAt - skew);
   }
 
+  // Resolves to the time the alarm is planned for, `at`, or null once the
+  // schedule retires.
   async arm(name) {
     await this.#running?.catch(() => {});
     // Planned from the last occurrence that ran at the earliest: a clock
     // behind it, stepped back or another node's, would arm it again. A
     // schedule stored without `fired` has the occurrence its retry owes.
-    const stored = await this.ctx.storage.get(['fired', 'owed']);
+    const stored = await this.ctx.storage.get(['fired', 'owed', 'at']);
     const fired =
       stored.get('fired') ?? stored.get('owed')?.occurrence ?? -Infinity;
     const now = Math.max(clock(), fired);
@@ -347,9 +356,12 @@ export class Schedule extends DurableObject {
     // An alarm no later than the plan's, a retry or a missed occurrence, is
     // kept.
     const alarm = await this.ctx.storage.getAlarm();
-    if (alarm !== null && p.armAt !== null && alarm + skew <= p.armAt) return;
+    if (alarm !== null && p.armAt !== null && alarm + skew <= p.armAt) {
+      return stored.get('at');
+    }
     // Written back, so the occurrence a cleared retry owed stays recorded.
     await this.#arm(name, p, null, fired === -Infinity ? undefined : fired);
+    return p.armAt;
   }
 
   alarm() {
