@@ -326,6 +326,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_buffer_data(view: &Local) -> *mut u8;
+        pub unsafe fn local_array_buffer_view_data(view: &Local, byte_length: &mut usize) -> usize;
         pub unsafe fn local_array_buffer_view_get_buffer(
             isolate: *mut Isolate,
             view: &Local,
@@ -2879,15 +2880,14 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return &[];
         }
-        // SAFETY: buffer_data() + byte_offset() gives the start of the view's region;
-        // byte_length() bytes are valid until JS runs, which the lock borrow prevents.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts(ptr.cast_const(), self.byte_length())
-        }
+        // SAFETY: `data` points to the `len` bytes the view covers, which are valid until JS
+        // runs, which the lock borrow prevents.
+        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
     }
 
     /// Returns a mutable byte slice of the view's visible region.
@@ -2912,29 +2912,42 @@ impl<'s> Local<'s, ArrayBufferView> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return &mut [];
         }
-        // SAFETY: caller guarantees exclusive access; same pointer derivation
-        // as as_slice; the lock borrow keeps JS from running.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts_mut(ptr, self.byte_length())
-        }
+        // SAFETY: caller guarantees exclusive access; `data` points to the `len` bytes the
+        // view covers; the lock borrow keeps JS from running.
+        unsafe { std::slice::from_raw_parts_mut(data, len) }
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return Vec::new();
         }
-        // SAFETY: same pointer derivation as as_slice; no JS can run before the copy
-        // completes.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts(ptr.cast_const(), self.byte_length()).to_vec()
-        }
+        // SAFETY: `data` points to the `len` bytes the view covers; no JS can run before the
+        // copy completes.
+        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }.to_vec()
     }
+}
+
+/// Returns the first of the elements of type `E` that the `ArrayBufferView` `view` covers, and
+/// how many it covers.
+///
+/// V8 reads a view's offset and length from the V8 heap and does not always check them against
+/// the buffer, so a view that does not lie within its buffer covers nothing here.
+///
+/// # Safety
+/// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
+unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
+    let mut byte_length = 0;
+    // SAFETY: the caller guarantees the handle.
+    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) };
+    (data as *mut E, byte_length / size_of::<E>())
 }
 
 // `TypedArray`-specific implementations
@@ -3066,15 +3079,14 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                if self.is_empty() {
+                // SAFETY: handle is valid within the current HandleScope.
+                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
+                if len == 0 {
                     return &[];
                 }
-                // SAFETY: handle is valid; non-empty guarantees non-null data pointer.
-                // data() returns the ArrayBuffer base; byte_offset() gives this view's start.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts(ptr.cast_const(), self.len())
-                }
+                // SAFETY: `data` points to the `len` elements the view covers, which are
+                // valid until JS runs, which the lock borrow prevents.
+                unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -3103,15 +3115,14 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
-                if self.is_empty() {
+                // SAFETY: handle is valid within the current HandleScope.
+                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
+                if len == 0 {
                     return &mut [];
                 }
-                // SAFETY: caller guarantees exclusive access to this buffer region;
-                // handle is valid and non-empty guarantees a non-null data pointer.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts_mut(ptr, self.len())
-                }
+                // SAFETY: caller guarantees exclusive access to this buffer region; `data`
+                // points to the `len` elements the view covers.
+                unsafe { std::slice::from_raw_parts_mut(data, len) }
             }
 
             /// Returns an iterator over the elements.

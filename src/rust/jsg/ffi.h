@@ -445,6 +445,9 @@ size_t local_array_buffer_get_backing_store(const Local& buffer);
 size_t local_array_buffer_view_byte_offset(const Local& view);
 size_t local_array_buffer_view_byte_length(const Local& view);
 uint8_t* local_array_buffer_view_buffer_data(const Local& view);
+// Returns the address of the first byte the view covers and sets `byte_length` to how many it
+// covers, which is zero for a view that is detached or that does not lie within its buffer.
+uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
 size_t local_array_buffer_view_element_size(const Local& view);
 bool local_array_buffer_view_is_integer_type(const Local& view);

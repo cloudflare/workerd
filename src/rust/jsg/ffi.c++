@@ -41,13 +41,23 @@ namespace workerd::rust::jsg {
     return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
   }
 
+// The memory that `view` covers. V8 reads a view's offset and length from the V8 heap and does
+// not always check them against the buffer, so a view that does not lie within its buffer is
+// empty here, as it is for jsg::JsBufferSource.
+static kj::ArrayPtr<uint8_t> viewBytes(v8::Local<v8::ArrayBufferView> view) {
+  auto buffer = view->Buffer();
+  auto byteOffset = view->ByteOffset();
+  auto byteLength = view->ByteLength();
+  auto bufferLength = buffer->ByteLength();
+  if (byteOffset > bufferLength || byteLength > bufferLength - byteOffset) return nullptr;
+  return kj::arrayPtr(static_cast<uint8_t*>(buffer->Data()) + byteOffset, byteLength);
+}
+
 #define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
   elem_type local_##name##_get(const Local& array, size_t index) {                                 \
-    auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
-    KJ_REQUIRE(index < typed->Length(), "index out of bounds");                                    \
-    auto data = reinterpret_cast<elem_type*>(                                                      \
-        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
-    return data[index];                                                                            \
+    auto bytes = viewBytes(local_as_ref_from_ffi<v8::v8_type>(array));                             \
+    KJ_REQUIRE(index < bytes.size() / sizeof(elem_type), "index out of bounds");                   \
+    return reinterpret_cast<elem_type*>(bytes.begin())[index];                                     \
   }
 
 // BackingStore — the size_t handle is the address of a heap-allocated
@@ -776,6 +786,12 @@ size_t local_array_buffer_view_byte_length(const Local& view) {
 
 uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
+}
+
+uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length) {
+  auto bytes = viewBytes(local_as_ref_from_ffi<v8::ArrayBufferView>(view));
+  byte_length = bytes.size();
+  return reinterpret_cast<uintptr_t>(bytes.begin());
 }
 
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
