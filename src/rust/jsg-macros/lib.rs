@@ -951,6 +951,9 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The constant name is used as-is (no camelCase conversion), matching the
 /// convention that constants are `UPPER_SNAKE_CASE` in both Rust and JavaScript.
 /// Only numeric types (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`) are supported.
+/// Like a static method, a static constant cannot be named `length`, `name` or
+/// `prototype`, or share its name with another static member (see the README's
+/// "Static member names").
 ///
 /// ```ignore
 /// #[jsg_resource]
