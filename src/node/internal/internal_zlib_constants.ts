@@ -28,6 +28,10 @@ Object.defineProperties(
       .map(([k, v]) => [
         k.slice(constPrefix.length),
         {
+          // A null prototype keeps properties added to Object.prototype by user
+          // code (such as `get`) from being read as part of the descriptor. This
+          // module can load lazily, after user code has run.
+          __proto__: null,
           value: v,
           writable: false,
           configurable: false,
