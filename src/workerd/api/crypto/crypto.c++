@@ -129,6 +129,62 @@ const EVP_MD* lookupSubtleDigestAlgorithm(kj::StringPtr name) {
   return lookupDigestAlgorithm(name).second;
 }
 
+struct XofDigestAlgorithm {
+  const EVP_MD* type;
+  uint32_t outputBytes;
+};
+
+uint32_t normalizeXofInteger(double value, uint32_t maximum, kj::StringPtr field) {
+  auto integer = std::trunc(value);
+  JSG_REQUIRE(std::isfinite(integer) && integer >= 0 && integer <= maximum, TypeError, field,
+      " is outside the supported integer range.");
+  return static_cast<uint32_t>(integer);
+}
+
+kj::Maybe<XofDigestAlgorithm> lookupXofDigestAlgorithm(jsg::Lock& js,
+    kj::StringPtr name,
+    v8::Local<v8::Value> parameters,
+    const jsg::TypeHandler<SubtleCrypto::CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<SubtleCrypto::TurboShakeParams>& turboShakeParamsHandler) {
+  if (!Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) return kj::none;
+
+  if (strcasecmp(name.cStr(), "cSHAKE256") == 0) {
+    auto algorithm = JSG_REQUIRE_NONNULL(cshakeParamsHandler.tryUnwrap(js, parameters), TypeError,
+        "cSHAKE256 requires an algorithm dictionary with outputLength.");
+    auto outputBits = normalizeXofInteger(
+        algorithm.outputLength, std::numeric_limits<uint32_t>::max(), "outputLength");
+    JSG_REQUIRE(outputBits % 8 == 0, DOMNotSupportedError,
+        "cSHAKE256 outputLength must be a multiple of 8 bits.");
+    KJ_IF_SOME(functionName, algorithm.functionName) {
+      JSG_REQUIRE(functionName.getHandle(js).size() == 0, DOMNotSupportedError,
+          "cSHAKE256 only supports an empty functionName.");
+    }
+    KJ_IF_SOME(customization, algorithm.customization) {
+      JSG_REQUIRE(customization.getHandle(js).size() == 0, DOMNotSupportedError,
+          "cSHAKE256 only supports an empty customization.");
+    }
+    return XofDigestAlgorithm{EVP_shake256(), outputBits / 8};
+  }
+
+  if (strcasecmp(name.cStr(), "TurboSHAKE256") == 0) {
+    auto algorithm = JSG_REQUIRE_NONNULL(turboShakeParamsHandler.tryUnwrap(js, parameters),
+        TypeError, "TurboSHAKE256 requires an algorithm dictionary with outputLength.");
+    auto domain =
+        normalizeXofInteger(algorithm.domainSeparation.orDefault(0x1f), 255, "domainSeparation");
+    auto outputBits = normalizeXofInteger(
+        algorithm.outputLength, std::numeric_limits<uint32_t>::max(), "outputLength");
+    JSG_REQUIRE(outputBits > 0 && outputBits % 8 == 0, DOMOperationError,
+        "TurboSHAKE256 outputLength must be a positive multiple of 8 bits.");
+    JSG_REQUIRE(domain >= 1 && domain <= 0x7f, DOMOperationError,
+        "TurboSHAKE256 domainSeparation must be between 1 and 127.");
+    JSG_REQUIRE(
+        domain == 0x1f, DOMNotSupportedError, "TurboSHAKE256 only supports domainSeparation 31.");
+    return XofDigestAlgorithm{EVP_turboshake256(), outputBits / 8};
+  }
+
+  return kj::none;
+}
+
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
   static const std::set<CryptoAlgorithm> ALGORITHMS = {
     {"AES-CTR"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
@@ -761,12 +817,32 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
-    jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    kj::OneOf<kj::String, HashAlgorithm> algorithmParam,
+    jsg::JsBufferSource data,
+    const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler) {
+  auto& js = jsg::Lock::from(args.GetIsolate());
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
+    KJ_IF_SOME(xof,
+        lookupXofDigestAlgorithm(
+            js, algorithm.name, args[0], cshakeParamsHandler, turboShakeParamsHandler)) {
+      auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
+      KJ_ASSERT(digestCtx.get() != nullptr);
+      auto ptr = nonNullBytes(data.asArrayPtr());
+      OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), xof.type, nullptr));
+      OSSLCALL(EVP_DigestUpdate(digestCtx.get(), ptr.begin(), ptr.size()));
+      auto buf = jsg::JsArrayBuffer::create(js, xof.outputBytes);
+      kj::byte emptyOutput = 0;
+      auto output = buf.size() == 0 ? kj::arrayPtr(&emptyOutput, 0) : buf.asArrayPtr();
+      OSSLCALL(EVP_DigestFinalXOF(digestCtx.get(), output.begin(), output.size()));
+      return buf.addRef(js);
+    }
+
     auto type = lookupSubtleDigestAlgorithm(algorithm.name);
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
@@ -1159,6 +1235,8 @@ bool SubtleCrypto::supports(jsg::Lock& js,
     const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
+    const jsg::TypeHandler<CShakeParams>& cshakeParamsHandler,
+    const jsg::TypeHandler<TurboShakeParams>& turboShakeParamsHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
         generateKeyAlgorithmHandler,
     const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
@@ -1214,6 +1292,10 @@ bool SubtleCrypto::supports(jsg::Lock& js,
           case SubtleOperation::DIGEST: {
             auto normalizedAlgorithm =
                 normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
+            if (lookupXofDigestAlgorithm(js, normalizedAlgorithm.name, algorithmValue,
+                    cshakeParamsHandler, turboShakeParamsHandler) != kj::none) {
+              return true;
+            }
             KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
               lookupSubtleDigestAlgorithm(normalizedAlgorithm.name);
             })) {

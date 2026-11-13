@@ -827,6 +827,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-xof-test.wd-test",
+    data = ["crypto-xof-test.js"],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],

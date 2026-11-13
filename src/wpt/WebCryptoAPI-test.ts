@@ -253,11 +253,18 @@ export default {
     comment: 'Argon2 is not supported',
     omittedTests: true,
   },
-  'modern-algos/digest/cshake.https.any.js': unsupported('cSHAKE'),
+  'modern-algos/digest/cshake.https.any.js': {
+    comment: 'cSHAKE128 is not supported',
+    expectedFailures: [/^cSHAKE128 /],
+  },
   'modern-algos/digest/kangarootwelve.https.any.js':
     unsupported('KangarooTwelve'),
   'modern-algos/digest/sha3.https.any.js': {},
-  'modern-algos/digest/turboshake.https.any.js': unsupported('TurboSHAKE'),
+  'modern-algos/digest/turboshake.https.any.js': {
+    comment:
+      'TurboSHAKE128 and non-default domain separation are not supported',
+    expectedFailures: [/^TurboSHAKE128 /, /^TurboSHAKE256.*D=0x/],
+  },
   'modern-algos/digest/xof_digest.js': {},
   'modern-algos/encap_decap/encap_decap_bits.https.any.js': {
     comment: 'ML-KEM-512 and the P-256/P-384 hybrid KEMs are not supported',
