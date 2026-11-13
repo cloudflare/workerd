@@ -1105,6 +1105,7 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     }
     disconnectException = exception.clone();
     canceler.cancel(kj::mv(exception));
+    heldDownEnd = kj::none;
   }
 
   // Adopts the background task that watches the `Port.connect()` RPC. connectTyped() hands the
@@ -1130,6 +1131,23 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     } else if (connectState == ConnectState::PENDING) {
       connectState = ConnectState::PENDING_WITH_DISCONNECT;
       pendingDisconnect = kj::mv(exception);
+    }
+  }
+
+  // Called when the container drops `down` without end().
+  void notifyDownDropped() {
+    downDropped = true;
+    notifyUncleanDisconnect();
+  }
+
+  // Takes the write end of `input`'s pipe once the container is done with `down`. Destroying it
+  // ends `input`, which reads and pumps report as EOF. When the container drops `down` without
+  // end() after Port.connect() has returned, the drop has already failed them, but before that it
+  // only leaves an unclean disconnect pending, so the write end is kept until disconnect() fails
+  // them with the disconnect, which is Port.connect()'s error if it failed.
+  void releaseDownEnd(kj::Own<kj::AsyncOutputStream> end) {
+    if (downDropped && disconnectException == kj::none) {
+      heldDownEnd = kj::mv(end);
     }
   }
 
@@ -1180,6 +1198,11 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
   // The exception of the signal that moved connectState to PENDING_WITH_DISCONNECT, if it had one.
   kj::Maybe<kj::Exception> pendingDisconnect;
 
+  // Whether the container dropped `down` without end(), and the write end of `input`'s pipe that
+  // releaseDownEnd() keeps after such a drop.
+  bool downDropped = false;
+  kj::Maybe<kj::Own<kj::AsyncOutputStream>> heldDownEnd;
+
   // Background watcher for the connect RPC; see adoptConnectTask().
   kj::Promise<void> connectTask = nullptr;
 
@@ -1208,6 +1231,43 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
       return kj::mv(exception);
     });
   }
+};
+
+// The write end of the pipe from a container port's `down` to its ContainerPortAsyncIoStream,
+// which decides when the stream's input ends (see releaseDownEnd()).
+class ContainerPortDownEnd final: public kj::AsyncOutputStream {
+ public:
+  ContainerPortDownEnd(
+      kj::Own<kj::AsyncOutputStream> inner, kj::WeakRc<ContainerPortAsyncIoStream> stream)
+      : inner(kj::mv(inner)),
+        stream(kj::mv(stream)) {}
+
+  ~ContainerPortDownEnd() noexcept(false) {
+    KJ_IF_SOME(s, stream) {
+      s->releaseDownEnd(kj::mv(inner));
+    }
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->write(buffer);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->write(pieces);
+  }
+
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& input, uint64_t amount = kj::maxValue) override {
+    return inner->tryPumpFrom(input, amount);
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+
+ private:
+  kj::Own<kj::AsyncOutputStream> inner;
+  kj::WeakRc<ContainerPortAsyncIoStream> stream;
 };
 
 // A kj::NetworkAddress backed by a single container `Port` capability. Each connect() opens a
@@ -1256,12 +1316,14 @@ class ContainerPortNetworkAddress final: public kj::NetworkAddress {
 
     // Capture a weak reference: this callback is owned by the capnp byte-stream machinery once
     // `down` is sent to the container, so it may fire after `conn` has been destroyed. Upgrading
-    // the weak reference makes that safe. Route through notifyUncleanDisconnect() so a drop seen
-    // while the connect is still outstanding defers to the (more specific) connect result.
-    auto down =
-        capnp::ExplicitEndOutputStream::wrap(kj::mv(downPipe.out), [weak = conn.addWeakRef()]() {
+    // the weak reference makes that safe. notifyDownDropped() routes through
+    // notifyUncleanDisconnect() so a drop seen while the connect is still outstanding defers to the
+    // (more specific) connect result.
+    auto down = capnp::ExplicitEndOutputStream::wrap(
+        kj::heap<ContainerPortDownEnd>(kj::mv(downPipe.out), conn.addWeakRef()),
+        [weak = conn.addWeakRef()]() {
       KJ_IF_SOME(stream, weak) {
-        stream->notifyUncleanDisconnect();
+        stream->notifyDownDropped();
       }
     });
     req.setDown(byteStreamFactory.kjToCapnp(kj::mv(down)));
@@ -1401,6 +1463,40 @@ void Container::invalidateTcpPortStates() {
   tcpPortStates = kj::none;
 }
 
+// The source of the pump from a raw connect()'s tunnel into its socket. Once the socket has been
+// accepted, a failed connect() only shuts the socket down, so a failure of the tunnel, such as
+// Port.connect()'s error, reaches the socket's reader only if the reader's read or pump goes
+// through the tunnel's stream.
+//
+// The socket is a kj pipe, so pumpTo() lets the destination pull through tryRead(), which makes
+// the pipe's reads read the tunnel's stream. The pipe continues a pump by calling pumpTo() again,
+// so every call offers the pull. The pipe also calls pumpTo() with the reader's destination when
+// the reader pumps the socket, and a failure of that pump fails the reader's pump. A capnp
+// ByteStream adapter (an ExplicitEndOutputStream) can only be such a destination, never the
+// socket, so it gets the tunnel's own pump, which can redirect `down` to it with getSubstream().
+// Other destinations get the tunnel's pump only when they can't pull.
+class RawSocketDownInput final: public kj::AsyncInputStream {
+ public:
+  explicit RawSocketDownInput(ContainerPortAsyncIoStream& stream): stream(stream) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return stream.tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Promise<uint64_t> pumpTo(
+      kj::AsyncOutputStream& destination, uint64_t amount = kj::maxValue) override {
+    if (kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(destination) == kj::none) {
+      KJ_IF_SOME(promise, destination.tryPumpFrom(*this, amount)) {
+        return kj::mv(promise);
+      }
+    }
+    return stream.pumpTo(destination, amount);
+  }
+
+ private:
+  ContainerPortAsyncIoStream& stream;
+};
+
 // `getTcpPort()` returns a `Fetcher`, on which `fetch()` and `connect()` can be called. `Fetcher`
 // is a JavaScript wrapper around `WorkerInterface`, so we need to implement that.
 class Container::TcpPortWorkerInterface final: public WorkerInterface {
@@ -1497,20 +1593,33 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   kj::Promise<void> connectImpl(kj::Own<kj::AsyncIoStream> connection) {
     auto portConnection = portState->connectForRawSocket();
     auto& portStream = *portConnection;
+    RawSocketDownInput portInput(portStream);
 
-    auto downPumpTask =
-        portConnection->pumpTo(*connection).then([&connection](uint64_t) -> kj::Promise<void> {
+    // The pumps are forked so that they outlive the join below.
+    auto downPumpTask = portInput.pumpTo(*connection)
+                            .then([&connection](uint64_t) -> kj::Promise<void> {
       connection->shutdownWrite();
       return kj::NEVER_DONE;
-    });
+    }).fork();
     auto upPumpTask = connection->pumpTo(*portConnection)
-                          .then([&portStream](uint64_t) {
-      return portStream.endWrite();
-    }).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+                          .then([&portStream](uint64_t) { return portStream.endWrite(); })
+                          .then([]() -> kj::Promise<void> {
+      return kj::NEVER_DONE;
+    }).fork();
     auto disconnected = portStream.rejectWhenDisconnected();
 
-    co_await kj::joinPromisesFailFast(
-        kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask), kj::mv(disconnected)));
+    kj::Maybe<kj::Exception> failure;
+    try {
+      co_await kj::joinPromisesFailFast(
+          kj::arr(upPumpTask.addBranch(), downPumpTask.addBranch(), kj::mv(disconnected)));
+    } catch (...) {
+      failure = kj::getCaughtExceptionAsKj();
+    }
+    // A failure of the tunnel fails the socket's read or pump in continuations that can still be
+    // queued. Returning destroys the pump into the socket, which would cancel them, so wait for
+    // them to run first.
+    co_await kj::yieldUntilQueueEmpty();
+    kj::throwFatalException(KJ_ASSERT_NONNULL(kj::mv(failure)));
   }
 };
 
