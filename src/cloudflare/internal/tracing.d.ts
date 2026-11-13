@@ -57,7 +57,7 @@ interface TracingSpanLinkContext extends TracingSpanContext {
 interface TracingSpanLink {
   context: TracingSpanLinkContext;
   attributes?: SpanAttributes;
-  // Accepted for OTel Link compatibility; recording computes this from sanitized attributes.
+  // OTel Link compatibility; recording computes this from sanitized attributes.
   droppedAttributesCount?: number;
 }
 
