@@ -109,7 +109,7 @@ Example:
 
 ```python
 CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
+    "workerd-new-check": [
         "src/workerd/io",
         "src/workerd/api",
     ],

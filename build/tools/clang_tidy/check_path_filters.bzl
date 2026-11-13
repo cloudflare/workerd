@@ -23,9 +23,4 @@ CHECK_PATH_FILTERS = {
         "src/workerd/tools",
         "src/workerd/util",
     ],
-    "workerd-unsafe-continuation-capture": [
-        # Add paths here as they are cleaned up:
-        # "src/workerd/io",
-        # "src/workerd/api",
-    ],
 }
