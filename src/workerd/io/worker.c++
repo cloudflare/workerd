@@ -2169,7 +2169,7 @@ void handleLog(jsg::Lock& js,
       kj::String label;
       if (length > 0) {
         KJ_IF_SOME(first, jsg::JsValue(info[0]).tryCast<jsg::JsString>()) {
-          char buf[128];
+          char buf[128]{};
           auto written = first.writeInto(js, buf, jsg::JsString::REPLACE_INVALID_UTF8).written;
           label = kj::str(kj::ArrayPtr<const char>(buf, written));
         }
