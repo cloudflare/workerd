@@ -630,9 +630,10 @@ fn invocation(
                 return;
             };
             // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
-            // during the call. Resources are only ever borrowed shared, so this may alias the
-            // borrow of a method that called into JavaScript, or of GC tracing.
-            let self_: &Self = unsafe { resource.as_ref() };
+            // during the call, and the borrow lasts no longer than that of the local `this`.
+            // Resources are only ever borrowed shared, so this may alias the borrow of a method
+            // that called into JavaScript, or of GC tracing.
+            let self_: &Self = unsafe { jsg::v8::borrow_receiver(resource, &this) };
             let result = self_.#fn_name(#(#arg_exprs),*);
         },
         Receiver::This => quote! {

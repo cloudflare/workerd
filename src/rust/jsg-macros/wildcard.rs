@@ -221,8 +221,9 @@ impl Signature {
                 }
             };
             // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
-            // during the call. Resources are only ever borrowed shared.
-            let self_: &Self = unsafe { resource.as_ref() };
+            // during the call, and the borrow lasts no longer than that of the local `this`.
+            // Resources are only ever borrowed shared.
+            let self_: &Self = unsafe { jsg::v8::borrow_receiver(resource, &this) };
             let result = self_.#fn_name(#lock_arg #name_arg);
             let result: Result<_, jsg::Error> = #to_result;
         }
