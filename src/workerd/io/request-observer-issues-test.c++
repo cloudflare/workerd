@@ -5,6 +5,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/stream-utils.h>
 
 #include <kj/compat/http.h>
 #include <kj/test.h>
@@ -140,10 +141,9 @@ uint fetchThroughEntrypoint(TestFixture& fixture) {
   kj::HttpHeaderTable table;
   kj::HttpHeaders headers(table);
   StatusResponse response;
+  auto body = newNullInputStream();
   auto entrypoint = fixture.makeWorkerEntrypoint();
-  entrypoint
-      ->request(kj::HttpMethod::GET, "http://example.com/"_kj, headers,
-          *kj::heap<kj::NullInputStream>(), response)
+  entrypoint->request(kj::HttpMethod::GET, "http://example.com/"_kj, headers, *body, response)
       .wait(fixture.getWaitScope());
   return response.status;
 }

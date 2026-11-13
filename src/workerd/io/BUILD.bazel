@@ -776,6 +776,7 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util",
     ],
 )
 
