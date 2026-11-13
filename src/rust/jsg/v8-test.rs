@@ -23,3 +23,36 @@ fn v8_length_refuses_longer_input() {
     );
     assert_eq!(String::v8_length(usize::MAX), None);
 }
+
+/// A resource type whose every instance is interchangeable, as `#[jsg_resource(snapshot_stateless)]`
+/// declares.
+struct Stateless;
+
+impl crate::Traced for Stateless {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
+
+impl GarbageCollected for Stateless {
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        c"Stateless"
+    }
+
+    fn snapshot_recreate(&self) -> Option<crate::SnapshotRecreated> {
+        Some(crate::snapshot_recreate_leak(Stateless))
+    }
+}
+
+#[test]
+fn snapshot_recreate_leaks_a_fresh_instance_of_the_type() {
+    let recreated = Stateless
+        .snapshot_recreate()
+        .expect("a stateless type recreates");
+    let ptr = recreated.0;
+    assert!(!ptr.is_cleared());
+    assert_eq!(ptr.type_id(), std::any::TypeId::of::<Stateless>());
+    // SAFETY: `ptr` holds the leaked instance until `drop_rc` below releases it.
+    let gc = unsafe { ptr.as_gc_ref() };
+    assert_eq!(gc.memory_name(), c"Stateless");
+    // SAFETY: releases the one `Rc` the leak created; nothing else refers to the instance.
+    unsafe { ptr.drop_rc() };
+}

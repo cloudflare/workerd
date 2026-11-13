@@ -205,6 +205,11 @@ pub mod ffi {
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
 
+        /// Called from C++ `Wrappable::snapshotClone`: the trait object of a fresh instance for
+        /// a wrapper restored from a startup snapshot (`GarbageCollected::snapshot_recreate`), or
+        /// a cleared pointer (`data_ptr == 0`) when the resource's type is not stateless.
+        unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &Wrappable) -> TraitObjectPtr;
+
         /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
         /// which C++ adds to the Wrappable's own.
         unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
@@ -4959,6 +4964,25 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // literal). Convert to &str so CXX can pass it as rust::Str. The C++
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
+    }
+}
+
+unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &ffi::Wrappable) -> ffi::TraitObjectPtr {
+    const NONE: ffi::TraitObjectPtr = ffi::TraitObjectPtr {
+        data_ptr: 0,
+        vtable_ptr: 0,
+        type_id_lo: 0,
+        type_id_hi: 0,
+    };
+    // SAFETY: wrappable is valid.
+    unsafe {
+        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
+            return NONE;
+        };
+        trait_ptr
+            .as_gc_ref()
+            .snapshot_recreate()
+            .map_or(NONE, |recreated| recreated.0)
     }
 }
 

@@ -129,6 +129,16 @@ void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
   wrappable_invoke_get_memory_info(*this, tracker);
 }
 
+kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> Wrappable::snapshotClone() const {
+  auto recreated = wrappable_invoke_snapshot_recreate(*this);
+  if (recreated.data_ptr == 0) return kj::none;
+  // wrappable_new() minus the strong reference: the restore path requires a strong refcount of
+  // zero, and nothing on the Rust side holds the instance (snapshot_recreate_leak).
+  auto rc = kj::rc<Wrappable>();
+  rc->trait_object = kj::mv(recreated);
+  return kj::Own<::workerd::jsg::Wrappable>(rc.toOwn());
+}
+
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value) {
   v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(kj::mv(value)));

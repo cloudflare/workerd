@@ -308,13 +308,13 @@ async function test(ctrl, env) {
     // File system handles: see startup-snapshot-wrappables-webfs-test.js.
     'webfs-tmp',
     'webfs-bundle',
+    // node:fs and node:url: the module scope reaches UrlUtil, a Rust JSG resource
+    // (src/rust/api/url.rs) marked snapshot_stateless.
+    'fs',
     ...(tsUrl ? ['searchparams'] : []),
   ];
-  // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
-  // module scope of node:fs reaches UrlUtil, a Rust JSG resource (src/rust/api/url.rs); Rust
-  // resource types have no snapshot transfer, so the fs case falls back until they do.
+  // Cases that fail the zygote: always plain Workers.
   const fallback = [
-    'fs',
     'unclonable',
     ...(tsUrl ? [] : ['searchparams']),
     'midstream-decoder',

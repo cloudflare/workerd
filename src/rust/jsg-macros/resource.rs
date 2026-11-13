@@ -24,6 +24,7 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
+use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -51,6 +52,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
+    let snapshot_stateless = has_flag(&attr, "snapshot_stateless");
     let typescript = typescript_options(attr.clone());
     let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
         Ok(generated) => generated,
@@ -82,6 +84,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         &name_str,
         &memory_info.gc_fn,
         &drop_detach_types(custom_trace, &fields),
+        &snapshot_recreate_method(snapshot_stateless),
     );
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
@@ -649,6 +652,20 @@ fn drop_probe_items() -> proc_macro2::TokenStream {
     }
 }
 
+/// The `snapshot_recreate` method of a `#[jsg_resource(snapshot_stateless)]` type, which rebuilds
+/// the instance behind every wrapper restored from a startup snapshot through its `Default` impl;
+/// nothing for any other type.
+fn snapshot_recreate_method(snapshot_stateless: bool) -> proc_macro2::TokenStream {
+    if !snapshot_stateless {
+        return quote! {};
+    }
+    quote! {
+        fn snapshot_recreate(&self) -> Option<jsg::SnapshotRecreated> {
+            Some(jsg::snapshot_recreate_leak(<Self as ::core::default::Default>::default()))
+        }
+    }
+}
+
 /// The types whose `Traced::needs_drop_detach` makes a resource with `fields` detach its
 /// references before it is dropped. A `custom_trace` resource's own `Traced` impl answers for
 /// its fields, which need not be `Traced`.
@@ -667,13 +684,15 @@ fn drop_detach_types(
 }
 
 /// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
-/// `memory_info` method or nothing, and `drop_detach_types`, the types whose
-/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped.
+/// `memory_info` method or nothing, `drop_detach_types`, the types whose
+/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped,
+/// and `snapshot_recreate_fn`, its `snapshot_recreate` method or nothing.
 fn generate_gc_impl(
     name: &syn::Ident,
     name_str: &str,
     memory_info_fn: &proc_macro2::TokenStream,
     drop_detach_types: &[proc_macro2::TokenStream],
+    snapshot_recreate_fn: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let drop_probe = drop_probe_items();
     quote! {
@@ -697,19 +716,22 @@ fn generate_gc_impl(
                     #(|| __JsgDropProbe::<#drop_detach_types>(::std::marker::PhantomData)
                         .needs_drop_detach())*
             }
+
+            #snapshot_recreate_fn
         }
     }
 }
 
 /// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
-/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
-/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
-/// the impl block.
+/// `custom_trace`, `memory_info`, `custom_memory_info`, `snapshot_stateless` and `ts_root`, so
+/// that a misspelled flag does not compile instead of being ignored. `nested_types(...)` and
+/// `custom_members` belong on the impl block.
 fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
-                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `custom_memory_info`, `snapshot_stateless`, `ts_root`, \
+                            `ts_override = \"...\"` or \
                             `ts_define = \"...\"` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
@@ -742,6 +764,7 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
                     "custom_trace",
                     "memory_info",
                     "custom_memory_info",
+                    "snapshot_stateless",
                     "ts_root",
                 ]
                 .iter()

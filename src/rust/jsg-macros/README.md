@@ -689,6 +689,14 @@ A cell is required whenever a traced field needs to be mutated after constructio
 because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 `TracedGlobal` uses the `jsg::` cells.
 
+### Stateless resources and startup snapshots
+
+`#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is
+interchangeable with any other, so a live instance can transfer through a V8 startup snapshot:
+the macro adds a `GarbageCollected::snapshot_recreate` method that leaks a `Default` instance
+for the wrapper restored from the snapshot. The type must implement `Default`. See
+`jsg/README.md` §Startup snapshots.
+
 ### Manual tracing with `custom_trace`
 
 For cases where default field-by-field `Traced` behavior is not enough, use

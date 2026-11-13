@@ -227,6 +227,12 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
   `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
   live original, and once more per started worker on the stored copy.
+- for a Rust JSG resource, `#[jsg_resource(snapshot_stateless)]` (`UrlUtil`, `DnsUtil`,
+  `InspectorModule`), which requires `Default`. Every Rust resource shares one
+  CppHeapPointerTag, so the type cannot be recorded by tag alone: the Rust-side `Wrappable`'s
+  `snapshotClone()` asks the resource for a fresh instance
+  (`GarbageCollected::snapshot_recreate`) that stands in for the clone. See
+  `src/rust/jsg/README.md`.
 
 A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
@@ -334,7 +340,7 @@ once.
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
 | `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, file system handles to a `/tmp` file and to a bundle file, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

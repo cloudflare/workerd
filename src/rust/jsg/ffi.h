@@ -78,6 +78,12 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   size_t jsgGetMemorySelfSize() const override;
   void jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const override;
 
+  // Startup snapshot transfer; see GarbageCollected::snapshot_recreate on the Rust side. Every
+  // Rust resource shares one CppHeapPointerTag, so a stateless Rust type cannot be recorded by
+  // tag alone the way a C++ jsgSnapshotStateless type is: it goes through snapshotClone(), with
+  // a fresh instance standing in for the clone.
+  kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> snapshotClone() const override;
+
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
     return addRefToThis();
