@@ -8,10 +8,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use futures::future::Either;
 use futures::future::FusedFuture;
@@ -34,6 +36,8 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::cluster::Deadlines;
+use crate::cluster::Ready;
 use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
@@ -74,6 +78,8 @@ pub struct RunOptions {
     /// The source deployment of each appended service and of each service left absent because its
     /// deployment was skipped.
     pub deployments: Deployments,
+    /// `--shutdown-delay`: how long `run` serves on after the drain signal before it drains.
+    pub shutdown_delay: Duration,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -411,114 +417,202 @@ async fn serve_listeners(
     Ok(())
 }
 
-/// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
-/// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
-/// error returned.
+/// `workerd serve`: serves until it is told to drain, then drains. A listener failing is fatal
+/// and is the error returned.
+///
+/// Each item of `drain` is a drain signal, with when it arrived on the factory's timer. After the
+/// first, it serves on until the options' `shutdown_delay` has passed since the signal, or until
+/// the next one (`delay_drain`). Draining, it stops accepting connections, lets the open ones
+/// finish, and stops the actors' containers.
 ///
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
-/// `stopTimeoutMs` bounds all of it.
+/// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
     report: Reporter,
-    drain: impl Future<Output = ()>,
+    drain: impl Stream<Item = Duration>,
 ) -> Result<()> {
+    let delay = options.shutdown_delay;
+    let mut drain = std::pin::pin!(drain);
+    let (running, signalled) = start_noting_drain(factory, options, report, drain.as_mut()).await?;
     let Some(Running {
         server,
         mut listeners,
         drain: draining,
-    }) = start(factory, options, report, false).await?
+    }) = running
     else {
         return Ok(());
     };
 
-    // Whatever way this returns, the cluster port answers that this instance is not ready.
-    let _serving = server.cluster().map(ClusterNode::serving);
-    let drain = std::pin::pin!(drain);
+    // The cluster port answers ready until the instance is told to drain or this returns.
+    let ready = server.cluster().map(ClusterNode::ready);
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
-    match futures::future::select(serving.as_mut(), drain).await {
-        Either::Left((result, _)) => result?,
-        Either::Right(((), _)) => {
-            // A draining instance claims nothing more and hands its clustered objects off,
-            // `preventEviction` or not, while it serves on: a request for one waits for it and
-            // then goes where it runs next. Then it leaves the cluster, so peers take over what
-            // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
-            if let Some(node) = server.cluster() {
-                let deadlines = node.start_draining();
-                let workers = server
-                    .services()
-                    .filter_map(|(_, service)| service.as_worker());
-                let namespaces: Vec<_> = workers
-                    .flat_map(|worker| worker.namespaces())
-                    .map(|(_, ns)| ns)
-                    .filter(|ns| ns.cluster().is_some())
-                    .collect();
-                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
-                let stopped = match futures::future::select(serving.as_mut(), handoff).await {
-                    Either::Left((result, handoff)) => {
-                        result?;
-                        handoff.await
-                    }
-                    Either::Right((stopped, _)) => stopped,
-                };
-                // Released before the lease goes, so nothing is served after it. Until the
-                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again. With
-                // objects still running, which stopping very many can leave, it stays a member:
-                // peers take over every object it did not hand off once its lease expires, after
-                // this process exited.
-                if stopped {
-                    let deregister = node.cluster.deregister();
-                    match tokio::time::timeout_at(deadlines.connections, deregister).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
-                        Err(_) => tracing::warn!("leaving the cluster timed out"),
-                    }
-                } else {
-                    tracing::warn!(
-                        "Durable Objects still run at the release deadline: staying a cluster \
-                         member, so that peers take over its objects once this node's lease \
-                         expires"
-                    );
-                }
-                let grace = std::pin::pin!(tokio::time::sleep_until(deadlines.grace));
-                if let Either::Left((result, _)) =
-                    futures::future::select(serving.as_mut(), grace).await
-                {
+    let signal = until_drain(&server, signalled, serving.as_mut(), drain.as_mut()).await?;
+    if let Some(signalled) = signal {
+        delay_drain(
+            &server,
+            (delay, signalled),
+            ready,
+            serving.as_mut(),
+            drain.as_mut(),
+        )
+        .await?;
+        // A draining instance claims nothing more and hands its clustered objects off,
+        // `preventEviction` or not, while it serves on: a request for one waits for it and
+        // then goes where it runs next. Then it leaves the cluster, so peers take over what
+        // it did not hand off, accepts requests until the grace period ends, as load
+        // balancers may still send some, and lets its connections, peers' among them, finish.
+        if let Some(node) = server.cluster() {
+            let deadlines = node.start_draining();
+            let workers = server
+                .services()
+                .filter_map(|(_, service)| service.as_worker());
+            let namespaces: Vec<_> = workers
+                .flat_map(|worker| worker.namespaces())
+                .map(|(_, ns)| ns)
+                .filter(|ns| ns.cluster().is_some())
+                .collect();
+            let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+            let stopped = match futures::future::select(serving.as_mut(), handoff).await {
+                Either::Left((result, handoff)) => {
                     result?;
+                    handoff.await
                 }
-                stop = Some((Rc::clone(node), deadlines));
-            }
-            draining.send_replace(true);
-            if let Some((node, deadlines)) = &stop {
-                let finished = async {
-                    if !serving.is_terminated() {
-                        serving.as_mut().await?;
-                    }
-                    node.peer_requests_done().await;
-                    Ok::<_, crate::Error>(())
-                };
-                let finished = tokio::time::timeout_at(deadlines.connections, finished);
-                if let Ok(result) = finished.await {
-                    result?;
-                } else {
-                    tracing::warn!(
-                        "stopping with requests in flight at the connections deadline: they end \
-                         as the process exits"
-                    );
+                Either::Right((stopped, _)) => stopped,
+            };
+            // Released before the lease goes, so nothing is served after it. Until the
+            // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
+            // that reads this node's record still finds it live and routes here again. With
+            // objects still running, which stopping very many can leave, it stays a member:
+            // peers take over every object it did not hand off once its lease expires, after
+            // this process exited.
+            if stopped {
+                let deregister = node.cluster.deregister();
+                match tokio::time::timeout_at(deadlines.connections, deregister).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
+                    Err(_) => tracing::warn!("leaving the cluster timed out"),
                 }
             } else {
-                serving.await?;
+                tracing::warn!(
+                    "Durable Objects still run at the release deadline: staying a cluster \
+                     member, so that peers take over its objects once this node's lease \
+                     expires"
+                );
             }
+            let grace = std::pin::pin!(tokio::time::sleep_until(deadlines.grace));
+            if let Either::Left((result, _)) =
+                futures::future::select(serving.as_mut(), grace).await
+            {
+                result?;
+            }
+            stop = Some((Rc::clone(node), deadlines));
+        }
+        draining.send_replace(true);
+        if let Some((node, deadlines)) = &stop {
+            let finished = async {
+                if !serving.is_terminated() {
+                    serving.as_mut().await?;
+                }
+                node.peer_requests_done().await;
+                Ok::<_, crate::Error>(())
+            };
+            let finished = tokio::time::timeout_at(deadlines.connections, finished);
+            if let Ok(result) = finished.await {
+                result?;
+            } else {
+                tracing::warn!(
+                    "stopping with requests in flight at the connections deadline: they end \
+                     as the process exits"
+                );
+            }
+        } else if !serving.is_terminated() {
+            serving.await?;
         }
     }
+    stop_containers(&server, stop).await
+}
 
-    // All incoming requests have drained. Stop container-enabled actors so they cannot race
-    // their terminal Docker cleanup, then wait for it while their namespaces remain available.
+/// `start`, noting when a drain signal arrives meanwhile, so that a signal during startup counts
+/// towards the shutdown delay.
+async fn start_noting_drain(
+    factory: Rc<Factory>,
+    options: RunOptions,
+    report: Reporter,
+    mut drain: Pin<&mut impl Stream<Item = Duration>>,
+) -> Result<(Option<Running>, Option<Duration>)> {
+    let clock = Rc::clone(&factory);
+    let start = std::pin::pin!(start(factory, options, report, false));
+    match futures::future::select(start, drain.next()).await {
+        Either::Left((running, _)) => Ok((running?, None)),
+        Either::Right((signalled, start)) => {
+            let signalled = signalled.unwrap_or_else(|| clock.now());
+            Ok((start.await?, Some(signalled)))
+        }
+    }
+}
+
+/// When the drain signal arrived: `signalled`, if it did while the server started, else the next
+/// item of `drain`; `None` if the listeners end first.
+async fn until_drain(
+    server: &Server,
+    signalled: Option<Duration>,
+    serving: Pin<&mut impl Future<Output = Result<()>>>,
+    mut drain: Pin<&mut impl Stream<Item = Duration>>,
+) -> Result<Option<Duration>> {
+    if signalled.is_some() {
+        return Ok(signalled);
+    }
+    match futures::future::select(serving, drain.next()).await {
+        Either::Left((result, _)) => result.map(|()| None),
+        Either::Right((signalled, _)) => {
+            Ok(Some(signalled.unwrap_or_else(|| server.factory().now())))
+        }
+    }
+}
+
+/// Serves on until `delay` (`--shutdown-delay`) has passed since the drain signal arrived at
+/// `signalled`, or until `drain`'s next item, as load balancers go on sending connections for a
+/// while: they are served as before, and a cluster node keeps its Durable Objects and its place in
+/// the cluster. Its readiness probe fails from the signal on (`ready` is dropped), so that what
+/// routes by it sends no more. A listener failing meanwhile is fatal.
+async fn delay_drain(
+    server: &Server,
+    (delay, signalled): (Duration, Duration),
+    ready: Option<Ready>,
+    serving: Pin<&mut impl Future<Output = Result<()>>>,
+    mut drain: Pin<&mut impl Stream<Item = Duration>>,
+) -> Result<()> {
+    drop(ready);
+    let factory = server.factory();
+    let remaining = delay.saturating_sub(factory.now().saturating_sub(signalled));
+    if remaining.is_zero() {
+        return Ok(());
+    }
+    let seconds = remaining.as_secs_f64();
+    tracing::warn!(
+        "drain signal received: serving for {seconds:.1} s more (--shutdown-delay), then \
+         draining; a second signal drains at once"
+    );
+    let delay = std::pin::pin!(factory.sleep(remaining));
+    let delayed = futures::future::select(delay, drain.next());
+    if let Either::Left((result, _)) = futures::future::select(serving, delayed).await {
+        result?;
+    }
+    Ok(())
+}
+
+/// Once the incoming requests have drained: stops container-enabled actors so they cannot race
+/// their terminal Docker cleanup, then waits for it while their namespaces remain available, for
+/// a cluster node that drained (`stop`) until its stop deadline.
+async fn stop_containers(
+    server: &Server,
+    stop: Option<(Rc<ClusterNode>, Deadlines)>,
+) -> Result<()> {
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());

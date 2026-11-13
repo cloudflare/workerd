@@ -10,7 +10,7 @@
 //! whose `getActor` gives a `WorkerdBootstrap` for one Durable Object, so HTTP, WebSockets and
 //! JS RPC to the object cross unchanged. A request for an object this instance
 //! does not own routes on through its own channel to the owner. `GET /ready` answers whether
-//! the instance takes traffic: it serves, holds its lease, and is not stopping.
+//! the instance takes traffic: it serves, holds its lease, and was not told to stop.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -83,8 +83,9 @@ pub struct ClusterNode {
     deadlines: Cell<Option<Deadlines>>,
     /// The requests peers have in flight here.
     peer_requests: Rc<PeerRequests>,
-    /// Whether the application's listeners are being served (`Serving`).
-    serving: Cell<bool>,
+    /// Whether the application's listeners are served and the instance was not told to stop
+    /// (`Ready`).
+    ready: Cell<bool>,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -105,12 +106,13 @@ struct PeerRequests {
     none: Notify,
 }
 
-/// The application's listeners are being served, until this is dropped.
-pub struct Serving(Rc<ClusterNode>);
+/// The instance takes traffic as far as its listeners go, until this is dropped: they are served,
+/// and it was not told to stop.
+pub struct Ready(Rc<ClusterNode>);
 
-impl Drop for Serving {
+impl Drop for Ready {
     fn drop(&mut self) {
-        self.0.serving.set(false);
+        self.0.ready.set(false);
     }
 }
 
@@ -343,14 +345,15 @@ impl ClusterNode {
             alarms_interval: ALARMS_INTERVAL / divisor,
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
-            serving: Cell::new(false),
+            ready: Cell::new(false),
         }))
     }
 
-    /// Marks the application's listeners as served until the guard is dropped.
-    pub fn serving(self: &Rc<Self>) -> Serving {
-        self.serving.set(true);
-        Serving(Rc::clone(self))
+    /// Marks the instance as taking traffic, as far as its listeners go, until the guard is
+    /// dropped.
+    pub fn ready(self: &Rc<Self>) -> Ready {
+        self.ready.set(true);
+        Ready(Rc::clone(self))
     }
 
     /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
@@ -709,9 +712,10 @@ impl Handler for PeerConnection {
         if method != Method::GET || url != b"/ready" {
             return send_error(response, 404, "Not Found", &headers).await;
         }
-        // Ready to take traffic: serving, a member of the cluster, not stopping.
+        // Ready to take traffic: serving and not told to stop, a member of the cluster, not
+        // draining.
         let cluster = &self.node.cluster;
-        if self.node.serving.get() && cluster.lease_holds() && !cluster.is_draining() {
+        if self.node.ready.get() && cluster.lease_holds() && !cluster.is_draining() {
             send_error(response, 200, "OK", &headers).await
         } else {
             send_error(response, 503, "Service Unavailable", &headers).await

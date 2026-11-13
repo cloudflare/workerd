@@ -266,17 +266,18 @@ struct ClusterConfig {
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
 
   stopTimeoutMs @6 :UInt32 = 8000;
-  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
-  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
-  # while it keeps serving the rest: each object takes no new requests but those that the work of
-  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
-  # its requests in flight finish, and it is released for the next request anywhere to claim.
-  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
-  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
-  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
-  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
-  # stops its containers' Docker containers.
+  # How long an instance takes to stop, from SIGTERM, or from the end of its `--shutdown-delay`, to
+  # exit. Rather than leave its Durable Objects to wait for its lease to expire, a stopping instance
+  # hands them to its peers, busiest first, while it keeps serving the rest: each object takes no
+  # new requests but those that the work of an object being handed off makes, here or on a peer,
+  # directly or through other Durable Objects, its requests in flight finish, and it is released for
+  # the next request anywhere to claim. Requests that arrive meanwhile, other Durable Objects' calls
+  # included, wait for the object and then go where it runs next. While a Durable Object serves a
+  # call of a handoff's work, all the calls it makes count as that work. Then the instance leaves
+  # the cluster, keeps accepting requests until at least five seconds after SIGTERM or the end of
+  # the shutdown delay (or until the handoff deadline, if that comes sooner), as load balancers take
+  # a while to stop sending them, lets its connections finish, and stops its containers' Docker
+  # containers.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
@@ -306,6 +307,11 @@ struct ClusterConfig {
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+  #
+  # `workerd serve --shutdown-delay` puts a delay between SIGTERM and all of this, during which the
+  # instance serves as before and keeps its objects, but `GET /ready` answers 503: for load
+  # balancers that go on sending requests for a while, as a cloud load balancer in front of
+  # Kubernetes does. The supervisor's grace period must then cover the delay plus this timeout.
 
   unsafeTimeDivisor @7 :UInt32 = 1;
   # For tests: divides by this the times that a takeover and a stop wait out, which tests would

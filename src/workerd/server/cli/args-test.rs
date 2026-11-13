@@ -75,6 +75,7 @@ fn serve_options() {
         "--async-trace-promises",
         "--cluster-addr=0.0.0.0:7000",
         "--cluster-advertise=10.0.0.4:7000",
+        "--shutdown-delay=20",
     ])
     .command
     else {
@@ -97,6 +98,7 @@ fn serve_options() {
     assert_eq!(serve.control_fd, Some(3));
     assert_eq!(serve.cluster_address.as_deref(), Some("0.0.0.0:7000"));
     assert_eq!(serve.cluster_advertise.as_deref(), Some("10.0.0.4:7000"));
+    assert_eq!(serve.shutdown_delay, 20);
     assert_eq!(
         serve.socket_addr_overrides,
         [Override {
@@ -114,6 +116,14 @@ fn serve_const_name_and_verbose_after_subcommand() {
         panic!("expected serve")
     };
     assert_eq!(const_name.const_name.as_deref(), Some("myConfig"));
+}
+
+#[test]
+fn serve_drains_at_once_by_default() {
+    let Command::Serve { serve, .. } = parse(&["serve", "config.capnp"]).command else {
+        panic!("expected serve")
+    };
+    assert_eq!(serve.shutdown_delay, 0);
 }
 
 #[test]
@@ -213,6 +223,10 @@ fn bad_values_are_usage_errors() {
         &["serve", "c.capnp", "--socket-addr=noequals"][..],
         &["serve", "c.capnp", "--socket-fd=http=abc"],
         &["serve", "c.capnp", "--control-fd=-1"],
+        // Whole seconds, as Kubernetes' grace period is.
+        &["serve", "c.capnp", "--shutdown-delay=-1"],
+        &["serve", "c.capnp", "--shutdown-delay=1.5"],
+        &["serve", "c.capnp", "--shutdown-delay=20s"],
         &["serve"],
         &["test", "c.capnp", "a", "b"],
         &["unknown"],

@@ -778,14 +778,18 @@ pub mod ffi {
             structured_logging: bool,
         ) -> Result<i32>;
 
-        /// The server run inside a test process (in_process.rs), on a factory the test built.
-        /// `run` is `workerd serve` until `drain`, with `--debug-port` if `debug_port` is not
-        /// empty; `test` is `workerd test`; `bench` is `workerd bench` with `params`, an encoded
-        /// `BenchParams` message. `next_report` is the next config error or warning. `connect`
-        /// and `accept` are the two ends of a `loopback:` name.
+        /// The server run inside a test process (in_process.rs), on a factory the test built. `run`
+        /// is `workerd serve` until `drain`, with `--debug-port` if `debug_port` is not empty and a
+        /// `--shutdown-delay` of `shutdown_delay_ms`; `test` is `workerd test`; `bench` is `workerd
+        /// bench` with `params`, an encoded `BenchParams` message. `next_report` is the next config
+        /// error or warning. `connect` and `accept` are the two ends of a `loopback:` name.
         type InProcessServer;
         fn new_in_process_server(factory: KjOwn<WorkerFactory>) -> Box<InProcessServer>;
-        async unsafe fn run<'a>(self: &'a InProcessServer, debug_port: &'a str) -> Result<()>;
+        async unsafe fn run<'a>(
+            self: &'a InProcessServer,
+            debug_port: &'a str,
+            shutdown_delay_ms: u64,
+        ) -> Result<()>;
         async unsafe fn test<'a>(
             self: &'a InProcessServer,
             service_pattern: &'a str,

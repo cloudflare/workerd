@@ -15,9 +15,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use kj_rs::KjOwn;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
 
 use crate::Result;
@@ -33,7 +33,9 @@ pub struct InProcessServer {
     factory: Rc<Factory>,
     reports: mpsc::UnboundedSender<ffi::ConfigReport>,
     reported: RefCell<mpsc::UnboundedReceiver<ffi::ConfigReport>>,
-    drain: Notify,
+    /// The drain signals, each with when it was sent on the factory's timer.
+    drain: mpsc::UnboundedSender<Duration>,
+    drained: RefCell<mpsc::UnboundedReceiver<Duration>>,
     /// The names the test accepts connections for.
     listeners: RefCell<HashMap<String, Rc<LoopbackListener>>>,
     /// The services marked as coming from deployments for the next run.
@@ -46,11 +48,13 @@ pub fn new_in_process_server(factory: KjOwn<ffi::WorkerFactory>) -> Box<InProces
     factory.loopback().enable();
     factory.loopback().mock_internet();
     let (reports, reported) = mpsc::unbounded_channel();
+    let (drain, drained) = mpsc::unbounded_channel();
     Box::new(InProcessServer {
         factory,
         reports,
         reported: RefCell::new(reported),
-        drain: Notify::new(),
+        drain,
+        drained: RefCell::new(drained),
         listeners: RefCell::default(),
         deployments: RefCell::default(),
     })
@@ -103,14 +107,21 @@ impl InProcessServer {
         }
     }
 
-    /// `workerd serve`, until [`Self::drain`]; `debug_port` is `--debug-port`, if not empty.
-    pub async fn run(&self, debug_port: &str) -> Result<()> {
+    /// `workerd serve`, until [`Self::drain`]; `debug_port` is `--debug-port`, if not empty, and
+    /// `shutdown_delay_ms` is `--shutdown-delay`.
+    pub async fn run(&self, debug_port: &str, shutdown_delay_ms: u64) -> Result<()> {
         let options = RunOptions {
             debug_port: (!debug_port.is_empty()).then(|| debug_port.to_owned()),
+            shutdown_delay: Duration::from_millis(shutdown_delay_ms),
             ..RunOptions::default()
         };
         let factory = Rc::clone(&self.factory);
-        crate::run::run(factory, options, self.reporter(), self.drain.notified()).await
+        // The receiver lives as long as the sender: both are the server's.
+        let drain = futures::stream::unfold(&self.drained, |drained| async move {
+            let signalled = std::future::poll_fn(|cx| drained.borrow_mut().poll_recv(cx)).await;
+            Some((signalled?, drained))
+        });
+        crate::run::run(factory, options, self.reporter(), drain).await
     }
 
     /// `workerd test`.
@@ -149,8 +160,10 @@ impl InProcessServer {
         })
     }
 
+    /// The drain signal, SIGTERM in `workerd serve`.
     pub fn drain(&self) {
-        self.drain.notify_one();
+        // The receiver lives as long as the sender: both are the server's.
+        let _ = self.drain.send(self.factory.now());
     }
 
     /// A connection to the loopback name `name`, queued for whoever listens on it.
