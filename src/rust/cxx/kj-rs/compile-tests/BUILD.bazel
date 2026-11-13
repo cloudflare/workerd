@@ -1,0 +1,12 @@
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+
+# Snippets that must not compile against kj-rs (each annotates the errors it expects) and snippets
+# that must (no annotations). See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "kj-rs",
+    srcs = glob(["*.rs"]),
+    deps = [
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+    ],
+)
