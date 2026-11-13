@@ -452,8 +452,14 @@ impl Cluster {
     pub async fn announce_draining(&self) {
         let timing = self.lease.borrow().timing;
         let renew = timeout(ms(timing.renew_timeout_ms), self.renew(now_ms()));
-        if !matches!(renew.await, Ok(Ok(_))) {
-            tracing::warn!("cluster: publishing the drain failed");
+        match renew.await {
+            Ok(Ok(_)) => {}
+            // The node left the cluster first: `deregister`, which runs at
+            // once on a node with nothing to hand off, published its record
+            // expired and draining.
+            Ok(Err(crate::Error::NotHere(_))) if self.registry.left() => {}
+            Ok(Err(e)) => tracing::warn!("cluster: publishing the drain failed: {e}"),
+            Err(_) => tracing::warn!("cluster: publishing the drain timed out"),
         }
         let _ = timeout(ms(timing.list_timeout_ms), self.peers(now_ms())).await;
     }

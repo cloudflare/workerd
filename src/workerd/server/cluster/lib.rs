@@ -86,7 +86,8 @@ pub enum Error {
     /// The bucket URL or an option is missing or malformed.
     #[error("bucket config: {0}")]
     Config(String),
-    /// A claim or a commit's capture could not proceed.
+    /// A claim or a commit could not proceed: its capture failed, the
+    /// object is not open here, or another owner took it over.
     #[error("replica: {0}")]
     Replica(String),
     /// This instance does not serve the object and cannot claim it: it is draining, or the
@@ -99,7 +100,7 @@ pub enum Error {
     Http(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
-    /// Another writer kept winning the conditional write.
+    /// Another writer kept winning the conditional write to the key named.
     #[error("{0} is contended")]
     Contended(String),
     /// Someone else rewrote this node's own record: this process no longer
