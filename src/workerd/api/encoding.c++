@@ -569,6 +569,8 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
     kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
+    // Zeroed because V8 may not fill it; see JsString::writeInto().
+    latin1Buffer.asPtr().fill(0);
 
     [[maybe_unused]] auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
     KJ_DASSERT(
@@ -594,6 +596,7 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   // and potentially triggering GC. Stack allocation for small strings, heap for large.
   // Stack allocation for small strings, heap for large.
   kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
+  utf16Buffer.asPtr().fill(0);
 
   [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
   KJ_DASSERT(
