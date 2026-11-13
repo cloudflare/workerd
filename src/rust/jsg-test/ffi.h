@@ -94,6 +94,10 @@ void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callba
 // v8::HeapStatistics::used_global_handles_size() of the isolate.
 size_t used_global_handles_size(Isolate* isolate);
 
+// The external memory that embedders have attributed to the isolate: the total V8 keeps of
+// AdjustAmountOfExternalAllocatedMemory() calls, which v8::HeapStatistics does not report.
+int64_t external_memory(Isolate* isolate);
+
 // Takes a heap snapshot of the isolate and returns it serialized as JSON.
 ::rust::String take_heap_snapshot(Isolate* isolate);
 

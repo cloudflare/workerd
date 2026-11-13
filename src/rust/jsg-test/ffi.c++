@@ -267,6 +267,10 @@ size_t used_global_handles_size(Isolate* isolate) {
   return stats.used_global_handles_size();
 }
 
+int64_t external_memory(Isolate* isolate) {
+  return isolate->GetExternalMemory();
+}
+
 ::rust::String take_heap_snapshot(Isolate* isolate) {
   kj::Vector<char> serialized;
   ::workerd::jsg::HeapSnapshotActivity activity([](auto, auto) { return true; });
