@@ -735,7 +735,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_is_detachable(buffer: &Local) -> bool;
 
         // Value-level shared check
-        pub fn local_array_buffer_is_shared(value: &Local) -> bool;
+        pub unsafe fn local_array_buffer_is_shared(value: &Local) -> bool;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -2784,7 +2784,8 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// This performs a value-level check, allowing code that receives a
     /// `Local<ArrayBuffer>` via cast to distinguish shared buffers.
     pub fn is_shared(&self) -> bool {
-        ffi::local_array_buffer_is_shared(self.raw())
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_array_buffer_is_shared(self.raw()) }
     }
 
     /// Returns the `BackingStore` for this `ArrayBuffer`.
