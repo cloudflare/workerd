@@ -824,10 +824,12 @@ pub mod ffi {
             error_type: JsErrorType,
             message: &[u8],
         ) -> Local;
+        // Returns false, calling nothing in V8, while an exception or a termination is pending.
         // Fallible only if no context is entered.
         pub unsafe fn dom_exception_try_unwrap(
             isolate: *mut Isolate,
             value: &Local,
+            is_dom_exception: &mut bool,
             name: &mut String,
             message: &mut String,
         ) -> Result<bool>;
@@ -2046,7 +2048,9 @@ impl<'s, T> Local<'s, T> {
     /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
     /// method.
     ///
-    /// Corresponds to `v8::Value::ToDetailString()`.
+    /// Corresponds to C++ JSG's `workerd::jsg::toDetailString()`: `v8::Value::ToDetailString()`,
+    /// except that an error implemented in the per-isolate bootstrap, such as its `DOMException`,
+    /// whose `name` and `message` are accessors, is described by the name and message it holds.
     ///
     /// # Errors
     ///

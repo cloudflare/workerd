@@ -334,7 +334,7 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
 MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(
-      local_as_ref_from_ffi<v8::Value>(val)->ToDetailString(isolate->GetCurrentContext()));
+      ::workerd::jsg::toDetailString(isolate, local_as_ref_from_ffi<v8::Value>(val)));
 }
 
 // Utf8Value
@@ -1902,17 +1902,23 @@ Local js_error_create_from_bytes(
   KJ_UNREACHABLE;
 }
 
-bool dom_exception_try_unwrap(
-    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message) {
-  // No exceptionPending() check: unwrapping passes no context to V8, and runs no JavaScript.
+bool dom_exception_try_unwrap(Isolate* isolate,
+    const Local& value,
+    bool& isDomException,
+    ::rust::String& name,
+    ::rust::String& message) {
+  // Recognizing the bootstrap's DOMException reads private symbols, which passes the context.
+  if (exceptionPending(isolate)) return false;
   KJ_IF_SOME(exception,
       ::workerd::jsg::tryGetDOMExceptionNameAndMessage(
           isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    isDomException = true;
     name = ::rust::String::lossy(exception.name.begin(), exception.name.size());
     message = ::rust::String::lossy(exception.message.begin(), exception.message.size());
-    return true;
+  } else {
+    isDomException = false;
   }
-  return false;
+  return true;
 }
 
 namespace {

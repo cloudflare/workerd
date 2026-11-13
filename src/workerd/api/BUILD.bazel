@@ -723,6 +723,7 @@ kj_test(
         "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:thread-scopes",
     ],
 )
@@ -798,6 +799,14 @@ kj_test(
 
 kj_test(
     src = "serialization-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "dom-exception-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

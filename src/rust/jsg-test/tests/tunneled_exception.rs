@@ -7,6 +7,7 @@
 
 use jsg::v8;
 
+use super::dom_exception::set_up_bootstrap_dom_exception;
 use crate::EvalContext;
 use crate::Harness;
 
@@ -71,6 +72,12 @@ const EXCEPTIONS: &[(&str, &str)] = &[
     (
         "Object.assign(new Error('o'), { overloaded: 1, retryable: 1 })",
         "v.message === 'o' && v.overloaded === true",
+    ),
+    // A DOMException is tunneled as FAILED, whatever its `overloaded` and `retryable` say.
+    (
+        "Object.assign(new abortError.constructor('m', 'AbortError'), \
+         { overloaded: true, retryable: true })",
+        "v.name === 'AbortError' && v.overloaded === undefined && v.retryable === undefined",
     ),
     (
         "Object.assign(new RangeError('r'), { retryable: 'yes' })",
@@ -138,30 +145,40 @@ fn set_up(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>) {
     ctx.set_global(lock, "dataError", data_error);
 }
 
+/// Copies each of `exceptions` with Rust JSG and C++ JSG, and checks that Rust JSG's copy holds
+/// its check and is like C++ JSG's.
+fn assert_copies_like_cpp(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    exceptions: &[(&str, &str)],
+    enhanced_error_serialization: bool,
+) {
+    for &(expr, check) in exceptions {
+        let what = format!("{expr}, enhanced_error_serialization: {enhanced_error_serialization}");
+        let exception = eval(lock, ctx, expr);
+        let rust = tunnel(lock, exception).unwrap_or_else(|_| panic!("{what}: Rust"));
+        let cpp = Harness::cpp_tunnel_exception(lock, exception)
+            .unwrap_or_else(|_| panic!("{what}: C++"));
+        ctx.set_global(lock, "v", rust);
+        ctx.set_global(lock, "cpp", cpp);
+        let holds = ctx
+            .eval::<bool>(lock, check)
+            .unwrap_or_else(|_| panic!("{what}: {check} threw"));
+        assert!(holds, "{what}: {check}");
+        assert!(
+            ctx.eval::<bool>(lock, "same(v, cpp)").unwrap(),
+            "{what}: unlike C++ JSG's copy"
+        );
+    }
+}
+
 fn assert_like_cpp(enhanced_error_serialization: bool) {
     let harness = Harness::with_flags(|mut flags| {
         flags.set_enhanced_error_serialization(enhanced_error_serialization);
     });
     harness.run_in_context(|lock, ctx| {
         set_up(lock, ctx);
-        for &(expr, check) in EXCEPTIONS {
-            let what =
-                format!("{expr}, enhanced_error_serialization: {enhanced_error_serialization}");
-            let exception = eval(lock, ctx, expr);
-            let rust = tunnel(lock, exception).unwrap_or_else(|_| panic!("{what}: Rust"));
-            let cpp = Harness::cpp_tunnel_exception(lock, exception)
-                .unwrap_or_else(|_| panic!("{what}: C++"));
-            ctx.set_global(lock, "v", rust);
-            ctx.set_global(lock, "cpp", cpp);
-            let holds = ctx
-                .eval::<bool>(lock, check)
-                .unwrap_or_else(|_| panic!("{what}: {check} threw"));
-            assert!(holds, "{what}: {check}");
-            assert!(
-                ctx.eval::<bool>(lock, "same(v, cpp)").unwrap(),
-                "{what}: unlike C++ JSG's copy"
-            );
-        }
+        assert_copies_like_cpp(lock, ctx, EXCEPTIONS, enhanced_error_serialization);
         Ok(())
     });
 }
@@ -174,6 +191,39 @@ fn copies_like_cpp_jsg() {
 #[test]
 fn copies_like_cpp_jsg_with_enhanced_error_serialization() {
     assert_like_cpp(true);
+}
+
+/// With the bootstrap's `DOMException`, the copy of a `DOMException` is an instance of the
+/// bootstrap's class, as C++ JSG's copy is.
+#[test]
+fn copies_the_bootstrap_dom_exception_like_cpp_jsg() {
+    const IS_BOOTSTRAP: &str = "Object.getPrototypeOf(v) === DOMException.prototype";
+    let abort_error_check = format!(
+        "{IS_BOOTSTRAP} && v.name === 'AbortError' && v.message === 'm' && v !== abortError"
+    );
+    let data_error_check = format!("{IS_BOOTSTRAP} && v.name === 'DataError' && v.message === 'd'");
+    let exceptions = [
+        ("abortError", abort_error_check.as_str()),
+        (
+            "Object.defineProperty(Object.defineProperty(dataError, 'name', { value: 'Other' }), \
+             'message', { value: 'other' })",
+            data_error_check.as_str(),
+        ),
+        (
+            "Object.assign(abortError, { overloaded: true, retryable: true })",
+            "v.name === 'AbortError' && v.overloaded === undefined && v.retryable === undefined",
+        ),
+    ];
+    for enhanced in [false, true] {
+        let harness =
+            Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
+        harness.run_in_context(|lock, ctx| {
+            set_up_bootstrap_dom_exception(lock, ctx);
+            set_up(lock, ctx);
+            assert_copies_like_cpp(lock, ctx, &exceptions, enhanced);
+            Ok(())
+        });
+    }
 }
 
 /// Only with `enhanced_error_serialization` does the copy come from the serialized exception,
@@ -194,35 +244,47 @@ fn copies_own_properties_only_with_enhanced_error_serialization() {
     }
 }
 
-/// The properties read run their getters as C++ JSG runs them, in the same order.
+/// The properties read run their getters as C++ JSG runs them, in the same order, for an error
+/// and for a `DOMException`.
 #[test]
 fn reads_properties_like_cpp_jsg() {
     for enhanced in [false, true] {
-        let harness =
-            Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
-        harness.run_in_context(|lock, ctx| {
-            let make = "(() => {
-                globalThis.reads = [];
-                const e = new Error('m');
-                for (const k of ['overloaded', 'retryable', 'name', 'stack', 'code']) {
-                    Object.defineProperty(e, k, {
-                        get() { reads.push(k); return undefined; },
-                        enumerable: true,
-                        configurable: true,
-                    });
-                }
-                return e;
-            })()";
-            let exception = eval(lock, ctx, make);
-            tunnel(lock, exception)?;
-            let rust = ctx.eval::<String>(lock, "reads.join()").unwrap();
-            let exception = eval(lock, ctx, make);
-            Harness::cpp_tunnel_exception(lock, exception)?;
-            let cpp = ctx.eval::<String>(lock, "reads.join()").unwrap();
-            assert_eq!(rust, cpp, "enhanced_error_serialization: {enhanced}");
-            assert!(rust.starts_with("overloaded,retryable"), "{rust}");
-            Ok(())
-        });
+        for base in [
+            "new Error('m')",
+            "new dataError.constructor('m', 'DataError')",
+        ] {
+            let harness =
+                Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
+            harness.run_in_context(|lock, ctx| {
+                set_up(lock, ctx);
+                let make = format!(
+                    "(() => {{
+                        globalThis.reads = [];
+                        const e = {base};
+                        for (const k of ['overloaded', 'retryable', 'name', 'stack', 'message', 'code']) {{
+                            Object.defineProperty(e, k, {{
+                                get() {{ reads.push(k); return undefined; }},
+                                enumerable: true,
+                                configurable: true,
+                            }});
+                        }}
+                        return e;
+                    }})()"
+                );
+                let exception = eval(lock, ctx, &make);
+                tunnel(lock, exception)?;
+                let rust = ctx.eval::<String>(lock, "reads.join()").unwrap();
+                let exception = eval(lock, ctx, &make);
+                Harness::cpp_tunnel_exception(lock, exception)?;
+                let cpp = ctx.eval::<String>(lock, "reads.join()").unwrap();
+                assert_eq!(
+                    rust, cpp,
+                    "{base}, enhanced_error_serialization: {enhanced}"
+                );
+                assert!(rust.starts_with("overloaded,retryable"), "{rust}");
+                Ok(())
+            });
+        }
     }
 }
 

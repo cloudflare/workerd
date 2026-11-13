@@ -305,8 +305,14 @@ static kj::Array<kj::byte> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue
     // because kj::str() returns an empty string for the error. As a
     // workaround, we drop the error object in that case and return
     // a generic error that only includes the type of the value.
+    // A DOMException, such as the DataCloneError that the serializer
+    // throws, is dropped too, whatever kj::str() gives for it: for
+    // the C++ DOMException, that is empty only until JavaScript reads
+    // its name or message.
     // TODO(later): remove this workaround
-    if (kj::str(exception.getHandle(js)).size() == 0) {
+    auto handle = exception.getHandle(js);
+    if (js.tryGetDomExceptionInfo(jsg::JsValue(handle)) != kj::none ||
+        kj::str(handle).size() == 0) {
       throw JSG_KJ_EXCEPTION(
           FAILED, DOMDataCloneError, "failed to serialize ", value.getHandle(js).typeOf(js));
     }

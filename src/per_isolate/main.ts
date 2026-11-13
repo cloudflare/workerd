@@ -38,6 +38,49 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 // serialization.ts).
 require('serialization');
 
+// Loaded before any module that may create or recognize a DOMException.
+const { DOMException, QuotaExceededError } = require('dom-exception');
+
+// The TypeScript DOMException replaces the C++ one, which global-scope.h then
+// leaves out, and adds QuotaExceededError, which the C++ one lacks. Installed
+// as JSG_NESTED_TYPE installs the C++ class.
+if (autogates['ts-dom-exception']) {
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    DOMException: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DOMException,
+    },
+    QuotaExceededError: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: QuotaExceededError,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      DOMException: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: DOMException,
+      },
+      QuotaExceededError: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: QuotaExceededError,
+      },
+    });
+  }
+}
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,

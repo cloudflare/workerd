@@ -390,8 +390,7 @@ DecodedException decodeTunneledException(
     KJ_IF_SOME(errorName, tryConsumeDomExceptionName(errorType)) {
       auto& js = Lock::from(isolate);
       auto message = appMessage(errorType);
-      auto exception = js.domException(kj::mv(errorName), kj::mv(message));
-      result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+      result.handle = js.domException(kj::mv(errorName), kj::mv(message));
       addAdditionalInfo();
       return result;
     }
@@ -771,10 +770,22 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   capnp::MallocMessageBuilder message;
   auto metadata = message.initRoot<JsExceptionMetadata>();
 
+  // A DOMException's name and message are read without running their getters, since this may run
+  // where JavaScript can't, as when the deserializer aborts an AbortSignal with a deserialized
+  // reason.
+  auto domException = js.tryGetDomExceptionInfo(JsValue(handle));
+
   // Extract error name (e.g., "Error", "TypeError", "RangeError")
-  auto nameProp = errorObj.get(js, "name"_kj);
-  if (nameProp.isString()) {
-    auto errorType = nameProp.toString(js);
+  kj::Maybe<kj::String> maybeErrorType;
+  KJ_IF_SOME(info, domException) {
+    maybeErrorType = kj::mv(info.name);
+  } else {
+    auto nameProp = errorObj.get(js, "name"_kj);
+    if (nameProp.isString()) {
+      maybeErrorType = nameProp.toString(js);
+    }
+  }
+  KJ_IF_SOME(errorType, maybeErrorType) {
     // Truncate to 4KB if needed
     if (errorType.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
       errorType = truncateUtf8(errorType, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);
@@ -794,9 +805,16 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   }
 
   // Extract error message
-  auto messageProp = errorObj.get(js, "message"_kj);
-  if (messageProp.isString()) {
-    auto errorMessage = messageProp.toString(js);
+  kj::Maybe<kj::String> maybeErrorMessage;
+  KJ_IF_SOME(info, domException) {
+    maybeErrorMessage = kj::mv(info.message);
+  } else {
+    auto messageProp = errorObj.get(js, "message"_kj);
+    if (messageProp.isString()) {
+      maybeErrorMessage = messageProp.toString(js);
+    }
+  }
+  KJ_IF_SOME(errorMessage, maybeErrorMessage) {
     // Truncate to 4KB if needed
     if (errorMessage.size() > JS_EXCEPTION_METADATA_MAX_FIELD_SIZE) {
       errorMessage = truncateUtf8(errorMessage, JS_EXCEPTION_METADATA_MAX_FIELD_SIZE);

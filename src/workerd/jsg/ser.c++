@@ -173,13 +173,6 @@ kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
   return kj::none;
 }
 
-// The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
-constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
-constexpr uint32_t JS_SERIALIZABLE_KEEP_STACK = 2;
-constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
-constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
-    JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
-
 // The message of the DataCloneError that a raw read throws when the data ends too soon. Like V8's
 // own error for malformed data, it is not an internal error: corrupt or crafted bytes are not a
 // bug in the reader.
@@ -207,6 +200,7 @@ Serializer::Serializer(Lock& js, Options options)
 #endif
   prototypeOfObject = js.obj().getPrototype(js);
   jsSerializeModeKey = IsolateBase::getJsSerializeModeKey(js.v8Isolate);
+  domExceptionBrandKey = IsolateBase::getDomExceptionBrandKey(js.v8Isolate);
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.
     ser.SetTreatFunctionsAsHostObjects(true);
@@ -256,8 +250,7 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   auto message = kj::str("Could not serialize object of type \"", obj->GetConstructorName(),
       "\". This type does "
       "not support serialization.");
-  auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
-  js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
+  js.throwException(js.domException(kj::str("DataCloneError"), kj::mv(message)));
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
@@ -294,6 +287,14 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
     if (hasMode) {
       return v8::Just(true);
     }
+    bool isDomException;
+    if (!object->HasPrivate(isolate->GetCurrentContext(), domExceptionBrandKey)
+             .To(&isDomException)) {
+      return v8::Nothing<bool>();
+    }
+    if (isDomException) {
+      return v8::Just(true);
+    }
   }
 
   // Native errors are host object if the enhanced_error_serialization compat flag is enalbed.
@@ -317,7 +318,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
 
-    // Checked first, since such a class may make native errors.
+    // Checked before native errors and DOMExceptions, since such a class may make them.
     KJ_IF_SOME(mark, tryGetJsSerializeMark(js, object)) {
       writeJsSerializable(js, object, mark);
       return v8::Just(true);
@@ -382,6 +383,16 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
 }
 
 void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
+  // The bootstrap's DOMException, an API wrapper object without internal fields, writes what the
+  // C++ class does.
+  KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(js, object)) {
+    writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
+    writeLengthDelimited(info.name.toString(js));
+    writeLengthDelimited(info.message.toString(js));
+    writeLengthDelimited(JsObject(object).get(js, "stack"_kj).toString(js));
+    return;
+  }
+
   if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
       !Wrappable::isWorkerdApiObject(object)) {
     KJ_IF_SOME(eh, externalHandler) {
@@ -464,7 +475,9 @@ void Serializer::writeJsSerializable(
   uint32_t flags = 0;
   kj::Maybe<JsValue> message;
   kj::Maybe<JsValue> stack;
-  if (object->IsNativeError()) {
+  // An error as Error.isError() reports it: V8 asks isJsApiWrapperNativeErrorCallback() about an
+  // API wrapper object, which is one if it is an instance of the bootstrap's DOMException.
+  if (object->IsNativeError() || check(object->HasPrivate(context, domExceptionBrandKey))) {
     auto value = check(object->Get(context, js.strIntern("message"_kj)));
     if (value->IsString()) {
       flags |= JS_SERIALIZABLE_HAS_MESSAGE;
@@ -880,14 +893,19 @@ size_t Deserializer::findJsSerializableClass(Lock& js, kj::String deserializeInf
   if (!deserialize->IsFunction()) return unknownClass();
 
   if (errorPrototype == kj::none) {
-    errorPrototype = js.v8Ref(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context()));
+    errorPrototype = js.v8Ref(check(IsolateBase::getErrorPrototype(js.v8Isolate, js.v8Context())));
   }
   v8::Local<v8::Value> errorProto = KJ_ASSERT_NONNULL(errorPrototype).getHandle(js);
-  bool isError = false;
+  // The bootstrap's DOMException.prototype inherits from Error.prototype, so it is found first.
+  auto kind = JsSerializableClass::Kind::OBJECT;
   for (auto current = prototype; current->IsObject();
        current = current.As<v8::Object>()->GetPrototype()) {
+    if (JsObject(current.As<v8::Object>()).hasPrivate(js, DOM_EXCEPTION_PROTOTYPE_KEY)) {
+      kind = JsSerializableClass::Kind::DOM_EXCEPTION;
+      break;
+    }
     if (current == errorProto) {
-      isError = true;
+      kind = JsSerializableClass::Kind::NATIVE_ERROR;
       break;
     }
   }
@@ -897,7 +915,7 @@ size_t Deserializer::findJsSerializableClass(Lock& js, kj::String deserializeInf
     .prototype = js.v8Ref(prototype.As<v8::Object>()),
     .descriptor = js.v8Ref(v8::Local<v8::Object>(descriptor)),
     .deserialize = js.v8Ref(deserialize.As<v8::Function>()),
-    .isError = isError,
+    .kind = kind,
   });
   return jsSerializableClasses.size() - 1;
 }
@@ -932,31 +950,38 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   v8::Local<v8::Object> prototype = cls.prototype.getHandle(js);
 
   // The instance is what calling the constructor would make, minus whatever the constructor does:
-  // `deserialize` initializes it. A class that inherits from Error makes native errors.
+  // `deserialize` initializes it. A class that inherits from Error makes errors, whose stack is the
+  // writer's, as for a native error, or else the one captured now. Either way it is not enumerable.
   auto context = js.v8Context();
+  kj::Maybe<v8::Local<v8::String>> keptStack;
+  if (preserveStackInErrors || (flags & JS_SERIALIZABLE_KEEP_STACK)) keptStack = stack;
   v8::Local<v8::Object> instance;
-  if (cls.isError) {
-    // The message is what the stack just captured begins with, after the error's name, as for a
-    // native error.
-    instance =
-        v8::Exception::Error(message.orDefault(v8::String::Empty(js.v8Isolate))).As<v8::Object>();
-    // Error() always gives the error an own `message`, which a class's instance does not have
-    // until it is initialized.
-    check(instance->Delete(context, js.strIntern("message"_kj)));
-    check(instance->SetPrototype(context, prototype));
-    // The writer's stack replaces the one just captured, as for a native error. Like the captured
-    // one, it is not enumerable.
-    KJ_IF_SOME(s, stack) {
-      if (preserveStackInErrors || (flags & JS_SERIALIZABLE_KEEP_STACK)) {
+  switch (cls.kind) {
+    case JsSerializableClass::Kind::DOM_EXCEPTION:
+      // V8 formats the stack's header lazily, from the name and message that `deserialize` sets.
+      instance = newUninitializedBootstrapDomException(js, JsObject(prototype),
+          keptStack.map([](v8::Local<v8::String> s) { return JsString(s); }));
+      break;
+    case JsSerializableClass::Kind::NATIVE_ERROR:
+      // The message is what the stack just captured begins with, after the error's name, as for a
+      // native error.
+      instance =
+          v8::Exception::Error(message.orDefault(v8::String::Empty(js.v8Isolate))).As<v8::Object>();
+      // Error() always gives the error an own `message`, which a class's instance does not have
+      // until it is initialized.
+      check(instance->Delete(context, js.strIntern("message"_kj)));
+      check(instance->SetPrototype(context, prototype));
+      KJ_IF_SOME(s, keptStack) {
         v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
         check(instance->DefineOwnProperty(context, stackKey, s, v8::DontEnum));
       }
-    }
-  } else {
-    // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
-    // given a new prototype, as by Object.setPrototypeOf(), keeps fast properties.
-    instance = v8::Object::New(js.v8Isolate);
-    check(instance->SetPrototype(context, prototype));
+      break;
+    case JsSerializableClass::Kind::OBJECT:
+      // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
+      // given a new prototype, as by Object.setPrototypeOf(), keeps fast properties.
+      instance = v8::Object::New(js.v8Isolate);
+      check(instance->SetPrototype(context, prototype));
+      break;
   }
   // It was cloneable when written, and so is the copy.
   check(instance->SetPrivate(
@@ -1024,6 +1049,15 @@ v8::MaybeLocal<v8::Object> readApiObject(
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return {};
   }
+}
+
+kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(
+    v8::Isolate* isolate, kj::StringPtr specifier) {
+  auto& js = Lock::from(isolate);
+  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return kj::none);
+  return modules.tryGetLoadedExports(js, specifier).map([](JsValue exports) {
+    return v8::Local<v8::Value>(exports);
+  });
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {

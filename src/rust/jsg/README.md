@@ -252,11 +252,15 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG, and
-`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
-through which Rust creates and reads DOMExceptions without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
+them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
+`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
+`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+their serializers are written against C++ JSG, and the deserializer finds classes implemented in
+JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
+in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
+depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
+which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
+JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -1083,13 +1087,18 @@ callback never throws a `DOMException`, since only a method that returns no `Res
 `jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
 of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default options: the bytes are
 the same, and each reads what the other writes, so the two can share stored data. Native errors
-are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
-objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
-serialized, and neither can instances of the runtime's classes implemented in JavaScript, which
-C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
-throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
-bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
-resolve, so data containing one can't be read back. Deserialization runs no JavaScript.
+are written as host objects when the `enhanced_error_serialization` flag is on, workerd API
+objects such as `Blob` and `Headers` through their C++ serializers, and a `DOMException`,
+whichever implementation made it, as C++ JSG writes it. Rust resources can't be serialized.
+Instances of the runtime's classes implemented in JavaScript, such as `QuotaExceededError`, are
+written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
+that the class's `clone` function returns follows the value. Reading one makes the copy from the
+class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
+with the class's `deserialize` function once the whole value is read. That function is the only
+JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
+such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
+given only the bytes can resolve, so data containing one can't be read back.
 
 Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
 `SerializeOptions::version`, the version of V8's format to write rather than the latest, as
