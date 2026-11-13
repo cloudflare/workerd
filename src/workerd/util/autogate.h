@@ -112,6 +112,10 @@ namespace workerd::util {
      (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
      class in jsg/dom-exception.h. */                                                              \
   V(TS_DOM_EXCEPTION)                                                                              \
+  /* SubtleCrypto is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/crypto/subtle.ts) over the native SubtleCryptoBackend, rather than the C++    \
+     class in api/crypto/crypto.h. */                                                              \
+  V(TS_WEBCRYPTO)                                                                                  \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

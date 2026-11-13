@@ -1,0 +1,11 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "crypto-subtle-ts-bench",
+    worker = (
+      modules = [(name = "worker", esModule = embed "crypto-subtle-bench.js")],
+    ),
+  )],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

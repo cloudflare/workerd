@@ -827,6 +827,24 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-subtle-parity-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-subtle-parity-expected.js",
+        "crypto-subtle-parity-test.js",
+    ],
+)
+
+wd_test(
+    src = "crypto-subtle-parity-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-subtle-parity-expected.js",
+        "crypto-subtle-parity-test.js",
+    ],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],
@@ -1949,6 +1967,19 @@ sh_test(
 wd_bench(
     src = "text-encoder-bench.wd-bench",
     data = ["text-encoder-bench.js"],
+)
+
+# Enabling every autogate enables TS_WEBCRYPTO, so the C++ config has no @all-autogates variant;
+# the TypeScript config enables TS_WEBCRYPTO itself.
+wd_bench(
+    src = "crypto-subtle-bench.wd-bench",
+    data = ["crypto-subtle-bench.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "crypto-subtle-ts-bench.wd-bench",
+    data = ["crypto-subtle-bench.js"],
 )
 
 # wd_bench() always passes --compat-date, so this runs `workerd bench` without it, to check that

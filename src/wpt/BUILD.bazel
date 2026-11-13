@@ -192,6 +192,24 @@ wpt_test(
 )
 
 wpt_test(
+    name = "WebCryptoAPI-ts",
+    size = "enormous",
+    autogates = ["workerd-autogate-ts-webcrypto"],
+    compat_flags = [
+        "disable_fast_jsg_struct",
+        "webcrypto_modern_algorithms",
+    ],
+    config = "WebCryptoAPI-test.ts",
+    include_tentative = True,
+    target_compatible_with = select({
+        # Too slow on Windows
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:WebCryptoAPI@module",
+)
+
+wpt_test(
     name = "streams",
     size = "large",
     compat_flags = ["writable_stream_spec_compliant_writer"],

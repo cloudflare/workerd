@@ -447,6 +447,37 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
+// The TypeScript SubtleCrypto replaces the C++ one, which global-scope.h then
+// leaves out. Installed as EventSource is, matching JSG_NESTED_TYPE. The
+// context's instance is kept under a V8-private key of the global, where
+// Crypto::getSubtleForJs() (api/crypto/crypto.h) finds it for `crypto.subtle`.
+if (autogates['ts-webcrypto']) {
+  const { SubtleCrypto, createSubtleCrypto } = require('crypto/subtle');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    SubtleCrypto: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: SubtleCrypto,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      SubtleCrypto: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: SubtleCrypto,
+      },
+    });
+  }
+  (globalThis as Record<symbol, unknown>)[
+    utils.getPrivateSymbol('workerd:SubtleCrypto')
+  ] = createSubtleCrypto();
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

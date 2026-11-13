@@ -8,6 +8,7 @@
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/crypto/subtle-bootstrap.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
@@ -145,6 +146,7 @@ struct BootstrapState final: public jsg::BootstrapModules {
 };
 
 #define VALUE_METHOD_MAP(V)                                                                        \
+  V(Array)                                                                                         \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
   V(DataView)                                                                                      \
@@ -214,6 +216,17 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
       auto toWellFormed = api::ToWellFormed(args[1]->BooleanValue(args.GetIsolate()));
       args.GetReturnValue().Set(
           v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
+    });
+  });
+}
+
+// Creates the native half of the TypeScript SubtleCrypto. Like CreateDigestContext it allocates,
+// so it is a plain method rather than a fast-API call.
+static void CreateSubtleCryptoBackend(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(v8::Local<v8::Value>(api::createSubtleCryptoBackend(js)));
     });
   });
 }
@@ -576,6 +589,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "getApiSymbol",
     "newCompressionCodec",
     "createDigestContext",
+    "createSubtleCryptoBackend",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
@@ -619,6 +633,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
+    getMethod(js, CreateSubtleCryptoBackend),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
