@@ -205,7 +205,7 @@ class CryptoImpl final: public jsg::Object {
   // Stateless module object, safe to recreate for a worker started from a snapshot.
   static constexpr bool jsgSnapshotStateless = true;
 
-  kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> exportKey(
+  kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::NodeExportedJsonWebKey> exportKey(
       jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options);
 
   bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);

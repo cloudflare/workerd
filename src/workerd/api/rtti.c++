@@ -58,7 +58,7 @@
   F("basics", EW_BASICS_ISOLATE_TYPES)                                                             \
   F("blob", EW_BLOB_ISOLATE_TYPES)                                                                 \
   F("cache", EW_CACHE_ISOLATE_TYPES)                                                               \
-  F("crypto", EW_CRYPTO_ISOLATE_TYPES)                                                             \
+  F("crypto", EW_CRYPTO_RTTI_TYPES)                                                                \
   F("encoding", EW_ENCODING_ISOLATE_TYPES)                                                         \
   F("events", EW_EVENTS_ISOLATE_TYPES)                                                             \
   F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                                        \

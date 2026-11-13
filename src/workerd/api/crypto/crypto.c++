@@ -1022,18 +1022,27 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(jsg::Lock& js,
   return cryptoKey;
 }
 
-jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
+jsg::Promise<SubtleCrypto::ExportedKeyData> SubtleCrypto::exportKey(
     jsg::Lock& js, kj::String format, const CryptoKey& key) {
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, key.getAlgorithmName());
 
-  return js.evalNow([&] {
+  return js.evalNow([&]() -> ExportedKeyData {
     requireModernKeyFormat(js, format);
     // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
     //   but Web IDL says that's deprecated.
     JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
         key.getAlgorithmName(), " key.");
 
-    return key.impl->exportKey(js, format);
+    auto exportedKey = key.impl->exportKey(js, format);
+    KJ_SWITCH_ONEOF(exportedKey) {
+      KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsArrayBuffer>) {
+        return kj::mv(buffer);
+      }
+      KJ_CASE_ONEOF(jwk, JsonWebKey) {
+        return ExportedJsonWebKey{kj::mv(jwk)};
+      }
+    }
+    KJ_UNREACHABLE;
   });
 }
 

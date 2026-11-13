@@ -637,6 +637,27 @@ KJ_TEST("new module registry defaults on at 2026-11-17") {
   KJ_EXPECT(!isNewModuleRegistryEnabled(*python));
 }
 
+KJ_TEST("Node.js-compatible JWK exports default on at 2026-12-01") {
+  auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
+    capnp::MallocMessageBuilder message;
+    auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
+    for (auto i: kj::indices(flags)) {
+      flagList.set(i, flags[i]);
+    }
+    auto output = message.getOrphanage().newOrphan<CompatibilityFlags>();
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(date, flagList.asReader(), output.get(), errorReporter,
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+    return output.get().getNodeJsCompatJwkExport();
+  };
+
+  KJ_EXPECT(!compileFlags("2026-11-30", {}));
+  KJ_EXPECT(compileFlags("2026-12-01", {}));
+  KJ_EXPECT(compileFlags("2026-11-30", {"nodejs_compat_jwk_export"_kj}));
+  KJ_EXPECT(!compileFlags("2026-12-01", {"no_nodejs_compat_jwk_export"_kj}));
+}
+
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   // List of specific flags that are allowed to use non-conformant dates
   // (already deployed and can't be changed for compatibility reasons)
