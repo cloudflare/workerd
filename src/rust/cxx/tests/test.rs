@@ -665,7 +665,7 @@ fn test_rust_vec_copy_assign_failure() {
 #[test]
 fn test_smart_ptr_new_over_aligned() {
     let is_aligned =
-        |ptr: *const ffi2::OverAligned| ptr.addr() % align_of::<ffi2::OverAligned>() == 0;
+        |ptr: *const ffi2::OverAligned| ptr.addr().is_multiple_of(align_of::<ffi2::OverAligned>());
 
     let unique: Vec<_> = (0..16)
         .map(|value| UniquePtr::new(ffi2::OverAligned { value }))
