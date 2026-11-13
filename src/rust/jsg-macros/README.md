@@ -95,9 +95,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
-- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
-  as the creator for an instance method and `None` for a static one, as C++ JSG passes
-  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- The return value converts with `jsg::ToJS::to_js_with_creator`. Instance methods pass the
+  resource's wrapper as the creator unless the macro recognizes a primitive return type
+  (including `()` and `Result` of those types), in which case it skips the wrapper lookup and
+  passes `None`. Static methods also pass `None`. A returned `jsg::Promise` keeps its creator
+  resource alive until it settles, as in C++ JSG.
 - A method, property or call handler that returns a promise (`jsg::Promise<T>` or
   `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
   conversion error included, when the isolate captures throws as rejections (the

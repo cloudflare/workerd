@@ -67,9 +67,72 @@ impl DirectReturnResource {
     }
 
     #[jsg_method]
+    pub fn fallible_number(&self, value: f64) -> jsg::Result<f64> {
+        #[expect(clippy::float_cmp, reason = "42 is exactly representable")]
+        let fail = value == 42.0;
+        if fail {
+            Err(jsg::Error::new_range_error("primitive result error"))
+        } else {
+            Ok(value)
+        }
+    }
+
+    #[jsg_method]
+    pub fn fallible_void(&self, fail: bool) -> jsg::Result<()> {
+        if fail {
+            Err(jsg::Error::new_range_error("primitive result error"))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[jsg_method]
     pub fn maybe_name(&self) -> Option<String> {
         Some(self.name.clone()).filter(|s| !s.is_empty())
     }
+}
+
+#[test]
+fn primitive_results_preserve_numbers_undefined_and_errors() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(
+            lock,
+            DirectReturnResource {
+                name: "primitive".to_owned(),
+                counter: Rc::new(Cell::new(u32::MAX)),
+            },
+        );
+        let wrapped = resource.to_js(lock)?;
+        ctx.set_global(lock, "primitive", wrapped);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                r"
+            (() => {
+              if (primitive.getCounter() !== 4294967295 || primitive.isValid() !== true)
+                return false;
+              for (const value of [-0, NaN, Infinity, -Infinity, 1.5]) {
+                if (!Object.is(primitive.fallibleNumber(value), value)) return false;
+              }
+              for (const invoke of [
+                () => primitive.fallibleNumber(42),
+                () => primitive.fallibleVoid(true),
+              ]) {
+                try { invoke(); return false; }
+                catch (e) {
+                  if (!(e instanceof RangeError) || e.message !== 'primitive result error')
+                    return false;
+                }
+              }
+              return primitive.fallibleVoid(false) === undefined &&
+                     primitive.fallibleNumber(0) === 0;
+            })()
+        "
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
 }
 
 /// Validates that resource methods can be called from JavaScript.

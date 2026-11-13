@@ -55,6 +55,7 @@ use utils::is_option_type;
 use utils::is_promise_type;
 use utils::is_rc_self;
 use utils::is_result_type;
+use utils::returns_primitive;
 use utils::snake_to_camel;
 use utils::this_param;
 use utils::typescript_options;
@@ -519,6 +520,14 @@ fn generate_callbacks(
         })
         .unzip();
 
+    // The argument count, which `unwrap_value` checks each required argument against, read from
+    // V8 once.
+    let argc = if method_name.is_some() && params.len() > injected_params {
+        quote! { let argc = args.len(); }
+    } else {
+        quote! {}
+    };
+
     let result_handling = result_handling(fn_sig, receiver);
 
     let invocation = invocation(fn_name, receiver, receiver_check, &arg_exprs);
@@ -531,6 +540,7 @@ fn generate_callbacks(
         quote! {}
     };
     let body = quote! {
+        #argc
         #(#unwraps)*
         #invocation
         #result_handling
@@ -573,13 +583,33 @@ fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
 
+    if let Some(primitive) = utils::primitive_return(fn_sig) {
+        let set = match primitive {
+            utils::PrimitiveReturn::Void => quote! { let _ = value; },
+            utils::PrimitiveReturn::Boolean => quote! { args.set_return_boolean(value); },
+            utils::PrimitiveReturn::Number => quote! { args.set_return_number(f64::from(value)); },
+        };
+        return if is_result {
+            quote! {
+                match result {
+                    Ok(value) => { #set }
+                    Err(err) => lock.throw_exception(&err.into()),
+                }
+            }
+        } else {
+            quote! { let value = result; #set }
+        };
+    }
+
     // Like C++ JSG, an instance method or property passes its receiver as the `creator` of the
     // value it returns, which a promise keeps alive until it settles; a static one passes none.
+    // Reading the receiver takes two calls into V8, so a method returning a value that keeps no
+    // creator skips it.
     let creator = match receiver {
-        Receiver::SelfRef | Receiver::This => {
+        Receiver::SelfRef | Receiver::This if !returns_primitive(fn_sig) => {
             quote! { jsg::v8::Local::<jsg::v8::Object>::try_from(args.this()).ok() }
         }
-        Receiver::None => quote! { None },
+        Receiver::SelfRef | Receiver::This | Receiver::None => quote! { None },
     };
     let conversion = if is_result {
         quote! {
@@ -745,7 +775,7 @@ fn unwrap_value(
             #js_index + 1,
             <#ty as jsg::FromJS<'_>>::type_name(),
         ));
-        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= args.len() {
+        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= argc {
             lock.throw_exception(&not_of_type());
             return;
         }

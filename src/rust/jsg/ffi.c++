@@ -327,8 +327,11 @@ bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
 
 MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  if (v8Value->IsString()) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8Value.As<v8::String>()));
+  }
+  return maybe_local_to_ffi(v8Value->ToString(isolate->GetCurrentContext()));
 }
 
 MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
@@ -760,6 +763,12 @@ uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
+  auto buf = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  byteLength = buf->ByteLength();
+  return byteLength == 0 ? 0 : reinterpret_cast<uintptr_t>(buf->Data());
+}
+
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
@@ -776,6 +785,22 @@ size_t local_array_buffer_view_byte_length(const Local& view) {
 
 uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
+}
+
+uintptr_t local_array_buffer_view_contents(const Local& value, size_t& byteLength) {
+  auto view = local_as_ref_from_ffi<v8::ArrayBufferView>(value);
+  byteLength = view->ByteLength();
+  if (byteLength == 0) return 0;
+  auto buffer = view->Buffer();
+  auto byteOffset = view->ByteOffset();
+  // As jsg::JsBufferSource::asArrayPtr(): the view's range is checked against the backing store,
+  // which the sandbox can't corrupt.
+  auto bufferLength = buffer->ByteLength();
+  if (byteOffset > bufferLength || byteLength > bufferLength - byteOffset) [[unlikely]] {
+    byteLength = 0;
+    return 0;
+  }
+  return reinterpret_cast<uintptr_t>(buffer->Data()) + byteOffset;
 }
 
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
@@ -1102,6 +1127,10 @@ size_t local_typed_array_byte_offset(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
 }
 
+uintptr_t local_typed_array_contents(const Local& array, size_t& byteLength) {
+  return local_array_buffer_view_contents(array, byteLength);
+}
+
 size_t local_typed_array_byte_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
 }
@@ -1300,6 +1329,14 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
+void fci_set_return_number(FunctionCallbackInfo* args, double value) {
+  args->GetReturnValue().Set(value);
+}
+
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
+  args->GetReturnValue().Set(value);
+}
+
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
@@ -1319,6 +1356,14 @@ Local pci_get_this(PropertyCallbackInfo* info) {
 
 void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
   info->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+void pci_set_return_number(PropertyCallbackInfo* info, double value) {
+  info->GetReturnValue().Set(value);
+}
+
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
+  info->GetReturnValue().Set(value);
 }
 
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info) {

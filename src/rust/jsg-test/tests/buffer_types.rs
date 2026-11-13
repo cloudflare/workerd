@@ -741,3 +741,102 @@ fn array_buffer_view_back_to_typed_array() {
         Ok(())
     });
 }
+
+#[test]
+fn slices_follow_resized_and_detached_buffers() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(
+                lock,
+                r"
+            const sliceBuffer = new ArrayBuffer(8, { maxByteLength: 16 });
+            new Uint8Array(sliceBuffer).set([0, 1, 2, 3, 4, 5, 6, 7]);
+            sliceBuffer
+        ",
+            )
+            .unwrap();
+        let buffer: v8::Local<v8::ArrayBuffer> = value.try_into().unwrap();
+        let mut fixed = Vec::new();
+        for source in [
+            "new Uint8Array(sliceBuffer, 2, 4)",
+            "new Uint16Array(sliceBuffer, 2, 2)",
+            "new DataView(sliceBuffer, 2, 4)",
+        ] {
+            let view: v8::Local<v8::ArrayBufferView> =
+                ctx.eval_raw(lock, source).unwrap().try_into().unwrap();
+            assert_eq!(view.as_slice(lock), &[2, 3, 4, 5]);
+            fixed.push(view);
+        }
+        let mut tracking = Vec::new();
+        for source in [
+            "new Uint8Array(sliceBuffer, 2)",
+            "new DataView(sliceBuffer, 2)",
+        ] {
+            let view: v8::Local<v8::ArrayBufferView> =
+                ctx.eval_raw(lock, source).unwrap().try_into().unwrap();
+            assert_eq!(view.as_slice(lock), &[2, 3, 4, 5, 6, 7]);
+            tracking.push(view);
+        }
+        let typed: v8::Local<v8::Uint16Array> = ctx
+            .eval_raw(lock, "new Uint16Array(sliceBuffer, 2, 2)")
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(
+            typed.as_slice(lock),
+            &[u16::from_ne_bytes([2, 3]), u16::from_ne_bytes([4, 5])]
+        );
+
+        ctx.eval_raw(lock, "sliceBuffer.resize(4)").unwrap();
+        assert_eq!(buffer.as_slice(lock), &[0, 1, 2, 3]);
+        assert_eq!(buffer.to_vec(), [0, 1, 2, 3]);
+        assert!(typed.as_slice(lock).is_empty());
+        for view in &mut fixed {
+            assert!(view.as_slice(lock).is_empty());
+            assert!(view.to_vec().is_empty());
+            // SAFETY: no Rust references into the buffer are live while this slice is held.
+            assert!(unsafe { view.as_mut_slice(lock) }.is_empty());
+        }
+        for view in &tracking {
+            assert_eq!(view.as_slice(lock), &[2, 3]);
+        }
+
+        ctx.eval_raw(lock, "sliceBuffer.resize(10)").unwrap();
+        assert_eq!(buffer.as_slice(lock), &[0, 1, 2, 3, 0, 0, 0, 0, 0, 0]);
+        for view in &fixed {
+            assert_eq!(view.as_slice(lock), &[2, 3, 0, 0]);
+        }
+        for view in &tracking {
+            assert_eq!(view.as_slice(lock), &[2, 3, 0, 0, 0, 0, 0, 0]);
+        }
+        buffer.detach(lock)?;
+        assert!(buffer.as_slice(lock).is_empty());
+        assert!(buffer.to_vec().is_empty());
+        assert!(typed.as_slice(lock).is_empty());
+        for view in fixed.iter().chain(&tracking) {
+            assert!(view.as_slice(lock).is_empty());
+            assert!(view.to_vec().is_empty());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn empty_view_at_end_of_buffer_has_empty_slices() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for source in [
+            "new Uint8Array(new ArrayBuffer(4), 4, 0)",
+            "new DataView(new ArrayBuffer(4), 4, 0)",
+        ] {
+            let mut view: v8::Local<v8::ArrayBufferView> =
+                ctx.eval_raw(lock, source).unwrap().try_into().unwrap();
+            assert!(view.as_slice(lock).is_empty());
+            assert!(view.to_vec().is_empty());
+            // SAFETY: no Rust references into this buffer are live during this call.
+            assert!(unsafe { view.as_mut_slice(lock) }.is_empty());
+        }
+        Ok(())
+    });
+}
