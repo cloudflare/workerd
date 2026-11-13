@@ -198,9 +198,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const Attribute& attribute, StringCache& cache)
   auto obj = js.obj();
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
-  // A single value is emitted as-is. Array-typed values (see Attribute::Value) therefore stay
-  // arrays here, even with one or zero elements; only legacy multi-value attributes rely on the
-  // list length below.
   if (attribute.value.size() == 1) {
     obj.set(js, VALUE_STR, ToJs(js, attribute.value[0]));
   } else {
