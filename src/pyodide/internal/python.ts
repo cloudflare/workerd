@@ -12,6 +12,7 @@ import {
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
+  KEEP_RESTORED_IMPORT_CACHES,
   LOADED_SNAPSHOT_TYPE,
   type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
@@ -35,6 +36,7 @@ import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
   PythonUserError,
   PythonWorkersInternalError,
+  invalidateCaches,
   loadPythonMod,
   reportError,
   setInternalErrorReporter,
@@ -299,6 +301,9 @@ export async function loadPyodide(
       // present in snapshot memory.
       enterJaegerSpan('mount_worker_files', () => {
         mountWorkerFiles(Module);
+        if (!KEEP_RESTORED_IMPORT_CACHES) {
+          invalidateCaches(Module);
+        }
       });
 
       if (Module.API.version === PyodideVersion.V0_26_0a2) {
