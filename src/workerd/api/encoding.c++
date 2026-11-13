@@ -570,8 +570,8 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
     kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
 
-    [[maybe_unused]] auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
-    KJ_DASSERT(
+    auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
+    KJ_ASSERT(
         writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
     utf8_length = simdutf::utf8_length_from_latin1(
@@ -595,8 +595,8 @@ jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   // Stack allocation for small strings, heap for large.
   kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
 
-  [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
-  KJ_DASSERT(
+  auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
+  KJ_ASSERT(
       writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
