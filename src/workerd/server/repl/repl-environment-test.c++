@@ -706,5 +706,12 @@ KJ_TEST("REPL closes loaded servers when it drains") {
   // ~Fixture drains, closing both; a server destroyed while open would fail an assertion.
 }
 
+KJ_TEST("REPL closes the server of a load still under way when it drains") {
+  Fixture fixture;
+  fixture.evalAwait("s = await workerd.loadConfig('worker.capnp')");
+  // Not awaited: ~Fixture drains while the load runs, and closes its server once it has started.
+  KJ_EXPECT(fixture.eval("workerd.loadConfig('worker.capnp'), 'loading'") == "'loading'");
+}
+
 }  // namespace
 }  // namespace workerd::server

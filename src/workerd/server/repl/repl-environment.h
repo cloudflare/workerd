@@ -16,6 +16,7 @@
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/message.h>
 #include <kj/function.h>
+#include <kj/sticky-flag.h>
 
 namespace workerd::api {
 class MemoryCacheProvider;
@@ -91,10 +92,11 @@ class ReplEnvironment final: public ReplHost {
   // identifier chain, its evaluation throws, or its value is null or undefined.
   kj::Promise<kj::Array<kj::String>> propertyNames(kj::String base);
 
-  // Closes every loaded config's server and every environment this one started, then ends the
-  // session's IoContext once its waitUntil() tasks are done. Must complete before destruction;
-  // nothing else may be called afterwards. Rejects with the first failure to close, if any, once
-  // all of that is done.
+  // Waits for the loads and environment starts under way, refusing new ones, then closes every
+  // loaded config's server and every environment this one started, then ends the session's
+  // IoContext once its waitUntil() tasks are done. Must complete before destruction; nothing else
+  // may be called afterwards. Rejects with the first failure to close, if any, once all of that is
+  // done.
   kj::Promise<void> drain();
 
   kj::Promise<kj::Own<ReplServerHost>> loadConfig(ReplConfigSource source) override;
@@ -159,6 +161,14 @@ class ReplEnvironment final: public ReplHost {
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
 
+  // The loads and environment starts under way, which add to `servers` and `environments` when
+  // they finish. drain() waits for them, and none starts once it has begun. Declared before
+  // `incomingRequest`: a start runs in the session's IoContext, and its end updates these.
+  uint startsUnderWay = 0;
+  bool drainStarted = false;
+  // Signaled once drain() has begun and no start is under way.
+  kj::StickyFlag startsSettled;
+
   // The session's request, which owns its IoContext. None once drained.
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
 
@@ -174,6 +184,10 @@ class ReplEnvironment final: public ReplHost {
 
   void compileWorker();
   void startSession();
+
+  // Counts a load or environment start as under way until the result is dropped. Throws a JSG
+  // error once drain() has begun.
+  kj::Own<void> beginStart();
 
   struct Compiled {
     jsg::NonModuleScript script;
