@@ -46,6 +46,9 @@ use crate::args::ReplArgs;
 
 /// Runs the REPL until its input ends; the exit status.
 pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
+    // Before the REPL starts any thread, each of which blocks SIGINT then.
+    #[cfg(unix)]
+    interrupt::take_interrupts();
     let first_input = args
         .config_file
         .as_deref()
