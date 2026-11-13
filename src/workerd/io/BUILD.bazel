@@ -772,6 +772,15 @@ kj_test(
 )
 
 kj_test(
+    src = "request-observer-issues-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util",
+    ],
+)
+
+kj_test(
     src = "uncaught-exception-test.c++",
     deps = [
         ":io",

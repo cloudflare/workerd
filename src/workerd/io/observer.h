@@ -12,6 +12,8 @@
 #include <workerd/util/sqlite.h>
 #include <workerd/util/strong-bool.h>
 
+#include <kj/function.h>
+#include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
@@ -110,6 +112,43 @@ class OutgoingActorCallObserver {
   }
 };
 
+// Embedder issue hooks. An embedder that wants to detect and report problems in a Worker (uncaught
+// exceptions, error logs, 5xx responses) implements the RequestObserver::issue* hooks below. The
+// runtime only reports facts it already has, using stable string codes. It applies no policy, so
+// deduplication, caps and what to do with a report are up to the embedder.
+namespace issues {
+constexpr kj::StringPtr UNCAUGHT_EXCEPTION = "uncaught_exception"_kj;
+constexpr kj::StringPtr ERROR_LOG = "error_log"_kj;
+constexpr kj::StringPtr HTTP_SERVER_ERROR = "http_server_error"_kj;
+
+// A structured fact about an issue.
+struct Field {
+  kj::StringPtr name;
+  kj::OneOf<kj::StringPtr, int64_t, double, bool> value;
+};
+
+// An Error the Worker threw or logged.
+struct Error {
+  kj::StringPtr name;
+  kj::StringPtr message;
+  kj::Maybe<kj::StringPtr> stack;
+};
+
+// Detail that is costly to build. `render` runs only if the observer calls it, so an issue that
+// the observer drops never pays for it.
+struct Attachment {
+  kj::StringPtr name;
+  kj::Function<kj::String()> render;
+};
+
+enum class BreadcrumbKind : uint8_t {
+  CALL_STARTED,
+  CALL_FINISHED_OK,
+  CALL_FINISHED_FAILED,
+  LOG,
+};
+}  // namespace issues
+
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
@@ -173,6 +212,33 @@ class RequestObserver: public kj::Refcounted {
   // type may be reported multiple times during a single request; implementations should deduplicate.
   virtual void reportInternalException(
       const kj::Exception& e, jsg::InternalExceptionObserver::Detail detail) {}
+
+  // True if the embedder wants issue reports for this request. Every issue feed point checks this
+  // first and builds nothing when it is false.
+  virtual bool issuesEnabled() {
+    return false;
+  }
+
+  // Reports an issue the runtime saw in the Worker. `code` is one of the issues:: codes. The
+  // observer may call `attachments[i].render()` to get an attachment. It must not keep the
+  // arguments past the call.
+  virtual void reportIssue(kj::StringPtr code,
+      kj::StringPtr message,
+      kj::ArrayPtr<const issues::Field> fields,
+      kj::ArrayPtr<const issues::Error> errors,
+      kj::ArrayPtr<issues::Attachment> attachments) {}
+
+  // Records something that happened shortly before a possible issue. For LOG, `detail` is the log
+  // level name and `label` is the start of the first string argument. For calls, `detail` is empty
+  // and `label` is the operation name.
+  virtual void issueBreadcrumb(
+      issues::BreadcrumbKind kind, kj::StringPtr detail, kj::StringPtr label) {}
+
+  // Notes who the request is for, from the user.id, session.id and account.id span attributes.
+  virtual void noteIssueUserContext(kj::StringPtr key, kj::StringPtr value) {}
+
+  // Records the HTTP status the request is returning.
+  virtual void setIssueStatus(uint status) {}
 
   // Wrap the given WorkerInterface with a version that collects metrics. This method may only be
   // called once, and only one method call may be made to the returned interface.
