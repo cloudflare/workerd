@@ -474,7 +474,9 @@ class Fetcher: public JsRpcClientProvider {
   kj::LiteralStringConst getRpcTargetKind() override;
 
   // A binding transfers through a startup snapshot as the description it is: a channel number
-  // that every request resolves through its own IoContext. See http.c++ for what does not.
+  // that every request resolves through its own IoContext, or a CrossContextOutgoingFactory that
+  // copies itself (CrossContextOutgoingFactory::cloneForSnapshot()). See http.c++ for what does
+  // not.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   // The same copy, as a jsg::Ref for the snapshotClone() of an object that holds this Fetcher (a
