@@ -422,7 +422,9 @@ class Wrappable: public kj::Refcounted {
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
   // Override in subclasses with state that must survive a V8 startup snapshot. Must return a deep,
-  // isolate-independent copy: no V8 handles, no jsg::Ref<T> members, no IoContext/IO refs. A
+  // isolate-independent copy: no V8 handles, no IoContext/IO refs, and no jsg::Ref<T> members
+  // except to a fresh object the copy owns, which has never been wrapped and so belongs to no
+  // isolate (a WrappedBinding's copy of its Fetcher, for example). A
   // kj::none result marks the type as not transferable; a snapshot whose context reaches such a
   // wrapper is rejected (see IsolateBase::createSnapshotBlob()). Stateless types do not override
   // this: they set Object::jsgSnapshotStateless instead, and the snapshot records only their tag.
