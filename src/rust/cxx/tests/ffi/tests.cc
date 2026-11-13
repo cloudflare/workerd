@@ -739,6 +739,16 @@ void c_take_ref_rust_vec_index(const rust::Vec<uint8_t> &v) {
   }
 }
 
+ThrowingCopy::ThrowingCopy(const ThrowingCopy &other) : value(other.value) {
+  if (value == 0) {
+    throw std::runtime_error("copy failed");
+  }
+}
+
+void c_copy_assign_rust_vec(rust::Vec<ThrowingCopy> &dst, const rust::Vec<ThrowingCopy> &src) {
+  dst = src;
+}
+
 void c_take_ref_rust_vec_copy(const rust::Vec<uint8_t> &v) {
   // The std::copy() will make sure rust::Vec<>::const_iterator satisfies the
   // requirements for std::iterator_traits.

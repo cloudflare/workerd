@@ -28,6 +28,7 @@ pub mod ffi2 {
 
         type D = crate::other::D;
         type E = crate::other::E;
+        type ThrowingCopy = crate::other::ThrowingCopy;
         #[namespace = "F"]
         type F = crate::other::f::F;
         #[namespace = "G"]
@@ -44,6 +45,10 @@ pub mod ffi2 {
         fn c_take_trivial_ref_method(self: &D);
         fn c_take_trivial_mut_ref_method(self: &mut D);
         fn c_take_trivial(d: D);
+        fn c_copy_assign_rust_vec(
+            dst: &mut Vec<ThrowingCopy>,
+            src: &Vec<ThrowingCopy>,
+        ) -> Result<()>;
         fn c_take_trivial_ns_ptr(g: UniquePtr<G>);
         fn c_take_trivial_ns_ref(g: &G);
         fn c_take_trivial_ns(g: G);
@@ -83,4 +88,5 @@ pub mod ffi2 {
     impl UniquePtr<E> {}
     impl UniquePtr<F> {}
     impl UniquePtr<G> {}
+    impl Vec<ThrowingCopy> {}
 }

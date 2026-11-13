@@ -945,8 +945,10 @@ Vec<T> &Vec<T>::operator=(Vec &&other) & noexcept {
 template <typename T>
 Vec<T> &Vec<T>::operator=(const Vec &other) & {
   if (this != &other) {
-    this->drop();
-    new (this) Vec(other);
+    // Copying an element can throw, so the copy is complete before this Vec gives up its own
+    // elements.
+    Vec copy(other);
+    *this = std::move(copy);
   }
   return *this;
 }
