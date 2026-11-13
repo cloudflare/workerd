@@ -46,6 +46,41 @@ class MockHttpService: public kj::HttpService {
   }
 };
 
+// Reads the host of a connect() only after the caller has run again, as a service that waits
+// before it connects does.
+class DeferredHostService final: public kj::HttpService {
+ public:
+  explicit DeferredHostService(kj::String& seenHost): seenHost(seenHost) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    KJ_UNIMPLEMENTED("not exercised by test");
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    co_await kj::yield();
+    // Allocations of the host's size, which take over its memory if it has been freed.
+    kj::Vector<kj::String> fillers;
+    for (auto i KJ_UNUSED: kj::zeroTo(64)) {
+      fillers.add(kj::heapString(host.size()));
+    }
+    for (auto& filler: fillers) {
+      filler.asArray().fill('#');
+    }
+    seenHost = kj::str(host);
+  }
+
+ private:
+  kj::String& seenHost;
+};
+
 class TestConnectResponse: public kj::HttpService::ConnectResponse {
  public:
   void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
@@ -222,4 +257,25 @@ KJ_TEST("http connect settings") {
   auto promise = proxy->connect(host.asBytes().as<Rust>(), headers, connection, tunnel, settings);
   KJ_ASSERT_NONNULL (*tlsStarter)(host).wait(waitScope);
   KJ_EXPECT(tlsHost == host);
+}
+
+KJ_TEST("http connect host outlives the call") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  kj::String seenHost;
+  auto proxy = kj::rust::tests::new_proxy_http_service(kj::heap<DeferredHostService>(seenHost));
+
+  auto host = kj::str("deferred-host.example.com:443");
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  auto pipe = kj::newTwoWayPipe();
+  kj::AsyncIoStream& connection = *pipe.ends[0];
+
+  TestConnectResponse tunnel;
+
+  ::kj::rust::HttpConnectSettings settings = {.use_tls = false, .tls_starter = kj::none};
+  proxy->connect(host.asBytes().as<Rust>(), headers, connection, tunnel, settings).wait(waitScope);
+  KJ_EXPECT(seenHost == host, seenHost);
 }

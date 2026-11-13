@@ -22,8 +22,10 @@ kj::Promise<void> connect(HttpService& service,
     AsyncIoStream& connection,
     ConnectResponse& response,
     HttpConnectSettings settings) {
+  // The service may refer to the host until its promise resolves, so the copy lives in the
+  // coroutine frame.
   auto strHost = kj::str(kj::from<kj_rs::Rust>(host).asChars());
-  return service.connect(strHost, headers, connection, response,
+  co_await service.connect(strHost, headers, connection, response,
       {
         .useTls = settings.use_tls,
         .tlsStarter = settings.tls_starter,
