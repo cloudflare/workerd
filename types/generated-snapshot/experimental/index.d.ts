@@ -1217,6 +1217,7 @@ declare class Blob {
 }
 interface BlobOptions {
   type?: string;
+  endings?: "transparent" | "native";
 }
 /**
  * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
@@ -1245,6 +1246,7 @@ declare class File extends Blob {
 interface FileOptions {
   type?: string;
   lastModified?: number;
+  endings?: "transparent" | "native";
 }
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
