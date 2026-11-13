@@ -7,15 +7,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { env } from 'cloudflare:workers';
+import unsafe from 'workerd:unsafe';
 
 const MODE = env.MODE;
-
-// Whether this Worker was started from a startup snapshot rather than running its top level
-// itself. In the zygote's env a service binding is an `undefined` placeholder (the started Worker
-// supplies the value: isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF
-// is undefined exactly when this code runs in the zygote, and the constant is baked into the
-// snapshot.
-const snapshotUsed = typeof env.SELF === 'undefined';
 
 let state = null;
 
@@ -72,6 +66,10 @@ function checks() {
 
 export default {
   async fetch() {
-    return Response.json({ mode: MODE, snapshotUsed, checks: checks() });
+    return Response.json({
+      mode: MODE,
+      snapshotUsed: unsafe.startedFromStartupSnapshot(),
+      checks: checks(),
+    });
   },
 };
