@@ -371,6 +371,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return asyncTracker.get();
   }
 
+  // The async trace resource of an awaitJs() wait, which the wait settles when the JavaScript
+  // promise settles. Inert if the context is not traced. The Rust io-context crate's await_js()
+  // creates its resource with this too.
+  AsyncResource makeAwaitJsResource() const {
+    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
+    }
+    return {};
+  }
+
   // Gets the actor, throwing if there isn't one.
   Worker::Actor& getActorOrThrow();
 
@@ -601,6 +611,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       "values are not allowed within global scope. To fix this error, perform this "
       "operation within a handler. "
       "https://developers.cloudflare.com/workers/runtime-apis/handlers/"_kj;
+
+  // The exception with which awaitJs() fails if JavaScript never settles the promise: a FAILED
+  // Error whose message is "Promise will never complete.".
+  static kj::Exception neverSettledException();
+
+  // The message of memoryLimitException().
+  static constexpr kj::StringPtr MEMORY_LIMIT_MESSAGE = "Worker has exceeded memory limit."_kj;
+
+  // The exception with which awaitJs() fails, rather than with neverSettledException(), if
+  // JavaScript never settles the promise while the isolate has excessively exceeded its heap
+  // limit: an OVERLOADED Error with MEMORY_LIMIT_MESSAGE, carrying MEMORY_LIMIT_DETAIL_ID, which
+  // marks it as an out-of-memory outcome.
+  static kj::Exception memoryLimitException();
 
   // Like current(), but returns kj::none if there is no current context.
   static kj::Maybe<IoContext&> tryCurrent();
@@ -1422,6 +1445,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
+  // NOTE: This must also live below `abortException` and `abortFlag`: the half of a Rust
+  //   await_js() wait that settles it reads `abortException` when it is destroyed, and destroys a
+  //   branch of `abortFlag`.
   OwnedObjectList ownedObjects;
 
   kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
@@ -1566,8 +1592,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void resumeAfterIo(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
-  // Async trace resources for the awaitIo() and awaitJs() bridges. Inert if the context is not
-  // traced.
+  // The async trace resource for the awaitIo() bridge. Inert if the context is not traced.
+  // awaitJs()'s is makeAwaitJsResource().
   AsyncResource makeAwaitIoResource() const {
     KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
       KJ_IF_SOME(name, awaitIoOperationName) {
@@ -1583,12 +1609,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Set by AwaitIoOperation.
   mutable kj::Maybe<kj::StringPtr> awaitIoOperationName;
-  AsyncResource makeAwaitJsResource() const {
-    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
-      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
-    }
-    return {};
-  }
 
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.
@@ -2113,13 +2133,11 @@ class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
       return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
     }).orDefault(false);
     if (hasExcessivelyExceededHeapLimit) {
-      auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
-      e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      fulfiller->reject(kj::mv(e));
+      fulfiller->reject(memoryLimitException());
     } else {
       // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
       // this promise.
-      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+      fulfiller->reject(neverSettledException());
     }
   }
 };
