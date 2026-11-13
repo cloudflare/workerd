@@ -332,7 +332,7 @@ fn backing_store_data_and_byte_length() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[11u8, 22, 33]);
-        let bs = buf.backing_store();
+        let bs = buf.backing_store(lock);
         assert_eq!(bs.byte_length(), 3);
         assert!(!bs.is_empty());
         // SAFETY: non-shared backing store; no concurrent access.
@@ -346,7 +346,7 @@ fn backing_store_max_byte_length_equals_byte_length_for_fixed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[0u8; 16]);
-        let bs = buf.backing_store();
+        let bs = buf.backing_store(lock);
         assert_eq!(bs.max_byte_length(), bs.byte_length());
         Ok(())
     });
@@ -357,7 +357,7 @@ fn backing_store_is_not_resizable_for_regular_buffer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2]);
-        let bs = buf.backing_store();
+        let bs = buf.backing_store(lock);
         assert!(!bs.is_resizable_by_user_javascript());
         Ok(())
     });
@@ -368,7 +368,7 @@ fn backing_store_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 0);
-        let bs = buf.backing_store();
+        let bs = buf.backing_store(lock);
         assert_eq!(bs.byte_length(), 0);
         assert!(bs.is_empty());
         // SAFETY: non-shared backing store; no concurrent access.
@@ -382,7 +382,7 @@ fn backing_store_as_mut_slice_mutations_visible_via_local() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[0u8, 0, 0]);
-        let mut bs = buf.backing_store();
+        let mut bs = buf.backing_store(lock);
         // SAFETY: single-threaded test; no concurrent access to this non-shared backing store.
         unsafe { bs.as_mut_slice(lock) }.copy_from_slice(&[7, 8, 9]);
         // The Local<ArrayBuffer> shares the same backing store
@@ -399,7 +399,7 @@ fn backing_store_outlives_local() {
         // BackingStore keeps backing memory alive even after the Local is dropped
         let bs = {
             let buf = v8::ArrayBuffer::new(lock, &[42u8, 43, 44]);
-            buf.backing_store()
+            buf.backing_store(lock)
             // buf (Local<ArrayBuffer>) dropped here
         };
         // The shared_ptr in BackingStore keeps the memory alive

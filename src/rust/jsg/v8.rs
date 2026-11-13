@@ -1454,12 +1454,19 @@ pub struct ArrayBufferView;
 /// memory alive even after the original JS buffer handle goes out of scope.
 ///
 /// Obtained via [`Local<ArrayBuffer>::backing_store()`].
+///
+/// A store taken from an `ArrayBuffer` shares that buffer's memory, which only its isolate's
+/// lock guards, so [`ArrayBuffer::from_backing_store`] wraps it only in that isolate. A
+/// `BackingStore` is `Send` and `Sync`: what it lends without a lock is `unsafe` to read.
 pub struct BackingStore {
     /// Non-zero `usize` encoding the address of a heap-allocated
     /// `std::shared_ptr<v8::BackingStore>`. Using `usize` matches the CXX FFI
     /// convention of representing opaque pointers as `size_t`.
     /// Freed by `ffi::backing_store_drop` on `Drop`.
     ptr: NonZeroUsize,
+    /// The state of the isolate whose `ArrayBuffer` the store was taken from, or `None` for a
+    /// store that no buffer has wrapped.
+    isolate: Option<Arc<IsolateState>>,
 }
 
 impl Drop for BackingStore {
@@ -1479,8 +1486,9 @@ impl BackingStore {
     pub fn new_resizable(byte_length: usize, max_byte_length: usize) -> Self {
         // SAFETY: V8 guarantees a non-null result or crashes on OOM.
         let ptr = unsafe { ffi::backing_store_new_resizable(byte_length, max_byte_length) };
-        // SAFETY: ptr is a freshly allocated shared_ptr, uniquely owned.
-        unsafe { Self::from_raw(ptr) }
+        // SAFETY: ptr is a freshly allocated shared_ptr, uniquely owned, of a store that no
+        // buffer has wrapped.
+        unsafe { Self::from_raw(ptr, None) }
     }
 
     /// Wraps a `usize` address returned by a `local_*_get_backing_store` FFI call.
@@ -1488,11 +1496,14 @@ impl BackingStore {
     /// # Safety
     /// `ptr` must be a non-zero value returned by one of the
     /// `local_*_get_backing_store` FFI functions, and the caller must transfer
-    /// unique ownership to this `BackingStore`.
+    /// unique ownership to this `BackingStore`. `isolate` must be the state of the isolate
+    /// whose buffer the store was taken from, and may be `None` only for a store that no
+    /// buffer has wrapped.
     #[expect(clippy::expect_used, reason = "the caller guarantees a non-zero `ptr`")]
-    unsafe fn from_raw(ptr: usize) -> Self {
+    unsafe fn from_raw(ptr: usize, isolate: Option<Arc<IsolateState>>) -> Self {
         Self {
             ptr: NonZeroUsize::new(ptr).expect("backing_store pointer must be non-null"),
+            isolate,
         }
     }
 
@@ -2593,6 +2604,11 @@ impl ArrayBuffer {
     ///
     /// The `ArrayBuffer` shares ownership of the backing store's memory via the
     /// underlying `shared_ptr` reference count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `store` was taken from an `ArrayBuffer` of another isolate: that isolate's
+    /// JavaScript, which `lock` does not exclude, can write to the memory.
     // The BackingStore is taken by value to express ownership transfer; the
     // C++ ArrayBuffer::New copies the shared_ptr so both sides hold a reference.
     #[expect(
@@ -2603,6 +2619,13 @@ impl ArrayBuffer {
         lock: &mut crate::Lock<'s>,
         store: BackingStore,
     ) -> Local<'s, Self> {
+        if let Some(state) = &store.isolate {
+            assert!(
+                Arc::ptr_eq(state, lock.isolate_state()),
+                "attempt to wrap a BackingStore in an isolate other than the one whose \
+                 ArrayBuffer it was taken from"
+            );
+        }
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         // store.ptr is a valid heap-allocated shared_ptr; we pass it by raw pointer
@@ -2791,12 +2814,14 @@ impl<'s> Local<'s, ArrayBuffer> {
     ///
     /// The returned `BackingStore` keeps the underlying memory alive independently
     /// of this `Local` handle.
-    pub fn backing_store(&self) -> BackingStore {
+    pub fn backing_store(&self, lock: &mut Lock<'_>) -> BackingStore {
+        self.debug_assert_isolate(lock);
         // SAFETY: handle is valid within the current HandleScope; the returned pointer
         // is a freshly heap-allocated shared_ptr that we uniquely own.
         let ptr = unsafe { ffi::local_array_buffer_get_backing_store(self.raw()) };
-        // SAFETY: the FFI guarantees a non-null pointer on success.
-        unsafe { BackingStore::from_raw(ptr) }
+        // SAFETY: the FFI guarantees a non-null pointer on success, and the buffer belongs
+        // to the lock's isolate because all open scopes do.
+        unsafe { BackingStore::from_raw(ptr, Some(Arc::clone(lock.isolate_state()))) }
     }
 }
 

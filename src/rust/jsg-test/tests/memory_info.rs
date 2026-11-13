@@ -668,7 +668,7 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             weak: weak_target.downgrade(lock),
             lenient: jsg::Lenient::Unconvertable(v8::TracedGlobal::new(lock, unconvertable)),
             global: global.to_global(lock),
-            store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(),
+            store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(lock),
             borrowed: RefCell::new("borrowed".to_owned()),
             locked: std::sync::Mutex::new("locked".to_owned()),
         };

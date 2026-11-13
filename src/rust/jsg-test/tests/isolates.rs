@@ -157,6 +157,67 @@ fn global_of_another_isolate_panics() {
     });
 }
 
+/// Two isolates run on different threads, so memory that one's `ArrayBuffer` owns must not
+/// become another's.
+#[test]
+fn backing_store_of_another_isolate_panics_when_wrapped() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut store = None;
+    a.run_in_context(|lock, ctx| {
+        let buffer = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
+        store = Some(buffer.backing_store(lock));
+
+        // In its own isolate, the store becomes another buffer over the same memory.
+        let own = buffer.backing_store(lock);
+        let again = v8::ArrayBuffer::from_backing_store(lock, own);
+        ctx.set_global(lock, "buffer", buffer);
+        ctx.set_global(lock, "again", again);
+        ctx.eval_raw(lock, "new Uint8Array(again)[0] = 7").unwrap();
+        assert_eq!(
+            ctx.eval::<u8>(lock, "new Uint8Array(buffer)[0]").unwrap(),
+            7
+        );
+        Ok(())
+    });
+    let store = store.expect("taken in A");
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        b.run_in_context(|lock, _ctx| {
+            let _buffer = v8::ArrayBuffer::from_backing_store(lock, store);
+            Ok(())
+        });
+    }));
+    let payload = result.expect_err("wrapping the store of A's buffer in B must panic");
+    assert_eq!(
+        panic_message(&*payload),
+        "attempt to wrap a BackingStore in an isolate other than the one whose ArrayBuffer it was \
+         taken from"
+    );
+}
+
+/// A store that no buffer has wrapped belongs to no isolate yet.
+#[test]
+fn new_backing_store_is_wrapped_in_any_isolate() {
+    let stores = [
+        v8::BackingStore::new_resizable(4, 8),
+        v8::BackingStore::new_resizable(4, 8),
+    ];
+    for store in stores {
+        crate::Harness::new().run_in_context(|lock, ctx| {
+            let buffer = v8::ArrayBuffer::from_backing_store(lock, store);
+            assert_eq!(buffer.byte_length(), 4);
+            ctx.set_global(lock, "buffer", buffer);
+            assert_eq!(
+                ctx.eval::<u32>(lock, "buffer.resize(8); buffer.byteLength")
+                    .unwrap(),
+                8
+            );
+            Ok(())
+        });
+    }
+}
+
 #[test]
 fn taking_a_global_of_another_isolate_out_of_a_cell_panics() {
     let a = crate::Harness::new();
