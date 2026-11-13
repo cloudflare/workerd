@@ -141,6 +141,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 config,
                 const_name.const_name,
                 &process,
+                &options,
                 serve_or_test.experimental,
             );
             let (config, options) = with_cluster::<T>(config, &serve_or_test, options, &process);
@@ -173,13 +174,15 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(config, None, &process, serve_or_test.experimental);
+            let options = run_options(&serve_or_test);
+            let config =
+                load_config::<T>(config, None, &process, &options, serve_or_test.experimental);
             entry::test(
                 verbose,
                 config.into_words(),
                 (&serve_or_test).into(),
                 (&args::TestArgs::default()).into(),
-                run_options(&serve_or_test),
+                options,
                 patterns(args::TestFilter::default()),
                 watching(process),
             )
@@ -262,7 +265,9 @@ fn run_deploy(
                 binary: args.binary,
                 config_file,
             };
-            (name, load_config::<T>(config, const_name, &process, true))
+            let config =
+                load_config::<T>(config, const_name, &process, &RunOptions::default(), true);
+            (name, config)
         }
         Err(error) => usage_error::<T>(error),
     };
@@ -306,7 +311,7 @@ fn run_compile(
     }
     let process = Process::new(executable, None, Vec::new());
     // The binary checks `--experimental` when it runs (the server, for bundled modules).
-    let config = load_config::<T>(config, const_name, &process, true);
+    let config = load_config::<T>(config, const_name, &process, &RunOptions::default(), true);
     let written = if config_only {
         config.write_to_stdout()
     } else {
@@ -329,10 +334,15 @@ fn run_test(
     let filter = test.filter.take().unwrap_or_default();
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
     let process = Process::new(executable, watcher, Vec::new());
+    let options = RunOptions {
+        socket_addresses: args::override_map(std::mem::take(&mut test.socket_addr_overrides)),
+        ..run_options(serve_or_test)
+    };
     let config = load_config::<T>(
         config,
         filter.const_name.clone(),
         &process,
+        &options,
         serve_or_test.experimental,
     );
     entry::test(
@@ -340,10 +350,7 @@ fn run_test(
         config.into_words(),
         serve_or_test.into(),
         (&test).into(),
-        RunOptions {
-            socket_addresses: args::override_map(test.socket_addr_overrides),
-            ..run_options(serve_or_test)
-        },
+        options,
         patterns(filter),
         watching(process),
     )
@@ -363,10 +370,12 @@ fn run_bench(
     let filter = bench.filter.take().unwrap_or_default();
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
     let process = Process::new(executable, watcher, Vec::new());
+    let options = run_options(serve_or_test);
     let config = load_config::<T>(
         config,
         filter.test.const_name.clone(),
         &process,
+        &options,
         serve_or_test.experimental,
     );
     entry::bench(
@@ -374,7 +383,7 @@ fn run_bench(
         config.into_words(),
         serve_or_test.into(),
         bench.options(filter.case_pattern),
-        run_options(serve_or_test),
+        options,
         patterns(filter.test),
         watching(process),
     )
@@ -444,14 +453,15 @@ fn release_version() -> &'static str {
 }
 
 /// The config to run: a schema file compiled now (the compiler registers every file it reads with
-/// the process's watcher before reading it), or an encoded message read from a file or stdin.
-/// Exits with a usage error on a problem with the file itself. Parse errors in a schema file are
-/// printed; without `--watch` they end the process, with it the process waits for the files to
-/// change and reloads.
+/// the process's watcher before reading it), a wrangler config translated now for a run with
+/// `options`, or an encoded message read from a file or stdin. Exits with a usage error on a
+/// problem with the file itself. Parse errors in a schema file are printed; without `--watch` they
+/// end the process, with it the process waits for the files to change and reloads.
 fn load_config<T: CommandFactory>(
     config: args::ConfigFileArgs,
     const_name: Option<String>,
     process: &Process,
+    options: &RunOptions,
     experimental: bool,
 ) -> Config {
     let args::ConfigFileArgs {
@@ -488,7 +498,7 @@ fn load_config<T: CommandFactory>(
         if !std::path::Path::new(&config_file).is_file() {
             usage_error::<T>(format!("{config_file}: No such file."));
         }
-        return wrangler::load(&config_file, process, experimental)
+        return wrangler::load(&config_file, process, options, experimental)
             .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
     }
 

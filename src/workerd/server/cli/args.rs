@@ -56,6 +56,11 @@ pub enum Command {
     #[command(
         long_about = "Serve requests based on a config.",
         after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
+            A wrangler config's Durable Objects are stored on the disk service \
+            `<name>-do-storage`, or `do-storage` when --cluster-addr joins it to a cluster, in \
+            `.wrangler/state/workerd` next to the config unless --directory-path names another \
+            directory for that service. Joined to a cluster, a wrangler config defines \
+            `do-storage` even without Durable Objects, for those of the cluster's deployments.\n\n\
             Cluster mode (`Config.cluster`, or --cluster-addr for a config without one, with \
             --experimental): instances that share an S3-compatible (s3://) or Google Cloud \
             Storage (gs://) bucket serve Durable Objects together. For an s3:// bucket, each \

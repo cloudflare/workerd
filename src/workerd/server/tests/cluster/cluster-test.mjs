@@ -3350,13 +3350,18 @@ test('cluster: nodes serving a wrangler project join a cluster with --cluster-ad
           (node) => nodeKeys.get(node.nodeId) === JSON.parse(record).node
         );
         assert(owner !== undefined, record);
-        // The object is stored where --directory-path points.
+        // The object is stored where --directory-path do-storage points, and
+        // nothing is stored in the project.
         assert((await readdir(owner.localPath)).includes('counter-Counter'));
+        assert.deepStrictEqual((await readdir(project)).sort(), [
+          'index.js',
+          'wrangler.jsonc',
+        ]);
       },
       {
         config: join(project, 'wrangler.jsonc'),
         configName: null,
-        disk: 'counter-do-storage',
+        disk: 'do-storage',
         extraArgs: () => ['--cluster-addr=127.0.0.1:0'],
         nodeEnv: async () => ({
           WORKERD_CLUSTER_KEY: 'test-cluster-shared-secret-of-32-bytes',
