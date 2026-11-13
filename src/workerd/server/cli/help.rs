@@ -49,9 +49,24 @@ Cluster (experimental):
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS.
   WORKERD_CLUSTER_KEY, or the file that WORKERD_CLUSTER_KEY_FILE names,
   overrides the config's cluster key, WORKERD_CLUSTER_BUCKET its bucket.
-  On SIGTERM an instance hands its objects to its peers and exits within
-  stopTimeoutMs (8 s by default). GET /ready on the cluster address
-  answers OK once serving.
+  On SIGTERM, after any shutdown delay, an instance hands its objects to
+  its peers and exits within stopTimeoutMs (8 s by default). GET /ready
+  on the cluster address answers OK once serving.
+"
+    };
+}
+
+macro_rules! stopping {
+    () => {
+        "\
+Stopping:
+  On SIGTERM the server drains: it stops accepting connections, lets
+  the open ones finish, and exits. WORKERD_SHUTDOWN_DELAY_MS, or else
+  shutdownDelayMs in the config, keeps it serving that many
+  milliseconds first, for load balancers that go on sending connections
+  for a while; a second SIGTERM drains at once. The supervisor's grace
+  period must cover the delay and the drain, in a cluster the delay
+  plus stopTimeoutMs.
 "
     };
 }
@@ -214,6 +229,8 @@ Usage:
     python_options!(),
     "\n",
     capnp_options!(),
+    "\n",
+    stopping!(),
     "\n",
     cluster_setup!(),
 );
@@ -378,6 +395,8 @@ Options:
     trace_options!(),
     "\n",
     python_options!(),
+    "\n",
+    stopping!(),
 );
 
 pub const FUZZILLI: &str = concat!(

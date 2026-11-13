@@ -110,7 +110,11 @@ impl InProcessServer {
             ..RunOptions::default()
         };
         let factory = Rc::clone(&self.factory);
-        crate::run::run(factory, options, self.reporter(), self.drain.notified()).await
+        let drain = futures::stream::unfold(&self.drain, |drain| async move {
+            drain.notified().await;
+            Some(((), drain))
+        });
+        crate::run::run(factory, options, self.reporter(), drain).await
     }
 
     /// `workerd test`.
@@ -149,6 +153,9 @@ impl InProcessServer {
         })
     }
 
+    /// The drain signal, SIGTERM in `workerd serve`. Sent before [`Self::run`], or while the
+    /// server starts, it is pending once the server is up, as a SIGTERM that arrives while the
+    /// process starts is.
     pub fn drain(&self) {
         self.drain.notify_one();
     }

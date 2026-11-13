@@ -110,6 +110,24 @@ struct Config {
 
   tracing @8 :TracingOptions;
   # Where the spans of Worker invocations are exported.
+
+  shutdownDelayMs @9 :UInt32 = 0;
+  # How long `workerd serve` keeps serving after SIGTERM (Ctrl-Break on Windows) before it drains.
+  # Load balancers can go on sending new connections for a while after they learn a server is
+  # stopping: a cloud load balancer in front of Kubernetes, for up to about 20 seconds. Until the
+  # delay ends, the listeners accept and serve connections as before; then the server drains as it
+  # does at once with the default of 0. A second SIGTERM starts the drain at once. So does a SIGTERM
+  # that arrives before the server serves: it was never ready, so nothing sends it traffic.
+  #
+  # `serve`, and a binary that `workerd compile` builds, take it from the environment variable
+  # `WORKERD_SHUTDOWN_DELAY_MS` instead when that is set; a blank variable counts as unset. The
+  # variable holds a whole number of milliseconds in digits, and trailing whitespace is ignored;
+  # any other value ends the process at startup. So does a delay above 3600000 (an hour), from the
+  # variable or, when that is unset, from here.
+  #
+  # A cluster instance keeps its lease, its membership and its Durable Objects through the delay.
+  # `ClusterConfig.stopTimeoutMs` runs from the end of the delay, so the supervisor's grace period
+  # (Kubernetes' `terminationGracePeriodSeconds`) must cover the delay plus the stop timeout.
 }
 
 struct ClusterConfig {
@@ -293,20 +311,21 @@ struct ClusterConfig {
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
 
   stopTimeoutMs @6 :UInt32 = 8000;
-  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
-  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
-  # while it keeps serving the rest: each object takes no new requests but those that the work of
-  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
-  # its requests in flight finish, and it is released for the next request anywhere to claim.
-  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
-  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
-  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
-  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
-  # sooner), as load balancers take a while to stop sending them, lets its connections finish, its
-  # peers' last, and then stops its containers' Docker containers. Once its other connections have
-  # finished, it starts none of its peers' requests, and closes each peer's connection once the
-  # requests it started on that connection have ended, so that the peer sends those it did not
-  # start where their Durable Objects run next.
+  # How long an instance takes to stop, from SIGTERM, or from the end of its shutdown delay
+  # (`Config.shutdownDelayMs`), to exit. Rather than leave its Durable Objects to wait for its lease
+  # to expire, a stopping instance hands them to its peers, busiest first, while it keeps serving
+  # the rest: each object takes no new requests but those that the work of an object being handed
+  # off makes, here or on a peer, directly or through other Durable Objects, its requests in flight
+  # finish, and it is released for the next request anywhere to claim. Requests that arrive
+  # meanwhile, other Durable Objects' calls included, wait for the object and then go where it runs
+  # next. While a Durable Object serves a call of a handoff's work, all the calls it makes count as
+  # that work. Then the instance leaves the cluster, keeps accepting requests until at least five
+  # seconds after SIGTERM or the end of the shutdown delay (or until the handoff deadline, if that
+  # comes sooner), as load balancers take a while to stop sending them, lets its connections finish,
+  # its peers' last, and then stops its containers' Docker containers. Once its other connections
+  # have finished, it starts none of its peers' requests, and closes each peer's connection once the
+  # requests it started on that connection have ended, so that the peer sends those it did not start
+  # where their Durable Objects run next.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent

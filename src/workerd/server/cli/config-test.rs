@@ -506,3 +506,146 @@ fn a_compiled_config_without_cluster_cannot_join_one() {
     let before = config.0.clone();
     assert_eq!(config.with_cluster(&flags, None).unwrap().0, before);
 }
+
+/// A config with `shutdownDelayMs` set to `delay`.
+fn shutdown_delay_config(delay: u32) -> Config {
+    let mut message = capnp::message::Builder::new_default();
+    let mut root = message.init_root::<config::Builder>();
+    root.reborrow().init_services(1).get(0).set_name("main");
+    root.set_shutdown_delay_ms(delay);
+    Config(words_from_bytes(&capnp::serialize::write_message_to_words(
+        &message,
+    )))
+}
+
+/// The `shutdownDelayMs` of `config`.
+fn shutdown_delay_of(config: &Config) -> u32 {
+    let message = read(config);
+    let root = message.get_root::<config::Reader>().unwrap();
+    // The rest of the config is kept.
+    assert_eq!(
+        root.get_services().unwrap().get(0).get_name().unwrap(),
+        "main"
+    );
+    root.get_shutdown_delay_ms()
+}
+
+/// An environment where `SHUTDOWN_DELAY_MS` is `value`, if any.
+fn shutdown_delay_env(value: Option<&str>) -> impl Fn(&str) -> Option<OsString> + '_ {
+    move |name| {
+        assert_eq!(name, SHUTDOWN_DELAY_MS);
+        value.map(OsString::from)
+    }
+}
+
+#[test]
+fn shutdown_delay_unset_or_blank_in_environment_keeps_the_config_delay() {
+    for configured in [0, 5000] {
+        for value in [None, Some(""), Some(" \n")] {
+            let config = shutdown_delay_config(configured)
+                .with_shutdown_delay_environment(shutdown_delay_env(value))
+                .unwrap();
+            assert_eq!(shutdown_delay_of(&config), configured, "{value:?}");
+        }
+    }
+}
+
+#[test]
+fn shutdown_delay_comes_from_environment() {
+    for (value, delay) in [
+        ("20000", 20_000),
+        ("0", 0),
+        ("3600000", 3_600_000),
+        // Trailing whitespace, such as a file's final newline, is trimmed.
+        ("20000\n", 20_000),
+        ("20000 \t", 20_000),
+    ] {
+        let config = shutdown_delay_config(0)
+            .with_shutdown_delay_environment(shutdown_delay_env(Some(value)))
+            .unwrap();
+        assert_eq!(shutdown_delay_of(&config), delay, "{value:?}");
+    }
+}
+
+#[test]
+fn shutdown_delay_in_environment_overrides_config() {
+    for (configured, value, delay) in [
+        (5000, "20000", 20_000),
+        (5000, "5000", 5000),
+        (5000, "0", 0),
+        // A delay the config cannot have is no error when the variable overrides it.
+        (20_000_000, "5000", 5000),
+    ] {
+        let config = shutdown_delay_config(configured)
+            .with_shutdown_delay_environment(shutdown_delay_env(Some(value)))
+            .unwrap();
+        assert_eq!(shutdown_delay_of(&config), delay, "{configured} {value:?}");
+    }
+}
+
+#[test]
+fn unusable_shutdown_delay_in_environment_is_an_error() {
+    for value in [
+        "abc",
+        "-1",
+        "+20",
+        "1.5",
+        "20s",
+        " 20",
+        "2 0",
+        "3600001",
+        "99999999999",
+    ] {
+        // Even where the config sets a delay, which the variable would override.
+        for configured in [0, 5000] {
+            let Err(error) = shutdown_delay_config(configured)
+                .with_shutdown_delay_environment(shutdown_delay_env(Some(value)))
+            else {
+                panic!("{value:?} accepted over {configured}");
+            };
+            assert_eq!(
+                error,
+                format!(
+                    "WORKERD_SHUTDOWN_DELAY_MS={value}: not a whole number of milliseconds \
+                     from 0 to 3600000 (an hour)."
+                )
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_delay_in_environment_that_is_not_utf8_is_an_error() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let var = |name: &str| {
+        assert_eq!(name, SHUTDOWN_DELAY_MS);
+        Some(OsString::from_vec(b"20\xff".to_vec()))
+    };
+    let Err(error) = shutdown_delay_config(0).with_shutdown_delay_environment(var) else {
+        panic!("accepted");
+    };
+    assert_eq!(
+        error,
+        "WORKERD_SHUTDOWN_DELAY_MS=20\u{fffd}: not UTF-8 text."
+    );
+}
+
+#[test]
+fn shutdown_delay_above_an_hour_in_config_is_an_error() {
+    let config = shutdown_delay_config(3_600_000)
+        .with_shutdown_delay_environment(shutdown_delay_env(None))
+        .unwrap();
+    assert_eq!(shutdown_delay_of(&config), 3_600_000);
+
+    let Err(error) =
+        shutdown_delay_config(20_000_000).with_shutdown_delay_environment(shutdown_delay_env(None))
+    else {
+        panic!("accepted");
+    };
+    assert_eq!(
+        error,
+        "Config.shutdownDelayMs = 20000000: more than 3600000 (an hour)."
+    );
+}
