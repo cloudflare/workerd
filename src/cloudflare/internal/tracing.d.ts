@@ -2,8 +2,24 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A value acceptable as an attribute on a span.
-type SpanValue = string | number | boolean;
+// A value acceptable as an attribute on a span. Mirrors OpenTelemetry's AttributeValue:
+// a primitive, or a homogeneous array of one primitive type.
+//
+// Array semantics:
+//   - A one-element array stays an array (it is not collapsed to its element).
+//   - An empty array is recorded as an empty array.
+//   - null and undefined elements preserve their position as empty values. Both are represented
+//     as null in downstream tracing output.
+//   - Arrays mixing primitive types, or containing objects or nested arrays, are ignored.
+//
+// Keep in sync with the JSG_TS_OVERRIDE in src/workerd/api/tracing.h.
+type SpanValue =
+  | string
+  | number
+  | boolean
+  | Array<string | null | undefined>
+  | Array<number | null | undefined>
+  | Array<boolean | null | undefined>;
 
 interface SpanAttributes {
   [key: string]: SpanValue | undefined;
