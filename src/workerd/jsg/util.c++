@@ -1290,6 +1290,8 @@ v8::Local<v8::String> copyToExternalString(Lock& js, kj::ArrayPtr<const Data> bu
   auto* chars = static_cast<Data*>(allocator.allocate(buf.size() * sizeof(Data)));
   JSG_REQUIRE(chars != nullptr, RangeError, "String allocation failed");
   memcpy(chars, buf.begin(), buf.size() * sizeof(Data));
+  // We are passing this to V8, which will `delete` it when the external string is garbage
+  // collected, so we use a plain `new` here.
   auto* resource =
       new AllocatedExternString<Type, Data>(allocator, kj::arrayPtr(chars, buf.size()));
 

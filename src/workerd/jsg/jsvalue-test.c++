@@ -173,6 +173,7 @@ class LoggingExternalStringAllocator final: public ExternalStringAllocator {
         freed(freed) {}
 
   void* allocate(size_t size) override {
+    // It's a test so we don't mind using new and delete.
     void* ptr = operator new(size);
     allocated.add(kj::arrayPtr(static_cast<const char*>(ptr), size));
     return ptr;
