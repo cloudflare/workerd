@@ -525,17 +525,34 @@ kj::Promise<void> closeKeepingFailure(
 }
 }  // namespace
 
+kj::Own<void> ReplEnvironment::beginStart() {
+  JSG_REQUIRE(!drainStarted, Error, "The environment is closing.");
+  ++startsUnderWay;
+  return kj::heap(kj::defer([this]() {
+    if (--startsUnderWay == 0 && drainStarted) {
+      startsSettled.signal();
+    }
+  }));
+}
+
 kj::Promise<void> ReplEnvironment::drain() {
+  // A start under way, such as a loadConfig() that wasn't awaited, adds what it started when it
+  // finishes. Canceling one could drop a server that is running but not closed.
+  drainStarted = true;
+  if (startsUnderWay > 0) {
+    co_await startsSettled.whenSignaled();
+  }
+
   // What fails to close does not keep the rest open or the request undrained.
   kj::Maybe<kj::Exception> failure;
-  for (auto& server: servers) {
+  auto closingServers = kj::mv(servers);
+  for (auto& server: closingServers) {
     co_await closeKeepingFailure(server->close(), failure);
   }
-  servers.clear();
-  for (auto& environment: environments) {
+  auto closingEnvironments = kj::mv(environments);
+  for (auto& environment: closingEnvironments) {
     co_await closeKeepingFailure(environment->close(), failure);
   }
-  environments.clear();
 
   KJ_IF_SOME(request, incomingRequest) {
     auto draining = kj::mv(request);
@@ -550,6 +567,7 @@ kj::Promise<void> ReplEnvironment::drain() {
 }
 
 kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSource source) {
+  auto started = beginStart();
   // JavaScript asked for the load under the REPL's isolate lock; the server's workers lock
   // isolates of their own, so the load runs on the event loop.
   co_await kj::yield();
@@ -573,6 +591,7 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
 
 kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
     ReplEnvironmentSettings settings) {
+  auto started = beginStart();
   // JavaScript asked for it under the REPL's isolate lock; starting an isolate locks it.
   co_await kj::yield();
   auto date = kj::mv(settings.compatibilityDate).orDefault([]() { return currentDateStr(); });
