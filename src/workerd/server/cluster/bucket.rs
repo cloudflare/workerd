@@ -37,8 +37,9 @@ pub trait Store {
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>>;
     /// `Ok(None)` when the guard failed and nothing was written;
     /// `Error::OutcomeUnknown` when the guard failed but an earlier attempt
-    /// of the call may have written. A write without a guard answers
-    /// neither: the store refusing it is another error.
+    /// of the call, or a copy sent beside it, may have written. A write
+    /// without a guard answers neither: the store refusing it is another
+    /// error.
     async fn put(
         &self,
         key: &str,
@@ -119,7 +120,7 @@ impl Bucket {
     /// Write `body` if the guard holds. `Ok(None)` means the guard failed and
     /// nothing was written; an error means the write may have landed.
     /// `Error::OutcomeUnknown` is the store refusing the guard where the
-    /// refusal may be of this write's own earlier attempt.
+    /// refusal may be of this write's own earlier attempt or other copy.
     pub async fn put_if(&self, key: &str, body: Vec<u8>, guard: Guard) -> Result<Option<Version>> {
         let body = Payload::Bytes(body.into());
         self.store.put(&self.key(key), body, Some(guard), &[]).await
@@ -131,7 +132,9 @@ impl Bucket {
     /// writes whose bytes no other writer puts at `key`, or where it means
     /// the same if one does, and whose body differs from what the guarded
     /// version holds: on a store whose versions do not follow content, a
-    /// refused write of those same bytes would read back as landed.
+    /// refused write of those same bytes would read back as landed. Not for
+    /// a write `http::prompt` may send twice (`http::Repeat::GuardedWrite`):
+    /// the other copy can land after the read.
     pub async fn put_if_settled(
         &self,
         key: &str,

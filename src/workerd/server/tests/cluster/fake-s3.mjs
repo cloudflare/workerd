@@ -8,7 +8,8 @@
 // own process, so that it answers at once however slow the instances under
 // test are: their leases are short in tests, and a bucket that lags their
 // renewals fences them. A conditional write checks and writes with nothing in
-// between, so it is atomic. Requests are not authenticated.
+// between, so it is atomic. An object's ETag is the MD5 of its body, as S3's
+// is for an object written in one piece. Requests are not authenticated.
 //
 // A test arms faults with `POST /_faults` and a JSON array: each delays the
 // requests whose key starts with `prefix` (and does not end with `except`)
@@ -19,11 +20,12 @@
 // `GET /_rejected?key=` counts the writes to a key whose precondition failed.
 //
 // With the dialect "gcs", it speaks Cloud Storage's XML API instead: an
-// object's version is its generation, answered in `x-goog-generation`, and a
-// PUT is conditional on `x-goog-if-generation-match` (0: the object must not
-// exist), not on If-Match or If-None-Match, which Cloud Storage ignores on a
-// PUT. Every request needs a bearer token that has not expired, unless it
-// carries `x-fake-admin`. Tokens come from:
+// object's version is its generation, unique to each write and answered in
+// `x-goog-generation`, and a PUT is conditional on
+// `x-goog-if-generation-match` (0: the object must not exist), not on If-Match
+// or If-None-Match, which Cloud Storage ignores on a PUT. Every request needs
+// a bearer token that has not expired, unless it carries `x-fake-admin`.
+// Tokens come from:
 //   - GET /computeMetadata/v1/instance/service-accounts/default/token, the
 //     metadata server's endpoint, with `Metadata-Flavor: Google`, a header
 //     its answers carry too;
@@ -34,7 +36,7 @@
 // seconds and the service account; `GET /_gcs` counts the tokens issued
 // (`metadata`, `jwt`) and the requests refused for a token (`refused`).
 
-import { createPublicKey, randomUUID, verify } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -178,7 +180,7 @@ export class FakeS3Server {
           this.#rejected.set(key, (this.#rejected.get(key) ?? 0) + 1);
           return reply(412);
         }
-        const etag = `"${Date.now()}-${this.#next}"`;
+        const etag = `"${createHash('md5').update(body).digest('hex')}"`;
         // Decimal, unique, and never 0.
         const generation = `${Date.now()}${String(this.#next++).padStart(6, '0')}`;
         const stored = { etag, generation, body };
