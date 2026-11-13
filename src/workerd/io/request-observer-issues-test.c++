@@ -178,9 +178,9 @@ KJ_TEST("console.log only leaves a breadcrumb and console.error reports an error
   KJ_EXPECT(fetchThroughEntrypoint(fixture) == 200);
   KJ_EXPECT(events.joined() ==
           "breadcrumb log log pricing sku-991\n"
-          "breadcrumb log error \n"
-          "issue error_log message= | level=error | error TypeError: boom (stack) | "
+          "issue error_log message=boom | level=error | error TypeError: boom (stack) | "
           "args=[\"TypeError: boom\", \"while pricing\"]\n"
+          "breadcrumb log error \n"
           "status 200",
       events.joined());
 }
@@ -202,8 +202,8 @@ KJ_TEST("error_log carries the first string argument as its message and drops ex
   KJ_EXPECT(fetchThroughEntrypoint(fixture) == 200);
   auto text = events.joined();
   KJ_EXPECT(
-      text.startsWith("breadcrumb log error failed\n"
-                      "issue error_log message=failed | level=error | args=[\"failed\", 1, 2]\n"
+      text.startsWith("issue error_log message=failed | level=error | args=[\"failed\", 1, 2]\n"
+                      "breadcrumb log error failed\n"
                       "breadcrumb log warn xxxxxxxx"),
       text);
   KJ_EXPECT(text.contains("issue error_log message=many | level=info | "

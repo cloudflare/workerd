@@ -2174,8 +2174,6 @@ void handleLog(jsg::Lock& js,
           label = kj::str(kj::ArrayPtr<const char>(buf, written));
         }
       }
-      observer.issueBreadcrumb(issues::BreadcrumbKind::LOG, logLevelToString(level), label);
-
       auto errors = captureErrors(ioContext);
       if (level == LogLevel::ERROR || errors != kj::none) {
         constexpr size_t MAX_ISSUE_ERRORS = 4;
@@ -2196,6 +2194,9 @@ void handleLog(jsg::Lock& js,
         issues::Attachment attachments[] = {{"args"_kj, [&]() { return message(); }}};
         observer.reportIssue(issues::ERROR_LOG, text, fields, issueErrors.asPtr(), attachments);
       }
+      // After the report, so an embedder that snapshots breadcrumbs into the issue does not repeat
+      // the log that caused it.
+      observer.issueBreadcrumb(issues::BreadcrumbKind::LOG, logLevelToString(level), label);
     }
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
