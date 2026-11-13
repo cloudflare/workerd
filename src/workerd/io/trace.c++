@@ -2,9 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/io/trace-state/lib.rs.h>
 #include <workerd/io/trace.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
+
+#include <kj-rs/convert.h>
 
 #include <capnp/message.h>
 #include <capnp/schema.h>
@@ -1494,11 +1497,6 @@ SpanLink::SpanLink(rpc::Trace::SpanLink::Reader reader)
 kj::Maybe<SpanContext> SpanLink::parseContext(
     kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags) {
   if (traceId.size() != 32 || spanId.size() != 16) return kj::none;
-  for (const auto& value: {traceId, spanId}) {
-    for (auto c: value) {
-      if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return kj::none;
-    }
-  }
   auto high = KJ_UNWRAP_OR_RETURN(hexToUint64(traceId.slice(0, 16)), kj::none);
   auto low = KJ_UNWRAP_OR_RETURN(hexToUint64(traceId.slice(16)), kj::none);
   auto id = KJ_UNWRAP_OR_RETURN(hexToUint64(spanId), kj::none);
@@ -1506,58 +1504,9 @@ kj::Maybe<SpanContext> SpanLink::parseContext(
 }
 
 kj::Maybe<kj::String> SpanLink::parseTracestate(kj::StringPtr value) {
-  if (value.size() == 0 || value.size() > 512) return kj::none;
-  kj::Vector<kj::ArrayPtr<const char>> keys;
-  kj::Vector<kj::ArrayPtr<const char>> entries;
-  auto lower = [](char c) { return c >= 'a' && c <= 'z'; };
-  auto digit = [](char c) { return c >= '0' && c <= '9'; };
-  size_t start = 0;
-  while (start < value.size()) {
-    size_t end = start;
-    while (end < value.size() && value[end] != ',') ++end;
-    auto entry = value.slice(start, end);
-    while (entry.size() && (entry[0] == ' ' || entry[0] == '\t')) entry = entry.slice(1);
-    while (entry.size() && (entry.back() == ' ' || entry.back() == '\t')) {
-      entry = entry.first(entry.size() - 1);
-    }
-    // Empty list members are permitted by W3C Trace Context.
-    if (entry.size() == 0) {
-      start = end + 1;
-      continue;
-    }
-    auto equals = KJ_UNWRAP_OR_RETURN(entry.findFirst('='), kj::none);
-    auto key = entry.first(equals);
-    auto data = entry.slice(equals + 1);
-    if (key.size() == 0 || key.size() > 256 || data.size() == 0 || data.size() > 256 ||
-        keys.size() == 32)
-      return kj::none;
-    for (const auto& previous: keys) {
-      if (previous == key) return kj::none;
-    }
-    auto at = key.findFirst('@');
-    if (at == kj::none) {
-      if (!lower(key[0])) return kj::none;
-    } else {
-      auto pos = KJ_ASSERT_NONNULL(at);
-      if (pos == 0 || pos > 241 || pos + 1 == key.size() || key.size() - pos - 1 > 14 ||
-          (!lower(key[0]) && !digit(key[0])) || !lower(key[pos + 1]))
-        return kj::none;
-    }
-    for (size_t i = 0; i < key.size(); ++i) {
-      auto c = key[i];
-      if (lower(c) || digit(c) || c == '_' || c == '-' || c == '*' || c == '/') continue;
-      if (c == '@' && at == i) continue;
-      return kj::none;
-    }
-    for (auto c: data) {
-      if (c < 0x20 || c > 0x7e || c == '=') return kj::none;
-    }
-    keys.add(key);
-    entries.add(entry);
-    start = end + 1;
-  }
-  if (entries.empty()) return kj::none;
-  return kj::strArray(entries.asPtr(), ",");
+  auto parsed = trace_state::parse_tracestate(value.asBytes().as<kj_rs::Rust>());
+  if (parsed.empty()) return kj::none;
+  return kj::str(parsed);
 }
 
 void SpanLink::copyTo(rpc::Trace::SpanLink::Builder builder) const {

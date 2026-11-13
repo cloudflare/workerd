@@ -95,14 +95,20 @@ export const validate = {
     assert.equal(attrs(counts[129]).key128, 128);
 
     const validated = named('validation').links;
-    assert.equal(validated.length, 4);
-    assert.equal(validated[0].context.traceId, '0'.repeat(32));
-    assert.equal(validated[0].context.spanId, '0'.repeat(16));
-    assert.equal(attrs(validated[0]).meaningful, true);
-    assert.equal(validated[1].context.traceState, 'a=state');
-    assert.equal(validated[2].context.isRemote, false);
-    assert.equal('traceState' in validated[2].context, false);
-    assert.equal(validated[3].droppedAttributesCount, 0);
+    assert.equal(validated.length, 6);
+    assert.equal(validated[0].context.traceId, first.context.traceId);
+    assert.equal(validated[0].context.spanId, first.context.spanId);
+    assert.equal(validated[1].context.traceId, '0'.repeat(32));
+    assert.equal(validated[1].context.spanId, '0'.repeat(16));
+    assert.equal(attrs(validated[1]).meaningful, true);
+    assert.equal(validated[2].context.traceState, 'a=state');
+    assert.deepEqual(
+      validated[3].context.traceState.split(','),
+      Array.from({ length: 32 }, (_, i) => `k${i}=${'v'.repeat(20)}`)
+    );
+    assert.equal(validated[4].context.isRemote, false);
+    assert.equal('traceState' in validated[4].context, false);
+    assert.equal(validated[5].droppedAttributesCount, 0);
 
     assert.equal(named('batch-limit').links.length, 513);
 

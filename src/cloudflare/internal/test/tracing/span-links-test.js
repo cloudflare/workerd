@@ -11,6 +11,11 @@ const remote = {
   isRemote: true,
   traceState: 'vendor=state',
 };
+// 33 list members, over 512 characters.
+const longTraceState = Array.from(
+  { length: 33 },
+  (_, i) => `k${i}=${'v'.repeat(20)}`
+).join(',');
 const zero = {
   traceId: '00000000000000000000000000000000',
   spanId: '0000000000000000',
@@ -100,7 +105,13 @@ export const links = {
         null,
         {},
         { context: 7 },
-        { context: { ...remote, traceId: remote.traceId.toUpperCase() } },
+        {
+          context: {
+            ...remote,
+            traceId: remote.traceId.toUpperCase(),
+            spanId: 'F123456789ABCdef',
+          },
+        },
         { context: { ...remote, spanId: '123' } },
         { context: { ...remote, traceFlags: '1' } },
         {
@@ -120,7 +131,8 @@ export const links = {
         { context: { ...zero, traceState: 'invalid' } },
         { context: zero, attributes: { meaningful: true } },
         { context: { ...zero, traceState: 'a=state' } },
-        { context: { ...remote, traceState: 'a=one,a=two', isRemote: false } },
+        { context: { ...zero, traceState: longTraceState } },
+        { context: { ...remote, traceState: 'A=1', isRemote: false } },
         { context: remote, droppedAttributesCount: 2 ** 40 },
       ]);
     });

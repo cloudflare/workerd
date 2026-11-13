@@ -1,0 +1,9 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# W3C tracestate parsing for SpanLink::parseTracestate() in //src/workerd/io:trace.
+wd_rust_crate(
+    name = "trace-state",
+    cxx_bridge_src = "lib.rs",
+    visibility = ["//src/workerd/io:__pkg__"],
+    deps = ["@crates_vendor//:opentelemetry"],
+)

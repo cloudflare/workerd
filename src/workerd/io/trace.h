@@ -834,8 +834,11 @@ struct SpanLink final {
   KJ_DISALLOW_COPY(SpanLink);
 
   // Link identities may have zero IDs when attributes or tracestate carry the relationship.
+  // Hexadecimal IDs are accepted in either case.
   static kj::Maybe<SpanContext> parseContext(
       kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags);
+  // The normalized header form of a W3C tracestate value, as parsed by the opentelemetry crate's
+  // TraceState (src/workerd/io/trace-state), or kj::none if it is invalid or has no list members.
   static kj::Maybe<kj::String> parseTracestate(kj::StringPtr value);
   void copyTo(rpc::Trace::SpanLink::Builder builder) const;
   SpanLink clone() const;

@@ -143,7 +143,7 @@ kj::Maybe<tracing::SpanLink> toSpanLink(jsg::Lock& js,
   kj::Maybe<kj::ConstString> traceState;
   KJ_IF_SOME(value, inputContext.traceState) {
     auto handle = value.getHandle(js);
-    if (handle->IsString() && handle.As<v8::String>()->Length() <= 512) {
+    if (handle->IsString()) {
       KJ_IF_SOME(parsed, tracing::SpanLink::parseTracestate(jsg::JsValue(handle).toString(js))) {
         traceState = kj::ConstString(kj::mv(parsed));
       }
