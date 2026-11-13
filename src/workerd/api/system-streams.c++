@@ -709,7 +709,8 @@ SystemMultiStream newSystemMultiStream(kj::Rc<kj::AsyncIoStream> stream, IoConte
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
-    : brotliEnabled(flags.getBrotliContentEncoding()) {}
+    : brotliEnabled(flags.getBrotliContentEncoding()),
+      chainEnabled(flags.getContentEncodingChain()) {}
 
 namespace {
 
@@ -765,9 +766,16 @@ kj::Array<StreamEncoding> getContentEncoding(IoContext& context,
     return nullptr;
   }
   KJ_IF_SOME(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
-    // Note: if chain handling ever needs to sit behind a compatibility flag, this is the seam;
-    // the fallback is matching encodingStr against "gzip"/"br" as a whole.
-    return parseContentEncodings(encodingStr, options);
+    if (options.chainEnabled) {
+      return parseContentEncodings(encodingStr, options);
+    }
+    // Without content_encoding_chain, only a header that is exactly "gzip" or "br" names a
+    // coding; anything else, including a list, means the body passes through unchanged.
+    if (encodingStr == "gzip") {
+      return kj::arr(StreamEncoding::GZIP);
+    } else if (options.brotliEnabled && encodingStr == "br") {
+      return kj::arr(StreamEncoding::BROTLI);
+    }
   }
   return nullptr;
 }

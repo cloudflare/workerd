@@ -7,10 +7,13 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "content-encoding-chain-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_zlib", "brotli_content_encoding"],
+        compatibilityFlags = [
+          "nodejs_compat", "nodejs_zlib", "brotli_content_encoding", "content_encoding_chain"
+        ],
         bindings = [
           ( name = "HELPER", service = "ce-chain-helper" ),
           ( name = "NOBR", service = "ce-chain-nobr" ),
+          ( name = "LEGACY", service = "ce-chain-legacy" ),
           # Reaches the helper over a real (loopback) HTTP socket rather than an in-process
           # service binding, so tests can observe genuine wire framing (Content-Length vs.
           # chunked).
@@ -23,7 +26,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "content-encoding-chain-helper.js")
         ],
-        compatibilityFlags = ["brotli_content_encoding"],
+        compatibilityFlags = ["brotli_content_encoding", "content_encoding_chain"],
         bindings = [
           ( name = "SELF", service = "ce-chain-helper" ),
         ],
@@ -34,9 +37,23 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "content-encoding-chain-helper.js")
         ],
-        compatibilityFlags = ["no_brotli_content_encoding"],
+        compatibilityFlags = ["no_brotli_content_encoding", "content_encoding_chain"],
         bindings = [
           ( name = "PEER", service = "ce-chain-helper" ),
+        ],
+      )
+    ),
+    # Same module with chain handling off: Content-Encoding lists must behave exactly as they
+    # did before content_encoding_chain existed.
+    ( name = "ce-chain-legacy",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "content-encoding-chain-helper.js")
+        ],
+        compatibilityFlags = ["brotli_content_encoding", "no_content_encoding_chain"],
+        bindings = [
+          ( name = "PEER", service = "ce-chain-helper" ),
+          ( name = "SELF", service = "ce-chain-legacy" ),
         ],
       )
     ),

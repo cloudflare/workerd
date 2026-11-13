@@ -192,3 +192,44 @@ export const brotliDisabledMakesChainUnknown = {
     await expectSameBytes(env.NOBR, '/nobr/single-br', '/nobr-raw/single-br');
   },
 };
+
+export const flagOffChainPassesThrough = {
+  async test(ctrl, env) {
+    // Without content_encoding_chain, a Content-Encoding list reaches JavaScript as the raw
+    // bytes, as it did before chain support existed.
+    await expectSameBytes(env.LEGACY, '/nobr/gzip-br', '/nobr-raw/gzip-br');
+    await expectSameBytes(env.LEGACY, '/nobr/double-gzip', '/nobr-raw/double-gzip');
+    await expectSameBytes(
+      env.LEGACY,
+      '/nobr/identity-chain',
+      '/nobr-raw/identity-chain'
+    );
+    // Single values decode exactly as before.
+    strictEqual(
+      new TextDecoder().decode(await bytes(env.LEGACY, '/nobr/single-gzip')),
+      DATA
+    );
+    strictEqual(
+      new TextDecoder().decode(await bytes(env.LEGACY, '/nobr/single-br')),
+      DATA
+    );
+  },
+};
+
+export const flagOffConstructedChainNotEncoded = {
+  async test(ctrl, env) {
+    // Without content_encoding_chain, a constructed Response with a Content-Encoding list is
+    // sent unencoded, and fetching it back does not decode it either, so the plain text
+    // arrives. Had either side applied the chain, these would be gzip bytes.
+    strictEqual(
+      new TextDecoder().decode(await bytes(env.LEGACY, '/self-out/auto-chain')),
+      DATA
+    );
+    strictEqual(
+      new TextDecoder().decode(
+        await bytes(env.LEGACY, '/self-out/auto-br-chain')
+      ),
+      DATA
+    );
+  },
+};

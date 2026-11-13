@@ -1841,4 +1841,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  contentEncodingChain @207 :Bool
+      $compatEnableFlag("content_encoding_chain")
+      $compatDisableFlag("no_content_encoding_chain");
+  # Treats a Content-Encoding header as the comma-separated list of codings RFC 9110 defines, so
+  # a value such as "gzip, br" is decoded (or, on a Response the Worker constructs, encoded) one
+  # coding at a time, in list order. "identity" tokens and empty list elements are skipped. If any
+  # coding is unsupported, or more than five remain, the body passes through unchanged. Without the
+  # flag, only a header that is exactly "gzip" (or "br", with `brotli_content_encoding`) is decoded
+  # or encoded, and any other value, including a list, leaves the body as is.
 }
