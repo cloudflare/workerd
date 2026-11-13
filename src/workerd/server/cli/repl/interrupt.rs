@@ -6,33 +6,32 @@
 //! raises SIGINT. While an [`AbandonOnInterrupt`] is held, the first SIGINT abandons the input
 //! rather than ending the process: the session stops awaiting it. A second comes only if the
 //! session could not abandon the input, because its JavaScript runs without yielding, and ends the
-//! process as SIGINT would have.
+//! process as SIGINT does by default, as does a SIGINT while no input runs. A process that ignores
+//! SIGINT when the REPL starts goes on ignoring it.
 //!
-//! The handler only writes a byte to a socket; a thread of its own reads the socket and does what
-//! a handler may not.
+//! [`take_interrupts`] blocks SIGINT before the REPL starts any other thread, so that every thread
+//! blocks it, and starts a thread that takes each one with `sigwait()`. A SIGINT is taken at once
+//! whatever the other threads are doing. A handler would instead run on a thread the kernel picks,
+//! often the one running JavaScript, and `ThreadSanitizer` defers a handler until the thread it
+//! interrupted calls into the C library, which JavaScript running without yielding never does.
 
 #![allow(
     unsafe_code,
-    reason = "sigaction, and write() and errno in the signal handler, which std does not expose"
+    reason = "sigaction(), pthread_sigmask(), sigwait() and raise(), which std does not expose"
 )]
 
-use std::io;
-use std::io::Read;
 use std::mem::MaybeUninit;
-use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
-use std::sync::OnceLock;
 use std::sync::PoisonError;
-use std::sync::atomic::AtomicI32;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use tokio::sync::oneshot;
 
 /// What a SIGINT does.
 enum State {
-    /// Nothing: no input runs. A SIGINT read now arrived while the last one ran.
+    /// Ends the process: no input runs.
     Idle,
     /// Abandons the input that runs.
     Running(oneshot::Sender<()>),
@@ -42,40 +41,47 @@ enum State {
 
 static STATE: Mutex<State> = Mutex::new(State::Idle);
 
-/// The socket the handler writes to, once the relay has started; an error if it could not.
-static RELAY: OnceLock<io::Result<UnixStream>> = OnceLock::new();
+/// Whether a thread of [`take_interrupts`] takes SIGINT. Set before the console's thread starts.
+static TAKEN: AtomicBool = AtomicBool::new(false);
 
-/// The descriptor of [`RELAY`]'s socket, for the handler.
-static RELAY_FD: AtomicI32 = AtomicI32::new(-1);
-
-/// SIGINT abandons an input while this is held.
-pub struct AbandonOnInterrupt {
-    /// The SIGINT disposition to restore; none if the handler is not installed.
-    previous: Option<libc::sigaction>,
+/// Blocks SIGINT and starts the thread that takes it, unless SIGINT is ignored. Must be called
+/// before the process starts any other thread, which would not block SIGINT, and could be the one
+/// it is delivered to. If SIGINT is ignored or the thread cannot start, SIGINT does what it would
+/// otherwise, and no input is abandoned.
+pub fn take_interrupts() {
+    if ignored() {
+        return;
+    }
+    let signals = sigint();
+    if !set_blocked(&signals, true) {
+        return;
+    }
+    let started = std::thread::Builder::new()
+        .name("repl-interrupts".to_owned())
+        .spawn(move || take(&signals));
+    if started.is_err() {
+        set_blocked(&signals, false);
+        return;
+    }
+    TAKEN.store(true, Ordering::Relaxed);
 }
 
+/// SIGINT abandons an input while this is held.
+pub struct AbandonOnInterrupt(());
+
 impl AbandonOnInterrupt {
-    /// Until dropped, the first SIGINT sends on `abandon`. If the relay cannot start, SIGINT ends
-    /// the process as it would otherwise.
+    /// Until dropped, the first SIGINT sends on `abandon`, if a thread takes SIGINT. Otherwise
+    /// `abandon` is dropped unsent.
     pub fn new(abandon: oneshot::Sender<()>) -> Self {
-        if RELAY.get_or_init(start_relay).is_err() {
-            return Self { previous: None };
+        if TAKEN.load(Ordering::Relaxed) {
+            *state() = State::Running(abandon);
         }
-        *state() = State::Running(abandon);
-        Self {
-            previous: set_handler(on_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t),
-        }
+        Self(())
     }
 }
 
 impl Drop for AbandonOnInterrupt {
     fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            // SAFETY: `previous` is the disposition sigaction() reported.
-            unsafe {
-                libc::sigaction(libc::SIGINT, &raw const previous, std::ptr::null_mut());
-            }
-        }
         *state() = State::Idle;
     }
 }
@@ -84,85 +90,74 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Installs `handler` for SIGINT; the disposition it replaced, unless that fails.
-fn set_handler(handler: libc::sighandler_t) -> Option<libc::sigaction> {
-    // SAFETY: an all-zero sigaction is valid (no flags, an empty mask) before its fields are set;
-    // sigaction() fills in `previous` when it succeeds, the only case in which it is read.
+/// Whether SIGINT is ignored, as it is in a background job of a shell without job control.
+fn ignored() -> bool {
+    let mut current = MaybeUninit::<libc::sigaction>::uninit();
+    // SAFETY: with no new action, sigaction() only reports the current one, filling in `current`
+    // when it succeeds, the only case in which it is read.
     unsafe {
-        let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = handler;
-        // The blocking calls of the threads it lands on go on rather than failing with EINTR.
-        action.sa_flags = libc::SA_RESTART;
-        libc::sigemptyset(&raw mut action.sa_mask);
-        let mut previous = MaybeUninit::<libc::sigaction>::uninit();
-        if libc::sigaction(libc::SIGINT, &raw const action, previous.as_mut_ptr()) != 0 {
-            return None;
+        libc::sigaction(libc::SIGINT, std::ptr::null(), current.as_mut_ptr()) == 0
+            && current.assume_init().sa_sigaction == libc::SIG_IGN
+    }
+}
+
+/// The set of SIGINT alone.
+fn sigint() -> libc::sigset_t {
+    let mut signals = MaybeUninit::<libc::sigset_t>::uninit();
+    // SAFETY: sigemptyset() initializes the set, which sigaddset() then adds a valid signal to.
+    unsafe {
+        libc::sigemptyset(signals.as_mut_ptr());
+        libc::sigaddset(signals.as_mut_ptr(), libc::SIGINT);
+        signals.assume_init()
+    }
+}
+
+/// Blocks or unblocks `signals` on the calling thread; whether that succeeded.
+fn set_blocked(signals: &libc::sigset_t, blocked: bool) -> bool {
+    let how = if blocked {
+        libc::SIG_BLOCK
+    } else {
+        libc::SIG_UNBLOCK
+    };
+    // SAFETY: `signals` is an initialized set, and the old mask is not asked for.
+    unsafe { libc::pthread_sigmask(how, signals, std::ptr::null_mut()) == 0 }
+}
+
+/// Takes each SIGINT, which every thread blocks.
+fn take(signals: &libc::sigset_t) {
+    loop {
+        let mut signal = 0;
+        // SAFETY: `signals` is an initialized set, and `signal` is where sigwait() stores the one
+        // it took.
+        match unsafe { libc::sigwait(signals, &raw mut signal) } {
+            0 => interrupted(signals),
+            libc::EINTR => {}
+            // Only a set that is not valid fails.
+            _ => return,
         }
-        Some(previous.assume_init())
     }
 }
 
-fn start_relay() -> io::Result<UnixStream> {
-    let (mut reader, writer) = UnixStream::pair()?;
-    // A handler must not block. A full socket holds unread bytes, which already stand for the
-    // signal whose byte is dropped.
-    writer.set_nonblocking(true)?;
-    std::thread::Builder::new()
-        .name("repl-interrupts".to_owned())
-        .spawn(move || {
-            let mut byte = [0_u8; 1];
-            // The writer is never closed, so reading fails only if the socket does.
-            loop {
-                match reader.read(&mut byte) {
-                    Ok(0) => return,
-                    Ok(_) => interrupted(),
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                    Err(_) => return,
-                }
-            }
-        })?;
-    RELAY_FD.store(writer.as_raw_fd(), Ordering::Relaxed);
-    Ok(writer)
-}
-
-extern "C" fn on_sigint(_signal: libc::c_int) {
-    // SAFETY: write() is async-signal-safe, and the descriptor is the relay's socket, which is
-    // never closed. errno is the interrupted code's, so it is restored.
-    unsafe {
-        let errno = *errno_location();
-        libc::write(RELAY_FD.load(Ordering::Relaxed), [0_u8].as_ptr().cast(), 1);
-        *errno_location() = errno;
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-unsafe fn errno_location() -> *mut libc::c_int {
-    // SAFETY: the caller's thread's errno.
-    unsafe { libc::__errno_location() }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-unsafe fn errno_location() -> *mut libc::c_int {
-    // SAFETY: the caller's thread's errno.
-    unsafe { libc::__error() }
-}
-
-/// What a SIGINT does, on the relay's thread.
-fn interrupted() {
+/// What a SIGINT does, on the thread that takes it.
+fn interrupted(signals: &libc::sigset_t) {
     let mut state = state();
     match std::mem::replace(&mut *state, State::Abandoning) {
         State::Running(abandon) => {
             // A session that has replied meanwhile has nothing to abandon.
             let _ = abandon.send(());
         }
-        State::Abandoning => {
-            // SAFETY: with the default disposition, raising SIGINT ends the process, as the
-            // signal would have ended it without the handler.
-            unsafe {
-                libc::signal(libc::SIGINT, libc::SIG_DFL);
-                libc::raise(libc::SIGINT);
-            }
-        }
-        State::Idle => *state = State::Idle,
+        State::Idle | State::Abandoning => end_process(signals),
+    }
+}
+
+/// Ends the process as SIGINT does by default. A handler installed for SIGINT, as KJ installs one
+/// in debug builds, would run on this thread instead.
+fn end_process(signals: &libc::sigset_t) {
+    // SAFETY: with the default disposition, SIGINT ends the process once this thread, which raises
+    // it, unblocks it.
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_DFL);
+        set_blocked(signals, false);
+        libc::raise(libc::SIGINT);
     }
 }
