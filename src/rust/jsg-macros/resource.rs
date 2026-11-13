@@ -778,6 +778,8 @@ struct ImplArgs {
     nested_types: Vec<NestedTypeArg>,
     /// The `jsg::Intrinsic` variant of `inherit_intrinsic = ...`.
     inherit_intrinsic: Option<syn::Ident>,
+    /// The parent resource type of `inherit = ...`.
+    inherit: Option<syn::Type>,
 }
 
 /// Parses the arguments of `#[jsg_resource]` on an impl block: `custom_members` and any
@@ -789,11 +791,10 @@ struct ImplArgs {
 /// type or member. `nested_types(...)` cannot be combined with `custom_members`, which
 /// leaves `Resource::members` to the author.
 fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
-    use syn::ext::IdentExt;
     use syn::parse::Parser as _;
     use syn::punctuated::Punctuated;
 
-    const EXPECTED: &str = "expected `custom_members`, `nested_types(...)` or \
+    const EXPECTED: &str = "expected `custom_members`, `nested_types(...)`, `inherit = ...` or \
                             `inherit_intrinsic = ...` on a #[jsg_resource] impl block (`name`, \
                             `custom_trace`, `memory_info`, `custom_memory_info`, `ts_root`, \
                             `ts_override` and `ts_define` belong on the struct)";
@@ -803,8 +804,18 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     let mut nested_types = Vec::<NestedTypeArg>::new();
     let mut first_nested_types = None;
     let mut inherit_intrinsic = None;
+    let mut inherit = None;
     for arg in args {
         match &arg {
+            syn::Meta::NameValue(name_value) if name_value.path.is_ident("inherit") => {
+                if inherit.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &name_value.path,
+                        "duplicate `inherit`; a resource type inherits from at most one type",
+                    ));
+                }
+                inherit = Some((name_value.path.clone(), parent_type(&name_value.value)?));
+            }
             syn::Meta::NameValue(name_value) if name_value.path.is_ident("inherit_intrinsic") => {
                 if inherit_intrinsic.is_some() {
                     return Err(syn::Error::new_spanned(
@@ -826,31 +837,7 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
             }
             syn::Meta::List(list) if list.path.is_ident("nested_types") => {
                 first_nested_types.get_or_insert_with(|| list.path.clone());
-                let list_args = list.parse_args_with(
-                    Punctuated::<NestedTypeArg, syn::Token![,]>::parse_terminated,
-                )?;
-                for nested in list_args {
-                    let duplicate =
-                        nested_types
-                            .iter()
-                            .any(|other| match (&nested.name, &other.name) {
-                                (Some(name), Some(other)) => name.unraw() == other.unraw(),
-                                (None, None) => {
-                                    let (ty, other) = (&nested.ty, &other.ty);
-                                    quote! { #ty }.to_string() == quote! { #other }.to_string()
-                                }
-                                _ => false,
-                            });
-                    if duplicate {
-                        return Err(match &nested.name {
-                            Some(name) => {
-                                syn::Error::new_spanned(name, "duplicate nested type name")
-                            }
-                            None => syn::Error::new_spanned(&nested.ty, "duplicate nested type"),
-                        });
-                    }
-                    nested_types.push(nested);
-                }
+                add_nested_types(list, &mut nested_types)?;
             }
             _ => return Err(syn::Error::new_spanned(arg, EXPECTED)),
         }
@@ -884,11 +871,100 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
         ));
         return Err(error);
     }
+    if let Some((inherit, _)) = &inherit {
+        check_inherit_alone(
+            inherit,
+            inherit_intrinsic.as_ref().map(|(path, _)| path),
+            custom_members.as_ref(),
+        )?;
+    }
     Ok(ImplArgs {
         mode,
         nested_types,
         inherit_intrinsic: inherit_intrinsic.map(|(_, variant)| variant),
+        inherit: inherit.map(|(_, ty)| ty),
     })
+}
+
+/// Adds the entries of one `nested_types(...)` list to `nested_types`, rejecting a nested type
+/// listed twice without a name, or a name given twice.
+fn add_nested_types(
+    list: &syn::MetaList,
+    nested_types: &mut Vec<NestedTypeArg>,
+) -> syn::Result<()> {
+    use syn::ext::IdentExt;
+    use syn::punctuated::Punctuated;
+
+    let list_args =
+        list.parse_args_with(Punctuated::<NestedTypeArg, syn::Token![,]>::parse_terminated)?;
+    for nested in list_args {
+        let duplicate = nested_types
+            .iter()
+            .any(|other| match (&nested.name, &other.name) {
+                (Some(name), Some(other)) => name.unraw() == other.unraw(),
+                (None, None) => {
+                    let (ty, other) = (&nested.ty, &other.ty);
+                    quote! { #ty }.to_string() == quote! { #other }.to_string()
+                }
+                _ => false,
+            });
+        if duplicate {
+            return Err(match &nested.name {
+                Some(name) => syn::Error::new_spanned(name, "duplicate nested type name"),
+                None => syn::Error::new_spanned(&nested.ty, "duplicate nested type"),
+            });
+        }
+        nested_types.push(nested);
+    }
+    Ok(())
+}
+
+/// The parent resource type that `inherit = <value>` names.
+fn parent_type(value: &syn::Expr) -> syn::Result<syn::Type> {
+    let syn::Expr::Path(path) = value else {
+        return Err(syn::Error::new_spanned(
+            value,
+            "expected the parent resource type, such as `inherit = Base`",
+        ));
+    };
+    Ok(syn::Type::Path(syn::TypePath {
+        qself: path.qself.clone(),
+        path: path.path.clone(),
+    }))
+}
+
+/// Rejects `inherit` given with `inherit_intrinsic`, since a type inherits from at most one
+/// type or intrinsic, or with `custom_members`, which leaves `Resource::members` to the author.
+fn check_inherit_alone(
+    inherit: &syn::Path,
+    inherit_intrinsic: Option<&syn::Path>,
+    custom_members: Option<&syn::Path>,
+) -> syn::Result<()> {
+    let conflict = |message: &str, other: &syn::Path, flag: &str| {
+        let mut error = syn::Error::new_spanned(inherit, message);
+        error.combine(syn::Error::new_spanned(
+            other,
+            format!("`{flag}` given here"),
+        ));
+        error
+    };
+    if let Some(intrinsic) = inherit_intrinsic {
+        return Err(conflict(
+            "`inherit` cannot be combined with `inherit_intrinsic`; a resource type inherits \
+             from at most one type or intrinsic",
+            intrinsic,
+            "inherit_intrinsic",
+        ));
+    }
+    if let Some(custom_members) = custom_members {
+        return Err(conflict(
+            "`inherit` cannot be combined with `custom_members`; call \
+             `registry.inherit(jsg::ParentType::of::<T>())` in `Resource::members` instead",
+            custom_members,
+            "custom_members",
+        ));
+    }
+    Ok(())
 }
 
 /// The `jsg::Intrinsic` variant that `inherit_intrinsic = <value>` names.
@@ -936,6 +1012,7 @@ fn generate_resource_bindings(
         mode,
         nested_types,
         inherit_intrinsic,
+        inherit,
     } = parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
     let self_ty = &impl_block.self_ty;
 
@@ -968,6 +1045,9 @@ fn generate_resource_bindings(
     let inherit_intrinsic_registration = inherit_intrinsic.map(|variant| {
         quote! { registry.inherit_intrinsic(jsg::Intrinsic::#variant); }
     });
+    let inherit_registration = inherit.map(|parent| {
+        quote! { registry.inherit(jsg::ParentType::of::<#parent>()); }
+    });
 
     let resource_impl = if mode == RegistrationMode::Automatic {
         quote! {
@@ -979,6 +1059,7 @@ fn generate_resource_bindings(
                 ) {
                     let _ = &registry;
                     #inherit_intrinsic_registration
+                    #inherit_registration
                     #(registry.add(#automatic);)*
                     #(registry.add(#nested_type_registrations);)*
                 }

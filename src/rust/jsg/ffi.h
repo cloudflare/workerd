@@ -585,6 +585,9 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 MaybeLocal function_template_get_function(Isolate* isolate, const Global& tmpl);
 void function_template_set_nested_type(
     Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested);
+// `FunctionTemplate::Inherit`: `parent`'s prototype becomes the [[Prototype]] of `tmpl`'s
+// prototype, and methods with `parent`'s signature accept `tmpl`'s instances.
+void function_template_inherit(Isolate* isolate, const Global& tmpl, const Global& parent);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);

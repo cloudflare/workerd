@@ -512,7 +512,7 @@ impl TypeInfo for IteratorNode {
     fn describe(cx: &mut Context) -> Type {
         let typescript = TypeScript {
             ts_root: true,
-            extends: Some(crate::Intrinsic::IteratorPrototype),
+            extends: Some(Extends::Intrinsic(crate::Intrinsic::IteratorPrototype)),
             ..TypeScript::default()
         };
         cx.structure::<Self>("IteratorNode", typescript, |_, _| {
@@ -670,4 +670,72 @@ fn registration_replaces_the_declared_typescript_override() {
         })),
         ("FlaggedWithCache".to_owned(), define)
     );
+}
+
+struct FlaggedChild;
+
+impl crate::Type for FlaggedChild {
+    fn class_name() -> &'static str {
+        "FlaggedChild"
+    }
+
+    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
+        false
+    }
+}
+
+impl crate::Traced for FlaggedChild {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
+
+impl crate::GarbageCollected for FlaggedChild {
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        c"FlaggedChild"
+    }
+}
+
+impl Resource for FlaggedChild {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.inherit(crate::ParentType::of::<Flagged>());
+    }
+}
+
+impl TypeInfo for FlaggedChild {
+    fn describe(cx: &mut Context) -> Type {
+        cx.structure::<Self>(
+            "FlaggedChild",
+            TypeScript::default(),
+            resource_members::<Self>,
+        )
+    }
+}
+
+// As C++ RTTI writes `JSG_INHERIT`, the parent type is the structure's `extends`, and is
+// described along with the child.
+#[test]
+fn parent_type_is_the_extended_structure() {
+    let mut cx = Context::default();
+    FlaggedChild::describe(&mut cx);
+    let message = read_context(&cx);
+    let root = message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap();
+    let structures = root.get_groups().unwrap().get(0).get_structures().unwrap();
+    assert_eq!(structures.len(), 2);
+    let child = structures
+        .iter()
+        .find(|s| s.get_name().unwrap() == "FlaggedChild")
+        .unwrap();
+    let reference = structure_reference(child.get_extends().unwrap());
+    assert_eq!(reference.get_name().unwrap(), "Flagged");
+    assert_eq!(
+        reference.get_fully_qualified_name().unwrap(),
+        type_name::<Flagged>()
+    );
+    assert_eq!(child.get_members().unwrap().len(), 0);
+    let parent = structures
+        .iter()
+        .find(|s| s.get_name().unwrap() == "Flagged")
+        .unwrap();
+    assert!(!parent.has_extends());
 }

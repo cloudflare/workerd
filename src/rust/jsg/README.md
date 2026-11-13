@@ -1662,6 +1662,40 @@ They behave as in C++ JSG:
   `iterable` set, and the intrinsic as its `extends`, which the TypeScript generator declares as
   `[Symbol.iterator]()` and `extends Iterator<unknown>`.
 
+## Inheritance
+
+`#[jsg_resource(inherit = Base)]` on the impl block, or `registry.inherit(jsg::ParentType::of::<Base>())`
+with `custom_members`, links the type's template to `Base`'s, as C++ JSG's `JSG_INHERIT(Base)`
+does through `FunctionTemplate::Inherit`:
+
+```rust
+#[jsg_resource(inherit = Fetcher)]
+impl DurableObjectStub {
+    #[jsg_property(prototype, readonly)]
+    fn get_name(&self) -> String { /* ... */ }
+}
+```
+
+- `Base.prototype` is the [[Prototype]] of the type's prototype, so instances are `instanceof`
+  both types and reach `Base`'s methods, accessors and constants. The type keeps its own class
+  name and `Symbol.toStringTag`. Statics stay on `Base`'s constructor, which is not the
+  [[Prototype]] of the type's constructor.
+- `Base`'s methods have `Base`'s `v8::Signature`, which the type's instances pass. The type's own
+  methods reject `Base`'s instances and those of its siblings.
+- V8 does not inherit a named-property handler, so a type without a `#[jsg_wildcard_property]` of
+  its own gets `Base`'s, own or inherited. A callable `Base`'s call handler is not inherited.
+- `Base`'s callbacks still resolve their receiver as exactly a `Base`, so on the type's instances
+  they throw `TypeError: Illegal invocation`, and a `jsg::Rc<Base>` parameter rejects them. The
+  Rust side of inheritance, through which they would reach a `Base` in the type's instance, is
+  not implemented.
+- A type inherits from at most one type or intrinsic; two panic when the template is created.
+  `Base`'s template is created first. A type that inherits from itself, directly or through
+  other types, or that nests a type inheriting from it, panics when its template is created:
+  V8 instantiates a template's prototype, nested types included, before it caches the
+  template's function, so it would instantiate the type recursively. A type can nest its own
+  parent.
+- RTTI describes `Base` as the structure's `extends`, as C++ RTTI writes a `JSG_INHERIT`.
+
 ## Static Constants
 
 To expose numeric constants on a resource class (equivalent to `JSG_STATIC_CONSTANT` in C++), use `#[jsg_static_constant]` on `const` items inside a `#[jsg_resource]` impl block:

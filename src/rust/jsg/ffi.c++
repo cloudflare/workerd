@@ -1749,6 +1749,18 @@ void function_template_set_nested_type(
   local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
 }
 
+// Mirrors registerInherit() (resource.h). V8 copies neither the parent's named-property handler
+// nor its call handler to the child; the wildcard property is copied by the caller, through the
+// child's descriptor, and a callable stays the parent's own.
+void function_template_inherit(Isolate* isolate, const Global& tmpl, const Global& parent) {
+  v8::HandleScope scope(isolate);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl));
+  auto local_parent = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(parent));
+  local_tmpl->Inherit(local_parent);
+}
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =

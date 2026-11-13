@@ -204,8 +204,8 @@ impl Signature {
         };
         quote! {
             // V8 calls an interceptor only on objects made from the resource's instance
-            // template, so this is the resource's own wrapper; a mismatch is still a
-            // TypeError rather than a panic.
+            // template or that of a child, which inherits the wildcard property; the child's
+            // instance is not a `Self`, and a mismatch is a TypeError rather than a panic.
             let resource = jsg::v8::resolve_receiver::<Self>(lock, this);
             let Some(resource) = resource else {
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
