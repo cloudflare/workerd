@@ -70,12 +70,15 @@ SystemMultiStream newSystemMultiStream(
 
 struct ContentEncodingOptions {
   bool brotliEnabled = false;
+  bool chainEnabled = false;
   ContentEncodingOptions() = default;
   ContentEncodingOptions(CompatibilityFlags::Reader flags);
 };
 
 // Get the Content-Encoding header from an HttpHeaders object as a chain of StreamEncoding values,
-// listed in the order they were applied. An empty array means identity. "identity" tokens and
+// listed in the order they were applied. An empty array means identity. Without
+// options.chainEnabled (the content_encoding_chain flag), only a header that is exactly "gzip" or
+// "br" yields a coding, and the chain has at most one entry. With it, "identity" tokens and
 // empty list elements are skipped rather than added to the chain. If any coding in the list is
 // unsupported, or more than five codings remain after the skips, an empty array is returned and
 // the body is passed through unchanged, matching the longstanding behavior for a single

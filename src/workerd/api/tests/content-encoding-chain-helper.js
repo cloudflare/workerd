@@ -6,10 +6,11 @@
 // encodeBody: 'manual' so the wire bytes are exactly the embedded payloads. All payloads
 // compress DATA below; they were generated with Node's zlib (gzipSync / brotliCompressSync).
 //
-// The same module runs as two services: "ce-chain-helper" (brotli enabled, has a SELF
-// binding to itself) and "ce-chain-nobr" (brotli disabled, has a PEER binding to the
-// helper). The /nobr* routes only run in the latter, where fetches through PEER decode
-// according to *this* worker's flags.
+// The same module runs as three services: "ce-chain-helper" (brotli and chain handling
+// enabled, has a SELF binding to itself), "ce-chain-nobr" (brotli disabled, has a PEER binding
+// to the helper) and "ce-chain-legacy" (chain handling disabled, has a PEER binding to the
+// helper and a SELF binding to itself). The /nobr* and /self-out routes only run in the latter
+// two, where fetches decode according to *that* worker's flags.
 
 const DATA = 'The quick brown fox jumps over the lazy dog. '.repeat(32);
 
@@ -110,9 +111,9 @@ export default {
       return new Response('not found', { status: 404 });
     }
 
-    // The /nobr* routes run in the ce-chain-nobr service (no brotli): the fetch through
-    // PEER decodes with brotli disabled, and the body is returned as plain bytes with no
-    // Content-Encoding, so the test worker sees exactly what this worker's decoder
+    // The /nobr* routes run in the ce-chain-nobr and ce-chain-legacy services: the fetch
+    // through PEER decodes with this worker's flags, and the body is returned as plain bytes
+    // with no Content-Encoding, so the test worker sees exactly what this worker's decoder
     // produced.
     if (route === 'nobr') {
       return bodyOf(await env.PEER.fetch(`http://helper/p/${name}`));
@@ -122,6 +123,11 @@ export default {
     }
     if (route === 'nobr-out') {
       return bodyOf(await env.PEER.fetch(`http://helper/out/${name}`));
+    }
+    // Runs in ce-chain-legacy: this worker both builds the /out response (encoding with its
+    // own flags) and fetches it back through SELF (decoding with the same flags).
+    if (route === 'self-out') {
+      return bodyOf(await env.SELF.fetch(`http://helper/out/${name}`));
     }
 
     return new Response('not found', { status: 404 });
