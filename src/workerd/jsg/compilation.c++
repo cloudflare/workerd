@@ -221,7 +221,11 @@ v8::MaybeLocal<v8::Module> SharedModuleCompilationCache::compile(Lock& js,
       if (lock->generation == generation) lock->data = kj::none;
     }
     if (lock->data == kj::none && !js.isPreparingSnapshot()) {
-      if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
+      if (!lock->compiled) {
+        // Serializing is wasted work unless another replica compiles this definition, so the
+        // first one only marks the slot.
+        lock->compiled = true;
+      } else if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
         lock->data = kj::Own<v8::ScriptCompiler::CachedData>(
             ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
         ++lock->generation;

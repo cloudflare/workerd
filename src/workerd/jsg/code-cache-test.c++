@@ -544,10 +544,34 @@ void compileSharedModule(
   KJ_EXPECT(JsValue(check(ns->Get(js.v8Context(), js.str("value"_kj)))).toString(js) == "6");
 }
 
+void compileInFreshIsolate(const SharedModuleCompilationCache& cache, CountingObserver& observer) {
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+}
+
+// Compiles in two isolates, the first of which only marks the slot, so that it holds bytecode.
+void populateSharedSlot(const SharedModuleCompilationCache& cache, CountingObserver& observer) {
+  compileInFreshIsolate(cache, observer);
+  compileInFreshIsolate(cache, observer);
+}
+
+KJ_TEST("A shared slot generates bytecode when a second replica compiles from source") {
+  SharedModuleCompilationCache cache;
+  CountingObserver observer;
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.generated == 0);
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 0);
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.rejected == 0);
+}
+
 void expectSharedSlotRejected(size_t corruptOffset, CompatibilityCheckResult expectedCheck) {
   SharedModuleCompilationCache cache;
   CountingObserver observer;
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  populateSharedSlot(cache, observer);
   KJ_EXPECT(observer.generated == 1);
   SharedModuleCompilationCacheTestAccess::corrupt(cache, corruptOffset);
   withIsolate({}, observer, Defer::NO, [&](Lock& js) {
@@ -558,7 +582,7 @@ void expectSharedSlotRejected(size_t corruptOffset, CompatibilityCheckResult exp
   KJ_EXPECT(observer.rejected == 1);
   KJ_EXPECT(observer.generated == 2);
   KJ_EXPECT(observer.found == 0);
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  compileInFreshIsolate(cache, observer);
   KJ_EXPECT(observer.found == 1);
   KJ_EXPECT(observer.generated == 2);
   KJ_EXPECT(observer.rejected == 1);
@@ -574,7 +598,7 @@ KJ_TEST("Shared slot rejection preserves a replacement made before taking the ex
   SharedModuleCompilationCache cache;
   CountingObserver observer;
   CountingObserver replacementObserver;
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  populateSharedSlot(cache, observer);
   SharedModuleCompilationCacheTestAccess::corrupt(cache, FLAGS_HASH_OFFSET);
   withIsolate({}, observer, Defer::NO, [&](Lock& js) {
     // The observer runs after the read lock is released, before the write lock is acquired.
@@ -587,7 +611,7 @@ KJ_TEST("Shared slot rejection preserves a replacement made before taking the ex
   KJ_EXPECT(observer.generated == 1);
   KJ_EXPECT(replacementObserver.rejected == 1);
   KJ_EXPECT(replacementObserver.generated == 1);
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  compileInFreshIsolate(cache, observer);
   KJ_EXPECT(observer.found == 1);
   KJ_EXPECT(observer.generated == 1);
 }
@@ -605,7 +629,10 @@ KJ_TEST("Snapshot preparation consumes shared slots without generating or regene
   };
   snapshotCompile();
   KJ_EXPECT(observer.generated == 0);
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  // Snapshot preparation does not mark the slot, so this is still the first compile from source.
+  compileInFreshIsolate(cache, observer);
+  KJ_EXPECT(observer.generated == 0);
+  compileInFreshIsolate(cache, observer);
   KJ_EXPECT(observer.generated == 1);
   snapshotCompile();
   KJ_EXPECT(observer.found == 1);
@@ -614,7 +641,7 @@ KJ_TEST("Snapshot preparation consumes shared slots without generating or regene
   snapshotCompile();
   KJ_EXPECT(observer.rejected == 1);
   KJ_EXPECT(observer.generated == 1);
-  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  compileInFreshIsolate(cache, observer);
   KJ_EXPECT(observer.generated == 2);
   KJ_EXPECT(observer.rejected == 1);
   KJ_EXPECT(observer.generationFailed == 0);
@@ -915,7 +942,8 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
   using Options = modules::ModuleRegistry::Builder::Options;
   evalWithFreshRegistry(Options::CODE_CACHE_KEYS);
   evalWithFreshRegistry(Options::CODE_CACHE_KEYS);
-  // A registry built without code cache keys does not use the store.
+  // A registry built without code cache keys does not use the store, and its one isolate does
+  // not generate bytecode into the definition's slot.
   evalWithFreshRegistry(Options::NONE);
 
   auto lock = store->state.lockShared();
@@ -923,7 +951,7 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
   KJ_EXPECT(lock->hits == 1);
   KJ_EXPECT(lock->inserts == 1);
   KJ_EXPECT(observer.found == 1);
-  KJ_EXPECT(observer.generated == 2);
+  KJ_EXPECT(observer.generated == 1);
 }
 
 kj::Arc<modules::ModuleRegistry> newLazyModuleRegistry(
@@ -984,11 +1012,12 @@ KJ_TEST("New registry: an unkeyed module consumes hints despite an installed cod
   CountingObserver observer;
   int hints[] = {16};
   auto registry = newLazyModuleRegistry(modules::ModuleRegistry::Builder::Options::NONE, hints);
-  for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+  // The second isolate generates the slot's bytecode, which the third consumes.
+  for (auto i: kj::zeroTo(3)) {
     withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
       evalNewRegistry(js, *registry, observer, CollectCompileHints::NO);
     }, UseNewModuleRegistry::YES);
-    KJ_EXPECT(observer.hintsConsumed == 1);
+    KJ_EXPECT(observer.hintsConsumed == kj::min(i + 1, 2));
   }
   auto lock = store->state.lockShared();
   KJ_EXPECT(lock->lookups == 0);
