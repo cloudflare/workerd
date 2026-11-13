@@ -2369,9 +2369,10 @@ jsg::Ref<Socket> Fetcher::connect(
 }
 
 kj::Maybe<Fetcher::ChannelSnapshot> Fetcher::channelForSnapshot() const {
-  // A Fetcher bound to a live channel or factory belongs to one IoContext. One that registered a
-  // connect override (ctx.mapVirtualHost()) left that override on the zygote's global scope,
-  // which the restored Worker's fresh global scope does not have.
+  // A Fetcher bound to a live channel or an IoContext-bound factory belongs to one IoContext (a
+  // cross-context factory is copyForSnapshot()'s concern). One that registered a connect override
+  // (ctx.mapVirtualHost()) left that override on the zygote's global scope, which the restored
+  // Worker's fresh global scope does not have.
   if (registeredConnectOverride) return kj::none;
   KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
     return ChannelSnapshot{channel, requiresHost, isInHouse, rpcCompatGateBypassed};

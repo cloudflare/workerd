@@ -215,9 +215,11 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   type's `Lock&` constructor, or its default constructor. The type must be `final` (a
   `static_assert` enforces it), since a subclass would inherit the flag.
 - an override of `Wrappable::snapshotClone()` returning a deep, isolate-independent copy
-  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`): no V8 handles, no `jsg::Ref` members,
-  no IoContext. It is called in the zygote on the live original, and once more per started
-  worker on the stored copy.
+  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`): no V8 handles, no IoContext, and no
+  `jsg::Ref` members except to a fresh object the copy owns, which has never been wrapped and so
+  belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
+  `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
+  live original, and once more per started worker on the stored copy.
 
 A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
@@ -235,9 +237,14 @@ the zygote's error
 (`live wrapper types that neither set jsgSnapshotStateless nor implement snapshotClone() ...`).
 
 A binding type's `snapshotClone()` copies the binding's description (its channel number and
-names) and returns none when the object is bound to one IoContext instead (a live channel or
-factory, a stub minted per request) or has registered a connect override on the zygote's global
-scope (`ctx.mapVirtualHost()`), which the restored Worker's fresh global scope would lack. A
+names) and returns none when the object is bound to one IoContext instead (a live channel or an
+IoContext-bound factory, a stub minted per request) or has registered a connect override on the
+zygote's global scope (`ctx.mapVirtualHost()`, or reading an `ExtendedFetcher`'s `host`), which
+the restored Worker's fresh global scope would lack. A `Fetcher` on a
+`CrossContextOutgoingFactory`, which is not tied to one IoContext, transfers if the factory copies
+itself (`CrossContextOutgoingFactory::cloneForSnapshot()`; none by default). An embedder's
+loopback Durable Object namespace in `env` transfers as its channel numbers and a copy of its ID
+factory, and a `WrappedBinding` with a copy of its `Fetcher` (`Fetcher::cloneForSnapshot()`). A
 subclass that does not override `snapshotClone()` fails the zygote rather than transferring as
 its base type.
 
