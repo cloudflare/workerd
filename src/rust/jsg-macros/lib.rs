@@ -810,7 +810,7 @@ fn fast_callback(fn_sig: &syn::Signature) -> proc_macro2::TokenStream {
     quote! {
         #[automatically_derived]
         #[doc(hidden)]
-        fn #descriptor_name() -> Option<jsg::v8::ffi::FastApiDescriptor> {
+        fn #descriptor_name() -> Option<jsg::fast_api::FastCallback> {
             #descriptor
         }
     }
