@@ -589,18 +589,13 @@ kj::Promise<kj::Own<ReplServerHost>> ReplEnvironment::loadConfig(ReplConfigSourc
   co_return server;
 }
 
-kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
-    ReplEnvironmentSettings settings) {
-  auto started = beginStart();
-  // JavaScript asked for it under the REPL's isolate lock; starting an isolate locks it.
-  co_await kj::yield();
-  auto date = kj::mv(settings.compatibilityDate).orDefault([]() { return currentDateStr(); });
-  kj::Own<ReplEnvironment> environment;
+kj::Own<ReplEnvironment> ReplEnvironment::startEnvironment(
+    kj::StringPtr compatibilityDate, kj::ArrayPtr<const kj::String> compatibilityFlags) {
   KJ_TRY {
-    environment = kj::heap<ReplEnvironment>(resources, configLoader, candidateSource,
+    return kj::heap<ReplEnvironment>(resources, configLoader, candidateSource,
         ReplEnvironmentOptions{
-          .compatibilityDate = kj::str(date),
-          .compatibilityFlags = KJ_MAP(flag, settings.compatibilityFlags) { return kj::str(flag); },
+          .compatibilityDate = kj::str(compatibilityDate),
+          .compatibilityFlags = KJ_MAP(flag, compatibilityFlags) { return kj::str(flag); },
           .experimental = options.experimental,
           // The rendering is a string in the REPL that started it, where escapes would show.
           .colors = false,
@@ -610,6 +605,15 @@ kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
     // The settings' problems, which are the user's.
     JSG_FAIL_REQUIRE(Error, exception.getDescription());
   }
+}
+
+kj::Promise<kj::Own<ReplEnvironmentHost>> ReplEnvironment::newEnvironment(
+    ReplEnvironmentSettings settings) {
+  auto started = beginStart();
+  // JavaScript asked for it under the REPL's isolate lock; starting an isolate locks it.
+  co_await kj::yield();
+  auto date = kj::mv(settings.compatibilityDate).orDefault([]() { return currentDateStr(); });
+  auto environment = startEnvironment(date, settings.compatibilityFlags);
   auto nested = kj::refcounted<Nested>(
       kj::mv(environment), kj::mv(date), kj::mv(settings.compatibilityFlags));
   // Drop the environments that were closed since the last one started.

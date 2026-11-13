@@ -189,6 +189,13 @@ class ReplEnvironment final: public ReplHost {
   // error once drain() has begun.
   kj::Own<void> beginStart();
 
+  // The environment newEnvironment() starts; throws a JSG error naming the settings' problems.
+  // Kept out of the coroutine: clang-cl builds of a newEnvironment() that assigned the environment
+  // to a `kj::Own` declared before a KJ_TRY, and threw from its KJ_CATCH, destroyed that `kj::Own`
+  // holding a garbage pointer while unwinding.
+  kj::Own<ReplEnvironment> startEnvironment(
+      kj::StringPtr compatibilityDate, kj::ArrayPtr<const kj::String> compatibilityFlags);
+
   struct Compiled {
     jsg::NonModuleScript script;
     bool awaited;
