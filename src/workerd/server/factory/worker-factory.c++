@@ -564,6 +564,17 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     return tracing::SpanId::fromEntropy(entropySource);
   }
 
+  void submitSpanTrace(tracing::SpanId spanId,
+      tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags) override {
+    weakTracer->runIfAlive(
+        [&](BaseTracer& tracer) { tracer.setSpanTrace(spanId, kj::mv(traceId), traceFlags); });
+  }
+
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId::fromEntropy(entropySource);
+  }
+
  private:
   uint64_t nextSpanId = 1;
   kj::Own<BaseTracer::WeakRef> weakTracer;

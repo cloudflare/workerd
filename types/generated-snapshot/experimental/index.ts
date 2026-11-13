@@ -17789,14 +17789,18 @@ export declare namespace TailStream {
     // This should be a new traceId for the first worker stage invoked in the eyeball request and then
     // same-account service-bindings should reuse the same traceId but cross-account service-bindings
     // should use a new traceId.
+    // Events for a span outside the invocation's trace carry that span's traceId instead: a child of a
+    // span created elsewhere, such as in another Worker, or a span that starts a new trace, and their
+    // descendants. So do logs, exceptions and diagnostic channel events
+    // emitted while such a span is active. The parent of such a span may not be in this stream.
     readonly traceId: string;
     // spanId in which this event is handled
     // for Onset and SpanOpen events this would be the parent span id
     // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
     // For Hibernate and Mark this would be the span under which they were emitted.
-    // spanId is not set ONLY if:
-    //  1. This is an Onset event
-    //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    // spanId is not set ONLY for:
+    //  - An Onset event that doesn't inherit any SpanContext (e.g. this is a cross-account service binding or a new top-level invocation)
+    //  - A SpanOpen event for a span that starts a new trace, whose traceId differs from the onset's
     readonly spanId?: string;
     // W3C trace flags from an upstream traceparent. Absent when no upstream
     // sampling decision was made.
