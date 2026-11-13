@@ -166,6 +166,147 @@ impl Http {
     }
 }
 
+tokio::task_local! {
+    /// What `prompt` set: the bound, and what it may send twice.
+    static ATTEMPT: (Duration, &'static [Repeat]);
+}
+
+/// What a request sent twice may be, as `prompt` names it. Two copies of
+/// one request may both take effect, in either order, or one may take
+/// effect after the other answered: each kind but `Read` is safe only by
+/// what the caller does with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Repeat {
+    /// A GET: a read or a listing, which changes nothing.
+    Read,
+    /// A DELETE, safe only where no key the calls delete is written again:
+    /// a late copy then deletes nothing written since.
+    Delete,
+    /// A PUT with a precondition, of which at most one copy lands. The
+    /// bucket client reports a refusal of one sent twice as of unknown
+    /// outcome (`Attempt::sent_twice`, `Error::OutcomeUnknown`). Safe only
+    /// where the caller's answer to that holds when the other copy lands
+    /// later still, as a renewal's reread does: a read back, as
+    /// `Bucket::put_if_settled` makes, may come before it lands.
+    GuardedWrite,
+}
+
+/// Runs `calls` with each bucket request they make that is of a kind in
+/// `repeat` sent once more when it has not answered within `attempt`, the
+/// first copy kept in flight: a bucket's slow answers are single requests,
+/// and the same request sent again answers in its usual time, but a slow
+/// bucket answers every request late, the copy sent first soonest. The
+/// caller's deadline bounds the whole. A pause between retries of a refused
+/// request is not part of any request's wait.
+///
+/// The copy that loses is dropped, and its connection closes, never to be
+/// reused: the client speaks only HTTP/1.1, and hyper closes a connection
+/// whose request's caller is gone rather than return it to the pool. The
+/// dropped copy may still take effect, before or after the other.
+pub async fn prompt<F: Future>(
+    attempt: Duration,
+    repeat: &'static [Repeat],
+    calls: F,
+) -> F::Output {
+    ATTEMPT.scope((attempt, repeat), calls).await
+}
+
+/// A request, as `attempt` judges it.
+pub struct Call<'a> {
+    pub method: &'a str,
+    /// A write with a precondition.
+    pub guarded: bool,
+    pub body: &'a Payload,
+    /// Where the answer's body goes instead of memory.
+    pub to: Option<&'a Path>,
+}
+
+/// The largest body a request sent again may have: a larger one's own bound
+/// grows with its size, which `prompt`'s does not.
+const REPEATABLE_BODY: usize = 1 << 20;
+
+impl Call<'_> {
+    /// The kind of request this is if it could be sent twice: one with a
+    /// small body in memory and its answer kept in memory, other than an
+    /// unguarded write. Anything else goes once, whatever `prompt` names.
+    pub fn repeat(&self) -> Option<Repeat> {
+        let small = matches!(self.body, Payload::Bytes(bytes) if bytes.len() < REPEATABLE_BODY);
+        if !small || self.to.is_some() {
+            return None;
+        }
+        match self.method {
+            "GET" => Some(Repeat::Read),
+            "DELETE" => Some(Repeat::Delete),
+            "PUT" if self.guarded => Some(Repeat::GuardedWrite),
+            _ => None,
+        }
+    }
+}
+
+/// What `attempt` answered.
+pub struct Attempt<T> {
+    pub answer: T,
+    /// Whether the request went twice. The copy `answer` is not of may have
+    /// taken effect before it, or may yet, its own answer dropped: a guarded
+    /// write refused may have been refused against that copy's write.
+    pub sent_twice: bool,
+}
+
+/// `call`, sent with `send`, and once more if `prompt` bounds it, names its
+/// kind, and it has not answered in time. The first answer that `settles`
+/// is the call's. An answer that does not (an error, or a status the
+/// caller would rather the other copy's answer replaced) waits up to one
+/// more bound for the other copy's; when neither settles, the first answer
+/// that is not an error is the call's. `what` names it in the log.
+pub async fn attempt<T, E, F: Future<Output = Result<T, E>>>(
+    call: &Call<'_>,
+    what: impl FnOnce() -> String,
+    settles: impl Fn(&T) -> bool,
+    mut send: impl FnMut() -> F,
+) -> Attempt<Result<T, E>> {
+    let once = |answer| Attempt {
+        answer,
+        sent_twice: false,
+    };
+    let twice = |answer| Attempt {
+        answer,
+        sent_twice: true,
+    };
+    let scope = ATTEMPT.try_with(|scope| *scope).ok();
+    let bound = scope.and_then(|(bound, repeat)| {
+        call.repeat()
+            .filter(|kind| repeat.contains(kind))
+            .map(|_| bound)
+    });
+    let Some(bound) = bound else {
+        return once(send().await);
+    };
+    let first = send();
+    tokio::pin!(first);
+    if let Ok(answer) = tokio::time::timeout(bound, &mut first).await {
+        return once(answer);
+    }
+    tracing::warn!(
+        "cluster: {} had no answer in {} ms; sending it again",
+        what(),
+        bound.as_millis()
+    );
+    let second = send();
+    tokio::pin!(second);
+    let (answer, other) = match futures::future::select(first, second).await {
+        futures::future::Either::Left(answered) | futures::future::Either::Right(answered) => {
+            answered
+        }
+    };
+    if answer.as_ref().is_ok_and(&settles) {
+        return twice(answer);
+    }
+    twice(match tokio::time::timeout(bound, other).await {
+        Ok(later) if answer.is_err() || later.as_ref().is_ok_and(&settles) => later,
+        _ => answer,
+    })
+}
+
 /// A request body: bytes in one piece, or a file's chunks as a blocking
 /// task reads them. Either way its exact size is known, which S3 needs.
 enum Body {

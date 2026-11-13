@@ -169,6 +169,8 @@ class IoContext {
     return {};
   }
   void addTask(kj::Promise<void>);
+  void addWaitUntil(kj::Promise<void>);
+  void startOwnTask();
   template <typename Func>
   auto addFunctor(Func &&f) -> Func && {
     return static_cast<Func &&>(f);
@@ -288,6 +290,43 @@ kj::Promise<int> ioContextRun(workerd::IoContext &ctx, kj::Own<Resource> r) {
     (void)r;
     return 0;
   });
+}
+
+// The IoContext stores a promise passed to addWaitUntil() or addTask(), so the
+// chain outlives the function.
+void ioContextWaitUntil(workerd::IoContext &ctx) {
+  Resource &r = lookupResource();
+  kj::Promise<void> p;
+  // expected: unsafe by-reference capture of `r`
+  ctx.addWaitUntil(p.catch_([&r](int) { (void)r; }));
+}
+
+void ioContextAddTask(workerd::IoContext &ctx) {
+  Resource &r = lookupResource();
+  kj::Promise<void> p;
+  // expected: unsafe by-reference capture of `r`
+  ctx.addTask(p.then([&r]() { (void)r; }));
+}
+
+// Every lambda argument is checked, not just the first: here the error
+// handler is the unsafe one.
+void ioContextAddTaskErrorHandler(workerd::IoContext &ctx) {
+  Resource &r = lookupResource();
+  kj::Promise<void> p;
+  // expected: unsafe by-reference capture of `r`
+  ctx.addTask(p.then([]() {}, [&r](int) { (void)r; }));
+}
+
+void ioContextAddTaskReceiver(workerd::IoContext &ctx) {
+  kj::Promise<void> p;
+  // safe: the IoContext owns the task, so it outlives it.
+  ctx.addTask(p.then([&ctx]() { (void)ctx; }));
+}
+
+void workerd::IoContext::startOwnTask() {
+  kj::Promise<void> p;
+  // safe: the IoContext owns the task, so it outlives it.
+  addTask(p.then([this]() { (void)this; }));
 }
 
 // ---------------------------------------------------------------------------

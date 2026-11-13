@@ -1055,7 +1055,7 @@
     },
     "//build/deps:pyodide.bzl%pyodide": {
       "general": {
-        "bzlTransitiveDigest": "x0hizSFn3RuZD5g2sVAROCrLWqgtQ4LudX4OZourhCk=",
+        "bzlTransitiveDigest": "wjZdUJr60nS9WUABJ0lvR4lW4PDJEXJ6EjFBheXXZZM=",
         "usagesDigest": "D34wPmZYfmECvOxNBPDzjLSxn305F92xp6ZX7mjGPnk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_lib bazel_lib+",
@@ -1390,14 +1390,14 @@
             "repoRuleId": "@@//build/deps:dep_pyodide.bzl%_stdlib_wheels_repo",
             "attributes": {
               "tag": "20240829.4",
-              "lockfile": "@@//src/pyodide:python-lock/pyodide-lock_20240829.4.json"
+              "lockfile": "@@//src/pyodide/bundle:python-lock/pyodide-lock_20240829.4.json"
             }
           },
           "all_pyodide_wheels_20250808": {
             "repoRuleId": "@@//build/deps:dep_pyodide.bzl%_stdlib_wheels_repo",
             "attributes": {
               "tag": "20250808",
-              "lockfile": "@@//src/pyodide:python-lock/pyodide-lock_20250808.json"
+              "lockfile": "@@//src/pyodide/bundle:python-lock/pyodide-lock_20250808.json"
             }
           },
           "pyodide-snapshot-baseline-7177ed710.bin": {

@@ -133,12 +133,13 @@ fn versions_are_generations() {
 
 /// A bucket `bkt` behind tokens from the metadata server: each request for
 /// one answers `t<n>`, and the bucket takes the tokens in `accepted`, unless
-/// it `refuse`s all.
+/// it `refuse`s all. It answers a request it takes with `status`, 404 if 0.
 #[derive(Default)]
 struct Fake {
     issued: usize,
     accepted: BTreeSet<String>,
     refuse: bool,
+    status: u16,
 }
 
 const METADATA: &str = "/computeMetadata/v1/instance/service-accounts/default/token";
@@ -159,7 +160,7 @@ async fn client(fake: &Arc<Mutex<Fake>>) -> (Bucket, Server) {
             .header("authorization")
             .and_then(|v| v.strip_prefix("Bearer "));
         if !fake.refuse && token.is_some_and(|token| fake.accepted.contains(token)) {
-            reply(404, "")
+            reply(if fake.status == 0 { 404 } else { fake.status }, "")
         } else {
             reply(401, "")
         }
@@ -249,5 +250,34 @@ fn a_replacement_refused_in_the_same_call_is_not_sent_again() {
             "{message}"
         );
         assert!(sent(&server).is_empty());
+    });
+}
+
+/// A 401 refuses a request before anything applies it: a guard that fails
+/// once the request is sent again with another token failed against what
+/// another writer wrote.
+#[test]
+fn a_guard_that_fails_after_a_refused_token_failed() {
+    runtime().block_on(async {
+        let fake = Arc::new(Mutex::new(Fake::default()));
+        let (bucket, server) = client(&fake).await;
+        assert!(bucket.get("k").await.unwrap().is_none());
+        server.take();
+        {
+            let mut state = fake.lock().unwrap();
+            state.accepted.clear();
+            state.status = 412;
+        }
+        let put = bucket.put_if("k", Vec::new(), crate::Guard::Absent).await;
+        assert!(matches!(put, Ok(None)), "{put:?}");
+        let object = "/bkt/pre/k".to_owned();
+        assert_eq!(
+            sent(&server),
+            [
+                (object.clone(), bearer("t1")),
+                (METADATA.into(), String::new()),
+                (object, bearer("t2")),
+            ]
+        );
     });
 }

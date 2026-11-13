@@ -7,11 +7,13 @@ load("//:build/wd_bench.bzl", "wd_bench")
 compression_bench_srcs = glob(["*.js"]) + ["compression-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "compression-cpp.wd-bench",
     data = compression_bench_srcs,
 )
 
 wd_bench(
+    size = "large",
     src = "compression-ts.wd-bench",
     args = ["--experimental"],
     data = compression_bench_srcs,

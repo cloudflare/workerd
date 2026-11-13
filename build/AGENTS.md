@@ -109,7 +109,7 @@ Example:
 
 ```python
 CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
+    "workerd-new-check": [
         "src/workerd/io",
         "src/workerd/api",
     ],
@@ -136,4 +136,4 @@ Lives in `deps/`. Uses jsonc manifests + codegen:
 - `workerd-v8/` — separate Bazel module wrapping V8 dependency
 
 Pyodide package metadata lives in `build/python_metadata.bzl`; the checked-in, pre-filtered
-package lock files live in `src/pyodide/python-lock/`.
+package lock files live in `src/pyodide/bundle/python-lock/`.

@@ -813,7 +813,10 @@ interface DurableObjectStorage {
   snapshot(
     options?: DurableObjectSnapshotOptions,
   ): Promise<DurableObjectSnapshot>;
-  onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
+  onNextSessionRestore(
+    target: DurableObjectSnapshot | string,
+    options?: DurableObjectRestoreOptions,
+  ): Promise<string>;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
@@ -827,6 +830,9 @@ interface DurableObjectReadReplicationOptions {
 }
 interface DurableObjectSnapshotOptions {
   bookmark?: string;
+}
+interface DurableObjectRestoreOptions {
+  kvData?: Record<string, any>;
 }
 interface DurableObjectListOptions {
   start?: string;

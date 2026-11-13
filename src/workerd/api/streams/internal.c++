@@ -202,8 +202,7 @@ class AllReader final {
         // to a rejected tryRead() promise here since both reject this coroutine's promise.
         uint64_t amount = 0;
         kj::Maybe<size_t> maybeSyncAmount;
-        if (syncBytes < MAX_SYNC_BYTES &&
-            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        if (syncBytes < MAX_SYNC_BYTES) {
           maybeSyncAmount = input->tryReadSync(bytes.asBytes(), amountToRead);
         }
         KJ_IF_SOME(syncAmount, maybeSyncAmount) {
@@ -742,20 +741,18 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // event loop when the data is already available (e.g. buffered decompressed data or a
         // pending write on an identity transform).
         kj::Maybe<size_t> maybeSyncAmount;
-        if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-          KJ_TRY {
-            maybeSyncAmount = readable->tryReadSync(bytes, atLeast);
+        KJ_TRY {
+          maybeSyncAmount = readable->tryReadSync(bytes, atLeast);
+        }
+        KJ_CATCH(exception) {
+          // tryReadSync() may throw when a synchronous read is possible but fails. Handle the
+          // failure exactly like the asynchronous error path below.
+          readPending = false;
+          auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+          if (!state.is<StreamStates::Errored>()) {
+            doError(js, error);
           }
-          KJ_CATCH(exception) {
-            // tryReadSync() may throw when a synchronous read is possible but fails. Handle the
-            // failure exactly like the asynchronous error path below.
-            readPending = false;
-            auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
-            if (!state.is<StreamStates::Errored>()) {
-              doError(js, error);
-            }
-            return js.rejectedPromise<ReadResult>(error);
-          }
+          return js.rejectedPromise<ReadResult>(error);
         }
 
         KJ_IF_SOME(amount, maybeSyncAmount) {
@@ -992,18 +989,16 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       // single synchronous read of everything the source has buffered is exactly the
       // draining behavior this method approximates.
       kj::Maybe<size_t> maybeSyncAmount;
-      if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-        KJ_TRY {
-          maybeSyncAmount = readable->tryReadSync(bytes, kAtLeast);
+      KJ_TRY {
+        maybeSyncAmount = readable->tryReadSync(bytes, kAtLeast);
+      }
+      KJ_CATCH(exception) {
+        readPending = false;
+        auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
+        if (!state.is<StreamStates::Errored>()) {
+          doError(js, error);
         }
-        KJ_CATCH(exception) {
-          readPending = false;
-          auto error = jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
-          if (!state.is<StreamStates::Errored>()) {
-            doError(js, error);
-          }
-          return js.rejectedPromise<DrainingReadResult>(error);
-        }
+        return js.rejectedPromise<DrainingReadResult>(error);
       }
 
       KJ_IF_SOME(amount, maybeSyncAmount) {
@@ -1393,8 +1388,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
         // TODO(perf): Consider adding a synchronous "output gate is open" check so that actors
         // can also take this fast path when no storage writes are pending.
         if (len > 0 && queue.empty() && maybePendingAbort == kj::none &&
-            maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none &&
-            util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+            maybeHighWaterMark == kj::none && IoContext::current().getActor() == kj::none) {
           bool syncSuccess = false;
           KJ_TRY {
             syncSuccess = writable->sink->tryWriteSync(ptr);
@@ -2061,8 +2055,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       // Fast path: try to complete the write synchronously, avoiding a trip through the KJ
       // event loop when the sink can accept data immediately.
-      if (syncDepth < kMaxSyncWriteDepth &&
-          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+      if (syncDepth < kMaxSyncWriteDepth) {
         auto ptr = request.bytes;
         bool syncSuccess = false;
         KJ_TRY {
@@ -2518,20 +2511,18 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
   //
   auto writeBytes = [&](kj::Array<const kj::byte> data) {
     // Fast path: complete the write synchronously when the sink can accept data immediately.
-    if (util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
-      bool syncSuccess = false;
-      KJ_TRY {
-        syncSuccess = KJ_ASSERT_NONNULL(parent.state.whenActive(
-            [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(data); }));
-      }
-      KJ_CATCH(exception) {
-        // A sync throw is equivalent to a rejected write() promise; surface it as one so the
-        // caller's rejection continuation handles it identically to an async write failure.
-        return js.rejectedPromise<void>(js.exceptionToJs(kj::mv(exception)));
-      }
-      if (syncSuccess) {
-        return js.resolvedPromise();
-      }
+    bool syncSuccess = false;
+    KJ_TRY {
+      syncSuccess = KJ_ASSERT_NONNULL(parent.state.whenActive(
+          [&](IoOwn<Writable>& writable) { return writable->sink->tryWriteSync(data); }));
+    }
+    KJ_CATCH(exception) {
+      // A sync throw is equivalent to a rejected write() promise; surface it as one so the
+      // caller's rejection continuation handles it identically to an async write failure.
+      return js.rejectedPromise<void>(js.exceptionToJs(kj::mv(exception)));
+    }
+    if (syncSuccess) {
+      return js.resolvedPromise();
     }
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
