@@ -5,12 +5,14 @@
 //! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
 //! first adds the deployments in the cluster's bucket to the config ([`deployments`]), and
-//! `deploy` publishes one ([`deploy`]).
+//! `deploy` publishes one ([`deploy`]). `repl` evaluates JavaScript typed at a console
+//! ([`repl`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
-// and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
-// Everything else is safe code over std, socket2 and the bridge.
+// Four modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
+// to FFI declarations; socket_fd.rs, where a descriptor number from the command line becomes an
+// owned descriptor; and repl/terminal.rs, which puts the terminal in raw mode. Everything else is
+// safe code over std, socket2 and the bridges.
 
 mod args;
 mod bridge;
@@ -18,6 +20,7 @@ mod config;
 mod deploy;
 mod deployments;
 mod process;
+mod repl;
 mod socket_fd;
 mod watch;
 mod wrangler;
@@ -191,6 +194,14 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             const_name,
             deploy,
         } => Ok(run_deploy(&project, const_name, &deploy, executable)),
+        args::Command::Repl { repl } => {
+            if !repl.experimental {
+                usage_error::<T>(
+                    "The repl command is experimental. Pass --experimental to use it.",
+                );
+            }
+            repl::run(verbose, repl)
+        }
     }
 }
 
@@ -571,7 +582,7 @@ fn watcher<T: CommandFactory>(
             );
         };
         Some(
-            Watcher::new(executable.path())
+            Watcher::with_executable(executable.path())
                 .unwrap_or_else(|error| usage_error::<T>(format!("--watch: {error}"))),
         )
     }

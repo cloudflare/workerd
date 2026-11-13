@@ -387,3 +387,40 @@ fn compiled_binary_has_no_config_arguments() {
     assert_eq!(main.serve.socket_addr_overrides.len(), 1);
     assert!(CompiledMain::try_parse_from(["workerd", "config.capnp"]).is_err());
 }
+
+#[test]
+fn repl_config_to_load() {
+    let repl = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl
+    };
+    let none = repl(&["repl", "--experimental"]);
+    assert_eq!(none.config_file, None);
+    let config = repl(&["repl", "--experimental", "config.capnp", "dev"]);
+    assert_eq!(config.config_file.as_deref(), Some("config.capnp"));
+    assert_eq!(config.const_name.as_deref(), Some("dev"));
+}
+
+#[test]
+fn repl_process_wide_settings() {
+    let main = parse(&[
+        "repl",
+        "--experimental",
+        "--autogate=compression-rs",
+        "--autogate",
+        "ts-url",
+        "--v8-flag=--expose-gc",
+        // A V8 flag looks like an option of its own.
+        "--v8-flag",
+        "--jitless",
+        "config.capnp",
+    ]);
+    let Command::Repl { repl } = main.command else {
+        panic!("not repl");
+    };
+    assert_eq!(repl.autogates, ["compression-rs", "ts-url"]);
+    assert_eq!(repl.v8_flags, ["--expose-gc", "--jitless"]);
+    assert_eq!(repl.config_file.as_deref(), Some("config.capnp"));
+}

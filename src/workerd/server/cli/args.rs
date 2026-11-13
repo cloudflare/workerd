@@ -177,7 +177,24 @@ pub enum Command {
         #[command(flatten)]
         deploy: DeployArgs,
     },
+
+    /// evaluate JavaScript interactively (experimental)
+    #[command(
+        long_about = "Evaluates JavaScript typed at a console (experimental).",
+        after_long_help = REPL_HELP,
+    )]
+    Repl {
+        #[command(flatten)]
+        repl: ReplArgs,
+    },
 }
+
+const REPL_HELP: &str = "\
+Evaluates JavaScript in a Worker environment and prints each result. The `workerd` global loads \
+configs, as `serve` does, and calls their services and sockets; type .help in the REPL for more. \
+On a terminal, the lines typed are saved in ~/.workerd_repl_history; WORKERD_REPL_HISTORY names \
+another file, or, set to the empty string, turns saving off. This is a tool for developing \
+workerd, and may change or go away in any release.";
 
 const DEPLOY_HELP: &str = "\
 Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
@@ -467,6 +484,43 @@ pub struct DeployArgs {
     pub binary: bool,
 
     /// Enable experimental features. Cluster mode requires this flag.
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ReplArgs {
+    /// A config to load before the first prompt, into the global `s`: a Cap'n Proto config
+    /// (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, as for `serve`.
+    #[arg(value_name = "config-file")]
+    pub config_file: Option<String>,
+
+    /// For a Cap'n Proto <config-file>, the constant that contains the config, as for `serve`.
+    #[arg(value_name = "const-name", requires = "config_file")]
+    pub const_name: Option<String>,
+
+    /// Give the REPL's JavaScript the behavior of this compatibility date. Defaults to today.
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    /// Enable this compatibility flag in the REPL's JavaScript; repeat the option for more.
+    /// `nodejs_compat` is on unless a flag turns it or `nodejs_compat_v2` on or off.
+    #[arg(long = "compat-flag", value_name = "flag")]
+    pub compat_flags: Vec<String>,
+
+    /// Enable this autogate, named as in `WORKERD_AUTOGATES` but in kebab-case (such as
+    /// `compression-rs`); repeat the option for more. The REPL and every config it loads share
+    /// the process's autogates; the configs' own `autogates` are ignored.
+    #[arg(long = "autogate", value_name = "name")]
+    pub autogates: Vec<String>,
+
+    /// Pass this flag to V8, such as `--v8-flag=--expose-gc`; repeat the option for more. The
+    /// REPL and every config it loads share the process's V8; the configs' own `v8Flags` are
+    /// ignored.
+    #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
+    pub v8_flags: Vec<String>,
+
+    /// Enable experimental features. The repl command requires this flag.
     #[arg(long)]
     pub experimental: bool,
 }

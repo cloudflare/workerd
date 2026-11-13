@@ -273,61 +273,10 @@ Worker::Actor::Id normalizeActorId(Worker::Actor::Id id) {
 }
 
 // =======================================================================================
-// Single-tenant policy: no limits, and tracing that feeds tail workers directly.
+// Single-tenant policy (the limits are in single-tenant-policy.h): observers, and tracing that
+// feeds tail workers directly.
 
 namespace {
-
-class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
- public:
-  v8::Isolate::CreateParams getCreateParams() override {
-    return {};
-  }
-  void customizeIsolate(v8::Isolate* isolate) override {}
-  ActorCacheSharedLruOptions getActorCacheLruOptions() override {
-    return {.softLimit = 16 * (1ull << 20),
-      .hardLimit = 128 * (1ull << 20),
-      .staleTimeout = 30 * kj::SECONDS,
-      .dirtyListByteLimit = 8 * (1ull << 20),
-      .maxKeysPerRpc = 128,
-      // In-memory-only actors: the cache never flushes to its (empty) backing storage.
-      .neverFlush = true};
-  }
-  kj::Own<void> enterStartupJs(jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterStartupPython(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterDynamicImportJs(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterLoggingJs(jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  kj::Own<void> enterInspectorJs(
-      jsg::Lock&, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
-  }
-  void completedRequest(kj::StringPtr id) const override {}
-  bool exitJs(jsg::Lock& lock) const override {
-    return false;
-  }
-  void reportMetrics(IsolateObserver& isolateMetrics) const override {}
-  kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
-    return kj::none;
-  }
-  bool hasExcessivelyExceededHeapLimit() const override {
-    return false;
-  }
-  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
-    return trackedWasmInstances;
-  }
-
- private:
-  TrackedWasmInstanceList trackedWasmInstances;
-};
 
 // Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
 // --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
@@ -368,44 +317,6 @@ kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& option
   }
   return kj::atomicRefcounted<IsolateObserver>();
 }
-
-class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
- public:
-  kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
-    return {};
-  }
-  void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
-  void newKvRequest(KvOpType op) override {}
-  void newAnalyticsEngineRequest() override {}
-  kj::Promise<void> limitDrain() override {
-    return kj::NEVER_DONE;
-  }
-  kj::Promise<void> limitScheduled() override {
-    return kj::NEVER_DONE;
-  }
-  kj::Duration getAlarmLimit() override {
-    return 15 * kj::MINUTES;
-  }
-  size_t getBufferingLimit() override {
-    return kj::maxValue;
-  }
-  kj::Maybe<EventOutcome> getLimitsExceeded() override {
-    return kj::none;
-  }
-  kj::Promise<void> onLimitsExceeded() override {
-    return kj::NEVER_DONE;
-  }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
-  void requireLimitsNotExceeded() override {}
-  void reportMetrics(RequestObserver& requestMetrics) override {}
-  kj::Duration consumeTimeElapsedForPeriodicLogging() override {
-    return 0 * kj::SECONDS;
-  }
-  size_t getSqliteMemoryUsage() const override {
-    return 0;
-  }
-};
 
 // Records a request's outcome on its tracer, wrapping the WorkerInterface to observe failures.
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
@@ -1380,6 +1291,13 @@ kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex) {
       "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
   return kj::heap<ActorIdHandle>(kj::Own<ActorIdFactory::ActorId>(
       kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none)));
+}
+
+kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromName(kj::str(name)));
+}
+kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex) {
+  return kj::heap<ActorIdHandle>(ActorIdFactoryImpl(kj::str(uniqueKey)).idFromString(kj::str(hex)));
 }
 
 // =======================================================================================

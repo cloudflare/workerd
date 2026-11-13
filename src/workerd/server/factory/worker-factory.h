@@ -142,6 +142,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     uint32_t asyncTraceStackDepth = 0;
     // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
     bool asyncTracePromises = false;
+    // The header table of the program that runs the server in-process and calls into it, which
+    // must outlive the factory. The `host_*` shims rekey headers between it and the factory's own
+    // table.
+    kj::Maybe<const kj::HttpHeaderTable&> hostHeaderTable;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an
@@ -287,6 +291,8 @@ kj::Own<ActorIdHandle> actor_id_clone(const ActorIdHandle& id);
 ::rust::String actor_id_key(const ActorIdHandle& id);
 kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name);
 kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex);
+kj::Own<ActorIdHandle> actor_id_from_durable_name(::rust::Str uniqueKey, ::rust::Str name);
+kj::Own<ActorIdHandle> actor_id_from_durable_string(::rust::Str uniqueKey, ::rust::Str hex);
 
 // The storage of one Durable Object namespace: its directory (or none, for in-memory storage),
 // the SQLite VFS over it, and the alarm scheduler.
@@ -455,6 +461,12 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
+kj::Own<kj::HttpHeaders> host_request_headers(
+    const WorkerFactory& factory, const kj::HttpHeaders& headers);
+kj::Own<kj::HttpService::Response> new_host_response(
+    const WorkerFactory& factory, kj::HttpService::Response& inner);
+kj::Own<kj::HttpService::ConnectResponse> new_host_connect_response(
+    const WorkerFactory& factory, kj::HttpService::ConnectResponse& inner);
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow);

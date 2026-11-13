@@ -12,7 +12,7 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers` and `rewriting_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and the safe wrappers over the bridge's `unsafe fn edit_headers` and `unsafe fn new_*_response` shims"
 )]
 
 pub use crate::actor::MovedHook;
@@ -493,6 +493,14 @@ pub mod ffi {
         fn actor_id_from_name(name: &str) -> KjOwn<ActorIdHandle>;
         /// The id of a durable namespace, from its hex text (a debug-port request).
         fn actor_id_from_hex(hex: &str) -> Result<KjOwn<ActorIdHandle>>;
+        /// The id `idFromName(name)` gives in the durable namespace `unique_key`.
+        fn actor_id_from_durable_name(unique_key: &str, name: &str) -> KjOwn<ActorIdHandle>;
+        /// The id `idFromString(hex)` gives in the durable namespace `unique_key`: an error if
+        /// `hex` is not an id of that namespace.
+        fn actor_id_from_durable_string(
+            unique_key: &str,
+            hex: &str,
+        ) -> Result<KjOwn<ActorIdHandle>>;
 
         /// The storage of one actor namespace: its directory on disk (or none for in-memory
         /// storage), the SQLite VFS over it, and its alarm scheduler.
@@ -718,6 +726,22 @@ pub mod ffi {
         /// The `ConnectResponse` of a raw TCP socket's `connect()`: accepting does nothing,
         /// rejecting discards the body.
         fn new_null_connect_response() -> KjOwn<ConnectResponse>;
+        /// An in-process server's host (in_process/host.rs) keys its headers by
+        /// `WorkerFactory::Options::hostHeaderTable`: a copy of the host's request `headers`
+        /// keyed by the factory's table; and responses, which borrow the host's `inner` for
+        /// their life, whose headers are copied into the host's table on the way out.
+        fn host_request_headers(
+            factory: &WorkerFactory,
+            headers: &HttpHeaders,
+        ) -> Result<KjOwn<HttpHeaders>>;
+        unsafe fn new_host_response<'a>(
+            factory: &WorkerFactory,
+            inner: Pin<&'a mut HttpServiceResponse>,
+        ) -> Result<KjOwn<HttpServiceResponse>>;
+        unsafe fn new_host_connect_response<'a>(
+            factory: &WorkerFactory,
+            inner: Pin<&'a mut ConnectResponse>,
+        ) -> Result<KjOwn<ConnectResponse>>;
         /// `JsgifyWebSocketErrors`: the WebSocket error handler whose exceptions reach JS as
         /// `Error`s, for every server and client the Rust server runs.
         fn new_jsgify_websocket_errors() -> KjOwn<WebSocketErrorHandler>;
@@ -778,14 +802,26 @@ pub mod ffi {
             structured_logging: bool,
         ) -> Result<i32>;
 
-        /// The server run inside a test process (in_process.rs), on a factory the test built.
-        /// `run` is `workerd serve` until `drain`, with `--debug-port` if `debug_port` is not
-        /// empty; `test` is `workerd test`; `bench` is `workerd bench` with `params`, an encoded
-        /// `BenchParams` message. `next_report` is the next config error or warning. `connect`
-        /// and `accept` are the two ends of a `loopback:` name.
+        /// The server run inside another program's event loop (in_process.rs), on a factory
+        /// that program built: a test, or `workerd repl`. With `mock_internet`, connections to
+        /// public addresses go to loopback names instead. `run` is `workerd serve` until `drain`,
+        /// with `--debug-port` if `debug_port` is not empty; `start` is `workerd serve` in the
+        /// background, until the server is closed, and resolves once it listens; `test` is
+        /// `workerd test`; `bench` is `workerd bench` with `params`, an encoded `BenchParams`
+        /// message. `next_report` is the next config error or warning, `take_reports` those
+        /// reported so far. `connect` and `accept` are the two ends of a `loopback:` name.
+        ///
+        /// For a host that calls into the server it started, on a factory with a
+        /// `hostHeaderTable`: `service` and `socket` are channels to a service and to an http
+        /// socket, which `revoke` (or closing the server) revokes along with every request
+        /// started on them.
         type InProcessServer;
-        fn new_in_process_server(factory: KjOwn<WorkerFactory>) -> Box<InProcessServer>;
+        fn new_in_process_server(
+            factory: KjOwn<WorkerFactory>,
+            mock_internet: bool,
+        ) -> Box<InProcessServer>;
         async unsafe fn run<'a>(self: &'a InProcessServer, debug_port: &'a str) -> Result<()>;
+        async unsafe fn start<'a>(self: &'a InProcessServer) -> Result<()>;
         async unsafe fn test<'a>(
             self: &'a InProcessServer,
             service_pattern: &'a str,
@@ -801,13 +837,37 @@ pub mod ffi {
         fn add_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         fn add_skipped_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
+        fn take_reports(self: &InProcessServer) -> Vec<ConfigReport>;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
         async unsafe fn accept<'a>(
             self: &'a InProcessServer,
             name: &'a str,
         ) -> Result<KjOwn<AsyncIoStream>>;
-        /// Ends the server's tasks and drops the factory, logging an error if a service still
-        /// holds it.
+        /// `entrypoint` (the default without one) of the config's service `name`, resolved as
+        /// the debug port's `getEntrypoint` resolves it, with `props` bound if given.
+        fn service(
+            self: &InProcessServer,
+            name: &str,
+            entrypoint: KjMaybe<&str>,
+            props: KjMaybe<KjOwn<Frankenvalue>>,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// The object of the config's service `service`'s Durable Object class `class_name`
+        /// named by `name` (as `idFromName()` names it) or by `id` (as `idFromString()` does),
+        /// one of which is given.
+        fn actor(
+            self: &InProcessServer,
+            service: &str,
+            class_name: &str,
+            name: KjMaybe<&str>,
+            id: KjMaybe<&str>,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// HTTP requests to the config's http socket `name`, as a client of it would send them.
+        fn socket(self: &InProcessServer, name: &str) -> Result<Box<SubrequestChannel>>;
+        /// Revokes, with `reason` (what failed requests say), every channel `service`, `actor`
+        /// and `socket` handed out. The first reason stands.
+        fn revoke(self: &InProcessServer, reason: &str);
+        /// Drains and awaits the run `start` started, then ends the server's tasks and drops the
+        /// factory, logging an error if a service still holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
 
         /// A background task of the server, run by the factory's task set (`factory_spawn`);
@@ -1055,16 +1115,27 @@ pub mod ffi {
 }
 
 // =====================================================================================
-/// A response whose headers are edited before they reach `inner`. Borrows `inner` for its life,
-/// which the type carries.
-pub struct RewritingResponse<'a> {
-    response: kj_rs::KjOwn<ffi::HttpServiceResponse>,
-    _inner: std::marker::PhantomData<&'a mut ffi::HttpServiceResponse>,
+/// A KJ object that forwards to another, which it borrows for its life; the type carries the
+/// borrow.
+pub struct Wrapper<'a, T: kj_rs::OwnTarget> {
+    wrapper: kj_rs::KjOwn<T>,
+    _inner: std::marker::PhantomData<&'a mut T>,
 }
 
-impl RewritingResponse<'_> {
-    pub fn as_mut(&mut self) -> std::pin::Pin<&mut ffi::HttpServiceResponse> {
-        self.response.as_mut()
+impl<T: kj_rs::OwnTarget> Wrapper<'_, T> {
+    /// Takes `wrapper`, a KJ object that borrows another for the lifetime the type carries.
+    ///
+    /// # Safety
+    /// `wrapper` must not use what it borrows after that lifetime ends.
+    unsafe fn new(wrapper: kj_rs::KjOwn<T>) -> Self {
+        Self {
+            wrapper,
+            _inner: std::marker::PhantomData,
+        }
+    }
+
+    pub fn as_mut(&mut self) -> std::pin::Pin<&mut T> {
+        self.wrapper.as_mut()
     }
 }
 
@@ -1073,13 +1144,35 @@ pub fn rewriting_response<'a>(
     inner: std::pin::Pin<&'a mut ffi::HttpServiceResponse>,
     table: &ffi::HttpHeaderTable,
     edits: &[ffi::HeaderEdit],
-) -> crate::Result<RewritingResponse<'a>> {
-    // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
-    let response = unsafe { ffi::new_rewriting_response(inner, table, edits) }?;
-    Ok(RewritingResponse {
-        response,
-        _inner: std::marker::PhantomData,
-    })
+) -> crate::Result<Wrapper<'a, ffi::HttpServiceResponse>> {
+    // SAFETY: the wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    unsafe {
+        Ok(Wrapper::new(ffi::new_rewriting_response(
+            inner, table, edits,
+        )?))
+    }
+}
+
+/// See `ffi::new_host_response`.
+pub fn host_response<'a>(
+    factory: &ffi::WorkerFactory,
+    inner: std::pin::Pin<&'a mut ffi::HttpServiceResponse>,
+) -> crate::Result<Wrapper<'a, ffi::HttpServiceResponse>> {
+    // SAFETY: the wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    unsafe { Ok(Wrapper::new(ffi::new_host_response(factory, inner)?)) }
+}
+
+/// See `ffi::new_host_connect_response`.
+pub fn host_connect_response<'a>(
+    factory: &ffi::WorkerFactory,
+    inner: std::pin::Pin<&'a mut ffi::ConnectResponse>,
+) -> crate::Result<Wrapper<'a, ffi::ConnectResponse>> {
+    // SAFETY: the wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    unsafe {
+        Ok(Wrapper::new(ffi::new_host_connect_response(
+            factory, inner,
+        )?))
+    }
 }
 
 /// The headers `edit_headers` returns. Borrows the headers they were copied from, whose header
