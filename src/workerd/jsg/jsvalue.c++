@@ -422,8 +422,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written = kj::min(buffer.size(), length(js));
-    inner->WriteOneByte(
-        js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
+    inner->WriteOneByte(js.v8Isolate, 0, result.written, buffer.begin(), options);
     result.read = length(js);
   }
   return result;
