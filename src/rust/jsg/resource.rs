@@ -35,6 +35,7 @@ use crate::Traced;
 use crate::Type;
 use crate::UnionMember;
 use crate::UnionTypes;
+use crate::fast_api::FastCallback;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
 use crate::isolate_state::Releasable;
@@ -742,7 +743,7 @@ fn get_resource_descriptor<R: Resource>(
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
-                    fast: fast.into(),
+                    fast: fast.map(FastCallback::into_ffi).into(),
                     length,
                 });
             }
@@ -801,7 +802,7 @@ fn get_resource_descriptor<R: Resource>(
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
-                    fast: fast.into(),
+                    fast: fast.map(FastCallback::into_ffi).into(),
                     length,
                 });
             }

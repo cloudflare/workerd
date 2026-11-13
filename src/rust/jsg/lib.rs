@@ -1504,7 +1504,7 @@ pub enum Member {
         /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
         /// receiver; don't use one in any other member.
         callback: RawFunctionCallback,
-        fast: Option<v8::ffi::FastApiDescriptor>,
+        fast: Option<fast_api::FastCallback>,
         length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
@@ -1539,7 +1539,7 @@ pub enum Member {
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
-        fast: Option<v8::ffi::FastApiDescriptor>,
+        fast: Option<fast_api::FastCallback>,
         length: u32,
     },
     StaticConstant {
