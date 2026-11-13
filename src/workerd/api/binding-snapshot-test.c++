@@ -16,9 +16,10 @@
 #include <kj/test.h>
 
 namespace workerd::api {
-namespace {
 
 WD_STRONG_BOOL(Copyable);
+
+namespace {
 
 // The copies a test factory's cloneForSnapshot() made.
 struct CopyCount {
