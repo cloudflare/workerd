@@ -2676,8 +2676,13 @@ class ExternalMemoryTarget: public IsolateLiveness {
   void maybeDeferAdjustment(ssize_t amount) const;
   void adjustNow(Lock& js, ssize_t amount) const;
 
+  // Reports a decrease (`amount` < 0) to `target`, this target's isolate, whose lock the caller
+  // holds, with the pending total netted into it. Never passes V8 a rise.
+  void decreaseNow(v8::Isolate* target, int64_t amount) const;
+
   // Tracks changes to external memory that were applied from a thread that did not hold the
-  // isolate lock. These will be applied the next time the lock is taken.
+  // isolate lock. These are applied the next time the lock is taken, or netted into a decrease
+  // made under it.
   mutable std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
   static_assert(std::atomic<int64_t>::is_always_lock_free);
 

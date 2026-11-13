@@ -120,6 +120,10 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
+        /// The external memory that embedders have attributed to the isolate; see
+        /// `external_memory` in `ffi.h`.
+        pub unsafe fn external_memory(isolate: *mut Isolate) -> i64;
+
         /// Takes a heap snapshot of the isolate, which includes what `jsg::MemoryTracker`
         /// reports, and returns it serialized as JSON.
         pub unsafe fn take_heap_snapshot(isolate: *mut Isolate) -> Result<String>;
@@ -627,6 +631,15 @@ impl Harness {
     pub fn used_global_handles_size(lock: &mut jsg::Lock<'_>) -> usize {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
+    }
+
+    /// The external memory that `jsg::ExternalMemoryAdjustment`s, of Rust or C++, have
+    /// attributed to the isolate and that has reached V8. Tests compare it with amounts taken
+    /// earlier.
+    #[must_use]
+    pub fn external_memory(lock: &mut jsg::Lock<'_>) -> i64 {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::external_memory(lock.isolate().as_ffi()) }
     }
 
     /// Takes a heap snapshot, as the inspector's `HeapProfiler.takeHeapSnapshot` does, and

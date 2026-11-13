@@ -251,8 +251,10 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
-`GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
+`GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
+`ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
+fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
+`src/workerd/io`, and the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
 workerd's API objects serialize, since their serializers are written against C++ JSG, and
 `newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
@@ -599,6 +601,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
 | `std::sync::Arc<T>`, `std::sync::Mutex<T>` | No | Only for `T: HoldsNoGcReferences`, and `Sync` for `Arc` |
+| `jsg::ExternalMemoryAdjustment`, `jsg::ExternalMemoryTarget` | No | Hold no GC reference; see [External memory](#external-memory) |
 | `std::rc::Rc<T>` | Compile error — not `Send`, so not `Traced` | Share a resource through a `jsg::Rc` or `jsg::Weak`, and plain data with a future through an `Arc` (Safety rules, rules 2 and 5) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
@@ -633,6 +636,54 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
   left to update. No lock serializes them, so they go through the queue, which one thread at a
   time drains. Nothing else touches the counts by then: every other operation takes a lock of
   the isolate, and panics once its `Realm` is dropped.
+
+### External memory
+
+A resource that keeps memory alive outside the V8 heap (a buffer, a codec's state, a native
+library's allocations) reports it to V8, so that the memory counts toward the isolate's use and V8
+collects garbage sooner when it is large. A `jsg::ExternalMemoryAdjustment` attributes an amount of
+memory to an isolate until it is dropped, and `adjust(delta)` and `set(amount)` change the amount.
+It is C++ JSG's `jsg::ExternalMemoryAdjustment`, shared with it, so Rust and C++ report to one
+total. Make one under the lock with `lock.external_memory_adjustment(amount)`, keep it in a field,
+and change it as the memory changes:
+
+```rust
+#[jsg_resource]
+struct ExternalBuffer {
+    data: RefCell<Vec<u8>>,
+    external_memory: RefCell<jsg::ExternalMemoryAdjustment>,
+}
+
+let external_memory = lock.external_memory_adjustment(data.len());
+// ... and when the buffer grows:
+self.external_memory.borrow_mut().set(data.len());
+```
+
+When V8 collects the resource, the adjustment is dropped and the memory released. `adjust`
+returns a `jsg::Result`: lowering an adjustment below zero fails with C++ `adjust()`'s exception,
+as an internal error, which a method passes on with `?` so that JavaScript catches it as it
+catches the error a C++ method throws then. An adjustment of 32 GiB or more aborts the process, as
+in C++ JSG.
+
+Both types are `Send` and `Sync`. An adjustment can be made, changed or dropped on any thread. A
+thread that has entered the isolate, as every thread holding its lock in workerd has, reports the
+change to V8 at once. Any other thread, or one that has entered another isolate, adds it to a
+pending total, which the next `IsolateBase::Lock` hands to V8. A decrease reported at once has the
+pending total netted into it: V8 gets the net decrease, or nothing if the pending total exceeds it,
+so that a decrease, often made in a destructor or a GC finalizer, never makes V8 start a GC. So an
+adjustment made on one thread can be changed or dropped on another. To
+make adjustments without the lock, take the isolate's `jsg::ExternalMemoryTarget` under the lock
+(`lock.external_memory_target()`) and call `target.adjustment(amount)` later, on any thread. Both
+outlive the isolate: once it is destroyed, nothing reaches V8, and `target.is_isolate_alive()`
+returns false; the checks above still apply. C++'s `adjustNow()` and `setNow()` have no
+counterpart: they report at once without asking which isolate the thread has entered, and a thread
+holding the lock in workerd has entered the isolate, so `adjust` and `set` report at once there
+too.
+
+C++ JSG's `Lock::allocAccounted<T>(size, ...)` attaches an adjustment to a new resource; a Rust
+resource holds the adjustment as a field instead. Neither type reports anything to heap snapshots,
+as in C++: the memory belongs to the resource, which reports it in `visit_for_memory_info` if it
+reports it at all. See `external_memory.rs`.
 
 ### Creating resources from C++
 

@@ -20,6 +20,7 @@
 #include <kj/mutex.h>
 #include <kj/string.h>
 
+#include <limits>
 #include <memory>
 
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
@@ -2054,6 +2055,79 @@ bool isolate_in_context(Isolate* isolate) {
 
 Local isolate_current_context_global(Isolate* isolate) {
   return to_ffi(isolate->GetCurrentContext()->Global());
+}
+
+// ExternalMemory
+namespace {
+
+class ExternalMemoryAdjustmentImpl final: public ExternalMemoryAdjustment {
+ public:
+  explicit ExternalMemoryAdjustmentImpl(::workerd::jsg::ExternalMemoryAdjustment adjustment)
+      : adjustment(kj::mv(adjustment)) {}
+
+  ::workerd::jsg::ExternalMemoryAdjustment adjustment;
+};
+
+kj::Own<ExternalMemoryAdjustment> wrap(::workerd::jsg::ExternalMemoryAdjustment adjustment) {
+  return kj::heap<ExternalMemoryAdjustmentImpl>(kj::mv(adjustment));
+}
+
+::workerd::jsg::ExternalMemoryAdjustment& unwrap(ExternalMemoryAdjustment& adjustment) {
+  return kj::downcast<ExternalMemoryAdjustmentImpl>(adjustment).adjustment;
+}
+
+const ::workerd::jsg::ExternalMemoryAdjustment& unwrap(const ExternalMemoryAdjustment& adjustment) {
+  return kj::downcast<const ExternalMemoryAdjustmentImpl>(adjustment).adjustment;
+}
+
+}  // namespace
+
+kj::Arc<ExternalMemoryTarget> isolate_external_memory_target(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryTarget();
+}
+
+kj::Own<ExternalMemoryAdjustment> isolate_external_memory_adjustment(
+    Isolate* isolate, size_t amount) {
+  // The caller holds the lock and has entered the isolate, so maybeDeferAdjustment() reports the
+  // amount to V8 at once.
+  KJ_DASSERT(v8::Isolate::TryGetCurrent() == isolate);
+  return wrap(::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryAdjustment(amount));
+}
+
+kj::Own<ExternalMemoryAdjustment> external_memory_target_adjustment(
+    ExternalMemoryTarget& target, size_t amount) {
+  return wrap(target.getAdjustment(amount));
+}
+
+bool external_memory_target_is_isolate_alive(ExternalMemoryTarget& target) {
+  return target.isIsolateAlive();
+}
+
+int64_t external_memory_target_pending_update_for_test(ExternalMemoryTarget& target) {
+  return target.getPendingMemoryUpdateForTest();
+}
+
+size_t external_memory_adjustment_amount(const ExternalMemoryAdjustment& adjustment) {
+  return unwrap(adjustment).getAmount();
+}
+
+void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::rust::isize delta) {
+  unwrap(adjustment).adjust(delta);
+}
+
+void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount) {
+  auto& inner = unwrap(adjustment);
+  size_t current = inner.getAmount();
+  if (amount >= current) {
+    // jsg::ExternalMemoryAdjustment::set() passes the difference to adjust() as a ssize_t, which
+    // would wrap a rise above SSIZE_MAX to a fall below zero and throw. Capped, the rise still
+    // makes the adjustment 32 GiB or more, so it aborts as too large.
+    inner.adjust(static_cast<ssize_t>(
+        kj::min(amount - current, static_cast<size_t>(std::numeric_limits<ssize_t>::max()))));
+  } else {
+    // An adjustment is always below 32 GiB, so the fall fits in a ssize_t.
+    inner.adjust(-static_cast<ssize_t>(current - amount));
+  }
 }
 
 }  // namespace workerd::rust::jsg

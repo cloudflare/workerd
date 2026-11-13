@@ -25,8 +25,9 @@ import re
 import sys
 from pathlib import Path
 
-# Allowlist name -> pattern. `jsg::Wrappable`, `jsg::GcVisitor`, `jsg::MemoryTracker` and the
-# module registries are not listed, because Rust JSG still shares them with C++ JSG.
+# Allowlist name -> pattern. `jsg::Wrappable`, `jsg::GcVisitor`, `jsg::MemoryTracker`, the
+# isolate's `jsg::ExternalMemoryTarget` and its adjustments, and the module registries are not
+# listed, because Rust JSG still shares them with C++ JSG.
 CONSTRUCTS = {
     "jsg::Lock": r"\bjsg::Lock\b",
     # IoContext::getCurrentLock() returns the C++ jsg::Lock.

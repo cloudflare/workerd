@@ -230,6 +230,12 @@ pub mod ffi {
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
+        /// C++ `const jsg::ExternalMemoryTarget`, the isolate's singleton that adjustments add
+        /// to. Thread-safe.
+        type ExternalMemoryTarget;
+        /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
+        /// (see `ffi.h`).
+        type ExternalMemoryAdjustment;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -874,7 +880,34 @@ pub mod ffi {
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
         pub unsafe fn ignore_leak(ptr: usize);
+
+        // ExternalMemory
+        pub unsafe fn isolate_external_memory_target(
+            isolate: *mut Isolate,
+        ) -> KjArc<ExternalMemoryTarget>;
+        pub unsafe fn isolate_external_memory_adjustment(
+            isolate: *mut Isolate,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_adjustment(
+            target: &ExternalMemoryTarget,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_is_isolate_alive(target: &ExternalMemoryTarget) -> bool;
+        pub fn external_memory_target_pending_update_for_test(target: &ExternalMemoryTarget)
+        -> i64;
+        pub fn external_memory_adjustment_amount(adjustment: &ExternalMemoryAdjustment) -> usize;
+        pub fn external_memory_adjustment_adjust(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            delta: isize,
+        ) -> Result<()>;
+        pub fn external_memory_adjustment_set(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            amount: usize,
+        );
     }
+
+    impl KjOwn<ExternalMemoryAdjustment> {}
 
     /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
     ///

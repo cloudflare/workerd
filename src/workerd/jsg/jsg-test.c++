@@ -6,6 +6,8 @@
 
 #include <signal.h>
 
+#include <kj/thread.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -625,6 +627,79 @@ KJ_TEST("External memory adjustment - defered") {
   // Making an adjustment anyway won't do anything but also won't crash
   auto adjuster3 = target->getAdjustment(500);
   KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
+}
+
+KJ_TEST("External memory adjustment - decrease under the lock of a pending increase") {
+  // An adjustment made on another thread while this one holds the lock is pending until the next
+  // lock. Releasing it under this lock must not make V8's total fall below zero, which V8 checks
+  // and aborts on. 1 GiB is far more than a fresh isolate reports, so V8 would see the fall.
+  constexpr size_t AMOUNT = static_cast<size_t>(1) << 30;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    auto target = lock.getExternalMemoryTarget();
+    auto makePending = [&]() {
+      kj::Maybe<ExternalMemoryAdjustment> result;
+      {
+        kj::Thread thread([&]() { result = target->getAdjustment(AMOUNT); });
+      }
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == AMOUNT);
+      return KJ_ASSERT_NONNULL(kj::mv(result));
+    };
+
+    // Destroyed.
+    { auto adjustment = makePending(); }
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+
+    // Lowered with adjust().
+    {
+      auto adjustment = makePending();
+      adjustment.adjust(-static_cast<ssize_t>(AMOUNT));
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+    }
+
+    // Lowered with adjustNow().
+    {
+      auto adjustment = makePending();
+      adjustment.adjustNow(lock, -static_cast<ssize_t>(AMOUNT));
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+    }
+
+    // A pending total larger than the decrease stays pending, net of it: V8 gets no rise from a
+    // decrease, which often runs in a destructor or a GC finalizer.
+    {
+      auto big = makePending();
+      kj::Maybe<ExternalMemoryAdjustment> small;
+      {
+        kj::Thread thread([&]() { small = target->getAdjustment(100); });
+      }
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == AMOUNT + 100);
+      small = kj::none;
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == AMOUNT);
+    }
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+  });
+}
+
+KJ_TEST("External memory adjustment - adjustNow() of another isolate's adjustment") {
+  // The adjustment counts against an isolate that is gone, so adjustNow() under another
+  // isolate's lock must not report it to that isolate: V8 would see 1 GiB leave a total that
+  // never held it, and abort.
+  constexpr size_t AMOUNT = static_cast<size_t>(1) << 30;
+  kj::Arc<const ExternalMemoryTarget> target;
+  {
+    IsolateUuidIsolate gone(v8System, kj::heap<IsolateObserver>());
+    target = gone.runInLockScope(
+        [&](IsolateUuidIsolate::Lock& lock) { return lock.getExternalMemoryTarget(); });
+  }
+  KJ_ASSERT(!target->isIsolateAlive());
+  auto adjustment = target->getAdjustment(AMOUNT);
+
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    adjustment.adjustNow(lock, -static_cast<ssize_t>(AMOUNT));
+    KJ_ASSERT(adjustment.getAmount() == 0);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+  });
 }
 
 KJ_TEST("strong jsg::Data destroyed after isolate teardown") {
