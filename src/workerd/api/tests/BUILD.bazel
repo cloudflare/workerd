@@ -1318,8 +1318,8 @@ wd_test(
     data = ["url-test.js"],
 )
 
-# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
-# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# The @all-compat-flags variant would turn the temporal flag on, which the cases without that flag
+# expect to be off.
 wd_test(
     # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
     # timeout in loaded debug builds.
@@ -1331,18 +1331,14 @@ wd_test(
 )
 
 # Top-level event listeners across a startup snapshot. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
-# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# pipeline.
 wd_test(
     src = "startup-snapshot-listeners-test.wd-test",
     args = ["--experimental"],
     data = ["startup-snapshot-listeners-test.js"],
-    generate_all_compat_flags_variant = False,
 )
 
 # Module identity across a startup snapshot. Only the @all-autogates variant runs the pipeline.
-# The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of
-# the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
 wd_test(
     src = "startup-snapshot-modules-test.wd-test",
     args = ["--experimental"],
@@ -1350,13 +1346,11 @@ wd_test(
         "startup-snapshot-modules-cjs-test.js",
         "startup-snapshot-modules-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
 # Live API objects (Headers, URL, TextEncoder, crypto, navigator, node:fs, bindings) across a
 # startup snapshot, and the cases that must fall back. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the Worker
-# out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# pipeline.
 wd_test(
     src = "startup-snapshot-wrappables-test.wd-test",
     args = ["--experimental"],
@@ -1364,23 +1358,19 @@ wd_test(
         "startup-snapshot-wrappables-fs-test.js",
         "startup-snapshot-wrappables-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
 # Capability bindings captured at module scope and used at request time, and the kinds that keep
-# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline. The
-# @all-compat-flags variant would turn new_module_registry on, which keeps the Worker out of the
-# startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-bindings-test.wd-test",
     args = ["--experimental"],
     data = ["startup-snapshot-bindings-test.js"],
-    generate_all_compat_flags_variant = False,
 )
 
 # Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
-# pipeline. The @all-compat-flags variant would turn new_module_registry on, which keeps the
-# Worker out of the startup-snapshot pipeline and so would quietly test only the plain-Worker half.
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, under which the
+# function createRequire('/worker.js') returns does not find ./lib.cjs.
 wd_test(
     src = "startup-snapshot-functions-test.wd-test",
     args = ["--experimental"],
@@ -1391,10 +1381,19 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# Module identity and import.meta across a startup snapshot with the new module registry. Only
+# the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-new-module-registry-case-test.js",
+        "startup-snapshot-new-module-registry-test.js",
+    ],
+)
+
 # Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
-# Only the @all-autogates variant runs the pipeline. The @all-compat-flags variant would turn
-# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline and so would
-# quietly test only the plain-Worker half.
+# Only the @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-node-test.wd-test",
     args = ["--experimental"],
@@ -1402,7 +1401,6 @@ wd_test(
         "startup-snapshot-node-case-test.js",
         "startup-snapshot-node-test.js",
     ],
-    generate_all_compat_flags_variant = False,
 )
 
 wd_test(

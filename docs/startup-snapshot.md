@@ -37,8 +37,8 @@ all of these hold:
   top-level code has to run there for DevTools to see its console output and stop at its
   breakpoints;
 - `supportsStartupSnapshot()` accepts the Worker: ES-modules syntax (not a service-worker
-  script), no Wasm modules, not a Python Worker, the legacy module registry (no
-  `new_module_registry`), the `typescript_implemented_streams` flag, and only bindings of kinds
+  script), no Wasm modules, not a Python Worker, the `typescript_implemented_streams` flag, and
+  only bindings of kinds
   that transfer (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). The C++
   streams implementation leaves a pending `pull()` as a C++ promise continuation reachable from
   the context, which `CreateBlob()` cannot serialize; the TypeScript implementation keeps it in
@@ -105,7 +105,10 @@ all of these hold:
 6. The zygote's global scope is cleared, the script's module context handle dropped, and
    `IsolateBase::createSnapshotBlob()` runs. Its steps are numbered in `setup.c++`:
    1. `bakeModuleRegistryIntoSnapshot()`: every materialized module handle of the legacy registry
-      is pinned and recorded in `artifact.moduleRecords`; the handles are reset.
+      is pinned and recorded in `artifact.moduleRecords`; the handles are reset. With the new
+      module registry, `modules::recordIsolateModuleRegistryForSnapshot()` instead pins the
+      `v8::Module` of each of the registry's resolutions (a context type and a specifier, query
+      and fragment included) and records them in `artifact.newModuleRegistryRecords`.
    2. `WrappablesSerializeMetadata::recordLiveWrappables()`: every live JSG object is recorded
       while it still exists, by its tag alone for a stateless type, as a `snapshotClone()`
       otherwise (`artifact.liveWrappables`), keyed by its CppgcShim address. The metadata roots
@@ -173,6 +176,12 @@ long as the isolate does. In order:
    (`tryTakeSnapshotModule()`) and still registers the lazily compilable builtins the zygote
    never touched, then `applySnapshotSeeds()`. Runtime `import()`, `require()` and the
    `Buffer`/`process` globals therefore resolve to the instances the top level evaluated against.
+   With the new module registry, `ModuleRegistry::attachToIsolate()` instead rebuilds the
+   isolate's resolution and instantiation tables from `newModuleRegistryRecords`
+   (`IsolateModuleRegistry::restoreFromSnapshot()`), so that `import()` and `import.meta` find
+   the modules the top level evaluated. Every synthetic module of the new registry is created
+   with the same evaluation steps, which `Worker::Isolate` registers as an external reference
+   (`getSyntheticModuleEvaluationStepsRef()`).
 5. The `Worker` constructor takes `env` from the snapshot (`extractOnceFromSnapshot()`), complete
    with its bindings: `factory_new_worker()` compiles no bindings for a Worker started from a
    snapshot, while `ctx.exports` is still built for it afterwards, by `worker_set_ctx_exports()`.
@@ -193,6 +202,7 @@ long as the isolate does. In order:
 | `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
 | `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
+| New module registry's resolutions            | pinned `v8::Module`s, rebuilt into the restored registry    | `newModuleRegistryRecords`        |
 | Global-scope event listeners                 | pinned identity, callback and receiver; re-registered in C++ | `listenerRecords`                |
 
 Not transferred, by design: `ctx.exports` (built for the real Worker after the zygote has run),
@@ -226,9 +236,10 @@ also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Cry
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
 
-A `jsg::Function` the top level keeps (the function `createRequire()` returns, for example)
-transfers if its functor provides `Impl clone() const`; V8 patch 0052 keeps functions created by
-`v8::Function::New()` in the context snapshot so that their wrapper goes through the same path.
+A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
+registry's `import.meta.resolve`, for example) transfers if its functor provides
+`Impl clone() const`; V8 patch 0052 keeps functions created by `v8::Function::New()` in the
+context snapshot so that their wrapper goes through the same path.
 
 Neither may throw: see the contracts on `Object::jsgSnapshotStateless` (`jsg.h`) and
 `Wrappable::snapshotClone()` (`wrappable.h`). A type with neither makes every Worker whose top
@@ -253,8 +264,7 @@ its base type.
 Two outcomes are possible for a Worker that qualifies:
 
 - **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a module
-  fallback service, a service-worker script, Wasm modules, Python, the new module registry, C++
-  streams, or a binding
+  fallback service, a service-worker script, Wasm modules, Python, C++ streams, or a binding
   of a kind that cannot transfer (`cryptoKey`, `memoryCache`, `wrapped`, logged at INFO as
   `startup snapshot skipped: a binding of this kind cannot be transferred`), or a dynamically
   loaded Worker. No zygote runs.
@@ -312,6 +322,8 @@ once.
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
 | `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
+| `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
+| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, `node:diagnostics_channel`) across the snapshot |
 | `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and ineligible cases fall back |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
