@@ -327,54 +327,52 @@ if (compatFlags['typescript_implemented_streams']) {
   }
 }
 
-// The TypeScript MessageChannel and MessagePort replace the C++ ones. They are
-// loaded whether or not they become globals: cloudflare-internal:messagechannel
-// (used by node:worker_threads) reads them from this module's exports
-// (MessageChannelModule in api/messagechannel.h).
-if (autogates['ts-message-channel']) {
-  const {
-    MessageChannel,
-    MessagePort,
-  } = require('messagechannel/messagechannel');
-  if (compatFlags['expose_global_message_channel']) {
-    // Installed where JSG_NESTED_TYPE installs the C++ classes, with the same
-    // attributes: always on the global scope's prototype, with all three true,
-    // and under spec_compliant_property_attributes also as own properties of
-    // the global, non-enumerable per Web IDL.
-    ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+// MessageChannel and MessagePort are loaded whether or not they become
+// globals: cloudflare-internal:messagechannel (used by node:worker_threads)
+// reads them from this module's exports (MessageChannelModule in
+// api/messagechannel.h).
+const {
+  MessageChannel,
+  MessagePort,
+} = require('messagechannel/messagechannel');
+if (compatFlags['expose_global_message_channel']) {
+  // Installed as JSG_NESTED_TYPE installs a global class: always on the
+  // global scope's prototype, with all three attributes true, and under
+  // spec_compliant_property_attributes also as own properties of the global,
+  // non-enumerable per Web IDL.
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    MessageChannel: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: MessageChannel,
+    },
+    MessagePort: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: MessagePort,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
       MessageChannel: {
         __proto__: null,
         configurable: true,
-        enumerable: true,
+        enumerable: false,
         writable: true,
         value: MessageChannel,
       },
       MessagePort: {
         __proto__: null,
         configurable: true,
-        enumerable: true,
+        enumerable: false,
         writable: true,
         value: MessagePort,
       },
     });
-    if (compatFlags['spec_compliant_property_attributes']) {
-      ObjectDefineProperties(globalThis, {
-        MessageChannel: {
-          __proto__: null,
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: MessageChannel,
-        },
-        MessagePort: {
-          __proto__: null,
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: MessagePort,
-        },
-      });
-    }
   }
 }
 
