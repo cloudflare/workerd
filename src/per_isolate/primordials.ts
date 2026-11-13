@@ -312,6 +312,7 @@ const kIllegalInvocation =
 // Math / Number (statics - plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
+const MathTrunc = Math.trunc;
 const NumberIsFinite = Number.isFinite;
 const NumberIsNaN = Number.isNaN;
 
@@ -846,6 +847,7 @@ module.exports = ObjectFreeze({
   // Math / Number
   MathMax,
   MathMin,
+  MathTrunc,
   NumberIsFinite,
   NumberIsNaN,
 

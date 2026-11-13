@@ -114,6 +114,10 @@ namespace workerd::util {
      bootstrap (src/per_isolate/structured-clone.ts), a WebIDL layer over the same native          \
      serializer, rather than the C++ method in api/global-scope.h. */                              \
   V(TS_STRUCTURED_CLONE)                                                                           \
+  /* SubtleCrypto is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/crypto/subtle.ts) over the native SubtleCryptoBackend, rather than the C++    \
+     class in api/crypto/crypto.h. */                                                              \
+  V(TS_WEBCRYPTO)                                                                                  \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
