@@ -1548,7 +1548,10 @@ kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
     pendingLead = kj::none;
   }
   auto dest = utf16.slice(prefix);
-  str.writeInto(js, kj::arrayPtr(reinterpret_cast<uint16_t*>(dest.begin()), dest.size()));
+  auto result =
+      str.writeInto(js, kj::arrayPtr(reinterpret_cast<uint16_t*>(dest.begin()), dest.size()));
+  KJ_ASSERT(
+      result.written == dest.size(), "writeInto must completely overwrite the backing buffer");
 
   // A lead surrogate at the very end may pair with whatever comes next, so it
   // cannot be encoded until the next chunk (or flush()) settles the question.
