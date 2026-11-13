@@ -99,9 +99,10 @@ pub enum Error {
     #[error("bucket: {0}")]
     Http(String),
     /// The store refused a conditional write's guard, but an earlier attempt
-    /// of the same request may have been applied, and the refusal may be of
-    /// that attempt's own write: whether the write landed is unknown. Reading
-    /// the object back tells.
+    /// of the same request, or a copy sent beside it, may have been applied,
+    /// and the refusal may be of that one's own write: whether the write
+    /// landed is unknown. Reading the object back tells, unless a copy still
+    /// in flight lands after the read.
     #[error("bucket: {0}; an earlier attempt may have landed")]
     OutcomeUnknown(String),
     #[error("record: {0}")]

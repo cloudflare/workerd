@@ -30,6 +30,17 @@ fn divided_times_keep_their_proportions() {
 }
 
 #[test]
+fn every_divided_timing_sends_a_stalled_request_again_within_its_round() {
+    // Every divisor up to the shortest time, which rounds it to 1 ms; none
+    // past it (`a_divisor_that_rounds_a_time_to_zero_is_refused`).
+    let shortest = Timing::DEFAULT.times().into_iter().min().unwrap();
+    for t in (1..=shortest).map(|d| Timing::divided(d).unwrap()) {
+        assert!(t.renew_attempt_ms < t.renew_timeout_ms, "{t:?}");
+        assert!(t.list_attempt_ms < t.list_timeout_ms, "{t:?}");
+    }
+}
+
+#[test]
 fn a_divisor_that_rounds_a_time_to_zero_is_refused() {
     let shortest = Timing::DEFAULT.times().into_iter().min().unwrap();
     assert_eq!(Timing::divided(0), None);

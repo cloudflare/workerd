@@ -24,6 +24,7 @@ use crate::bucket::Entry;
 use crate::bucket::Guard;
 use crate::bucket::Store;
 use crate::bucket::Version;
+use crate::http::Call;
 use crate::http::Http;
 use crate::http::HttpResponse;
 use crate::http::Payload;
@@ -106,7 +107,10 @@ impl<D> Client<D> {
 #[async_trait::async_trait(?Send)]
 impl<D: Dialect> Store for Client<D> {
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
-        let response = self.send("GET", key, &[], Vec::new(), none(), to).await?;
+        let empty = none();
+        let response = self
+            .send(&call_for("GET", false, &empty, to), key, &[], Vec::new())
+            .await?;
         match response.status {
             200 => {
                 let version = version::<D>("GET", key, &response)?;
@@ -134,7 +138,8 @@ impl<D: Dialect> Store for Client<D> {
                 D::precondition(guard).map_err(|e| Error::Http(format!("PUT {key}: {e}")))?;
             headers.push(header);
         }
-        let sent = self.exchange("PUT", key, &[], headers, body, None).await?;
+        let put = call_for("PUT", guard.is_some(), &body, None);
+        let sent = self.exchange(&put, key, &[], headers).await?;
         if !written(key, &sent, guard.is_some())? {
             return Ok(None);
         }
@@ -142,9 +147,9 @@ impl<D: Dialect> Store for Client<D> {
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        let response = self
-            .send("DELETE", key, &[], Vec::new(), none(), None)
-            .await?;
+        let empty = none();
+        let delete = call_for("DELETE", false, &empty, None);
+        let response = self.send(&delete, key, &[], Vec::new()).await?;
         match response.status {
             200 | 204 | 404 => Ok(()),
             _ => Err(failure("DELETE", key, &response)),
@@ -180,9 +185,9 @@ impl<D: Dialect> Client<D> {
             if let Some(token) = token.take() {
                 query.push(("continuation-token", token));
             }
-            let response = self
-                .send("GET", "", &query, Vec::new(), none(), None)
-                .await?;
+            let empty = none();
+            let list = call_for("GET", false, &empty, None);
+            let response = self.send(&list, "", &query, Vec::new()).await?;
             if response.status != 200 {
                 return Err(failure("LIST", prefix, &response));
             }
@@ -196,14 +201,12 @@ impl<D: Dialect> Client<D> {
     /// Authorize and send one request (`exchange`), answering its response.
     async fn send(
         &self,
-        method: &str,
+        call: &Call<'_>,
         key: &str,
         query: &[(&str, String)],
         headers: Vec<(String, String)>,
-        body: Payload,
-        to: Option<&Path>,
     ) -> Result<HttpResponse> {
-        let sent = self.exchange(method, key, query, headers, body, to).await?;
+        let sent = self.exchange(call, key, query, headers).await?;
         Ok(sent.response)
     }
 
@@ -215,20 +218,31 @@ impl<D: Dialect> Client<D> {
     /// an owner record is written twice in a row when an object reclaims:
     /// under a 10,000-object kill, four reclaims failed that way and dropped
     /// their objects. So is a request refused as unauthenticated, once, when
-    /// the dialect has another credential for it.
+    /// the dialect has another credential for it. Each authorized request is
+    /// sent once more if `http::prompt` bounds it and it has not answered in
+    /// time (`http::attempt`), both copies with one authorization, their
+    /// answers judged by `settles`.
     ///
     /// An attempt sent again may have been applied, and a conditional
     /// write's next attempt then fails its guard against it
     /// (`Sent::maybe_applied`).
     async fn exchange(
         &self,
-        method: &str,
+        call: &Call<'_>,
         key: &str,
         query: &[(&str, String)],
         headers: Vec<(String, String)>,
-        body: Payload,
-        to: Option<&Path>,
     ) -> Result<Sent> {
+        let Call {
+            method,
+            guarded,
+            body,
+            to,
+        } = *call;
+        let what = || match query.iter().find(|(name, _)| *name == "prefix") {
+            Some((_, prefix)) if key.is_empty() => format!("LIST {prefix}"),
+            _ => format!("{method} {key}"),
+        };
         let path = format!("/{}/{}", encode(&self.bucket, false), encode(key, false));
         let mut query: Vec<String> = query
             .iter()
@@ -257,9 +271,14 @@ impl<D: Dialect> Client<D> {
                 headers: headers.clone(),
             };
             let credential = self.dialect.authorize(&mut request).await?;
-            let response = self
-                .send_once(method, key, &url, request.headers, body.clone(), to)
-                .await?;
+            let once = || {
+                let headers = request.headers.clone();
+                self.send_once(method, key, &url, headers, body.clone(), to)
+            };
+            let settled = |response: &HttpResponse| settles(guarded, response);
+            let attempt = crate::http::attempt(call, what, settled, once).await;
+            maybe_applied |= attempt.sent_twice;
+            let response = attempt.answer?;
             // A refused credential is dropped even when the request is not
             // sent again, so that no later request carries it.
             if response.status == 401
@@ -330,13 +349,47 @@ struct Sent {
     /// S3-compatible one does. Taking a refusal for a possible write costs a
     /// read; the reverse misreports the write. One answered 401 was refused
     /// first: the credential is checked before the request is processed.
-    /// Whatever sends a request again while an earlier attempt may still
-    /// land, one whose answer never came, sets it too.
+    /// So may a copy `http::attempt` sent beside the one answered
+    /// (`http::Attempt::sent_twice`), before that one's guard was checked or
+    /// after: its own answer is dropped when the other's comes first, a 401
+    /// among them.
     maybe_applied: bool,
 }
 
 fn none() -> Payload {
     Payload::Bytes(bytes::Bytes::new())
+}
+
+/// A `method` request with `body`, a write with a precondition if `guarded`,
+/// whose answer's body goes to the file `to`, if any.
+const fn call_for<'a>(
+    method: &'a str,
+    guarded: bool,
+    body: &'a Payload,
+    to: Option<&'a Path>,
+) -> Call<'a> {
+    Call {
+        method,
+        guarded,
+        body,
+        to,
+    }
+}
+
+/// Whether `response` answers its request for good while another copy of
+/// the request is in flight (`http::attempt`), rather than wait for that
+/// one's answer. A refusal (429, 503) did nothing, and says nothing of the
+/// other copy. A guarded write's failed guard (412) or concurrent write
+/// (R2's 409) may be the other copy's own write, landed or in progress,
+/// whose answer is then its success; without that answer, the write's
+/// outcome is unknown (`Sent::maybe_applied`). S3 and Cloud Storage answer
+/// alike.
+const fn settles(guarded: bool, response: &HttpResponse) -> bool {
+    match response.status {
+        429 | 503 => false,
+        409 | 412 => !guarded,
+        _ => true,
+    }
 }
 
 /// How long one bucket request may take. R2 answers in 0.1-1 s from the
@@ -354,10 +407,11 @@ fn failure(call: &str, key: &str, response: &HttpResponse) -> Error {
 const MAX_CODE: usize = 100;
 
 /// Whether a PUT's answer says it wrote the object, `false` when its guard
-/// failed and it wrote nothing. A guard that failed after an earlier attempt
-/// may have been applied may have failed against that attempt's write:
-/// `Error::OutcomeUnknown`. A 409 or 412 to a write without a guard is an
-/// error: `Store::put` answers `Ok(None)` only for a failed guard.
+/// failed and it wrote nothing. A guard that failed after an earlier attempt,
+/// or a copy sent beside it, may have been applied may have failed against
+/// that one's write: `Error::OutcomeUnknown`. A 409 or 412 to a write without
+/// a guard is an error: `Store::put` answers `Ok(None)` only for a failed
+/// guard.
 fn written(key: &str, sent: &Sent, guarded: bool) -> Result<bool> {
     let response = &sent.response;
     match response.status {
