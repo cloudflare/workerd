@@ -59,7 +59,7 @@ KJ_TEST("IdentityTransformStream records cancellation before a later readable ca
 
   auto pipe = newIdentityPipe();
   auto buffer = kj::heapArray<kj::byte>(64);
-  memset(buffer.begin(), 'x', buffer.size());
+  buffer.asPtr().fill('x');
 
   {
     auto writePromise = pipe.out->write(buffer.asPtr());
@@ -113,7 +113,7 @@ KJ_TEST("IdentityTransformStream releases a pending write buffer when its promis
 
   auto pipe = newIdentityPipe();
   auto buffer = kj::heapArray<kj::byte>(64);
-  memset(buffer.begin(), 'x', buffer.size());
+  buffer.asPtr().fill('x');
 
   {
     auto writePromise = pipe.out->write(buffer.asPtr());
@@ -134,7 +134,7 @@ KJ_TEST("IdentityTransformStream releases a partially-consumed write buffer on c
   auto readPromise = pipe.in->tryRead(destination, 1, sizeof(destination));
 
   auto buffer = kj::heapArray<kj::byte>(4);
-  memset(buffer.begin(), 'x', buffer.size());
+  buffer.asPtr().fill('x');
   {
     auto writePromise = pipe.out->write(buffer.asPtr());
     KJ_EXPECT(readPromise.wait(ws) == sizeof(destination));
@@ -732,7 +732,7 @@ KJ_TEST("DrainingReader with maxRead parameter (internal stream)") {
         if (readCount == 1) {
           // Return less than maxBytes
           auto toWrite = kj::min(maxBytes, static_cast<size_t>(100));
-          memset(buffer, 'x', toWrite);
+          kj::arrayPtr(static_cast<kj::byte*>(buffer), toWrite).fill('x');
           return toWrite;
         }
         return static_cast<size_t>(0);  // EOF
@@ -1399,7 +1399,7 @@ class ZeroFillSource final: public ReadableStreamSource {
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto amount = kj::min(maxBytes, length);
-    memset(buffer, 0, amount);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount).fill(0);
     length -= amount;
     return amount;
   }
