@@ -76,6 +76,17 @@ TracingSpanContext toTracingSpanContext(kj::Maybe<tracing::SpanContext> context)
 // SpanState
 
 void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
+  if (key == "user.id"_kj || key == "session.id"_kj || key == "account.id"_kj) {
+    KJ_IF_SOME(value, maybeValue) {
+      KJ_IF_SOME(text, value.tryGet<kj::String>()) {
+        KJ_IF_SOME(context, IoContext::tryCurrent()) {
+          KJ_IF_SOME(observer, context.getIssueObserver()) {
+            observer.noteIssueUserContext(key, text);
+          }
+        }
+      }
+    }
+  }
   if (!canRecordAttributes()) {
     return;
   }

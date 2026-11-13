@@ -378,6 +378,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().metrics;
   }
 
+  // The current request's observer, if it wants issue reports. Attributed like getWorkerTracer().
+  kj::Maybe<RequestObserver&> getIssueObserver() {
+    if (incomingRequests.empty()) return kj::none;
+    auto& observer = getMetrics();
+    if (!observer.issuesEnabled()) return kj::none;
+    return observer;
+  }
+
   kj::Maybe<BaseTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();

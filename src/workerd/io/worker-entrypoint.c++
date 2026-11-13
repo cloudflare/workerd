@@ -31,6 +31,18 @@ kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
   return value.map([](kj::String& text) -> kj::StringPtr { return text; });
 }
 
+// Tells the observer the status the request returns. A 5xx is also reported as an issue, since
+// it may be the only sign that something failed.
+void noteIssueStatus(RequestObserver& observer, uint status) {
+  if (!observer.issuesEnabled() || status == 0) return;
+  observer.setIssueStatus(status);
+  if (status >= 500) {
+    issues::Field fields[] = {{"status"_kj, static_cast<int64_t>(status)}};
+    observer.reportIssue(issues::HTTP_SERVER_ERROR, kj::str("Worker returned HTTP ", status),
+        fields, nullptr, nullptr);
+  }
+}
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -538,6 +550,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
             PERFETTO_FLOW_FROM_POINTER(this));
         proxyTask = kj::mv(deferredProxy.proxyTask);
+        noteIssueStatus(*metricsForCatch, wrappedResponse->getHttpResponseStatus());
         KJ_IF_SOME(t, workerTracer) {
           auto httpResponseStatus = wrappedResponse->getHttpResponseStatus();
           if (httpResponseStatus != 0) {
@@ -652,6 +665,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         if (wrappedResponse->isSent()) return;
         kj::HttpHeaders errorHeaders(threadContext.getHeaderTable());
         wrappedResponse->send(statusCode, statusText, errorHeaders, static_cast<uint64_t>(0));
+        noteIssueStatus(*metricsForCatch, statusCode);
         KJ_IF_SOME(t, workerTracer) {
           t.setReturn(
               kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
@@ -894,8 +908,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
           // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
           // necessarily an internal error) and correspond to HTTP error 503.
           response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
+          noteIssueStatus(*metrics, 503);
         } else {
           response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+          noteIssueStatus(*metrics, 500);
         }
         KJ_IF_SOME(t, workerTracer) {
           t.setReturn(kj::none,

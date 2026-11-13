@@ -2111,63 +2111,96 @@ void handleLog(jsg::Lock& js,
     return kj::str("[", kj::delimited(stringified, ", "_kj), "]");
   };
 
-  // Only check tracing if console.log() was not invoked at the top level.
-  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-      auto timestamp = ioContext.now();
+  auto captureErrors = [&](IoContext& ioContext) -> tracing::LogErrorInfo {
+    // Scan all arguments for native Errors and build a positional ErrorInfo array: slot `i`
+    // holds the extracted {name, message, stack} for arg `i` if it was a native Error, otherwise
+    // kj::none. If no argument was a native Error, the whole array is left absent (kj::none) to
+    // keep the common case cheap on the wire. We extract via the same helper used for uncaught
+    // exceptions (getErrorInfoForTrace) so that `console.error(err)` and a thrown `err` produce
+    // an identical representation in traces.
+    tracing::LogErrorInfo capturedErrors;
+    {
+      auto& errorTypeHandler =
+          ioContext.getWorker().getIsolate().getApi().getErrorInterfaceTypeHandler(js);
+      kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
+      bool anyError = false;
+      for (auto i: kj::zeroTo(length)) {
+        if (!tryCatch.CanContinue()) break;
+        auto arg = info[i];
+        if (!arg->IsNativeError()) continue;
 
-      // Scan all arguments for native Errors and build a positional ErrorInfo array: slot `i`
-      // holds the extracted {name, message, stack} for arg `i` if it was a native Error, otherwise
-      // kj::none. If no argument was a native Error, the whole array is left absent (kj::none) to
-      // keep the common case cheap on the wire. We extract via the same helper used for uncaught
-      // exceptions (getErrorInfoForTrace) so that `console.error(err)` and a thrown `err` produce
-      // an identical representation in traces.
-      tracing::LogErrorInfo capturedErrors;
-      {
-        auto& errorTypeHandler =
-            ioContext.getWorker().getIsolate().getApi().getErrorInterfaceTypeHandler(js);
-        kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
-        bool anyError = false;
-        for (auto i: kj::zeroTo(length)) {
-          if (!tryCatch.CanContinue()) break;
-          auto arg = info[i];
-          if (!arg->IsNativeError()) continue;
-
-          // Reading the error's properties may throw an application-level JS exception (e.g. user
-          // code defines `stack`/`message` as a throwing getter). JSG_CATCH still rethrows
-          // automatically if the isolate is terminating, so only recoverable JS exceptions land in
-          // the handler below.
-          kj::Maybe<tracing::ErrorInfo> extracted;
-          JSG_TRY(js) {
-            // Fresh handle scope so the temporary handles created while reading the error's
-            // properties are released each iteration rather than accumulating across the loop.
-            v8::HandleScope handleScope(js.v8Isolate);
-            extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler);
-          }
-          JSG_CATCH(_) {
-            // Deliberately swallow the exception because:
-            //   - console.* must not throw
-            //   - errorInfo is purely additive/best-effort. If it fails to parse,
-            //     the argument is still stringified
-            //   - We don't log the failure to mirror the silent fallback
-            //     in getErrorInfoForTrace's stringify path.
-          }
-
-          KJ_IF_SOME(e, extracted) {
-            if (!anyError) {
-              slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
-              anyError = true;
-            }
-            slots[i] = kj::mv(e);
-          }
+        // Reading the error's properties may throw an application-level JS exception (e.g. user
+        // code defines `stack`/`message` as a throwing getter). JSG_CATCH still rethrows
+        // automatically if the isolate is terminating, so only recoverable JS exceptions land in
+        // the handler below.
+        kj::Maybe<tracing::ErrorInfo> extracted;
+        JSG_TRY(js) {
+          // Fresh handle scope so the temporary handles created while reading the error's
+          // properties are released each iteration rather than accumulating across the loop.
+          v8::HandleScope handleScope(js.v8Isolate);
+          extracted = getErrorInfoForTrace(js, jsg::JsValue(arg), errorTypeHandler);
         }
-        if (anyError) {
-          capturedErrors = kj::mv(slots);
+        JSG_CATCH(_) {
+          // Deliberately swallow the exception because:
+          //   - console.* must not throw
+          //   - errorInfo is purely additive/best-effort. If it fails to parse,
+          //     the argument is still stringified
+          //   - We don't log the failure to mirror the silent fallback
+          //     in getErrorInfoForTrace's stringify path.
+        }
+
+        KJ_IF_SOME(e, extracted) {
+          if (!anyError) {
+            slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+            anyError = true;
+          }
+          slots[i] = kj::mv(e);
         }
       }
+      if (anyError) {
+        capturedErrors = kj::mv(slots);
+      }
+    }
+    return capturedErrors;
+  };
 
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    KJ_IF_SOME(observer, ioContext.getIssueObserver()) {
+      kj::String label;
+      if (length > 0) {
+        KJ_IF_SOME(first, jsg::JsValue(info[0]).tryCast<jsg::JsString>()) {
+          char buf[128];
+          auto written = first.writeInto(js, buf, jsg::JsString::REPLACE_INVALID_UTF8).written;
+          label = kj::str(kj::ArrayPtr<const char>(buf, written));
+        }
+      }
+      observer.issueBreadcrumb(issues::BreadcrumbKind::LOG, logLevelToString(level), label);
+
+      auto errors = captureErrors(ioContext);
+      if (level == LogLevel::ERROR || errors != kj::none) {
+        constexpr size_t MAX_ISSUE_ERRORS = 4;
+        kj::Vector<issues::Error> issueErrors;
+        KJ_IF_SOME(slots, errors) {
+          for (auto& slot: slots) {
+            if (issueErrors.size() == MAX_ISSUE_ERRORS) break;
+            KJ_IF_SOME(e, slot) {
+              issueErrors.add(issues::Error{.name = e.name,
+                .message = e.message,
+                .stack = e.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; })});
+            }
+          }
+        }
+        kj::StringPtr text = label;
+        if (text == ""_kj && issueErrors.size() > 0) text = issueErrors[0].message;
+        issues::Field fields[] = {{"level"_kj, logLevelToString(level)}};
+        issues::Attachment attachments[] = {{"args"_kj, [&]() { return message(); }}};
+        observer.reportIssue(issues::ERROR_LOG, text, fields, issueErrors.asPtr(), attachments);
+      }
+    }
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      auto timestamp = ioContext.now();
       tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
-          kj::mv(capturedErrors));
+          captureErrors(ioContext));
     }
   }
 
@@ -3021,8 +3054,29 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::JsMessage& message,
     kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
-  // Only add exception to trace when running within an I/O context with a tracer.
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    kj::Maybe<RequestObserver&> issueObserver;
+    KJ_IF_SOME(request, incomingRequest) {
+      issueObserver = request.getMetrics();
+    } else if (ioContext.hasCurrentIncomingRequest()) {
+      issueObserver = ioContext.getMetrics();
+    }
+    KJ_IF_SOME(observer, issueObserver) {
+      if (observer.issuesEnabled() && source != UncaughtExceptionSource::INTERNAL &&
+          source != UncaughtExceptionSource::INTERNAL_ASYNC) {
+        JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
+          auto info = getErrorInfoForTrace(
+              js, exception, worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
+          issues::Error issueErrors[] = {{.name = info.name,
+            .message = info.message,
+            .stack = info.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; })}};
+          observer.reportIssue(
+              issues::UNCAUGHT_EXCEPTION, info.message, nullptr, issueErrors, nullptr);
+        });
+      }
+    }
+
+    // Only add exception to trace when running within an I/O context with a tracer.
     kj::Maybe<BaseTracer&> maybeTracer;
     KJ_IF_SOME(request, incomingRequest) {
       maybeTracer = request.getWorkerTracer();
