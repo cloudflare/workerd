@@ -105,7 +105,11 @@ fn error_codes_are_capped() {
         metadata_flavor: String::new(),
         body: long.into_bytes(),
     };
-    let Err(Error::Http(message)) = written("k", &response, false) else {
+    let sent = Sent {
+        response,
+        maybe_applied: false,
+    };
+    let Err(Error::Http(message)) = written("k", &sent, false) else {
         panic!("a 500 was accepted");
     };
     assert_eq!(message, format!("PUT k: 500 {}", "x".repeat(100)));
@@ -147,8 +151,52 @@ async fn call(bucket: &Bucket, call: Call) -> std::result::Result<String, String
     };
     outcome.map_err(|e| match e {
         Error::Http(message) => message,
+        Error::OutcomeUnknown(message) => format!("unknown: {message}"),
         other => other.to_string(),
     })
+}
+
+/// Drives `bucket` as `end_to_end` does, through calls the bucket answers
+/// only after refusing them once or more.
+async fn retried(
+    bucket: &Bucket,
+    server: &Server,
+    queue: &Mutex<VecDeque<Answer>>,
+    version: (&'static str, &str),
+) {
+    let answer = |status| Answer::Reply {
+        status,
+        headers: if status == 200 {
+            vec![(version.0, version.1.to_owned())]
+        } else {
+            Vec::new()
+        },
+        body: String::new(),
+    };
+    let unknown = |status| Err(format!("unknown: PUT k: {status} to a retry"));
+    let written = Ok(format!("Some({:?})", version.1));
+    for (call_, statuses, expected) in [
+        // A 429 or 503 may follow a write the bucket applied, and a guard
+        // that fails after it may fail against that write.
+        (Call::PutIfAbsent, &[503, 412][..], unknown(412)),
+        (Call::PutIfAbsent, &[503, 409], unknown(409)),
+        (Call::PutIfAbsent, &[429, 412], unknown(412)),
+        (Call::PutIfAbsent, &[503, 429, 412], unknown(412)),
+        (Call::PutIfAbsent, &[503, 200], written.clone()),
+        (Call::PutIfAbsent, &[429, 200], written),
+        (Call::PutIfAbsent, &[412], Ok("None".into())),
+        // A write without a guard fails no guard.
+        (Call::Put, &[503, 200], Ok("written".into())),
+        (Call::Put, &[503, 412], Err("PUT k: 412 ".into())),
+    ] {
+        queue
+            .lock()
+            .unwrap()
+            .extend(statuses.iter().map(|status| answer(*status)));
+        let outcome = call(bucket, call_).await;
+        assert_eq!(outcome, expected, "{call_:?} answered {statuses:?}");
+        assert_eq!(server.take().len(), statuses.len(), "{statuses:?}");
+    }
 }
 
 /// Drives `bucket`, the client of the fake bucket `b` at `server`, which
@@ -265,6 +313,7 @@ fn an_s3_bucket_end_to_end() {
         let (s3, prefix) = S3::new("s3://b", &options).unwrap();
         let bucket = Bucket::new(s3, &prefix);
         let wire = (("etag", "\"e\""), "x-amz-meta-", true);
+        retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<SigV4>(bucket, &server, &queue, wire).await;
     });
 }
@@ -278,6 +327,7 @@ fn an_anonymous_cloud_storage_emulator_end_to_end() {
         let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
         let bucket = Bucket::new(gcs, &prefix);
         let wire = (("x-goog-generation", "17"), "x-goog-meta-", false);
+        retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<Google>(bucket, &server, &queue, wire).await;
     });
 }

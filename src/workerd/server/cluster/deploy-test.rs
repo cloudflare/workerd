@@ -62,6 +62,9 @@ enum Fault {
     Lands,
     /// The write fails without landing.
     Fails,
+    /// The write is decided, and answered as of unknown outcome, as the
+    /// client answers a refused retry: whether it landed or was refused.
+    Unknown,
 }
 
 /// A store whose next catalog write is preceded by another deploy's (`race`), and with
@@ -132,6 +135,10 @@ impl Store for Rc<Flaky> {
                 Err(Error::Http("PUT timed out".into()))
             }
             Some(Fault::Fails) => Err(Error::Http("PUT timed out".into())),
+            Some(Fault::Unknown) => {
+                self.inner.put(key, body, guard, metadata).await?;
+                Err(Error::OutcomeUnknown(format!("PUT {key}: 412")))
+            }
             None => self.inner.put(key, body, guard, metadata).await,
         }
     }
@@ -390,9 +397,45 @@ fn an_ambiguous_catalog_write_does_not_undo_a_later_deploy() {
     });
 }
 
+/// A catalog write of unknown outcome is resolved as one whose answer was
+/// lost: the catalog says whether it landed. When it names another deploy,
+/// the write may have landed beneath it, so it is not written again.
+#[test]
+fn a_catalog_write_of_unknown_outcome_is_resolved_by_reading_it() {
+    block_on(async {
+        let store = Rc::new(Flaky::default());
+        store.fail(CATALOG, Fault::Unknown);
+        let bucket = Bucket::new(store.clone(), "");
+        let published = publish(&bucket, "app", &services(&["app"])).await.unwrap();
+        assert_eq!(published.revision, 1);
+        assert_eq!(catalog_of(&bucket).await.revision, 1);
+        assert_eq!(store.catalog_writes.get(), 1);
+    });
+    block_on(async {
+        let store = Rc::new(Flaky::default());
+        let other = deployment_config("other", &services(&["one"])).unwrap();
+        let race = naming(1, "other", version_of(&other));
+        *store.race.borrow_mut() = Some(serde_json::to_vec(&race).unwrap());
+        store.fail(CATALOG, Fault::Unknown);
+        let bucket = Bucket::new(store.clone(), "");
+        upload(&bucket, "other", &other).await.unwrap();
+        let refused = refusal(publish(&bucket, "app", &services(&["two"])).await);
+        assert!(
+            refused.ends_with(
+                "may have been published. Workerd could not confirm the result because bucket: \
+                 PUT deploy/catalog.json: 412; an earlier attempt may have landed. \
+                 deploy/catalog.json is at revision 1 and does not name this version."
+            ),
+            "{refused}"
+        );
+        assert_eq!(catalog_of(&bucket).await, race);
+        assert_eq!(store.catalog_writes.get(), 1);
+    });
+}
+
 #[test]
 fn an_ambiguous_write_of_a_versions_object_is_resolved_by_reading_it() {
-    for fault in [Fault::Lands, Fault::Fails] {
+    for fault in [Fault::Lands, Fault::Fails, Fault::Unknown] {
         block_on(async {
             let store = Rc::new(Flaky::default());
             let bucket = Bucket::new(store.clone(), "");
@@ -401,12 +444,12 @@ fn an_ambiguous_write_of_a_versions_object_is_resolved_by_reading_it() {
             let key = format!("deploy/app/{version}/config.bin");
             store.fail(&key, fault);
             let result = upload(&bucket, "app", &config).await;
-            if fault == Fault::Lands {
-                assert_eq!(result.unwrap(), version);
-                assert!(read(&bucket, "app", &version).await.is_ok());
-            } else {
+            if fault == Fault::Fails {
                 assert!(matches!(result, Err(Error::Http(_))));
                 assert!(bucket.list("").await.unwrap().is_empty());
+            } else {
+                assert_eq!(result.unwrap(), version);
+                assert!(read(&bucket, "app", &version).await.is_ok());
             }
         });
     }

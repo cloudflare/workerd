@@ -2904,6 +2904,37 @@ async function until(check, ms, message) {
   assert.fail(message);
 }
 
+test('cluster: an owner record write answered 503 after it landed counts as written', async () => {
+  for (const options of [{}, { ...GCS, nodeEnv: (bucket) => bucket.gcsEnv }]) {
+    await withCluster(
+      1,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const [node] = nodes;
+        // A new object's first write is the owner record that opens epoch
+        // 1. It lands, the bucket answers 503, and the client's retry fails
+        // its precondition against it.
+        await bucket.setFaults([
+          { method: 'PUT', prefix: 'do/', status: 503, after: true, times: 1 },
+        ]);
+        const r = await fetchJson(node.httpPort, '/increment?name=landed');
+        assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+        assert.strictEqual(r.body.count, 1);
+        assert.deepStrictEqual(await bucket.faultHits(), [1]);
+        const key = `${objectPrefix(r.body.id)}/own.json`;
+        assert.strictEqual(await bucket.rejected(key), 1);
+        const record = JSON.parse(await bucket.get(key));
+        assert.deepStrictEqual(record, {
+          node: nodeKeys.get(node.nodeId),
+          epoch: 1,
+          from: 1,
+        });
+        assert.match(node.stderr, /epoch 1 opens new/);
+      },
+      options
+    );
+  }
+});
+
 test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata server', async () => {
   await withCluster(
     2,

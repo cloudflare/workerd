@@ -120,14 +120,22 @@ impl Registry {
                 instance: self.instance,
                 draining: self.draining.get(),
             })?;
-            if let Some(version) = self.bucket.put_if(&key, body, guard).await? {
-                self.own.replace(Some(version));
-                return Ok(expires_ms);
+            match self.bucket.put_if(&key, body, guard).await {
+                Ok(Some(version)) => {
+                    self.own.replace(Some(version));
+                    return Ok(expires_ms);
+                }
+                Ok(None) | Err(Error::OutcomeUnknown(_)) => {}
+                Err(error) => return Err(error),
             }
-            // Not the version we know. If this process wrote it, earlier
-            // renewals landed and only their answers were lost (timed-out
-            // rounds on the fleet), and one may land between our read and
-            // write: retry. Anything else is another writer.
+            // Not the version we know, or a refusal of this renewal's own
+            // write, whose first answer was lost. If this process wrote it,
+            // earlier renewals landed and only their answers were lost
+            // (timed-out rounds on the fleet), and one may land between our
+            // read and write: retry. Anything else is another writer. The
+            // record tells this process's writes from others', not one of
+            // them from another, and need not: only a write that answers its
+            // version renews the lease.
             let Some((current, version)) = self.bucket.get(&key).await? else {
                 return Err(Error::Fenced(self.node.clone()));
             };
@@ -159,13 +167,10 @@ impl Registry {
         let key = node_key(&self.node);
         for _ in 0..DEREGISTER_ATTEMPTS {
             let guard = Guard::Match(version);
-            if self
-                .bucket
-                .put_if(&key, body.clone(), guard)
-                .await?
-                .is_some()
-            {
-                return Ok(());
+            match self.bucket.put_if(&key, body.clone(), guard).await {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) | Err(Error::OutcomeUnknown(_)) => {}
+                Err(error) => return Err(error),
             }
             let Some((current, current_version)) = self.bucket.get(&key).await? else {
                 return Ok(());

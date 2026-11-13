@@ -134,11 +134,11 @@ impl<D: Dialect> Store for Client<D> {
                 D::precondition(guard).map_err(|e| Error::Http(format!("PUT {key}: {e}")))?;
             headers.push(header);
         }
-        let response = self.send("PUT", key, &[], headers, body, None).await?;
-        if !written(key, &response, guard.is_some())? {
+        let sent = self.exchange("PUT", key, &[], headers, body, None).await?;
+        if !written(key, &sent, guard.is_some())? {
             return Ok(None);
         }
-        Ok(Some(version::<D>("PUT", key, &response)?))
+        Ok(Some(version::<D>("PUT", key, &sent.response)?))
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
@@ -193,15 +193,7 @@ impl<D: Dialect> Client<D> {
         }
     }
 
-    /// Authorize and send one request. `key` is the object key, or empty
-    /// for a bucket-level call.
-    /// R2 answers 429 to more than about one write a second to one key, and
-    /// an owner record is written twice in a row when an object reclaims:
-    /// under a 10,000-object kill, four reclaims failed that way and dropped
-    /// their objects. A refused request did nothing, conditional or not, so
-    /// it is retried after a pause. So is a request refused as
-    /// unauthenticated, once, when the dialect has another credential for
-    /// it.
+    /// Authorize and send one request (`exchange`), answering its response.
     async fn send(
         &self,
         method: &str,
@@ -211,6 +203,32 @@ impl<D: Dialect> Client<D> {
         body: Payload,
         to: Option<&Path>,
     ) -> Result<HttpResponse> {
+        let sent = self.exchange(method, key, query, headers, body, to).await?;
+        Ok(sent.response)
+    }
+
+    /// Authorize and send one request. `key` is the object key, or empty
+    /// for a bucket-level call.
+    ///
+    /// A request the bucket refused under load is sent again after a pause:
+    /// R2 answers 429 to more than about one write a second to one key, and
+    /// an owner record is written twice in a row when an object reclaims:
+    /// under a 10,000-object kill, four reclaims failed that way and dropped
+    /// their objects. So is a request refused as unauthenticated, once, when
+    /// the dialect has another credential for it.
+    ///
+    /// An attempt sent again may have been applied, and a conditional
+    /// write's next attempt then fails its guard against it
+    /// (`Sent::maybe_applied`).
+    async fn exchange(
+        &self,
+        method: &str,
+        key: &str,
+        query: &[(&str, String)],
+        headers: Vec<(String, String)>,
+        body: Payload,
+        to: Option<&Path>,
+    ) -> Result<Sent> {
         let path = format!("/{}/{}", encode(&self.bucket, false), encode(key, false));
         let mut query: Vec<String> = query
             .iter()
@@ -229,6 +247,7 @@ impl<D: Dialect> Client<D> {
         };
         let mut pause = Duration::from_millis(250);
         let mut reauthorized = false;
+        let mut maybe_applied = false;
         loop {
             let mut request = Request {
                 method,
@@ -251,8 +270,12 @@ impl<D: Dialect> Client<D> {
                 continue;
             }
             if !matches!(response.status, 429 | 503) || pause > Duration::from_secs(2) {
-                return Ok(response);
+                return Ok(Sent {
+                    response,
+                    maybe_applied,
+                });
             }
+            maybe_applied = true;
             tokio::time::sleep(pause).await;
             pause *= 2;
         }
@@ -296,6 +319,22 @@ impl<D: Dialect> Client<D> {
     }
 }
 
+/// A request's response, after the attempts `Client::exchange` made of it.
+struct Sent {
+    response: HttpResponse,
+    /// Whether an attempt before the one answered may have been applied, so
+    /// that the bucket may have answered this one against it. One answered
+    /// 429 or 503 may have been: a 503 may come from anywhere on the way,
+    /// after the bucket applied the request, and that a store's 429 refuses
+    /// before anything applies is that store's to promise, which not every
+    /// S3-compatible one does. Taking a refusal for a possible write costs a
+    /// read; the reverse misreports the write. One answered 401 was refused
+    /// first: the credential is checked before the request is processed.
+    /// Whatever sends a request again while an earlier attempt may still
+    /// land, one whose answer never came, sets it too.
+    maybe_applied: bool,
+}
+
 fn none() -> Payload {
     Payload::Bytes(bytes::Bytes::new())
 }
@@ -315,13 +354,19 @@ fn failure(call: &str, key: &str, response: &HttpResponse) -> Error {
 const MAX_CODE: usize = 100;
 
 /// Whether a PUT's answer says it wrote the object, `false` when its guard
-/// failed and it wrote nothing. A 409 or 412 to a write without a guard is
-/// an error: `Store::put` answers `Ok(None)` only for a failed guard.
-fn written(key: &str, response: &HttpResponse, guarded: bool) -> Result<bool> {
+/// failed and it wrote nothing. A guard that failed after an earlier attempt
+/// may have been applied may have failed against that attempt's write:
+/// `Error::OutcomeUnknown`. A 409 or 412 to a write without a guard is an
+/// error: `Store::put` answers `Ok(None)` only for a failed guard.
+fn written(key: &str, sent: &Sent, guarded: bool) -> Result<bool> {
+    let response = &sent.response;
     match response.status {
         200 => Ok(true),
         // 412: the guard failed. 409: a concurrent conditional write to the
         // same key won the race, which is the same answer.
+        status @ (409 | 412) if guarded && sent.maybe_applied => Err(Error::OutcomeUnknown(
+            format!("PUT {key}: {status} to a retry"),
+        )),
         409 | 412 if guarded => Ok(false),
         _ => Err(failure("PUT", key, response)),
     }

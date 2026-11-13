@@ -13,7 +13,9 @@
 // A test arms faults with `POST /_faults` and a JSON array: each delays the
 // requests whose key starts with `prefix` (and does not end with `except`)
 // and whose method is `method` by `delayMs`, then answers `status` instead if
-// given, for the next `times` of them. `GET /_faults` lists them, with `hits`.
+// given, for the next `times` of them; with `after`, it serves the request
+// first and answers `status` instead of its answer. `GET /_faults` lists
+// them, with `hits`.
 // `GET /_rejected?key=` counts the writes to a key whose precondition failed.
 //
 // With the dialect "gcs", it speaks Cloud Storage's XML API instead: an
@@ -150,11 +152,12 @@ export class FakeS3Server {
       fault.hits++;
       await sleep(fault.delayMs ?? 0);
       if (generation !== this.#generation) return send(503);
-      if (fault.status !== undefined) return send(fault.status);
+      if (fault.status !== undefined && !fault.after) return send(fault.status);
     }
+    const reply = fault?.after ? () => send(fault.status) : send;
 
     if (req.method === 'GET' && key === '') {
-      return send(200, this.#list(url.searchParams));
+      return reply(200, this.#list(url.searchParams));
     }
 
     const counted = key.slice(key.indexOf('/') + 1);
@@ -164,27 +167,27 @@ export class FakeS3Server {
     const object = this.#objects.get(key);
     switch (req.method) {
       case 'GET':
-        if (!object) return send(404);
+        if (!object) return reply(404);
         this.#served.set(
           counted,
           (this.#served.get(counted) ?? 0) + object.body.length
         );
-        return send(200, object.body, this.#version(object));
+        return reply(200, object.body, this.#version(object));
       case 'PUT': {
         if (!this.#holds(req, object)) {
           this.#rejected.set(key, (this.#rejected.get(key) ?? 0) + 1);
-          return send(412);
+          return reply(412);
         }
         const etag = `"${Date.now()}-${this.#next}"`;
         // Decimal, unique, and never 0.
         const generation = `${Date.now()}${String(this.#next++).padStart(6, '0')}`;
         const stored = { etag, generation, body };
         this.#objects.set(key, stored);
-        return send(200, null, this.#version(stored));
+        return reply(200, null, this.#version(stored));
       }
       case 'DELETE':
         this.#objects.delete(key);
-        return send(204);
+        return reply(204);
     }
     return send(405);
   }
