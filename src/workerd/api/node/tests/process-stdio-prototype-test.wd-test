@@ -1,0 +1,60 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "process-stdio-prototype-get",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "get") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+    ( name = "process-stdio-prototype-set",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "set") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+    ( name = "process-stdio-prototype-value",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "value") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+    ( name = "process-stdio-prototype-writable",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "writable") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+    ( name = "process-stdio-prototype-enumerable",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "enumerable") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+    ( name = "process-stdio-prototype-configurable",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-stdio-prototype-test.js")
+        ],
+        bindings = [ (name = "PROPERTY", text = "configurable") ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2"],
+      )
+    ),
+  ],
+);

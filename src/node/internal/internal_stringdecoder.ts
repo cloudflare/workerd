@@ -144,8 +144,12 @@ StringDecoder.prototype.write = write;
 StringDecoder.prototype.end = end;
 StringDecoder.prototype.text = text;
 
+// The descriptors have a null prototype so that properties added to
+// Object.prototype by user code (such as `value` or `writable`) are not read as
+// part of them. This module can load lazily, after user code has run.
 Object.defineProperties(StringDecoder.prototype, {
   lastChar: {
+    __proto__: null,
     enumerable: true,
     get(this: StringDecoder): Buffer {
       if (this[kNativeDecoder] === undefined) {
@@ -156,8 +160,9 @@ Object.defineProperties(StringDecoder.prototype, {
         kIncompleteCharactersEnd
       ) as Buffer;
     },
-  },
+  } as PropertyDescriptor,
   lastNeed: {
+    __proto__: null,
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {
@@ -165,8 +170,9 @@ Object.defineProperties(StringDecoder.prototype, {
       }
       return this[kNativeDecoder][kMissingBytes] as number;
     },
-  },
+  } as PropertyDescriptor,
   lastTotal: {
+    __proto__: null,
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {
@@ -177,7 +183,7 @@ Object.defineProperties(StringDecoder.prototype, {
         (this[kNativeDecoder][kMissingBytes] ?? 0)
       );
     },
-  },
+  } as PropertyDescriptor,
 });
 
 export default {
