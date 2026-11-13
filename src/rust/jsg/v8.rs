@@ -5290,6 +5290,22 @@ pub unsafe fn resolve_method_receiver<R: 'static>(
     ptr?.resolve::<R>()
 }
 
+/// Borrows the resource that [`resolve_receiver`] or [`resolve_method_receiver`] resolved from
+/// `this`, for no longer than `this` is borrowed.
+///
+/// A callback passes a borrow of its own `this` handle, a local, so the borrow of the resource
+/// ends with the call, whatever lifetime the method names for its receiver.
+///
+/// # Safety
+///
+/// `resource` was resolved from `this`, the receiver of the callback that is running.
+#[doc(hidden)]
+pub unsafe fn borrow_receiver<'a, R>(resource: NonNull<R>, _this: &'a Local<'_, Value>) -> &'a R {
+    // SAFETY: the caller guarantees that `resource` points at the resource of `this`, whose
+    // wrapper keeps it alive during the call, which `'a` cannot outlive.
+    unsafe { resource.as_ref() }
+}
+
 impl WrappableRc {
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///

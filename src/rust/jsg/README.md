@@ -306,11 +306,14 @@ and `.h` file in `src/rust/jsg`. To check a shim file in another package, export
   `'static`, because they run after the current callback has returned.
 - Use a `Global` for a handle that Rust holds outside a resource, and a `TracedGlobal` for a
   resource field. Both can be dropped without the lock, and after the isolate is gone.
+- A method's `&self` lasts for the call: the wrapper the method was called on keeps the resource
+  alive only until the method returns. A method that keeps its resource takes
+  `this: jsg::Rc<Self>`.
 
 Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
-`global-*`, `traced-global-*`) and `src/workerd/io/io-context/compile-tests`
-(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
-`traced_global_lifetime.rs` and `gc.rs`.
+`global-*`, `traced-global-*`, `method-receiver-cannot-escape`) and
+`src/workerd/io/io-context/compile-tests` (`await-io-and-run-*`), and the drop tests in
+`src/rust/jsg-test/tests/global.rs`, `traced_global_lifetime.rs` and `gc.rs`.
 
 ### 5. State guarded by the isolate lock is `Send`
 
