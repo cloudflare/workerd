@@ -123,11 +123,6 @@ pub mod ffi {
         ptr: usize,
     }
 
-    #[derive(Debug)]
-    struct Utf8Value {
-        ptr: usize,
-    }
-
     /// Mirrors `v8::BackingStoreInitializationMode`. Must be kept in sync with
     /// the V8-defined enum in `v8-array-buffer.h`.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -1055,11 +1050,6 @@ pub mod ffi {
             name: &str,
             nested: &Global, /* v8::Global<FunctionTemplate> */
         );
-
-        pub unsafe fn utf8_value_new(isolate: *mut Isolate, value: Local) -> Utf8Value;
-        pub unsafe fn utf8_value_drop(value: Utf8Value);
-        pub unsafe fn utf8_value_length(value: &Utf8Value) -> usize;
-        pub unsafe fn utf8_value_data(value: &Utf8Value) -> *const u8;
     }
 
     /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
@@ -3893,7 +3883,8 @@ impl Local<'_, Date> {
 /// println!("{}", utf8.as_str().unwrap_or(""));
 /// ```
 pub struct Utf8Value {
-    inner: ffi::Utf8Value,
+    /// The UTF-8 bytes that V8 wrote, then a null terminator.
+    bytes: Box<[u8]>,
 }
 
 impl Utf8Value {
@@ -3910,12 +3901,30 @@ impl Utf8Value {
     /// If the conversion throws (a `Symbol`, or a `toString` that throws), or an exception or a
     /// termination is already pending, the exception stays pending and the error is one for
     /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> crate::Result<Self> {
+    pub fn new<'s>(lock: &mut Lock<'s>, value: &Local<'_, Value>) -> crate::Result<Self> {
         value.debug_assert_isolate(lock);
-        call_into_js(lock, |lock| {
-            // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-            let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), *value.raw()) };
-            Ok((inner.ptr != 0).then(|| Self { inner }))
+        let string: Local<'s, String> = call_into_js(lock, |lock| {
+            // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active, and a
+            // non-empty result is a string in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_value_to_string(
+                    lock.isolate().as_ffi(),
+                    *value.raw(),
+                ))
+            })
+        })?;
+        // V8 measures the string and encodes it in separate passes over the V8 heap. The copy
+        // is zeroed first and cut to the bytes V8 reports writing, so that it holds only
+        // initialized bytes whatever the second pass reads.
+        let mut bytes = vec![0u8; string.utf8_length(lock) + 1];
+        let written = string.write_utf8(
+            lock,
+            &mut bytes,
+            WriteFlags::NullTerminateAndReplaceInvalidUtf8,
+        );
+        bytes.truncate(written);
+        Ok(Self {
+            bytes: bytes.into_boxed_slice(),
         })
     }
 
@@ -3924,8 +3933,7 @@ impl Utf8Value {
     /// Corresponds to `v8::String::Utf8Value::length()`.
     #[inline]
     pub fn length(&self) -> usize {
-        // SAFETY: self.inner is a valid Utf8Value.
-        unsafe { ffi::utf8_value_length(&self.inner) }
+        self.bytes.len() - 1
     }
 
     /// Returns a raw pointer to the null-terminated UTF-8 bytes stored in this copy.
@@ -3936,32 +3944,19 @@ impl Utf8Value {
     /// Corresponds to `v8::String::Utf8Value::operator*()`.
     #[inline]
     pub fn as_ptr(&self) -> *const u8 {
-        // SAFETY: self.inner is a valid Utf8Value.
-        unsafe { ffi::utf8_value_data(&self.inner) }
+        self.bytes.as_ptr()
     }
 
     /// Returns the UTF-8 content as a byte slice.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        // SAFETY: the pointer is non-null (the conversion succeeded) and points to length()
-        // valid bytes for the lifetime of self.
-        unsafe { std::slice::from_raw_parts(self.as_ptr(), self.length()) }
+        &self.bytes[..self.length()]
     }
 
     /// Returns the UTF-8 content as a `&str`, or `None` if the bytes are not valid UTF-8.
     #[inline]
     pub fn as_str(&self) -> Option<&str> {
         std::str::from_utf8(self.as_bytes()).ok()
-    }
-}
-
-impl Drop for Utf8Value {
-    fn drop(&mut self) {
-        let inner = ffi::Utf8Value {
-            ptr: self.inner.ptr,
-        };
-        // SAFETY: self.inner is a valid Utf8Value being released.
-        unsafe { ffi::utf8_value_drop(inner) };
     }
 }
 

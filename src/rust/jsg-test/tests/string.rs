@@ -430,6 +430,55 @@ fn utf8_value_as_ptr_is_non_null() {
     });
 }
 
+/// The copy ends in a terminator that `length()` and `as_bytes()` leave out, also after a NUL
+/// in the string.
+#[test]
+fn utf8_value_is_null_terminated() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for (expression, expected) in [
+            ("''", "".as_bytes()),
+            ("'hé'", "hé".as_bytes()),
+            ("'a\\0b'", b"a\0b".as_slice()),
+        ] {
+            let val = ctx
+                .eval_raw(lock, expression)
+                .map_err(|e| e.unwrap_jsg_err(lock))?;
+            let utf8 = Utf8Value::new(lock, &val)?;
+            assert_eq!(utf8.as_bytes(), expected);
+            assert_eq!(utf8.length(), expected.len());
+            // SAFETY: the copy holds `length()` bytes and then the terminator.
+            let with_terminator =
+                unsafe { std::slice::from_raw_parts(utf8.as_ptr(), utf8.length() + 1) };
+            assert_eq!(with_terminator, [expected, b"\0".as_slice()].concat());
+        }
+        Ok(())
+    });
+}
+
+/// A surrogate pair is one four-byte sequence, and a lone surrogate is U+FFFD, so the bytes are
+/// always UTF-8.
+#[test]
+fn utf8_value_encodes_surrogates() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for (expression, expected) in [
+            ("'a\\ud83e\\udd80b'", "a🦀b"),
+            ("'a\\ud83eb'", "a\u{fffd}b"),
+            ("'a\\udd80'", "a\u{fffd}"),
+            ("'\\udd80\\ud83e'", "\u{fffd}\u{fffd}"),
+        ] {
+            let val = ctx
+                .eval_raw(lock, expression)
+                .map_err(|e| e.unwrap_jsg_err(lock))?;
+            let utf8 = Utf8Value::new(lock, &val)?;
+            assert_eq!(utf8.as_str(), Some(expected), "{expression}");
+            assert_eq!(utf8.length(), expected.len(), "{expression}");
+        }
+        Ok(())
+    });
+}
+
 #[test]
 fn utf8_value_coerces_number_to_string() {
     let harness = crate::Harness::new();
