@@ -43,4 +43,9 @@ wd_cc_capnp_library(
 
 # The checked-in package lock files. Exported so the `pyodide` module extension
 # (build/deps/dep_pyodide.bzl) can read them to download the stdlib wheels.
-exports_files(glob(["python-lock/*.json"]) + ["python_packages.capnp"])
+exports_files(
+    glob(["python-lock/*.json"]) + [
+        "esbuild.config.mjs",
+        "python_packages.capnp",
+    ],
+)

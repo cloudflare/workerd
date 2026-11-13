@@ -1,7 +1,8 @@
 """Macros that build the per-version Pyodide bundles.
 
-Together with internal/pool/, everything that determines a bundle's contents lives in this
-directory, apart from the Pyodide release itself (PYODIDE_VERSIONS in build/python_metadata.bzl).
+Everything that determines a bundle's contents lives in this directory, apart from the Pyodide
+release itself (PYODIDE_VERSIONS in build/python_metadata.bzl). Changing anything here means
+uploading new bundles.
 
 The macros are called from //src/pyodide, so the generated targets live in that package.
 """
@@ -9,7 +10,6 @@ The macros are called from //src/pyodide, so the generated targets live in that 
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//:build/js_file.bzl", "js_file")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS")
 load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
@@ -104,29 +104,14 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
         deps = ["pyodide.asm.mjs@rule@" + version],
     )
 
-    expand_template(
-        name = "esbuild.config.mjs@" + version,
-        out = _out_path("esbuild.config.mjs", version),
-        substitutions = {
-            "%PYODIDE_VERSION%": version,
-        },
-        template = "internal/pool/esbuild.config.mjs",
-    )
-
+    _copy_to_generated(Label(":esbuild.config.mjs"), version, "esbuild.config.mjs")
     esbuild(
-        name = "emscriptenSetup@" + version,
-        # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
-        # for it. The file is provided in entry_point instead.
-        srcs = native.glob([
-            "internal/pool/*.ts",
-        ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
-            patched_asm_mjs,
-            "internal/util.ts",
-            "internal/const.ts",
-        ],
+        name = "pyodide.asm.js@rule@" + version,
+        srcs = [patched_asm_mjs],
         config = _out_path("esbuild.config.mjs", version),
-        entry_point = "internal/pool/emscriptenSetup.ts",
+        entry_point = patched_asm_mjs,
         external = [
+            "pyodide-internal:*",
             "child_process",
             "crypto",
             "fs",
@@ -144,10 +129,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
             "node:tls",
             "node:net",
             "node:module",
-            "internal:unsafe-eval",
         ],
         format = "esm",
-        output = _out_path("emscriptenSetup.js", version),
+        output = _out_path("pyodide.asm.js", version),
         target = "esnext",
         deps = ["pyodide.asm.mjs@rule_js@" + version],
     )
@@ -195,14 +179,14 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
         builtin_modules = [],
         schema_id = "0xbcc8f57c63814005",
         internal_modules = [
-            _out_path("emscriptenSetup.js", version),
+            _out_path("pyodide.asm.js", version),
         ],
         internal_wasm_modules = [
             _out_path("pyodide.asm.wasm", version),
         ],
         internal_data_modules = internal_data_modules,
         deps = [
-            "emscriptenSetup@" + version,
+            "pyodide.asm.js@rule@" + version,
             "pyodide.asm.wasm@copy@" + version,
             "python_stdlib.zip@copy@" + version,
         ] + extra_deps,
@@ -213,7 +197,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
     bin_srcs = [
         ":pyodide@%s.capnp" % version,
         "//src/workerd/jsg:modules.capnp",
-        _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
+        _ts_bundle_out(import_name + "-internal_", "pyodide.asm", version),
         _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
         _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
     ]

@@ -1,3 +1,11 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// Functions that the patched Emscripten glue in the Pyodide bundle imports. See the `imports` of
+// each patch in bundle/patch_pyodide_asm.ts. Released bundles import these by name, so keep
+// every export that a pinned bundle imports, with a compatible signature.
+
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
@@ -25,8 +33,7 @@ export function addEventListener(): void {}
 // * Pyodide's scheduler.ts
 // * Emscripten's implementation of syscalls etc
 //
-// These locations use the globals directly so they will get them from the pool isolate unless we
-// modify globalThis to include setTimeout etc from the main isolate.
+// These locations use the globals directly, so we install our versions on globalThis.
 // We could just change scheduler.ts to use jsglobals but it won't fix Emscripten so we'll need to
 // do this either way.
 export function setSetTimeout(
@@ -47,7 +54,7 @@ function dynlibLookup026Helper(
 ): string | undefined {
   try {
     Module.FS.lookupPath(path);
-  } catch (e) {
+  } catch {
     return undefined;
   }
   return path;
@@ -194,7 +201,7 @@ export function wasmInstantiate(
 /**
  * Check that the callee is `convertJsFunctionToWasm` by formatting a stack
  * trace and using `prepareStackTrace` to read out the callee. It should be
- * `convertJsFunctionToWasm` in `"pyodide-internal:generated/pyodide.asm"`,
+ * `convertJsFunctionToWasm` in `"pyodideRuntime-internal:pyodide.asm"`,
  * if it's anything else we'll bail.
  */
 function checkCallee(): void {
@@ -237,7 +244,7 @@ function prepareStackTrace(
   try {
     const funcName = caller.getFunctionName();
     const fileName = caller.getFileName();
-    if (fileName !== 'pyodideRuntime-internal:emscriptenSetup') {
+    if (fileName !== 'pyodideRuntime-internal:pyodide.asm') {
       return [false, funcName];
     }
     return [
@@ -350,7 +357,10 @@ function getCountFuncParams(Module: Module): (funcPtr: number) => number {
 
 let countFuncParams: (funcPtr: number) => number;
 
-export function patched_PyEM_CountFuncParams(Module: Module, funcPtr: any) {
+export function patched_PyEM_CountFuncParams(
+  Module: Module,
+  funcPtr: number
+): number {
   // This should only be called from 0.26.0a2. It's hot so we leave the version
   // check to getCountFuncParams() which we only call once.
   countFuncParams ??= getCountFuncParams(Module);

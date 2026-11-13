@@ -45,7 +45,7 @@ import { default as introspectionSource } from 'pyodide-internal:introspection.p
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
-import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
+import { instantiateEmscriptenModule } from 'pyodide-internal:emscriptenSetup';
 import { createImportProxy } from 'pyodide-internal:serializeJsModule';
 
 // Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
