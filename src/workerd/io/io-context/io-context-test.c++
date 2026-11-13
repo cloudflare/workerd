@@ -480,6 +480,19 @@ KJ_TEST("await_io_and_run() drops its future and callback when the IoContext is 
   KJ_EXPECT(awaited_future_dropped());
 }
 
+KJ_TEST("a jsg::Rc in an await_io_and_run() callback dropped with its IoContext waits for a lock") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { await_holding_resource(isolateOf(env)); });
+  fixture.pollEventLoop();
+  // Destroying the IoContext drops the callback without the isolate lock, so its jsg::Rc is
+  // queued, and released only by the next lock.
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(!held_resource_dropped());
+  fixture.enterWorkerLockSynchronously([&](Worker::Lock&) { KJ_EXPECT(held_resource_dropped()); });
+}
+
 KJ_TEST("an await_io_and_run() callback that fails fails the task") {
   TestFixture fixture;
   auto context = fixture.newIoContext();

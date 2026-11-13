@@ -126,6 +126,8 @@ mod ffi {
         fn await_observation() -> AwaitObservation;
         fn awaited_value() -> i32;
         fn awaited_future_dropped() -> bool;
+        unsafe fn await_holding_resource(isolate: usize) -> Result<()>;
+        fn held_resource_dropped() -> bool;
         unsafe fn await_promise(isolate: usize, ending: PromiseEnding) -> Result<()>;
         unsafe fn await_value(isolate: usize, fail: bool) -> Result<()>;
         unsafe fn awaited_promise_outcome(isolate: usize) -> Result<String>;
@@ -572,6 +574,47 @@ fn awaited_value() -> i32 {
 
 fn awaited_future_dropped() -> bool {
     AWAITED_FUTURE_DROPPED.load(Ordering::SeqCst)
+}
+
+/// Whether the resource of the last `await_holding_resource()` has been dropped.
+static HELD_RESOURCE_DROPPED: AtomicBool = AtomicBool::new(false);
+
+/// The resource of `await_holding_resource()`, in a module of its own for the reason `probe` is.
+mod held {
+    use std::sync::atomic::Ordering;
+
+    #[jsg_macros::jsg_resource]
+    pub struct Held;
+
+    #[jsg_macros::jsg_resource]
+    impl Held {}
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            super::HELD_RESOURCE_DROPPED.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// In a request, awaits a future that never completes, with a callback that holds the only
+/// `jsg::Rc` of a resource that has no wrapper.
+unsafe fn await_holding_resource(isolate: usize) -> Result<()> {
+    HELD_RESOURCE_DROPPED.store(false, Ordering::SeqCst);
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let resource = jsg::Rc::new(lock, held::Held);
+    IoContext::current(lock)
+        .and_then(|context| {
+            context.await_io_and_run(std::future::pending::<()>(), move |_lock, ()| {
+                drop(resource);
+                Ok(())
+            })
+        })
+        .map_err(|err| to_io(&err))
+}
+
+fn held_resource_dropped() -> bool {
+    HELD_RESOURCE_DROPPED.load(Ordering::SeqCst)
 }
 
 thread_local! {

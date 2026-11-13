@@ -119,8 +119,9 @@ impl<'s> IoContext<'s> {
     /// - While it waits, the request is neither finished nor hung. The wait is recorded for async
     ///   tracing.
     ///
-    /// If this `IoContext` is destroyed first, both are dropped without `callback` running. In a
-    /// Durable Object, the `IoContext` can outlive the request that called this.
+    /// If this `IoContext` is destroyed first, both are dropped without `callback` running, and
+    /// without the isolate lock. In a Durable Object, the `IoContext` can outlive the request
+    /// that called this.
     ///
     /// Unlike `awaitIo()`, this returns no promise: it sits a level below an `await_io` that
     /// would return one, as `awaitIo()` does. `callback` settles what it needs to, such as a
