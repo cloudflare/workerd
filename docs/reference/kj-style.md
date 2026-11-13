@@ -97,8 +97,9 @@ The project uses KJ types instead of the C++ standard library:
   These macros automatically capture file/line, stringify operands, and generate stack traces.
 
 - **Never declare anything `noexcept`**. Bugs can happen anywhere; aborting is never correct.
-- **Always** ensure that explicit destructors use `noexcept(false)`**. Use `kj::UnwindDetector` or
-  recovery blocks in destructors to handle the unwinding-during-unwind problem.
+- **Always** ensure that explicit destructors use `noexcept(false)`**. Use the `KJ_DTOR_*` macros
+  (or `kj::UnwindDetector`) in destructors to handle the unwinding-during-unwind problem. Don't
+  follow KJ assertion macros with a recovery block; test the condition explicitly instead.
 
 **Exceptions are for fault tolerance**, not control flow. They represent things that "should never
 happen" — bugs, network failures, resource exhaustion. If callers need to catch an exception
