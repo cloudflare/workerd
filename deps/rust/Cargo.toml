@@ -122,6 +122,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Network
 # subdirectories), ReadDirectoryChangesW on Windows. kj-rs-io watches directories only and judges
 # changes by re-stamping the watched files, so it needs nothing backend-specific.
 notify = "8"
+# Span links: W3C tracestate parsing and normalization (src/workerd/io/trace-state).
+opentelemetry = { version = "0", default-features = false, features = ["trace"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "26"
 swc_ts_fast_strip = "59"

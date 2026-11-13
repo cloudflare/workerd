@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "963feda7dd144f6fde41e1dfc484639a8eb4d6d62d3f802b01152f22559cef7e",
+  "checksum": "2556afdedd2c76eb4afe4b87a04ab5d9a177f5bc7f2b1219d3aecfacdd40ab6d",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -35,6 +35,7 @@
       "aarch64-apple-darwin"
     ],
     "cfg(all(target_arch = \"loongarch64\", target_os = \"linux\"))": [],
+    "cfg(all(target_arch = \"wasm32\", not(target_os = \"wasi\")))": [],
     "cfg(all(target_arch = \"wasm32\", target_os = \"wasi\", target_env = \"p2\"))": [],
     "cfg(all(target_arch = \"x86\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86\", target_env = \"msvc\", not(windows_raw_dylib)))": [],
@@ -3004,6 +3005,10 @@
             "target": "notify"
           },
           {
+            "id": "opentelemetry 0.33.1",
+            "target": "opentelemetry"
+          },
+          {
             "id": "percent-encoding 2.3.2",
             "target": "percent_encoding"
           },
@@ -4134,6 +4139,7 @@
       "common_attrs": {
         "crate_features": [
           "alloc",
+          "default",
           "std"
         ],
         "edition": "2018"
@@ -7856,6 +7862,69 @@
         }
       ],
       "version": "0.2.2"
+    },
+    "opentelemetry 0.33.1": {
+      "common_attrs": {
+        "crate_features": [
+          "futures",
+          "futures-core",
+          "futures-sink",
+          "pin-project-lite",
+          "thiserror",
+          "trace"
+        ],
+        "deps": {
+          "common": [
+            {
+              "id": "futures-core 0.3.34",
+              "target": "futures_core"
+            },
+            {
+              "id": "futures-sink 0.3.34",
+              "target": "futures_sink"
+            },
+            {
+              "id": "pin-project-lite 0.2.17",
+              "target": "pin_project_lite"
+            },
+            {
+              "id": "thiserror 2.0.21",
+              "target": "thiserror"
+            }
+          ],
+          "selects": {
+            "cfg(all(target_arch = \"wasm32\", not(target_os = \"wasi\")))": [
+              {
+                "id": "js-sys 0.3.107",
+                "target": "js_sys"
+              }
+            ]
+          }
+        },
+        "edition": "2021"
+      },
+      "library_target_name": "opentelemetry",
+      "license": "Apache-2.0",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "opentelemetry",
+      "package_url": "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry",
+      "repository": {
+        "Http": {
+          "sha256": "8c1f1a6ac9c875a4941e4c7c085b61e8f4daa326de03b4701768c3491a6ad9ee",
+          "url": "https://static.crates.io/crates/opentelemetry/0.33.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "opentelemetry",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.33.1"
     },
     "outref 0.5.2": {
       "common_attrs": {
@@ -15985,6 +16054,7 @@
     "lol_html_c_api 1.4.0",
     "nix 0.31.3",
     "notify 8.2.2",
+    "opentelemetry 0.33.1",
     "percent-encoding 2.3.2",
     "pico-args 0.5.0",
     "proc-macro2 1.0.107",
