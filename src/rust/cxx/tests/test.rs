@@ -642,6 +642,27 @@ fn test_extern_trivial() {
 }
 
 #[test]
+fn test_rust_vec_copy_assign_failure() {
+    let values = |vec: &Vec<ffi2::ThrowingCopy>| vec.iter().map(|e| e.value).collect::<Vec<_>>();
+    let mut dst = vec![ffi2::ThrowingCopy { value: 7 }];
+
+    // Copying the second element throws, which leaves the destination as it was.
+    let src = vec![
+        ffi2::ThrowingCopy { value: 1 },
+        ffi2::ThrowingCopy { value: 0 },
+    ];
+    assert!(ffi2::c_copy_assign_rust_vec(&mut dst, &src).is_err());
+    assert_eq!(values(&dst), [7]);
+
+    let src = vec![
+        ffi2::ThrowingCopy { value: 1 },
+        ffi2::ThrowingCopy { value: 2 },
+    ];
+    ffi2::c_copy_assign_rust_vec(&mut dst, &src).unwrap();
+    assert_eq!(values(&dst), [1, 2]);
+}
+
+#[test]
 fn test_extern_opaque() {
     let mut e = ffi2::c_return_opaque_ptr();
     check!(ffi2::c_take_opaque_ref(e.as_ref().unwrap()));
