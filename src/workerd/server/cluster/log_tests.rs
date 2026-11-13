@@ -683,9 +683,10 @@ fn a_superseded_owners_commit_is_not_acknowledged() {
         .unwrap();
 
     let commit = rt.block_on(a_owners.commit(&a_own, "ns", "x"));
-    assert!(
-        matches!(&commit, Err(Error::Contended(m)) if m.contains("superseded")),
-        "{commit:?}"
+    assert!(matches!(&commit, Err(Error::Replica(_))), "{commit:?}");
+    assert_eq!(
+        commit.unwrap_err().to_string(),
+        "replica: ns/x: epoch 1 was superseded"
     );
 
     // b's epoch is open, so no restore reads a's session: b deletes it,

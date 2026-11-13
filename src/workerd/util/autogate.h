@@ -86,13 +86,6 @@ namespace workerd::util {
      CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's     \
      compression utils. Chromium zlib remains the default. */                                      \
   V(COMPRESSION_RS)                                                                                \
-  /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
-     controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
-     event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \
-     never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
-     suspends through the event loop on every iteration (only the write suspension is elided),     \
-     leaving the JS-visible pull() ordering unchanged. */                                          \
-  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
@@ -111,12 +104,23 @@ namespace workerd::util {
   /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
      (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
   V(TS_URL)                                                                                        \
+  /* URLPattern is the TypeScript implementation from the per-isolate bootstrap                    \
+     (src/per_isolate/urlpattern/) rather than the C++ classes in api/urlpattern.h and             \
+     api/urlpattern-standard.h. */                                                                 \
+  V(TS_URL_PATTERN)                                                                                \
+  /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
+     class in jsg/dom-exception.h. */                                                              \
+  V(TS_DOM_EXCEPTION)                                                                              \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
   V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
+     (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
+  V(RUST_MEMORY_CACHE)                                                                             \
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \

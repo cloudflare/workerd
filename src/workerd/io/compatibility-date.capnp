@@ -1815,6 +1815,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
   # like a fetch handler whose client went away.
   #
+  # A Durable Object's pending I/O belongs to the object, not to the request that started it, so a
+  # canceled call doesn't stop it: the method runs to completion, as a Durable Object's fetch
+  # handler does when its client disconnects. To have a Durable Object stop early, pass it an
+  # `AbortSignal` (`enable_abortsignal_rpc`) and abort the signal when disposing the call. The
+  # object still receives the abort after the call is canceled.
+  #
   # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
   # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
   # event is in flight cancels the event and ends the callee's request.
@@ -1827,4 +1833,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
   # RPC. This flag is intended for internal testing only and may never have its experimental
   # annotation removed.
+
+  pythonDedicatedSnapshotKeepImportCaches @206 :Bool
+      $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
+      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches");
+  # When enabled, a Python Worker restored from a dedicated memory snapshot keeps the import system's
+  # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
+  # collected with the Worker's files and packages already in place, so the caches still describe
+  # them, and rebuilding them is a large part of startup.
 }

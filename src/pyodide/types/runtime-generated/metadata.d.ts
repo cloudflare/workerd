@@ -14,6 +14,7 @@ declare namespace MetadataReader {
     python_workflows_implicit_dependencies?: boolean;
     python_process_pth_files?: boolean;
     python_shared_standard_library?: boolean;
+    python_dedicated_snapshot_keep_import_caches?: boolean;
   }
 
   const isWorkerd: () => boolean;

@@ -114,11 +114,12 @@ export default {
     }
 
     if (url.pathname.startsWith('/kv/')) {
-      if (url.pathname === '/kv/clock') {
-        await env.KV_WORKER.fetch(`http://kv/clock${url.search}`, {
-          method: 'POST',
-        });
-        return Response.json({});
+      if (url.pathname === '/kv/clock' || url.pathname === '/kv/gc') {
+        const r = await env.KV_WORKER.fetch(
+          `http://kv${url.pathname.slice(3)}${url.search}`,
+          { method: 'POST' }
+        );
+        return Response.json({}, { status: r.status });
       }
       return kv(url, env.KV);
     }

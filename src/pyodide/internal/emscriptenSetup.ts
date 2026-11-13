@@ -1,0 +1,257 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+/**
+ * Instantiates the Emscripten module from the patched `pyodide.asm` glue in the Pyodide bundle.
+ *
+ * This file is part of `pyodide_static`. The bundle provides only the Emscripten glue, so behavior
+ * implemented here changes with the binary rather than requiring a bundle upload.
+ */
+
+import { _createPyodideModule } from 'pyodideRuntime-internal:pyodide.asm';
+
+import {
+  setGetRandomValues,
+  setSetTimeout,
+  finishSetup,
+} from 'pyodide-internal:builtin_wrappers';
+
+import { getJsvErrorImport } from 'pyodide-internal:sentinel';
+
+/**
+ * A preRun hook. Make sure environment variables are visible at runtime.
+ */
+function setEnv(Module: Module): void {
+  Object.assign(Module.ENV, Module.API.config.env);
+}
+
+function getWaitForDynlibs(resolveReadyPromise: PreRunHook): PreRunHook {
+  return function waitForDynlibs(Module: Module): void {
+    // Block the instantiation of the runtime until we can preload the dynamic libraries. The
+    // promise returned by _createPyodideModule won't resolve until we call
+    // `removeRunDependency('dynlibs')` so we use `emscriptenSettings.readyPromise` to continue
+    // execution when we've gotten to this point.
+    Module.addRunDependency('dynlibs');
+    resolveReadyPromise(Module);
+  };
+}
+
+function computeVersionTuple(Module: Module): [number, number, number] {
+  if (Module._py_version_major) {
+    const pymajor = Module._py_version_major();
+    const pyminor = Module._py_version_minor();
+    const micro = Module._py_version_micro();
+    return [pymajor, pyminor, micro];
+  }
+  const versionInt = Module.HEAPU32[Module._Py_Version >>> 2];
+  if (versionInt === undefined) {
+    throw new Error('Failed to read Python version');
+  }
+  const major = (versionInt >>> 24) & 0xff;
+  const minor = (versionInt >>> 16) & 0xff;
+  const micro = (versionInt >>> 8) & 0xff;
+  return [major, minor, micro];
+}
+
+/**
+ * This is passed as a preRun hook in EmscriptenSettings, run just before
+ * main(). It makes an empty home directory and an empty global site-packages
+ * directory `/lib/pythonv.vv/site-packages`.
+ *
+ * This is a simplified version of the `prepareFileSystem` function here:
+ * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
+ */
+function prepareFileSystem(Module: Module): void {
+  Module.API.pyVersionTuple = computeVersionTuple(Module);
+  const [pymajor, pyminor] = Module.API.pyVersionTuple;
+  Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+  Module.LD_LIBRARY_PATH = [
+    '/usr/lib',
+    Module.FS.sitePackages,
+    '/session/metadata/python_modules/lib/',
+  ].join(':');
+  Module.ENV.LD_LIBRARY_PATH = Module.LD_LIBRARY_PATH;
+  Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
+  Module.FS.mkdirTree(Module.FS.sitePackages);
+  Module.FS.mkdirTree(Module.API.config.env.HOME);
+}
+
+/**
+ * A hook that the Emscripten runtime calls to perform the WebAssembly
+ * instantiation action. Once instantiated, this callback function should call
+ * ``successCallback()`` with the generated WebAssembly Instance object.
+ *
+ * @param wasmImports a JS object which contains all the function imports that
+ * need to be passed to the WebAssembly Module when instantiating
+ * @param successCallback A callback to indicate that instantiation was
+ * successful,
+ * @returns The return value of this function should contain the ``exports`` object of
+ * the instantiated WebAssembly Module, or an empty dictionary object ``{}`` if
+ * the instantiation is performed asynchronously, or ``false`` if instantiation
+ * synchronously failed. There is no way to indicate asynchronous failure.
+ */
+function getInstantiateWasm(
+  pyodideWasmModule: WebAssembly.Module
+): EmscriptenSettings['instantiateWasm'] {
+  const jsvErrorImportPromise = getJsvErrorImport();
+  return function instantiateWasm(
+    wasmImports: WebAssembly.Imports,
+    successCallback: (
+      inst: WebAssembly.Instance,
+      mod: WebAssembly.Module
+    ) => void
+  ): WebAssembly.Exports {
+    (async function (): Promise<void> {
+      const { Jsv_GetError_import, JsvError_Check } =
+        await jsvErrorImportPromise;
+
+      // Pyodide <= 0.28.2: The names were create_sentinel and is_sentinel
+      // Pyodide >= 314: These are renamed to Jsv_GetError_import and JsvError_Check and moved to env namespace
+      wasmImports.sentinel = {
+        create_sentinel: Jsv_GetError_import,
+        is_sentinel: JsvError_Check,
+      };
+      const env = wasmImports.env;
+      if (env) {
+        env.Jsv_GetError_import = Jsv_GetError_import;
+        env.JsvError_Check = JsvError_Check;
+      } else {
+        console.error('Should never happen: wasmImports.env is undefined');
+      }
+
+      // Instantiate pyodideWasmModule with wasmImports
+      const instance = await WebAssembly.instantiate(
+        pyodideWasmModule,
+        wasmImports
+      );
+      successCallback(instance, pyodideWasmModule);
+    })().catch((e: unknown) => {
+      console.error(
+        'Internal error: wasm instantiation failed. This should never happen.',
+        e
+      );
+      // Execution hangs at this point.
+    });
+
+    return {};
+  };
+}
+
+/**
+ * The Emscripten settings object
+ *
+ * This isn't public API of Pyodide so it's a bit fiddly.
+ */
+function getEmscriptenSettings(
+  pyodideWasmModule: WebAssembly.Module
+): EmscriptenSettings {
+  const config: PyodideConfig = {
+    // jsglobals is used for the js module.
+    jsglobals: globalThis,
+    // environment variables go here
+    env: {
+      HOME: '/session',
+      // We don't have access to entropy at startup so we cannot support hash
+      // randomization. Setting `PYTHONHASHSEED` disables it. See further
+      // discussion in topLevelEntropy/entropy_patches.py
+      PYTHONHASHSEED: '111',
+    },
+    lockFileURL: '',
+    enableRunUntilComplete: true,
+  };
+  // We mount the stdlib packages directly (see loadPackage.ts) rather than going through Pyodide's
+  // package manager, so we deliberately leave `API.lockFilePromise` unset. Pyodide's bootstrap
+  // guards on it (`API.lockFilePromise && ...`), so the package index is simply not initialised.
+  const API = {
+    config,
+    runtimeEnv: {
+      IN_WORKERD: true,
+      IN_BROWSER: true,
+      IN_BROWSER_MAIN_THREAD: true,
+    },
+  };
+  let resolveReadyPromise: (mod: Module) => void;
+  let rejectReadyPromise: (e: any) => void = () => {};
+  const readyPromise: Promise<Module> = new Promise((res, rej) => {
+    resolveReadyPromise = res;
+    rejectReadyPromise = rej;
+  });
+  const waitForDynlibs = getWaitForDynlibs(resolveReadyPromise!);
+  const instantiateWasm = getInstantiateWasm(pyodideWasmModule);
+
+  // Emscripten settings to control runtime instantiation.
+  return {
+    // preRun hook to set up the file system before running main
+    // The preRun hook gets run independently of noInitialRun, which is
+    // important because the file system lives outside of linear memory.
+    preRun: [prepareFileSystem, setEnv, waitForDynlibs],
+    instantiateWasm,
+    reportUndefinedSymbolsNoOp(): void {},
+    readyPromise,
+    rejectReadyPromise,
+    API, // Pyodide requires we pass this in.
+  };
+}
+
+/**
+ * Force Emscripten to feature detect the way we want.
+ * We want it to think we're the browser main thread.
+ */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
+  const global = globalThis as any;
+  // Make Emscripten think we're in the browser main thread
+  global.window = { sessionStorage: {} };
+  global.document = { createElement(): void {} };
+  global.sessionStorage = {};
+  // Make Emscripten think we're not in a worker
+  global.importScripts = 1;
+  global.WorkerGlobalScope = undefined;
+  // Make Emscripten think we're not in Node.js.
+  const hadProcess = 'process' in global;
+  const process = global.process;
+  global.process = undefined;
+  try {
+    yield;
+  } finally {
+    if (hadProcess) {
+      global.process = process;
+    } else {
+      delete global.process;
+    }
+    delete global.window;
+    delete global.document;
+    delete global.sessionStorage;
+    delete global.importScripts;
+  }
+}
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+
+/**
+ * Simple wrapper around _createPyodideModule that applies some monkey patches
+ * to force the environment to be detected the way we want.
+ *
+ * In the long run we should fix this in `pyodide.asm.js` instead.
+ *
+ * Returns the instantiated emscriptenModule object.
+ */
+export async function instantiateEmscriptenModule(
+  wasmModule: WebAssembly.Module
+): Promise<Module> {
+  const emscriptenSettings = getEmscriptenSettings(wasmModule);
+  for (const _ of featureDetectionMonkeyPatchesContextManager()) {
+    // Ignore the returned promise, it won't resolve until we're done preloading dynamic
+    // libraries.
+    void _createPyodideModule(emscriptenSettings).catch((e: unknown) => {
+      emscriptenSettings.rejectReadyPromise(e);
+    });
+  }
+
+  // Wait until we've executed all the preRun hooks before proceeding
+  const emscriptenModule = await emscriptenSettings.readyPromise;
+  emscriptenModule.setGetRandomValues = setGetRandomValues;
+  emscriptenModule.setSetTimeout = setSetTimeout;
+  finishSetup();
+  return emscriptenModule;
+}

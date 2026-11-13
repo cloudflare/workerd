@@ -41,6 +41,26 @@ executors and shares its cache with CI. Log in once with
 command, from macOS or Linux. Tests that need the network or a container engine run on executors
 that have them; the container tests are `enormous`, which Bazel skips without `--test_size_filters=`.
 
+A bazelflare build downloads only the outputs it needs locally, so the generated headers and Rust
+sources that clangd and rust-analyzer read from `bazel-bin` (Cap'n Proto and cxx bridge code, the
+`_virtual_includes` trees) stay remote. `just fetch-generated [targets]` downloads them, by default
+for `//src/...`, without compiling or downloading anything else. A later build that regenerates one
+of them removes the local copy; rerun the command to download it again.
+
+To download them on every build instead, add `--config=bazelflare-generated` to a bazelflare build,
+or enable it for all of them by adding this line to `.local/bazelrc`, which `.bazelrc` imports and
+git ignores:
+
+```
+common:bazelflare --config=bazelflare-generated
+```
+
+The config adds the output group of `just fetch-generated` to the build and downloads each generated
+header and Rust source that it produces or finds missing locally, so the files of the targets you
+build stay up to date. It doesn't change action keys, so builds still share the cache with CI. With
+the line above, `just fetch-generated` isn't needed, and it and `--config=bazelflare-generated` fail:
+Bazel rejects the config's aspect when it is added twice.
+
 ## Formatting and Linting
 
 `just format` formats the repository using clang-format, prettier, ruff, buildifier, and rustfmt.

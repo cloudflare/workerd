@@ -20,11 +20,55 @@
 
 namespace workerd::jsg {
 
+namespace {
+// As V8 describes an error whose name and message are `name` and `message`, except that a name
+// and message too long to join into one string are described by the name, where V8 abbreviates
+// the message.
+v8::Local<v8::String> describeError(
+    v8::Isolate* isolate, v8::Local<v8::String> name, v8::Local<v8::String> message) {
+  if (name->Length() == 0) return message;
+  if (message->Length() == 0) return name;
+  auto prefix = v8::String::Concat(isolate, name, v8::String::NewFromUtf8Literal(isolate, ": "));
+  if (prefix.IsEmpty()) return name;
+  auto description = v8::String::Concat(isolate, prefix, message);
+  return description.IsEmpty() ? name : description;
+}
+
+v8::Local<v8::Private> privateKey(v8::Isolate* isolate, kj::StringPtr name) {
+  return v8::Private::ForApi(isolate,
+      v8::String::NewFromUtf8(isolate, name.begin(), v8::NewStringType::kInternalized, name.size())
+          .ToLocalChecked());
+}
+}  // namespace
+
+v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  auto context = isolate->GetCurrentContext();
+  if (value->IsObject()) {
+    // Reading a private symbol runs no JavaScript: it skips interceptors, Proxy traps and the
+    // prototype chain.
+    auto object = value.As<v8::Object>();
+    v8::Local<v8::Value> name;
+    if (!object->GetPrivate(context, privateKey(isolate, ERROR_NAME_KEY)).ToLocal(&name)) {
+      return {};
+    }
+    if (name->IsString()) {
+      v8::Local<v8::Value> message;
+      if (!object->GetPrivate(context, privateKey(isolate, ERROR_MESSAGE_KEY)).ToLocal(&message)) {
+        return {};
+      }
+      if (message->IsString()) {
+        return describeError(isolate, name.As<v8::String>(), message.As<v8::String>());
+      }
+    }
+  }
+  return value->ToDetailString(context);
+}
+
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
   // TODO(cleanup): Perhaps we should require you to call `js.toString(handle)`?
   auto& js = jsg::Lock::current();
   return js.withinHandleScope([&] {
-    v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+    v8::Local<v8::String> str = workerd::jsg::check(toDetailString(js.v8Isolate, value));
     v8::String::Utf8Value utf8(js.v8Isolate, str);
     if (*utf8 == nullptr) {
       return kj::str("(couldn't stringify)");

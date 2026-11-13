@@ -1,6 +1,6 @@
 'use strict';
 
-// DigestStream — a non-standard workerd extension that hashes everything
+// DigestStream - a non-standard workerd extension that hashes everything
 // written to it and exposes the result as a promise. It is a real subclass of
 // WritableStream, which is the reason it is implemented here: the C++ version
 // subclasses the C++ WritableStream, so under the
@@ -19,9 +19,9 @@
 // still hands out a writer; the first write then fails from the sink. The three
 // digest states are:
 //
-//   ready   — accepting writes; the native context is live.
-//   closed  — close() ran, digest resolved, native context finalized.
-//   errored — abort() or dispose() ran, digest rejected with `storedError`.
+//   ready  - accepting writes; the native context is live.
+//   closed - close() ran, digest resolved, native context finalized.
+//   errored - abort() or dispose() ran, digest rejected with `storedError`.
 //
 // Writes in `closed` resolve without hashing, and writes in `errored` re-reject
 // with the stored error. Neither is reachable through a well-behaved
@@ -35,19 +35,19 @@
 // to observe later, the digest consumes bytes synchronously inside update() and
 // never retains them, so copying would be pure overhead. The consequence is
 // that SharedArrayBuffer-backed views are read in place, and a concurrent write
-// from another thread races the hash — as it does in C++.
+// from another thread races the hash - as it does in C++.
 //
 // STRINGS
 //
 // String chunks are forwarded to the native context rather than encoded here.
 // A lone surrogate has no UTF-8 encoding, and the default is to hash it as
-// WTF-8 (U+D800 becomes ED A0 80) — which TextEncoder cannot produce, since it
+// WTF-8 (U+D800 becomes ED A0 80) - which TextEncoder cannot produce, since it
 // always substitutes U+FFFD. Callers who want the substitution opt in with
 // `{toWellFormed: true}`, and the choice is fixed when the native context is
 // created. Routing both implementations through the same native conversion is
 // what keeps their digests byte-identical under either setting.
 //
-// This is also why update() returns a byte count — a string's UTF-8 length is
+// This is also why update() returns a byte count - a string's UTF-8 length is
 // not observable from JavaScript. Both encodings happen to agree on it, since a
 // lone surrogate and U+FFFD are both three bytes.
 
@@ -112,7 +112,7 @@ function byteLengthOf(chunk: ArrayBuffer | ArrayBufferView): number {
 }
 
 // Collapses the WebCrypto-style `string | { name }` algorithm parameter to a
-// name. Unrecognized names are not rejected here — createDigestContext() throws
+// name. Unrecognized names are not rejected here - createDigestContext() throws
 // for those, which is what keeps the error type and message identical to C++.
 function normalizeAlgorithmName(algorithm: unknown): string {
   if (typeof algorithm === 'string') return algorithm;
@@ -159,8 +159,8 @@ function createDigestState(algorithm: unknown, options: unknown): DigestState {
     resolve: (value: ArrayBuffer) => void;
     reject: (reason?: unknown) => void;
   };
-  // Reading `digest` is optional — a stream may be used only for bytesWritten,
-  // or abandoned entirely — and an abort is already surfaced through the
+  // Reading `digest` is optional - a stream may be used only for bytesWritten,
+  // or abandoned entirely - and an abort is already surfaced through the
   // writer's ready/closed promises. An unobserved rejection here is therefore
   // not worth reporting. Marked before returning, so no rejecting path can run
   // first. Derived promises are unaffected: `stream.digest.then(f)` with no
@@ -241,7 +241,7 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
     options?: { toWellFormed?: boolean }
   ) {
     // The state is built before super() because the sink closures below capture
-    // it — they cannot reference `this`, which is in its temporal dead zone
+    // it - they cannot reference `this`, which is in its temporal dead zone
     // until super() returns. An unrecognized algorithm therefore also throws
     // before any stream exists, as in C++.
     const state = createDigestState(algorithm, options);

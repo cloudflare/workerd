@@ -50,11 +50,17 @@ kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectClass::snapshotClone() c
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectNamespace::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(
+        kj::refcounted<LoopbackDurableObjectNamespace>(copy.channel, kj::mv(copy.idFactory),
+            actorCallRetriesAllowed, loopbackClass->cloneForSnapshot(), persistent));
+  }
   return kj::none;
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackColoLocalActorNamespace::snapshotClone() const {
-  return kj::none;
+  return ownAsWrappable(kj::refcounted<LoopbackColoLocalActorNamespace>(
+      getChannel(), loopbackClass->cloneForSnapshot()));
 }
 
 }  // namespace workerd::api

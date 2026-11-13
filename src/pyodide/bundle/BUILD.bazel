@@ -1,0 +1,51 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_python//python:defs.bzl", "py_binary")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
+
+# Build-time tool that applies workerd's patches to Pyodide's pyodide.asm.js / pyodide.asm.mjs as
+# AST rewrites. Used by python_bundles.bzl.
+wd_ts_project(
+    name = "patch_pyodide_asm_lib",
+    srcs = ["patch_pyodide_asm.ts"],
+    eslintrc_json = "eslint.config.mjs",
+    tsconfig_json = "tsconfig.json",
+    deps = [
+        "//:node_modules/@types/estree",
+        "//:node_modules/@types/node",
+        "//:node_modules/acorn",
+        "//:node_modules/astring",
+    ],
+)
+
+js_binary(
+    name = "patch_pyodide_asm",
+    data = [":patch_pyodide_asm_lib"],
+    entry_point = "patch_pyodide_asm.js",
+    visibility = ["//src/pyodide:__pkg__"],
+)
+
+# Build-time tool that extracts the stdlib wheels into a PythonPackages capnp message embedded in
+# the Pyodide bundle. Used by python_bundles.bzl.
+py_binary(
+    name = "pack_python_packages",
+    srcs = ["pack_python_packages.py"],
+    visibility = ["//src/pyodide:__pkg__"],
+)
+
+# Shared by pack_python_packages.py, which writes the message embedded in the bundle, and the C++
+# reader in src/workerd/api/pyodide.
+wd_cc_capnp_library(
+    name = "python_packages_capnp",
+    srcs = ["python_packages.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+# The checked-in package lock files. Exported so the `pyodide` module extension
+# (build/deps/dep_pyodide.bzl) can read them to download the stdlib wheels.
+exports_files(
+    glob(["python-lock/*.json"]) + [
+        "esbuild.config.mjs",
+        "python_packages.capnp",
+    ],
+)

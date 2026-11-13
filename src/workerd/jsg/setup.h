@@ -6,6 +6,7 @@
 // Public API for setting up JavaScript context. Only high-level code needs to include this file.
 
 #include "async-context.h"
+#include "dom-exception.h"
 #include "jsg.h"
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
@@ -220,9 +221,17 @@ class IsolateBase {
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
 
   // Returns the Error.prototype of `context`, found without making an error, which would capture
-  // a stack trace. Runs no JavaScript.
-  static v8::Local<v8::Value> getErrorPrototype(
+  // a stack trace. Runs no JavaScript. Returns nothing if V8 throws, leaving the exception
+  // pending.
+  static v8::MaybeLocal<v8::Value> getErrorPrototype(
       v8::Isolate* isolate, v8::Local<v8::Context> context);
+
+  // The V8 private symbol named DOM_EXCEPTION_BRAND_KEY, the brand of the bootstrap's
+  // DOMException, looked up once per isolate.
+  static v8::Local<v8::Private> getDomExceptionBrandKey(v8::Isolate* isolate);
+
+  // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
+  static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
   static IsolateBase& from(v8::Isolate* isolate);
 
@@ -487,11 +496,13 @@ class IsolateBase {
     deferredActionHook = hook;
   }
 
-  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
-  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
-  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
-  // destructor may do it.
-  using DisposeHook = void (*)(void* data);
+  // A function that ~IsolateBase() calls with `data` twice: with DISPOSING just before the
+  // isolate is disposed, so that another layer stops using the isolate pointer, and with DISPOSED
+  // once it is, so that the layer can free memory that V8 may write into until then. The Rust JSG
+  // Realm, of which an isolate has at most one, sets it when it is dropped. Setting it does not
+  // allocate, so a destructor may do it.
+  enum class DisposeStage { DISPOSING, DISPOSED };
+  using DisposeHook = void (*)(void* data, DisposeStage stage);
   void setDisposeHook(DisposeHook hook, void* data) {
     disposeHook = hook;
     disposeHookData = data;
@@ -784,6 +795,10 @@ class IsolateBase {
   // including paired TracedReferences. Entries never instantiated in the zygote leaked no identity into the
   // baked heap, so they are not pinned and are recompiled fresh at LOAD. The registry is owned
   // by the context global's Wrappable.
+  //
+  // With the new module registry, records its resolutions in
+  // SnapshotArtifact::newModuleRegistryRecords instead (see
+  // modules::recordIsolateModuleRegistryForSnapshot()).
   void bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle);
 
   // Bakes every materialized JSG_RESOURCE-type constructor template
@@ -938,12 +953,18 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
+  // FunctionTemplate returned by getDomExceptionTemplate().
+  v8::Global<v8::FunctionTemplate> domExceptionTemplate;
+
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
 
   // A template of an object whose one property is its context's Error.prototype, which
   // getErrorPrototype() reads.
   v8::Global<v8::ObjectTemplate> errorPrototypeTemplate;
+
+  // The private symbol that getDomExceptionBrandKey() returns.
+  v8::Global<v8::Private> domExceptionBrandKey;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
@@ -1076,6 +1097,8 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
+  static void constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static bool isJsApiWrapperNativeErrorCallback(v8::Isolate* isolate, v8::Local<v8::Object> object);
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
@@ -1368,9 +1391,14 @@ class Isolate: public IsolateBase {
           *this, context, handle, jsg::TypeErrorContext::other());
     }
 
-    Ref<DOMException> domException(
+    JsObject domException(
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
-      return withinHandleScope([&] {
+      return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
+        KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
+          return newBootstrapDomException(*this, prototype, name, message,
+              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
+        }
+
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
             v8Isolate, static_cast<DOMException*>(nullptr));
         KJ_DASSERT(!tmpl.IsEmpty());
@@ -1389,10 +1417,30 @@ class Isolate: public IsolateBase {
         }
 
         auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
+        // Wrapping through the TypeWrapper would do this, so that serialize() can read `stack`.
+        de->jsgInitReflection(*jsgIsolate.getWrapperByContext(*this));
         de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
 
-        return kj::mv(de);
-      });
+        return obj;
+      }));
+    }
+
+    kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) override {
+      KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(*this, value)) {
+        return DomExceptionInfo{
+          .name = info.name.toString(*this),
+          .message = info.message.toString(*this),
+        };
+      }
+      KJ_IF_SOME(domException,
+          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
+              *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
+        return DomExceptionInfo{
+          .name = kj::str(domException.getName()),
+          .message = kj::str(domException.getMessage()),
+        };
+      }
+      return kj::none;
     }
 
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
@@ -1467,23 +1515,25 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
-      uint32_t badTagFieldsCount = 0;
       WrappableDeserializeMetadata metadata;
+      kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
         options.internalFieldsDeserializer =
-            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
             v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
+        abortOnGc.emplace(v8Isolate, metadata);
       }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      abortOnGc = kj::none;
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      KJ_REQUIRE(badTagFieldsCount == 0,
+      KJ_REQUIRE(metadata.badTagFieldsCount == 0,
           "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
           "wrapper markers",
-          badTagFieldsCount);
+          metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.finishWrappableDeserializeMetadata(metadata);
       }
@@ -1528,12 +1578,8 @@ class Isolate: public IsolateBase {
     }
 
     void reportError(const JsValue& value) override {
-      auto& js = Lock::from(v8Isolate);
-      KJ_IF_SOME(domException,
-          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
-              js, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
-        auto desc =
-            kj::str("DOMException(", domException.getName(), "): ", domException.getMessage());
+      KJ_IF_SOME(info, tryGetDomExceptionInfo(value)) {
+        auto desc = kj::str("DOMException(", info.name, "): ", info.message);
         jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));
       } else {
         jsgIsolate.reportError(

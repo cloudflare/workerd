@@ -942,7 +942,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    JSG_NESTED_TYPE(DOMException);
+    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+      JSG_NESTED_TYPE(DOMException);
+    }
     JSG_NESTED_TYPE(WorkerGlobalScope);
     if (flags.getSpecCompliantPropertyAttributes()) {
       // EventTarget is also declared on WorkerGlobalScope, but V8's
@@ -1102,10 +1106,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       }
     }
 
-    if (flags.getSpecCompliantUrlpattern()) {
-      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
-    } else {
-      JSG_NESTED_TYPE(URLPattern);
+    // Under the TS_URL_PATTERN autogate, the per-isolate bootstrap installs the TypeScript
+    // URLPattern instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL_PATTERN)) {
+      if (flags.getSpecCompliantUrlpattern()) {
+        JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+      } else {
+        JSG_NESTED_TYPE(URLPattern);
+      }
     }
 
     JSG_NESTED_TYPE(Blob);

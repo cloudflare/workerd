@@ -450,6 +450,25 @@ KJ_TEST("a stateless context's cross-context actions stay queued if its request 
   KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
 }
 
+KJ_TEST("whenTargetDestroyed() resolves once the target IoContext is destroyed") {
+  TestFixture fixture;
+  auto context = fixture.newStatelessIoContext();
+  auto executor = context->getCrossContextExecutor();
+  auto destroyed = executor.whenTargetDestroyed();
+
+  // Waits that are canceled get pruned as more are registered.
+  for (auto i = 0; i < 100; ++i) {
+    // Canceled at the end of each iteration.
+    auto canceled = executor.whenTargetDestroyed();
+  }
+  KJ_EXPECT(!destroyed.poll(fixture.getWaitScope()));
+
+  context = nullptr;
+  KJ_EXPECT(destroyed.poll(fixture.getWaitScope()));
+  destroyed.wait(fixture.getWaitScope());
+  KJ_EXPECT(executor.whenTargetDestroyed().poll(fixture.getWaitScope()));
+}
+
 // An actor whose class publishes its `ctx`. createPromise() creates a promise for another context
 // to settle with settle(). The promise's reaction uses the actor's storage, which needs a current
 // request, and appends its progress to `globalThis.events`.

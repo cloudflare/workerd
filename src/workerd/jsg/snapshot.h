@@ -7,6 +7,7 @@
 // that creates isolates (jsg::IsolateBase and its callers) needs to include this file.
 
 #include <cppgc/persistent.h>
+#include <v8-callbacks.h>
 #include <v8-object.h>
 #include <v8-sandbox.h>
 #include <v8-snapshot.h>
@@ -63,7 +64,14 @@ class Wrappable;
 //   compiling them again (preserving identity between the baked main-module graph and runtime
 //   import()/require()). Field types are raw ints to avoid coupling this header to modules.h:
 //   `moduleType` is a jsg::ModuleRegistry::Type (capnp ModuleType), `handleKind` a
-//   jsg::ModuleRegistry::SnapshotHandleKind.
+//   jsg::ModuleRegistry::SnapshotHandleKind. Only the legacy module registry's.
+// * `newModuleRegistryRecords` are the new module registry's resolutions
+//   (modules::IsolateModuleRegistry): one (context type, specifier) the zygote resolved ->
+//   context-level AddData index of the v8::Module it resolved to; several specifiers may name one
+//   module. A restored isolate rebuilds its registry from these (ModuleRegistry::attachToIsolate);
+//   without them the registry starts empty, so a later import compiles and evaluates a second
+//   instance of a module the baked graph holds, and V8's import.meta callback, which looks the
+//   module up in the registry, leaves import.meta.url and import.meta.main unset.
 // * `listenerRecords` are the global scope's event listeners the zygote's top level registered
 //   via addEventListener(), in per-type registration order: for each, its type, its `once` and
 //   `passive` options, and the context-level AddData indices of its identity object and of the
@@ -107,6 +115,13 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     size_t dataIndex;
   };
   kj::Vector<ModuleRecord> moduleRecords;
+
+  struct NewModuleRegistryRecord {
+    uint8_t contextType;   // A modules::ResolveContext::Type.
+    kj::String specifier;  // The normalized specifier URL, query and fragment included.
+    size_t moduleDataIndex;
+  };
+  kj::Array<NewModuleRegistryRecord> newModuleRegistryRecords;
 
   // A listener the zygote's top level registered on the context global, re-registered as it was
   // on load: the identity removeEventListener() matches, and the callback and receiver its
@@ -215,9 +230,14 @@ struct WrappableDeserializeMetadata {
   // Each slot's instance, owned by its shim; null for a dropped slot. Valid for a linked slot.
   kj::Array<Wrappable*> instances;
 
-  // Findings the callback cannot raise itself.
+  // Findings the callbacks cannot raise themselves.
+  uint32_t badTagFieldsCount = 0;    // internal-field payload at the wrong index or unknown marker
   uint32_t badPayloadsCount = 0;     // API-wrapper payload with a bad size, index or slot
   uint32_t duplicateLinksCount = 0;  // one slot referenced by more than one holder
+
+  // Set while deserializeInternalFields() or deserializeApiWrapperCallback() runs, for
+  // AbortOnGcInDeserializerCallbacks.
+  bool inCallback = false;
 
   // Before creating a context: pre-allocates the CppgcShim that will back each restored wrapper,
   // so that the deserializer callback only needs to link holder and shim. `instances` is parallel
@@ -237,10 +257,30 @@ struct WrappableDeserializeMetadata {
   void releaseSlotsWithChecks();
 };
 
+// V8 runs the deserializer callbacks below under DisallowGarbageCollection, which only a debug
+// build of V8 checks. A GC that starts inside one of them, say from an allocation for an aligned
+// pointer with a large buffer's external memory to account for, would run on a half-restored
+// context. While in scope, this aborts the process in every build when a GC starts while
+// `metadata.inCallback` is set.
+class AbortOnGcInDeserializerCallbacks {
+ public:
+  AbortOnGcInDeserializerCallbacks(v8::Isolate* isolate, WrappableDeserializeMetadata& metadata);
+  ~AbortOnGcInDeserializerCallbacks() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(AbortOnGcInDeserializerCallbacks);
+
+ private:
+  v8::Isolate* isolate;
+  WrappableDeserializeMetadata& metadata;
+
+  static void onGcPrologue(
+      v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data);
+};
+
 // DeserializeInternalFieldsCallback for Context::New() from a startup snapshot. Restores the
 // workerd marker in WRAPPABLE_TAG_FIELD_INDEX of each deserialized wrapper from the marker value
-// the serializer emitted. `data` is a uint32_t counter of payloads at the wrong index or with an
-// unknown marker; the caller raises it after Context::New() returns.
+// the serializer emitted. `data` is the WrappableDeserializeMetadata, whose badTagFieldsCount
+// counts payloads at the wrong index or with an unknown marker; the caller raises it after
+// Context::New() returns.
 void deserializeInternalFields(
     v8::Local<v8::Object> holder, int index, v8::StartupData payload, void* data);
 

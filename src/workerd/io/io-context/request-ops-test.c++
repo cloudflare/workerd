@@ -186,7 +186,8 @@ class RecordingRequestObserver final: public RequestObserver {
 
   void reportFailure(const kj::Exception& e, FailureSource) override {
     record->failures.add(kj::str(e.getType(), ": ", e.getDescription()));
-    // Logs show where the exception was created, so that must match too.
+    // Logs show where the exception was created, so that must match too, but for the location of
+    // a tunneled exception (withTunneledLocationsNormalized()).
     record->failureLocations.add(kj::str(e.getFile(), ":", e.getLine()));
   }
   void setFailedOpen(bool value) override {
@@ -375,12 +376,48 @@ Outcome run(kj::StringPtr scenario, Implementation implementation, Flags flags) 
   return worker.outcome(statusCode, log);
 }
 
-// Runs `scenario` on both implementations, checks that they are observed alike, and returns
-// the outcome.
+// `text` with the location of each exception that C++ or Rust JSG creates for a JavaScript
+// exception replaced by the same placeholder. Each records where it creates the exception, so
+// that is the one place where the logs of the two implementations differ. A location is a word,
+// which may start with a directory the build adds to the path, such as
+// `workerd/jsg/_virtual_includes/<target>/`, and ends with the line.
+kj::String withTunneledLocationsNormalized(kj::StringPtr text) {
+  constexpr kj::StringPtr FILES[] = {"workerd/jsg/value.h:"_kj, "rust/jsg/lib.rs:"_kj};
+  kj::Vector<char> result(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    auto rest = text.slice(i);
+    kj::Maybe<size_t> matched;
+    for (const auto& file: FILES) {
+      if (rest.startsWith(file)) {
+        matched = file.size();
+        break;
+      }
+    }
+    KJ_IF_SOME(size, matched) {
+      // Drop the rest of the word before the file, then the line after it.
+      while (!result.empty() && result.back() != ' ' && result.back() != '\n') {
+        result.removeLast();
+      }
+      result.addAll("<tunneled exception>"_kj);
+      i += size;
+      while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
+    } else {
+      result.add(text[i++]);
+    }
+  }
+  result.add('\0');
+  return kj::String(result.releaseAsArray());
+}
+
+// Runs `scenario` on both implementations, checks that they are observed alike, but for where
+// JSG creates the exceptions it tunnels, and returns the outcome.
 Outcome runOnBoth(kj::StringPtr scenario, Flags flags = {}) {
   auto cpp = run(scenario, Implementation::CPP, flags);
   auto rust = run(scenario, Implementation::RUST, flags);
-  KJ_EXPECT(cpp.toString() == rust.toString(), scenario, cpp.toString(), rust.toString());
+  KJ_EXPECT(withTunneledLocationsNormalized(cpp.toString()) ==
+          withTunneledLocationsNormalized(rust.toString()),
+      scenario, cpp.toString(), rust.toString());
   return cpp;
 }
 
@@ -529,6 +566,20 @@ KJ_TEST("passThroughOnException() has a failing request fail open, as in C++") {
   KJ_EXPECT(control.statusCode == 500);
 }
 
+KJ_TEST("withTunneledLocationsNormalized() replaces the whole location on every platform") {
+  auto expected = "failure locations: <tunneled exception> | io-context.c++:12\n"
+                  "exception = <tunneled exception>: failed: x"_kj;
+  for (const auto& prefix: {""_kj, "workerd/jsg/_virtual_includes/iterator/"_kj,
+         "workerd/jsg/_virtual_includes/iterator\\"_kj}) {
+    for (const auto& file: {"workerd/jsg/value.h:1467"_kj, "rust/jsg/lib.rs:1271"_kj}) {
+      auto location = kj::str(file.startsWith("rust") ? ""_kj : prefix, file);
+      auto text = kj::str("failure locations: ", location, " | io-context.c++:12\n",
+          "exception = ", location, ": failed: x");
+      KJ_EXPECT(withTunneledLocationsNormalized(text) == expected, text);
+    }
+  }
+}
+
 KJ_TEST("abort() without a reason aborts and terminates as C++ does") {
   for (auto scenario: {"abortWithoutReason"_kj, "abortUndefined"_kj}) {
     auto outcome = runOnBoth(scenario);
@@ -621,8 +672,8 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
         io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
     KJ_EXPECT_THROW_MESSAGE(
         "not the one of the current request", io_context_set_fail_open(firstId));
-    KJ_EXPECT_THROW_MESSAGE("not the one of the current request",
-        io_context_abort(firstId, ::workerd::rust::jsg::MaybeLocal{0}));
+    KJ_EXPECT_THROW_MESSAGE(
+        "not the one of the current request", io_context_abort_without_reason(firstId));
     KJ_EXPECT(!env.context.isFailOpen());
     KJ_EXPECT(env.context.getAbortReason() == kj::none);
   });
@@ -632,8 +683,8 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
     KJ_EXPECT_THROW_MESSAGE("there is no current request",
         io_context_add_wait_until(firstId, ::workerd::rust::jsg::to_ffi(kj::mv(promise))));
     KJ_EXPECT_THROW_MESSAGE("there is no current request", io_context_set_fail_open(firstId));
-    KJ_EXPECT_THROW_MESSAGE("there is no current request",
-        io_context_abort(firstId, ::workerd::rust::jsg::MaybeLocal{0}));
+    KJ_EXPECT_THROW_MESSAGE(
+        "there is no current request", io_context_abort_without_reason(firstId));
   });
 
   fixture.enterContext(*first, [&](const TestFixture::Environment& env) {

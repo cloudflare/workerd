@@ -6,6 +6,10 @@
 
 #include <workerd/jsg/wrappable.h>
 
+#include <v8-isolate.h>
+
+#include <kj/debug.h>
+
 #include <cstring>
 
 namespace workerd::jsg {
@@ -185,9 +189,32 @@ v8::StartupData serializeApiWrapperCallback(
   return {nullptr, 0};
 }
 
+AbortOnGcInDeserializerCallbacks::AbortOnGcInDeserializerCallbacks(
+    v8::Isolate* isolate, WrappableDeserializeMetadata& metadata)
+    : isolate(isolate),
+      metadata(metadata) {
+  isolate->AddGCPrologueCallback(&onGcPrologue, &metadata);
+}
+
+AbortOnGcInDeserializerCallbacks::~AbortOnGcInDeserializerCallbacks() noexcept(false) {
+  isolate->RemoveGCPrologueCallback(&onGcPrologue, &metadata);
+}
+
+void AbortOnGcInDeserializerCallbacks::onGcPrologue(
+    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+  auto& metadata = *static_cast<WrappableDeserializeMetadata*>(data);
+  if (metadata.inCallback) {
+    KJ_LOG(FATAL, "START_FROM_SNAPSHOT: GC started inside a context deserializer callback",
+        static_cast<int>(type));
+    abort();
+  }
+}
+
 void deserializeApiWrapperCallback(
     v8::Local<v8::Object> holder, v8::StartupData payload, void* data) {
   auto& metadata = *static_cast<WrappableDeserializeMetadata*>(data);
+  metadata.inCallback = true;
+  KJ_DEFER(metadata.inCallback = false);
   size_t index;
   if (payload.raw_size != sizeof(index)) {
     ++metadata.badPayloadsCount;
@@ -230,10 +257,12 @@ v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index,
 
 void deserializeInternalFields(
     v8::Local<v8::Object> holder, int index, v8::StartupData payload, void* data) {
-  auto& badTagFieldsCount = *static_cast<uint32_t*>(data);
+  auto& metadata = *static_cast<WrappableDeserializeMetadata*>(data);
+  metadata.inCallback = true;
+  KJ_DEFER(metadata.inCallback = false);
   if (index != Wrappable::WRAPPABLE_TAG_FIELD_INDEX ||
       payload.raw_size != internalFieldTagSizeInBytes) {
-    ++badTagFieldsCount;
+    ++metadata.badTagFieldsCount;
     return;
   }
 
@@ -249,7 +278,7 @@ void deserializeInternalFields(
       tagPtr = const_cast<TagType*>(&Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
       break;
     default:
-      ++badTagFieldsCount;
+      ++metadata.badTagFieldsCount;
       return;
   }
 

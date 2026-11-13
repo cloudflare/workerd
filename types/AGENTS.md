@@ -50,7 +50,7 @@ Types in this project come from three layers. Changes must be made in the correc
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements, whose C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)` (`url.d.ts`) |
+| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements, whose C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)` (`dom-exception.d.ts`, `url.d.ts`, `urlpattern.d.ts`) |
 
 Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, or `defines/`).
 

@@ -127,6 +127,9 @@ switch (MODE) {
   case 'process-env':
     process.env.FROM_TOP_LEVEL = 'yes';
     break;
+  case 'process-stdout':
+    topLevel.stdoutWritable = typeof process.stdout.write;
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -235,6 +238,12 @@ async function test(ctrl, env) {
     'buffer-assign'(r) {
       strictEqual(r.bufferCustom, 'Buffer');
     },
+    // Reading `process` evaluates the process object's module, which the zygote can run. Its
+    // stdio streams are built on first access, so a top level that leaves them alone stays
+    // transferable; process-stdout below shows what touching one costs.
+    'process-env'(r) {
+      strictEqual(r.processEnv, 'yes');
+    },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top
   // level themselves against the real objects. The zygote records every use of a fail-closed
@@ -300,12 +309,11 @@ async function test(ctrl, env) {
     'date-frozen'(r) {
       strictEqual(r.dateFrozen, true);
     },
-    // Reading `process` evaluates node:process, whose module scope reaches UrlUtil, a Rust JSG
-    // resource (src/rust/api/url.rs). Rust resource types have no snapshot transfer, so this
-    // falls back until they do; the process value itself would carry over, as process-assign
-    // shows.
-    'process-env'(r) {
-      strictEqual(r.processEnv, 'yes');
+    // Building a stdio stream evaluates the fs stream modules, whose module scope reaches
+    // UrlUtil, a Rust JSG resource (src/rust/api/url.rs). Rust resource types have no snapshot
+    // transfer, so this falls back until they do.
+    'process-stdout'(r) {
+      strictEqual(r.topLevel.stdoutWritable, 'function');
     },
   };
 

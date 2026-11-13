@@ -125,6 +125,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     // workers would add their cost to each. The server still looks a config worker's tails up, so
     // that their config errors are reported, but does not link them.
     bool tailWorkers = true;
+    // Whether Durable Object storage on disk is synced (see SqliteDatabase::VfsOptions::sync).
+    // `workerd test` turns this off, since a test's storage need not survive a crash of the
+    // machine.
+    bool syncStorage = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
     // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute

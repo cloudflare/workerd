@@ -304,14 +304,14 @@ impl<'a> MemoryTracker<'a> {
 /// # Built-in implementations
 ///
 /// Primitives report nothing; strings, buffers and collections a node of what they allocate;
-/// wrappers (`Option`, `RefCell`, `jsg::Cell`, ...) what they hold; handles, promises and frames
+/// wrappers (`Option`, `RefCell`, `Mutex`, `jsg::Cell`, ...) what they hold; handles, promises and frames
 /// an edge into the V8 heap; `jsg::Rc` the resource's node. Less obviously:
 ///
 /// - A collection of [plain data](Self::PLAIN_DATA) is one node; an empty collection is none.
-/// - `Box`, `Rc` and `Arc` report a retainer as its node, plain data as a node of its size, and
-///   anything else as a node of its uncounted bytes. An allocation shared by several `Rc`s or
-///   `Arc`s is one node, which keeps the work linear and ends cycles.
-/// - A mutably borrowed `RefCell` reports nothing.
+/// - `Box` and `Arc` report a retainer as its node, plain data as a node of its size, and
+///   anything else as a node of its uncounted bytes. An allocation shared by several `Arc`s is
+///   one node, which keeps the work linear and ends cycles.
+/// - A mutably borrowed `RefCell`, and a `Mutex` locked elsewhere, report nothing.
 /// - The impl for `std::cell::Cell<T>` exists only for `T: Copy` and reports nothing; hold a
 ///   retainer in a `jsg::Cell`.
 /// - `jsg::Weak`, the root async context frame, and a handle or `jsg::Rc` of another isolate
@@ -570,6 +570,24 @@ impl<T: MemoryInfo> MemoryInfo for std::cell::RefCell<T> {
     }
 }
 
+impl<T: MemoryInfo> MemoryInfo for std::sync::Mutex<T> {
+    const PLAIN_DATA: bool = T::PLAIN_DATA;
+
+    fn self_bytes_reported(&self) -> usize {
+        self.try_lock()
+            .map_or(0, |inner| inner.self_bytes_reported())
+    }
+
+    fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
+        // Another thread can hold the lock, such as a future polled without the isolate lock, and
+        // a heap snapshot must not wait for it. The contents are not reported then, nor once the
+        // mutex is poisoned.
+        if let Ok(inner) = self.try_lock() {
+            inner.track_as_field(tracker, edge_name);
+        }
+    }
+}
+
 impl<T: MemoryInfo> MemoryInfo for Box<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
         let inner = &**self;
@@ -588,7 +606,7 @@ impl<T: MemoryInfo> MemoryInfo for Box<T> {
     }
 }
 
-/// Reports what an `Rc` or `Arc` shares as a `Box` would, except that the allocation's node is
+/// Reports what an `Arc` shares as a `Box` would, except that the allocation's node is
 /// deduplicated by `address` and the pointer kind `K`. A retainer deduplicates itself.
 fn track_shared<K: 'static, T: MemoryInfo>(
     tracker: &mut MemoryTracker<'_>,
@@ -620,12 +638,6 @@ fn track_shared<K: 'static, T: MemoryInfo>(
 }
 
 // The kind of a pointer, not its type, tags its allocation: one allocation holds one `T`.
-impl<T: MemoryInfo> MemoryInfo for std::rc::Rc<T> {
-    fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        track_shared::<std::rc::Rc<()>, T>(tracker, edge_name, c"Rc", Self::as_ptr(self), self);
-    }
-}
-
 impl<T: MemoryInfo> MemoryInfo for std::sync::Arc<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
         track_shared::<std::sync::Arc<()>, T>(tracker, edge_name, c"Arc", Self::as_ptr(self), self);

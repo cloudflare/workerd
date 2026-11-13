@@ -7,12 +7,14 @@
 #include "workerd-api-isolate.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
@@ -21,6 +23,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/server/queues/queues_js.embed.h>
+#include <workerd/server/workflows/workflows_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -55,6 +58,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/kv.js"_kj, KV_JS);
     map.insert("/workerd/cron.js"_kj, CRON_JS);
     map.insert("/workerd/queues.js"_kj, QUEUES_JS);
+    map.insert("/workerd/workflows.js"_kj, WORKFLOWS_JS);
     return map;
   }();
   return bundled.find(name).map([](auto& source) { return source; });
@@ -631,13 +635,18 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       // A cache without an id is not shared.
       kj::Maybe<kj::StringPtr> cacheId;
       if (cache.getCacheId().size() > 0) cacheId = cache.getCacheId();
-      return lock.wrap(context,
-          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId,
-              {
-                .maxKeys = cache.getMaxKeys(),
-                .maxValueSize = cache.getMaxValueSize(),
-                .maxTotalValueSize = cache.getMaxTotalValueSize(),
-              })));
+      api::MemoryCacheLimits limits{
+        .maxKeys = cache.getMaxKeys(),
+        .maxValueSize = cache.getMaxValueSize(),
+        .maxTotalValueSize = cache.getMaxTotalValueSize(),
+      };
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_MEMORY_CACHE)) {
+        return jsg::check(
+            ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(api::memory_cache_new(
+                lock.v8Isolate, memoryCacheProvider.bindForRust(cacheId, limits))));
+      }
+      return lock.wrap(
+          context, lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId, limits)));
     }
 
     case Global::EPHEMERAL_ACTOR_NAMESPACE:

@@ -163,7 +163,8 @@ void maybePerIsolateBootstrap(
     const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-    runPerIsolateBootstrap(js, api.getFeatureFlags(), api.getEmbedderBootstrap());
+    runPerIsolateBootstrap(
+        js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
   });
 }
 
@@ -187,14 +188,13 @@ void sendExceptionToInspector(jsg::Lock& js,
   jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
-// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is the single
-// source of truth for how an error is represented in traces, shared by the uncaught-exception
-// path (addExceptionToTrace) and the console.* logging path (handleLog), so that an error
-// reported either way produces an identical representation.
+// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is shared by the
+// uncaught-exception path (addExceptionToTrace) and the console.* logging path (handleLog), so
+// that an error reported either way produces an identical representation.
 //
 // `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
-// and the redundant leading "Name: message" prefix is stripped off `stack` (since name and message
-// are stored as separate fields).
+// and tracing::ErrorInfo::fromErrorProperties() defines the rest, as it does for an exception
+// that is traced without the isolate lock.
 tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -231,32 +231,8 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     }
   }
 
-  kj::Maybe<kj::String> stack;
-  KJ_IF_SOME(s, error.stack) {
-    kj::StringPtr slice = s;
-
-    // Normally `error.stack` repeats the error type and message first. We don't want send two
-    // copies of that to the trace so we'll strip it off.
-    if (slice.startsWith(name)) {
-      slice = slice.slice(name.size());
-      if (slice.startsWith(": "_kj)) {
-        slice = slice.slice(2);
-      }
-    }
-
-    if (slice.startsWith(message)) {
-      slice = slice.slice(message.size());
-      if (slice.startsWith("\n")) {
-        slice = slice.slice(1);
-      }
-    }
-
-    if (slice.size() > 0) {
-      stack = kj::str(slice);
-    }
-  }
-
-  return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message),
+      error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
 }
 
 void addExceptionToTrace(jsg::Lock& js,
@@ -1129,7 +1105,12 @@ kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
 // be held on the Promise itself, and will be fulfilled/rejected when the
 // promise is resolved or rejected. This will signal all of the waiters
 // from other IoContexts.
-jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js, v8::Local<v8::Promise>& promise) {
+//
+// `tag` is the promise's context tag, identifying the IoContext that created it. The returned
+// promise also resolves once that IoContext is destroyed, if only it can settle the promise;
+// the caller must check whether the promise has settled.
+jsg::Promise<void> addCrossThreadPromiseWaiter(
+    jsg::Lock& js, v8::Local<v8::Promise>& promise, v8::Local<v8::Object> tag) {
   auto waiter = kj::newPromiseAndCrossThreadFulfiller<void>();
 
   struct Waiter: public kj::Refcounted {
@@ -1156,7 +1137,16 @@ jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js, v8::Local<v8::Prom
 
   js.toPromise(promise).then(js, kj::mv(onSuccess), kj::mv(onFailure));
 
-  return IoContext::current().awaitIo(js, kj::mv(waiter.promise));
+  kj::Promise<void> settled = kj::mv(waiter.promise);
+  if (FeatureFlags::get(js).getHandleCrossRequestPromiseResolution()) {
+    // Settlement from another IoContext is deferred to the creating IoContext (see the
+    // PromiseCrossContextResolveCallback in Worker::Isolate's constructor), and dropped if it has
+    // been destroyed. A promise still pending then can never settle, so stop waiting.
+    auto& owner = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(js.v8Isolate, tag);
+    settled = settled.exclusiveJoin(owner->whenTargetDestroyed());
+  }
+
+  return IoContext::current().awaitIo(js, kj::mv(settled));
 }
 
 struct HeapSnapshotDeleter: public kj::Disposer {
@@ -1261,6 +1251,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
     }
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, jsg::modules::getSyntheticModuleEvaluationStepsRef());
 
     configureJsgIsolate(*lock, features);
 
@@ -1362,8 +1354,17 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
             "request.");
 
         return js.wrapSimplePromise(
-            addCrossThreadPromiseWaiter(js, promise)
-                .then(js, [promise = js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
+            addCrossThreadPromiseWaiter(js, promise, tag)
+                .then(js, [promise = js.v8Ref(promise.As<v8::Value>())](jsg::Lock& js) mutable {
+          // The waiter also resolves once the creating IoContext is gone, if that leaves the
+          // promise unable to settle.
+          JSG_REQUIRE(promise.getHandle(js).As<v8::Promise>()->State() !=
+                  v8::Promise::PromiseState::kPending,
+              Error,
+              "This promise was created by a request that has since ended, so it can never "
+              "settle. With the handle_cross_request_promise_resolution compatibility flag, a "
+              "promise can only settle in the request that created it, and settling it after "
+              "that request ends is dropped.");
           // Once the waiter has been resolved, return the now settled promise.
           // Since the promise has been settled, it is now safe to access from
           // other requests. Note that the resolved value of the promise still
@@ -2327,10 +2328,15 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
   // the modules are already resolved so we don't pump the microtask queue while
   // synchronously accessing those globals. Resolving them here ensures that they are
   // ready to go before we begin evaluating the main module.
+  //
+  // The process global reads the process object's own module, not node:process, whose
+  // named exports include the stdio streams and so force them to be built.
   auto featureFlags = FeatureFlags::get(js);
   if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
-    JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
-        "Failed to initialize node:process module");
+    auto processSpec = featureFlags.getEnableNodeJsProcessV2() ? "node-internal:public_process"_kj
+                                                               : "node-internal:legacy_process"_kj;
+    JSG_REQUIRE_NONNULL(js.resolveInternalModule(processSpec), Error, "Failed to initialize ",
+        processSpec, " module");
     JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
         "Failed to initialize node:buffer module");
   }
@@ -3033,6 +3039,11 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     }
   }
 
+  logUncaughtExceptionToConsole(source, exception, message);
+}
+
+void Worker::Lock::logUncaughtExceptionToConsole(
+    UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {
     JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(),
         [&](jsg::Lock& js) { sendExceptionToInspector(js, *i.get(), source, exception, message); });
@@ -3057,16 +3068,19 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   }
 }
 
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+void Worker::Lock::logUncaughtExceptionToConsole(UncaughtExceptionSource source,
     kj::Exception&& exception,
-    kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
+    const jsg::JsErrorDescription& error) {
   jsg::Lock& js = *this;
   try {
+    // Describing an internal exception logged and reported it, so the conversion is told not to
+    // do so again and to refer to it by the same internal error id.
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
           .trusted = true,
+          .alreadyDescribed = error,
         });
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   } catch (const jsg::JsExceptionThrown&) {
     // An exception occurred while trying to convert the exception to a JS value.
     // With exceptionToJs, this should only happen if the isolate is terminating
@@ -3075,8 +3089,9 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     // so let's try exceptionToJs again but this time ignoring the detail, and
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
-    auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    auto jsError =
+        js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true, .alreadyDescribed = error});
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   }
 }
 

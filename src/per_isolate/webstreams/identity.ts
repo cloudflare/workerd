@@ -1,24 +1,24 @@
 'use strict';
 
-// IdentityTransformStream and FixedLengthStream — non-standard
+// IdentityTransformStream and FixedLengthStream - non-standard
 // byte-capable identity transforms.
 //
 // IdentityTransformStream is semantically equivalent to
 // `new TransformStream()` (no-op, elided) except:
-//   - The readable side is a BYTE STREAM (BYOB, min/atLeast, draining,
-//     extraction — all inherited from ReadableByteStreamController).
-//   - The writable side only accepts BYTES (ArrayBuffer, ArrayBufferView,
-//     SharedArrayBuffer) and STRINGS (→ UTF-8 via TextEncoder).
+//  - The readable side is a BYTE STREAM (BYOB, min/atLeast, draining,
+//     extraction - all inherited from ReadableByteStreamController).
+//  - The writable side only accepts BYTES (ArrayBuffer, ArrayBufferView,
+//     SharedArrayBuffer) and STRINGS (-> UTF-8 via TextEncoder).
 //     Everything else: TypeError.
-//   - All writes COPY the data (never transfer/detach the input buffer),
-//     and the copy is taken SYNCHRONOUSLY inside writer.write() — via the
+//  - All writes COPY the data (never transfer/detach the input buffer),
+//     and the copy is taken SYNCHRONOUSLY inside writer.write() - via the
 //     strategy size callback, the one hook the writable machinery runs
-//     before control returns to the caller — so resizing or detaching the
+//     before control returns to the caller - so resizing or detaching the
 //     buffer after write() cannot change or destroy what gets delivered.
 //     SAB input forces copying anyway; uniform copy avoids a behavioral
 //     split and matches legacy parity with the old C++ ITS (whose
 //     processChunk copies inside write() for exactly these hazards).
-//   - Zero-length writes are accepted as NO-OPS: the write resolves
+//  - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
 //     chunk enqueued, no backpressure interaction, no pull). A detached
 //     ArrayBuffer, and a view whose buffer is detached or out of bounds,
@@ -59,7 +59,7 @@
 // and settles a write once one tee branch has read it (the identity
 // suite's ledger #22 and #23).
 //
-// writer.write() therefore does not resolve until reads consume it —
+// writer.write() therefore does not resolve until reads consume it -
 // callers must not `await writer.write()` before starting a read, or the
 // result is a deadlock. Aborting the writable or cancelling the readable
 // also wakes the waiting write, which then rejects.
@@ -70,7 +70,7 @@
 //   const { value } = await readPromise;
 //
 // Deadlock:
-//   await writer.write(chunk);  // waits forever — no read pending
+//   await writer.write(chunk);  // waits forever - no read pending
 //   reader.read();              // never reached
 //
 // FixedLengthStream extends IdentityTransformStream with an
@@ -176,7 +176,7 @@ const byobRequestRespond = uncurryThis(
   ReadableStreamBYOBRequest.prototype.respond
 ) as (request: object, bytesWritten: number) => void;
 
-// TextEncoder instance for string → UTF-8 conversion.
+// TextEncoder instance for string -> UTF-8 conversion.
 const textEncoderInstance = new TextEncoder();
 
 // ---------------------------------------------------------------------------
@@ -336,9 +336,9 @@ class IdentityTransformStream {
 
   // Once the writable is erroring (aborted, or the readable cancelled or
   // errored), the in-flight write is left to #unblockWrite, which rejects
-  // it. A consumer's progress can still be observed in between — a
+  // it. A consumer's progress can still be observed in between - a
   // settlement check deferred from before, or a read answered while user
-  // code aborts from inside its resolution — and by then the readable's
+  // code aborts from inside its resolution - and by then the readable's
   // backlog no longer measures what the consumers have read.
   #writableErroring(): boolean {
     const state = writableInternals.getState(this.#writable);
@@ -346,7 +346,7 @@ class IdentityTransformStream {
   }
 
   // The readable queue's consumption notification. It runs inside the
-  // queue's walk, so the check itself waits a microtask — unless #deliver
+  // queue's walk, so the check itself waits a microtask - unless #deliver
   // is answering a read, as it checks right after.
   #onConsumption(): void {
     if (
@@ -401,8 +401,8 @@ class IdentityTransformStream {
     return true;
   }
 
-  // The undelivered writes, in order — the rest of the in-flight write,
-  // then the writes queued behind it — up to `limit` bytes, counted against
+  // The undelivered writes, in order - the rest of the in-flight write,
+  // then the writes queued behind it - up to `limit` bytes, counted against
   // a FixedLengthStream's budget as they are taken.
   #collectUndelivered(limit: number): AcceptedWrite[] {
     const segments: AcceptedWrite[] = [];
@@ -581,7 +581,7 @@ class IdentityTransformStream {
 
     // The strategy size callback is the one hook the writable machinery
     // runs SYNCHRONOUSLY inside writer.write(), so the chunk snapshot is
-    // taken here — before control returns to the caller, and therefore
+    // taken here - before control returns to the caller, and therefore
     // before the caller can resize or detach the buffer. sinkWrite
     // consumes the snapshots in FIFO order: the machinery calls size()
     // exactly once per write and runs the sink write algorithm for the
@@ -597,7 +597,7 @@ class IdentityTransformStream {
     // GetChunkSize error path errors the stream immediately, which would
     // reject earlier valid writes still sitting in the queue instead of
     // letting them deliver. The validation error is recorded in the FIFO
-    // instead and thrown when its entry's turn reaches sinkWrite — so
+    // instead and thrown when its entry's turn reaches sinkWrite - so
     // errors surface in write order, exactly as when validation lived in
     // sinkWrite itself, and everything written before the bad chunk still
     // flows. (The error entry transiently counts one unit of queue size.)
@@ -667,7 +667,7 @@ class IdentityTransformStream {
       const entry = snapshots.shift() as SnapshotEntry;
       // A recorded validation error surfaces here, at its FIFO turn, as a
       // NON-FATAL write rejection: this write's promise rejects while the
-      // stream stays usable and queued writes behind it still deliver —
+      // stream stays usable and queued writes behind it still deliver -
       // the per-write invalid-chunk contract shared with the C++ internal
       // controllers.
       if (!entry.ok) {
@@ -709,7 +709,7 @@ class IdentityTransformStream {
     };
     // FixedLengthStream underwrite enforcement (matches C++
     // identity-transform-stream.c++ tryReadInternal underwrite check).
-    // Not called on abort — sinkAbort fires instead, naturally
+    // Not called on abort - sinkAbort fires instead, naturally
     // skipping the underwrite check (matching C++ behavior).
     const sinkClose = (): void => {
       if (this.#remaining !== undefined && this.#remaining > 0n) {
@@ -777,7 +777,7 @@ class IdentityTransformStream {
       'bytes' // type
     );
 
-    // highWaterMark: 0 ensures pull is not called eagerly — it fires
+    // highWaterMark: 0 ensures pull is not called eagerly - it fires
     // only when a reader.read() is pending, enforcing the rendezvous.
     this.#readable = new ReadableStream(
       byteSource,

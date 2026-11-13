@@ -1,0 +1,60 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The Workflow "flow", class `Flow` of "workflows-test", on the engine
+# "workflows".
+const flow :Workerd.ServiceDesignator = (
+  name = "workflows",
+  entrypoint = "WorkflowBinding",
+  props = ( json = "{\"workflow\": \"flow\"}" ),
+);
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "workflows-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "workflows-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "rpc", "streams_enable_constructors"],
+        bindings = [
+          ( name = "FLOW",
+            wrapped = (
+              moduleName = "cloudflare-internal:workflows-api",
+              innerBindings = [ ( name = "fetcher", service = .flow ) ],
+            ) ),
+          ( name = "WORKFLOWS", service = "workflows" ),
+          ( name = "ENGINE", durableObjectNamespace = "miniflare-workflows-flow" ),
+          # The binding's service itself, with the testing API.
+          ( name = "FLOW_TEST", service = (
+              name = "workflows",
+              entrypoint = "WorkflowBinding",
+              props = ( json = "{\"workflow\": \"flow\", \"binding\": \"FLOW\"}" ),
+            ) ),
+        ],
+        workflowsEngine = (
+          actorClass = ( name = "workflows", entrypoint = "Engine" ),
+          workflows = [
+            ( className = "Flow", name = "flow", bindingService = .flow ) ],
+        ),
+      )
+    ),
+    ( name = "workflows",
+      worker = (
+        modules = [
+          ( name = "workflows.js", bundled = "/workerd/workflows.js" ) ],
+        compatibilityFlags = ["rpc", "streams_enable_constructors"],
+        bindings = [
+          ( name = "workflow:flow",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-flow",
+              serviceName = "workflows-test",
+            ) ),
+          ( name = "WORKFLOWS",
+            json = "{\"flow\": {\"steps\": 3, \"retention\": {\"success\": \"2 days\"}}}" ),
+          ( name = "TEST_CLOCK", json = "true" ),
+          ( name = "LOCAL_DEV", json = "true" ),
+        ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+      )
+    ),
+  ],
+);

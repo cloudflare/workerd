@@ -131,8 +131,16 @@ struct EncoderModuleRegistryImpl {
     kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
   };
 
-  void addBuiltinBundle(
-      jsg::Bundle::Reader bundle, kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none) {
+  // The module source is where V8 would read source text from; this registry only records names
+  // and types, so it is ignored.
+  //
+  // clang-format misparses this struct from the constructor above on and would put a space
+  // before the `*`.
+  // clang-format off
+  void addBuiltinBundle(jsg::Bundle::Reader bundle,
+      kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none,
+      const jsg::ModuleSource* = nullptr) {
+    // clang-format on
     for (auto module: bundle.getModules()) {
       if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
     }

@@ -28,6 +28,7 @@ import { mock } from 'node:test';
 import util, {
   inspect,
   callbackify,
+  diff,
   inherits,
   promisify,
   stripVTControlCharacters,
@@ -4492,6 +4493,27 @@ export const utilFormat = {
   },
 };
 
+// An error whose stack can't be read, because reading its name throws, is
+// rendered as an object, as Node renders it.
+export const utilInspectErrorWithThrowingName = {
+  test() {
+    class ThrowingName extends Error {
+      get name() {
+        throw new TypeError('Illegal invocation');
+      }
+    }
+    assert.strictEqual(util.inspect(ThrowingName.prototype), '[object Object]');
+    const withKey = Object.create(ThrowingName.prototype, {
+      tag: { value: 1, enumerable: true },
+    });
+    assert.strictEqual(util.inspect(withKey), '[object Object] { tag: 1 }');
+    assert.strictEqual(
+      util.inspect({ p: ThrowingName.prototype }),
+      '{ p: [object Object] }'
+    );
+  },
+};
+
 export const utilInspectError = {
   // message/util_inspect_error.js
   async test(ctrl, env, ctx) {
@@ -6161,5 +6183,61 @@ export const setTraceSigInt = {
   async test() {
     assert.strictEqual(namedSetTraceSigInt, util.setTraceSigInt);
     assert.strictEqual(util.setTraceSigInt(true), undefined);
+  },
+};
+
+// Ported from Node.js test/parallel/test-diff.js
+export const testDiff = {
+  test() {
+    assert.strictEqual(util.diff, diff);
+
+    assert.throws(() => diff({}, 'foo'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff('foo', {}), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "expected" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff(['1', { b: 2 }], ['1', '2']), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual[1]" argument must be of type string. Received an instance of Object',
+    });
+
+    assert.deepStrictEqual(diff('foo', 'foo'), []);
+
+    assert.deepStrictEqual(diff('12345678', '12!!5!7!'), [
+      [0, '1'],
+      [0, '2'],
+      [1, '3'],
+      [1, '4'],
+      [-1, '!'],
+      [-1, '!'],
+      [0, '5'],
+      [1, '6'],
+      [-1, '!'],
+      [0, '7'],
+      [1, '8'],
+      [-1, '!'],
+    ]);
+
+    assert.deepStrictEqual(diff(['1', '2', '3'], ['1', '3', '4']), [
+      [0, '1'],
+      [1, '2'],
+      [0, '3'],
+      [-1, '4'],
+    ]);
+
+    assert.deepStrictEqual(diff('', 'ab'), [
+      [-1, 'a'],
+      [-1, 'b'],
+    ]);
+    assert.deepStrictEqual(diff(['a', 'b'], []), [
+      [1, 'a'],
+      [1, 'b'],
+    ]);
   },
 };

@@ -45,20 +45,21 @@ use crate::v8::GcVisitor;
 ///
 /// Use a [`RefCell`] to read or change the value in place.
 ///
-/// A heap snapshot reports the value in place. Writing into the cell while it does, from the code
-/// that reports it, would drop the value under it, so [`set`](Self::set) and
-/// [`replace`](Self::replace) of any `jsg::Cell` panic on the thread while it reports one, which
-/// aborts the process (see the
+/// GC visits and heap snapshots read the value in place. Writing into the cell meanwhile, from the
+/// code that visits or reports it, would drop the value under it, so [`set`](Self::set) and
+/// [`replace`](Self::replace) of any `jsg::Cell` panic on the thread while it reads one in place,
+/// which aborts the process (see the
 /// [rules for reporting code](crate::MemoryInfo#rules-for-reporting-code)).
 pub struct Cell<T> {
     inner: std::cell::Cell<T>,
 }
 
 thread_local! {
-    /// Whether this thread is reading the value of a `jsg::Cell` in place, to report it. One flag
-    /// for the thread rather than one in each cell: a cell is not `Sync`, so only the thread that
-    /// reads it in place can write it, and reporting code writes into no cell at all.
-    static REPORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether this thread is reading the value of a `jsg::Cell` in place, to visit or report it.
+    /// One flag for the thread rather than one in each cell: a cell is not `Sync`, so only the
+    /// thread that reads it in place can write it, and visiting and reporting code write into no
+    /// cell at all.
+    static READING_IN_PLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 impl<T: Traced> Cell<T> {
@@ -74,19 +75,21 @@ impl<T: Traced> Cell<T> {
     /// Dropping a weak reference needs no fix-up, so this takes no lock.
     ///
     /// # Panics
-    /// Panics if a heap snapshot is reporting a `jsg::Cell`'s value on this thread.
+    /// Panics if a GC visit or a heap snapshot is reading a `jsg::Cell`'s value in place on this
+    /// thread.
     pub fn set(&self, value: T) {
-        Self::check_not_reporting();
+        Self::check_not_reading_in_place();
         self.inner.set(value);
     }
 
     /// Replaces the value with `value` and returns the old one, made strong.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
-    /// heap snapshot is reporting a `jsg::Cell`'s value on this thread.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's, or if a GC visit or a heap snapshot is reading a
+    /// `jsg::Cell`'s value in place on this thread.
     pub fn replace(&self, lock: &mut Lock<'_>, value: T) -> T {
-        Self::check_not_reporting();
+        Self::check_not_reading_in_place();
         // Detached once out of the cell: making a `jsg::Rc` to a resource with no wrapper strong
         // visits that resource, which can lead back to this cell, and that visit must not find
         // the old value here still weak.
@@ -98,8 +101,9 @@ impl<T: Traced> Cell<T> {
     /// Takes the value, made strong, and leaves `T::default()` behind.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
-    /// heap snapshot is reporting a `jsg::Cell`'s value on this thread.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's, or if a GC visit or a heap snapshot is reading a
+    /// `jsg::Cell`'s value in place on this thread.
     pub fn take(&self, lock: &mut Lock<'_>) -> T
     where
         T: Default,
@@ -107,22 +111,19 @@ impl<T: Traced> Cell<T> {
         self.replace(lock, T::default())
     }
 
-    fn check_not_reporting() {
+    fn check_not_reading_in_place() {
         assert!(
-            !REPORTING.get(),
-            "a jsg::Cell was written while a heap snapshot reported a jsg::Cell's value"
+            !READING_IN_PLACE.get(),
+            "a jsg::Cell was written while a GC visit or a heap snapshot read a jsg::Cell's value"
         );
     }
 }
 
 impl<T: Traced> Traced for Cell<T> {
     fn trace(&self, visitor: &mut GcVisitor) {
-        // SAFETY: visits are single-threaded within an isolate, create only shared references, and
-        // write only through the interior mutability of the GC references they reach (`trace`
-        // changes nothing other than through the visitor). The cell hands out no reference to its
-        // value, and `replace` moves the value out before it runs a visit, so no visit overlaps a
-        // write to the cell.
-        unsafe { (*self.inner.as_ptr()).trace(visitor) }
+        // `replace` moves the value out before it runs a visit, so a visit never finds a value
+        // that is leaving the cell.
+        self.read_in_place(|value| value.trace(visitor));
     }
 }
 
@@ -134,36 +135,36 @@ impl<T: MemoryInfo> MemoryInfo for Cell<T> {
     const PLAIN_DATA: bool = T::PLAIN_DATA;
 
     fn self_bytes_reported(&self) -> usize {
-        self.read_for_report(T::self_bytes_reported)
+        self.read_in_place(T::self_bytes_reported)
     }
 
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        self.read_for_report(|value| value.track_as_field(tracker, edge_name));
+        self.read_in_place(|value| value.track_as_field(tracker, edge_name));
     }
 }
 
 impl<T> Cell<T> {
-    /// Runs `report` on the value in place, with writes into every `jsg::Cell` refused on this
+    /// Runs `read` on the value in place, with writes into every `jsg::Cell` refused on this
     /// thread.
-    fn read_for_report<U>(&self, report: impl FnOnce(&T) -> U) -> U {
-        /// Restores the flag however `report` ends, including by a panic.
+    fn read_in_place<U>(&self, read: impl FnOnce(&T) -> U) -> U {
+        /// Restores the flag however `read` ends, including by a panic.
         struct Restore {
             previous: bool,
         }
         impl Drop for Restore {
             fn drop(&mut self) {
-                REPORTING.set(self.previous);
+                READING_IN_PLACE.set(self.previous);
             }
         }
 
         let _restore = Restore {
-            previous: REPORTING.replace(true),
+            previous: READING_IN_PLACE.replace(true),
         };
         // SAFETY: the cell hands out no reference to its value, and every `jsg::Cell` on this
-        // thread refuses `set` and `replace` until `_restore` is dropped, after `report` returns.
+        // thread refuses `set` and `replace` until `_restore` is dropped, after `read` returns.
         // The cell is not `Sync`, so no other thread can write into it, and nothing writes into
         // it while the reference lives.
-        report(unsafe { &*self.inner.as_ptr() })
+        read(unsafe { &*self.inner.as_ptr() })
     }
 }
 
@@ -227,7 +228,8 @@ impl<T: Traced> RefCell<T> {
     /// borrowed.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's.
+    /// Panics if the value holds a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, of an
+    /// isolate other than the lock's.
     pub fn try_borrow_mut(&self, lock: &mut Lock<'_>) -> Result<RefMut<'_, T>, BorrowMutError> {
         let guard = self.inner.try_borrow_mut()?;
         GcVisitor::detach(lock, &*guard);

@@ -16,6 +16,8 @@ use jsg_macros::jsg_resource;
 use crate::EvalContext;
 use crate::Harness;
 
+mod js_classes;
+
 #[jsg_resource]
 struct Unserializable;
 
@@ -40,19 +42,24 @@ fn assert_round_trip(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str
     let value = eval(lock, ctx, expr);
     let data = jsg::ser::serialize(lock, value).unwrap();
     assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
+    assert_read(lock, ctx, &data, check);
+}
 
-    let copy = jsg::ser::deserialize(lock, &data).unwrap();
+/// Checks that what Rust JSG and C++ JSG read from `data` satisfies `check`, a JavaScript
+/// expression of `v`.
+fn assert_read(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, data: &[u8], check: &str) {
+    let copy = jsg::ser::deserialize(lock, data).unwrap();
     ctx.set_global(lock, "v", copy);
     assert!(
         ctx.eval::<bool>(lock, check).unwrap(),
-        "{expr}: Rust JSG read: {check}"
+        "Rust JSG read: {check}"
     );
 
-    let copy = Harness::cpp_deserialize(lock, &data);
+    let copy = Harness::cpp_deserialize(lock, data);
     ctx.set_global(lock, "v", copy);
     assert!(
         ctx.eval::<bool>(lock, check).unwrap(),
-        "{expr}: C++ JSG read: {check}"
+        "C++ JSG read: {check}"
     );
 }
 
@@ -169,6 +176,35 @@ fn errors_with_enhanced_error_serialization() {
     });
 }
 
+/// Without `preserve_stack_in_errors`, an error keeps the stack it gets when read, and its other
+/// properties, as `jsg::Deserializer` does without `preserveStackInErrors`.
+#[test]
+fn errors_without_their_stacks() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = eval(
+            lock,
+            ctx,
+            "Object.assign(new Error('e'), { stack: 'original', code: 42 })",
+        );
+        let data = jsg::ser::serialize(lock, value)?;
+        let options = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+        };
+        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+        ctx.set_global(lock, "v", copy);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "v instanceof Error && v.message === 'e' && v.code === 42 && \
+                 typeof v.stack === 'string' && v.stack !== 'original'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
 /// that the bytes stay the same.
 #[test]
@@ -234,6 +270,38 @@ fn workerd_api_objects_round_trip() {
 }
 
 #[test]
+fn bootstrap_dom_exceptions_round_trip() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        // An API wrapper object without internal fields, unlike the C++ DOMException, which V8
+        // would otherwise serialize as an empty plain object. The harness has no DOMException
+        // global, so its prototype stands in for the bootstrap's, and a copy, the C++ class's
+        // instance, is recognized by its code.
+        let prototype = eval(lock, ctx, "Object.create(Error.prototype)");
+        let exception =
+            Harness::new_bootstrap_dom_exception(lock, prototype, "AbortError", "m", "S");
+        ctx.set_global(lock, "exception", exception);
+        eval(
+            lock,
+            ctx,
+            "globalThis.isCopy = (e) => e.name === 'AbortError' && e.message === 'm' && \
+             e.code === 20 && e.stack === 'S'",
+        );
+        for (expr, check) in [
+            ("exception", "isCopy(v)"),
+            (
+                "({ exception, again: exception })",
+                "isCopy(v.exception) && v.again === v.exception",
+            ),
+            ("new Error('e', { cause: exception })", "isCopy(v.cause)"),
+        ] {
+            assert_round_trip(lock, ctx, expr, check);
+        }
+        Ok(())
+    });
+}
+
+#[test]
 fn unserializable_values_throw_data_clone_error() {
     Harness::new().run_in_context(|lock, ctx| {
         let exception = serialize_exception(lock, ctx, "({ f() {} }).f");
@@ -264,72 +332,6 @@ fn unserializable_values_throw_data_clone_error() {
             "DataCloneError",
             "Could not serialize object of type \"Unserializable\". This type does not support \
              serialization.",
-        );
-        Ok(())
-    });
-}
-
-#[test]
-fn classes_implemented_in_javascript_throw_data_clone_error() {
-    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
-    harness.run_in_context(|lock, ctx| {
-        // Whatever the instance's mark, and even if it is a native error.
-        let cloneable = "({ __proto__: null, deserializeInfo: 'test:Point', clone: () => 1, \
-                         deserialize: () => {} })";
-        for (expr, mark, class) in [
-            ("new (class Point {})()", cloneable, "Point"),
-            ("new (class Opaque {})()", "0", "Opaque"),
-            (
-                "new (class TestError extends Error {})('e')",
-                cloneable,
-                "TestError",
-            ),
-        ] {
-            let value = eval(lock, ctx, expr);
-            let mark = eval(lock, ctx, mark);
-            Harness::mark_js_serializable(lock, value, mark);
-            ctx.set_global(lock, "instance", value);
-            let exception = serialize_exception(lock, ctx, "[instance]");
-            assert_error(
-                lock,
-                ctx,
-                exception,
-                "DataCloneError",
-                &format!(
-                    "Could not serialize object of type \"{class}\". This type does not support \
-                     serialization."
-                ),
-            );
-        }
-
-        // A mark on an object whose prototype is Object.prototype or null is ignored, as by
-        // jsg::Serializer.
-        for (expr, check) in [
-            ("({ a: 1 })", "v.a === 1"),
-            (
-                "Object.create(null)",
-                "Object.getPrototypeOf(v) === Object.prototype",
-            ),
-        ] {
-            let value = eval(lock, ctx, expr);
-            let mark = eval(lock, ctx, "0");
-            Harness::mark_js_serializable(lock, value, mark);
-            ctx.set_global(lock, "instance", value);
-            assert_round_trip(lock, ctx, "instance", check);
-        }
-
-        // What C++ JSG writes for one: V8's tag for a host object, jsg::Serializer's tag for an
-        // instance of a class implemented in JavaScript, its length-delimited deserializeInfo, and
-        // its flags.
-        let mut data = header(lock);
-        data.extend_from_slice(b"\\\x17\x0atest:Point\x00");
-        let exception = deserialize_exception(lock, &data);
-        assert_error(
-            lock,
-            ctx,
-            exception,
-            "DataCloneError",
-            "This deserializer does not support objects implemented in JavaScript.",
         );
         Ok(())
     });
@@ -382,31 +384,55 @@ fn deserialize_exception<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local
     caught.expect_err("deserialization should throw")
 }
 
+/// Deserializes `data` with Rust JSG and with C++ JSG, both of which must throw `name: message`.
+fn assert_deserialization_throws(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    data: &[u8],
+    name: &str,
+    message: &str,
+) {
+    let exception = deserialize_exception(lock, data);
+    assert_error(lock, ctx, exception, name, message);
+    let caught = lock
+        .try_catch(|lock| Harness::cpp_try_deserialize(lock, data))
+        .unwrap();
+    let exception = caught.expect_err("C++ JSG should throw");
+    assert_error(lock, ctx, exception, name, message);
+}
+
 #[test]
 fn malformed_data_throws() {
     Harness::new().run_in_context(|lock, ctx| {
-        // V8's tag for a host object, then the tag of no workerd API type.
+        // V8's tag for a host object, then the tag of no workerd API type, which means version
+        // skew: an internal error.
         let mut data = header(lock);
         data.extend_from_slice(b"\\\x63");
         let exception = deserialize_exception(lock, &data);
         let err = jsg::Error::from_js(lock, exception).unwrap();
         assert!(err.message.starts_with("internal error"), "{}", err.message);
 
-        // A native error, cut short before its type.
-        let mut data = header(lock);
-        data.extend_from_slice(b"\\\x0a");
-        let exception = deserialize_exception(lock, &data);
-        let err = jsg::Error::from_js(lock, exception).unwrap();
-        assert!(err.message.starts_with("internal error"), "{}", err.message);
+        // A host object cut short before its tag, and a native error before its type, which are
+        // not errors in the reader.
+        for bytes in [&b"\\"[..], b"\\\x0a"] {
+            let mut data = header(lock);
+            data.extend_from_slice(bytes);
+            assert_deserialization_throws(
+                lock,
+                ctx,
+                &data,
+                "DataCloneError",
+                "Deserialization failed: the data is malformed.",
+            );
+        }
 
         // A native error whose message is not a string.
         let mut data = header(lock);
         data.extend_from_slice(b"\\\x0a\x01_");
-        let exception = deserialize_exception(lock, &data);
-        assert_error(
+        assert_deserialization_throws(
             lock,
             ctx,
-            exception,
+            &data,
             "DataCloneError",
             "Deserialization failed: error message is not a string",
         );
@@ -440,15 +466,18 @@ fn missing_or_unsupported_header_is_an_internal_error() {
 #[test]
 fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
     Harness::new().run_in_context(|lock, ctx| {
-        let value = eval(
-            lock,
-            ctx,
+        for expr in [
             "(() => { const b = new SharedArrayBuffer(1); return [b, new SharedArrayBuffer(2), b]; })()",
-        );
-        let data = jsg::ser::serialize(lock, value).unwrap();
-        assert_eq!(data, Harness::cpp_serialize(lock, value));
-        // No deserializer is given the buffers.
-        deserialize_exception(lock, &data);
+            // V8 hands the serializer each buffer in a handle scope that ends with the array that
+            // holds it, and the second buffer's handle takes the slot the first's had.
+            "[[0, new SharedArrayBuffer(1)], [new SharedArrayBuffer(2)]]",
+        ] {
+            let value = eval(lock, ctx, expr);
+            let data = jsg::ser::serialize(lock, value).unwrap();
+            assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
+            // No deserializer is given the buffers.
+            deserialize_exception(lock, &data);
+        }
         Ok(())
     });
 }
@@ -486,6 +515,50 @@ fn nothing_runs_while_execution_is_terminating() {
             other => panic!("the script was not terminated: {other:?}"),
         }
         assert!(CHECKED_WHILE_TERMINATING.load(Ordering::SeqCst));
+        Ok(())
+    });
+}
+
+#[test]
+fn an_older_version_is_written_and_read_back() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr = "new Uint8Array([1, 2, 3])";
+        let check = "v instanceof Uint8Array && v[2] === 3";
+        let value = eval(lock, ctx, expr);
+        let latest = jsg::ser::serialize(lock, value).unwrap();
+        let options = jsg::ser::SerializeOptions { version: Some(13) };
+        let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        assert_eq!(data[..2], [0xff, 13]);
+        // Version 14 added the flags of an ArrayBufferView.
+        assert!(data.len() < latest.len());
+        for copy in [
+            jsg::ser::deserialize(lock, &data).unwrap(),
+            Harness::cpp_deserialize(lock, &data),
+        ] {
+            ctx.set_global(lock, "v", copy);
+            assert!(ctx.eval::<bool>(lock, check).unwrap());
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_write_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let value = eval(lock, ctx, "1");
+        let caught = lock
+            .try_catch(|lock| {
+                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let result = jsg::ser::serialize_with_options(lock, value, options);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        ctx.set_global(lock, "e", caught.expect_err("serialization should throw"));
+        assert!(
+            ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
+                .unwrap()
+        );
         Ok(())
     });
 }

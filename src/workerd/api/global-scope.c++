@@ -697,10 +697,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
       }
 
-      auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
-
       return context
-          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm, &incomingRequest,
+          .run([exportedHandler, timeout, retryCount, scheduledTime,
+                   weakRequest = incomingRequest.addWeak(),
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
@@ -709,7 +708,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // first timeout will be canceled.
         jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
-            [&context, &incomingRequest]() -> kj::Promise<WorkerInterface::AlarmResult> {
+            [weakContext = context.getWeakRef(),
+                weakRequest]() -> kj::Promise<WorkerInterface::AlarmResult> {
+          auto& context = KJ_REQUIRE_NONNULL(
+              weakContext->tryGet(), "IoContext destroyed before alarm timeout fired");
           // We don't want to delete the alarm since we have not successfully completed the alarm
           // execution.
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
@@ -722,7 +724,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
           e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
           e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-          incomingRequest.getMetrics().reportFailure(e);
+          KJ_REQUIRE_NONNULL(
+              weakRequest.tryGet(), "IncomingRequest destroyed before alarm timeout fired")
+              .getMetrics()
+              .reportFailure(e);
 
           // We don't want the handler to keep running after timeout.
           context.abort(kj::mv(e));
@@ -735,17 +740,23 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .outcome = EventOutcome::EXCEEDED_WALL_TIME};
         });
 
+        auto& alarm = KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(exportedHandler).alarm);
         return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
       })
-          .catch_([&context, &incomingRequest, deferredDelete = kj::mv(armResult.deferredDelete)](
-                      kj::Exception&& e) mutable {
+          .catch_(
+              [weakContext = context.getWeakRef(), weakRequest = incomingRequest.addWeak(),
+                  deferredDelete = kj::mv(armResult.deferredDelete)](kj::Exception&& e) mutable {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before alarm failure was handled");
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
 
+        auto& incomingRequest = KJ_REQUIRE_NONNULL(
+            weakRequest.tryGet(), "IncomingRequest destroyed before alarm failure was handled");
         incomingRequest.getMetrics().reportFailure(e);
 
         auto description = kj::str(e.getDescription());  // because e is moved before this is used
@@ -801,11 +812,16 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .outcome = outcome,
           .errorDescription = kj::str(description)};
       })
-          .then([&context, &incomingRequest](WorkerInterface::AlarmResult result)
+          .then([weakContext = context.getWeakRef(), weakRequest = incomingRequest.addWeak()](
+                    WorkerInterface::AlarmResult result)
                     -> kj::Promise<WorkerInterface::AlarmResult> {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before alarm output locks were awaited");
         return context.waitForOutputLocks().then([result = kj::mv(result)]() mutable {
           return kj::mv(result);
-        }, [&context, &incomingRequest](kj::Exception&& e) {
+        }, [weakContext = context.getWeakRef(), weakRequest](kj::Exception&& e) {
+          auto& context = KJ_REQUIRE_NONNULL(
+              weakContext->tryGet(), "IoContext destroyed before alarm output lock failure");
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
           kj::String actorId;
           KJ_SWITCH_ONEOF(actor.getId()) {
@@ -816,7 +832,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               actorId = kj::str(s);
             }
           }
-          incomingRequest.getMetrics().reportFailure(e);
+          KJ_REQUIRE_NONNULL(
+              weakRequest.tryGet(), "IncomingRequest destroyed before alarm output lock failure")
+              .getMetrics()
+              .reportFailure(e);
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
           auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
@@ -1372,7 +1391,9 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_IF_SOME(p, processValue) {
     return p.getHandle(js);
   }
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  // Handle process module redirection based on enable_nodejs_process_v2 flag. This reads
+  // the process object's own module rather than node:process, whose named exports include
+  // the stdio streams and so force them to be built.
   auto specifier = ([&]() -> kj::StringPtr {
     if (FeatureFlags::get(js).getEnableNodeJsProcessV2()) {
       return "node-internal:public_process"_kj;

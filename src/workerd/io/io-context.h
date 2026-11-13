@@ -493,6 +493,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // request as a fallback if none is given. Pass `incomingRequest` whenever the exception is known
   // to belong to a specific request, such as the failure of its event handler: in an actor, the
   // current incoming request may be a newer, unrelated one.
+  //
+  // Adding the exception to the trace does not take the isolate lock, so this does not wait for
+  // another thread that is running JavaScript in the isolate. Only reporting the exception to an
+  // attached inspector takes the lock, synchronously.
+  //
+  // With a tracer or an inspector attached, an internal exception is reported to the isolate's
+  // observer and to the observer of the request it is traced under, both without the lock.
   void logUncaughtExceptionAsync(UncaughtExceptionSource source,
       kj::Exception&& e,
       kj::Maybe<IncomingRequest&> incomingRequest);
@@ -2177,7 +2184,10 @@ auto IoContext::makeReentryCallbackWeak(Func func) {
 
 template <IoContext::TopUpFlag topUp, typename Func>
 auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
-  auto ioFunc = addObjectReverse(kj::heap(kj::fwd<Func>(func)));
+  // Refcounted so that a run() still in flight keeps the function alive after the callback is
+  // dropped.
+  auto ioFunc =
+      kj::refcountedWrapper<ReverseIoOwn<Func>>(addObjectReverse(kj::heap(kj::fwd<Func>(func))));
 
   return [self = getWeakRef(), cs = getCriticalSection(), attachment = kj::mv(attachment),
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
@@ -2190,11 +2200,11 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+        [ioFunc = kj::addRef(*ioFunc), ... params = kj::fwd<decltype(params)>(params)](
             Worker::Lock& lock, IoContext& ctx) mutable {
       using ResultType = kj::Decay<decltype(func(lock, ctx, kj::fwd<decltype(params)>(params)...))>;
 
-      auto& func = *ioFunc;
+      auto& func = *ioFunc->getWrapped();
 
       if constexpr (kj::isSameType<ResultType, void>()) {
         func(lock, ctx, kj::fwd<decltype(params)>(params)...);

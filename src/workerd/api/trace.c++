@@ -726,7 +726,6 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
   incomingRequest->delivered("trace"_kj);
 
   auto& context = incomingRequest->getContext();
-  auto& request = *incomingRequest;
 
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
@@ -736,8 +735,7 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
   }
 
   // Add the actual JS as a wait until because the handler may be an event listener which can't
-  // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
-  // and its members until this task completes.
+  // wait around for async resolution.
   auto entrypointName = entrypointNamePtr.clone();
   context.addWaitUntil(
       context
@@ -750,19 +748,23 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     auto handler = lock.getExportedHandler(
         entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor(), isDynamicDispatch);
     return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
-  }).catch_([&request, &context](kj::Exception&& e) {
+  })
+          .catch_(
+              [metrics = kj::addRef(incomingRequest->getMetrics()),
+                  weakRequest = incomingRequest->addWeak(), &context](kj::Exception&& e) mutable {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
     //   event handler throws an exception; we do not consider waitUntil(). But all async work done
     //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
     //   change it so any waitUntil() failure counts as an error? For that matter, arguably *all*
     //   event types should report failure if a waitUntil() throws?
-    request.getMetrics().reportFailure(e);
+    metrics->reportFailure(e);
 
     // Log JS exceptions (from the initial sendTraces() call) to the JS console, if inspector is
     // attached. This also has the effect of logging internal errors to syslog. (Note that
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), request);
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), weakRequest.tryGet());
   }));
 
   // drain() keeps the request until its background work, including the handler above, finishes,

@@ -86,7 +86,8 @@ pub enum Error {
     /// The bucket URL or an option is missing or malformed.
     #[error("bucket config: {0}")]
     Config(String),
-    /// A claim or a commit's capture could not proceed.
+    /// A claim or a commit could not proceed: its capture failed, the
+    /// object is not open here, or another owner took it over.
     #[error("replica: {0}")]
     Replica(String),
     /// This instance does not serve the object and cannot claim it: it is draining, or the
@@ -97,9 +98,16 @@ pub enum Error {
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),
+    /// The store refused a conditional write's guard, but an earlier attempt
+    /// of the same request, or a copy sent beside it, may have been applied,
+    /// and the refusal may be of that one's own write: whether the write
+    /// landed is unknown. Reading the object back tells, unless a copy still
+    /// in flight lands after the read.
+    #[error("bucket: {0}; an earlier attempt may have landed")]
+    OutcomeUnknown(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
-    /// Another writer kept winning the conditional write.
+    /// Another writer kept winning the conditional write to the key named.
     #[error("{0} is contended")]
     Contended(String),
     /// Someone else rewrote this node's own record: this process no longer

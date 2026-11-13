@@ -1,0 +1,41 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The URLPattern suite runs the same test modules under a cell per
+# implementation and flag combination: standard and legacy, for C++ and
+# TypeScript (TS_URL_PATTERN), and standard with the dateless opt-ins (C++
+# only). See AGENTS.md.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_URL_PATTERN, which swaps in the TypeScript implementation under
+# a cell whose USING_TS_IMPL binding says C++.
+
+urlpattern_suite_srcs = glob(["*.js"]) + ["urlpattern-modules.capnp"]
+
+wd_test(
+    src = "urlpattern-standard-cpp.wd-test",
+    data = urlpattern_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "urlpattern-legacy-cpp.wd-test",
+    data = urlpattern_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "urlpattern-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = urlpattern_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "urlpattern-standard-ts.wd-test",
+    data = urlpattern_suite_srcs,
+)
+
+wd_test(
+    src = "urlpattern-legacy-ts.wd-test",
+    data = urlpattern_suite_srcs,
+)

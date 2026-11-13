@@ -8,7 +8,9 @@
 //   1. Consistent DO state across instances (single-writer correctness).
 //   2. Transparent forwarding when a request arrives at the "wrong" instance.
 //   3. Takeover after a node is killed.
-//   4. Each running instance holds a lease record in the bucket.
+//   4. Each running instance holds a lease record in the bucket, and keeps
+//      it through a renewal whose write the bucket, S3 or Cloud Storage,
+//      stalls.
 //   5. Storing/loading a DO stub without calling it claims nothing.
 //   6. A broken DO does not stay stuck while stubs still pin it: it can be
 //      re-instantiated instead of hanging requests.
@@ -39,7 +41,8 @@
 //      bucket and cached on each node's disk, and it survives its owner.
 //  14. A cron trigger runs once a minute, through its schedule owner's death
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
-//      a test clock moved to each minute.
+//      a test clock moved to each minute, and an occurrence does not run
+//      again on a new owner whose clock lags the old one's.
 //  15. A cluster on a Cloud Storage bucket (gs://, fake-s3.mjs in its GCS
 //      dialect): requests are forwarded, a lease renewal refused by a
 //      generation precondition renews over the new generation, KV keeps a
@@ -474,17 +477,20 @@ class FakeS3 {
     return (await res.json()).map((f) => f.hits);
   }
 
-  // How many GET, PUT and DELETE requests the bucket served for `key`.
+  // How many GET, PUT and DELETE requests the bucket served for `key`, a key
+  // in the cluster's layout. The fake counts a key without its first
+  // segment, the bucket's `cluster/`.
   async requests(key) {
-    const query = new URLSearchParams({ key });
+    const query = new URLSearchParams({ key: `v1/${key}` });
     return (
       await fetch(`http://127.0.0.1:${this.port}/_requests?${query}`)
     ).json();
   }
 
-  // How many body bytes GETs of `key` were served.
+  // How many body bytes GETs of `key`, a key in the cluster's layout, were
+  // served.
   async served(key) {
-    const query = new URLSearchParams({ key });
+    const query = new URLSearchParams({ key: `v1/${key}` });
     return (
       await fetch(`http://127.0.0.1:${this.port}/_served?${query}`)
     ).json();
@@ -991,22 +997,23 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
   await withCluster(2, async ({ nodes, bucket }) => {
     // Without coalescing, each of these reads own.json and the losers retry
     // their claims: the stampede that starved lease renewal on the fleet.
+    // `/get` writes nothing, so no commit rereads own.json: every request for
+    // it comes from resolving the DO. Coalesced, each node reads it once and
+    // the claim's loser once more, about 5 requests with the claims; one
+    // resolution per request would be 64 or more.
     const results = await Promise.all(
       Array.from({ length: 64 }, (_, i) =>
-        fetchJson(nodes[i % 2].httpPort, '/increment?name=herd')
+        fetchJson(nodes[i % 2].httpPort, '/get?name=herd')
       )
     );
     for (const r of results)
       assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    const counts = results.map((r) => r.body.count).sort((a, b) => a - b);
-    assert.deepStrictEqual(
-      counts,
-      Array.from({ length: 64 }, (_, i) => i + 1)
-    );
+    const served = new Set(results.map((r) => `${r.body.nodeId} ${r.body.id}`));
+    assert.strictEqual(served.size, 1, [...served].join());
     const requests = await bucket.requests(
       `${objectPrefix(results[0].body.id)}/own.json`
     );
-    assert(requests <= 8, `${requests} owner record requests for one cold DO`);
+    assert(requests < 16, `${requests} owner record requests for one cold DO`);
   });
 });
 
@@ -1053,7 +1060,7 @@ test('cluster: a KV namespace is an object, seen from every node', async () => {
     }
     const blobs = await bucket.list('services/kv/');
     assert.strictEqual(blobs.length, 1, blobs.join());
-    const served = () => bucket.served(`v1/${blobs[0]}`);
+    const served = () => bucket.served(blobs[0]);
     const before = await served();
     const bigListed = (await fetchJson(b, `/kv/list?${q({ prefix: 'big' })}`))
       .body;
@@ -1084,7 +1091,7 @@ test('cluster: a node caches KV blobs on its disk', async () => {
     const served = async () => {
       for (const key of await bucket.list('services/kv/')) seen.add(key);
       let n = 0;
-      for (const key of seen) n += await bucket.served(`v1/${key}`);
+      for (const key of seen) n += await bucket.served(key);
       return n;
     };
 
@@ -1188,11 +1195,8 @@ test('cluster: a KV namespace survives its owner', async () => {
 
     assert.strictEqual((await bucket.list('services/kv/')).length, 1);
     await kv(survivor, 'put', { key: 'big', value: 'small' });
-    const collected = Date.now() + 10_000;
-    while ((await bucket.list('services/kv/')).length > 0) {
-      assert(Date.now() < collected, 'the replaced blob was never collected');
-      await sleep(100);
-    }
+    assert.strictEqual((await kv(survivor, 'gc', {})).status, 200);
+    assert.deepStrictEqual(await bucket.list('services/kv/'), []);
   });
 });
 
@@ -1347,6 +1351,53 @@ test('cluster: each running instance holds a lease record', async () => {
     }
   });
 });
+
+// On S3 and on Cloud Storage, whose writes are guarded by another header.
+for (const dialect of ['s3', 'gcs']) {
+  test(`cluster: a lease write the ${dialect} bucket stalls is sent again, and the node serves on`, async () => {
+    // As `GCS`, with tokens from the fake metadata server.
+    const options =
+      dialect === 'gcs'
+        ? { configName: 'gcs', dialect, nodeEnv: (bucket) => bucket.gcsEnv }
+        : {};
+    await withCluster(
+      1,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const [node] = nodes;
+        const key = nodeKeys.get(node.nodeId);
+        const resent =
+          /PUT \S*nodes\/\S+\.json had no answer in \d+ ms; sending it again/;
+        // What the node logs from here on.
+        const armed = node.stderr.length;
+        // Longer than a renewal round may take: unanswered, it would time the
+        // round out.
+        await bucket.setFaults([
+          {
+            method: 'PUT',
+            prefix: `nodes/${key}.json`,
+            delayMs: 3000,
+            times: 1,
+          },
+        ]);
+        await node.waitForStderr(resent, 5000);
+        // Until the stalled write has been answered, and a few rounds past it.
+        await sleep(4000);
+        assert.deepStrictEqual(await bucket.faultHits(), [1]);
+        const since = node.stderr.slice(armed);
+        assert.match(since, resent);
+        assert.doesNotMatch(since, /renewing the cluster lease failed/);
+        const record = JSON.parse(await bucket.get(`nodes/${key}.json`));
+        assert(record.expires_ms > Date.now(), `lease of ${key} has expired`);
+        const { status, body } = await fetchJson(
+          node.httpPort,
+          '/increment?name=stalled-lease'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+      },
+      options
+    );
+  });
+}
 
 test("cluster: an alarm runs once on its object's owner", async () => {
   await withCluster(2, async ({ nodes }) => {
@@ -2903,6 +2954,37 @@ async function until(check, ms, message) {
   assert.fail(message);
 }
 
+test('cluster: an owner record write answered 503 after it landed counts as written', async () => {
+  for (const options of [{}, { ...GCS, nodeEnv: (bucket) => bucket.gcsEnv }]) {
+    await withCluster(
+      1,
+      async ({ nodes, bucket, nodeKeys }) => {
+        const [node] = nodes;
+        // A new object's first write is the owner record that opens epoch
+        // 1. It lands, the bucket answers 503, and the client's retry fails
+        // its precondition against it.
+        await bucket.setFaults([
+          { method: 'PUT', prefix: 'do/', status: 503, after: true, times: 1 },
+        ]);
+        const r = await fetchJson(node.httpPort, '/increment?name=landed');
+        assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+        assert.strictEqual(r.body.count, 1);
+        assert.deepStrictEqual(await bucket.faultHits(), [1]);
+        const key = `${objectPrefix(r.body.id)}/own.json`;
+        assert.strictEqual(await bucket.rejected(key), 1);
+        const record = JSON.parse(await bucket.get(key));
+        assert.deepStrictEqual(record, {
+          node: nodeKeys.get(node.nodeId),
+          epoch: 1,
+          from: 1,
+        });
+        assert.match(node.stderr, /epoch 1 opens new/);
+      },
+      options
+    );
+  }
+});
+
 test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata server', async () => {
   await withCluster(
     2,
@@ -3033,7 +3115,8 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
       }
       return now;
     };
-    const to = async (t) => clock(t - (await clock(0)));
+    // Moves the clocks forward to `t`, unless they are past it already.
+    const to = async (t) => clock(Math.max(0, t - (await clock(0))));
     // The node that runs minute `t`: a real minute may run first.
     const ran = (ns, t, ms) =>
       Promise.any(
@@ -3058,5 +3141,56 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
       .map((m) => Number(m[1]))
       .filter((t) => t >= at);
     assert.deepStrictEqual(seen.sort(), [at, at + 60_000]);
+  });
+});
+
+test('cluster: a cron occurrence does not run again on an owner whose clock lags', async () => {
+  // How far the new owner's clock lags the old one's: it is still before the
+  // occurrence once it has taken the schedule over, however slow that is.
+  const LAG_MS = 45_000;
+  await withCluster(2, async ({ nodes }) => {
+    await Promise.all(
+      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+    );
+    // Moves one node's cron clock by `ms`, once its schedule is re-armed: its
+    // time, and when the schedule's alarm is planned for, on its owner's.
+    const clock = async (n, ms) =>
+      (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body;
+    const { now } = await clock(nodes[0], 0);
+    let at = now - (now % 60_000) + 60_000;
+    if (at - now < 2000) at += 60_000;
+    for (const n of nodes) {
+      await clock(n, at - 1000 - (await clock(n, 0)).now);
+    }
+    const owner = await Promise.any(
+      nodes.map((n) =>
+        n.waitForStderr(new RegExp(`TICK ${at}`), 10_000).then(() => n)
+      )
+    );
+    const survivor = nodes.find((n) => n !== owner);
+    // The owner has stored its next alarm once an arm returns. The survivor's
+    // clock then falls behind, as it takes the schedule over.
+    assert.strictEqual((await clock(owner, 0)).at.main, at + 60_000);
+    await clock(survivor, -LAG_MS);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    // Its arm fails until it has taken the schedule over, then plans on its
+    // own clock.
+    let armed;
+    for (const deadline = Date.now() + 40_000; armed === undefined;) {
+      try {
+        armed = await clock(survivor, 0);
+      } catch (e) {
+        if (Date.now() > deadline) throw e;
+        await sleep(250);
+      }
+    }
+    assert(armed.now < at, `the survivor's clock is not behind: ${armed.now}`);
+    // A schedule runs only what its alarm is planned for: the next minute, so
+    // `at` does not run again.
+    assert.strictEqual(armed.at.main, at + 60_000);
+    const runs = [owner, survivor].flatMap(
+      (n) => n.stderr.match(new RegExp(`TICK ${at}`, 'g')) ?? []
+    );
+    assert.strictEqual(runs.length, 1);
   });
 });

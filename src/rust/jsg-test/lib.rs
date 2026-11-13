@@ -82,6 +82,11 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn eval_with_caught_exception(self: &EvalContext, code: &str) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Makes `exports` the exports of the loaded bootstrap module named `specifier`. See
+        /// `set_bootstrap_module` in `ffi.h`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_bootstrap_module(self: &EvalContext, specifier: &str, exports: Local);
         /// Has `register_modules` add builtin modules, then calls the callback of the one named
         /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
         pub unsafe fn call_builtin_module(
@@ -149,26 +154,74 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
-        /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
+        /// Serializes `value` into `result` with C++ JSG's `jsg::Serializer`. Returns false if
+        /// serialization throws, leaving the exception pending.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+        pub unsafe fn cpp_serialize(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
 
-        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
-        /// throws.
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Returns none if
+        /// deserialization throws, leaving the exception pending, which is a JavaScript exception
+        /// even where C++ JSG throws a KJ exception, as a JSG method's glue makes it one.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
-        /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which
-        /// is its class's descriptor if it is cloneable. Fails if it is not an object.
+        /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
+        /// `value`, or returns false if creating it threw, leaving the exception pending.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn mark_js_serializable(
+        pub unsafe fn cpp_exception_to_kj(isolate: *mut Isolate, value: Local) -> Result<bool>;
+
+        /// Converts `exception` to a `kj::Exception` and back, as C++ JSG does with
+        /// `jsg::Lock::exceptionToKj()` and `jsg::Lock::exceptionToJsValue()`. Fails if
+        /// converting it throws, leaving that exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
+
+        /// The key of the V8 private property `name`, as the per-isolate bootstrap gives it to
+        /// JavaScript.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn private_symbol(isolate: *mut Isolate, name: &str) -> Result<Local>;
+
+        /// Disallows JavaScript execution as JSG code sees it, or allows it again. Fails if it
+        /// allows it more often than it disallowed it.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_javascript_execution_disallowed(
+            isolate: *mut Isolate,
+            disallowed: bool,
+        ) -> Result<()>;
+
+        /// Gives `object` `name` and `message` as an error implemented in the per-isolate
+        /// bootstrap holds them. Fails if it is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_error_slots(
             isolate: *mut Isolate,
             object: Local,
-            mark: Local,
+            name: &str,
+            message: &str,
         ) -> Result<()>;
+
+        /// Creates an instance of the per-isolate bootstrap's `DOMException`, as
+        /// `jsg::newBootstrapDomException()` does, whose prototype is `prototype`, with `name`,
+        /// `message` and `stack`. Fails if `prototype` is not an object.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn new_bootstrap_dom_exception(
+            isolate: *mut Isolate,
+            prototype: Local,
+            name: &str,
+            message: &str,
+            stack: &str,
+        ) -> Result<Local>;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
@@ -376,6 +429,23 @@ impl EvalContext<'_> {
             .expect("converting a global's value failed");
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
+    }
+
+    /// Makes `exports` the exports of the loaded bootstrap module named `specifier`, among which
+    /// Rust JSG's and C++ JSG's deserializers look up classes implemented in JavaScript by their
+    /// `deserializeInfo`, `"specifier:Export"`. The harness runs no bootstrap, so this stands in
+    /// for its modules until the callback of [`Harness::run_in_context`] returns.
+    pub fn set_bootstrap_module<'s>(
+        &self,
+        _lock: &mut jsg::Lock<'s>,
+        specifier: &str,
+        exports: v8::Local<'s, v8::Value>,
+    ) {
+        // SAFETY: self.inner is a valid EvalContext, and `exports` belongs to the lock's scope.
+        unsafe {
+            self.inner
+                .set_bootstrap_module(specifier, exports.into_ffi());
+        }
     }
 }
 
@@ -646,24 +716,87 @@ impl Harness {
         }
     }
 
-    /// Marks `object` as an instance of a class implemented in JavaScript with `mark`, which C++
-    /// JSG's `jsg::Serializer` serializes it through if `mark` is its class's descriptor (see
-    /// `jsg/ser.h`).
+    /// The key of the V8 private property `name`, as the per-isolate bootstrap's
+    /// `utils.getPrivateSymbol()` gives it to JavaScript, which can use it as a property key that
+    /// no reflection reveals. The names of the serialization protocol's properties are those of
+    /// C++ JSG's `JS_SERIALIZE_MODE_KEY`, `JS_CLONEABLE_KEY` and `DOM_EXCEPTION_PROTOTYPE_KEY`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if creating it throws.
+    pub fn private_symbol<'s>(lock: &mut jsg::Lock<'s>, name: &str) -> v8::Local<'s, v8::Value> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which the result belongs to.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::private_symbol(lock.isolate().as_ffi(), name)
+                    .expect("creating the symbol should not throw"),
+            )
+        }
+    }
+
+    /// Disallows JavaScript execution as JSG code sees it, as `jsg::DisallowJavaScriptScope`
+    /// does without V8's own guard, or allows it again.
+    ///
+    /// # Panics
+    ///
+    /// Panics if it allows it more often than it disallowed it.
+    pub fn set_javascript_execution_disallowed(lock: &mut jsg::Lock<'_>, disallowed: bool) {
+        // SAFETY: `lock` proves the isolate is locked.
+        unsafe { ffi::set_javascript_execution_disallowed(lock.isolate().as_ffi(), disallowed) }
+            .expect("JavaScript execution should have been disallowed");
+    }
+
+    /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,
+    /// whose `name` and `message` are accessors, holds them: under the private symbols that C++
+    /// JSG's `ERROR_NAME_KEY` and `ERROR_MESSAGE_KEY` name, which
+    /// [`v8::Local::<v8::Value>::to_detail_string`] reads.
     ///
     /// # Panics
     ///
     /// Panics if `object` is not an object.
-    pub fn mark_js_serializable<'s>(
+    pub fn set_error_slots<'s>(
         lock: &mut jsg::Lock<'s>,
         object: v8::Local<'s, v8::Value>,
-        mark: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
     ) {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which `object` and `mark` belong to.
+        // open, which `object` belongs to.
+        unsafe { ffi::set_error_slots(lock.isolate().as_ffi(), object.into_ffi(), name, message) }
+            .expect("the value should be an object");
+    }
+
+    /// An instance of the per-isolate bootstrap's `DOMException`, as C++ JSG's
+    /// `jsg::newBootstrapDomException()` creates one: an API wrapper object without internal
+    /// fields, which holds its brand, `name` and `message` under private symbols, with `stack` as
+    /// an own data property. Its prototype is `prototype`. The harness has no bootstrap, so this
+    /// stands in for one, and C++ JSG reads a serialized one as its own `DOMException`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `prototype` is not an object.
+    pub fn new_bootstrap_dom_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        prototype: v8::Local<'s, v8::Value>,
+        name: &str,
+        message: &str,
+        stack: &str,
+    ) -> v8::Local<'s, v8::Value> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `prototype` and the result belong to.
         unsafe {
-            ffi::mark_js_serializable(lock.isolate().as_ffi(), object.into_ffi(), mark.into_ffi())
+            v8::Local::from_ffi(
+                ffi::new_bootstrap_dom_exception(
+                    lock.isolate().as_ffi(),
+                    prototype.into_ffi(),
+                    name,
+                    message,
+                    stack,
+                )
+                .expect("the prototype should be an object"),
+            )
         }
-        .expect("the value should be an object");
     }
 
     /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
@@ -681,10 +814,33 @@ impl Harness {
     ///
     /// Panics if serialization throws.
     pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
+        Self::cpp_try_serialize(lock, value).expect("C++ JSG should serialize the value")
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer`, as [`Self::cpp_serialize`] does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if serialization throws.
+    ///
+    /// # Panics
+    ///
+    /// Panics if C++ JSG throws a KJ exception.
+    pub fn cpp_try_serialize<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Vec<u8>, jsg::Error> {
+        let mut data = Vec::new();
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open, which `value` belongs to.
-        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi()) }
-            .expect("C++ JSG should serialize the value")
+        let ok =
+            unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi(), &mut data) }
+                .expect("C++ JSG should throw only JavaScript exceptions");
+        if ok {
+            Ok(data)
+        } else {
+            Err(jsg::Error::pending())
+        }
     }
 
     /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
@@ -694,13 +850,71 @@ impl Harness {
     ///
     /// Panics if deserialization throws.
     pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        Self::cpp_try_deserialize(lock, data).expect("C++ JSG should deserialize the data")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, as [`Self::cpp_deserialize`]
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if deserialization throws. A KJ exception, such as
+    /// the internal error for a missing header, becomes a JavaScript one, as a JSG method's glue
+    /// makes it one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the harness throws anything but a JavaScript exception.
+    pub fn cpp_try_deserialize<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
         // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
         unsafe {
-            v8::Local::from_ffi(
+            v8::Local::from_ffi_maybe(
                 ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
-                    .expect("C++ JSG should deserialize the data"),
+                    .expect("the harness should throw only JavaScript exceptions"),
             )
         }
+        .ok_or_else(jsg::Error::pending)
+    }
+
+    /// The KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for `value`, to compare
+    /// with [`jsg::Lock::exception_to_kj`].
+    ///
+    /// # Errors
+    ///
+    /// Fails with an error for which [`jsg::Error::is_pending`] is true if creating it threw,
+    /// leaving the exception pending.
+    pub fn cpp_exception_to_kj<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<cxx::KjError> {
+        // SAFETY: as for `cpp_serialize`.
+        match unsafe { ffi::cpp_exception_to_kj(lock.isolate().as_ffi(), value.into_ffi()) } {
+            Ok(_) => Err(jsg::Error::pending()),
+            Err(exception) => Ok(exception.into()),
+        }
+    }
+
+    /// Converts `exception` to a `kj::Exception` and back with C++ JSG, to compare with
+    /// [`jsg::TunneledException`].
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if converting it throws.
+    pub fn cpp_tunnel_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        exception: v8::Local<'s, v8::Value>,
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(ffi::cpp_tunnel_exception(
+                lock.isolate().as_ffi(),
+                exception.into_ffi(),
+            ))
+        }
+        .ok_or_else(jsg::Error::pending)
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

@@ -1415,18 +1415,10 @@ class ExceptionWrapper {
       kj::Exception*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
 
-    // If handle is a DOMException, then createTunneledException will not work
-    // here. We have to manually handle the DOMException case.
-    //
-    // Note that this is a general issue with any JSG_RESOURCE_TYPE that we
-    // happen to use as Errors. The createTunneledException() method uses V8's
-    // ToDetailString() to extract the detail about the error in a manner that
-    // is safe and side-effect free. Unfortunately, that mechanism does not
-    // work for JSG_RESOURCE_TYPE objects that are used as errors. For those,
-    // we need to drop down to the C++ interface and generate the kj::Exception
-    // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
-    // introduced, they'll need to be handled explicitly here also.
-    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    // A DOMException tunnels by the name and message it holds, which
+    // Lock::tryGetDomExceptionInfo() reads without running JavaScript. Other
+    // values tunnel by what kj::str() describes them as, which runs no
+    // JavaScript either.
     kj::Exception result = [&]() {
       kj::Exception::Type excType = [&]() {
         // Use .retryable and .overloaded properties as hints for what kj exception type to use.
@@ -1443,19 +1435,9 @@ class ExceptionWrapper {
         return kj::Exception::Type::FAILED;
       }();
 
-      KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(
-              js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
-        return KJ_EXCEPTION(FAILED,
-            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+      KJ_IF_SOME(info, js.tryGetDomExceptionInfo(JsValue(handle))) {
+        return KJ_EXCEPTION(FAILED, kj::str("jsg.DOMException(", info.name, "): ", info.message));
       } else {
-
-        static const constexpr kj::StringPtr PREFIXES[] = {
-#define V(name, _) name##_kj,
-          JS_ERROR_TYPES(V)
-#undef V
-              "DOMException"_kj,
-        };
 
         kj::String reason;
         if (!handle->IsObject()) {
@@ -1463,18 +1445,11 @@ class ExceptionWrapper {
           reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
         } else {
           reason = kj::str(handle);
-          bool found = false;
           // If the error message starts with a platform error type that we tunnel,
-          // prefix it with "jsg."
-          for (const auto& name: PREFIXES) {
-            if (reason.startsWith(name)) {
-              reason = kj::str("jsg.", reason);
-              found = true;
-              break;
-            }
-          }
-          // Everything else should just come through as a normal error.
-          if (!found) {
+          // prefix it with "jsg."; everything else should just come through as a normal error.
+          if (startsWithTunneledErrorType(reason)) {
+            reason = kj::str("jsg.", reason);
+          } else {
             reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }

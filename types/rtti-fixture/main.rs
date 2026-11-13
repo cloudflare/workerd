@@ -190,7 +190,7 @@ impl Fixture {
     #[jsg_property(prototype)]
     fn get_child(&self, lock: &mut jsg::Lock<'_>) -> jsg::Nullable<jsg::Rc<Self>> {
         let child = self.child.take(lock);
-        let result = child.clone();
+        let result = child.as_ref().map(|child| child.clone(lock));
         self.child.set(child);
         match result {
             Some(child) => jsg::Nullable::Some(child),
@@ -227,8 +227,8 @@ impl Fixture {
     }
 
     #[jsg_method]
-    fn with_this(this: jsg::Rc<Self>, _lock: &mut jsg::Lock, suffix: String) -> String {
-        format!("{}{suffix}", this.label)
+    fn with_this(this: jsg::Rc<Self>, lock: &mut jsg::Lock, suffix: String) -> String {
+        format!("{}{suffix}", this.get(lock).label)
     }
 
     #[jsg_method]

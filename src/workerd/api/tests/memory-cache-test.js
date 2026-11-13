@@ -1,8 +1,18 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual } from 'node:assert';
+import { match, ok, rejects, strictEqual } from 'node:assert';
+import { DurableObject, env as importedEnv } from 'cloudflare:workers';
 import unsafe from 'workerd:unsafe';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+// What deleting from the cache in the global scope, outside any request, throws.
+let deleteInGlobalScopeError;
+try {
+  importedEnv.CACHE.delete('global scope');
+} catch (err) {
+  deleteInGlobalScopeError = err;
+}
 
 export const basic = {
   async test(ctrl, env) {
@@ -86,6 +96,9 @@ export const valueNotSerializable = {
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'failed to serialize symbol');
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.code, 25);
+      ok(err instanceof DOMException);
     }
 
     try {
@@ -95,6 +108,57 @@ export const valueNotSerializable = {
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'failed to serialize function');
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.code, 25);
+      ok(err instanceof DOMException);
+    }
+  },
+};
+
+export const valueGetterThrows = {
+  async test(ctrl, env) {
+    // What a getter of the value throws while it is serialized reaches the read as C++ tunnels
+    // it through a kj::Exception: as a copy, which only enhanced_error_serialization builds
+    // from the serialized exception, keeping its own properties.
+    const enhanced = Cloudflare.compatibilityFlags.enhanced_error_serialization;
+    class Custom extends Error {}
+    const thrown = Object.assign(new Custom('g'), { code: 7 });
+    const readThrowing = (key, exception) =>
+      env.CACHE.read(key, () => ({
+        value: {
+          get x() {
+            throw exception;
+          },
+        },
+      }));
+
+    let err = await readThrowing('getter', thrown).catch((e) => e);
+    ok(err !== thrown);
+    strictEqual(Object.getPrototypeOf(err), Error.prototype);
+    strictEqual(err.message, 'g');
+    strictEqual(err.code, enhanced ? 7 : undefined);
+
+    err = await readThrowing('getter', 'a string').catch((e) => e);
+    strictEqual(Object.getPrototypeOf(err), Error.prototype);
+    strictEqual(err.message, 'a string');
+
+    err = await readThrowing(
+      'getter',
+      Object.assign(new RangeError('r'), { retryable: true })
+    ).catch((e) => e);
+    strictEqual(Object.getPrototypeOf(err), RangeError.prototype);
+    strictEqual(err.message, 'r');
+    strictEqual(err.retryable, true);
+
+    // A DOMException becomes a DataCloneError, including one whose name
+    // JavaScript has read, which kj::str() of the C++ DOMException then shows.
+    const named = new DOMException('m', 'AbortError');
+    strictEqual(named.name, 'AbortError');
+    for (const exception of [new DOMException('m', 'AbortError'), named]) {
+      err = await readThrowing('getter', exception).catch((e) => e);
+      ok(err instanceof DOMException);
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.message, 'failed to serialize object');
     }
   },
 };
@@ -330,5 +394,368 @@ export const fallbackNotLocked = {
     );
     const raced = await Promise.race(promises);
     strictEqual(raced, 'bbb');
+  },
+};
+
+export default {
+  // Runs a fallback that never settles, and ends the request once it has started. Its promise
+  // stays reachable, so that the garbage collector does not drop the reactions to it.
+  async fetch(request, env) {
+    if (new URL(request.url).pathname === '/resolve-cross') {
+      globalThis.resolveCross({ value: 'cross' });
+      return new Response('resolved');
+    }
+    const { promise: started, resolve } = Promise.withResolvers();
+    env.CACHE.read('abandoned', () => {
+      resolve();
+      globalThis.neverSettles = new Promise(() => {});
+      return globalThis.neverSettles;
+    });
+    await started;
+    return new Response('started');
+  },
+};
+
+export const fallbackAbandonedWhenRequestEnds = {
+  async test(ctrl, env) {
+    const response = await env.SELF.fetch('http://example.com/');
+    strictEqual(await response.text(), 'started');
+    // The fallback of the request that ended is abandoned with it, rather than when the garbage
+    // collector drops its promise, so this read runs its own fallback.
+    const value = await Promise.race([
+      env.CACHE.read('abandoned', () => ({ value: 'taken over' })),
+      scheduler.wait(1000).then(() => 'still waiting'),
+    ]);
+    strictEqual(value, 'taken over');
+  },
+};
+
+export const fallbackSettledFromAnotherRequest = {
+  async test(ctrl, env) {
+    const { promise: started, resolve: start } = Promise.withResolvers();
+    const read = env.CACHE.read('cross', () => {
+      const { promise, resolve } = Promise.withResolvers();
+      globalThis.resolveCross = resolve;
+      start();
+      return promise;
+    });
+    await started;
+    const response = await env.SELF.fetch('http://example.com/resolve-cross');
+    strictEqual(await response.text(), 'resolved');
+    if (Cloudflare.compatibilityFlags.handle_cross_request_promise_resolution) {
+      // The reactions to the fallback's promise run in the request that read.
+      strictEqual(await read, 'cross');
+      strictEqual(await env.CACHE.read('cross'), 'cross');
+      env.CACHE.delete('cross');
+    } else {
+      // They run in the request that resolved it, where the read's fallback is out of reach,
+      // so the read fails, and caches nothing. C++ appends the type its IoOwn holds, as
+      // jsg::typeName() names it on each platform; the Rust MemoryCache has no such type.
+      await rejects(read, {
+        name: 'Error',
+        message:
+          /^Cannot perform I\/O on behalf of a different request\. I\/O objects \(such as streams, request\/response bodies, and others\) created in the context of one request handler cannot be accessed from a different request's handler\. This is a limitation of Cloudflare Workers which allows us to improve overall performance\.( \(I\/O type: .*FallbackSpans.*\))?$/,
+      });
+      strictEqual(await env.CACHE.read('cross'), undefined);
+    }
+  },
+};
+
+export const fallbackRunsInAsyncContextOfRead = {
+  async test(ctrl, env) {
+    const storage = new AsyncLocalStorage();
+    const value = await storage.run('of the read', () =>
+      env.CACHE.read('asyncContext', () => ({
+        value: storage.getStore() ?? 'none',
+      }))
+    );
+    strictEqual(value, 'of the read');
+  },
+};
+
+export const fallbackGetsKeyAsCacheHoldsIt = {
+  async test(ctrl, env) {
+    // The cache holds keys as UTF-8, with a lone surrogate encoded as such, and passes the key to
+    // the fallback decoded from it: each of the surrogate's three bytes becomes U+FFFD.
+    let fallbackKey;
+    await env.CACHE.read('lone \udbff', (key) => {
+      fallbackKey = key;
+      return { value: 'unused' };
+    });
+    strictEqual(fallbackKey, 'lone \ufffd\ufffd\ufffd');
+    env.CACHE.delete('lone \udbff');
+  },
+};
+
+export const nanExpirationRejected = {
+  async test(ctrl, env) {
+    await rejects(
+      env.CACHE.read('nanExpiration', () => ({ value: 1, expiration: NaN })),
+      { name: 'TypeError', message: 'Expiration time must not be NaN.' }
+    );
+    // The value is not cached, and the next read runs its own fallback.
+    strictEqual(
+      await env.CACHE.read('nanExpiration', () => ({ value: 'next' })),
+      'next'
+    );
+    env.CACHE.delete('nanExpiration');
+  },
+};
+
+export const fallbackCalledWithGlobalThis = {
+  async test(ctrl, env) {
+    // Modules are strict, so a function called without a receiver gets `this === undefined`.
+    const value = await env.CACHE.read('receiver', function () {
+      return { value: this === globalThis };
+    });
+    strictEqual(value, true);
+    env.CACHE.delete('receiver');
+  },
+};
+
+export const fallbackProducesNoObject = {
+  async test(ctrl, env) {
+    // C++ names the type as typeid() does: mangled, or on Windows as "struct workerd::api::...".
+    // The Rust MemoryCache names it as jsg::typeName() does.
+    const noObject =
+      /^Cannot initialize (struct )?\S*CacheValueProduceResult\S* with required members from an undefined or null value\.$/;
+    for (const produce of [
+      () => undefined,
+      () => null,
+      async () => undefined,
+      async () => null,
+    ]) {
+      await rejects(env.CACHE.read('noObject', produce), {
+        name: 'TypeError',
+        message: noObject,
+      });
+    }
+    await rejects(
+      env.CACHE.read('noObject', () => 42),
+      {
+        name: 'TypeError',
+        message: "Callback returned incorrect type; expected 'Promise'",
+      }
+    );
+    await rejects(
+      env.CACHE.read('noObject', async () => 42),
+      {
+        name: 'TypeError',
+        message:
+          "Incorrect type for Promise: the Promise did not resolve to 'CacheValueProduceResult'.",
+      }
+    );
+    // Nothing is cached, and the next read runs its own fallback.
+    strictEqual(
+      await env.CACHE.read('noObject', () => ({ value: 'next' })),
+      'next'
+    );
+    env.CACHE.delete('noObject');
+  },
+};
+
+export const fallbackResultReadAsReturned = {
+  async test(ctrl, env) {
+    // What the fallback returns, rather than a promise for, is read before it returns to the
+    // microtasks it queued.
+    const log = [];
+    const value = await env.CACHE.read('readAsReturned', () => {
+      queueMicrotask(() => log.push('microtask'));
+      return {
+        get value() {
+          log.push('value');
+          return 'read';
+        },
+      };
+    });
+    strictEqual(value, 'read');
+    strictEqual(log.join(), 'value,microtask');
+
+    // What reading it throws rejects the read, as if the fallback threw it.
+    const thrown = new Error('getter');
+    await rejects(
+      env.CACHE.read('readAsReturned2', () => ({
+        get value() {
+          throw thrown;
+        },
+      })),
+      (err) => err === thrown
+    );
+    env.CACHE.delete('readAsReturned');
+  },
+};
+
+export const domExceptionValues = {
+  async test(ctrl, env) {
+    // A DOMException in a value is cached as one, with its name, message and stack.
+    const error = new DOMException('m', 'AbortError');
+    await env.CACHE.read('domException', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('domException', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'AbortError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.code, 20);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('domException');
+  },
+};
+
+export const quotaExceededErrorValues = {
+  async test(ctrl, env) {
+    // QuotaExceededError is defined only under the TS_DOM_EXCEPTION autogate.
+    const { QuotaExceededError } = globalThis;
+    if (QuotaExceededError === undefined) return;
+    // An instance of a class implemented in JavaScript is cached as one, with its data.
+    const error = new QuotaExceededError('m', { quota: 1, requested: 2 });
+    await env.CACHE.read('quotaExceededError', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('quotaExceededError', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof QuotaExceededError);
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'QuotaExceededError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.quota, 1);
+    strictEqual(cached.requested, 2);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('quotaExceededError');
+  },
+};
+
+export const fallbackReturnsThenable = {
+  async test(ctrl, env) {
+    // A thenable is followed only under unwrap_custom_thenables; otherwise it is the result.
+    const value = await env.CACHE.read('thenable', () => ({
+      then(resolve) {
+        resolve({ value: 'from then' });
+      },
+      value: 'own',
+    }));
+    strictEqual(
+      value,
+      Cloudflare.compatibilityFlags.unwrap_custom_thenables
+        ? 'from then'
+        : 'own'
+    );
+    env.CACHE.delete('thenable');
+  },
+};
+
+// How many microtasks pass from when `start` is called until the promise it returns settles,
+// counted by a loop that awaits once per microtask, plus the few that counting takes.
+async function microtasksUntilSettled(start) {
+  let settled = false;
+  let microtasks = 0;
+  const counting = (async () => {
+    while (!settled && microtasks < 100) {
+      await null;
+      microtasks++;
+    }
+  })();
+  await start().then(
+    () => {},
+    () => {}
+  );
+  settled = true;
+  await counting;
+  return microtasks;
+}
+
+export const settlesAfterAsManyMicrotasksAsCpp = {
+  async test(ctrl, env) {
+    // The counts are those of memory-cache.c++.
+    await env.CACHE.read('microtasksHit', () => ({ value: 1 }));
+    for (const read of [
+      () => env.CACHE.read('microtasksHit'),
+      () => env.CACHE.read('microtasksHit', () => ({ value: 2 })),
+      () => env.CACHE.read('microtasksMissing'),
+      () => env.CACHE.read('a'.repeat(3000)),
+    ]) {
+      strictEqual(await microtasksUntilSettled(read), 4, read.toString());
+    }
+    env.CACHE.delete('microtasksHit');
+
+    // From when the fallback is called, which is after the read waits for the cache.
+    const fromFallback = async (key, fallback) => {
+      let counted;
+      const read = env.CACHE.read(key, (k) => {
+        counted = microtasksUntilSettled(() => read);
+        return fallback(k);
+      });
+      await read.catch(() => {});
+      return counted;
+    };
+    const thenable = Cloudflare.compatibilityFlags.unwrap_custom_thenables
+      ? 9
+      : 7;
+    for (const [fallback, expected] of [
+      [() => ({ value: 1 }), 7],
+      [async () => ({ value: 1 }), 8],
+      [
+        () => {
+          throw new Error('x');
+        },
+        7,
+      ],
+      [
+        async () => {
+          throw new Error('x');
+        },
+        8,
+      ],
+      [() => ({ value: Symbol() }), 7],
+      [() => ({ value: 1, expiration: NaN }), 7],
+      [() => 42, 7],
+      [async () => 42, 8],
+      [
+        () => ({
+          then(resolve) {
+            resolve({ value: 1 });
+          },
+          value: 2,
+        }),
+        thenable,
+      ],
+    ]) {
+      const key = `microtasks ${fallback}`;
+      strictEqual(
+        await fromFallback(key, fallback),
+        expected,
+        fallback.toString()
+      );
+      env.CACHE.delete(key);
+    }
+  },
+};
+
+export const deleteNeedsRequest = {
+  async test() {
+    ok(deleteInGlobalScopeError instanceof Error);
+    match(deleteInGlobalScopeError.message, /global scope/);
+  },
+};
+
+export class CacheReader extends DurableObject {
+  // Reads with a fallback inside blockConcurrencyWhile(). The read resumes inside the critical
+  // section; if it waited for the input gate instead, which the critical section holds, it would
+  // never resume.
+  async fetch() {
+    const value = await this.ctx.blockConcurrencyWhile(() =>
+      this.env.CACHE.read('criticalSection', () => ({ value: 'in section' }))
+    );
+    return new Response(value);
+  }
+}
+
+export const fallbackInDurableObjectCriticalSection = {
+  async test(ctrl, env) {
+    const reader = env.READER.get(env.READER.idFromName('reader'));
+    const value = await Promise.race([
+      reader.fetch('http://reader/').then((response) => response.text()),
+      scheduler.wait(5000).then(() => 'never resumed'),
+    ]);
+    strictEqual(value, 'in section');
   },
 };

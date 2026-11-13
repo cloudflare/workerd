@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/observer.h>
@@ -655,19 +656,19 @@ class ModuleBundle {
   static kj::Own<ModuleBundle> newFallbackBundle(
       Builder::ResolveCallback callback) KJ_WARN_UNUSED_RESULT;
 
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle);
+  // Adds the bundle's modules of the builder's type. If `moduleSource` is given, V8 reads each
+  // source module from the storage it provides (see jsg/module-source.h) instead of the
+  // compiled-in bytes.
+  static void getBuiltInBundleFromCapnp(
+      BuiltinBuilder& builder, Bundle::Reader bundle, const ModuleSource* moduleSource = nullptr);
 
   // Overload that accepts a per-module filter predicate. Only modules for which
   // the filter returns true are added to the builder. This is used for per-module
   // feature flag gating (e.g., individual node:* modules behind compat flags).
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
-      kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
-
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-      Bundle::Reader bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
-      kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
+      const ModuleSource* moduleSource = nullptr);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 
@@ -878,6 +879,20 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
 
   friend class Module::Evaluator;
 };
+
+// The address of the evaluation-steps callback every synthetic module of the new registry is
+// created with. V8 stores it as a Foreign on the module, so a startup snapshot needs it in the
+// external-reference table (jsg::isolateRegisterExternalReference), like the legacy registry's
+// getSyntheticModuleEvalRef().
+intptr_t getSyntheticModuleEvaluationStepsRef();
+
+// For jsg::IsolateBase::createSnapshotBlob: stores the v8::Module of every module that the
+// registry bound to `context` instantiated in the snapshot with `creator.AddData(context, ...)`,
+// and returns the records (see SnapshotArtifact::newModuleRegistryRecords) from which
+// ModuleRegistry::attachToIsolate rebuilds the registry of an isolate restored from the blob. The
+// registry forgets the modules, so it is unusable afterwards; the zygote is discarded anyway.
+kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordIsolateModuleRegistryForSnapshot(
+    v8::Local<v8::Context> context, v8::SnapshotCreator& creator);
 
 constexpr ModuleRegistry::Builder::Options operator|(
     const ModuleRegistry::Builder::Options& a, const ModuleRegistry::Builder::Options& b) {

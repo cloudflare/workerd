@@ -38,6 +38,49 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 // serialization.ts).
 require('serialization');
 
+// Loaded before any module that may create or recognize a DOMException.
+const { DOMException, QuotaExceededError } = require('dom-exception');
+
+// The TypeScript DOMException replaces the C++ one, which global-scope.h then
+// leaves out, and adds QuotaExceededError, which the C++ one lacks. Installed
+// as JSG_NESTED_TYPE installs the C++ class.
+if (autogates['ts-dom-exception']) {
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    DOMException: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DOMException,
+    },
+    QuotaExceededError: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: QuotaExceededError,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      DOMException: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: DOMException,
+      },
+      QuotaExceededError: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: QuotaExceededError,
+      },
+    });
+  }
+}
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,
@@ -206,7 +249,7 @@ if (compatFlags['typescript_implemented_streams']) {
   // the TypeScript implementation so the hierarchy is consistent.
   //
   // JSG installs nested types on the prototype rather than the instance, so
-  // this reaches every `crypto.DigestStream` — including the lazily created
+  // this reaches every `crypto.DigestStream` - including the lazily created
   // `globalThis.crypto` singleton, which is deliberately not touched here.
   // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
   // with no attributes, i.e. all three true), so the swap is invisible to
@@ -385,6 +428,21 @@ if (autogates['ts-url']) {
       enumerable: false,
       writable: true,
       value: URLSearchParams,
+    },
+  });
+}
+
+// The TypeScript URLPattern replaces the C++ ones, which global-scope.h then
+// leaves out, installed as URL is.
+if (autogates['ts-url-pattern']) {
+  const { URLPattern } = require('urlpattern/urlpattern');
+  ObjectDefineProperties(globalThis, {
+    URLPattern: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLPattern,
     },
   });
 }

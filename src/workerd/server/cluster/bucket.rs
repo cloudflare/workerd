@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use crate::Error;
 use crate::Result;
 pub use crate::http::Payload;
 
@@ -34,8 +35,10 @@ pub trait Store {
     /// The object and its version; with `to`, the body goes to that file
     /// instead.
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>>;
-    /// `Ok(None)` when the guard failed and nothing was written. A write
-    /// without a guard never answers `Ok(None)`: the store refusing it is an
+    /// `Ok(None)` when the guard failed and nothing was written;
+    /// `Error::OutcomeUnknown` when the guard failed but an earlier attempt
+    /// of the call, or a copy sent beside it, may have written. A write
+    /// without a guard answers neither: the store refusing it is another
     /// error.
     async fn put(
         &self,
@@ -116,9 +119,36 @@ impl Bucket {
 
     /// Write `body` if the guard holds. `Ok(None)` means the guard failed and
     /// nothing was written; an error means the write may have landed.
+    /// `Error::OutcomeUnknown` is the store refusing the guard where the
+    /// refusal may be of this write's own earlier attempt or other copy.
     pub async fn put_if(&self, key: &str, body: Vec<u8>, guard: Guard) -> Result<Option<Version>> {
         let body = Payload::Bytes(body.into());
         self.store.put(&self.key(key), body, Some(guard), &[]).await
+    }
+
+    /// `put_if`, with an unknown outcome (`Error::OutcomeUnknown`) settled by
+    /// reading the object back: the write counts as landed, at the version
+    /// read, if the object holds `body`, and as refused otherwise. For
+    /// writes whose bytes no other writer puts at `key`, or where it means
+    /// the same if one does, and whose body differs from what the guarded
+    /// version holds: on a store whose versions do not follow content, a
+    /// refused write of those same bytes would read back as landed. Not for
+    /// a write `http::prompt` may send twice (`http::Repeat::GuardedWrite`):
+    /// the other copy can land after the read.
+    pub async fn put_if_settled(
+        &self,
+        key: &str,
+        body: Vec<u8>,
+        guard: Guard,
+    ) -> Result<Option<Version>> {
+        match self.put_if(key, body.clone(), guard).await {
+            Err(Error::OutcomeUnknown(_)) => {}
+            written => return written,
+        }
+        Ok(match self.get(key).await? {
+            Some((current, version)) if current == body => Some(version),
+            _ => None,
+        })
     }
 
     /// Write `body` unconditionally, with user metadata.
@@ -188,12 +218,14 @@ pub mod memory {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::path::Path;
+    use std::rc::Rc;
 
     use super::Entry;
     use super::Guard;
     use super::Payload;
     use super::Store;
     use super::Version;
+    use crate::Error;
     use crate::Result;
 
     /// S3's semantics for the calls the cluster makes, in memory.
@@ -205,6 +237,25 @@ pub mod memory {
         pub ignores_guards: Cell<bool>,
         /// As a store whose `ETag`s are weak treats `If-Match`.
         pub never_matches: Cell<bool>,
+        /// Keys whose next guarded write answers `Error::OutcomeUnknown`
+        /// whether or not it was written, as the client does when a retry's
+        /// guard fails after an attempt that may have landed; one entry per
+        /// write. Shared, so a test keeps a handle on it once a `Bucket`
+        /// owns the store.
+        pub unknown: Rc<RefCell<Vec<String>>>,
+        /// Another writer's write of a key, which lands just before the next
+        /// guarded write of that key is decided; one entry per write.
+        pub interloper: Rc<RefCell<Vec<Write>>>,
+    }
+
+    /// A write's key and body.
+    pub type Write = (String, Vec<u8>);
+
+    /// Removes the first entry of `entries` that `matches` and answers it.
+    fn take<T>(entries: &RefCell<Vec<T>>, matches: impl Fn(&T) -> bool) -> Option<T> {
+        let mut entries = entries.borrow_mut();
+        let i = entries.iter().position(matches)?;
+        Some(entries.remove(i))
     }
 
     #[async_trait::async_trait(?Send)]
@@ -231,7 +282,14 @@ pub mod memory {
                 Payload::Bytes(bytes) => bytes.to_vec(),
                 Payload::File(path) => std::fs::read(path)?,
             };
+            let guarded = guard.is_some();
+            let unknown = guarded && take(&self.unknown, |k| k == key).is_some();
             let mut objects = self.objects.borrow_mut();
+            if guarded && let Some((_, other)) = take(&self.interloper, |(k, _)| k == key) {
+                self.writes.set(self.writes.get() + 1);
+                let version = Version(format!("\"{}\"", self.writes.get()));
+                objects.insert(key.to_owned(), (other, version));
+            }
             let current = objects.get(key).map(|(_, version)| version);
             let holds = match guard {
                 None => true,
@@ -240,12 +298,17 @@ pub mod memory {
                     current == Some(&version) && !self.never_matches.get()
                 }
             };
+            let outcome_unknown =
+                || Err(Error::OutcomeUnknown(format!("PUT {key}: 412 (simulated)")));
             if !holds && !self.ignores_guards.get() {
-                return Ok(None);
+                return if unknown { outcome_unknown() } else { Ok(None) };
             }
             self.writes.set(self.writes.get() + 1);
             let version = Version(format!("\"{}\"", self.writes.get()));
             objects.insert(key.to_owned(), (body, version.clone()));
+            if unknown {
+                return outcome_unknown();
+            }
             Ok(Some(version))
         }
 

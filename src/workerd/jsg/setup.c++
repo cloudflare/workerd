@@ -10,6 +10,7 @@
 #include "setup.h"
 
 #include "libplatform/libplatform.h"
+#include "modules-new.h"
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
@@ -527,6 +528,7 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+    ptr->SetIsJSApiWrapperNativeErrorCallback(&isJsApiWrapperNativeErrorCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -573,10 +575,17 @@ IsolateBase::IsolateBase(V8System& system,
       jsSerializeModeKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
 
+      domExceptionBrandKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_BRAND_KEY)));
+
       auto errorPrototypeTemplate = v8::ObjectTemplate::New(ptr);
       errorPrototypeTemplate->SetIntrinsicDataProperty(
           v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
       this->errorPrototypeTemplate.Reset(ptr, errorPrototypeTemplate);
+
+      auto domExceptionTemplate = v8::FunctionTemplate::New(ptr, &constructDomException);
+      registerExternalReference(reinterpret_cast<intptr_t>(&constructDomException));
+      this->domExceptionTemplate.Reset(ptr, domExceptionTemplate);
     }
   });
 }
@@ -607,10 +616,14 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
 }
 
 void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle) {
-  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
   auto& artifact = mutableSnapshotArtifact();
   v8::HandleScope scope(ptr);
   auto context = contextHandle.Get(ptr);
+  if (usingNewModuleRegistry) {
+    artifact.newModuleRegistryRecords =
+        modules::recordIsolateModuleRegistryForSnapshot(context, *getSnapshotCreator());
+    return;
+  }
   auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
       context, ContextPointerSlot::MODULE_REGISTRY));
   moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
@@ -746,8 +759,10 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
+  domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
+  domExceptionBrandKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -1218,10 +1233,13 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // thread, and v8::Isolate::Dispose() refuses to run on an entered isolate. Destroying the
     // SnapshotCreator exits the isolate; it does not dispose it, since we allocated the isolate.
     snapshotCreator = kj::none;
+    if (disposeHook != nullptr) {
+      disposeHook(disposeHookData, DisposeStage::DISPOSING);
+    }
     ptr->Dispose();
     ptr = nullptr;
     if (disposeHook != nullptr) {
-      disposeHook(disposeHookData);
+      disposeHook(disposeHookData, DisposeStage::DISPOSED);
     }
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
@@ -1233,16 +1251,26 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
+v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate* isolate) {
+  return from(isolate).domExceptionTemplate.Get(isolate);
+}
+
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->jsSerializeModeKey.Get(isolate);
 }
 
-v8::Local<v8::Value> IsolateBase::getErrorPrototype(
+v8::MaybeLocal<v8::Value> IsolateBase::getErrorPrototype(
     v8::Isolate* isolate, v8::Local<v8::Context> context) {
   auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  auto holder = check(self.errorPrototypeTemplate.Get(isolate)->NewInstance(context));
-  return check(holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY)));
+  v8::Local<v8::Object> holder;
+  if (!self.errorPrototypeTemplate.Get(isolate)->NewInstance(context).ToLocal(&holder)) return {};
+  return holder->GetRealNamedProperty(context, v8StrIntern(isolate, ERROR_PROTOTYPE_KEY));
+}
+
+v8::Local<v8::Private> IsolateBase::getDomExceptionBrandKey(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->domExceptionBrandKey.Get(isolate);
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
@@ -1271,8 +1299,10 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
+    KJ_DEFER(domExceptionBrandKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
     KJ_DEFER(zygoteRestoreTimeHolders = kj::none);
@@ -1359,6 +1389,19 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   }
 
   return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
+}
+
+// The constructor of getDomExceptionTemplate(), which does nothing: the bootstrap's DOMException
+// constructs it with its own new.target, and native code instantiates its instance template.
+void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args) {}
+
+// V8 asks whether an API wrapper object is a native error for Error.isError(), as WebIDL
+// requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its
+// brand.
+bool IsolateBase::isJsApiWrapperNativeErrorCallback(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionBrandKey(isolate))
+      .FromMaybe(false);
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {

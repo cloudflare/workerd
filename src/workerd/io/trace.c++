@@ -847,6 +847,34 @@ ErrorInfo::ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> 
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
 
+ErrorInfo ErrorInfo::fromErrorProperties(
+    kj::String name, kj::String message, kj::Maybe<kj::StringPtr> stack) {
+  kj::Maybe<kj::String> strippedStack;
+  KJ_IF_SOME(slice, stack) {
+    // Normally `error.stack` repeats the error type and message first. We don't want send two
+    // copies of that to the trace so we'll strip it off.
+    if (slice.startsWith(name)) {
+      slice = slice.slice(name.size());
+      if (slice.startsWith(": "_kj)) {
+        slice = slice.slice(2);
+      }
+    }
+
+    if (slice.startsWith(message)) {
+      slice = slice.slice(message.size());
+      if (slice.startsWith("\n")) {
+        slice = slice.slice(1);
+      }
+    }
+
+    if (slice.size() > 0) {
+      strippedStack = kj::str(slice);
+    }
+  }
+
+  return ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(strippedStack));
+}
+
 ErrorInfo::ErrorInfo(rpc::Trace::ErrorInfo::Reader reader)
     : name(kj::str(reader.getName())),
       message(kj::str(reader.getMessage())) {
