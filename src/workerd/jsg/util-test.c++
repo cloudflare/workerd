@@ -930,8 +930,12 @@ struct AsBytesResizableContext: public ContextGlobalObject {
     for (auto b: data) sum += b;
     return sum;
   }
+  kj::String listBytes(kj::Array<kj::byte> data) {
+    return kj::strArray(data, ",");
+  }
   JSG_RESOURCE_TYPE(AsBytesResizableContext) {
     JSG_METHOD(sumBytes);
+    JSG_METHOD(listBytes);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(AsBytesResizableIsolate, AsBytesResizableContext);
@@ -969,6 +973,29 @@ KJ_TEST("asBytes copies data from resizable ArrayBuffer") {
                "v3[0] = 5; v3[1] = 15; v3[2] = 25;\n"
                "typeof sumBytes(rab3, { valueOf() { rab3.resize(0); return 0; } });\n",
       "string", "number");
+}
+
+KJ_TEST("asBytes copies exactly the current bytes of a view of a resizable ArrayBuffer") {
+  Evaluator<AsBytesResizableContext, AsBytesResizableIsolate> e(v8System);
+
+  // A length-tracking view follows the buffer as it grows and shrinks, and a view left out of
+  // bounds by a shrink is empty.
+  e.expectEval("var rab = new ArrayBuffer(4, { maxByteLength: 8 });\n"
+               "new Uint8Array(rab).set([10, 20, 30, 40]);\n"
+               "var views = [new Uint8Array(rab), new Uint8Array(rab, 1, 2),\n"
+               "             new DataView(rab, 3), new Uint16Array(rab, 2)];\n"
+               "var list = () => views.map((view) => listBytes(view)).join(';');\n"
+               "var results = [list()];\n"
+               "for (var size of [6, 3, 2]) {\n"
+               "  rab.resize(size);\n"
+               "  results.push(list());\n"
+               "}\n"
+               "results.join(' | ');\n",
+      "string",
+      "10,20,30,40;20,30;40;30,40 | "
+      "10,20,30,40,0,0;20,30;40,0,0;30,40,0,0 | "
+      "10,20,30;20,30;; | "
+      "10,20;;;");
 }
 
 }  // namespace

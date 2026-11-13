@@ -1026,7 +1026,9 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
       return getEmptyArray();
     }
     auto copy = kj::heapArray<kj::byte>(len);
-    arrayBufferView->CopyContents(copy.begin(), copy.size());
+    // CopyContents reads the view's length again and copies no more than that.
+    auto copied = arrayBufferView->CopyContents(copy.begin(), copy.size());
+    KJ_ASSERT(copied == len, "CopyContents must completely overwrite the copy");
     return copy;
   }
   auto backing = buffer->GetBackingStore();
