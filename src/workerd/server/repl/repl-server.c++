@@ -140,7 +140,8 @@ ReplConfigServer::ReplConfigServer(ReplServerContext context,
 ReplConfigServer::~ReplConfigServer() noexcept(false) {
   // The REPL closes every server it loaded before it goes; a server dropped while running would
   // take its factory down without draining it.
-  KJ_ASSERT(server == kj::none, "a REPL server was destroyed without being closed", source.path);
+  KJ_DTOR_ASSERT(
+      server == kj::none, "a REPL server was destroyed without being closed", source.path);
 }
 
 InProcessServer& ReplConfigServer::requireOpen() {
