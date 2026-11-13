@@ -232,6 +232,21 @@ KJ_TEST("assert header ids present via ArrayPtr round-trip through Rust") {
   kj::rust::tests::assert_header_ids_present(headers, idSlice);
 }
 
+KJ_TEST("builtin header id outside the enum is rejected") {
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "example.com");
+
+  // What Rust passes for `HeaderId { repr: 1000 }`.
+  auto unknown = static_cast<kj::rust::BuiltinIndicesEnum>(1000);
+  KJ_EXPECT_THROW_MESSAGE("not a builtin header id", kj::rust::get_header(headers, unknown));
+  KJ_EXPECT_THROW_MESSAGE(
+      "not a builtin header id", kj::rust::set_header(headers, unknown, "value"));
+
+  auto host = KJ_ASSERT_NONNULL(kj::rust::get_header(headers, kj::rust::BuiltinIndicesEnum::HOST));
+  KJ_EXPECT(kj::from<Rust>(host).asChars() == "example.com"_kj.asArray());
+}
+
 KJ_TEST("http connect settings") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
