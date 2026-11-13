@@ -955,6 +955,14 @@ kj_test(
 )
 
 kj_test(
+    src = "binding-snapshot-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "abort-signal-test.c++",
     deps = [
         "//src/workerd/io",
