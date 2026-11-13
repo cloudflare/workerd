@@ -118,7 +118,10 @@ void throwDataCloneErrorForObject(v8::Isolate* isolate, v8::Local<v8::Object> ob
 // `string` as UTF-8, converted as jsg::JsString::toString() converts it.
 kj::String toKjString(v8::Isolate* isolate, v8::Local<v8::String> string) {
   auto buffer = kj::heapArray<char>(string->Utf8Length(isolate) + 1);
-  string->WriteUtf8(isolate, buffer.begin(), buffer.size(), v8::String::WriteFlags::kNullTerminate);
+  // The count that WriteUtf8 returns includes the terminator.
+  auto written = string->WriteUtf8(
+      isolate, buffer.begin(), buffer.size(), v8::String::WriteFlags::kNullTerminate);
+  KJ_ASSERT(written == buffer.size(), "WriteUtf8 must completely overwrite the backing buffer");
   return kj::String(kj::mv(buffer));
 }
 

@@ -361,23 +361,28 @@ JsArray::operator JsObject() const {
   return JsObject(inner.As<v8::Object>());
 }
 
+namespace {
+// `str` as NUL-terminated UTF-8.
+kj::Array<char> toUtf8(v8::Isolate* isolate, v8::Local<v8::String> str, int flags) {
+  auto buf = kj::heapArray<char>(str->Utf8Length(isolate) + 1);
+  // The count that WriteUtf8 returns includes the terminator.
+  auto written = str->WriteUtf8(
+      isolate, buf.begin(), buf.size(), flags | v8::String::WriteFlags::kNullTerminate);
+  KJ_ASSERT(written == buf.size(), "WriteUtf8 must completely overwrite the backing buffer");
+  return buf;
+}
+}  // namespace
+
 kj::String JsString::toString(jsg::Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return kj::String(kj::mv(buf));
+  return kj::String(toUtf8(js.v8Isolate, inner, v8::String::WriteFlags::kNone));
 }
 
 jsg::USVString JsString::toUSVString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(),
-      v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
-  return jsg::USVString(kj::mv(buf));
+  return jsg::USVString(toUtf8(js.v8Isolate, inner, v8::String::WriteFlags::kReplaceInvalidUtf8));
 }
 
 jsg::DOMString JsString::toDOMString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return jsg::DOMString(kj::mv(buf));
+  return jsg::DOMString(toUtf8(js.v8Isolate, inner, v8::String::WriteFlags::kNone));
 }
 
 int JsString::hashCode() const {

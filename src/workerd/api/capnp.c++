@@ -22,7 +22,10 @@ namespace workerd::api {
       name##_heap = kj::heapArray<char>(len + 1);                                                  \
       ptr = name##_heap.begin();                                                                   \
     }                                                                                              \
-    v8str->WriteUtf8(js.v8Isolate, ptr, len);                                                      \
+    /* The count that WriteUtf8 returns includes the terminator. */                                \
+    size_t written =                                                                               \
+        v8str->WriteUtf8(js.v8Isolate, ptr, len + 1, v8::String::WriteFlags::kNullTerminate);      \
+    KJ_ASSERT(written == len + 1, "WriteUtf8 must completely overwrite the backing buffer");       \
     name = kj::StringPtr(ptr, len);                                                                \
   }
 
@@ -105,7 +108,10 @@ struct JsCapnpConverter {
           auto str = jsg::check(jsValue->ToString(js.v8Context()));
           capnp::Orphan<capnp::Text> orphan =
               orphanage.newOrphan<capnp::Text>(str->Utf8Length(js.v8Isolate));
-          str->WriteUtf8(js.v8Isolate, orphan.get().begin(), orphan.get().size());
+          auto text = orphan.get();
+          auto written = str->WriteUtf8(js.v8Isolate, text.begin(), text.size());
+          KJ_ASSERT(
+              written == text.size(), "WriteUtf8 must completely overwrite the backing buffer");
           return kj::mv(orphan);
         }
         case capnp::schema::Type::DATA:

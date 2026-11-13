@@ -38,9 +38,9 @@ class V8StackCapturer final: public AsyncStackCapturer {
     if (builder.isKnown()) return;
     for (int i = 0; i < count; ++i) {
       auto frame = trace->GetFrame(isolate, i);
-      v8::String::Utf8Value function(isolate, frame->GetFunctionName());
-      v8::String::Utf8Value script(isolate, frame->GetScriptName());
-      builder.addFrame(toArray(function), toArray(script), frame->GetScriptId(),
+      auto function = toUtf8(frame->GetFunctionName());
+      auto script = toUtf8(frame->GetScriptName());
+      builder.addFrame(function, script, frame->GetScriptId(),
           static_cast<uint32_t>(frame->GetLineNumber()), static_cast<uint32_t>(frame->GetColumn()));
     }
   }
@@ -49,10 +49,15 @@ class V8StackCapturer final: public AsyncStackCapturer {
   v8::Isolate* isolate;
   int maxFrames;
 
-  // An empty handle (an anonymous function, a script without a name) converts to "".
-  static kj::ArrayPtr<const char> toArray(const v8::String::Utf8Value& value) {
-    if (*value == nullptr) return nullptr;
-    return kj::arrayPtr(*value, value.length());
+  // `value` as UTF-8, with U+FFFD for each lone surrogate. An empty handle (an anonymous
+  // function, a script without a name) converts to "".
+  kj::Array<char> toUtf8(v8::Local<v8::String> value) const {
+    if (value.IsEmpty()) return nullptr;
+    auto utf8 = kj::heapArray<char>(value->Utf8Length(isolate));
+    auto written = value->WriteUtf8(
+        isolate, utf8.begin(), utf8.size(), v8::String::WriteFlags::kReplaceInvalidUtf8);
+    KJ_ASSERT(written == utf8.size(), "WriteUtf8 must completely overwrite the backing buffer");
+    return utf8;
   }
 };
 

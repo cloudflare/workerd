@@ -4,6 +4,8 @@
 
 #include "jsg-test.h"
 #include "jsvalue.h"
+
+#include <kj/encoding.h>
 namespace workerd::jsg::test {
 namespace {
 
@@ -99,6 +101,19 @@ struct JsValueContext: public ContextGlobalObject {
     return kj::str(object);
   }
 
+  // The UTF-8 that toString(), toUSVString() and toDOMString() convert `str` to, in hex.
+  kj::String utf8Conversions(Lock& js, JsString str) {
+    return kj::str(kj::encodeHex(str.toString(js).asBytes()), ' ',
+        kj::encodeHex(str.toUSVString(js).asBytes()), ' ',
+        kj::encodeHex(str.toDOMString(js).asBytes()));
+  }
+
+  // The sizes of those conversions.
+  kj::String utf8Sizes(Lock& js, JsString str) {
+    return kj::str(
+        str.toString(js).size(), ' ', str.toUSVString(js).size(), ' ', str.toDOMString(js).size());
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -117,6 +132,8 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
     JSG_METHOD(describeWithErrorSlots);
+    JSG_METHOD(utf8Conversions);
+    JSG_METHOD(utf8Sizes);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -159,6 +176,33 @@ KJ_TEST("simple") {
       "boolean", "false");
   e.expectEval("function f(val) { return this == globalThis && val === 1; }; callFunction(f);",
       "boolean", "true");
+}
+
+KJ_TEST("JsString converts every string to UTF-8 of the length V8 measures") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+
+  e.expectEval("utf8Conversions('')", "string", "  ");
+  e.expectEval("utf8Conversions('a\\0b')", "string", "610062 610062 610062");
+  e.expectEval("utf8Conversions('\\xe9')", "string", "c3a9 c3a9 c3a9");
+  e.expectEval("utf8Conversions('\\u20ac')", "string", "e282ac e282ac e282ac");
+  e.expectEval("utf8Conversions('\\ud83d\\ude00')", "string", "f09f9880 f09f9880 f09f9880");
+
+  // A lone surrogate takes three bytes whether it is kept or replaced with U+FFFD.
+  e.expectEval("utf8Conversions('\\ud800')", "string", "eda080 efbfbd eda080");
+  e.expectEval("utf8Conversions('\\udc00')", "string", "edb080 efbfbd edb080");
+  e.expectEval("utf8Conversions('a\\ud83d')", "string", "61eda0bd 61efbfbd 61eda0bd");
+  e.expectEval(
+      "utf8Conversions('\\ude00\\ud83d')", "string", "edb880eda0bd efbfbdefbfbd edb880eda0bd");
+  e.expectEval("utf8Conversions('\\ud800\\ud83d\\ude00')", "string",
+      "eda080f09f9880 efbfbdf09f9880 eda080f09f9880");
+  e.expectEval("utf8Conversions('\\ud83d\\ude00\\ude00')", "string",
+      "f09f9880edb880 f09f9880efbfbd f09f9880edb880");
+
+  // A long one-byte string, and a string V8 has not flattened.
+  e.expectEval("utf8Sizes('\\xe9'.repeat(100000))", "string", "200000 200000 200000");
+  e.expectEval(
+      "utf8Sizes('a'.repeat(5000) + '\\u20ac'.repeat(5000) + '\\ud800' + '\\ud83d\\ude00')",
+      "string", "20007 20007 20007");
 }
 
 KJ_TEST("kj::str() describes an object by the error name and message it holds") {
