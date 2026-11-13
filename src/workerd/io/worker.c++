@@ -3067,9 +3067,12 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
         JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
           auto info = getErrorInfoForTrace(
               js, exception, worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
-          issues::Error issueErrors[] = {{.name = info.name,
-            .message = info.message,
-            .stack = info.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; })}};
+          issues::Error issueError;
+          issueError.name = info.name;
+          issueError.message = info.message;
+          issueError.stack =
+              info.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; });
+          kj::ArrayPtr<const issues::Error> issueErrors(&issueError, 1);
           observer.reportIssue(
               issues::UNCAUGHT_EXCEPTION, info.message, nullptr, issueErrors, nullptr);
         });
