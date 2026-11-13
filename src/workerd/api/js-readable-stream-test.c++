@@ -1244,8 +1244,6 @@ KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously 
   TestFixture testFixture;
   MockControllerState state;
   SyncContentSource::Counters counters;
-  const bool gateOn =
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1254,30 +1252,22 @@ KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously 
     auto controller = makeMockController(js, state, js.null());
 
     auto pullPromise = source->pull(js, controller, freshSignal(js));
-    if (gateOn) {
-      // The pull settled synchronously: the chunk was enqueued before pull() returned,
-      // without an event-loop round trip.
-      KJ_EXPECT(counters.syncReads == 1);
-      KJ_EXPECT(counters.asyncReads == 0);
-      KJ_EXPECT(state.enqueued.size() == 1);
-    } else {
-      // Ungated, the read must take the asynchronous path.
-      KJ_EXPECT(counters.syncReads == 0);
-      KJ_EXPECT(state.enqueued.size() == 0);
-    }
+    // The pull settled synchronously: the chunk was enqueued before pull() returned,
+    // without an event-loop round trip.
+    KJ_EXPECT(counters.syncReads == 1);
+    KJ_EXPECT(counters.asyncReads == 0);
+    KJ_EXPECT(state.enqueued.size() == 1);
 
     auto promise = pullPromise
                        .then(js,
-                           [&state, gateOn, source = source.addRef(),
-                               controller = controller.addRef(js)](jsg::Lock& js) mutable {
+                           [&state, source = source.addRef(), controller = controller.addRef(js)](
+                               jsg::Lock& js) mutable {
       KJ_EXPECT(state.enqueued.size() == 1);
       KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
       KJ_EXPECT(!state.closed);
       // The next pull observes EOF; when gated on, the close is likewise synchronous.
       auto next = source->pull(js, controller.getHandle(js), freshSignal(js));
-      if (gateOn) {
-        KJ_EXPECT(state.closed);
-      }
+      KJ_EXPECT(state.closed);
       return next;
     }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.closed); });
     return env.context.awaitJs(js, kj::mv(promise));
@@ -1288,8 +1278,6 @@ KJ_TEST("ReadableStreamNativeSource BYOB pull fast path fills the view and fuses
   TestFixture testFixture;
   MockControllerState state;
   SyncContentSource::Counters counters;
-  const bool gateOn =
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1302,16 +1290,12 @@ KJ_TEST("ReadableStreamNativeSource BYOB pull fast path fills the view and fuses
     auto controller = makeMockController(js, state, byobRequest);
 
     auto pullPromise = source->pull(js, controller, freshSignal(js));
-    if (gateOn) {
-      // Under-delivery (11 < 16) signals EOF: the fast path responds and fuses the
-      // close, all before pull() returns.
-      KJ_EXPECT(counters.syncReads == 1);
-      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
-      KJ_EXPECT(state.closed);
-      KJ_EXPECT(view.asArrayPtr().first(kData.size()) == kData.asBytes());
-    } else {
-      KJ_EXPECT(state.responded == kj::none);
-    }
+    // Under-delivery (11 < 16) signals EOF: the fast path responds and fuses the
+    // close, all before pull() returns.
+    KJ_EXPECT(counters.syncReads == 1);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
+    KJ_EXPECT(state.closed);
+    KJ_EXPECT(view.asArrayPtr().first(kData.size()) == kData.asBytes());
 
     auto promise = pullPromise.then(js, [&state, view = view.addRef(js)](jsg::Lock& js) mutable {
       KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == kData.size());
@@ -1326,8 +1310,6 @@ KJ_TEST("ReadableStreamNativeSource pull fast path failure rejects and releases 
   TestFixture testFixture;
   MockControllerState defaultState;
   MockControllerState byobState;
-  const bool gateOn =
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1335,12 +1317,7 @@ KJ_TEST("ReadableStreamNativeSource pull fast path failure rejects and releases 
                            jsg::JsObject controller) -> jsg::Promise<void> {
       auto source =
           js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<SyncThrowingSource>());
-      if (!gateOn) {
-        // Ungated, the synchronous path never runs; the source EOFs via the async path.
-        return source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
-          KJ_EXPECT(state.closed);
-        });
-      }
+
       return source->pull(js, controller, freshSignal(js))
           .then(js,
               [](jsg::Lock& js) -> jsg::Promise<void> {

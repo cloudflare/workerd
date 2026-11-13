@@ -815,8 +815,6 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
 KJ_TEST("WritableStreamNativeSink write fast path completes synchronously when gated on") {
   TestFixture testFixture;
   SyncCollectingSink::State state;
-  const bool gateOn =
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -824,15 +822,10 @@ KJ_TEST("WritableStreamNativeSink write fast path completes synchronously when g
         env.context, kj::heap<SyncCollectingSink>(state), kj::none, kj::none);
 
     auto writePromise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
-    if (gateOn) {
-      // The write completed synchronously, before write() returned.
-      KJ_EXPECT(state.syncWrites == 1);
-      KJ_EXPECT(state.asyncWrites == 0);
-    } else {
-      // Ungated, the write must take the asynchronous path.
-      KJ_EXPECT(state.syncWrites == 0);
-      KJ_EXPECT(state.asyncWrites == 1);
-    }
+    // The write completed synchronously, before write() returned.
+    KJ_EXPECT(state.syncWrites == 1);
+    KJ_EXPECT(state.asyncWrites == 0);
+
     auto promise = writePromise.then(
         js, [&state](jsg::Lock& js) { KJ_EXPECT(state.data.asPtr() == "hi"_kjb); });
     return env.context.awaitJs(js, kj::mv(promise));
@@ -842,20 +835,11 @@ KJ_TEST("WritableStreamNativeSink write fast path completes synchronously when g
 KJ_TEST("WritableStreamNativeSink write fast path failure rejects and releases the sink") {
   TestFixture testFixture;
   SyncThrowingSink::State state;
-  const bool gateOn =
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
     auto sink = js.alloc<WritableStreamNativeSink>(
         env.context, kj::heap<SyncThrowingSink>(state), kj::none, kj::none);
-
-    if (!gateOn) {
-      // Ungated, the synchronous path never runs; the write succeeds asynchronously.
-      auto promise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)))
-                         .then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.asyncWrites == 1); });
-      return env.context.awaitJs(js, kj::mv(promise));
-    }
 
     auto promise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)))
                        .then(js, [](jsg::Lock& js) -> jsg::Promise<void> {

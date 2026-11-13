@@ -697,8 +697,7 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // sink operation can be outstanding. Backpressure accounting lives in the TS
       // machinery and is driven by this hook promise's settlement, so a synchronously
       // resolved promise is spec-normal.
-      if (len > 0 && ioContext.getActor() == kj::none &&
-          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+      if (len > 0 && ioContext.getActor() == kj::none) {
         bool syncSuccess = false;
         KJ_TRY {
           syncSuccess = active.sink->tryWriteSync(data.asPtr());
