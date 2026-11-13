@@ -157,16 +157,17 @@ fn global_of_another_isolate_panics() {
     });
 }
 
-/// Two isolates run on different threads, so memory that one's `ArrayBuffer` owns must not
-/// become another's.
+/// Two isolates run on different threads, so memory that belongs to one must not become
+/// another's.
 #[test]
 fn backing_store_of_another_isolate_panics_when_wrapped() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
-    let mut store = None;
+    let mut stores = Vec::new();
     a.run_in_context(|lock, ctx| {
         let buffer = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
-        store = Some(buffer.backing_store(lock));
+        stores.push(buffer.backing_store(lock));
+        stores.push(v8::BackingStore::new_resizable(lock, 4, 8));
 
         // In its own isolate, the store becomes another buffer over the same memory.
         let own = buffer.backing_store(lock);
@@ -180,42 +181,37 @@ fn backing_store_of_another_isolate_panics_when_wrapped() {
         );
         Ok(())
     });
-    let store = store.expect("taken in A");
+    assert_eq!(stores.len(), 2);
 
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        b.run_in_context(|lock, _ctx| {
-            let _buffer = v8::ArrayBuffer::from_backing_store(lock, store);
-            Ok(())
-        });
-    }));
-    let payload = result.expect_err("wrapping the store of A's buffer in B must panic");
-    assert_eq!(
-        panic_message(&*payload),
-        "attempt to wrap a BackingStore in an isolate other than the one whose ArrayBuffer it was \
-         taken from"
-    );
+    for store in stores {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            b.run_in_context(|lock, _ctx| {
+                let _buffer = v8::ArrayBuffer::from_backing_store(lock, store);
+                Ok(())
+            });
+        }));
+        let payload = result.expect_err("wrapping a store of A in B must panic");
+        assert_eq!(
+            panic_message(&*payload),
+            "attempt to wrap a BackingStore in an isolate other than the one it belongs to"
+        );
+    }
 }
 
-/// A store that no buffer has wrapped belongs to no isolate yet.
 #[test]
-fn new_backing_store_is_wrapped_in_any_isolate() {
-    let stores = [
-        v8::BackingStore::new_resizable(4, 8),
-        v8::BackingStore::new_resizable(4, 8),
-    ];
-    for store in stores {
-        crate::Harness::new().run_in_context(|lock, ctx| {
-            let buffer = v8::ArrayBuffer::from_backing_store(lock, store);
-            assert_eq!(buffer.byte_length(), 4);
-            ctx.set_global(lock, "buffer", buffer);
-            assert_eq!(
-                ctx.eval::<u32>(lock, "buffer.resize(8); buffer.byteLength")
-                    .unwrap(),
-                8
-            );
-            Ok(())
-        });
-    }
+fn new_backing_store_is_wrapped_in_its_isolate() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let store = v8::BackingStore::new_resizable(lock, 4, 8);
+        let buffer = v8::ArrayBuffer::from_backing_store(lock, store);
+        assert_eq!(buffer.byte_length(), 4);
+        ctx.set_global(lock, "buffer", buffer);
+        assert_eq!(
+            ctx.eval::<u32>(lock, "buffer.resize(8); buffer.byteLength")
+                .unwrap(),
+            8
+        );
+        Ok(())
+    });
 }
 
 #[test]
