@@ -75,6 +75,7 @@ fn serve_options() {
         "--async-trace-promises",
         "--cluster-addr=0.0.0.0:7000",
         "--cluster-advertise=10.0.0.4:7000",
+        "--data-dir=/var/lib/workerd",
     ])
     .command
     else {
@@ -97,6 +98,7 @@ fn serve_options() {
     assert_eq!(serve.control_fd, Some(3));
     assert_eq!(serve.cluster_address.as_deref(), Some("0.0.0.0:7000"));
     assert_eq!(serve.cluster_advertise.as_deref(), Some("10.0.0.4:7000"));
+    assert_eq!(serve_or_test.data_dir.as_deref(), Some("/var/lib/workerd"));
     assert_eq!(
         serve.socket_addr_overrides,
         [Override {
