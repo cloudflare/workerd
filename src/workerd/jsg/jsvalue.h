@@ -654,6 +654,11 @@ class JsString final: public JsBase<v8::String, JsString> {
   // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
   // copies data out of V8's heap into your buffer. This makes it safe to use before calling
   // GC-triggering operations like Lock::allocBackingStore().
+  //
+  // For the byte and uint16_t buffers V8 does not report how much it copied, and for a string
+  // corrupted inside the V8 sandbox it can leave any of the `written` elements untouched. A
+  // buffer of native memory must therefore be initialized before it is passed here, or its
+  // previous contents are read as string data.
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
@@ -915,10 +920,13 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
+    // Zeroed because V8 may not fill it; see writeInto().
+    buf.asPtr().fill(0);
     inner->WriteOneByte(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   } else {
     auto buf = kj::heapArray<uint16_t>(inner->Length());
+    buf.asPtr().fill(0);
     inner->Write(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   }

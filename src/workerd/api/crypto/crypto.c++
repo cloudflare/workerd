@@ -1543,6 +1543,8 @@ kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
   if (end == 0) return kj::String();
 
   auto utf16 = kj::heapArray<char16_t>(end);
+  // Zeroed because V8 may not fill it; see JsString::writeInto().
+  utf16.asPtr().fill(0);
   KJ_IF_SOME(lead, pendingLead) {
     utf16[0] = lead;
     pendingLead = kj::none;
