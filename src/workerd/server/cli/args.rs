@@ -56,15 +56,23 @@ pub enum Command {
     #[command(
         long_about = "Serve requests based on a config.",
         after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
-            Cluster mode (`Config.cluster`, with --experimental): instances that share an \
-            S3-compatible (s3://) or Google Cloud Storage (gs://) bucket serve Durable Objects \
-            together. For an s3:// bucket, each `cluster.bucketOptions` setting falls back to an \
-            environment variable: AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, \
-            AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
-            takes no settings: its tokens come from the service account key \
-            GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
-            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
-            --cluster-addr."
+            A wrangler config's Durable Objects are stored on the disk service \
+            `<name>-do-storage`, or `do-storage` when --cluster-addr joins it to a cluster, in \
+            `.wrangler/state/workerd` next to the config unless --directory-path names another \
+            directory for that service. Joined to a cluster, a wrangler config defines \
+            `do-storage` even without Durable Objects, for those of the cluster's deployments.\n\n\
+            Cluster mode (`Config.cluster`, or --cluster-addr for a config without one, with \
+            --experimental): instances that share an S3-compatible (s3://) or Google Cloud \
+            Storage (gs://) bucket serve Durable Objects together. For an s3:// bucket, each \
+            `cluster.bucketOptions` setting falls back to an environment variable: \
+            AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, \
+            AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket takes no settings: its \
+            tokens come from the service account key GOOGLE_APPLICATION_CREDENTIALS names, else \
+            from the metadata server of the GCE VM or GKE pod (Workload Identity). An empty \
+            `cluster.bucket` falls back to \
+            WORKERD_CLUSTER_BUCKET, and an empty `cluster.key` to WORKERD_CLUSTER_KEY or the \
+            file named by WORKERD_CLUSTER_KEY_FILE. The cluster port must stay on a private \
+            network; see --cluster-addr."
     )]
     Serve {
         #[command(flatten)]
@@ -412,12 +420,16 @@ pub struct ServeArgs {
     #[arg(long, value_name = "fd", value_parser = parse_control_fd)]
     pub control_fd: Option<u32>,
 
-    /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. The
-    /// port gives full access to every service in the process to holders of the cluster key, and
-    /// its traffic is not encrypted: only the cluster's instances should reach it, on a private
-    /// network (a VPC or Tailscale). A public IP is refused unless the config sets
-    /// `cluster.unsafePublicAddress`; a wildcard (0.0.0.0) listens on every interface, so
-    /// firewall the port.
+    /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. A config
+    /// without `cluster`, such as a wrangler config, joins a cluster at <addr> (with
+    /// --experimental; a config compiled into a binary cannot), every other `cluster` setting at
+    /// its default: the key and bucket come
+    /// from `WORKERD_CLUSTER_KEY` or `WORKERD_CLUSTER_KEY_FILE` and `WORKERD_CLUSTER_BUCKET`, the
+    /// bucket's endpoint and credentials from the `AWS_*` variables. The port gives full access
+    /// to every service in the process to holders of the cluster key, and its traffic is not
+    /// encrypted: only the cluster's instances should reach it, on a private network (a VPC or
+    /// Tailscale). A public IP is refused unless the config sets `cluster.unsafePublicAddress`; a
+    /// wildcard (0.0.0.0) listens on every interface, so firewall the port.
     #[arg(long = "cluster-addr", value_name = "addr")]
     pub cluster_address: Option<String>,
 

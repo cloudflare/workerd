@@ -122,7 +122,7 @@ fn the_help_names_the_deployment_storage() {
         .render_long_help()
         .to_string();
     assert!(
-        help.contains(&format!("`{}`", wrangler::DEPLOYMENT_STORAGE)),
+        help.contains(&format!("`{}`", wrangler::CLUSTER_STORAGE)),
         "{help}"
     );
 }
