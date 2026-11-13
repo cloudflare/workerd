@@ -2982,6 +2982,67 @@ test(
   }
 );
 
+test(
+  'serve: a SIGTERM while the server starts drains it without the shutdown delay',
+  SIGTERM_DRAINS,
+  async () => {
+    // A worker whose evaluation keeps the server starting, synchronously,
+    // for seconds after it logs.
+    const dir = await mkdtemp(join(tmpdir(), 'workerd-starting-'));
+    try {
+      await writeFile(
+        join(dir, 'worker.js'),
+        `console.log('evaluating');
+let x = 0;
+for (let j = 0; j < 8; j++) for (let i = 0; i < 1e8; i++) x = (x + i) | 0;
+export default { fetch: () => new Response(String(x)) };
+`
+      );
+      const config = join(dir, 'config.capnp');
+      await writeFile(
+        config,
+        `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [(name = "main", worker = (
+    compatibilityDate = "2024-01-01",
+    modules = [(name = "worker.js", esModule = embed "worker.js")],
+  ))],
+  sockets = [(name = "http", address = "127.0.0.1:0", http = (), service = "main")],
+);
+`
+      );
+      const child = spawn(env.WORKERD_BINARY, ['serve', config], {
+        stdio: ['ignore', 'pipe', 'inherit'],
+        env: { ...env, WORKERD_SHUTDOWN_DELAY_MS: '600000' },
+      });
+      const closed = new Promise((resolve) =>
+        child.once('close', (code, signal) => resolve({ code, signal }))
+      );
+      const killTimer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+      try {
+        // The signal handler is installed before the server starts.
+        let stdout = '';
+        await new Promise((resolve, reject) => {
+          child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+            if (stdout.includes('evaluating')) resolve();
+          });
+          closed.then(() => reject(new Error(`exited early: ${stdout}`)));
+        });
+        child.kill('SIGTERM');
+        // The server was never ready, so it drains as soon as it is up,
+        // rather than serve for the delay.
+        assert.deepStrictEqual(await closed, { code: 0, signal: null });
+      } finally {
+        clearTimeout(killTimer);
+        child.kill('SIGKILL');
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
 test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO after it breaks', async () => {
   await withCluster(2, async ({ nodes }) => {
     const first = await fetchJson(nodes[0].httpPort, '/increment?name=root');

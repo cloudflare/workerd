@@ -99,6 +99,7 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
+    let config = with_environment(config);
     let (config, options) = with_deployments(config, &args.serve_or_test, options, &process);
     entry::serve(
         args.global.verbose,
@@ -131,6 +132,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 &process,
                 serve_or_test.experimental,
             );
+            let config = with_environment(config);
             let (config, options) = with_deployments(config, &serve_or_test, options, &process);
             entry::serve(
                 verbose,
@@ -463,6 +465,19 @@ fn load_config<T: CommandFactory>(
     }
 
     config_errors(&compiled.errors, process)
+}
+
+/// Fills settings that `config` leaves at their defaults from the environment, for `serve` and a
+/// compiled binary only, so that `compile` never embeds the environment, and checks them. An
+/// unusable variable or setting ends the process, even under `--watch`, because the cause can lie
+/// outside the config files.
+fn with_environment(config: Config) -> Config {
+    config
+        .with_shutdown_delay_environment(|name: &str| std::env::var_os(name))
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        })
 }
 
 /// Adds cluster deployments to `config` and records their service sources in `options`.
