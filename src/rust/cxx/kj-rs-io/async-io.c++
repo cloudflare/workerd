@@ -46,8 +46,7 @@ struct RawSockaddr {
 
 template <typename T>
 RawSockaddr rawFrom(const T &encoded, size_t length) {
-  RawSockaddr raw;
-  memset(&raw.storage, 0, sizeof(raw.storage));
+  RawSockaddr raw{};
   memcpy(&raw.storage, &encoded, length);
   raw.length = length;
   return raw;
@@ -58,16 +57,14 @@ RawSockaddr rawFrom(const T &encoded, size_t length) {
 RawSockaddr encodeSockaddr(const SocketAddress &addr) {
   switch (addr.kind) {
     case AddressKind::Ipv4: {
-      struct sockaddr_in in;
-      memset(&in, 0, sizeof(in));
+      struct sockaddr_in in {};
       in.sin_family = AF_INET;
       in.sin_port = htons(addr.port);
       memcpy(&in.sin_addr, addr.ip.data(), sizeof(in.sin_addr));
       return rawFrom(in, sizeof(in));
     }
     case AddressKind::Ipv6: {
-      struct sockaddr_in6 in6;
-      memset(&in6, 0, sizeof(in6));
+      struct sockaddr_in6 in6 {};
       in6.sin6_family = AF_INET6;
       in6.sin6_port = htons(addr.port);
       in6.sin6_flowinfo = htonl(addr.flowinfo);
@@ -80,8 +77,7 @@ RawSockaddr encodeSockaddr(const SocketAddress &addr) {
     case AddressKind::UnixAbstract:
     case AddressKind::UnixUnnamed: {
       constexpr size_t pathOffset = offsetof(struct sockaddr_un, sun_path);
-      struct sockaddr_un un;
-      memset(&un, 0, sizeof(un));
+      struct sockaddr_un un {};
       un.sun_family = AF_UNIX;
       size_t nameBytes = addr.name.size();
       if (addr.kind == AddressKind::UnixUnnamed) {
@@ -120,8 +116,7 @@ RawSockaddr encodeSockaddr(const SocketAddress &addr) {
 // pathname ends at its first NUL. Unsupported families and short lengths throw.
 SocketAddress decodeSockaddr(const void *addr, kj::uint addrlen) {
   KJ_REQUIRE(addrlen <= sizeof(struct sockaddr_storage), "sockaddr too large", addrlen);
-  struct sockaddr header;
-  memset(&header, 0, sizeof(header));
+  struct sockaddr header {};
   KJ_REQUIRE(addrlen >= offsetof(struct sockaddr, sa_family) + sizeof(header.sa_family),
       "sockaddr too short", addrlen);
   memcpy(&header, addr, kj::min<size_t>(addrlen, sizeof(header)));
@@ -156,8 +151,7 @@ SocketAddress decodeSockaddr(const void *addr, kj::uint addrlen) {
     case AF_UNIX: {
       constexpr size_t pathOffset = offsetof(struct sockaddr_un, sun_path);
       KJ_REQUIRE(addrlen >= pathOffset, "sockaddr_un too short", addrlen);
-      struct sockaddr_un un;
-      memset(&un, 0, sizeof(un));
+      struct sockaddr_un un {};
       memcpy(&un, addr, kj::min<size_t>(addrlen, sizeof(un)));
       size_t pathBytes = kj::min<size_t>(addrlen - pathOffset, sizeof(un.sun_path));
       const uint8_t *path = reinterpret_cast<const uint8_t *>(un.sun_path);

@@ -1303,7 +1303,7 @@ KJ_TEST("ByteQueue push to closed consumer is safe") {
 
     // Now push to the queue
     auto store = jsg::JsBufferSource(jsg::JsUint8Array::create(js, 4));
-    memset(store.asArrayPtr().begin(), 'A', 4);
+    store.asArrayPtr().fill('A');
     auto entry = kj::rc<ByteQueue::Entry>(js, store);
     queue.push(js, kj::mv(entry));
 
