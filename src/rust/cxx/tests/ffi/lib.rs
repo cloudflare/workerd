@@ -515,6 +515,11 @@ mod other {
         pub d: u64,
     }
 
+    #[repr(C, align(64))]
+    pub struct OverAligned {
+        pub value: u64,
+    }
+
     #[repr(C)]
     pub struct ThrowingCopy {
         pub value: u64,
@@ -565,6 +570,12 @@ mod other {
     // Safety: the test fixture provides valid bridge pointers and matching layouts.
     unsafe impl ExternType for ThrowingCopy {
         type Id = type_id!("tests::ThrowingCopy");
+        type Kind = Trivial;
+    }
+
+    // Safety: the test fixture provides valid bridge pointers and matching layouts.
+    unsafe impl ExternType for OverAligned {
+        type Id = type_id!("tests::OverAligned");
         type Kind = Trivial;
     }
 
