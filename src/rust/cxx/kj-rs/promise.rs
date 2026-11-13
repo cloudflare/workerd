@@ -110,7 +110,15 @@ pub struct KjPromiseNodeImpl {
     pub unwrap: UnwrapCallback,
 }
 
-pub fn new_callbacks_promise_future<T>(
+/// Makes a future of the `kj::Promise<T>` that `impl` describes. Generated bridge code calls this
+/// with the value an `async` C++ function returned.
+///
+/// # Safety
+///
+/// `impl.node` must point to a `kj::_::PromiseNode` that nothing else owns, since the future
+/// takes ownership of it, and `impl.unwrap` must be the callback C++ made for that node, whose
+/// result is a `T`.
+pub unsafe fn new_callbacks_promise_future<T>(
     r#impl: &KjPromiseNodeImpl,
 ) -> impl Future<Output = CxxResult<T>> + use<T> {
     PromiseFuture::new(
