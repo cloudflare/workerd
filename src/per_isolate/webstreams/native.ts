@@ -212,9 +212,13 @@ function hasOwnMarker(
 // A native underlying sink carries the corresponding V8-private marker.
 // Unlike the source side, native sinks need no new backend machinery - the standard
 // WritableStream drives them via start/write/close/abort. The marker
-// exists for pipe dispatch (is the dest native?) and extraction (hand
-// the sink to C++ for the native+native fast path). Two extension hooks
-// beyond the standard sink surface:
+// exists for pipe dispatch (is the dest native?), extraction (hand
+// the sink to C++ for the native+native fast path), and the controller's
+// flush hook. Three extension hooks beyond the standard sink surface:
+//  - flush(): called by the controller when a flush marker reaches the
+//     head of its queue. Returns undefined, or a promise (the Durable
+//     Object output gate's wait) that the flush, and everything queued
+//     behind it, waits on.
 //  - pipeFrom(source, options): the native+native pipe fast path,
 //     called by the pipe dispatch when both ends are native-backed.
 //  - detach(): called by detachWritableStream just before it drops its
