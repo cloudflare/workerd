@@ -147,7 +147,8 @@ bool callCpp(Isolate* isolate, Func&& func) noexcept {
 
 // callCpp() for a shim that returns a C++ resource to Rust: `func(jsg::Lock&)` returns a
 // `jsg::Ref<T>` or a `kj::Maybe<jsg::Ref<T>>` (`jsg::Optional`), which is stored in `out` for
-// `jsg_cpp::call_cpp_for_ref::<T>()`.
+// `jsg_cpp::call_cpp_for_ref::<T>()`. `T` is the class that Rust's `T` stands for, also when the
+// object is an instance of a subclass: the CppRef records the object's address as a `T*`.
 template <typename T, typename Func>
 bool callCppForRef(Isolate* isolate, kj::Maybe<kj::Own<CppRef>>& out, Func&& func) noexcept {
   return callCpp(isolate, [&](::workerd::jsg::Lock& js) {
