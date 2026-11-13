@@ -18,7 +18,7 @@ wd_rust_binary(
     test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:clap",
+        "@crates_vendor//clap",
     ],
 )
 

@@ -9,7 +9,7 @@ wd_rust_crate(
     ],
     cxx_bridge_src = "lib.rs",
     proc_macro_deps = [
-        "@crates_vendor//:async-trait",
+        "@crates_vendor//async-trait",
     ],
     deps = [
         "//src/rust/kj",

@@ -64,14 +64,14 @@ rust_library(
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
         "//src/rust/cxx/kj-rs-tokio",
-        "@crates_vendor//:dns-lookup",
-        "@crates_vendor//:libc",
-        "@crates_vendor//:nix",
-        "@crates_vendor//:notify",
-        "@crates_vendor//:socket2",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//dns-lookup",
+        "@crates_vendor//libc",
+        "@crates_vendor//nix",
+        "@crates_vendor//notify",
+        "@crates_vendor//socket2",
+        "@crates_vendor//tokio",
     ] + select({
-        "@platforms//os:windows": ["@crates_vendor//:windows-sys"],
+        "@platforms//os:windows": ["@crates_vendor//windows-sys"],
         "//conditions:default": [],
     }),
 )
@@ -81,7 +81,7 @@ wd_rust_test(
     compile_data = glob(["*-test.rs"]),
     crate = "kj-rs-io",
     edition = "2024",
-    deps = ["@crates_vendor//:static_assertions"],
+    deps = ["@crates_vendor//static_assertions"],
 )
 
 rust_cxx_bridge(

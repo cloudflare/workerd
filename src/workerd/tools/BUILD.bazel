@@ -49,12 +49,12 @@ wd_rust_binary(
     }),
     test = False,
     deps = [
-        "@crates_vendor//:anyhow",
-        "@crates_vendor//:clang-ast",
-        "@crates_vendor//:flate2",
-        "@crates_vendor//:pico-args",
-        "@crates_vendor//:serde",
-        "@crates_vendor//:serde_json",
+        "@crates_vendor//anyhow",
+        "@crates_vendor//clang-ast",
+        "@crates_vendor//flate2",
+        "@crates_vendor//pico-args",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
     ],
 )
 

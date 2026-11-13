@@ -29,11 +29,11 @@ wd_rust_crate(
         ":bridge",
     ],
     proc_macro_deps = [
-        "@crates_vendor//:async-trait",
+        "@crates_vendor//async-trait",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:futures",
+        "@crates_vendor//futures",
         "@workerd//src/rust/kj",
         "@workerd//src/workerd/io:outcome_capnp_rust",
     ],

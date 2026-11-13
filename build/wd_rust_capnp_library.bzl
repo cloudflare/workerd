@@ -7,7 +7,5 @@ def wd_rust_capnp_library(**kwargs):
     """
     rust_capnp_library(
         src_prefix = "src",
-        capnp_crate = "@crates_vendor//:capnp",
-        capnpc_plugin = "@crates_vendor//:capnpc__capnpc-rust",
         **kwargs
     )

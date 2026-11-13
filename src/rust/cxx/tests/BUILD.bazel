@@ -21,8 +21,6 @@ wd_rust_test(
     srcs = ["cxx_gen.rs"],
     edition = "2024",
     deps = [
-        ":cxx_test_suite",
-        "//src/rust/cxx",
         "//src/rust/cxx:cxx-gen",
     ],
 )
@@ -38,9 +36,6 @@ rust_library(
     edition = "2024",
     link_deps = [
         ":impl",
-    ],
-    proc_macro_deps = [
-        "//src/rust/cxx:cxxbridge-macro",
     ],
     deps = [
         "//src/rust/cxx",

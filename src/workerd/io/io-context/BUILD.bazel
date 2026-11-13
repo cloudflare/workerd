@@ -68,7 +68,7 @@ wd_rust_crate(
     deps = [
         ":io-context",
         "//src/rust/jsg",
-        "@crates_vendor//:futures",
+        "@crates_vendor//futures",
     ],
 )
 
