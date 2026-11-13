@@ -248,7 +248,8 @@ KJ_TEST("a bare 503 reports http_server_error without an exception") {
       events.joined());
 }
 
-KJ_TEST("user.id, session.id and account.id span attributes reach the observer") {
+KJ_TEST("user.id, session.id and account.id span attributes reach the observer, and user spans "
+        "leave no breadcrumb") {
   Events events;
   TestFixture fixture(paramsFor(events, true, R"JS(
     export default {
@@ -267,7 +268,6 @@ KJ_TEST("user.id, session.id and account.id span attributes reach the observer")
 
   KJ_EXPECT(fetchThroughEntrypoint(fixture) == 200);
   KJ_EXPECT(events.joined() ==
-          "breadcrumb call started  checkout\n"
           "user user.id=u_4821\n"
           "user session.id=s_9\n"
           "user account.id=a_1\n"
