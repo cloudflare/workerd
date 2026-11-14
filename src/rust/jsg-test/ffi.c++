@@ -268,6 +268,10 @@ void terminate_and_deliver(Isolate* isolate) {
   KJ_ASSERT(isolate->IsExecutionTerminating());
 }
 
+bool resource_drop_panicked(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).hasResourceDropPanicked();
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:

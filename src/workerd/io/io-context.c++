@@ -1803,6 +1803,11 @@ void IoContext::runImpl(Runnable& runnable,
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();
+      if (jsg::IsolateBase::from(workerLock.getIsolate()).hasResourceDropPanicked()) {
+        // See IsolateBase::setResourceDropPanicked().
+        abortIsolate("a Rust JSG resource's Drop panicked");
+        KJ_FAIL_REQUIRE("isolate aborted: a Rust JSG resource's Drop panicked");
+      }
       // Prevent prematurely detecting a hang while we're still executing JavaScript.
       // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
       //   not be necessary.

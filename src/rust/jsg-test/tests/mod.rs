@@ -18,6 +18,7 @@ mod dict;
 mod dispose;
 mod dom_exception;
 mod drop_moved_rc;
+mod drop_panic;
 mod eval;
 mod exception_to_kj;
 mod fast_api;

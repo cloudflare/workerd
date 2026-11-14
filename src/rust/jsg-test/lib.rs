@@ -105,6 +105,10 @@ mod ffi {
         /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
         pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
+        /// Whether a Rust resource's `Drop` panicked in the isolate. See
+        /// `resource_drop_panicked` in `ffi.h`.
+        pub unsafe fn resource_drop_panicked(isolate: *mut Isolate) -> bool;
+
         /// Runs the isolate's pending microtasks.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
@@ -603,6 +607,12 @@ impl Harness {
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
+    }
+
+    /// Whether a Rust resource's `Drop` panicked in the isolate.
+    pub fn resource_drop_panicked(lock: &mut jsg::Lock<'_>) -> bool {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::resource_drop_panicked(lock.isolate().as_ffi()) }
     }
 
     /// Runs the pending microtasks, such as promise reactions, as the event loop does after

@@ -250,6 +250,10 @@ IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
 }
 
+kj::Maybe<IsolateBase&> IsolateBase::tryFrom(v8::Isolate* isolate) {
+  return kj::_::readMaybe(static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE)));
+}
+
 void IsolateBase::registerTypeHandler(const std::type_info& type, const void* handler) {
   typeHandlerRegistry.upsert(
       TypeHandlerKey{.type = &type}, handler, [](const void*& existing, const void*&& replacement) {

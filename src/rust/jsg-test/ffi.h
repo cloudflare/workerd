@@ -98,6 +98,9 @@ void terminate_and_deliver(Isolate* isolate);
 // Runs the isolate's pending microtasks, as the event loop does after each task.
 void run_microtasks(Isolate* isolate);
 
+// Whether a Rust resource's `Drop` panicked in the isolate (IsolateBase::hasResourceDropPanicked()).
+bool resource_drop_panicked(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
