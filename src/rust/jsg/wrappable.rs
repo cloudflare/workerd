@@ -138,8 +138,9 @@ pub trait Traced: Send {
     /// Visit GC-visible references held by this value.
     ///
     /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
-    /// GC-visible references (primitives, plain data structs, etc.) uses `jsg_traced!`, which
-    /// generates a no-op `trace` and implements [`HoldsNoGcReferences`].
+    /// GC-visible references (primitives, plain data structs, etc.) uses `#[jsg_traced]`, which
+    /// checks that each field holds none, or `jsg_traced!`, which doesn't; both generate a no-op
+    /// `trace` and implement [`HoldsNoGcReferences`].
     ///
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
@@ -165,10 +166,10 @@ pub trait Traced: Send {
 /// Every built-in `Traced` type implements it, except those that can hold GC references:
 /// `jsg::Rc`, `TracedGlobal`, `Lenient`, `TracedPromise`, `TracedPromiseResolver` and
 /// `TracedAsyncContextFrame`. Wrappers and collections implement it when their contents do.
-/// `jsg_traced!` implements it for the types it covers, and `#[jsg_struct]` and `#[jsg_oneof]`
-/// implement it when every field or variant does, so for those types it is derived rather than
-/// claimed, and an impl by hand conflicts with it. Implement it for a hand-written `Traced` type
-/// only if its `trace` visits nothing.
+/// `jsg_traced!` implements it for the types it covers, and `#[jsg_traced]`, `#[jsg_struct]` and
+/// `#[jsg_oneof]` implement it when every field or variant does, so for those types it is derived
+/// rather than claimed, and an impl by hand conflicts with it. Implement it for a hand-written
+/// `Traced` type only if its `trace` visits nothing.
 pub trait HoldsNoGcReferences: Traced {}
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.

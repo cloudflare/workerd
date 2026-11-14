@@ -15,6 +15,11 @@
 ///
 /// `Traced` requires `Send`, so a generic type implements it only where it is `Send`.
 ///
+/// For a concrete type the claim is not checked: `jsg_traced!(Foo)` compiles even if `Foo` holds
+/// a `TracedGlobal`. It is for a type whose fields can't implement `HoldsNoGcReferences`, such as
+/// one from outside JSG. A struct whose fields all can uses `#[jsg_macros::jsg_traced]`, which
+/// checks them.
+///
 /// # Example
 ///
 /// ```ignore

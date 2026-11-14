@@ -19,6 +19,7 @@
 //! | `#[jsg_iterable]`        | fn inside impl   | Make instances iterable (`[Symbol.iterator]()`)                |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
+//! | `#[jsg_traced]`          | struct           | Implement a no-op `Traced` for a struct of GC-free fields      |
 //!
 //! See [`jsg/README.md`](../jsg/README.md) for full usage documentation.
 
@@ -28,6 +29,7 @@ mod memory_info;
 mod oneof;
 mod resource;
 mod trace;
+mod traced;
 mod utils;
 mod wildcard;
 
@@ -1302,4 +1304,26 @@ fn iterable_callback_name(fn_name: &syn::Ident) -> syn::Ident {
 #[proc_macro_attribute]
 pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
     oneof::expand(&attr, item)
+}
+
+// =============================================================================
+// #[jsg_traced]
+// =============================================================================
+
+/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct of GC-free fields.
+///
+/// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
+/// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
+/// can't implement the marker, see `jsg::jsg_traced!`.
+///
+/// ```ignore
+/// #[jsg_traced]
+/// struct Fill {
+///     key: String,
+///     span: IoOwnedSpan,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_traced(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    traced::generate_traced_impl(item)
 }
