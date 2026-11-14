@@ -788,7 +788,7 @@ class R2Bucket: public jsg::Object {
 
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
 
-  TraceContext makeR2TraceContext(kj::LiteralStringConst spanName,
+  void setR2SpanTags(TraceContext& traceContext,
       kj::LiteralStringConst operation,
       kj::Maybe<kj::StringPtr> key = kj::none);
 
