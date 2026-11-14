@@ -63,6 +63,10 @@ function isPaddedBase64Chunk(chunk: Uint8Array): boolean {
   return chunk.length > 0 && chunk[chunk.length - 1] === PADDING_CHAR_CODE;
 }
 
+function isPaddingOnly(chunk: Uint8Array): boolean {
+  return chunk.every((byte) => byte === PADDING_CHAR_CODE);
+}
+
 export function createBase64EncoderTransformStream(
   maxEncodeChunkSize: number = 32 * 1024 + 1
 ): TransformStream<Uint8Array, Uint8Array> {
@@ -134,8 +138,10 @@ export function createBase64DecoderTransformStream(
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller): void {
       try {
-        // If we see a chunk with padding, we aren't allowed to see any more data, as padding is allowed only at the end
-        if (paddingSeen && chunk.length > 0) {
+        // If we see a chunk with padding, we aren't allowed to see any more data, as padding is allowed only at the end.
+        // The padding itself can still be split across chunks ("QQ=" followed by "="), so
+        // chunks made only of padding characters are accepted; decoding rejects any excess.
+        if (paddingSeen && !isPaddingOnly(chunk)) {
           throw new Error('Padding already seen, no further chunks allowed');
         } else if (isPaddedBase64Chunk(chunk)) {
           paddingSeen = true;
