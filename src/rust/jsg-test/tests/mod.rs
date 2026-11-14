@@ -25,6 +25,7 @@ mod function_new;
 mod gc;
 mod global;
 mod harness;
+mod inherit;
 mod integer;
 mod internal_error;
 mod isolates;

@@ -671,6 +671,19 @@ struct TemplateMembers {
     class_name: &'static str,
     members: Vec<Member>,
     inherit_intrinsic: Option<Intrinsic>,
+    parent: Option<ParentType>,
+}
+
+impl TemplateMembers {
+    /// Panics unless the type inherits from nothing yet: `FunctionTemplate::Inherit` takes one
+    /// parent, whether a resource type or an intrinsic.
+    fn assert_no_parent(&self) {
+        assert!(
+            self.inherit_intrinsic.is_none() && self.parent.is_none(),
+            "{} inherits from more than one type or intrinsic",
+            self.class_name
+        );
+    }
 }
 
 impl MemberRegistry for TemplateMembers {
@@ -683,12 +696,13 @@ impl MemberRegistry for TemplateMembers {
     fn ts_define(&mut self, _ts_define: &'static str) {}
 
     fn inherit_intrinsic(&mut self, intrinsic: Intrinsic) {
-        assert!(
-            self.inherit_intrinsic.is_none(),
-            "{} inherits from more than one intrinsic",
-            self.class_name
-        );
+        self.assert_no_parent();
         self.inherit_intrinsic = Some(intrinsic);
+    }
+
+    fn inherit(&mut self, parent: ParentType) {
+        self.assert_no_parent();
+        self.parent = Some(parent);
     }
 }
 
@@ -696,15 +710,13 @@ impl MemberRegistry for TemplateMembers {
 /// [`Resource::members`] registers under `flags`.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
-/// Nested types are returned separately, since their templates are installed
-/// once the template for `R` exists.
+/// Nested types and the parent type are returned separately, since their templates are
+/// installed once the template for `R` exists.
 #[expect(
     clippy::too_many_lines,
     reason = "one match arm per Member variant, each a field-by-field conversion"
 )]
-fn get_resource_descriptor<R: Resource>(
-    flags: compatibility_flags::Reader<'_>,
-) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
+fn get_resource_descriptor<R: Resource>(flags: compatibility_flags::Reader<'_>) -> Registration {
     let mut nested_types = Vec::new();
     let mut descriptor = v8::ffi::ResourceDescriptor {
         name: R::class_name().to_owned(),
@@ -725,9 +737,12 @@ fn get_resource_descriptor<R: Resource>(
         class_name: R::class_name(),
         members: Vec::new(),
         inherit_intrinsic: None,
+        parent: None,
     };
     R::members(&mut members, flags);
     descriptor.inherit_intrinsic = members.inherit_intrinsic.into();
+    let parent = members.parent;
+    let mut wildcard = None;
     for m in members.members {
         match m {
             Member::Constructor { callback, length } => {
@@ -822,11 +837,11 @@ fn get_resource_descriptor<R: Resource>(
                 query_callback,
             } => {
                 assert!(
-                    descriptor.wildcard_property.is_none(),
+                    wildcard.is_none(),
                     "{} has more than one wildcard property",
                     R::class_name()
                 );
-                descriptor.wildcard_property = KjMaybe::Some(v8::ffi::WildcardPropertyDescriptor {
+                wildcard = Some(v8::ffi::WildcardPropertyDescriptor {
                     getter_callback: getter_callback as usize,
                     query_callback: query_callback as usize,
                 });
@@ -867,7 +882,22 @@ fn get_resource_descriptor<R: Resource>(
         }
     }
 
-    (descriptor, nested_types)
+    Registration {
+        descriptor,
+        wildcard,
+        nested_types,
+        parent,
+    }
+}
+
+/// What [`get_resource_descriptor`] collects from a resource type's registration.
+struct Registration {
+    /// The descriptor, without its wildcard property, which may come from the parent type.
+    descriptor: v8::ffi::ResourceDescriptor,
+    /// The type's own wildcard property.
+    wildcard: Option<v8::ffi::WildcardPropertyDescriptor>,
+    nested_types: NestedTypes,
+    parent: Option<ParentType>,
 }
 
 /// The descriptor of a [`Member::LazyInstanceProperty`].
@@ -891,9 +921,25 @@ fn lazy_instance_property_descriptor(
 /// The nested types of a resource type, with their names.
 type NestedTypes = Vec<(String, NestedType)>;
 
-/// The resource types whose templates are being created, each nesting the next,
-/// with their Rust type names.
-type Nesting = Vec<(TypeId, &'static str)>;
+/// How a resource type whose template is being created reaches the next one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    /// The template is the one asked for, not reached through another type.
+    Root,
+    /// The previous type nests this one ([`Member::NestedType`]).
+    Nests,
+    /// The previous type inherits from this one ([`MemberRegistry::inherit`]).
+    Inherits,
+}
+
+/// The resource types whose templates are being created, each nesting or inheriting from the
+/// next, with their Rust type names and how each was reached.
+type Nesting = Vec<(TypeId, &'static str, Edge)>;
+
+/// Gets or creates the template of a resource type and returns its index in
+/// [`Resources::templates`].
+type TemplateSlot =
+    fn(&mut Resources, v8::IsolatePtr, &Arc<IsolateState>, &FeatureFlags, &mut Nesting) -> usize;
 
 /// A resource type that another resource type exposes as a nested type
 /// ([`Member::NestedType`]).
@@ -901,13 +947,7 @@ type Nesting = Vec<(TypeId, &'static str)>;
 /// A resource type must not nest itself, directly or through other nested
 /// types; creating its template panics.
 pub struct NestedType {
-    template: for<'a> fn(
-        &'a mut Resources,
-        v8::IsolatePtr,
-        &Arc<IsolateState>,
-        &FeatureFlags,
-        &mut Nesting,
-    ) -> &'a v8::Global<v8::FunctionTemplate>,
+    template: TemplateSlot,
     describe: fn(&mut rtti::Context) -> &'static str,
 }
 
@@ -916,9 +956,47 @@ impl NestedType {
     #[must_use]
     pub fn of<R: Resource + rtti::TypeInfo>() -> Self {
         Self {
-            template: Resources::get_nested_constructor::<R>,
+            template: |resources, isolate, state, flags, nesting| {
+                resources.template_slot::<R>(isolate, state, flags, nesting, Edge::Nests)
+            },
             describe: rtti::Context::describe_structure::<R>,
         }
+    }
+}
+
+/// A resource type that another resource type inherits from, like the `Base` of C++ JSG's
+/// `JSG_INHERIT(Base)`; see [`MemberRegistry::inherit`].
+///
+/// The child's template `Inherit`s the parent's, so the parent's prototype is the [[Prototype]]
+/// of the child's, and the parent's methods, which have the parent's `v8::Signature`, accept the
+/// child's instances. A child without a wildcard property of its own gets the parent's, which
+/// V8 does not inherit. A callable parent's call handler is not inherited.
+///
+/// Neither makes the parent's callbacks accept a child's instance as an `R`: they resolve their
+/// receiver by its exact type.
+///
+/// A resource type must not inherit from itself, directly or through other types, or nest a type
+/// that inherits from it, which V8 would instantiate recursively; creating its template panics.
+pub struct ParentType {
+    template: TemplateSlot,
+    describe: fn(&mut rtti::Context) -> rtti::Type,
+}
+
+impl ParentType {
+    /// The parent type `R`.
+    #[must_use]
+    pub fn of<R: Resource + rtti::TypeInfo>() -> Self {
+        Self {
+            template: |resources, isolate, state, flags, nesting| {
+                resources.template_slot::<R>(isolate, state, flags, nesting, Edge::Inherits)
+            },
+            describe: R::describe,
+        }
+    }
+
+    /// The parent's structure, as RTTI describes it.
+    pub(crate) fn describe(&self, cx: &mut rtti::Context) -> rtti::Type {
+        (self.describe)(cx)
     }
 }
 
@@ -950,6 +1028,9 @@ pub struct Resources {
     slots: HashMap<TypeId, usize, BuildHasherDefault<TypeIdHasher>>,
     /// Cached V8 `FunctionTemplate`s, which GC never visits.
     templates: Vec<v8::Global<v8::FunctionTemplate>>,
+    /// The wildcard property of the template at the same index, own or inherited, which a child
+    /// template without one of its own gets.
+    wildcards: Vec<Option<v8::ffi::WildcardPropertyDescriptor>>,
 }
 
 impl Resources {
@@ -962,63 +1043,105 @@ impl Resources {
         state: &Arc<IsolateState>,
         flags: &FeatureFlags,
     ) -> &v8::Global<v8::FunctionTemplate> {
-        self.get_nested_constructor::<R>(isolate, state, flags, &mut Vec::new())
+        let slot = self.template_slot::<R>(isolate, state, flags, &mut Vec::new(), Edge::Root);
+        &self.templates[slot]
     }
 
-    /// Gets or creates the cached `FunctionTemplate` for a resource type, while the
-    /// templates of the types in `nesting` are being created, each nesting the next.
+    /// Gets or creates the cached `FunctionTemplate` for a resource type, reached through `edge`
+    /// while the templates of the types in `nesting` are being created, and returns its index
+    /// in `templates`.
     ///
     /// # Panics
     ///
     /// Panics if `R`'s template is being created already, meaning that `R`
-    /// directly or indirectly nests itself.
+    /// directly or indirectly nests or inherits from itself.
     #[expect(
         clippy::panic,
-        reason = "a resource type nesting itself is a programming error"
+        reason = "a resource type nesting or inheriting from itself is a programming error"
     )]
-    fn get_nested_constructor<'a, R: Resource + 'static>(
-        &'a mut self,
+    fn template_slot<R: Resource + 'static>(
+        &mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
         flags: &FeatureFlags,
         nesting: &mut Nesting,
-    ) -> &'a v8::Global<v8::FunctionTemplate> {
+        edge: Edge,
+    ) -> usize {
         let type_id = TypeId::of::<R>();
         if let Some(&slot) = self.slots.get(&type_id) {
-            return &self.templates[slot];
+            return slot;
         }
         let name = std::any::type_name::<R>();
-        if nesting.iter().any(|&(id, _)| id == type_id) {
-            let path: Vec<_> = nesting.iter().map(|&(_, name)| name).collect();
-            panic!(
-                "resource type nests itself: {} -> {name}",
-                path.join(" -> ")
-            );
+        if let Some(start) = nesting.iter().position(|&(id, _, _)| id == type_id) {
+            let path: Vec<_> = nesting.iter().map(|&(_, name, _)| name).collect();
+            let edges = nesting[start + 1..]
+                .iter()
+                .map(|&(_, _, edge)| edge)
+                .chain([edge]);
+            let relation = if edges.clone().all(|edge| edge == Edge::Nests) {
+                "nests itself"
+            } else if edges.clone().all(|edge| edge == Edge::Inherits) {
+                "inherits from itself"
+            } else {
+                "nests a type that inherits from it"
+            };
+            panic!("resource type {relation}: {} -> {name}", path.join(" -> "));
         }
-        nesting.push((type_id, name));
-        let template = self.create_resource_constructor::<R>(isolate, state, flags, nesting);
+        nesting.push((type_id, name, edge));
+        let (template, wildcard) =
+            self.create_resource_constructor::<R>(isolate, state, flags, nesting);
         nesting.pop();
         let slot = self.templates.len();
         self.templates.push(template);
+        self.wildcards.push(wildcard);
         self.slots.insert(type_id, slot);
-        &self.templates[slot]
+        slot
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI,
-    /// creating the templates of its nested types as needed.
+    /// creating the templates of its parent and nested types as needed. Returns it with its
+    /// wildcard property, own or inherited.
     fn create_resource_constructor<R: Resource>(
         &mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
         flags: &FeatureFlags,
         nesting: &mut Nesting,
-    ) -> v8::Global<v8::FunctionTemplate> {
-        let (descriptor, nested_types) = get_resource_descriptor::<R>(flags.reader());
+    ) -> (
+        v8::Global<v8::FunctionTemplate>,
+        Option<v8::ffi::WildcardPropertyDescriptor>,
+    ) {
+        let Registration {
+            mut descriptor,
+            mut wildcard,
+            nested_types,
+            parent,
+        } = get_resource_descriptor::<R>(flags.reader());
+        // The parent's template is created first, since `Inherit` must be called before the
+        // child's template is instantiated.
+        let parent_slot =
+            parent.map(|parent| (parent.template)(self, isolate, state, flags, nesting));
+        if let Some(slot) = parent_slot {
+            wildcard = wildcard.or(self.wildcards[slot]);
+        }
+        descriptor.wildcard_property = wildcard.into();
         // SAFETY: Caller guarantees the isolate is valid and locked.
         let handle = unsafe { v8::ffi::create_resource_template(isolate.as_ffi(), &descriptor) };
         let template = v8::Global::from_ffi_in(handle, Arc::clone(state));
+        if let Some(slot) = parent_slot {
+            // SAFETY: The caller guarantees the isolate is valid and locked, and both templates
+            // are live `Global<FunctionTemplate>`s of this isolate. The template for `R` was just
+            // created, so it has not been instantiated.
+            unsafe {
+                v8::ffi::function_template_inherit(
+                    isolate.as_ffi(),
+                    &template.as_ffi(),
+                    &self.templates[slot].as_ffi(),
+                );
+            }
+        }
         for (name, nested_type) in nested_types {
-            let nested = (nested_type.template)(self, isolate, state, flags, nesting);
+            let slot = (nested_type.template)(self, isolate, state, flags, nesting);
             // SAFETY: The caller guarantees the isolate is valid and locked, and both
             // templates are live `Global<FunctionTemplate>`s of this isolate. The template
             // for `R` has not been instantiated yet, so it can still be modified.
@@ -1027,11 +1150,11 @@ impl Resources {
                     isolate.as_ffi(),
                     &template.as_ffi(),
                     &name,
-                    &nested.as_ffi(),
+                    &self.templates[slot].as_ffi(),
                 );
             }
         }
-        template
+        (template, wildcard)
     }
 
     /// Drains every cached resource-template handle, transferring ownership of each
@@ -1040,6 +1163,7 @@ impl Resources {
     /// templates are recreated lazily on demand.
     pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
         self.slots.clear();
+        self.wildcards.clear();
         self.templates
             .drain(..)
             .map(v8::Global::into_ffi_for_snapshot)
@@ -1068,9 +1192,16 @@ pub trait MemberRegistry {
     /// Makes `intrinsic` the [[Prototype]] of the resource's prototype, like C++
     /// `JSG_INHERIT_INTRINSIC`, so that instances inherit its methods; RTTI writes it as the
     /// structure's `extends`. `#[jsg_resource(inherit_intrinsic = ...)]` calls it with automatic
-    /// registration. A type inherits from at most one: template creation panics if it is called
-    /// twice.
+    /// registration. A type inherits from at most one type or intrinsic: template creation
+    /// panics if this or [`inherit`](Self::inherit) is called twice.
     fn inherit_intrinsic(&mut self, intrinsic: Intrinsic);
+
+    /// Makes `parent`'s prototype the [[Prototype]] of the resource's prototype, like C++
+    /// `JSG_INHERIT`; RTTI writes it as the structure's `extends`. See [`ParentType`] for what
+    /// the resource inherits. `#[jsg_resource(inherit = Parent)]` calls it with automatic
+    /// registration. A type inherits from at most one type or intrinsic: template creation
+    /// panics if this or [`inherit_intrinsic`](Self::inherit_intrinsic) is called twice.
+    fn inherit(&mut self, parent: ParentType);
 }
 
 /// A member that [`Resource::members`] can register: the result of a generated member factory,

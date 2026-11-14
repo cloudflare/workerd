@@ -177,9 +177,12 @@ constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 Use `#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` to make a `jsg::Intrinsic` the
 [[Prototype]] of the type's prototype (equivalent to `JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype)`);
 see [`#[jsg_iterable]`](#jsg_iterable).
+Use `#[jsg_resource(inherit = Base)]` to make another resource type's prototype the
+[[Prototype]] of the type's prototype (the template linkage of `JSG_INHERIT(Base)`); see
+[Inheritance](../jsg/README.md#inheritance). A type inherits from at most one type or intrinsic.
 Each factory also describes its member for RTTI, which describes a resource type with the
 members its `Resource::members` registers, in registration order. Methods, properties,
-constructors, constants, iterable methods and inherited intrinsics are described; inspect and
+constructors, constants, iterable methods, parent types and inherited intrinsics are described; inspect and
 wildcard properties and disposers are not. Parameter
 names are retained, injected `this` and lock parameters are excluded, and fallible return types
 describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
@@ -281,7 +284,8 @@ data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
 types itself, as `jsg::nested_type::<Foo>(name)`. Neither can `inherit_intrinsic`; a custom
 `members` calls `registry.inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead, as it
-calls `registry.ts_override(..)`.
+calls `registry.ts_override(..)`, and nor can `inherit`, for which it calls
+`registry.inherit(jsg::ParentType::of::<Base>())`.
 
 A custom `members` can also choose the TypeScript customizations by compatibility flag, as C++
 does by calling `JSG_TS_OVERRIDE` conditionally in `JSG_RESOURCE_TYPE`.

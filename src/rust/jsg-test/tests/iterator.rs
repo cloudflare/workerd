@@ -766,7 +766,10 @@ impl Resource for Conflicting {
 #[test]
 fn conflicting_members_panic() {
     for (cache, message) in [
-        (false, "Conflicting inherits from more than one intrinsic"),
+        (
+            false,
+            "Conflicting inherits from more than one type or intrinsic",
+        ),
         (true, "Conflicting has more than one iterator method"),
     ] {
         let harness = crate::Harness::with_flags(|mut flags| flags.set_cache_option_enabled(cache));

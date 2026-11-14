@@ -1121,3 +1121,74 @@ fn inherit_intrinsic_is_registered() {
     );
     assert!(expanded.contains("Self :: next_member ()"), "{expanded}");
 }
+
+fn parse_inherit(attr: proc_macro2::TokenStream) -> syn::Result<Option<String>> {
+    parse_impl_args(attr).map(|args| args.inherit.map(|ty| quote! { #ty }.to_string()))
+}
+
+fn inherit_error(attr: proc_macro2::TokenStream) -> String {
+    parse_inherit(attr).unwrap_err().to_string()
+}
+
+#[test]
+fn parse_inherit_accepts_a_type_path() {
+    assert_eq!(parse_inherit(quote! {}).unwrap(), None);
+    assert_eq!(
+        parse_inherit(quote! { inherit = Base }).unwrap(),
+        Some("Base".to_owned())
+    );
+    assert_eq!(
+        parse_inherit(quote! { nested_types(Foo), inherit = crate::api::Base }).unwrap(),
+        Some("crate :: api :: Base".to_owned())
+    );
+}
+
+#[test]
+fn parse_inherit_rejects_invalid_values() {
+    assert!(inherit_error(quote! { inherit = "Base" }).starts_with("expected the parent"));
+    assert!(
+        inherit_error(quote! { inherit = Base, inherit = Other })
+            .starts_with("duplicate `inherit`")
+    );
+    // Only the name-value form is recognized.
+    assert!(inherit_error(quote! { inherit }).starts_with("expected"));
+}
+
+#[test]
+fn inherit_and_inherit_intrinsic_or_custom_members_together_are_rejected() {
+    for attr in [
+        quote! { inherit = Base, inherit_intrinsic = IteratorPrototype },
+        quote! { inherit_intrinsic = IteratorPrototype, inherit = Base },
+    ] {
+        assert!(
+            inherit_error(attr)
+                .starts_with("`inherit` cannot be combined with `inherit_intrinsic`"),
+            "unexpected error"
+        );
+    }
+    for attr in [
+        quote! { custom_members, inherit = Base },
+        quote! { inherit = Base, custom_members },
+    ] {
+        assert!(
+            inherit_error(attr).starts_with("`inherit` cannot be combined with `custom_members`"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn inherit_is_registered() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn run(&self) {}
+        }
+    };
+    let expanded = expand_resource_impl(quote! { inherit = Base }, &input).to_string();
+    assert!(
+        expanded.contains("registry . inherit (jsg :: ParentType :: of :: < Base > ())"),
+        "{expanded}"
+    );
+    assert!(expanded.contains("Self :: run_member ()"), "{expanded}");
+}

@@ -71,6 +71,7 @@ pub use resource::MemberDefinition;
 pub use resource::MemberRegistry;
 pub use resource::NestedType;
 pub use resource::NestedTypeMember;
+pub use resource::ParentType;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Undescribed;

@@ -961,6 +961,7 @@ pub mod ffi {
 
     /// The callbacks of a wildcard property: a named-property interceptor on every instance
     /// (`v8::NamedPropertyGetterCallback` and `v8::NamedPropertyQueryCallback`).
+    #[derive(Clone, Copy)]
     pub struct WildcardPropertyDescriptor {
         pub getter_callback: usize,
         pub query_callback: usize,
@@ -1055,6 +1056,13 @@ pub mod ffi {
             constructor: &Global, /* v8::Global<FunctionTemplate> */
             name: &str,
             nested: &Global, /* v8::Global<FunctionTemplate> */
+        );
+
+        // `constructor` must not have been instantiated; V8 checks this.
+        unsafe fn function_template_inherit(
+            isolate: *mut Isolate,
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+            parent: &Global,      /* v8::Global<FunctionTemplate> */
         );
 
         pub unsafe fn utf8_value_new(isolate: *mut Isolate, value: Local) -> Utf8Value;

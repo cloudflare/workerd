@@ -128,9 +128,21 @@ pub struct TypeScript {
     pub ts_override: Option<&'static str>,
     /// TypeScript declarations emitted next to the generated declaration.
     pub ts_define: Option<&'static str>,
-    /// The intrinsic the type's prototype inherits from, which the declaration extends: the
-    /// structure's `extends`, as C++ RTTI writes a `JSG_INHERIT_INTRINSIC`.
-    pub extends: Option<crate::Intrinsic>,
+    /// What the type's prototype inherits from, which the declaration extends: the structure's
+    /// `extends`, as C++ RTTI writes a `JSG_INHERIT` or `JSG_INHERIT_INTRINSIC`.
+    pub extends: Option<Extends>,
+}
+
+/// What a structure's declaration extends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Extends {
+    /// An intrinsic, as for `JSG_INHERIT_INTRINSIC`.
+    Intrinsic(crate::Intrinsic),
+    /// Another resource type, as for `JSG_INHERIT`.
+    Structure {
+        identity: &'static str,
+        name: &'static str,
+    },
 }
 
 struct Structure {
@@ -289,12 +301,16 @@ impl Context {
         if let Some(ts_define) = ts_define {
             builder.set_ts_define(ts_define);
         }
-        if let Some(intrinsic) = extends {
-            builder
+        match extends {
+            None => {}
+            Some(Extends::Intrinsic(intrinsic)) => builder
                 .reborrow()
                 .init_extends()
                 .init_intrinsic()
-                .set_name(intrinsic_name(intrinsic));
+                .set_name(intrinsic_name(intrinsic)),
+            Some(Extends::Structure { identity, name }) => {
+                Type::Structure { identity, name }.write(builder.reborrow().init_extends());
+            }
         }
         // Template creation rejects a type with more than one of each of these, which are
         // fields of the structure rather than members.
@@ -347,7 +363,14 @@ impl MemberRegistry for DescribedMembers<'_> {
     }
 
     fn inherit_intrinsic(&mut self, intrinsic: crate::Intrinsic) {
-        self.typescript.extends = Some(intrinsic);
+        self.typescript.extends = Some(Extends::Intrinsic(intrinsic));
+    }
+
+    fn inherit(&mut self, parent: crate::ParentType) {
+        let Type::Structure { identity, name } = parent.describe(self.cx) else {
+            unreachable!("a resource type describes a named structure");
+        };
+        self.typescript.extends = Some(Extends::Structure { identity, name });
     }
 }
 
