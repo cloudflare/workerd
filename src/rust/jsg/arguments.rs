@@ -91,6 +91,10 @@ impl<T: Traced> Traced for Arguments<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.0.trace(visitor);
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: crate::HoldsNoGcReferences> crate::HoldsNoGcReferences for Arguments<T> {}

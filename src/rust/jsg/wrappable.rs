@@ -148,6 +148,20 @@ pub trait Traced: Send {
     /// anything that holds it: a [`crate::Cell`] visits its value in place, so writing into any
     /// `jsg::Cell` during a visit panics.
     fn trace(&self, visitor: &mut crate::v8::GcVisitor);
+
+    /// Whether a `Drop` impl of this type, or of a type it holds, may move a GC reference out of
+    /// a field, so that a resource that holds it in a field makes its references strong and
+    /// parentless before it is dropped (see `GcVisitor::detach_for_drop`). A hand-written impl
+    /// for a type with its own `Drop` that may do so returns `true`; a generic impl can't tell
+    /// whether its contents implement `Drop`. Wrappers and collections return their contents'.
+    /// `#[jsg_struct]` and `#[jsg_oneof]` types can't implement `Drop` and return `false`
+    /// without looking at their fields, which a recursive type would make loop forever.
+    fn needs_drop_detach() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
 }
 
 /// Marks a `Traced` type that holds no GC references: no `jsg::Rc` and no `TracedGlobal` that
@@ -221,6 +235,10 @@ impl<T: Traced> Traced for Option<T> {
             inner.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
@@ -234,6 +252,10 @@ impl<T: Traced> Traced for Lenient<T> {
             inner.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: Traced> Traced for Nullable<T> {
@@ -241,6 +263,10 @@ impl<T: Traced> Traced for Nullable<T> {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
         }
+    }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
     }
 }
 
@@ -252,6 +278,10 @@ impl<T: Traced> Traced for NullOrUndefined<T> {
             inner.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
@@ -259,6 +289,10 @@ impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
 impl<T: Traced> Traced for NonCoercible<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
+    }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
     }
 }
 
@@ -270,6 +304,10 @@ impl<T: Traced> Traced for Vec<T> {
             item.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Vec<T> {}
@@ -279,6 +317,10 @@ impl<V: Traced> Traced for Dict<V> {
         for (_, value) in self.iter() {
             value.trace(visitor);
         }
+    }
+
+    fn needs_drop_detach() -> bool {
+        V::needs_drop_detach()
     }
 }
 
@@ -291,6 +333,10 @@ impl<K: HoldsNoGcReferences, V: Traced, S: std::hash::BuildHasher + Send> Traced
         for value in self.values() {
             value.trace(visitor);
         }
+    }
+
+    fn needs_drop_detach() -> bool {
+        V::needs_drop_detach()
     }
 }
 
@@ -305,6 +351,10 @@ impl<K: HoldsNoGcReferences, V: Traced> Traced for std::collections::BTreeMap<K,
             value.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        V::needs_drop_detach()
+    }
 }
 
 impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences> HoldsNoGcReferences
@@ -318,6 +368,10 @@ impl<T: Traced, S: std::hash::BuildHasher + Send> Traced for std::collections::H
             item.trace(visitor);
         }
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher + Send> HoldsNoGcReferences
@@ -330,6 +384,10 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
         for item in self {
             item.trace(visitor);
         }
+    }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
     }
 }
 

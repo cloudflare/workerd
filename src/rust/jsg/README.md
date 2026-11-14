@@ -210,11 +210,15 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before the
-  `Drop` impl of a `#[jsg_resource]` type runs, every `jsg::Rc` and `jsg_cpp::Ref` it traces is
-  made strong and forgets its parent, so that `Drop` may move one out and keep it. A
-  `TracedGlobal` it moves out must be dropped there, and so must a reference that the `Drop`
-  impl of a field's type moves out; see `GcVisitor::detach_for_drop`. See
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before a
+  `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
+  (`Traced::needs_drop_detach`), every `jsg::Rc` and `jsg_cpp::Ref` it traces is made strong and
+  forgets its parent, so that a `Drop` impl may move one out and keep it. A hand-written
+  `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
+  does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
+  Wrappers such as `Option` and `Vec` pass it on, but a `#[jsg_struct]` or `#[jsg_oneof]` that
+  holds the type doesn't, so such a `Drop` must not move a reference out there. A `TracedGlobal`
+  that `Drop` moves out must be dropped there; see `GcVisitor::detach_for_drop`. See
   [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
@@ -234,10 +238,10 @@ Bad: a `Drop` impl that moves a `TracedGlobal` out of a field into a static. Fix
 
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that `Drop` moves out. No test checks a
-hand-written `impl Traced` that shares traced state some other way or reaches it through
-another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
-whose `trace` visits something; reviewers check those.
+std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that the `Drop` of a resource or of a
+field's type moves out. No test checks a hand-written `impl Traced` that shares traced state some
+other way or reaches it through another kind of cell, a std cell included, or a hand-written
+`impl HoldsNoGcReferences` on a type whose `trace` visits something; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
