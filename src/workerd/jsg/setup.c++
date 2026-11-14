@@ -363,10 +363,13 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
   isolate->AddGCEpilogueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
     auto& self = *static_cast<HeapTracer*>(data);
-    for (Wrappable* wrappable: self.detachLater) {
-      wrappable->detachWrapper(true);
+    // Detaching can append to `detachLater`; see the comment there.
+    while (!self.detachLater.empty()) {
+      auto batch = kj::mv(self.detachLater);
+      for (auto& wrappable: batch) {
+        auto drop = wrappable->detachWrapper(true);
+      }
     }
-    self.detachLater.clear();
   }, this, v8::GCType::kGCTypeAll);
 }
 
