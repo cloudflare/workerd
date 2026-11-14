@@ -155,7 +155,7 @@ fn reject<'s>(
 /// observer, whose state belongs to the request's thread, so the request owns the spans, as in
 /// memory-cache.c++: they end when the reactions drop them, or with the request.
 struct Fill {
-    permit: IoOwned<FallbackPermit>,
+    permit: IoOwned<Permit>,
     /// The key, for the span of the write.
     key: String,
     /// Before its parent, so that it is released first, and ends first.
@@ -167,7 +167,10 @@ struct Fill {
 /// its callback and spans. It holds no JavaScript values, so sharing it is sound.
 struct SharedFill(Arc<Fill>);
 
-jsg::jsg_traced!(Fill, SharedFill);
+/// A fallback's permit, which holds no JavaScript values, for the request to own.
+struct Permit(FallbackPermit);
+
+jsg::jsg_traced!(Fill, SharedFill, Permit);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
@@ -187,7 +190,7 @@ impl Fill {
         // ends the child first.
         let read_span = context.add_span(read_span)?;
         Ok(Self {
-            permit: context.add_object(permit)?,
+            permit: context.add_object(Permit(permit))?,
             key,
             fallback_span: context.add_span(fallback_span)?,
             _read_span: read_span,
@@ -238,7 +241,7 @@ impl Fill {
         bytes: Vec<u8>,
         expiration: Option<f64>,
     ) -> jsg::Result<()> {
-        let Some(permit) = self.permit.take(lock)? else {
+        let Some(Permit(permit)) = self.permit.take(lock)? else {
             return Ok(());
         };
         let result = IoContext::current(lock).and_then(|context| {

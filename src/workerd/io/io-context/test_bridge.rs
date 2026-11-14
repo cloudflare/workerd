@@ -587,6 +587,8 @@ struct DropFlag {
     uses: i32,
 }
 
+jsg::jsg_traced!(DropFlag);
+
 impl Drop for DropFlag {
     fn drop(&mut self) {
         OWNED_DROPPED.store(true, Ordering::SeqCst);
