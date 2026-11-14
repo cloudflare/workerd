@@ -4,18 +4,6 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
-const ENDINGS_EXPECTED_FAILURES = [
-  'Valid "endings" value: "transparent"',
-  'Valid "endings" value: "native"',
-  'Invalid "endings" value: null',
-  'Invalid "endings" value: ""',
-  'Invalid "endings" value: "invalidEnumValue"',
-  'Invalid "endings" value: "Transparent"',
-  'Invalid "endings" value: "NATIVE"',
-  'Invalid "endings" value: 0',
-  'Invalid "endings" value: {}',
-];
-
 export default {
   'FileReaderSync.worker.js': {
     comment: 'FileReader and FileReaderSync are not implemented',
@@ -37,17 +25,14 @@ export default {
     comment: 'Uses DOM platform objects (document, window, HTMLCollection)',
     omittedTests: true,
   },
-  'blob/Blob-constructor-endings.any.js': {
-    comment:
-      'The endings option is unimplemented (jsg::Unimplemented in blob.h), so every value throws Error, even valid ones, instead of TypeError for invalid ones',
-    expectedFailures: ENDINGS_EXPECTED_FAILURES,
-  },
+  'blob/Blob-constructor-endings.any.js': {},
   'blob/Blob-constructor.any.js': {
     comment:
       'blobParts is converted as kj::Array (Blob::Bits in blob.h), which accepts only real Arrays, ' +
       'instead of as a WebIDL sequence<BlobPart> iterated through @@iterator. So iterables are rejected, ' +
       "a length getter isn't called, and changes made to the array during conversion aren't reflected. " +
-      'Transfer lists are not supported by structuredClone. The endings option is unimplemented. ' +
+      'Transfer lists are not supported by structuredClone. Blob::Options in blob.h declares type before endings, ' +
+      'so the options are read in that order rather than lexicographically. ' +
       'normalizeType() in blob.c++ only discards types containing characters below U+0020, so U+007F is kept.',
     expectedFailures: [
       'A plain object with @@iterator should be treated as a sequence for the blobParts argument.',
@@ -101,11 +86,7 @@ export default {
     comment: 'Blob.prototype.textStream() is not implemented',
     expectedFailures: true,
   },
-  'file/File-constructor-endings.any.js': {
-    comment:
-      'The endings option is unimplemented (jsg::Unimplemented in blob.h), so every value throws Error, even valid ones, instead of TypeError for invalid ones',
-    expectedFailures: ENDINGS_EXPECTED_FAILURES,
-  },
+  'file/File-constructor-endings.any.js': {},
   'file/File-constructor.any.js': {
     comment:
       'fileBits is converted as kj::Array rather than a WebIDL sequence, so a custom @@iterator is ignored. ' +

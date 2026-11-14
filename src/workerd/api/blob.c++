@@ -13,8 +13,54 @@
 namespace workerd::api {
 
 namespace {
+// The `endings` member of BlobPropertyBag and FilePropertyBag.
+enum class LineEndings { TRANSPARENT, NATIVE };
+
+LineEndings parseLineEndings(jsg::Optional<kj::String>& maybeEndings) {
+  KJ_IF_SOME(endings, maybeEndings) {
+    if (endings == "transparent"_kj) return LineEndings::TRANSPARENT;
+    if (endings == "native"_kj) return LineEndings::NATIVE;
+    JSG_FAIL_REQUIRE(TypeError,
+        kj::str(
+            "The provided value '", endings, "' is not a valid enum value of type EndingType."));
+  }
+  return LineEndings::TRANSPARENT;
+}
+
+// Implements "convert line endings to native" from the File API spec, replacing every CRLF, lone
+// CR and LF with the native line ending. Workers run on Linux, so the native line ending is LF on
+// every platform, including workerd on Windows; otherwise a Blob built locally on Windows would hold
+// different bytes than the same Blob built in production. Since only CRLF and lone CR change, the
+// result is never longer than the input. Leaves `text` untouched if it has no CR.
+void convertLineEndingsToNative(kj::String& text) {
+  auto chars = text.asArray();
+  size_t firstCr = KJ_UNWRAP_OR(chars.findFirst('\r'), return);
+
+  // Each CRLF becomes a single LF; every other character is kept or replaced one for one.
+  size_t crlfCount = 0;
+  for (size_t i = firstCr; i + 1 < chars.size(); ++i) {
+    if (chars[i] == '\r' && chars[i + 1] == '\n') ++crlfCount;
+  }
+
+  auto result = kj::heapString(chars.size() - crlfCount);
+  char* out = result.begin();
+  memcpy(out, chars.begin(), firstCr);
+  out += firstCr;
+  for (size_t i = firstCr; i < chars.size(); ++i) {
+    if (chars[i] == '\r') {
+      *out++ = '\n';
+      if (i + 1 < chars.size() && chars[i + 1] == '\n') ++i;
+    } else {
+      *out++ = chars[i];
+    }
+  }
+  KJ_DASSERT(out == result.end());
+  text = kj::mv(result);
+}
+
 // Concatenate an array of segments (parameter to Blob constructor).
-kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
+kj::Maybe<jsg::JsBufferSource> concat(
+    jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits, LineEndings endings) {
   auto bits = kj::mv(maybeBits).orDefault(nullptr);
   if (bits.size() == 0) {
     return kj::none;
@@ -38,6 +84,7 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
         partSize = bytes.size();
       }
       KJ_CASE_ONEOF(text, kj::String) {
+        if (endings == LineEndings::NATIVE) convertLineEndingsToNative(text);
         partSize = text.asBytes().size();
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
@@ -165,10 +212,12 @@ Blob::Blob(jsg::Lock& js, jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, 
 jsg::Ref<Blob> Blob::constructor(
     jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
+  auto endings = LineEndings::TRANSPARENT;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(t, o.type) {
       type = normalizeType(kj::mv(t));
     }
+    endings = parseLineEndings(o.endings);
   }
 
   KJ_IF_SOME(b, bits) {
@@ -188,7 +237,7 @@ jsg::Ref<Blob> Blob::constructor(
     }
   }
 
-  KJ_IF_SOME(data, concat(js, kj::mv(bits))) {
+  KJ_IF_SOME(data, concat(js, kj::mv(bits), endings)) {
     return js.alloc<Blob>(js, data, kj::mv(type));
   }
   return js.alloc<Blob>(kj::mv(type));
@@ -310,11 +359,13 @@ jsg::Ref<File> File::constructor(
     jsg::Lock& js, jsg::Optional<Bits> bits, kj::String name, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   kj::Maybe<double> maybeLastModified;
+  auto endings = LineEndings::TRANSPARENT;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(t, o.type) {
       type = normalizeType(kj::mv(t));
     }
     maybeLastModified = o.lastModified;
+    endings = parseLineEndings(o.endings);
   }
 
   double lastModified;
@@ -341,7 +392,7 @@ jsg::Ref<File> File::constructor(
     }
   }
 
-  KJ_IF_SOME(data, concat(js, kj::mv(bits))) {
+  KJ_IF_SOME(data, concat(js, kj::mv(bits), endings)) {
     return js.alloc<File>(js, data, kj::mv(name), kj::mv(type), lastModified);
   }
   return js.alloc<File>(kj::mv(name), kj::mv(type), lastModified);
