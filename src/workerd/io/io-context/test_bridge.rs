@@ -791,7 +791,9 @@ mod execution_context {
 
     /// `ctx.waitUntil()`, `ctx.passThroughOnException()` and `ctx.abort()`, implemented as a Rust
     /// `ExecutionContext` would implement them, for `request-ops-test.c++` to compare with the C++
-    /// `ExecutionContext`.
+    /// `ExecutionContext`. The shipped Rust `ExecutionContext` (src/workerd/api/execution-context)
+    /// depends on this crate, so this test can't use it; keep these three methods the same as
+    /// its.
     #[jsg_resource(name = "ExecutionContext")]
     struct RustExecutionContext;
 

@@ -124,7 +124,13 @@ namespace workerd::util {
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
-  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
+  /* The `ctx` of a stateless entrypoint is the Rust ExecutionContext                              \
+     (src/workerd/api/execution-context/) rather than the C++ class in api/global-scope.h. The     \
+     C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
+     toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
+     ones are of the other. */                                                                     \
+  V(RUST_EXECUTION_CONTEXT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

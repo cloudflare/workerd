@@ -72,8 +72,11 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&> tryGetEventListenerCallbackTypeHandler(
       jsg::Lock& lock) const override;
-  jsg::JsObject wrapExecutionContext(
-      jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
+  api::exportedhandler::ExecutionContext newExecutionContext(jsg::Lock& js,
+      jsg::JsValue exports,
+      jsg::JsValue props,
+      kj::Maybe<Worker::VersionInfo> versionInfo) const override;
+  bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const override;
   const jsg::IsolateObserver& getObserver() const override;
   void setIsolateObserver(IsolateObserver&) override;
 

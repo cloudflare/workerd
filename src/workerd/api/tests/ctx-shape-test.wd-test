@@ -1,0 +1,56 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ctx-shape-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ctx-shape-test.js"),
+          (name = "ctx-shape", esModule = embed "ctx-shape.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        bindings = [
+          (name = "SHAPE", service = (name = "ctx-shape-test", entrypoint = "Shape")),
+          (name = "FLAGGED", service = (name = "ctx-shape-flagged", entrypoint = "Shape")),
+          (name = "NO_CAPTURE", service = (name = "ctx-shape-no-capture", entrypoint = "Shape")),
+        ],
+      )
+    ),
+    ( name = "ctx-shape-flagged",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ctx-shape-flagged.js"),
+          (name = "ctx-shape", esModule = embed "ctx-shape.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "enable_ctx_exports",
+          "allow_irrevocable_stub_storage",
+          "enable_version_api",
+          "set_tostring_tag",
+          "capture_async_api_throws",
+          "spec_compliant_property_attributes",
+        ],
+        bindings = [
+          (name = "SELF", service = (name = "ctx-shape-flagged", entrypoint = "Shape")),
+        ],
+      )
+    ),
+    # ctx.restore() throws synchronously without capture_async_api_throws.
+    ( name = "ctx-shape-no-capture",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ctx-shape-flagged.js"),
+          (name = "ctx-shape", esModule = embed "ctx-shape.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "allow_irrevocable_stub_storage",
+          "do_not_capture_async_api_throws",
+        ],
+      )
+    ),
+  ],
+);

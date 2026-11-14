@@ -175,6 +175,77 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   js.terminateExecutionNow();
 }
 
+kj::Maybe<jsg::JsValue> ExecutionContext::versionToJs(
+    jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo) {
+  auto featureFlags = FeatureFlags::get(js);
+  if (!featureFlags.getEnableVersionApi()) return kj::none;
+  return kj::mv(versionInfo).map([&js, &featureFlags](Worker::VersionInfo v) {
+    return v.toJs(js,
+        featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
+                                                   : PopulateVersionInfoMetadata::NO);
+  });
+}
+
+namespace exportedhandler {
+
+ExecutionContext::ExecutionContext(jsg::Ref<api::ExecutionContext> ctx): impl(kj::mv(ctx)) {}
+ExecutionContext::ExecutionContext(jsg::JsRef<jsg::JsObject> rust): impl(kj::mv(rust)) {}
+ExecutionContext::ExecutionContext(ExecutionContext&& other) = default;
+ExecutionContext& ExecutionContext::operator=(ExecutionContext&& other) = default;
+ExecutionContext::~ExecutionContext() noexcept(false) = default;
+
+ExecutionContext ExecutionContext::fromRust(jsg::Lock& js, jsg::JsObject wrapper) {
+  return ExecutionContext(jsg::JsRef<jsg::JsObject>(js, wrapper));
+}
+
+kj::Maybe<ExecutionContext> ExecutionContext::tryUnwrapRust(
+    jsg::Lock& js, v8::Local<v8::Value> handle) {
+  if (!handle->IsObject() ||
+      !Worker::Isolate::from(js).getApi().isRustExecutionContext(js, handle)) {
+    return kj::none;
+  }
+  return fromRust(js, jsg::JsObject(handle.As<v8::Object>()));
+}
+
+ExecutionContext ExecutionContext::addRef(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(impl) {
+    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
+      return ExecutionContext(cpp.addRef());
+    }
+    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
+      return ExecutionContext(rust.addRef(js));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::JsObject ExecutionContext::getHandle(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(impl) {
+    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
+      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<api::ExecutionContext>>(),
+          "ExecutionContext is missing from the isolate type list");
+      return jsg::JsObject(handler.wrap(js, cpp.addRef()).As<v8::Object>());
+    }
+    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
+      return rust.getHandle(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void ExecutionContext::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_SWITCH_ONEOF(impl) {
+    KJ_CASE_ONEOF(cpp, jsg::Ref<api::ExecutionContext>) {
+      visitor.visit(cpp);
+    }
+    KJ_CASE_ONEOF(rust, jsg::JsRef<jsg::JsObject>) {
+      visitor.visit(rust);
+    }
+  }
+}
+
+}  // namespace exportedhandler
+
 namespace {
 template <typename T>
 jsg::LenientOptional<T> cloneFunction(jsg::Lock& js, jsg::LenientOptional<T>& function) {
@@ -197,7 +268,7 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
     .webSocketError{cloneFunction(js, webSocketError)},
     .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
     .env{env.addRef(js)},
-    .ctx{getCtx()},
+    .ctx{getCtx(js)},
     .missingSuperclass = missingSuperclass,
   };
 }
@@ -294,7 +365,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx(js));
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -328,7 +399,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
         js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx(js));
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -452,7 +523,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
+      auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx(js));
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
@@ -556,11 +627,11 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
       auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kjc, traces);
-      auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx(js));
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
       auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kjc, traces);
-      auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx(js));
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce("Attempted to send events but we lack a handler, "
@@ -594,9 +665,9 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
-      auto promise =
-          f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx())
-              .then([weakContext = context.getWeakRef()]() {
+      auto promise = f(
+          lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx(js))
+                         .then([weakContext = context.getWeakRef()]() {
         auto& context = KJ_REQUIRE_NONNULL(
             weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
@@ -889,7 +960,7 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
   jsg::Lock& js = lock;
-  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx(js));
 }
 
 jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
@@ -906,8 +977,9 @@ jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& loc
   auto controller = js.alloc<BenchController>(params);
   return js
       .tryCatch(
-          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
-          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+          [&] {
+    return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx(js));
+  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
       .then(js,
           IoContext::current().addFunctor(
               [controller = controller.addRef()](

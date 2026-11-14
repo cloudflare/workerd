@@ -1,0 +1,60 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The Rust ExecutionContext, the `ctx` of a stateless entrypoint, which replaces the C++ one in
+# //src/workerd/api under the rust-execution-context autogate. A package of its own because it
+# depends on //src/workerd/io, which knows of it only through Worker::Api: it is linked by the
+# binaries whose Worker::Api implementation creates and recognizes Rust ExecutionContexts
+# (execution-context.h).
+wd_rust_crate(
+    name = "execution-context",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+    ],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/io",
+    ],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/io/io-context",
+    ],
+)
+
+# The C++ shims that `ffi.rs` calls, and the definitions of `api::newRustExecutionContext()` and
+# `api::isRustExecutionContext()` (`execution-context.h`).
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = [
+        "execution-context.h",
+        "ffi.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
+        "//src/rust/jsg-cpp:ffi",
+        "//src/workerd/io",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+# Which ExecutionContext WorkerdApi creates, with the autogate enabled and disabled.
+kj_test(
+    src = "execution-context-test.c++",
+    deps = [
+        ":ffi",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+    ],
+)
