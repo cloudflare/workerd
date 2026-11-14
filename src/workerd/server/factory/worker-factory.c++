@@ -1571,12 +1571,11 @@ bool hasWasmModules(const WorkerSource& source) {
 }
 
 // Whether a Worker's top level can be evaluated in a zygote isolate and baked into a startup
-// snapshot. Only the TypeScript streams implementation qualifies: with the C++ implementation a
-// stream whose pull() or start() is still pending when top-level evaluation ends leaves a C++
-// promise continuation reachable from the context (a v8::Function whose callback is an
-// unregistered template instantiation and whose FunctionTemplateInfo data is a JS object), which
-// CreateBlob() cannot serialize. The TypeScript implementation keeps those continuations in
-// JavaScript, so a pending pull transfers with the context.
+// snapshot. The streams implementation is not a condition: a C++ stream whose pull() or start()
+// is still pending when top-level evaluation ends leaves a C++ promise continuation reachable
+// from the context, whose opaque callback data has no snapshot transfer, so that Worker fails its
+// zygote and starts without a snapshot (see jsg::Promise::thenImpl()); the TypeScript implementation
+// keeps such continuations in JavaScript and a pending pull transfers with the context.
 //
 // Every binding must be of a kind that transfers through the snapshot
 // (WorkerdApi::isBindingTransferableThroughSnapshot()): the zygote compiles the real bindings
@@ -1587,8 +1586,8 @@ bool supportsStartupSnapshot(kj::StringPtr name,
     CompatibilityFlags::Reader featureFlags,
     const WorkerSource& source,
     kj::Maybe<kj::ArrayPtr<const uint64_t>> globals) {
-  if (!featureFlags.getTypeScriptImplementedStreams() || featureFlags.getPythonWorkers() ||
-      source.variant.is<WorkerSource::ScriptSource>() || hasWasmModules(source)) {
+  if (featureFlags.getPythonWorkers() || source.variant.is<WorkerSource::ScriptSource>() ||
+      hasWasmModules(source)) {
     return false;
   }
   KJ_IF_SOME(words, globals) {

@@ -6,10 +6,23 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/worker.h>
 
 #include <kj/encoding.h>
 
 namespace workerd::api {
+
+kj::Maybe<kj::Own<jsg::Wrappable>> Performance::snapshotClone() const {
+  if (entries.size() != 0 || hasEventListeners()) return kj::none;
+  // The current isolate's limit enforcer, not `isolateLimitEnforcer`: this runs in the zygote, to
+  // produce the copy stored in the SnapshotArtifact, and again in every Worker started from that
+  // snapshot, on the stored copy, to produce the instance attached to the restored wrapper. The
+  // member would hand each Worker the zygote's enforcer, destroyed with the zygote's isolate. For
+  // the same reason the stored copy refers to a dead enforcer, and nothing but this method may be
+  // called on it.
+  auto& js = jsg::Lock::current();
+  return ownAsWrappable(kj::refcounted<Performance>(Worker::Isolate::from(js).getLimitEnforcer()));
+}
 
 double Performance::now(jsg::Lock& js) {
   // We define performance.now() for compatibility purposes, but due to Spectre concerns it

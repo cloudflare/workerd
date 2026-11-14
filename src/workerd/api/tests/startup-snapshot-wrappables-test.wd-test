@@ -13,6 +13,16 @@ const compatibilityFlags :List(Text) = [
   "unsafe_module",
 ];
 
+# The performance cases record entries: performance.mark() needs the full Performance interface.
+const performanceCompatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "global_navigator",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+  "enable_global_performance_classes",
+];
+
 const modules :List(Workerd.Worker.Module) = [
   (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
 ];
@@ -36,7 +46,11 @@ const unitTests :Workerd.Config = (
           (name = "unclonable", service = "unclonable"),
           (name = "searchparams", service = "searchparams"),
           (name = "midstream-decoder", service = "midstream-decoder"),
-          (name = "no-ts-streams", service = "no-ts-streams"),
+          (name = "cpp-streams", service = "cpp-streams"),
+          (name = "cpp-streams-pending-pull", service = "cpp-streams-pending-pull"),
+          (name = "cpp-streams-pending-cancel", service = "cpp-streams-pending-cancel"),
+          (name = "performance", service = "performance"),
+          (name = "performance-entries", service = "performance-entries"),
         ],
       )
     ),
@@ -194,13 +208,64 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-    # Without typescript_implemented_streams the Worker does not qualify for the pipeline.
-    ( name = "no-ts-streams",
+    # C++ streams (no typescript_implemented_streams): the Worker goes through the pipeline like
+    # the others.
+    ( name = "cpp-streams",
       worker = (
         modules = .modules,
         compatibilityFlags = ["nodejs_compat", "global_navigator", "experimental", "unsafe_module"],
         bindings = [
-          (name = "MODE", json = "\"no-ts-streams\""),
+          (name = "MODE", json = "\"cpp-streams\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # C++ streams the top level leaves awaiting a promise: the zygote fails on the C++ continuation.
+    ( name = "cpp-streams-pending-pull",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "global_navigator", "experimental", "unsafe_module", "streams_enable_constructors"],
+        bindings = [
+          (name = "MODE", json = "\"cpp-streams-pending-pull\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "cpp-streams-pending-cancel",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "global_navigator", "experimental", "unsafe_module", "streams_enable_constructors"],
+        bindings = [
+          (name = "MODE", json = "\"cpp-streams-pending-cancel\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # The performance global, touched at the top level; with an entry recorded there it falls back.
+    ( name = "performance",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .performanceCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"performance\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "performance-entries",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .performanceCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"performance-entries\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

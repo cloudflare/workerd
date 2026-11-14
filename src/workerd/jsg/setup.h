@@ -636,9 +636,8 @@ class IsolateBase {
   }
 
   // Isolate-level counterpart: pins `data` into the isolate's own snapshot data rather than a
-  // context's, so the restored isolate can read it back with
-  // v8::Isolate::GetDataFromSnapshotOnce() before any context exists.
-  // Same preconditions as above.
+  // context's, so the restored isolate can read it back with extractOnceFromIsolateSnapshot()
+  // before any context exists. Same preconditions as above.
   size_t pinIntoIsolateSnapshot(v8::Local<v8::Data> data) {
     return getSnapshotCreator()->AddData(data);
   }
@@ -659,6 +658,18 @@ class IsolateBase {
     v8::Local<v8::Value> value;
     KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Value>(index).ToLocal(&value),
         "no value pinned into the snapshot under this index", index);
+    return value;
+  }
+
+  // Isolate-level counterpart: returns the value pinned into the isolate's own snapshot data
+  // under `index` by pinIntoIsolateSnapshot(), as a `T`. Same once-only semantics and
+  // preconditions as above, except that no context is needed, so it may be called before any
+  // context exists.
+  template <typename T>
+  v8::Local<T> extractOnceFromIsolateSnapshot(size_t index) {
+    v8::Local<T> value;
+    KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<T>(index).ToLocal(&value),
+        "nothing pinned into the isolate snapshot under this index", index);
     return value;
   }
 
@@ -733,15 +744,6 @@ class IsolateBase {
       const uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata,
       kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
-
-  // Start from snapshot, before Context::New(): builds the instance each serialized wrapper slot
-  // is restored to (a stateless type's recreate function or a stored clone's snapshotClone()) and
-  // pre-allocates its CppgcShim; see WrappableDeserializeMetadata. Throws only if one of those
-  // does, which their contracts forbid: nothing on this path catches it and the Worker fails to
-  // start.
-  void prepareWrappableDeserializeMetadata(Lock& js, WrappableDeserializeMetadata& metadata);
-  // After Context::New(): WrappableDeserializeMetadata::releaseSlotsWithChecks().
-  void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -1518,7 +1520,9 @@ class Isolate: public IsolateBase {
       WrappableDeserializeMetadata metadata;
       kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
-        jsgIsolate.prepareWrappableDeserializeMetadata(*this, metadata);
+        metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer,
+            jsgIsolate.finalizedSnapshotArtifact(),
+            [this](v8::CppHeapPointerTag tag) { return jsgIsolate.snapshotRecreateFnFor(tag); });
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
@@ -1535,7 +1539,8 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
-        jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+        metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+        metadata.releaseSlotsWithChecks();
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and
       // adds them to a context restored from the snapshot, see

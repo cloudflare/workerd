@@ -101,6 +101,13 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
 }
 
+bool EventTarget::hasEventListeners() const {
+  for (auto& entry: typeMap) {
+    if (getHandlerCount(entry.key) > 0) return true;
+  }
+  return false;
+}
+
 void EventTarget::forEachSnapshotListener(
     jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb) {
   for (auto& entry: typeMap) {
