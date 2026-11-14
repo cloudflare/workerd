@@ -10,6 +10,7 @@ boilerplate when implementing the JSG type system for Rust-backed JavaScript API
 | `lib.rs`      | Public macro entry points — thin dispatchers only                              |
 | `resource.rs` | Code generation for `#[jsg_resource]` on structs and impl blocks               |
 | `trace.rs`    | GC trace code generation — field classification and `trace()` body emission    |
+| `traced.rs`   | Code generation for `#[jsg_traced]`                                            |
 | `utils.rs`    | Shared helpers: `extract_named_fields`, `snake_to_camel`, `is_lock_ref`, etc.  |
 
 ---
@@ -658,8 +659,13 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to inner values.
-`Traced::trace` has no default, so a hand-written impl must spell out its visits.
+use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced!`); containers/wrappers recurse to
+inner values. `Traced::trace` has no default, so a hand-written impl must spell out its visits.
+
+`#[jsg_traced]` on a struct implements a no-op `Traced` and `jsg::HoldsNoGcReferences`, bounding
+each field's type by `HoldsNoGcReferences`, so a field that holds a `jsg::Rc` or a `TracedGlobal`
+fails to compile. `jsg::jsg_traced!(Foo)` makes the same claim unchecked; it is for a type whose
+fields can't implement the marker, such as a wrapper of a type from outside JSG.
 
 ### Supported field shapes
 

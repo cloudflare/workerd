@@ -7,11 +7,10 @@
 use io_context::IoContext;
 use io_context::IoOwnedSpan;
 
+#[jsg_macros::jsg_traced]
 struct Reaction {
     span: IoOwnedSpan,
 }
-
-jsg::jsg_traced!(Reaction);
 
 pub fn t(lock: &mut jsg::Lock<'_>) -> jsg::Result<()> {
     let context = IoContext::current(lock)?;
