@@ -1701,6 +1701,11 @@ TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }
 
+TraceContext IoContext::makeTraceSpanWithoutUserSpan(kj::ConstString operationName) {
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChildWithoutUserSpan(kj::mv(operationName), tryGetAsyncTracker());
+}
+
 void IoContext::taskFailed(kj::Exception&& exception) {
   if (waitUntilStatusValue == EventOutcome::OK) {
     KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {

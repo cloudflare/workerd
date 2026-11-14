@@ -1057,12 +1057,13 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
 };
 
-// The tracer of one event on `worker`, or none if the event has no tails. A dynamic worker's tails
-// are its source's; the server passes it none in `tails`.
+// The tracer of one event on `worker`, or none if the event has neither tails nor an OTLP
+// exporter. A dynamic worker's tails are its source's; the server passes it none in `tails`.
 kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     kj::Maybe<Worker::Actor&> actor,
-    ::rust::Box<WorkerInterfaceList> tails) {
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter) {
   kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
   kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
   for (size_t i = 0; i < tails->len(); i++) {
@@ -1072,7 +1073,9 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
     for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
   }
-  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty()) return kj::none;
+  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty() && otlpExporter == kj::none) {
+    return kj::none;
+  }
 
   auto executionModel =
       actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
@@ -1090,7 +1093,8 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
   auto tailStreamWriter = tracing::initializeTailStreamWriter(
       streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
-      entrypointName.clone(), executionModel, kj::mv(durableObjectId));
+      entrypointName.clone(), executionModel,
+      durableObjectId.map([](kj::String& id) { return kj::str(id); }));
   kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
       kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
@@ -1115,6 +1119,34 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
         kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
         kj::mv(traceId), traceFlags));
   });
+
+  // The invocation's span, under which its user spans are exported, takes the invocation's ids.
+  KJ_IF_SOME(exporter, otlpExporter) {
+    OtlpServiceInfo service{
+      .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
+      .entrypoint = entrypointName,
+      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
+    };
+    tracer->setStartInvocationSpanFunc(
+        [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
+            serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
+            identityTags = makeOtlpIdentityTags(service)](
+            tracing::InvocationSpanContext& invocation) mutable {
+      // Standalone export samples traces without an upstream decision. Set the invocation's
+      // context so user spans and subrequests inherit the same flags.
+      invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
+      auto parent = invocation.getParent().map(
+          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
+      return startExportedUserSpan(entropySource, exporter.addRef(),
+          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
+          OtlpSpanSubmitter::Options{
+            .serviceName = serviceName,
+            .resource = resource,
+            .defaultTags = identityTags,
+          },
+          "invocation"_kjc, invocation.getSpanId());
+    });
+  }
   return kj::mv(tracer);
 }
 
@@ -1131,7 +1163,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   // The test event is not traced.
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
   if (entrypointName.orDefault("") != "test"_kj) {
-    workerTracer = makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails));
+    workerTracer =
+        makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails), worker.otlpExporter.clone());
   }
 
   kj::Own<RequestObserver> observer =
@@ -1203,7 +1236,8 @@ kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
   auto& impl = worker.getImpl();
   auto& actorRef = actor.getActor();
   auto entrypointName = kj::str(className);
-  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails));
+  // The handler's user spans are not exported over OTLP.
+  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails), kj::none);
   auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
   auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
   return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
@@ -1677,7 +1711,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
-    using ArtifactBundler = api::pyodide::ArtifactBundler;
+    using api::pyodide::ArtifactBundler;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           workerSource.variant.tryGet<Worker::Script::ModulesSource>(), featureFlags,
@@ -1943,6 +1977,12 @@ void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const ui
   });
 }
 
+void worker_set_otlp_exporter(
+    const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
+  worker.getImpl().otlpExporter =
+      exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
+}
+
 void worker_unlink(const CompiledWorker& worker) {
   auto& impl = worker.getImpl();
   impl.waitUntilTasks.clear();
@@ -1953,6 +1993,7 @@ void worker_unlink(const CompiledWorker& worker) {
     dynamic.tails = nullptr;
     dynamic.streamingTails = nullptr;
   }
+  impl.otlpExporter = kj::none;
 }
 
 }  // namespace workerd::server

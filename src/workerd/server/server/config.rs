@@ -538,6 +538,7 @@ impl Drop for Services {
 /// The server: the service graph of one run.
 pub struct Server {
     report: Reporter,
+    otlp: Option<OtlpTracing>,
     services: Services,
     /// Durable namespaces by `uniqueKey`, for actor tokens.
     namespaces_by_unique_key: HashMap<String, Rc<ActorNamespace>>,
@@ -548,7 +549,54 @@ pub struct Server {
     factory: Rc<Factory>,
 }
 
+struct OtlpTracing {
+    collector: String,
+    exporter: KjOwn<ffi::OtlpExporter>,
+}
+
+impl OtlpTracing {
+    fn from_config(
+        factory: &Factory,
+        config: config::Reader<'_>,
+        services: &Services,
+        report: &Reporter,
+    ) -> Result<Option<Self>> {
+        let tracing = config.get_tracing().map_err(capnp_error)?;
+        if !tracing.has_otlp() {
+            return Ok(None);
+        }
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            tracing.get_otlp().map_err(capnp_error)?,
+            "tracing.otlp".to_owned(),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            report.error(error);
+        }
+        let collector = lookup_service(&services.0, report, None, &designator);
+        Ok(Some(Self {
+            collector: designator.service,
+            exporter: ffi::factory_new_otlp_exporter(
+                factory.raw(),
+                SubrequestChannel::new(collector),
+            )?,
+        }))
+    }
+}
+
 impl Server {
+    /// The collector's own worker is excluded across all of its entrypoints. Dynamic workers
+    /// have no configured service name and are eligible too.
+    pub fn otlp_exporter(&self, service: Option<&str>) -> Option<&ffi::OtlpExporter> {
+        let otlp = self.otlp.as_ref()?;
+        if service == Some(otlp.collector.as_str()) {
+            return None;
+        }
+        Some(&otlp.exporter)
+    }
+
     #[must_use]
     pub fn factory(&self) -> &Rc<Factory> {
         &self.factory
@@ -611,6 +659,9 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        if let Some(otlp) = &self.otlp {
+            ffi::otlp_exporter_unlink(&otlp.exporter);
+        }
         // Actors may have background work, which aborting them cancels. The run's background
         // tasks (tasks.rs) go too: one may hold an actor, and so its class's worker.
         self.abort_all_actors(Some(&kj::disconnected!("Server shutting down.")));
@@ -1484,8 +1535,11 @@ impl Server {
         }
         make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
 
+        let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
+
         let server = Rc::new(Self {
             report,
+            otlp,
             services,
             namespaces_by_unique_key,
             worker_loaders: RefCell::new(WorkerLoaders::default()),

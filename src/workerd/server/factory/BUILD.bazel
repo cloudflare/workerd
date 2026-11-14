@@ -1,7 +1,27 @@
+load("//:build/kj_test.bzl", "kj_test")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 package(default_visibility = ["//src/workerd/server:__subpackages__"])
+
+wd_cc_library(
+    name = "otlp-export-queue",
+    srcs = ["otlp-export-queue.c++"],
+    hdrs = ["otlp-export-queue.h"],
+    deps = [
+        "//src/workerd/util:ring-buffer",
+        "//src/workerd/util:sentry",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ],
+)
+
+kj_test(
+    src = "otlp-export-queue-test.c++",
+    deps = [
+        ":otlp-export-queue",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ],
+)
 
 # The declarations the server crate's bridge header needs. Header-only: the bridge library depends
 # on it, and :worker-factory depends on the bridge library, so the two cannot be one target.
@@ -14,6 +34,7 @@ wd_cc_library(
         "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
+        "//src/workerd/io:otlp-span-submitter",
         "//src/workerd/server:channel-token",
         "//src/workerd/server:workerd_capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -31,16 +52,19 @@ wd_cc_library(
         "worker-factory-actor.c++",
         "worker-factory-impl.h",
         "worker-factory-listen.c++",
+        "worker-factory-otlp.c++",
         "worker-factory-rpc.c++",
     ],
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
+        ":otlp-export-queue",
         ":worker-factory-hdrs",
         "//src/rust/worker:bridge",
         "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
         "//src/workerd/io:bundle-fs",
+        "//src/workerd/io:otlp-span-submitter",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/server:actor-id-impl",
@@ -55,6 +79,8 @@ wd_cc_library(
         "//src/workerd/server/server:bridge.rs@cxx",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:ring-buffer",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",

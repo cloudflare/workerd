@@ -481,6 +481,29 @@ KJ_TEST("a context's span is recorded by its tracker, whatever turn is innermost
   expectComplete(events);
 }
 
+KJ_TEST("omitting a user span preserves async-operation parents and adoption") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    TraceContext binding;
+    TraceContext backend;
+    {
+      AsyncTracker::TurnScope other(kj::none);
+      binding = env.context.makeTraceSpanWithoutUserSpan("binding"_kjc);
+      binding.detachAsync();
+      backend = binding.getSpanParents().newChildWithoutUserSpan(
+          "backend"_kjc, env.context.tryGetAsyncTracker());
+    }
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(binding), kj::mv(backend)));
+  });
+  expectInOrder(events,
+      {
+        "init binding#1 trigger=request exec=request"_kj,
+        "init backend#1 trigger=request exec=request parent=binding#1"_kj,
+        "before backend#1"_kj,
+        "turn cause=backend#1"_kj,
+      });
+  expectComplete(events);
+}
+
 KJ_TEST("awaitIo adopts the span's operation") {
   auto events = traceInContext([](const TestFixture::Environment& env) {
     auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
