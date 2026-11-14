@@ -11,6 +11,7 @@ export default {
       `ws://${env.SIDECAR_HOSTNAME}:${env.BIG_MESSAGE_SERVER_PORT}/`
     );
     let receivedError = false;
+    let closeEvent;
 
     // Set up a promise to wait for errors
     const errorPromise = new Promise((resolve, reject) => {
@@ -46,7 +47,8 @@ export default {
       ws.addEventListener('open', () => {});
       // Handle close
       ws.addEventListener('close', (event) => {
-        if (!(receivedError && event.code === 1009)) {
+        closeEvent = event;
+        if (!(receivedError && event.code === 1006)) {
           clearTimeout(timeoutId);
           reject({
             source: 'client-close',
@@ -59,5 +61,16 @@ export default {
 
     // Wait for an error or timeout
     await errorPromise;
+
+    // With web_socket_close_after_error the failed connection also closes, with 1006 because no
+    // Close frame was received; the error event is dispatched first.
+    if (Cloudflare.compatibilityFlags['web_socket_close_after_error']) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (closeEvent?.code !== 1006 || closeEvent.wasClean !== false) {
+        throw new Error(
+          `expected close 1006 after the error, got ${JSON.stringify(closeEvent && { code: closeEvent.code, wasClean: closeEvent.wasClean })}`
+        );
+      }
+    }
   },
 };
