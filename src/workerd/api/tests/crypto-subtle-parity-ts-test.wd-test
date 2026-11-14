@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# crypto-subtle-parity-test against the TypeScript SubtleCrypto.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-subtle-parity-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-subtle-parity-test.js"),
+          (name = "crypto-subtle-parity-expected.js",
+           esModule = embed "crypto-subtle-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "variant", text = "classic")],
+      )
+    ),
+    ( name = "crypto-subtle-parity-ts-test-modern",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-subtle-parity-test.js"),
+          (name = "crypto-subtle-parity-expected.js",
+           esModule = embed "crypto-subtle-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms"],
+        bindings = [(name = "variant", text = "modern")],
+      )
+    ),
+    ( name = "crypto-subtle-parity-ts-test-spec",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-subtle-parity-test.js"),
+          (name = "crypto-subtle-parity-expected.js",
+           esModule = embed "crypto-subtle-parity-expected.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "spec_compliant_property_attributes", "immutable_api_prototypes", "experimental"],
+        bindings = [(name = "variant", text = "spec")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-webcrypto"],
+);

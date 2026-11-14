@@ -690,6 +690,86 @@ class SubtleCrypto final: public jsg::Object {
   // This is a non-standard extension based off Node.js' implementation of crypto.timingSafeEqual.
   bool timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b);
 
+  // NOT VISIBLE TO JS: the synchronous bodies of the methods above, given arguments JSG has
+  // already converted. The methods run them in js.evalNow(); SubtleCryptoBackend runs them for
+  // the TypeScript SubtleCrypto. Each checks the key against the algorithm and usage, as the
+  // standard's steps do, so the caller converts arguments only.
+  static jsg::JsArrayBuffer encryptSync(jsg::Lock& js,
+      EncryptAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource plainText);
+  static jsg::JsArrayBuffer decryptSync(jsg::Lock& js,
+      EncryptAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource cipherText);
+  static jsg::JsArrayBuffer signSync(
+      jsg::Lock& js, SignAlgorithm algorithm, const CryptoKey& key, jsg::JsBufferSource data);
+  static bool verifySync(jsg::Lock& js,
+      SignAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource signature,
+      jsg::JsBufferSource data);
+  static jsg::JsArrayBuffer digestSync(
+      jsg::Lock& js, HashAlgorithm algorithm, jsg::JsBufferSource data);
+  static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKeySync(jsg::Lock& js,
+      GenerateKeyAlgorithm algorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages);
+  static jsg::Ref<CryptoKey> deriveKeySync(jsg::Lock& js,
+      DeriveKeyAlgorithm algorithm,
+      const CryptoKey& baseKey,
+      ImportKeyAlgorithm derivedKeyAlgorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages);
+  static jsg::JsArrayBuffer deriveBitsSync(jsg::Lock& js,
+      DeriveKeyAlgorithm algorithm,
+      const CryptoKey& baseKey,
+      kj::Maybe<uint32_t> length);
+  // importKeySync() preceded by the checks importKey() makes and it doesn't.
+  static jsg::Ref<CryptoKey> importKeyChecked(jsg::Lock& js,
+      kj::StringPtr format,
+      ImportKeyData keyData,
+      ImportKeyAlgorithm algorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages);
+  static ExportKeyData exportKeySync(jsg::Lock& js, kj::String format, const CryptoKey& key);
+  static jsg::JsArrayBuffer wrapKeySync(jsg::Lock& js,
+      kj::String format,
+      const CryptoKey& key,
+      const CryptoKey& wrappingKey,
+      EncryptAlgorithm wrapAlgorithm,
+      const jsg::TypeHandler<JsonWebKey>& jwkHandler);
+  static jsg::Ref<CryptoKey> unwrapKeySync(jsg::Lock& js,
+      kj::String format,
+      jsg::JsBufferSource wrappedKey,
+      const CryptoKey& unwrappingKey,
+      EncryptAlgorithm unwrapAlgorithm,
+      ImportKeyAlgorithm unwrappedKeyAlgorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages,
+      const jsg::TypeHandler<JsonWebKey>& jwkHandler);
+  static EncapsulatedBits encapsulateBitsSync(
+      jsg::Lock& js, ImportKeyAlgorithm algorithm, const CryptoKey& encapsulationKey);
+  static EncapsulatedKey encapsulateKeySync(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& encapsulationKey,
+      ImportKeyAlgorithm sharedKeyAlgorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages);
+  static jsg::JsArrayBuffer decapsulateBitsSync(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& decapsulationKey,
+      kj::ArrayPtr<const kj::byte> ciphertext);
+  static jsg::Ref<CryptoKey> decapsulateKeySync(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& decapsulationKey,
+      kj::ArrayPtr<const kj::byte> ciphertext,
+      ImportKeyAlgorithm sharedKeyAlgorithm,
+      bool extractable,
+      kj::ArrayPtr<const kj::String> keyUsages);
+  static jsg::Ref<CryptoKey> getPublicKeySync(
+      jsg::Lock& js, const CryptoKey& key, kj::ArrayPtr<const kj::String> keyUsages);
+
   JSG_RESOURCE_TYPE(SubtleCrypto, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encrypt);
     JSG_METHOD(decrypt);
@@ -798,6 +878,152 @@ class SubtleCrypto final: public jsg::Object {
         exportKey(format: string, key: CryptoKey) : Promise<ArrayBuffer | JsonWebKey>;
       });
     }
+  }
+};
+
+// The native half of the TypeScript SubtleCrypto (src/per_isolate/crypto/subtle.ts), which the
+// per-isolate bootstrap creates with utils.createSubtleCryptoBackend() under the ts-webcrypto
+// autogate.
+//
+// The TypeScript side converts the arguments as JSG converts the C++ SubtleCrypto's parameters,
+// asking the is*() members for the types it cannot test for. The other members are the
+// operations, which take arguments already converted that way and run synchronously, throwing
+// what the C++ methods reject with.
+class SubtleCryptoBackend final: public jsg::Object {
+ public:
+  // Stateless, so a worker started from a snapshot can get a fresh one.
+  static constexpr bool jsgSnapshotStateless = true;
+
+  using EncryptAlgorithm = SubtleCrypto::EncryptAlgorithm;
+  using SignAlgorithm = SubtleCrypto::SignAlgorithm;
+  using HashAlgorithm = SubtleCrypto::HashAlgorithm;
+  using GenerateKeyAlgorithm = SubtleCrypto::GenerateKeyAlgorithm;
+  using ImportKeyAlgorithm = SubtleCrypto::ImportKeyAlgorithm;
+  using DeriveKeyAlgorithm = SubtleCrypto::DeriveKeyAlgorithm;
+  using JsonWebKey = SubtleCrypto::JsonWebKey;
+  using ImportKeyData = SubtleCrypto::ImportKeyData;
+  using ExportKeyData = SubtleCrypto::ExportKeyData;
+
+  // Whether `value` unwraps as `const CryptoKey&`, which the TypeScript side cannot test for.
+  bool isCryptoKey(
+      jsg::Lock& js, jsg::JsValue value, const jsg::TypeHandler<jsg::Ref<CryptoKey>>& handler);
+  // typeid(T).name() of the struct `name`, which JSG quotes in conversion errors and which depends
+  // on the C++ ABI.
+  kj::String structTypeName(kj::String name);
+
+  jsg::JsArrayBuffer encrypt(jsg::Lock& js,
+      EncryptAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource plainText);
+  jsg::JsArrayBuffer decrypt(jsg::Lock& js,
+      EncryptAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource cipherText);
+  jsg::JsArrayBuffer sign(
+      jsg::Lock& js, SignAlgorithm algorithm, const CryptoKey& key, jsg::JsBufferSource data);
+  bool verify(jsg::Lock& js,
+      SignAlgorithm algorithm,
+      const CryptoKey& key,
+      jsg::JsBufferSource signature,
+      jsg::JsBufferSource data);
+  jsg::JsArrayBuffer digest(jsg::Lock& js, HashAlgorithm algorithm, jsg::JsBufferSource data);
+  kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(jsg::Lock& js,
+      GenerateKeyAlgorithm algorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+  jsg::Ref<CryptoKey> deriveKey(jsg::Lock& js,
+      DeriveKeyAlgorithm algorithm,
+      const CryptoKey& baseKey,
+      ImportKeyAlgorithm derivedKeyAlgorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+  jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
+      DeriveKeyAlgorithm algorithm,
+      const CryptoKey& baseKey,
+      kj::Maybe<uint32_t> length);
+  jsg::Ref<CryptoKey> importKey(jsg::Lock& js,
+      kj::String format,
+      ImportKeyData keyData,
+      ImportKeyAlgorithm algorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+  ExportKeyData exportKey(jsg::Lock& js, kj::String format, const CryptoKey& key);
+  jsg::JsArrayBuffer wrapKey(jsg::Lock& js,
+      kj::String format,
+      const CryptoKey& key,
+      const CryptoKey& wrappingKey,
+      EncryptAlgorithm wrapAlgorithm,
+      const jsg::TypeHandler<JsonWebKey>& jwkHandler);
+  jsg::Ref<CryptoKey> unwrapKey(jsg::Lock& js,
+      kj::String format,
+      jsg::JsBufferSource wrappedKey,
+      const CryptoKey& unwrappingKey,
+      EncryptAlgorithm unwrapAlgorithm,
+      ImportKeyAlgorithm unwrappedKeyAlgorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages,
+      const jsg::TypeHandler<JsonWebKey>& jwkHandler);
+  SubtleCrypto::EncapsulatedBits encapsulateBits(
+      jsg::Lock& js, ImportKeyAlgorithm algorithm, const CryptoKey& encapsulationKey);
+  SubtleCrypto::EncapsulatedKey encapsulateKey(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& encapsulationKey,
+      ImportKeyAlgorithm sharedKeyAlgorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+  jsg::JsArrayBuffer decapsulateBits(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& decapsulationKey,
+      kj::Array<const kj::byte> ciphertext);
+  jsg::Ref<CryptoKey> decapsulateKey(jsg::Lock& js,
+      ImportKeyAlgorithm algorithm,
+      const CryptoKey& decapsulationKey,
+      kj::Array<const kj::byte> ciphertext,
+      ImportKeyAlgorithm sharedKeyAlgorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+  jsg::Ref<CryptoKey> getPublicKey(
+      jsg::Lock& js, const CryptoKey& key, kj::Array<kj::String> keyUsages);
+  bool timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b);
+
+  // SubtleCrypto.supports(), which converts its own arguments.
+  bool supports(jsg::Lock& js,
+      kj::String operation,
+      v8::Local<v8::Value> algorithm,
+      jsg::Optional<v8::Local<v8::Value>> lengthOrAdditionalAlgorithm,
+      const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, HashAlgorithm>>& digestAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
+          generateKeyAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
+      const jsg::TypeHandler<kj::OneOf<kj::String, ImportKeyAlgorithm>>& importKeyAlgorithmHandler);
+
+  JSG_RESOURCE_TYPE(SubtleCryptoBackend) {
+    JSG_METHOD(isCryptoKey);
+    JSG_METHOD(structTypeName);
+    JSG_METHOD(encrypt);
+    JSG_METHOD(decrypt);
+    JSG_METHOD(sign);
+    JSG_METHOD(verify);
+    JSG_METHOD(digest);
+    JSG_METHOD(generateKey);
+    JSG_METHOD(deriveKey);
+    JSG_METHOD(deriveBits);
+    JSG_METHOD(importKey);
+    JSG_METHOD(exportKey);
+    JSG_METHOD(wrapKey);
+    JSG_METHOD(unwrapKey);
+    JSG_METHOD(encapsulateBits);
+    JSG_METHOD(encapsulateKey);
+    JSG_METHOD(decapsulateBits);
+    JSG_METHOD(decapsulateKey);
+    JSG_METHOD(getPublicKey);
+    JSG_METHOD(timingSafeEqual);
+    JSG_METHOD(supports);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type SubtleCryptoBackend = never);
   }
 };
 
@@ -1024,15 +1250,20 @@ class Crypto final: public jsg::Object {
 
   kj::String randomUUID();
 
+  // The C++ SubtleCrypto, which C++ callers use whether or not TS_WEBCRYPTO is enabled.
   jsg::Ref<SubtleCrypto> getSubtle() {
     return subtle.addRef();
   }
 
+  // `crypto.subtle`: under the TS_WEBCRYPTO autogate, the TypeScript SubtleCrypto that the
+  // per-isolate bootstrap (src/per_isolate/main.ts) creates for the context.
+  kj::OneOf<jsg::Ref<SubtleCrypto>, jsg::JsValue> getSubtleForJs(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Crypto, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
-      JSG_READONLY_PROTOTYPE_PROPERTY(subtle, getSubtle);
+      JSG_READONLY_PROTOTYPE_PROPERTY(subtle, getSubtleForJs);
     } else {
-      JSG_READONLY_INSTANCE_PROPERTY(subtle, getSubtle);
+      JSG_READONLY_INSTANCE_PROPERTY(subtle, getSubtleForJs);
     }
     JSG_METHOD(getRandomValues);
     JSG_METHOD(randomUUID);
@@ -1040,6 +1271,7 @@ class Crypto final: public jsg::Object {
     JSG_NESTED_TYPE(DigestStream);
 
     JSG_TS_OVERRIDE({
+      get subtle(): SubtleCrypto;
       getRandomValues<
         T extends
           | Int8Array
@@ -1077,7 +1309,7 @@ class Crypto final: public jsg::Object {
       api::CryptoKey::HmacKeyAlgorithm, api::CryptoKey::RsaKeyAlgorithm,                           \
       api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
       api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestStream::Options,         \
-      api::DigestContextHandle
+      api::DigestContextHandle, api::SubtleCryptoBackend
 
 }  // namespace workerd::api
 
