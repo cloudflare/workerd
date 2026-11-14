@@ -38,6 +38,10 @@ impl<T: Traced> Traced for Opaque<T> {
 }
 
 impl<T: Traced> GarbageCollected for Opaque<T> {
+    fn detach_before_drop(&self) -> bool {
+        T::needs_drop_detach()
+    }
+
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object behind an opaque wrapper.
         c"OpaqueWrappable"

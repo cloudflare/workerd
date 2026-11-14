@@ -172,16 +172,129 @@ fn rc_kept_in_drop_is_released_once() {
     assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), drops_before + 1);
 }
 
-/// `#[jsg_resource]` reports whether the resource implements `Drop` itself, which a field that
-/// needs dropping doesn't make it do.
+static NESTED_STASH: Mutex<Vec<jsg::Rc<DropLeaf>>> = Mutex::new(Vec::new());
+
+/// A field type whose own `Drop` moves its `Rc` out, which its `Traced` impl says.
+struct StashesInner {
+    child: Option<jsg::Rc<DropLeaf>>,
+}
+
+impl jsg::Traced for StashesInner {
+    fn trace(&self, visitor: &mut jsg::v8::GcVisitor) {
+        jsg::Traced::trace(&self.child, visitor);
+    }
+
+    fn needs_drop_detach() -> bool {
+        true
+    }
+}
+
+impl Drop for StashesInner {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            NESTED_STASH.lock().unwrap().push(child);
+        }
+    }
+}
+
+#[jsg_resource]
+struct InnerHolder {
+    inner: StashesInner,
+}
+
+#[jsg_resource]
+impl InnerHolder {}
+
+#[jsg_resource]
+struct OptionHolder {
+    inner: Option<StashesInner>,
+}
+
+#[jsg_resource]
+impl OptionHolder {}
+
+/// Drops a resource whose wrapper is unreachable at a GC, made by `make` around a leaf, then
+/// gives the `Rc` that a field's `Drop` moved out a new owner, and checks that the leaf is
+/// released once that owner is.
+fn reown_rc_moved_out_by_a_field<R: jsg::Resource>(make: impl FnOnce(jsg::Rc<DropLeaf>) -> R) {
+    let harness = crate::Harness::new();
+    let drops_before = LEAF_DROPS.load(Ordering::SeqCst);
+    harness.run_in_context(|lock, _ctx| {
+        let leaf = jsg::Rc::new(lock, DropLeaf {});
+        let holder = jsg::Rc::new(lock, make(leaf));
+        let _ = holder.to_js(lock)?;
+        Ok(())
+    });
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        Ok(())
+    });
+    harness.run_in_context(|lock, _ctx| {
+        let stashed = NESTED_STASH.lock().unwrap().pop().expect("stashed by Drop");
+        let next = jsg::Rc::new(
+            lock,
+            PlainHolder {
+                child: Some(stashed),
+            },
+        );
+        let _ = next.to_js(lock)?;
+        Ok(())
+    });
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        Ok(())
+    });
+    assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), drops_before + 1);
+}
+
+/// The `Drop` of a field's type, not of the resource, moves the `Rc` out.
 #[test]
-fn has_drop_impl_is_true_only_for_an_explicit_drop() {
+fn rc_moved_out_in_a_field_drop_can_be_reowned() {
+    reown_rc_moved_out_by_a_field(|leaf| InnerHolder {
+        inner: StashesInner { child: Some(leaf) },
+    });
+}
+
+/// The `Drop` of a type inside an `Option` field moves the `Rc` out.
+#[test]
+fn rc_moved_out_in_a_nested_field_drop_can_be_reowned() {
+    reown_rc_moved_out_by_a_field(|leaf| OptionHolder {
+        inner: Some(StashesInner { child: Some(leaf) }),
+    });
+}
+
+#[jsg_resource]
+struct ManyHolder {
+    children: Vec<jsg::Rc<DropLeaf>>,
+    direct: Option<jsg::Rc<DropLeaf>>,
+}
+
+#[jsg_resource]
+impl ManyHolder {}
+
+/// A resource detaches its references before it is dropped when it implements `Drop`, or when a
+/// field's type says it needs it through any wrappers, and not for the `Drop` impls of
+/// `jsg::Rc` and the std collections.
+#[test]
+fn detach_before_drop_follows_the_field_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let leaf = jsg::Rc::new(lock, DropLeaf {});
-        assert!(leaf.get(lock).has_drop_impl());
+        assert!(leaf.get(lock).detach_before_drop());
+        assert!(
+            InnerHolder {
+                inner: StashesInner { child: None },
+            }
+            .detach_before_drop()
+        );
+        assert!(OptionHolder { inner: None }.detach_before_drop());
+        let many = ManyHolder {
+            children: vec![leaf.clone(lock)],
+            direct: None,
+        };
+        assert!(!many.detach_before_drop());
         let plain = PlainHolder { child: Some(leaf) };
-        assert!(!plain.has_drop_impl());
+        assert!(!plain.detach_before_drop());
         Ok(())
     });
 }

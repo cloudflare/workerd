@@ -80,9 +80,9 @@ use crate::v8::ffi::Wrappable;
 /// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
 /// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
 /// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
-/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A resource's own `Drop`
-/// impl may move an `Rc` out of a plain field (see
-/// [`crate::GarbageCollected::has_drop_impl`]). See `README.md` §Safety rules, rule 2, and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A `Drop` impl of a
+/// resource or of a field's type may move an `Rc` out of a plain field (see
+/// [`crate::GarbageCollected::detach_before_drop`]). See `README.md` §Safety rules, rule 2, and
 /// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource. Taken by `Drop`.

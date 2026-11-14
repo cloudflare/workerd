@@ -181,6 +181,10 @@ impl<T: Traced> Traced for ReactionData<T> {
     fn trace(&self, visitor: &mut crate::GcVisitor) {
         self.0.trace(visitor);
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 /// The callback of a reaction that [`Local::then`], [`Local::catch`] or
