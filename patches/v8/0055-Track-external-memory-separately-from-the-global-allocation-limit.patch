@@ -1,0 +1,315 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Daniel Carney <dcarney@cloudflare.com>
+Date: Wed, 15 Apr 2026 14:57:20 +0000
+Subject: Track external memory separately from the global allocation limit
+
+Upstream V8 14.8 removed the external_memory_accounted_in_global_limit
+flag (commits 6a5039d9db92 and cf511a65adc5), hardcoding the behavior
+where external memory is always accounted in the global allocation limit.
+
+This is problematic for workerd because:
+- Workers have tight 128MB heap limits
+- Folding external memory into global limits causes double-counting
+  and overly aggressive GC triggering
+- The old soft/hard limit mechanism in HandleExternalMemoryInterrupt()
+  provided better graduated GC responses for our use case
+
+Rather than restoring the removed flag, this patch hardcodes the
+flag-disabled (false) behavior directly: external memory is tracked
+separately via HandleExternalMemoryInterrupt() with soft/hard limit
+thresholds, and is excluded from the global allocation limit
+computations. This keeps the patch minimal by dropping the now-unused
+flag and all of its conditional branches.
+
+Co-authored-by: Divy Srivastava <divy@cloudflare.com>
+
+diff --git a/src/heap/heap-controller.cc b/src/heap/heap-controller.cc
+--- a/src/heap/heap-controller.cc
++++ b/src/heap/heap-controller.cc
+@@ -279,7 +279,7 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+ 
+   const double global_growing_factor =
+       std::max(v8_growing_factor, embedder_growing_factor);
+-  const double external_growing_factor =
++  [[maybe_unused]] const double external_growing_factor =
+       std::min(global_growing_factor,
+                v8_flags.external_memory_max_growing_factor.value());
+   DCHECK_GT(global_growing_factor, 0);
+@@ -296,9 +296,11 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+             old_gen_consumed_bytes_at_last_gc, v8_mutator_speed,
+             total_size_excluding_external_at_last_gc_, limit_factor);
+ 
+-    const double global_mutator_speed =
+-        v8_mutator_speed + embedder_speed +
+-        tracer()->ExternalAllocationThroughputInBytesPerMillisecond();
++    // External memory is tracked separately via
++    // HandleExternalMemoryInterrupt(), not folded into the global limit, so its
++    // allocation throughput is excluded here. This branch only runs under
++    // --sqrt_allocation_limits (off by default).
++    const double global_mutator_speed = v8_mutator_speed + embedder_speed;
+     computed_global_allocation_limit =
+         MemoryController<GlobalMemoryTrait>::ComputeSqrtLimit(
+             global_consumed_bytes_at_last_gc, global_mutator_speed,
+@@ -309,9 +311,10 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+ 
+     const size_t global_consumed_bytes_baseline =
+         old_gen_consumed_bytes_at_last_gc + embedder_size_at_last_gc_;
++    // External memory is tracked separately and not folded into the global
++    // limit.
+     computed_global_allocation_limit =
+-        global_consumed_bytes_baseline * global_growing_factor +
+-        external_memory_low_since_last_gc() * external_growing_factor;
++        global_consumed_bytes_baseline * global_growing_factor;
+   }
+ 
+   const size_t preliminary_old_generation_allocation_limit =
+@@ -351,7 +354,8 @@ Heap::LimitsComputationResult HeapLimits::UpdateAllocationLimits(
+                  preliminary_old_generation_allocation_limit);
+         dict.Add("old_gen_consumed_bytes_at_last_gc",
+                  old_gen_consumed_bytes_at_last_gc);
+-        dict.Add("old_gen_consumed_bytes", heap_->OldGenerationConsumedBytes());
++        dict.Add("old_gen_allocation_limit_consumed_bytes",
++                 heap_->OldGenerationAllocationLimitConsumedBytes());
+         dict.Add("embedder_mutator_speed", embedder_speed);
+         dict.Add("global_allocation_limit", global_allocation_limit());
+         dict.Add("next_global_allocation_limit", next_global_allocation_limit);
+@@ -494,8 +498,8 @@ size_t HeapLimits::OldGenerationConsumedBytesAtLastGC() const {
+ }
+ 
+ uint64_t HeapLimits::GlobalConsumedBytesAtLastGC() const {
+-  return OldGenerationConsumedBytesAtLastGC() + embedder_size_at_last_gc_ +
+-         external_memory_low_since_last_gc();
++  // External memory is tracked separately and not folded into the global limit.
++  return OldGenerationConsumedBytesAtLastGC() + embedder_size_at_last_gc_;
+ }
+ 
+ size_t HeapLimits::PromotedSinceLastGC(size_t old_generation_size) const {
+diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+--- a/src/heap/heap.cc
++++ b/src/heap/heap.cc
+@@ -1387,6 +1387,50 @@ void Heap::PreciseCollectAllGarbage(GCFlags gc_flags,
+   CollectAllGarbage(gc_flags, gc_reason, gc_callback_flags);
+ }
+ 
++void Heap::HandleExternalMemoryInterrupt() {
++  const GCCallbackFlags kGCCallbackFlagsForExternalMemory =
++      static_cast<GCCallbackFlags>(
++          kGCCallbackFlagSynchronousPhantomCallbackProcessing |
++          kGCCallbackFlagCollectAllExternalMemory);
++  uint64_t current = external_memory();
++  if (current > external_memory_hard_limit()) {
++    TRACE_EVENT2("devtools.timeline,v8", "V8.ExternalMemoryPressure",
++                 "external_memory_mb", static_cast<int>((current) / MB),
++                 "external_memory_hard_limit_mb",
++                 static_cast<int>((external_memory_hard_limit()) / MB));
++    CollectAllGarbage(
++        GCFlag::kReduceMemoryFootprint,
++        GarbageCollectionReason::kExternalMemoryPressure,
++        static_cast<GCCallbackFlags>(kGCCallbackFlagCollectAllAvailableGarbage |
++                                     kGCCallbackFlagsForExternalMemory));
++    return;
++  }
++  uint64_t soft_limit = external_memory_soft_limit();
++  if (current <= soft_limit) {
++    return;
++  }
++  TRACE_EVENT2("devtools.timeline,v8", "V8.ExternalMemoryPressure",
++               "external_memory_mb", static_cast<int>((current) / MB),
++               "external_memory_soft_limit_mb",
++               static_cast<int>((soft_limit) / MB));
++  if (incremental_marking()->IsStopped()) {
++    if (incremental_marking()->CanAndShouldBeStarted()) {
++      StartIncrementalMarking(GCFlagsForIncrementalMarking(),
++                              GarbageCollectionReason::kExternalMemoryPressure,
++                              kGCCallbackFlagsForExternalMemory);
++    } else {
++      CollectAllGarbage(i::GCFlag::kNoFlags,
++                        GarbageCollectionReason::kExternalMemoryPressure,
++                        kGCCallbackFlagsForExternalMemory);
++    }
++  } else {
++    // Incremental marking is turned on and has already been started.
++    current_gc_callback_flags_ = static_cast<GCCallbackFlags>(
++        current_gc_callback_flags_ | kGCCallbackFlagsForExternalMemory);
++    incremental_marking()->AdvanceAndFinalizeIfNecessary();
++  }
++}
++
+ uint64_t Heap::external_memory_hard_limit() {
+   return limits()->external_memory_low_since_last_gc() +
+          limits()->max_old_generation_size() / 2;
+@@ -1845,6 +1889,8 @@ void Heap::StartIncrementalMarking(GCFlags gc_flags,
+         dict.Add("old_gen_allocation_limit",
+                  limits()->old_generation_allocation_limit());
+         dict.Add("old_gen_consumed_bytes", OldGenerationConsumedBytes());
++        dict.Add("old_gen_allocation_limit_consumed_bytes",
++                 OldGenerationAllocationLimitConsumedBytes());
+         dict.Add("old_gen_space_available", OldGenerationSpaceAvailable());
+         dict.Add("global_allocation_limit",
+                  limits()->global_allocation_limit());
+@@ -2911,19 +2957,26 @@ void Heap::EnsureMinimumRemainingAllocationLimit(size_t at_least_remaining) {
+ 
+   // At least with ArrayBufferExtensions, external memory could overflow size_t
+   // on 32-bit. Use a saturated cast here to defend against this.
+-  size_t new_old_generation_allocation_limit =
+-      std::max(base::saturated_cast<size_t>(OldGenerationConsumedBytes() +
+-                                            at_least_remaining),
+-               limits()->old_generation_allocation_limit());
++  size_t new_old_generation_allocation_limit = std::max(
++      base::saturated_cast<size_t>(OldGenerationAllocationLimitConsumedBytes() +
++                                   at_least_remaining),
++      limits()->old_generation_allocation_limit());
+   // We need to clamp the new limit between the allowed minimum and maximum
+-  // value. We do not currently cap allocated external memory, so the global
+-  // bytes counter could legitimately be larger than the maximum allowed limit.
++  // value. We do not currently cap allocated external memory, so either the old
++  // or global bytes counter could legitimately be larger than the maximum
++  // allowed limit.
+   new_old_generation_allocation_limit = std::clamp(
+       new_old_generation_allocation_limit, limits()->min_old_generation_size(),
+       limits()->max_old_generation_size());
+ 
++  // External memory is added in OldGenerationAllocationLimitConsumedBytes() but
++  // not in GlobalConsumedBytes(). This can lead to cases where the allocation
++  // limit for the old generation is higher than for global memory. We fix this
++  // here by manually adding it.
++  size_t current_global_bytes =
++      GlobalConsumedBytes() + AllocatedExternalMemorySinceMarkCompact();
+   size_t new_global_allocation_limit =
+-      std::max(GlobalConsumedBytes() +
++      std::max(current_global_bytes +
+                    HeapLimits::GlobalMemorySizeFromV8Size(at_least_remaining),
+                limits()->global_allocation_limit());
+   new_global_allocation_limit = std::clamp(new_global_allocation_limit,
+@@ -3547,7 +3600,7 @@ bool Heap::HasLowAllocationRate() {
+ }
+ 
+ size_t Heap::OldGenerationSpaceAvailable() {
+-  uint64_t bytes = OldGenerationConsumedBytes();
++  uint64_t bytes = OldGenerationAllocationLimitConsumedBytes();
+   if (limits()->old_generation_allocation_limit() <= bytes) return 0;
+   return limits()->old_generation_allocation_limit() -
+          static_cast<size_t>(bytes);
+@@ -5343,8 +5396,8 @@ size_t Heap::EmbedderSizeOfObjects() const {
+ }
+ 
+ uint64_t Heap::GlobalSizeOfObjects() const {
+-  return OldGenerationSizeOfObjects() + EmbedderSizeOfObjects() +
+-         external_memory();
++  // External memory is tracked separately and not folded into the global limit.
++  return OldGenerationSizeOfObjects() + EmbedderSizeOfObjects();
+ }
+ 
+ size_t Heap::GlobalWastedBytes() const { return OldGenerationWastedBytes(); }
+@@ -5374,7 +5427,8 @@ uint64_t Heap::AllocatedExternalMemorySinceMarkCompact() const {
+ }
+ 
+ bool Heap::AllocationLimitOvershotByLargeMargin() const {
+-  uint64_t old_generation_consumed = OldGenerationConsumedBytes();
++  uint64_t old_generation_consumed =
++      OldGenerationAllocationLimitConsumedBytes();
+   if (incremental_marking()->IsMajorMarking()) {
+     // No interleaved GCs, so we count young gen as part of old gen.
+     old_generation_consumed += YoungGenerationConsumedBytes();
+@@ -5416,7 +5470,7 @@ uint64_t GetFixedMarginForInputHandlingBytes() {
+ 
+ bool Heap::AllocationLimitOvershotByFixedMargin(
+     const uint64_t overshoot_margin) const {
+-  uint64_t old_generation_size = OldGenerationConsumedBytes();
++  uint64_t old_generation_size = OldGenerationAllocationLimitConsumedBytes();
+   if (incremental_marking()->IsMajorMarking()) {
+     // No interleaved GCs, so we count young gen as part of old gen.
+     old_generation_size += YoungGenerationConsumedBytes();
+@@ -5487,7 +5541,9 @@ bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
+   if (always_allocate()) {
+     return true;
+   }
+-  if (OldGenerationSpaceAvailable() > 0 && GlobalSpaceAvailable() > 0) {
++  // External memory is tracked separately, so only the old generation limit
++  // gates expansion here.
++  if (OldGenerationSpaceAvailable() > 0) {
+     return true;
+   }
+   // We reached the old generation or global allocation limit.
+@@ -7019,20 +7075,11 @@ uint64_t Heap::UpdateExternalMemory(int64_t delta) {
+   if (ReachedHeapLimit()) {
+     CollectGarbageWithRetry(local_heap, space,
+                             GarbageCollectionReason::kExternalMemoryPressure);
+-  } else if (total_after > external_memory_limit_for_interrupt()) {
+-    limits()->UpdateExternalMemoryLimitForInterrupt(external_memory());
+-    const GCCallbackFlags kGCCallbackFlagsForExternalMemory =
+-        static_cast<GCCallbackFlags>(
+-            kGCCallbackFlagSynchronousPhantomCallbackProcessing |
+-            kGCCallbackFlagCollectAllExternalMemory);
+-    StartIncrementalMarkingIfAllocationLimitIsReached(
+-        local_heap, GCFlagsForIncrementalMarking(),
+-        kGCCallbackFlagsForExternalMemory);
+-    if (incremental_marking()->IsMajorMarking() &&
+-        AllocationLimitOvershotByLargeMargin()) {
+-      CollectGarbageWithRetry(local_heap, space,
+-                              GarbageCollectionReason::kExternalMemoryPressure);
+-    }
++  } else if (total_after > external_memory_limit_for_interrupt() &&
++             local_heap->is_main_thread_for(this)) {
++    // HandleExternalMemoryInterrupt() may start a GC, which only the main
++    // thread can do. A later main thread allocation handles the interrupt.
++    HandleExternalMemoryInterrupt();
+   }
+   return total_after;
+ }
+@@ -7544,20 +7591,12 @@ void Heap::FinishSweepingIfOutOfWork(CompleteSweepingReason reason) {
+     DCHECK_IMPLIES(!delay_sweeper_tasks_for_testing_,
+                    !sweeper()->HasUnsweptPagesForMajorSweeping());
+     EnsureSweepingCompleted(SweepingForcedFinalizationMode::kV8Only, reason);
+-    if (!limits()->using_initial_limit()) {
+-      // Ensure that we don't update limits when starting incremental marking.
+-      // Shrinking limits there could lead to finalizing incremental marking
+-      // prematurely.
+-      DCHECK_NE(reason, CompleteSweepingReason::kStartMajorMarking);
+-      DCHECK_NE(reason, CompleteSweepingReason::kMajorGC);
+-      // Make sure we don't increase heap limits here.
+-      HeapLimitBounds bounds = limits()->AtMostCurrentLimits();
+-      // But don't go below the soft limits for starting incremental marking.
+-      const size_t new_space_capacity = NewSpaceCapacity();
+-      bounds.AtLeast(OldGenerationConsumedBytes() + new_space_capacity,
+-                     GlobalConsumedBytes() + new_space_capacity);
+-      limits()->UpdateAllocationLimits(CurrentHeapGrowingMode(), bounds);
+-    }
++    // Upstream recomputes (shrinks) the allocation limits here as part of the
++    // external_memory_accounted_in_global_limit feature. Since workerd does
++    // not fold external memory into the global limit, we restore the prior
++    // behavior and skip this post-sweep recomputation. Allocation limits are
++    // still recomputed at GC time via UpdateAllocationLimits(), so the
++    // post-sweep floor is unnecessary here.
+   }
+   // Ensure that sweeping is also completed for the C++ managed heap if it's
+   // out of work.
+diff --git a/src/heap/heap.h b/src/heap/heap.h
+--- a/src/heap/heap.h
++++ b/src/heap/heap.h
+@@ -1029,6 +1029,10 @@ class Heap final {
+       LocalHeap* local_heap, AllocationSpace space,
+       GarbageCollectionReason gc_reason);
+ 
++  // Reports an external memory pressure event, either performs a major GC or
++  // completes incremental marking in order to free external resources.
++  void HandleExternalMemoryInterrupt();
++
+   using GetExternallyAllocatedMemoryInBytesCallback =
+       v8::Isolate::GetExternallyAllocatedMemoryInBytesCallback;
+ 
+@@ -1958,6 +1962,14 @@ class Heap final {
+   // GC statistics. ============================================================
+   // ===========================================================================
+ 
++  // External memory is tracked separately and not folded into the global
++  // limit, so include it explicitly when computing the old generation
++  // allocation limit consumption.
++  inline uint64_t OldGenerationAllocationLimitConsumedBytes() const {
++    return OldGenerationConsumedBytes() +
++           AllocatedExternalMemorySinceMarkCompact();
++  }
++
+   V8_EXPORT_PRIVATE size_t OldGenerationSpaceAvailable();
+   V8_EXPORT_PRIVATE size_t GlobalSpaceAvailable();
+ 
