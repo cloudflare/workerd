@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 use quote::quote;
 use syn::FnArg;
 use syn::ItemImpl;
@@ -74,23 +75,14 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
     let trace_statements = generate_trace_statements(&fields);
     let name_str = name.to_string();
 
-    let traced_impl = if custom_trace {
-        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
-        quote! {}
-    } else {
-        quote! {
-            #[automatically_derived]
-            impl jsg::Traced for #name {
-                fn trace(&self, visitor: &mut jsg::GcVisitor) {
-                    // Suppress unused warning when there are no traceable fields.
-                    let _ = visitor;
-                    #(#trace_statements)*
-                }
-            }
-        }
-    };
+    let traced_impl = generate_traced_impl(&name, &trace_statements, custom_trace);
 
-    let gc_impl = generate_gc_impl(&name, &name_str, &memory_info.gc_fn);
+    let gc_impl = generate_gc_impl(
+        &name,
+        &name_str,
+        &memory_info.gc_fn,
+        &drop_detach_types(custom_trace, &fields),
+    );
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
@@ -592,13 +584,98 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
+/// The `jsg::Traced` impl of a resource named `name` that visits its fields with
+/// `trace_statements`, or nothing for a `custom_trace` resource.
+fn generate_traced_impl(
+    name: &syn::Ident,
+    trace_statements: &[proc_macro2::TokenStream],
+    custom_trace: bool,
+) -> proc_macro2::TokenStream {
+    if custom_trace {
+        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
+        quote! {}
+    } else {
+        let drop_probe = drop_probe_items();
+        quote! {
+            #[automatically_derived]
+            impl jsg::Traced for #name {
+                fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                    // Suppress unused warning when there are no traceable fields.
+                    let _ = visitor;
+                    #(#trace_statements)*
+                }
+
+                // For a resource held inline in another. Its fields aren't asked, which a
+                // recursive type would make loop forever.
+                fn needs_drop_detach() -> bool {
+                    #drop_probe
+                    __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
+                }
+            }
+        }
+    }
+}
+
+/// The items of the probes that `__JsgDropProbe::<T>(PhantomData)` answers: `has_drop_impl`,
+/// whether `T` implements `Drop` itself, and `needs_drop_detach`, `T`'s
+/// `Traced::needs_drop_detach`, or `false` for a type that isn't `Traced`, so that such a field
+/// reports its error once, from the `Traced` impl.
+fn drop_probe_items() -> proc_macro2::TokenStream {
+    quote! {
+        // A method of an inherent impl whose bound holds is picked over a trait's. The items are
+        // named so that they don't shadow a field's type.
+        struct __JsgDropProbe<T>(::std::marker::PhantomData<T>);
+        trait __JsgDropProbeFallback {
+            fn has_drop_impl(&self) -> bool {
+                false
+            }
+            fn needs_drop_detach(&self) -> bool {
+                false
+            }
+        }
+        impl<T> __JsgDropProbeFallback for __JsgDropProbe<T> {}
+        #[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
+        impl<T: ::std::ops::Drop> __JsgDropProbe<T> {
+            fn has_drop_impl(&self) -> bool {
+                true
+            }
+        }
+        #[allow(dead_code, reason = "not every caller asks a field")]
+        impl<T: jsg::Traced> __JsgDropProbe<T> {
+            fn needs_drop_detach(&self) -> bool {
+                T::needs_drop_detach()
+            }
+        }
+    }
+}
+
+/// The types whose `Traced::needs_drop_detach` makes a resource with `fields` detach its
+/// references before it is dropped. A `custom_trace` resource's own `Traced` impl answers for
+/// its fields, which need not be `Traced`.
+fn drop_detach_types(
+    custom_trace: bool,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<proc_macro2::TokenStream> {
+    if custom_trace {
+        vec![quote! { Self }]
+    } else {
+        fields
+            .iter()
+            .map(|field| field.ty.to_token_stream())
+            .collect()
+    }
+}
+
 /// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
-/// `memory_info` method or nothing.
+/// `memory_info` method or nothing, and `drop_detach_types`, the types whose
+/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped.
 fn generate_gc_impl(
     name: &syn::Ident,
     name_str: &str,
     memory_info_fn: &proc_macro2::TokenStream,
+    drop_detach_types: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
+    let drop_probe = drop_probe_items();
     quote! {
         #[automatically_derived]
         impl jsg::GarbageCollected for #name {
@@ -614,23 +691,11 @@ fn generate_gc_impl(
 
             #memory_info_fn
 
-            fn has_drop_impl(&self) -> bool {
-                // A method of an inherent impl whose bound holds is picked over a trait's, so
-                // this is true exactly when the resource implements `Drop` itself.
-                struct Probe<T>(::std::marker::PhantomData<T>);
-                trait NoDropImpl {
-                    fn has_drop_impl(&self) -> bool {
-                        false
-                    }
-                }
-                impl<T> NoDropImpl for Probe<T> {}
-                #[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
-                impl<T: ::std::ops::Drop> Probe<T> {
-                    fn has_drop_impl(&self) -> bool {
-                        true
-                    }
-                }
-                Probe::<Self>(::std::marker::PhantomData).has_drop_impl()
+            fn detach_before_drop(&self) -> bool {
+                #drop_probe
+                __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
+                    #(|| __JsgDropProbe::<#drop_detach_types>(::std::marker::PhantomData)
+                        .needs_drop_detach())*
             }
         }
     }
