@@ -1,0 +1,63 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs Wasm-only bundles through the real launcher and shim, with the legacy and with the new
+# module registry: a guest that uses cf:core/v1 and cf:http/v1, a bundle that lacks one of its
+# shim modules, and a guest that imports from a module outside the ABI.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "launcher-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "launcher-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "GUEST_LEGACY", service = "guest-legacy" ),
+          ( name = "GUEST_NEW", service = "guest-new" ),
+          ( name = "MISSING_SHIM_LEGACY", service = "missing-shim-legacy" ),
+          ( name = "MISSING_SHIM_NEW", service = "missing-shim-new" ),
+          ( name = "FOREIGN_MODULE_LEGACY", service = "foreign-module-legacy" ),
+          ( name = "FOREIGN_MODULE_NEW", service = "foreign-module-new" ),
+        ],
+      )
+    ),
+    ( name = "guest-legacy",
+      worker = ( modules = .guest, bindings = .greeting ) ),
+    ( name = "guest-new",
+      worker = ( modules = .guest, bindings = .greeting,
+                 compatibilityFlags = ["new_module_registry"] ) ),
+    ( name = "missing-shim-legacy", worker = ( modules = .missingShim ) ),
+    ( name = "missing-shim-new",
+      worker = ( modules = .missingShim, compatibilityFlags = ["new_module_registry"] ) ),
+    ( name = "foreign-module-legacy", worker = ( modules = .foreignModule ) ),
+    ( name = "foreign-module-new",
+      worker = ( modules = .foreignModule, compatibilityFlags = ["new_module_registry"] ) ),
+  ],
+);
+
+const greeting :List(Workerd.Worker.Binding) = [ ( name = "GREETING", text = "hello from wasm" ) ];
+
+# A Wasm-only bundle: the launcher as its main module, the shim and the guest.
+const guest :List(Workerd.Worker.Module) = [
+  ( name = "launcher.js", esModule = embed "../launcher.js" ),
+  ( name = "runtime.js", esModule = embed "../shim/runtime.js" ),
+  ( name = "cf-core-v1.js", esModule = embed "../shim/cf-core-v1.js" ),
+  ( name = "cf-http-v1.js", esModule = embed "../shim/cf-http-v1.js" ),
+  ( name = "worker.wasm", wasm = embed "../guest.wasm" ),
+];
+
+# The same guest without the shim module of cf:http/v1, behind a probe that reports the error.
+const missingShim :List(Workerd.Worker.Module) = [
+  ( name = "probe.js", esModule = embed "launcher-probe.js" ),
+  ( name = "launcher.js", esModule = embed "../launcher.js" ),
+  ( name = "runtime.js", esModule = embed "../shim/runtime.js" ),
+  ( name = "cf-core-v1.js", esModule = embed "../shim/cf-core-v1.js" ),
+  ( name = "worker.wasm", wasm = embed "../guest.wasm" ),
+];
+
+# A guest that imports from the module `env`, behind a probe that reports the error.
+const foreignModule :List(Workerd.Worker.Module) = [
+  ( name = "probe.js", esModule = embed "launcher-probe.js" ),
+  ( name = "launcher.js", esModule = embed "../launcher.js" ),
+  ( name = "runtime.js", esModule = embed "../shim/runtime.js" ),
+  ( name = "cf-core-v1.js", esModule = embed "../shim/cf-core-v1.js" ),
+  ( name = "worker.wasm", wasm = embed "../foreign.wasm" ),
+];

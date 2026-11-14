@@ -1,0 +1,14 @@
+{
+  "oldDate": "2023-01-01",
+  "newDate": "2026-10-23",
+  "gates": {
+    "cf:http/v1": {
+      "Headers#getSetCookie": {
+        "flag": "http_headers_getsetcookie",
+        "enableDate": "2023-03-01",
+        "field": "httpHeadersGetSetCookie"
+      }
+    }
+  },
+  "unattributed": []
+}
