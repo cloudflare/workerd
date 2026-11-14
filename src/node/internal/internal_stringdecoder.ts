@@ -24,7 +24,10 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { Buffer } from 'node-internal:internal_buffer';
-import { normalizeEncoding } from 'node-internal:internal_utils';
+import {
+  kNullProtoObject,
+  normalizeEncoding,
+} from 'node-internal:internal_utils';
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_THIS,
@@ -146,6 +149,8 @@ StringDecoder.prototype.text = text;
 
 Object.defineProperties(StringDecoder.prototype, {
   lastChar: {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     enumerable: true,
     get(this: StringDecoder): Buffer {
       if (this[kNativeDecoder] === undefined) {
@@ -158,6 +163,8 @@ Object.defineProperties(StringDecoder.prototype, {
     },
   },
   lastNeed: {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {
@@ -167,6 +174,8 @@ Object.defineProperties(StringDecoder.prototype, {
     },
   },
   lastTotal: {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {

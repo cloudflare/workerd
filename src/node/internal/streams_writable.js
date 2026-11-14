@@ -28,7 +28,10 @@ import * as destroyImpl from 'node-internal:streams_destroy';
 import { Stream } from 'node-internal:streams_legacy';
 import { Buffer } from 'node-internal:internal_buffer';
 import { nextTick } from 'node-internal:internal_process';
-import { normalizeEncoding } from 'node-internal:internal_utils';
+import {
+  kNullProtoObject,
+  normalizeEncoding,
+} from 'node-internal:internal_utils';
 import { validateBoolean, validateObject } from 'node-internal:validators';
 import {
   kState,
@@ -111,6 +114,7 @@ const kEnded = 1 << 30;
 // TODO(benjamingr) it is likely slower to do it this way than with free functions
 function makeBitMapDescriptor(bit) {
   return {
+    __proto__: kNullProtoObject,
     // This is not a breaking change according to Node.js but better safe than sorry.
     // Ref: https://github.com/nodejs/node/pull/49834
     enumerable: !streamsNodejsV24Compat,
