@@ -613,6 +613,25 @@ fn generate_gc_impl(
             }
 
             #memory_info_fn
+
+            fn has_drop_impl(&self) -> bool {
+                // A method of an inherent impl whose bound holds is picked over a trait's, so
+                // this is true exactly when the resource implements `Drop` itself.
+                struct Probe<T>(::std::marker::PhantomData<T>);
+                trait NoDropImpl {
+                    fn has_drop_impl(&self) -> bool {
+                        false
+                    }
+                }
+                impl<T> NoDropImpl for Probe<T> {}
+                #[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
+                impl<T: ::std::ops::Drop> Probe<T> {
+                    fn has_drop_impl(&self) -> bool {
+                        true
+                    }
+                }
+                Probe::<Self>(::std::marker::PhantomData).has_drop_impl()
+            }
         }
     }
 }

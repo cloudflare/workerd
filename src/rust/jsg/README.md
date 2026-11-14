@@ -210,9 +210,12 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is a resource's `Drop` impl, which has
-  `&mut self`: a reference it moves out of a field and keeps must be cloned or dropped there.
-  See [#7976](https://github.com/cloudflare/workerd/issues/7976).
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before the
+  `Drop` impl of a `#[jsg_resource]` type runs, every `jsg::Rc` and `jsg_cpp::Ref` it traces is
+  made strong and forgets its parent, so that `Drop` may move one out and keep it. A
+  `TracedGlobal` it moves out must be dropped there, and so must a reference that the `Drop`
+  impl of a field's type moves out; see `GcVisitor::detach_for_drop`. See
+  [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
   is ever collected. Use a `TracedGlobal`. The compiler rejects a `Global` field in a resource,
@@ -226,9 +229,12 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 `callback: Cell<Option<TracedGlobal<Value>>>`, which don't compile. Fix:
 `pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
+Bad: a `Drop` impl that moves a `TracedGlobal` out of a field into a static. Fix: drop it in
+`Drop`, or keep the state in a resource that outlives the one being dropped.
+
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell. No test checks a
+std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that `Drop` moves out. No test checks a
 hand-written `impl Traced` that shares traced state some other way or reaches it through
 another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
 whose `trace` visits something; reviewers check those.
