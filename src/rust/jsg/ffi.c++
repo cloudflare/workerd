@@ -514,6 +514,16 @@ void local_string_write_one_byte_v2(Isolate* isolate,
   local_as_ref_from_ffi<v8::String>(value)->WriteOneByte(isolate, offset, length, buffer, flags);
 }
 
+void local_string_value_view(Isolate* isolate,
+    const Local& value,
+    size_t data,
+    ::rust::Fn<void(size_t, size_t, uint32_t, bool)> callback) {
+  v8::String::ValueView view(isolate, local_as_ref_from_ffi<v8::String>(value));
+  auto characters = view.is_one_byte() ? reinterpret_cast<size_t>(view.data8())
+                                       : reinterpret_cast<size_t>(view.data16());
+  callback(data, characters, view.length(), view.is_one_byte());
+}
+
 size_t local_string_write_utf8_v2(
     Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags) {
   return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8(

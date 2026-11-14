@@ -542,6 +542,15 @@ pub mod ffi {
             buffer: *mut u8,
             flags: i32,
         );
+        // Calls `callback(data, characters, length, one_byte)` with the address of the
+        // string's characters, flattening it first, from within a `v8::String::ValueView`. Not
+        // `#[nothrow]`, which can't take a function pointer.
+        pub unsafe fn local_string_value_view(
+            isolate: *mut Isolate,
+            value: &Local,
+            data: usize,
+            callback: fn(usize, usize, u32, bool),
+        );
         #[nothrow]
         pub unsafe fn local_string_write_utf8_v2(
             isolate: *mut Isolate,
@@ -1701,6 +1710,27 @@ impl String {
             ))
         }
     }
+}
+
+/// A string's characters, as [`Local::<String>::with_value_view`] reads them in place: Latin-1
+/// for a one-byte string, UTF-16 otherwise.
+#[derive(Clone, Copy, Debug)]
+pub enum StringView<'a> {
+    OneByte(&'a [u8]),
+    TwoByte(&'a [u16]),
+}
+
+/// A slice of the `length` elements at `data`, which may be null or dangling if `length` is 0.
+///
+/// # Safety
+/// If `length` is not 0, `data` must be aligned and valid for reads of `length` elements for
+/// `'a`.
+unsafe fn slice_or_empty<'a, T>(data: *const T, length: usize) -> &'a [T] {
+    if length == 0 {
+        return &[];
+    }
+    // SAFETY: guaranteed by the caller.
+    unsafe { std::slice::from_raw_parts(data, length) }
 }
 
 #[derive(Debug)]
@@ -3979,6 +4009,79 @@ impl<'s> Local<'s, String> {
                 buffer.as_mut_ptr(),
                 flags.bits(),
             );
+        }
+    }
+
+    /// Calls `f` with the string's characters in place, as `v8::String::ValueView` reads them,
+    /// flattening the string first if it is not flat.
+    ///
+    /// `f` is not passed the `Lock` and cannot capture it, since `lock` is mutably borrowed for
+    /// this call, so it can neither run JavaScript nor allocate on the V8 heap, which could
+    /// collect garbage and move the characters.
+    pub fn with_value_view<F: FnOnce(StringView<'_>) -> R, R>(
+        &self,
+        lock: &mut Lock<'s>,
+        f: F,
+    ) -> R {
+        struct Call<F, R> {
+            f: Option<F>,
+            result: Option<std::thread::Result<R>>,
+        }
+
+        /// Runs the closure on the characters. Only `with_value_view` passes it, with the
+        /// address of its `Call`, to C++, so it is not an `unsafe fn` (which the bridge does not
+        /// accept for callbacks).
+        fn trampoline<F: FnOnce(StringView<'_>) -> R, R>(
+            data: usize,
+            characters: usize,
+            length: u32,
+            one_byte: bool,
+        ) {
+            // SAFETY: `data` was cast from `&raw mut Call` in `with_value_view`, which outlives
+            // the call.
+            let call = unsafe { &mut *(data as *mut Call<F, R>) };
+            let Some(f) = call.f.take() else {
+                unreachable!()
+            };
+            // A panic must not unwind into C++; it is resumed once the view is gone.
+            call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || {
+                    let length = length as usize;
+                    let view = if one_byte {
+                        let characters = characters as *const u8;
+                        // SAFETY: V8 keeps the `length` characters of the flat string alive and in
+                        // place for the duration of the view, during which nothing can allocate on
+                        // the V8 heap (see `with_value_view`).
+                        StringView::OneByte(unsafe { slice_or_empty(characters, length) })
+                    } else {
+                        let characters = characters as *const u16;
+                        assert!(characters.is_aligned(), "two-byte characters are aligned");
+                        // SAFETY: as above.
+                        StringView::TwoByte(unsafe { slice_or_empty(characters, length) })
+                    };
+                    f(view)
+                },
+            )));
+        }
+
+        let mut call = Call {
+            f: Some(f),
+            result: None,
+        };
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is open, which holds
+        // the flattened string; `call` outlives the call; `trampoline` matches its type.
+        unsafe {
+            ffi::local_string_value_view(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                &raw mut call as usize,
+                trampoline::<F, R>,
+            );
+        }
+        match call.result {
+            Some(Ok(result)) => result,
+            Some(Err(payload)) => std::panic::resume_unwind(payload),
+            None => unreachable!(),
         }
     }
 
