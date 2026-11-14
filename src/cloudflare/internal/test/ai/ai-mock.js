@@ -134,6 +134,12 @@ export default class AiMock extends WorkerEntrypoint {
       await scheduler.wait(1e8);
     }
 
+    if (modelName === 'delayedModel') {
+      // Delay the response so that another run() call can start and finish
+      // while this one is still in flight.
+      await scheduler.wait(100);
+    }
+
     if (modelName === 'inputErrorModel') {
       return Response.json(
         {
