@@ -93,7 +93,7 @@ export const onmessagePrimitiveClears = {
 };
 
 // The handler is invoked with the global object as `this`, as JSG invokes
-// one assigned through a C++ setter.
+// an event handler assigned through a C++ setter.
 export const onmessageHandlerReceiver = {
   async test() {
     const { port1, port2 } = new MessageChannel();

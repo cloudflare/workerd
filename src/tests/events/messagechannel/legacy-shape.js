@@ -9,7 +9,6 @@
 
 import { ok, strictEqual } from 'node:assert';
 import { MessageChannel, MessagePort } from 'node:worker_threads';
-import { usingTsImpl } from 'which-impl';
 
 export const legacyClassesAreNotGlobals = {
   test() {
@@ -22,12 +21,7 @@ export const legacyClassesThroughWorkerThreads = {
   async test() {
     strictEqual(MessageChannel.name, 'MessageChannel');
     strictEqual(MessagePort.name, 'MessagePort');
-    // Divergence #1: only the TypeScript constructor inherits from
-    // EventTarget's.
-    strictEqual(
-      Object.getPrototypeOf(MessagePort) === EventTarget,
-      usingTsImpl
-    );
+    strictEqual(Object.getPrototypeOf(MessagePort), EventTarget);
 
     const { port1, port2 } = new MessageChannel();
     ok(port1 instanceof MessagePort);

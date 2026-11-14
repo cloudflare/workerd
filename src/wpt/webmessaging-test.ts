@@ -80,7 +80,7 @@ export default {
     comment:
       'Like Node.js, workerd starts a port when any message listener is added, including ' +
       'via addEventListener(); per spec only start() or setting onmessage enables the port ' +
-      'message queue. See MessagePort::listenerCountChanged in api/messagechannel.c++.',
+      'message queue. See src/per_isolate/messagechannel/messagechannel.ts.',
     expectedFailures: [''],
     replace: removeUseCapture,
   },
@@ -115,13 +115,13 @@ export default {
   'message-channels/dictionary-transferrable.any.js': {
     comment:
       'MessagePort.postMessage() rejects any transfer list, even a plain ArrayBuffer ' +
-      '(api/messagechannel.c++, "Transfer list is not supported")',
+      '(src/per_isolate/messagechannel/messagechannel.ts, "Transfer list is not supported")',
     expectedFailures: [''],
   },
   'message-channels/historical.any.js': {
     comment:
       'Like Node.js, workerd dispatches a close event on both ports when one is closed ' +
-      '(MessagePort::close in api/messagechannel.c++); the spec removed that event',
+      '(src/per_isolate/messagechannel/messagechannel.ts); the spec removed that event',
     expectedFailures: [
       'No close event should be fired when an entangled port is closed',
       'No close event should be fired on a port when it is closed',
@@ -132,7 +132,7 @@ export default {
     comment:
       'Like Node.js, workerd starts a port when a message listener is added with ' +
       'addEventListener(); per spec the port stays disabled until start() is called. ' +
-      'See MessagePort::listenerCountChanged in api/messagechannel.c++.',
+      'See src/per_isolate/messagechannel/messagechannel.ts.',
     expectedFailures: [''],
   },
   'message-channels/worker-post-after-close.any.js': {

@@ -2,15 +2,15 @@
 
 An informal specification of MessageChannel and MessagePort as implemented
 in workerd, derived from, and kept in lockstep with, the test suite in this
-directory. **The tests are the normative artifact.** Both the C++
-implementation (`src/workerd/api/messagechannel.{h,c++}`) and the
-TypeScript implementation (`src/per_isolate/messagechannel/messagechannel.ts`,
-behind the `TS_MESSAGE_CHANNEL` autogate) are covered. The TypeScript
-classes subclass EventTarget through the seam in
-`src/per_isolate/events/event-target-internals.ts`, and both
-implementations clone messages with the same serializer, so the dispatch
-and cloning machinery is shared by construction; the divergences are in
-class shape and in the peer bookkeeping.
+directory. **The tests are the normative artifact.** The implementation is
+`src/per_isolate/messagechannel/messagechannel.ts`, whose classes subclass
+the C++ EventTarget through the seam in
+`src/per_isolate/events/event-target-internals.ts` and clone messages with
+the runtime's serializer. `cloudflare-internal:messagechannel`
+(`src/workerd/api/messagechannel.h`) hands the same classes to
+`node:worker_threads`. The bootstrap loads the implementation on first use;
+`src/workerd/api/messagechannel-bootstrap-test.c++` pins when, which
+JavaScript cannot see.
 
 ## Interface
 
@@ -37,12 +37,19 @@ dictionary PostMessageOptions { sequence<any> transfer = []; };
   always reachable through `node:worker_threads`, which hands out the same
   constructors.
 - `new MessagePort()` throws `TypeError: Illegal constructor`, from a
-  subclass too. MessageChannel is subclassable.
+  subclass too. MessageChannel is subclassable. Calling either constructor
+  without `new` throws the language's TypeError.
 - Every member is brand-checked and throws JSG's illegal-invocation
   TypeError for any other receiver, an object inheriting from
   `MessagePort.prototype` included.
 - Methods and accessors are enumerable, like every JSG member; accessor
   names and lengths follow `spec_compliant_property_attributes`.
+- Where the classes do not look like JSG's: MessagePort's constructor
+  inherits from EventTarget's, as WebIDL requires; both constructors'
+  `prototype` is non-writable whatever `immutable_api_prototypes` says;
+  `constructor` is the first of `MessagePort.prototype`'s own string keys;
+  and postMessage() recognizes a proxy for an array as an array
+  (`Array.isArray()`), where JSG converts it as a dictionary.
 
 ## Core semantics
 
@@ -68,7 +75,9 @@ dictionary PostMessageOptions { sequence<any> transfer = []; };
   called; a primitive clears it. The handler's `this` is the global object.
 - **close()** closes both ports and fires a trusted 'close' on each, the
   peer's first; a throwing 'close' listener's exception escapes close()
-  under every dispatch policy. A closed port is terminal.
+  under every dispatch policy. A closed port is terminal. A port whose
+  peer is collected closes without a 'close' event, when it next looks for
+  the peer, at a time that depends on the collector (not pinned).
 - **Listener exceptions** under `spec_compliant_dispatch_exceptions`: each
   is reported, the remaining listeners run, then the port dispatches a
   'messageerror' whose `data` is the exception. Without the flag the first
@@ -85,38 +94,24 @@ dictionary PostMessageOptions { sequence<any> transfer = []; };
 | `expose_global_message_channel` (2025-08-15) | classes as globals | `legacyClassesAreNotGlobals`, `legacyClassesThroughWorkerThreads` |
 | `set_tostring_tag` (2024-09-26) | `[object MessagePort]` branding | `legacyToStringTag` |
 | `spec_compliant_dispatch_exceptions` (2026-09-15) | reporting and 'messageerror' | `legacyExceptionIsRedispatched`, `legacyEscapingExceptionIsAnUnhandledRejection` |
-| `spec_compliant_property_attributes` (dateless) | accessor names and lengths; globals as own properties | the main cells (the `-opt-in` cells enable it) |
-| `immutable_api_prototypes` (dateless) | C++ constructors' `prototype` non-writable | the main cells (the `-opt-in` cells enable it) |
+| `spec_compliant_property_attributes` (dateless) | accessor names and lengths; globals as own properties | the main cell (the `-opt-in` cell enables it) |
+| `immutable_api_prototypes` (dateless) | nothing: the constructors' `prototype` is non-writable regardless | `constructorAttributes` (the `-opt-in` cell enables it) |
 
-The main cells pin the three dated flags on; the legacy cells pin them off
+The main cell pins the three dated flags on; the legacy cell pins them off
 by their disable names, so every cell keeps its `@all-compat-flags`
 variant. `nodejs_compat` and `enable_nodejs_worker_threads_module` are
 pinned everywhere for `node:assert`, `node:test`, `node:util` and
 `node:worker_threads`.
 
-## Divergence ledger (C++ vs TypeScript)
-
-| # | Area | C++ | TypeScript | Pinned in |
-| --- | --- | --- | --- | --- |
-| 1 | Constructor static inheritance | `getPrototypeOf(MessagePort) === Function.prototype` | `=== EventTarget` | `prototypeChains`, `legacyClassesThroughWorkerThreads` |
-| 2 | Constructors' `prototype` | writable unless `immutable_api_prototypes` | never writable | `constructorAttributes` |
-| 3 | Calling a constructor without `new` | JSG's TypeError | the language's TypeError | `constructorsRequireNew` |
-| 4 | Port whose peer is collected | closed when the peer's destructor runs | closed when it next looks for the peer | not pinned: depends on the collector; both close without a 'close' event |
-| 5 | `MessagePort.prototype` string key order | `constructor` last | `constructor` first | `prototypeKeys` |
-| 6 | A proxy for an array as postMessage() options | converted as a dictionary | an array (`Array.isArray()`) | `proxiedArrayOptions` |
-
-The TypeScript implementation also deserializes a message whose peer has
-gone; the work is not observable, so it is not in the ledger.
-
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
-| `api-surface.js` | member attributes, names and lengths; key order (#5); prototype chains (#1); constructor attributes (#2); runtime class marks; toStringTag branding; MessageChannel's own `port1`/`port2`; globals and `node:worker_threads` identity |
+| `api-surface.js` | member attributes, names and lengths; key order; prototype chains; constructor attributes; runtime class marks; toStringTag branding; MessageChannel's own `port1`/`port2`; globals and `node:worker_threads` identity |
 | `inspect.js` | `util.inspect()` of a port, a channel and `MessagePort.prototype` |
-| `construction.js` | MessagePort not constructible, from a subclass either; `new` required (#3); MessageChannel subclassable |
+| `construction.js` | MessagePort not constructible, from a subclass either; `new` required; MessageChannel subclassable |
 | `illegal-invocation.js` | every member brand-checked against every non-port receiver |
-| `post-message-arguments.js` | options conversion errors; accepted empty forms; `transfer` type; non-empty lists refused; read order; proxied arrays (#6) |
+| `post-message-arguments.js` | options conversion errors; accepted empty forms; `transfer` type; non-empty lists refused; read order; proxied arrays |
 | `cloning.js` | SharedArrayBuffer and uncloneable values; closed pairs still serialize; closing during serialization drops the message; the receiver gets a copy; Blob round trip |
 | `delivery.js` | both directions, before and while listening; event shape; deferral and order |
 | `message-event.js` | user-constructed MessageEvent with port `source` and `ports` |
@@ -126,9 +121,9 @@ gone; the work is not observable, so it is not in the ledger.
 | `listener-exceptions.js` | spec reporting order, 'messageerror', injected messages; throwing 'messageerror' listener |
 | `gc.js` | queued messages survive collection, including during start(); ports survive collection |
 | `pollution.js` | delivery under patched `Promise.prototype`, `Array.prototype.push` and `WeakRef.prototype.deref` |
-| `legacy-shape.js` | not globals; usable through `node:worker_threads` (#1); `[object Object]` |
+| `legacy-shape.js` | not globals; usable through `node:worker_threads`; `[object Object]` |
 | `legacy-listener-exceptions.js` | redispatch as 'message'; escaping exception as an unhandled rejection |
-| `which-impl.js` | the cell's implementation and the flags the suite branches on |
+| `flags.js` | the flags the suite branches on |
 | `helpers.js` | descriptor attribute strings |
 
 ## Web Platform Tests
@@ -146,5 +141,5 @@ Known not to pass:
 - `Channel_postMessage_with_transfer_incoming_messages.any.js`
 - `Channel_postMessage_with_transfer_outgoing_messages.any.js`
 - `message-channels/close-event/garbage-collected.tentative.any.js`: per
-  spec, a port's 'close' fires when its peer is collected; neither
-  implementation fires it (ledger #4).
+  spec, a port's 'close' fires when its peer is collected; workerd does
+  not fire it.

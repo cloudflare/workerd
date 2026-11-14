@@ -19,8 +19,8 @@ export const deliveryIgnoresPollutedPrototypes = {
     const record = (name) => {
       patched[patched.length] = name;
     };
-    // WeakRef is a global only at some compat dates; the TypeScript
-    // implementation captured its own before user code ran.
+    // WeakRef is a global only at some compat dates; the implementation
+    // captured its own before user code ran.
     const patchWeakRef = typeof WeakRef !== 'undefined';
     const saved = {
       then: Object.getOwnPropertyDescriptor(Promise.prototype, 'then'),

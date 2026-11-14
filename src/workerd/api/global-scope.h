@@ -8,7 +8,6 @@
 #include "bench.h"
 #include "filesystem.h"
 #include "http.h"
-#include "messagechannel.h"
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
@@ -23,6 +22,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 class DOMException;
@@ -1030,12 +1030,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    // Under the TS_MESSAGE_CHANNEL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript MessageChannel and MessagePort instead.
-    if (flags.getExposeGlobalMessageChannel() && !useTypeScriptMessageChannel()) {
-      JSG_NESTED_TYPE(MessageChannel);
-      JSG_NESTED_TYPE(MessagePort);
-    }
+    // Under expose_global_message_channel, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // defines MessageChannel and MessagePort, loaded on first use; the TypeScript override below
+    // declares them.
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);
@@ -1280,6 +1277,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
+
+      MessageChannel: typeof MessageChannel;
+      MessagePort: typeof MessagePort;
     });
   }
 
