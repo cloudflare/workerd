@@ -160,6 +160,23 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "email",
+    srcs = [
+        "email.c++",
+    ],
+    hdrs = [
+        "email.h",
+    ],
+    implementation_deps = [
+        "//src/workerd/util:header-validation",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
     name = "worker-loader",
     srcs = [
         "worker-loader.c++",
