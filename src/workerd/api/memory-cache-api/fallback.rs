@@ -13,6 +13,7 @@ use io_context::IoOwnedSpan;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::v8;
+use jsg_macros::jsg_traced;
 use memory_cache::CacheError;
 use memory_cache::FallbackPermit;
 
@@ -154,6 +155,7 @@ fn reject<'s>(
 /// only when it collects them if the promise never settles. A span reports to its request's
 /// observer, whose state belongs to the request's thread, so the request owns the spans, as in
 /// memory-cache.c++: they end when the reactions drop them, or with the request.
+#[jsg_traced]
 struct Fill {
     permit: IoOwned<Permit>,
     /// The key, for the span of the write.
@@ -165,12 +167,13 @@ struct Fill {
 
 /// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
 /// its callback and spans. It holds no JavaScript values, so sharing it is sound.
+#[jsg_traced]
 struct SharedFill(Arc<Fill>);
 
 /// A fallback's permit, which holds no JavaScript values, for the request to own.
 struct Permit(FallbackPermit);
 
-jsg::jsg_traced!(Fill, SharedFill, Permit);
+jsg::jsg_traced!(Permit);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
