@@ -476,6 +476,9 @@ pub mod private {
     pub use cxxbridge_macro::type_id;
 
     pub use crate::cxx_vector::VectorElement;
+    pub use crate::exception::kj_exception_from_raw;
+    pub use crate::exception::kj_exception_into_raw;
+    pub use crate::exception::repr::KjException as KjExceptionRepr;
     pub use crate::extern_type::verify_extern_kind;
     pub use crate::extern_type::verify_extern_type;
     pub use crate::function::FatFunction;

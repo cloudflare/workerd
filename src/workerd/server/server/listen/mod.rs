@@ -54,7 +54,6 @@ use workerd_capnp::socket;
 use crate::Result;
 use crate::bridge;
 use crate::bridge::ffi;
-use crate::channels::AbortReason;
 use crate::channels::Channel;
 use crate::channels::SubrequestChannel;
 use crate::config::Factory;
@@ -369,7 +368,7 @@ fn log_connection_error(what: &str, error: &crate::Error) {
 /// prints an exception; the client gets kj-hyper's bare 500.
 fn log_uncaught(error: &crate::Error) {
     if error.exception_type() != KjExceptionType::Disconnected {
-        let error = ffi::exception_text(&AbortReason(Some(error.clone())));
+        let error = ffi::exception_text(cxx::KjException::from(error.clone()));
         tracing::error!("Uncaught exception: {error}");
     }
 }

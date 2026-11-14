@@ -11,7 +11,7 @@ where
     V: Visit<'a> + ?Sized,
 {
     match ty {
-        Type::Ident(_) | Type::Str(_) | Type::Void(_) | Type::KjDate(_) => {}
+        Type::Ident(_) | Type::Str(_) | Type::Void(_) | Type::KjDate(_) | Type::KjException(_) => {}
         Type::RustBox(ty)
         | Type::UniquePtr(ty)
         | Type::KjOwn(ty)

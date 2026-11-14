@@ -38,7 +38,6 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
 struct IoFuture;
 struct IoCallback;
 struct IoOwnedSlot;
-struct AbortReason;
 
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and
@@ -97,9 +96,9 @@ void io_context_set_fail_open(uint64_t id);
 // Fails unless `id` identifies the current IoContext, as every call here that takes one does.
 void io_context_check_current(uint64_t id);
 
-// IoContext::abort() with the exception `reason` carries, which Rust encoded with
-// jsg::Lock::exception_to_kj(), for ctx.abort(reason). Does not terminate execution.
-void io_context_abort(uint64_t id, ::rust::Box<AbortReason> reason);
+// IoContext::abort() with `reason`, which Rust encoded with jsg::Lock::exception_to_kj(), for
+// ctx.abort(reason). Does not terminate execution.
+void io_context_abort(uint64_t id, kj::Exception reason);
 
 // IoContext::abort() with IoContext::abortWithoutReasonException(), for ctx.abort() without a
 // reason. Does not terminate execution.

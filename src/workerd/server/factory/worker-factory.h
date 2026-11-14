@@ -57,7 +57,6 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
-struct AbortReason;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -273,7 +272,8 @@ class ActorHandle final {
 
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
-void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+void actor_abort(const ActorHandle& actor, kj::Exception reason);
+void actor_stop(const ActorHandle& actor);
 bool actor_has_on_hibernate_handler(const ActorHandle& actor);
 bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
@@ -352,7 +352,7 @@ void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     bool persistent);
 
 void exception_throw(const kj::Exception& exception);
-::rust::String exception_text(const AbortReason& error);
+::rust::String exception_text(kj::Exception error);
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json);
 kj::Own<Frankenvalue> frankenvalue_clone(const Frankenvalue& value);
