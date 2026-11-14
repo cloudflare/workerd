@@ -41,13 +41,15 @@ cc_ast_dump(
 
 wd_rust_binary(
     name = "param_extractor_bin",
-    srcs = ["param-extractor.rs"],
+    srcs = [
+        "param-extractor.rs",
+        "param-extractor-test.rs",
+    ],
     tags = ["no-downstream"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
-    test = False,
     deps = [
         "@crates_vendor//:anyhow",
         "@crates_vendor//:clang-ast",
