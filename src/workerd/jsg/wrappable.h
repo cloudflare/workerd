@@ -466,6 +466,21 @@ class Wrappable: public kj::Refcounted {
   // wrapper. Must not throw, attach or detach wrappers, or allocate on the V8 or cppgc heap.
   virtual void snapshotContextReady(Lock& js) {}
 
+  // The JavaScript values this object holds that its snapshotClone() copy cannot, such as event
+  // listeners or an abort reason. Called in the zygote on the live original once snapshotClone()
+  // has returned a copy, under the isolate lock and inside the context, with every wrapper still
+  // attached. The values are kept in the snapshot heap, so a restored Worker gets the zygote's
+  // own objects back rather than copies. May throw, which fails the snapshot, for a value the
+  // restored instance could not take back.
+  virtual kj::Array<v8::Local<v8::Value>> snapshotValues(Lock& js) const {
+    return nullptr;
+  }
+
+  // In a Worker started from a snapshot, after snapshotRelink(): the values snapshotValues()
+  // returned in the zygote, in its order. Only called when there were any. Runs inside the
+  // restored context. Must not throw.
+  virtual void snapshotRestoreValues(Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {}
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 

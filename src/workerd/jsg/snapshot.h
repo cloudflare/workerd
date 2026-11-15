@@ -107,6 +107,9 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     // The slots of the objects the original's snapshotReferences() named, in its order; none for
     // one the snapshot carries no slot for.
     kj::Array<kj::Maybe<size_t>> references;
+    // The context-level AddData index of an array of the values the original's snapshotValues()
+    // returned, when it returned any.
+    kj::Maybe<size_t> valuesIndex;
   };
   kj::Vector<LiveWrappable> liveWrappables;
 
@@ -202,8 +205,11 @@ struct WrappablesSerializeMetadata {
   // Record the native side of every live Wrappable while it still exists into the snapshot
   // artifact (by tag alone when `isStateless(tag)`, as a snapshotClone() otherwise), and build a
   // map from each one's cppgc pointer to its index in the snapshot artifact to serialize the
-  // connection: JS Wrapper -> cppgc shim -> C++ Wrappable.
-  void recordLiveWrappables(HeapTracer& tracer,
+  // connection: JS Wrapper -> cppgc shim -> C++ Wrappable. Pins into `context`'s snapshot the
+  // values each transferred original's snapshotValues() returns.
+  void recordLiveWrappables(Lock& js,
+      v8::Local<v8::Context> context,
+      HeapTracer& tracer,
       SnapshotArtifact& artifact,
       kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless);
 
@@ -263,6 +269,11 @@ struct WrappableDeserializeMetadata {
   // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
   // original named references (Wrappable::snapshotReferences()) the linked instances of those.
   void relinkReferences(const SnapshotArtifact& artifact);
+
+  // After relinkReferences(), inside `context`: hands each linked instance whose original
+  // returned values from Wrappable::snapshotValues() those values. The values of a slot no
+  // wrapper linked are taken out of the snapshot and dropped.
+  void restoreValues(Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact);
 
   // After creating a context: verifies that every serialized slot was linked exactly once and that
   // the callback reported nothing else, then releases the roots that kept unlinked shims alive.
