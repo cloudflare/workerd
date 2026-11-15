@@ -1017,6 +1017,32 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     return kSnapshotRecreateByTag[bucket];
   }
 
+  // The function that initializes the reflections (JSG_REFLECTION) of the instance a restored
+  // wrapper is attached to, for the resource type tagged `tag`; none when that type has none (or
+  // `tag` is not a resource type's tag at all). The table is built inside the function, where Self
+  // is complete: a class-scope one would name Self::from() while Self is still being defined.
+  static kj::Maybe<SnapshotInitReflectionFn> snapshotInitReflectionFnFor(
+      v8::CppHeapPointerTag tag) {
+    static constexpr auto kByTag = []() {
+      kj::FixedArray<SnapshotInitReflectionFn, kMaxWrappableTags> table{};
+      ([&]<typename U>() {
+        if constexpr (U::JSG_KIND == JsgKind::RESOURCE) {
+          if constexpr (U::jsgHasReflection) {
+            table[wrappableTagBucketIndex(static_cast<uint16_t>(wrappableTag<U>()))] =
+                [](Lock& js, Wrappable& instance) {
+              static_cast<U&>(static_cast<Object&>(instance))
+                  .jsgInitReflection(Self::from(js.v8Isolate));
+            };
+          }
+        }
+      }.template operator()<T>(), ...);
+      return table;
+    }();
+    auto bucket = wrappableTagBucketIndex(static_cast<uint16_t>(tag));
+    if (bucket >= kMaxWrappableTags || kByTag[bucket] == nullptr) return kj::none;
+    return kByTag[bucket];
+  }
+
  private:
   const JsgConfig config;
 

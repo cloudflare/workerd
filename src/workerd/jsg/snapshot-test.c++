@@ -568,6 +568,29 @@ struct ValueThing: public Object {
   }
 };
 
+// Reads its own `label` property through a PropertyReflection, which a restored instance must
+// have initialized as a freshly wrapped one does.
+struct ReflectingThing: public Object {
+  PropertyReflection<kj::String> label;
+
+  static Ref<ReflectingThing> constructor(Lock& js) {
+    return js.alloc<ReflectingThing>();
+  }
+
+  kj::String readLabel(Lock& js) {
+    return label.get(js, "label"_kj).orDefault(kj::str("none"));
+  }
+
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<ReflectingThing>());
+  }
+
+  JSG_RESOURCE_TYPE(ReflectingThing) {
+    JSG_METHOD(readLabel);
+  }
+  JSG_REFLECTION(label);
+};
+
 struct SnapshotTransferContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(SnapshotTransferContext) {
     JSG_NESTED_TYPE(StatelessThing);
@@ -576,6 +599,7 @@ struct SnapshotTransferContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(OpaqueThing);
     JSG_NESTED_TYPE(HolderThing);
     JSG_NESTED_TYPE(ValueThing);
+    JSG_NESTED_TYPE(ReflectingThing);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
@@ -585,7 +609,8 @@ JSG_DECLARE_ISOLATE_TYPE(SnapshotTransferIsolate,
     StatefulSubThing,
     OpaqueThing,
     HolderThing,
-    ValueThing);
+    ValueThing,
+    ReflectingThing);
 
 // Runs `topLevel` in a zygote's context and serializes the context the way Worker::Worker does:
 // the serializer callbacks are registered with the context, the top level runs, the
@@ -733,6 +758,15 @@ KJ_TEST("the values of an object dropped from the artifact do not fail the resto
   auto restored = newIsolateFromSnapshot(*artifact);
   inRestoredContext(
       *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "kept.get()"_kj) == "kept"_kj); });
+}
+
+KJ_TEST("a restored object's property reflections read its wrapper") {
+  auto artifact = bakeSnapshot("globalThis.r = new ReflectingThing(); r.label = 'zygote';"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "r.readLabel()"_kj) == "zygote"_kj);
+    KJ_EXPECT(eval(js, "r.label = 'restored'; r.readLabel()"_kj) == "restored"_kj);
+  });
 }
 
 KJ_TEST("a type with no snapshot transfer does not matter once unreachable") {

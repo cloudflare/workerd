@@ -601,6 +601,11 @@ class Wrappable: public kj::Refcounted {
 // Object::jsgSnapshotStateless and TypeWrapper::snapshotRecreateFnFor().
 using SnapshotRecreateFn = kj::Own<Wrappable> (*)(Lock&);
 
+// Initializes the PropertyReflection members (JSG_REFLECTION) of an instance attached to a wrapper
+// restored from a V8 startup snapshot, as wrapping a new instance would. See
+// TypeWrapper::snapshotInitReflectionFnFor().
+using SnapshotInitReflectionFn = void (*)(Lock&, Wrappable&);
+
 // For historical reasons, this is actually implemented in setup.c++.
 class HeapTracer: public v8::EmbedderRootsHandler {
  public:
