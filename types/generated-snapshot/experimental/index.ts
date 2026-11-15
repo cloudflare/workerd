@@ -3577,6 +3577,12 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    */
   readyState: number;
   /**
+   * The **`WebSocket.bufferedAmount`** read-only property returns the number of bytes of data that have been queued using calls to send() but not yet transmitted to the network. This value resets to zero once all queued data has been sent. This value does not reset to zero when the connection is closed; if you keep calling send(), this will continue to climb.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/bufferedAmount)
+   */
+  bufferedAmount: number;
+  /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/url)
