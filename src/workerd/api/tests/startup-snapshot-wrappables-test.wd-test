@@ -46,6 +46,8 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"runner\""),
+          (name = "urlpattern-standard", service = "urlpattern-standard"),
+          (name = "urlpattern", service = "urlpattern"),
           (name = "caches-scheduler", service = "caches-scheduler"),
           (name = "searchparams-url-standard", service = "searchparams-url-standard"),
           (name = "control", service = "control"),
@@ -150,6 +152,37 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"caches-scheduler\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "urlpattern",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"urlpattern\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "urlpattern-standard",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "urlpattern_standard",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"urlpattern-standard\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

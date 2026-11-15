@@ -2391,6 +2391,16 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
   KJ_UNREACHABLE;
 }
 
+UrlPattern UrlPattern::clone() const {
+  auto copy = [](const Component& c) {
+    return Component(kj::str(c.getPattern()), kj::str(c.getRegex()),
+        KJ_MAP(name, c.getNames()) { return kj::str(name); });
+  };
+  return UrlPattern(kj::arr(copy(protocol), copy(username), copy(password), copy(hostname),
+                        copy(port), copy(pathname), copy(search), copy(hash)),
+      ignoreCase);
+}
+
 UrlPattern::UrlPattern(kj::Array<Component> components, bool ignoreCase)
     : protocol(kj::mv(components[0])),
       username(kj::mv(components[1])),
