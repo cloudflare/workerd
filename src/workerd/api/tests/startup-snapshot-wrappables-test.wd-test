@@ -69,6 +69,57 @@ const unitTests :Workerd.Config = (
           (name = "crypto-keys", service = "crypto-keys"),
           (name = "crypto-key-algorithm", service = "crypto-key-algorithm"),
           (name = "crypto-key-rsa", service = "crypto-key-rsa"),
+          (name = "event-targets", service = "event-targets"),
+          (name = "event-target-signal", service = "event-target-signal"),
+          (name = "abort-unread-aborted", service = "abort-unread-aborted"),
+        ],
+      )
+    ),
+    ( name = "event-targets",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"event-targets\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "abort",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"abort\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "event-target-signal",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"event-target-signal\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "abort-unread-aborted",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"abort-unread-aborted\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
         ],
       )
     ),
@@ -132,19 +183,6 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "MODE", json = "\"fs\""),
-          (name = "TEXT", text = "hello"),
-          (name = "JSON", json = "{\"answer\": 42}"),
-          (name = "DATA", data = "abc"),
-        ],
-      )
-    ),
-    # An AbortController and its signal kept at the top level.
-    ( name = "abort",
-      worker = (
-        modules = .modules,
-        compatibilityFlags = .compatibilityFlags,
-        bindings = [
-          (name = "MODE", json = "\"abort\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

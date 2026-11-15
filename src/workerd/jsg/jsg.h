@@ -1485,6 +1485,12 @@ class Object: private Wrappable {
     return &obj;
   }
 
+  // For a snapshotClone() override: whether JavaScript has a wrapper for `obj`, and so whether the
+  // snapshot records it (and transfers it) on its own.
+  static bool snapshotHasWrapper(const Object& obj) {
+    return obj.hasWrapper();
+  }
+
   // For a snapshotRelink() override: a restored reference as a Ref<T>, or none when the snapshot
   // carried none or the object is not a T.
   template <typename T>
