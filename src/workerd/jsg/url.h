@@ -382,6 +382,8 @@ class UrlPattern final {
     return ignoreCase;
   }
 
+  UrlPattern clone() const KJ_WARN_UNUSED_RESULT;
+
   JSG_MEMORY_INFO(UrlPattern) {
     tracker.trackField("protocol", protocol);
     tracker.trackField("username", username);

@@ -149,6 +149,53 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
   return js.alloc<URLPattern>(std::move(*result));
 }
 
+namespace {
+using Component = ada::url_pattern_component<UrlPatternRegexProvider>;
+
+// A copy of `component` without its RegExp. ada declares the components as public members only
+// to work around a compiler bug, and documents them as private: this reads the fields its own
+// constructor takes.
+Component copyComponentForSnapshot(const Component& component) {
+  return Component(std::string(component.pattern), UrlPatternRegexProvider::regex_type{},
+      std::vector<std::string>(component.group_name_list), component.has_regexp_groups,
+      component.type, std::string(component.exact_match_value));
+}
+}  // namespace
+
+kj::Maybe<kj::Own<jsg::Wrappable>> URLPattern::snapshotClone() const {
+  ada::url_pattern<UrlPatternRegexProvider> copy;
+#define V(_, name) copy.name##_component = copyComponentForSnapshot(inner.name##_component);
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  copy.ignore_case_ = inner.ignore_case_;
+  return ownAsWrappable(kj::refcounted<URLPattern>(kj::mv(copy)));
+}
+
+kj::Array<v8::Local<v8::Value>> URLPattern::snapshotValues(jsg::Lock& js) const {
+  kj::Vector<v8::Local<v8::Value>> values;
+#define V(_, name)                                                                                 \
+  if (inner.name##_component.type == ada::url_pattern_component_type::REGEXP) {                    \
+    values.add(inner.name##_component.regexp.getHandle(js));                                       \
+  }
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  return values.releaseAsArray();
+}
+
+void URLPattern::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  size_t i = 0;
+#define V(_, name)                                                                                 \
+  if (inner.name##_component.type == ada::url_pattern_component_type::REGEXP) {                    \
+    KJ_ASSERT(i < values.size() && values[i]->IsRegExp());                                         \
+    inner.name##_component.regexp =                                                                \
+        jsg::JsRef<jsg::JsRegExp>(js, jsg::JsRegExp(values[i++].As<v8::RegExp>()));                \
+  }
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  KJ_ASSERT(i == values.size());
+}
+
 bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
     jsg::Optional<jsg::USVString> maybeBase) {
   ada::result<bool> result;

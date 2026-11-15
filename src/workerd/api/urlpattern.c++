@@ -93,6 +93,25 @@ URLPattern::URLPattern(jsg::UrlPattern inner,
       searchRegex(kj::mv(searchRegex)),
       hashRegex(kj::mv(hashRegex)) {}
 
+kj::Array<v8::Local<v8::Value>> URLPattern::snapshotValues(jsg::Lock& js) const {
+  auto values = kj::heapArrayBuilder<v8::Local<v8::Value>>(8);
+#define V(_, name) values.add(name##Regex.getHandle(js));
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  return values.finish();
+}
+
+void URLPattern::snapshotRestoreValues(
+    jsg::Lock& js, kj::ArrayPtr<const v8::Local<v8::Value>> values) {
+  size_t i = 0;
+#define V(_, name)                                                                                 \
+  KJ_ASSERT(i < values.size() && values[i]->IsRegExp());                                           \
+  name##Regex = jsg::JsRef<jsg::JsRegExp>(js, jsg::JsRegExp(values[i++].As<v8::RegExp>()));
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  KJ_ASSERT(i == values.size());
+}
+
 void URLPattern::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(protocolRegex, usernameRegex, passwordRegex, hostnameRegex, portRegex,
       pathnameRegex, searchRegex, hashRegex);
