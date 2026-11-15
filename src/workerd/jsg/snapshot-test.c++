@@ -220,8 +220,6 @@ KJ_TEST("fail-closed properties exist in the zygote but throw when used") {
     KJ_EXPECT(attempt("typeof WebAssembly"_kj) ==
         "Error: startup snapshot: globalThis.WebAssembly cannot be used while preparing a startup "
         "snapshot"_kj);
-    KJ_EXPECT(attempt("typeof SharedArrayBuffer"_kj)
-                  .contains("globalThis.SharedArrayBuffer cannot be used"_kj));
     KJ_EXPECT(
         attempt("Iterator.concat = () => 1"_kj).contains("Iterator.concat cannot be used"_kj));
     KJ_EXPECT(attempt("[].values().join"_kj).contains("Iterator.prototype.join cannot be used"_kj));
@@ -232,7 +230,6 @@ KJ_TEST("fail-closed properties exist in the zygote but throw when used") {
             .contains("Iterator.concat cannot be used"_kj));
     // Present and, like V8's own, not enumerable.
     KJ_EXPECT(eval(js, "'WebAssembly' in globalThis"_kj) == "true"_kj);
-    KJ_EXPECT(eval(js, "Object.hasOwn(globalThis, 'SharedArrayBuffer')"_kj) == "true"_kj);
     KJ_EXPECT(eval(js, "Object.keys(globalThis).includes('WebAssembly')"_kj) == "false"_kj);
     KJ_EXPECT(eval(js, "Object.hasOwn(Iterator.prototype, 'includes')"_kj) == "true"_kj);
     // Every attempt above caught its error; the uses were recorded all the same.
@@ -253,7 +250,6 @@ KJ_TEST("removal rejects a zygote whose top level went on after a fail-closed er
   };
   // A caught read: a feature test that bakes its wrong answer in.
   rejects("try { WebAssembly } catch {}"_kj);
-  rejects("let t; try { t = typeof SharedArrayBuffer } catch { t = 'caught' }"_kj);
   // A caught write: a polyfill that gives up.
   rejects("try { Iterator.concat = () => 1 } catch {}"_kj);
   // A caught descriptor read goes through the getter too.
@@ -289,6 +285,24 @@ KJ_TEST("removal rejects a zygote whose top level went on after a fail-closed er
     });
     KJ_EXPECT(zygote->mutableSnapshotArtifact().restoreTimeGlobalsIndex != kj::none);
   }
+}
+
+KJ_TEST("SharedArrayBuffer is the realm's constructor in the zygote") {
+  auto zygote = newZygote();
+  inNewContext(*zygote, [&](Lock& js, v8::Local<v8::Context> context) {
+    KJ_EXPECT(eval(js, "typeof SharedArrayBuffer"_kj) == "function"_kj);
+    KJ_EXPECT(
+        eval(js,
+            "new SharedArrayBuffer(8) instanceof SharedArrayBuffer && "
+            "Object.getPrototypeOf(new SharedArrayBuffer(8)) === SharedArrayBuffer.prototype"_kj) ==
+        "true"_kj);
+    // Like V8's own: writable, configurable, not enumerable.
+    KJ_EXPECT(eval(js,
+                  "const d = Object.getOwnPropertyDescriptor(globalThis, 'SharedArrayBuffer');"
+                  "d.writable && d.configurable && !d.enumerable"_kj) == "true"_kj);
+    IsolateBase::from(js.v8Isolate).removeRestoreTimeGlobalsBeforeSnapshot(js, context);
+    KJ_EXPECT(eval(js, "Object.hasOwn(globalThis, 'SharedArrayBuffer')"_kj) == "false"_kj);
+  });
 }
 
 KJ_TEST("removal removes Error.stackTraceLimit and pins its final state") {
@@ -381,7 +395,7 @@ KJ_TEST("removal rejects a property the top level put in a fail-closed property'
           "delete globalThis.SharedArrayBuffer;"
           "Object.defineProperty(globalThis, 'SharedArrayBuffer', "
           "{get() { throw new Error('disabled'); }, configurable: true})"_kj);
-      KJ_EXPECT_THROW_MESSAGE("defined a property that V8 adds",
+      KJ_EXPECT_THROW_MESSAGE("non-configurable or an accessor",
           IsolateBase::from(js.v8Isolate).removeRestoreTimeGlobalsBeforeSnapshot(js, context));
     });
   }
@@ -758,6 +772,34 @@ KJ_TEST("the values of an object dropped from the artifact do not fail the resto
   auto restored = newIsolateFromSnapshot(*artifact);
   inRestoredContext(
       *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "kept.get()"_kj) == "kept"_kj); });
+}
+
+KJ_TEST("SharedArrayBuffer and one the top level made survive a snapshot round trip") {
+  auto artifact = bakeSnapshot("globalThis.Saved = SharedArrayBuffer;"
+                               "globalThis.buf = new SharedArrayBuffer(8);"
+                               "new Int32Array(buf)[1] = 7;"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    KJ_EXPECT(eval(js, "Saved === SharedArrayBuffer"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "buf instanceof SharedArrayBuffer"_kj) == "true"_kj);
+    KJ_EXPECT(eval(js, "new Int32Array(buf)[1]"_kj) == "7"_kj);
+    KJ_EXPECT(eval(js, "Object.keys(globalThis).includes('SharedArrayBuffer')"_kj) == "false"_kj);
+  });
+}
+
+KJ_TEST("a replaced or deleted SharedArrayBuffer stays so after a snapshot round trip") {
+  {
+    auto artifact = bakeSnapshot("globalThis.SharedArrayBuffer = 5;"_kj);
+    auto restored = newIsolateFromSnapshot(*artifact);
+    inRestoredContext(*restored,
+        [&](Lock& js) { KJ_EXPECT(eval(js, "globalThis.SharedArrayBuffer"_kj) == "5"_kj); });
+  }
+  {
+    auto artifact = bakeSnapshot("delete globalThis.SharedArrayBuffer;"_kj);
+    auto restored = newIsolateFromSnapshot(*artifact);
+    inRestoredContext(*restored,
+        [&](Lock& js) { KJ_EXPECT(eval(js, "typeof SharedArrayBuffer"_kj) == "undefined"_kj); });
+  }
 }
 
 KJ_TEST("a restored object's property reflections read its wrapper") {

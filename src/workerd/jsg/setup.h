@@ -130,9 +130,13 @@ class V8System {
 //
 // IsolateBase makes the zygote context look like a normal isolate's before any JavaScript runs in
 // it, and look like what V8 expects again right before creating the snapshot:
-// * Error.stackTraceLimit is installed as the data property V8 installs. Its final state is
-//   recorded into the snapshot and the property removed. The restored context replays the
-//   recorded state after V8 has re-added the default. Node's mksnapshot does the same.
+// * Error.stackTraceLimit and SharedArrayBuffer are installed as the data properties V8 installs.
+//   Their final state is recorded into the snapshot and the properties removed. The restored
+//   context replays the recorded state after V8 has re-added the default. Node's mksnapshot does
+//   the same for Error.stackTraceLimit. SharedArrayBuffer's value is the realm's constructor, which
+//   V8 creates at bootstrap and keeps in the native context, so the zygote's top level and the
+//   restored context see the same object; only the global property is left out of a context built
+//   for a snapshot.
 // * Every other such property is installed as a native data property whose getter and setter
 //   throw and record the use on the isolate: top-level code can neither use nor capture it, so
 //   instead of baking a wrong feature test in, the zygote fails and the Worker starts without a
@@ -187,7 +191,7 @@ constexpr RestoreTimeGlobal RESTORE_TIME_GLOBALS[] = {
   {RestoreTimeHolder::ERROR_CTOR, "stackTraceLimit"_kj, RestoreTimeKind::DATA_DEFAULT},
   {RestoreTimeHolder::GLOBAL, "WebAssembly"_kj, RestoreTimeKind::FAIL_CLOSED},
   // Genesis::InitializeExperimentalGlobal()
-  {RestoreTimeHolder::GLOBAL, "SharedArrayBuffer"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::GLOBAL, "SharedArrayBuffer"_kj, RestoreTimeKind::DATA_DEFAULT},
   {RestoreTimeHolder::ITERATOR_CTOR, "concat"_kj, RestoreTimeKind::FAIL_CLOSED},
   {RestoreTimeHolder::ITERATOR_CTOR, "zip"_kj, RestoreTimeKind::FAIL_CLOSED},
   {RestoreTimeHolder::ITERATOR_CTOR, "zipKeyed"_kj, RestoreTimeKind::FAIL_CLOSED},

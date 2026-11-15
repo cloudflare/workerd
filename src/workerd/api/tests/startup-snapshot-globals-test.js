@@ -229,6 +229,11 @@ async function test(ctrl, env) {
     'stl-delete'(r) {
       strictEqual(r.stackTraceLimit, null);
     },
+    // SharedArrayBuffer is the realm's constructor in the zygote too.
+    'sab-probe'(r) {
+      strictEqual(r.topLevel.sabType, 'function');
+      deepStrictEqual(r.types, NATIVE_TYPES);
+    },
     'wasm-delete'(r) {
       deepStrictEqual(r.types, {
         ...NATIVE_TYPES,
@@ -317,10 +322,6 @@ async function test(ctrl, env) {
     },
     'wasm-use'(r) {
       strictEqual(r.topLevel.valid, true);
-    },
-    'sab-probe'(r) {
-      strictEqual(r.topLevel.sabType, 'function');
-      deepStrictEqual(r.types, NATIVE_TYPES);
     },
     // Restoring the snapshot would replace the polyfill, and the Worker would then delete it.
     'temporal-polyfill'(r) {
