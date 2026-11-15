@@ -38,6 +38,13 @@ class Cache: public jsg::Object {
  public:
   explicit Cache(kj::Maybe<kj::String> cacheName);
 
+  // Its only state is its name; the requests it makes go through the I/O context of the request
+  // that makes them.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(
+        kj::refcounted<Cache>(cacheName.map([](const kj::String& name) { return kj::str(name); })));
+  }
+
   jsg::Unimplemented add(Request::Info request);
   jsg::Unimplemented addAll(kj::Array<Request::Info> requests);
 
@@ -98,9 +105,21 @@ class Cache: public jsg::Object {
 // =======================================================================================
 // CacheStorage
 
-class CacheStorage: public jsg::Object {
+class CacheStorage final: public jsg::Object {
  public:
   CacheStorage(jsg::Lock& js);
+
+  // Its only state is the default cache, which a restored instance takes back from the snapshot
+  // (snapshotRelink()) so that `caches.default` keeps its identity.
+  static constexpr bool jsgSnapshotStateless = true;
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    return kj::arr(snapshotReferenceTo(*default_));
+  }
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(restoredDefault, snapshotRelinkedRef<Cache>(restored[0])) {
+      default_ = kj::mv(restoredDefault);
+    }
+  }
 
   jsg::Promise<jsg::Ref<Cache>> open(jsg::Lock& js, kj::String cacheName);
 

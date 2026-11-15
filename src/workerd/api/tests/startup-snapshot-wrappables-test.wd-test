@@ -46,6 +46,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"runner\""),
+          (name = "caches-scheduler", service = "caches-scheduler"),
           (name = "searchparams-url-standard", service = "searchparams-url-standard"),
           (name = "control", service = "control"),
           (name = "state", service = "state"),
@@ -137,6 +138,18 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "MODE", json = "\"searchparams-url-standard\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "caches-scheduler",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"caches-scheduler\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),
