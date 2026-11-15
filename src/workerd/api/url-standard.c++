@@ -51,9 +51,24 @@ URL::~URL() noexcept(false) {
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> URL::snapshotClone() const {
-  // maybeSearchParams is deliberately not cloned: URLSearchParams holds a back-reference
-  // to *this* URL, which would dangle in the clone. getSearchParams() lazily recreates it.
+  // maybeSearchParams is not cloned: URLSearchParams holds a back-reference to *this* URL, which
+  // would dangle in the clone. One JavaScript got transfers on its own and is linked to the
+  // restored URL by snapshotRelink(); getSearchParams() lazily recreates any other.
   return ownAsWrappable(kj::refcounted<URL>(inner.clone()));
+}
+
+kj::Array<const jsg::Wrappable*> URL::snapshotReferences() const {
+  KJ_IF_SOME(searchParams, maybeSearchParams) {
+    return kj::arr(snapshotReferenceTo(*searchParams));
+  }
+  return nullptr;
+}
+
+void URL::snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) {
+  KJ_IF_SOME(searchParams, snapshotRelinkedRef<URLSearchParams>(restored[0])) {
+    searchParams->maybeUrl = *this;
+    maybeSearchParams = kj::mv(searchParams);
+  }
 }
 
 bool URL::canParse(jsg::USVString url, jsg::Optional<jsg::USVString> maybeBase) {
@@ -227,6 +242,13 @@ URLSearchParams::URLSearchParams(Initializer initializer): inner(initSearchParam
 URLSearchParams::URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery, URL& url)
     : inner(initFromSearch(maybeQuery)),
       maybeUrl(url) {}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> URLSearchParams::snapshotClone() const {
+  // Parsed back from its serialization, which keeps every name-value pair and their order.
+  jsg::UrlSearchParams copy;
+  copy.reset(inner.toStr().asPtr());
+  return ownAsWrappable(kj::refcounted<URLSearchParams>(kj::mv(copy)));
+}
 
 uint URLSearchParams::getSize() {
   return inner.size();

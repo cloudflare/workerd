@@ -232,10 +232,12 @@ switch (MODE) {
     );
     break;
   case 'searchparams':
-    // The C++ URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
-    // created lazily, but a reference the top level keeps makes it reachable. The TypeScript one
-    // (the TS_URL autogate) is a JavaScript object over its URL's LegacyUrlHandle, and travels.
+  case 'searchparams-url-standard':
+    // A URL's searchParams the top level keeps, which must still share the restored URL's query,
+    // and a standalone one with a repeated name. The TypeScript URL (the TS_URL autogate) is a
+    // JavaScript object over its URL's LegacyUrlHandle.
     params = url.searchParams;
+    kept = new URLSearchParams('a=1&b=2&a=3&c=x%20y+z');
     break;
   case 'cpp-streams-pending-pull':
     // A C++ stream whose pull() returns a promise the top level leaves pending: the controller
@@ -422,6 +424,13 @@ async function checks() {
       result.abortUnread = kept.signal.aborted;
       break;
     case 'searchparams':
+    case 'searchparams-url-standard':
+      result.standaloneParams =
+        kept.getAll('a').join() === '1,3' &&
+        kept.get('c') === 'x y z' &&
+        kept.toString() === 'a=1&b=2&a=3&c=x+y+z';
+      kept.append('d', '4');
+      result.standaloneParamsMutable = kept.get('d') === '4';
       result.params = params.get('query') === 'string';
       // The URL and its searchParams still share one query.
       params.set('x', '2');
@@ -632,12 +641,6 @@ async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
   // snapshot says whether the pipeline is on in this variant.
   const pipelineOn = unsafe.startedFromStartupSnapshot();
-  // Whether URL is the TypeScript implementation (the TS_URL autogate), which decides whether the
-  // searchparams case can be carried. User code cannot read an autogate, but unlike a JSG class,
-  // a TypeScript class's source text is not [native code].
-  const tsUrl = !Function.prototype.toString
-    .call(URL)
-    .includes('[native code]');
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
@@ -664,12 +667,12 @@ async function test(ctrl, env) {
     'streamed-decoder',
     'crypto-keys',
     'event-targets',
-    ...(tsUrl ? ['searchparams'] : []),
+    'searchparams',
+    'searchparams-url-standard',
   ];
   // Cases that fail the zygote: always plain Workers.
   const fallback = [
     'unclonable',
-    ...(tsUrl ? [] : ['searchparams']),
     'midstream-decoder',
     // C++ streams left awaiting a promise: a C++ continuation the snapshot cannot carry.
     'cpp-streams-pending-pull',

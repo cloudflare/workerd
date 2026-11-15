@@ -46,6 +46,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"runner\""),
+          (name = "searchparams-url-standard", service = "searchparams-url-standard"),
           (name = "control", service = "control"),
           (name = "state", service = "state"),
           (name = "state-url-standard", service = "state-url-standard"),
@@ -117,6 +118,25 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"abort-unread-aborted\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "searchparams-url-standard",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "url_standard",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"searchparams-url-standard\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

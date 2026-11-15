@@ -727,6 +727,21 @@ void URL::setSearch(kj::String value) {
   url->setSearch(kj::mv(value));
 }
 
+kj::Array<const jsg::Wrappable*> URL::snapshotReferences() const {
+  KJ_IF_SOME(usp, searchParams) {
+    return kj::arr(snapshotReferenceTo(*usp));
+  }
+  return nullptr;
+}
+
+void URL::snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) {
+  KJ_IF_SOME(usp, snapshotRelinkedRef<URLSearchParams>(restored[0])) {
+    // As getSearchParams() made it: over this URL's own LegacyUrl.
+    usp->url = url.addRef();
+    searchParams = kj::mv(usp);
+  }
+}
+
 jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
   KJ_IF_SOME(usp, searchParams) {
     return usp.addRef();
