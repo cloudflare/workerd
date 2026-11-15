@@ -439,17 +439,29 @@ pub struct Weak<R: Resource> {
 }
 
 impl<R: Resource> Weak<R> {
-    /// Returns `true` if the resource is still alive.
+    /// Returns `true` if the resource is still alive, i.e. if [`upgrade`](Self::upgrade) would
+    /// return `Some`.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
     #[inline]
     pub fn is_alive(&self, lock: &Lock<'_>) -> bool {
         self.assert_in_isolate_of(lock);
-        self.handle.strong_count() > 0
+        if self.handle.strong_count() == 0 {
+            return false;
+        }
+        self.wrappable.is_some_and(|wrappable| {
+            // SAFETY: the resource is alive, so its Wrappable is too (see `upgrade`).
+            !unsafe { v8::ffi::wrappable_is_condemned(wrappable.as_ref()) }
+        })
     }
 
     /// Upgrades to a strong `Rc<R>` if the resource is still alive.
+    ///
+    /// Returns `None` for a resource that a collection found unreachable and is sweeping, as
+    /// C++ `WeakRef::tryAddRef` does: its wrapper and the handles it traces are already dead,
+    /// though it is not dropped yet. Only code that runs during the sweep, such as the `Drop` of
+    /// another resource swept with it, can see one.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
@@ -464,6 +476,10 @@ impl<R: Resource> Weak<R> {
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
         let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        if wrappable.try_condemn() {
+            // The sweep still owns the Wrappable, so this drops only the references just taken.
+            return None;
+        }
         wrappable.add_strong_ref();
         Some(Rc::from_parts(handle, wrappable, state))
     }

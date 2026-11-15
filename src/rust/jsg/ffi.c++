@@ -1189,6 +1189,16 @@ void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
 }
 
+bool wrappable_is_condemned(const Wrappable& wrappable) {
+  return wrappable.isCondemned();
+}
+
+bool wrappable_try_condemn(Wrappable& wrappable) {
+  if (!wrappable.isCondemned()) return false;
+  wrappable.condemn();
+  return true;
+}
+
 void wrappable_remove_strong_ref(Wrappable& wrappable) {
   wrappable.removeStrongRef();
 }
