@@ -922,6 +922,29 @@ Holders zygoteHolders(v8::Isolate* isolate,
   };
 }
 
+// The value and attributes V8 gives a DATA_DEFAULT property.
+struct DataDefault {
+  v8::Local<v8::Value> value;
+  v8::PropertyAttribute attributes;
+};
+DataDefault dataDefaultFor(Lock& js, const RestoreTimeGlobal& entry) {
+  auto isolate = js.v8Isolate;
+  if (entry.name == "stackTraceLimit"_kj) {
+    // Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
+    return {v8::Integer::New(isolate, kDefaultStackTraceLimit), v8::None};
+  }
+  if (entry.name == "SharedArrayBuffer"_kj) {
+    // Genesis::InitializeGlobal_sharedarraybuffer(): the native context's constructor, which a
+    // new SharedArrayBuffer's prototype names before any JavaScript can replace it; writable,
+    // configurable, not enumerable.
+    auto prototype = v8::SharedArrayBuffer::New(isolate, 0)->GetPrototype().As<v8::Object>();
+    auto ctor = check(prototype->Get(js.v8Context(), v8StrIntern(isolate, "constructor"_kj)));
+    KJ_ASSERT(ctor->IsFunction());
+    return {ctor, v8::DontEnum};
+  }
+  KJ_FAIL_ASSERT("no default for this DATA_DEFAULT property", entry.name);
+}
+
 // The table entry a FAIL_CLOSED property's callback data names.
 const RestoreTimeGlobal& entryOf(v8::Local<v8::Data> data) {
   auto index = data.As<v8::Value>().As<v8::Integer>()->Value();
@@ -1078,11 +1101,12 @@ void IsolateBase::installRestoreTimeGlobalsForZygote(
       auto holder = getHolder(context, holders, entry.holder);
       auto name = v8StrIntern(isolate, entry.name);
       switch (entry.kind) {
-        case RestoreTimeKind::DATA_DEFAULT:
-          // As Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
-          KJ_REQUIRE(check(holder->CreateDataProperty(
-              context, name, v8::Integer::New(isolate, kDefaultStackTraceLimit))));
+        case RestoreTimeKind::DATA_DEFAULT: {
+          auto initial = dataDefaultFor(js, entry);
+          KJ_REQUIRE(
+              check(holder->DefineOwnProperty(context, name, initial.value, initial.attributes)));
           break;
+        }
         case RestoreTimeKind::TEMPORAL:
           if (!hasTemporal) break;
           [[fallthrough]];

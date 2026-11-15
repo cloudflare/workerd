@@ -54,7 +54,9 @@ all of these hold:
    in a serializer-enabled isolate and adds them when the context is restored
    (`Error.stackTraceLimit`, `WebAssembly`, `SharedArrayBuffer`, the Iterator helpers behind
    shipped flags, `Temporal` and `Date.prototype.toTemporalInstant`). The zygote installs
-   `Error.stackTraceLimit` as the data property V8 would, and the others as fail-closed accessors
+   `Error.stackTraceLimit` and `SharedArrayBuffer` as the data properties V8 would (the latter's
+   value is the realm's constructor, the same object the restored context gets), and the others
+   as fail-closed accessors
    that throw and record the use, so top-level code sees a normal context and cannot bake a wrong
    feature test in, even when it catches the error. The Temporal names are fail-closed only in a
    Worker with the `temporal` flag; without it they are absent, as in a normal context. See the
@@ -82,7 +84,8 @@ all of these hold:
      changed behind the record's back, and the live-object record below keys wrappers by a
      cppgc shim address that is unique only while nothing allocates;
    - `removeRestoreTimeGlobalsBeforeSnapshot()` records what the top level left of
-     `Error.stackTraceLimit`, and which fail-closed properties it deleted, and removes every
+     `Error.stackTraceLimit` and `SharedArrayBuffer`, and which fail-closed properties it deleted,
+     and removes every
      restore-time property, so that V8 can add them back on restore. A fail-closed property the
      top level used (whether or not it caught the error), a property it defined in their place,
      or a holder it made non-extensible, fails the zygote here;
@@ -167,7 +170,8 @@ long as the isolate does. In order:
    (`Wrappable::snapshotValues()`) those values (`snapshotRestoreValues()`), and
    `releaseSlotsWithChecks()` verifies every serialized slot was linked
    exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
-   `Error.stackTraceLimit` state and deletions on top of the defaults V8 just installed.
+   `Error.stackTraceLimit` and `SharedArrayBuffer` state and deletions on top of the defaults V8
+   just installed.
 4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
    pinned object instead of running the bootstrap scripts (`restoreBootstrapState()`), hands the
    fresh global scope the recorded `process`/`Buffer` state (`restoreSnapshotState()`),
@@ -203,7 +207,7 @@ long as the isolate does. In order:
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
-| `Error.stackTraceLimit` as the top level left it, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
+| `Error.stackTraceLimit` and `SharedArrayBuffer` as the top level left them, deleted fail-closed properties | pinned record, replayed after restore | `restoreTimeGlobalsIndex` |
 | `process`/`Buffer` values of the global scope | one pinned object                                          | `globalScopeStateIndex`           |
 | Materialized module-registry entries         | pinned handles, seeded into the new registry                | `moduleRecords`                   |
 | New module registry's resolutions            | pinned `v8::Module`s, rebuilt into the restored registry    | `newModuleRegistryRecords`        |
