@@ -82,6 +82,10 @@ constexpr size_t MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX = 1;
 //   each listener in C++ (EventTarget::restoreSnapshotListener()), without running JavaScript.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
+  // The C++ objects of the managed V8 objects the blob holds (Intl's ICU objects), which the
+  // blob refers to (v8::SnapshotCreator::TakeNativeState()); null if it holds none. Every
+  // isolate created from the blob shares them.
+  std::shared_ptr<void> v8NativeState;
   kj::Array<intptr_t> externalReferences;
   size_t externalReferenceCursor = 0;
 
