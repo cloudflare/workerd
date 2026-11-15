@@ -16,12 +16,12 @@ wd_rust_crate(
         ":ffi",
     ],
     proc_macro_deps = [
-        "@crates_vendor//:async-trait",
+        "@crates_vendor//async-trait",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:futures",
-        "@crates_vendor//:static_assertions",
+        "@crates_vendor//futures",
+        "@crates_vendor//static_assertions",
     ],
 )
 

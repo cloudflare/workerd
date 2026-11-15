@@ -59,7 +59,7 @@ wd_rust_crate(
         "//src/workerd/io:compatibility-date_capnp_rust",
         "//src/workerd/jsg:exception_metadata_capnp_rust",
         "//src/workerd/jsg:rtti_capnp_rust",
-        "@crates_vendor//:capnp",
+        "@crates_vendor//capnp",
     ],
 )
 
