@@ -1,8 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 # Two Workers whose top-level code writes to the console. `used` goes through the zygote and
-# starts from the snapshot; `fallback` aborts an AbortSignal at module scope, whose reason no
-# snapshot can carry, so it starts without one and evaluates its top level again. See
+# starts from the snapshot; `fallback` creates a FormData at module scope, which no snapshot
+# can carry, so it starts without one and evaluates its top level again. See
 # startup-snapshot-console-test.mjs for what the output must look like.
 
 const compatibilityDate :Text = "2025-09-01";
