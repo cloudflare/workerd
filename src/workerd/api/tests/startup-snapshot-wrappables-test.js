@@ -145,6 +145,10 @@ switch (MODE) {
     };
     break;
   }
+  case 'caches-scheduler':
+    // The global caches and scheduler, and the default cache, as the top level kept them.
+    kept = { caches, defaultCache: caches.default, scheduler };
+    break;
   case 'abort-unread-aborted':
     // Aborted before JavaScript got its signal: the signal has no wrapper of its own to carry
     // the abort.
@@ -420,6 +424,12 @@ async function checks() {
       }
       break;
     }
+    case 'caches-scheduler':
+      result.cachesIdentity =
+        kept.caches === caches && kept.scheduler === scheduler;
+      result.defaultCacheIdentity = kept.defaultCache === caches.default;
+      result.scheduler = typeof kept.scheduler.wait === 'function';
+      break;
     case 'abort-unread-aborted':
       result.abortUnread = kept.signal.aborted;
       break;
@@ -669,6 +679,7 @@ async function test(ctrl, env) {
     'event-targets',
     'searchparams',
     'searchparams-url-standard',
+    'caches-scheduler',
   ];
   // Cases that fail the zygote: always plain Workers.
   const fallback = [
