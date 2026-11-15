@@ -1120,9 +1120,7 @@ class IsolateBase {
 // Free-function form of IsolateBase::registerExternalReference() for call sites that only have a
 // v8::Isolate* and cannot include setup.h (e.g. ResourceTypeBuilder in resource.h, which
 // forward-declares this function).
-inline void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
-  IsolateBase::from(isolate).registerExternalReference(addr);
-}
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
 
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace
 // through it. The trace is built inside `scratch` without performing any allocation. This is

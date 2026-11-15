@@ -1660,4 +1660,8 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 }
 #endif
 
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
+  IsolateBase::from(isolate).registerExternalReference(addr);
+}
+
 }  // namespace workerd::jsg
