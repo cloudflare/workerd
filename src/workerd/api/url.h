@@ -190,12 +190,15 @@ class URL: public jsg::Object {
   // Treat as private -- needs to be public for js.alloc<T>()...
   explicit URL(kj::Rc<LegacyUrl> url);
 
-  // Deep copy for workers started from a snapshot: the LegacyUrl is plain C++ data.
-  // `searchParams` shares the same LegacyUrl and is deliberately dropped; it is lazily
-  // recreated on first access, same as URL::snapshotClone in url-standard.h.
+  // Deep copy for workers started from a snapshot: the LegacyUrl is plain C++ data. A
+  // `searchParams` JavaScript got transfers on its own and is handed back by snapshotRelink(),
+  // which makes it share this copy's LegacyUrl again; one it never got is recreated on first
+  // access, same as URL::snapshotClone in url-standard.h.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
     return ownAsWrappable(kj::refcounted<URL>(url->clone()));
   }
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override;
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override;
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize("inner", url->memorySize());
@@ -225,6 +228,11 @@ class URLSearchParams: public jsg::Object {
 
  public:
   explicit URLSearchParams(kj::Rc<LegacyUrl> url);
+
+  // A copy of its own LegacyUrl. A URL's searchParams is relinked to the URL's (URL::snapshotRelink()).
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<URLSearchParams>(url->clone()));
+  }
 
   using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>,
       kj::String,
@@ -287,6 +295,8 @@ class URLSearchParams: public jsg::Object {
  private:
   kj::Rc<LegacyUrl> url;
   kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+
+  friend class URL;
 
   static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->size()) {
