@@ -155,14 +155,17 @@ long as the isolate does. In order:
    and the consumer are the same binary.
 2. `newContext()` runs `prepareWrappableDeserializeMetadata()`: for each `liveWrappables` slot it
    builds the object the restored wrapper will be attached to (a stateless type's constructor,
-   or a second `snapshotClone()` of the stored clone) and pre-allocates its CppgcShim, since the
+   or a second `snapshotClone()` of the stored clone), initializes its `JSG_REFLECTION` members as
+   wrapping would, and pre-allocates its CppgcShim, since the
    deserializer callback runs under V8's `DisallowGarbageCollection` and may not allocate.
 3. `v8::Context::New()` deserializes the context. `deserializeInternalFields()` restores the
    wrapper-tag marker of every wrapper; `deserializeApiWrapperCallback()` links each wrapper to
    the shim pre-allocated for its payload's slot (`HeapTracer::linkRestoredWrapper()`). Then
    `relinkReferences()` hands each restored object that referred to other transferred objects
    (`Wrappable::snapshotReferences()`, such as `Crypto`'s `subtle`) their restored instances
-   (`snapshotRelink()`), `releaseSlotsWithChecks()` verifies every serialized slot was linked
+   (`snapshotRelink()`), `restoreValues()` hands each one whose original held JavaScript values
+   (`Wrappable::snapshotValues()`) those values (`snapshotRestoreValues()`), and
+   `releaseSlotsWithChecks()` verifies every serialized slot was linked
    exactly once, and `replayRestoreTimeGlobalsAfterLoad()` re-applies the recorded
    `Error.stackTraceLimit` state and deletions on top of the defaults V8 just installed.
 4. The `Worker::Script` constructor rebuilds the per-isolate bootstrap's C++ state from the
@@ -242,6 +245,13 @@ A type that holds a `jsg::Ref` to another transferred object whose identity Java
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
+
+A type whose state includes JavaScript values (`EventTarget`'s listeners, an `AbortSignal`'s
+reason) also overrides `Wrappable::snapshotValues()`, which returns them in the zygote, and
+`snapshotRestoreValues()`, which takes them back on the restored instance. The values are pinned
+into the context snapshot, so the restored instance holds the zygote's own objects. A subclass that
+inherits its base's `snapshotClone()` without overriding it is unclonable: its clone would be of
+the base type.
 
 `jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
 two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
