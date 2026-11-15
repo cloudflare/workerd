@@ -149,7 +149,9 @@ void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& ar
 void WrappableDeserializeMetadata::preallocateCppgcShims(Lock& js,
     HeapTracer& tracer,
     const SnapshotArtifact& artifact,
-    kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor) {
+    kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor,
+    kj::FunctionParam<kj::Maybe<SnapshotInitReflectionFn>(v8::CppHeapPointerTag)>
+        initReflectionFnFor) {
   isolate = js.v8Isolate;
   slots = kj::heapArray<Slot>(artifact.liveWrappables.size());
   auto instancesBuilder = kj::heapArrayBuilder<Wrappable*>(artifact.liveWrappables.size());
@@ -171,6 +173,10 @@ void WrappableDeserializeMetadata::preallocateCppgcShims(Lock& js,
         instance = KJ_ASSERT_NONNULL(clone->snapshotClone(), "snapshot clone failed to clone again",
             clone->jsgGetMemoryName());
       }
+    }
+    // As wrapping a new instance would.
+    KJ_IF_SOME(initReflection, initReflectionFnFor(stored.tag)) {
+      initReflection(js, *instance);
     }
     instancesBuilder.add(instance.get());
     slots[i].shim = tracer.allocateShimForSnapshotRestore(kj::mv(instance), stored.tag);

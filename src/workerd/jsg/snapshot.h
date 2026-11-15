@@ -259,12 +259,15 @@ struct WrappableDeserializeMetadata {
   // restored wrapper is attached to (a stateless type's fresh instance from `recreateFnFor(tag)`,
   // or a snapshotClone() of a stored clone) and pre-allocates the CppgcShim that will back it, so
   // that the deserializer callback only needs to link holder and shim. A dropped slot gets no
-  // shim. Throws only if a recreate function or a snapshotClone() does, which their contracts
-  // forbid: nothing on this path catches it and the Worker fails to start.
+  // shim. Each instance's property reflections are initialized by `initReflectionFnFor(tag)`, as
+  // wrapping a new instance would. Throws only if a recreate function or a snapshotClone() does,
+  // which their contracts forbid: nothing on this path catches it and the Worker fails to start.
   void preallocateCppgcShims(Lock& js,
       HeapTracer& tracer,
       const SnapshotArtifact& artifact,
-      kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor);
+      kj::FunctionParam<kj::Maybe<SnapshotRecreateFn>(v8::CppHeapPointerTag)> recreateFnFor,
+      kj::FunctionParam<kj::Maybe<SnapshotInitReflectionFn>(v8::CppHeapPointerTag)>
+          initReflectionFnFor);
 
   // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
   // original named references (Wrappable::snapshotReferences()) the linked instances of those.

@@ -784,6 +784,13 @@ class IsolateBase {
     return kj::none;
   }
 
+  // The function that initializes the JSG_REFLECTION members of an instance restored for the
+  // resource type tagged `tag`, or none if the type has none.
+  virtual kj::Maybe<SnapshotInitReflectionFn> snapshotInitReflectionFnFor(
+      v8::CppHeapPointerTag tag) const {
+    return kj::none;
+  }
+
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
@@ -1308,6 +1315,11 @@ class Isolate: public IsolateBase {
     return TypeWrapper::snapshotRecreateFnFor(tag);
   }
 
+  kj::Maybe<SnapshotInitReflectionFn> snapshotInitReflectionFnFor(
+      v8::CppHeapPointerTag tag) const override {
+    return TypeWrapper::snapshotInitReflectionFnFor(tag);
+  }
+
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
     if (!hasExtraWrappers) {
@@ -1523,8 +1535,11 @@ class Isolate: public IsolateBase {
       kj::Maybe<AbortOnGcInDeserializerCallbacks> abortOnGc;
       if (jsgIsolate.isStartingFromSnapshot()) {
         metadata.preallocateCppgcShims(*this, jsgIsolate.heapTracer,
-            jsgIsolate.finalizedSnapshotArtifact(),
-            [this](v8::CppHeapPointerTag tag) { return jsgIsolate.snapshotRecreateFnFor(tag); });
+            jsgIsolate.finalizedSnapshotArtifact(), [this](v8::CppHeapPointerTag tag) {
+          return jsgIsolate.snapshotRecreateFnFor(tag);
+        }, [this](v8::CppHeapPointerTag tag) {
+          return jsgIsolate.snapshotInitReflectionFnFor(tag);
+        });
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &metadata);
         options.apiWrapperDeserializer =
