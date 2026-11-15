@@ -216,6 +216,8 @@ class CompiledWorker final {
   mutable kj::Own<Impl> impl;
 };
 
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& factory, uint32_t configService);
 WorkerInfo worker_info(const CompiledWorker& worker);
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals);
 void worker_unlink(const CompiledWorker& worker);
@@ -454,6 +456,8 @@ kj::Own<kj::HttpHeaders> edit_headers(const kj::HttpHeaderTable& table,
 kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Response& inner,
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits);
+kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
+kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(

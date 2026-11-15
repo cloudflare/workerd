@@ -845,3 +845,136 @@ fn failed_bundle_watches_sources_and_missing_main() {
         [dir.join("index.ts"), dir.join("lib.ts")]
     );
 }
+
+#[test]
+fn assets_require_experimental() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "compatibility_date": "2026-01-01", "assets": { "directory": "public" } }"#,
+        ),
+        ("public/index.html", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("assets"), "{error}");
+    assert!(error.contains("--experimental"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("assets"), "{error}");
+}
+
+#[test]
+fn assets_route_through_the_assets_service() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+      "compatibility_flags": ["nodejs_compat"], "no_bundle": true,
+      "assets": { "directory": "public", "binding": "ASSETS",
+                  "not_found_handling": "404-page", "run_worker_first": ["/api/*"] } }"#;
+    let config = load_project(&[
+        ("wrangler.jsonc", wrangler),
+        ("index.js", ""),
+        ("public/_headers", "/*\n  X: y\n"),
+    ])
+    .unwrap();
+    let message = read(config);
+    let conf = message.get_root::<config::Reader>().unwrap();
+    let socket = conf.get_sockets().unwrap().get(0);
+    assert_eq!(
+        socket.get_service().unwrap().get_name().unwrap(),
+        "app-assets"
+    );
+    let services = conf.get_services().unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-assets"]);
+
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let b = w.unwrap().get_bindings().unwrap().get(0);
+    assert_eq!(b.get_name().unwrap(), "ASSETS");
+    let worker::binding::Which::Service(d) = b.which().unwrap() else {
+        panic!("not a service binding");
+    };
+    let d = d.unwrap();
+    assert_eq!(d.get_name().unwrap(), "app-assets");
+    assert_eq!(d.get_entrypoint().unwrap(), "AssetWorker");
+
+    let service::Which::Assets(assets) = services.get(1).which().unwrap() else {
+        panic!("not assets");
+    };
+    let assets = assets.unwrap();
+    assert!(
+        assets
+            .get_path()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with("public")
+    );
+    assert_eq!(assets.get_user_worker().unwrap().get_name().unwrap(), "app");
+    assert!(!assets.has_compatibility_date());
+    let config: Value =
+        serde_json::from_str(assets.get_config().unwrap().to_str().unwrap()).unwrap();
+    assert_eq!(
+        config,
+        serde_json::json!({
+            "html_handling": null,
+            "not_found_handling": "404-page",
+            "base_path": null,
+            "run_worker_first": ["/api/*"],
+            "headers": "/*\n  X: y\n",
+            "redirects": null,
+            "ignore": null,
+        })
+    );
+}
+
+#[test]
+fn assets_without_main_serve_only_files() {
+    let config = load_project(&[(
+        "wrangler.jsonc",
+        r#"{ "compatibility_date": "2026-01-01", "assets": { "directory": "." } }"#,
+    )])
+    .unwrap();
+    let message = read(config);
+    let conf = message.get_root::<config::Reader>().unwrap();
+    let services = conf.get_services().unwrap();
+    assert_eq!(services.len(), 1);
+    assert_eq!(services.get(0).get_name().unwrap(), "main-assets");
+    let service::Which::Assets(assets) = services.get(0).which().unwrap() else {
+        panic!("not assets");
+    };
+    let assets = assets.unwrap();
+    assert!(!assets.has_user_worker());
+    assert_eq!(assets.get_compatibility_date().unwrap(), "2026-01-01");
+
+    for (wrangler, expected) in [
+        (
+            r#"{ "compatibility_date": "2026-01-01" }"#,
+            "Missing entry-point",
+        ),
+        (
+            r#"{ "compatibility_date": "2026-01-01",
+                 "assets": { "directory": ".", "html_handling": "sometimes" } }"#,
+            "unknown variant `sometimes`",
+        ),
+        (
+            r#"{ "compatibility_date": "2026-01-01", "vars": { "A": 1 },
+                 "assets": { "directory": "." } }"#,
+            "vars needs a Worker, but there is no main",
+        ),
+        (
+            r#"{ "compatibility_date": "2026-01-01",
+                 "assets": { "directory": ".", "binding": "ASSETS" } }"#,
+            "assets.binding needs a Worker, but there is no main",
+        ),
+    ] {
+        let error = load_project(&[("wrangler.jsonc", wrangler)]).err().unwrap();
+        assert!(error.contains(expected), "{error}");
+    }
+}
