@@ -475,6 +475,7 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
           const SnapshotArtifact& artifact = *finalizedSnapshot.artifact;
           KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
           params.snapshot_blob = &artifact.blob;
+          params.snapshot_native_state = artifact.v8NativeState.get();
           params.external_references = artifact.externalReferences.begin();
         }
       }
@@ -799,6 +800,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   artifact.blob =
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.v8NativeState = getSnapshotCreator()->TakeNativeState();
 
   KJ_REQUIRE(*badTagFieldsCount == 0,
       "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
