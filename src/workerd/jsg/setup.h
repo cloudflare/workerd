@@ -1541,9 +1541,12 @@ class Isolate: public IsolateBase {
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         {
-          // snapshotRelink() runs with the new context entered.
-          v8::Context::Scope contextScope(context.getHandle(v8Isolate));
-          metadata.relinkReferences(jsgIsolate.finalizedSnapshotArtifact());
+          // snapshotRelink() and snapshotRestoreValues() run with the new context entered.
+          auto contextHandle = context.getHandle(v8Isolate);
+          v8::Context::Scope contextScope(contextHandle);
+          auto& artifact = jsgIsolate.finalizedSnapshotArtifact();
+          metadata.relinkReferences(artifact);
+          metadata.restoreValues(*this, contextHandle, artifact);
         }
         metadata.releaseSlotsWithChecks();
       }

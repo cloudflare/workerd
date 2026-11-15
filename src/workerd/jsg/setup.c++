@@ -716,8 +716,13 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // before CreateBlob() checks that no V8 handles are left; by the time the serializer callbacks
   // run, the shim pointer V8 reports is all that remains of a wrapper's native side. No
   // JavaScript runs from here until CreateBlob() returns: see step 3b.
-  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
-      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+  {
+    v8::HandleScope scope(ptr);
+    auto context = defaultContextHandle.Get(ptr);
+    v8::Context::Scope contextScope(context);
+    wrappablesMetadata->recordLiveWrappables(Lock::from(ptr), context, heapTracer, artifact,
+        [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+  }
 
   // 3. Destroy every live Wrappable.
   heapTracer.destroyLiveWrappableInstances();

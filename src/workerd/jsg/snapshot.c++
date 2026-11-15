@@ -5,6 +5,7 @@
 #include "snapshot.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/wrappable.h>
 
 #include <v8-isolate.h>
@@ -26,7 +27,9 @@ constexpr size_t internalFieldTagSizeInBytes = sizeof(Wrappable::WORKERD_WRAPPAB
 // destroyLiveWrappableInstances(). A snapshotClone() that throws propagates out of
 // IsolateBase::createSnapshotBlob() and fails the zygote; the Worker then starts without a
 // snapshot.
-void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
+void WrappablesSerializeMetadata::recordLiveWrappables(Lock& js,
+    v8::Local<v8::Context> context,
+    HeapTracer& tracer,
     SnapshotArtifact& artifact,
     kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless) {
   using LiveWrappable = SnapshotArtifact::LiveWrappable;
@@ -38,24 +41,33 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
     kj::Array<const Wrappable*> references;
   };
   kj::Vector<PendingReferences> pending;
-  tracer.forEachLiveWrapper([&artifact, &isStateless, &slotOf, &pending, this](Wrappable& wrappable,
-                                v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag) {
+  // The values each clone's original holds, pinned once every live wrapper is recorded: building
+  // the arrays allocates on the V8 heap, and a GC during the walk could sweep a shim it has yet
+  // to visit.
+  struct PendingValues {
+    size_t slot;
+    kj::Array<v8::Local<v8::Value>> values;
+  };
+  kj::Vector<PendingValues> pendingValues;
+  tracer.forEachLiveWrapper(
+      [&](Wrappable& wrappable, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag) {
     kj::Maybe<size_t> index;
     if (static_cast<uint16_t>(tag) != kContextGlobalWrappableTag) {
       LiveWrappable::Transfer transfer;
+      bool hasClone = false;
       if (isStateless(tag)) {
         transfer = LiveWrappable::Stateless{};
       } else KJ_IF_SOME(clone, wrappable.snapshotClone()) {
         // snapshotClone() is virtual, so a subclass that does not override it inherits its base's
         // clone. Attaching that to the subclass's restored wrapper would put a base instance under
-        // the subclass's tag and abort the first unwrap in the restored worker. Every
-        // JSG_RESOURCE_TYPE names its own type, so the names differ exactly when the clone is of
-        // another type.
-        KJ_REQUIRE(clone->jsgGetMemoryName() == wrappable.jsgGetMemoryName(),
-            "startup snapshot: snapshotClone() returned an instance of another type; a subclass "
-            "must override it",
-            wrappable.jsgGetMemoryName(), clone->jsgGetMemoryName());
-        transfer = kj::mv(clone);
+        // the subclass's tag and abort the first unwrap in the restored worker, so such a subclass
+        // is unclonable, like one with no clone at all: a base type (EventTarget) can implement
+        // snapshotClone() without every subclass having to. Every JSG_RESOURCE_TYPE names its own
+        // type, so the names differ exactly when the clone is of another type.
+        if (clone->jsgGetMemoryName() == wrappable.jsgGetMemoryName()) {
+          transfer = kj::mv(clone);
+          hasClone = true;
+        }
       }
       if (transfer != nullptr) {
         auto slot = artifact.liveWrappables.size();
@@ -65,6 +77,12 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
         auto references = wrappable.snapshotReferences();
         if (references.size() > 0) {
           pending.add(PendingReferences{slot, kj::mv(references)});
+        }
+        if (hasClone) {
+          auto values = wrappable.snapshotValues(js);
+          if (values.size() > 0) {
+            pendingValues.add(PendingValues{slot, kj::mv(values)});
+          }
         }
       }
     }
@@ -89,6 +107,11 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
       slots.add(slot);
     }
     artifact.liveWrappables[owner.slot].references = slots.finish();
+  }
+  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  for (auto& owner: pendingValues) {
+    auto array = v8::Array::New(js.v8Isolate, owner.values.begin(), owner.values.size());
+    artifact.liveWrappables[owner.slot].valuesIndex = isolateBase.pinIntoSnapshot(context, array);
   }
 }
 
@@ -168,6 +191,23 @@ void WrappableDeserializeMetadata::relinkReferences(const SnapshotArtifact& arti
       restored.add(target);
     }
     instances[i]->snapshotRelink(restored.finish());
+  }
+}
+
+void WrappableDeserializeMetadata::restoreValues(
+    Lock& js, v8::Local<v8::Context> context, const SnapshotArtifact& artifact) {
+  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  for (auto i: kj::indices(slots)) {
+    KJ_IF_SOME(index, artifact.liveWrappables[i].valuesIndex) {
+      // Taken out even for an unlinked slot, so that the snapshot heap does not keep them.
+      auto array = isolateBase.extractValueOnceFromSnapshot(context, index).As<v8::Array>();
+      if (!slots[i].linked) continue;
+      auto values = kj::heapArrayBuilder<v8::Local<v8::Value>>(array->Length());
+      for (uint32_t j = 0; j < array->Length(); ++j) {
+        values.add(check(array->Get(context, j)));
+      }
+      instances[i]->snapshotRestoreValues(js, values.finish());
+    }
   }
 }
 
