@@ -24,6 +24,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::io::Seek;
+use std::io::Write;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
@@ -303,7 +304,9 @@ impl Store for Local {
         let blob = self.path("blobs", &meta.blob);
         let body = match to {
             Some(to) => {
-                std::fs::copy(blob, to)?;
+                // Not `fs::copy`: its `copy_file_range` doesn't link against
+                // the arm64 Linux sysroot.
+                std::fs::write(to, std::fs::read(blob)?)?;
                 Vec::new()
             }
             None => std::fs::read(blob)?,
@@ -498,10 +501,7 @@ impl Store for Local {
         let mut out = std::fs::File::create(&temp)?;
         let mut digests = Vec::new();
         for (etag, _, blob) in &chosen {
-            std::io::copy(
-                &mut std::fs::File::open(self.path("blobs", blob))?,
-                &mut out,
-            )?;
+            out.write_all(&std::fs::read(self.path("blobs", blob))?)?;
             digests.extend(cluster::unhex(etag).unwrap_or_default());
         }
         drop(out);

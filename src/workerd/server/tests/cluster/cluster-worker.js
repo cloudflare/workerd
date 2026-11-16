@@ -201,8 +201,17 @@ async function kv(url, ns) {
 // &size=S and /r2/complete?key=K&upload=U&parts=JSON. Answers JSON.
 async function r2(url, bucket) {
   const q = Object.fromEntries(url.searchParams);
-  const bytes = (size, from = 0) =>
-    Uint8Array.from({ length: size }, (_, i) => (from + i) % 251);
+  // Built and compared with native copies and hashes: a loop over each
+  // byte of a multipart object holds the node's thread for seconds in
+  // debug builds, past its lease.
+  const bytes = (size, from = 0) => {
+    const out = new Uint8Array(size);
+    for (let i = 0; i < Math.min(size, 251); i++) out[i] = (from + i) % 251;
+    for (let n = 251; n < size; n *= 2) out.copyWithin(n, 0, n);
+    return out;
+  };
+  const digest = async (b) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', b)).join();
   switch (url.pathname) {
     case '/r2/put': {
       const put = await bucket.put(q.key, bytes(Number(q.size)));
@@ -216,7 +225,7 @@ async function r2(url, bucket) {
       if (got === null) return Response.json(null);
       const value = new Uint8Array(await got.arrayBuffer());
       const want = bytes(value.length, Number(q.offset ?? 0));
-      const right = value.every((b, i) => b === want[i]);
+      const right = (await digest(value)) === (await digest(want));
       return Response.json({ size: got.size, length: value.length, right });
     }
     case '/r2/list': {

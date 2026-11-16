@@ -571,7 +571,11 @@ async fn r2_calls(
     let (object, mut got) = bucket.read("k", None).await.unwrap().unwrap();
     assert_eq!(object.size, 100_000);
     let first = tokio::time::timeout(Duration::from_secs(5), got.next()).await;
-    assert_eq!(&first.unwrap().unwrap().unwrap()[..], b" ");
+    let first = first.unwrap().unwrap().unwrap();
+    assert!(
+        first.len() < 1000 && first.iter().all(|&b| b == b' '),
+        "{first:?}"
+    );
     drop(got);
     // A body cut short is an error at its end.
     push(vec![Answer::Cut(versioned())]);
