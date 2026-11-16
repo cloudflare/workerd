@@ -316,9 +316,10 @@ pub struct StackString {
     space: UnsafeCell<MaybeUninit<[usize; 8]>>,
 }
 
-// Safety: only `init` and the guard from `drop_guard` touch the storage, and their callers
-// answer for how the string they make and destroy is shared.
+// Safety: no safe method touches the storage, and `StackString` has no `Drop`. Access goes
+// through `init` and the guard from `drop_guard`, whose safety contracts make it exclusive.
 unsafe impl Sync for StackString {}
+impl core::panic::RefUnwindSafe for StackString {}
 
 impl StackString {
     /// Creates uninitialized storage for a C++ string. Dropping it destroys nothing: the guard
@@ -332,8 +333,10 @@ impl StackString {
     /// Initializes the storage and returns its pinned C++ string.
     ///
     /// # Safety
-    /// The storage must not hold a string yet, and the returned reference must not be used
-    /// once the string is destroyed.
+    /// `init` is called at most once on this storage, and until the string is destroyed nothing
+    /// accesses the storage except through the returned reference and the guard from
+    /// [`StackString::drop_guard`]. The returned reference must not be used once the string is
+    /// destroyed.
     #[expect(
         clippy::mut_from_ref,
         reason = "the storage is interior-mutable, and the caller answers for its uniqueness"
