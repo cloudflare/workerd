@@ -57,10 +57,72 @@ function transform(
   return printer.printFile(result.transformed[0]);
 }
 
+// The top-level names `source` declares.
+function declaredNames(source: string): Set<string> {
+  const file = ts.createSourceFile(
+    'names.ts',
+    source,
+    ts.ScriptTarget.ESNext,
+    false,
+    ts.ScriptKind.TS
+  );
+  const names = new Set<string>();
+  for (const statement of file.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) {
+          names.add(declaration.name.text);
+        }
+      }
+    } else if (
+      (ts.isClassDeclaration(statement) ||
+        ts.isInterfaceDeclaration(statement) ||
+        ts.isTypeAliasDeclaration(statement) ||
+        ts.isEnumDeclaration(statement) ||
+        ts.isFunctionDeclaration(statement) ||
+        ts.isModuleDeclaration(statement)) &&
+      statement.name !== undefined &&
+      ts.isIdentifier(statement.name)
+    ) {
+      names.add(statement.name.text);
+    }
+  }
+  return names;
+}
+
+// A name the bootstrap publishes has no other declaration to merge with: the
+// C++ or Rust class it replaces declares itself `never`, and no define
+// declares it.
+function checkPerIsolateNames(
+  perIsolate: string,
+  generated: string,
+  defines: string
+): void {
+  const generatedNames = declaredNames(generated);
+  const defineNames = declaredNames(defines);
+  for (const name of declaredNames(perIsolate)) {
+    if (generatedNames.has(name)) {
+      throw new Error(
+        `${name} is declared by both the per-isolate bootstrap and JSG RTTI; override the RTTI declaration to \`never\``
+      );
+    }
+    if (defineNames.has(name)) {
+      throw new Error(
+        `${name} is declared by both the per-isolate bootstrap and types/defines`
+      );
+    }
+  }
+}
+
+// `perIsolateDefinitions` are the declarations the per-isolate bootstrap
+// publishes (collectPerIsolateDeclarations()). They follow the generated
+// declarations, with the standard comments but none of the transforms that
+// adjust RTTI, and precede `extraDefinitions`, the defines.
 export function printDefinitions(
   root: StructureGroups,
   commentData: CommentsData,
-  extraDefinitions: string
+  extraDefinitions: string,
+  perIsolateDefinitions = ''
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
   const { nodes, included } = generateDefinitions(root);
@@ -88,9 +150,17 @@ export function printDefinitions(
     createAddOnMessageDeclarationTransformer(),
   ]);
 
+  const perIsolatePath = '/$virtual/per-isolate.ts';
+  const perIsolate = transform(
+    new SourcesMap([[perIsolatePath, perIsolateDefinitions]]),
+    perIsolatePath,
+    () => [createCommentsTransformer(commentData)]
+  );
+  checkPerIsolateNames(perIsolate, source, extraDefinitions);
+
   // TODO: enable this once we've figured out how not to expose internal modules
   // source += collectTypeScriptModules(root) + extraDefinitions;
-  source += extraDefinitions;
+  source += perIsolate + extraDefinitions;
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
