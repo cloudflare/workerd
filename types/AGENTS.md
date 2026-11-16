@@ -52,8 +52,8 @@ Types in this project come from four layers. Changes must be made in the correct
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest; their C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
-| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements but does not publish (`dom-exception.d.ts`, `url.d.ts`, `urlpattern.d.ts`, and `structured-clone.d.ts` for `structuredClone()`, a global scope method, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override) |
+| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest (`URL`, `URLSearchParams`, `URLPattern`); their C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
+| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for two APIs the bootstrap implements: `DOMException` (`dom-exception.d.ts`), whose published declaration takes forms its implementation cannot (see below), and `structuredClone()` (`structured-clone.d.ts`), a global scope method, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override |
 
 Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, the per-isolate implementation, or `defines/`).
 
@@ -81,7 +81,10 @@ emits is what users get:
   the class's, if the class has none.
 - **Member form is API.** A getter and a property are not interchangeable:
   a subclass overriding one as the other fails to compile (TS2610, TS2611),
-  so changing a member's form is a breaking type change.
+  so changing a member's form is a breaking type change. `DOMException` is
+  declared by its define because its declaration has `readonly` properties
+  and `stack` accessors, as the C++ class does, which the TypeScript class,
+  with prototype getters and no `stack`, cannot emit.
 - **A published declaration refers only to globals and published
   declarations.** The generator rejects a reference to another of the
   bootstrap's declarations, and a published name that RTTI or a define also

@@ -51,7 +51,7 @@ class URLPattern final: public jsg::Object {
     jsg::Optional<jsg::USVString> baseURL;
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
-    // Declared in types/defines/urlpattern.d.ts.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts.
     JSG_STRUCT_TS_OVERRIDE(type URLPatternInit = never);
 
     ada::url_pattern_init toAdaType() const;
@@ -67,7 +67,7 @@ class URLPattern final: public jsg::Object {
     jsg::JsRef<jsg::JsObject> groups;
 
     JSG_STRUCT(input, groups);
-    // Declared in types/defines/urlpattern.d.ts.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts.
     JSG_STRUCT_TS_OVERRIDE(type URLPatternComponentResult = never);
   };
 
@@ -81,7 +81,7 @@ class URLPattern final: public jsg::Object {
 #undef V
 
     JSG_STRUCT(inputs, protocol, username, password, hostname, port, pathname, search, hash);
-    // Declared in types/defines/urlpattern.d.ts.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts.
     JSG_STRUCT_TS_OVERRIDE(type URLPatternResult = never);
   };
 
@@ -89,7 +89,7 @@ class URLPattern final: public jsg::Object {
     jsg::Optional<bool> ignoreCase;
 
     JSG_STRUCT(ignoreCase);
-    // Declared in types/defines/urlpattern.d.ts.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts.
     JSG_STRUCT_TS_OVERRIDE(type URLPatternOptions = never);
 
     ada::url_pattern_options toAdaType() const;
@@ -123,8 +123,8 @@ class URLPattern final: public jsg::Object {
     JSG_METHOD(test);
     JSG_METHOD(exec);
 
-    // Declared in types/defines/urlpattern.d.ts, the same for both parsers. Also renames the
-    // references to this class from urlpatternURLPattern.
+    // Declared in src/per_isolate/urlpattern/urlpattern.ts, the same for both parsers. Also
+    // renames the references to this class from urlpatternURLPattern.
     JSG_TS_OVERRIDE(type URLPattern = never);
   }
 
