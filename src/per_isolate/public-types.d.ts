@@ -6,3 +6,12 @@
 //
 // A declaration listed here may refer only to globals and to declarations
 // listed here.
+
+export type { URL, URLSearchParams } from './url/url';
+export type {
+  URLPattern,
+  URLPatternInit,
+  URLPatternComponentResult,
+  URLPatternResult,
+  URLPatternOptions,
+} from './urlpattern/urlpattern';
