@@ -452,6 +452,9 @@ struct Service {
 
     assets @7 :AssetsService;
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
+    cache @8 :CacheDirectory;
+    # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
+    # directory on disk.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -500,6 +503,17 @@ struct AssetsService {
   compatibilityFlags @4 :List(Text);
   # Without a user Worker, the compatibility date and flags that select assets behavior, compiled
   # as a Worker's are.
+}
+
+struct CacheDirectory {
+  # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
+  # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
+  # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
+  # file in the directory, so entries survive a restart. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory, as in `DiskDirectory`: relative to the current directory, and if not
+  # specified, given on the command line with `--directory-path <service-name>=<path>`.
 }
 
 struct ServiceDesignator {

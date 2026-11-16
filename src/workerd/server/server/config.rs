@@ -412,7 +412,7 @@ impl Reporter {
 /// The CLI's substitutions for config values, by service or socket name.
 #[derive(Default)]
 pub struct Overrides {
-    /// `--directory-path`: a disk service's path.
+    /// `--directory-path`: a disk or cache service's path.
     pub directories: HashMap<String, String>,
     /// `--external-addr`: an external service's address.
     pub externals: HashMap<String, String>,
@@ -1832,6 +1832,20 @@ async fn make_service(
                 report,
                 crate::services::assets::make_assets_service(name, index, assets, factory, report)
                     .map(Service::Assets),
+            ))
+        }
+        Ok(service::Which::Cache(cache)) => {
+            let cache = cache.map_err(capnp_error)?;
+            let path = overrides
+                .directories
+                .get(name)
+                .filter(|_| !report.from_deployment(name))
+                .map(String::as_str);
+            Ok(invalid_on_error(
+                name,
+                report,
+                crate::services::cache::make_cache_service(name, cache, path, factory)
+                    .map(Service::Leaf),
             ))
         }
         // Made once the cluster is joined (`make_bucket_services`).

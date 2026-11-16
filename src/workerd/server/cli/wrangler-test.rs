@@ -80,7 +80,7 @@ fn hello() {
     );
     let config = message.get_root::<config::Reader>().unwrap();
     let services = config.get_services().unwrap();
-    assert_eq!(services.len(), 1);
+    assert_eq!(services.len(), 2);
     let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
         panic!("expected a worker service")
     };
@@ -128,7 +128,7 @@ fn durable_objects() {
     );
     let config = message.get_root::<config::Reader>().unwrap();
     let services = config.get_services().unwrap();
-    assert_eq!(services.len(), 2);
+    assert_eq!(services.len(), 3);
     let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
         panic!("expected a worker service")
     };
@@ -409,7 +409,16 @@ fn kv_namespaces_bind_the_kv_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-kv", "app-kv-storage", "app-kv-blobs"]);
+    assert_eq!(
+        names,
+        [
+            "app",
+            "app-kv",
+            "app-kv-storage",
+            "app-kv-blobs",
+            "app-cache"
+        ]
+    );
     let service::Which::Disk(disk) = services.get(3).which().unwrap() else {
         panic!("not a disk");
     };
@@ -457,6 +466,50 @@ fn kv_namespaces_bind_the_kv_worker() {
 }
 
 #[test]
+fn caches_are_served_by_the_cache_service() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let names = |experimental| {
+        let message = read(load(path.to_str().unwrap(), &process, experimental).unwrap());
+        let conf = message.get_root::<config::Reader>().unwrap();
+        let services = conf.get_services().unwrap();
+        let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+            panic!("not a worker");
+        };
+        let w = w.unwrap();
+        let outbound = w.has_cache_api_outbound().then(|| {
+            let d = w.get_cache_api_outbound().unwrap();
+            d.get_name().unwrap().to_str().unwrap().to_owned()
+        });
+        let names: Vec<_> = services
+            .iter()
+            .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+            .collect();
+        let path = services.iter().find_map(|s| match s.which().unwrap() {
+            service::Which::Cache(c) => Some(c.unwrap().get_path().unwrap().to_string().unwrap()),
+            _ => None,
+        });
+        (names, outbound, path)
+    };
+    assert_eq!(names(false), (vec!["app".to_owned()], None, None));
+    let (services, outbound, path) = names(true);
+    assert_eq!(services, ["app", "app-cache"]);
+    assert_eq!(outbound.as_deref(), Some("app-cache"));
+    assert_eq!(
+        fs::canonicalize(path.unwrap()).unwrap(),
+        fs::canonicalize(dir.join(".wrangler/state/workerd/cache")).unwrap()
+    );
+}
+
+#[test]
 fn d1_databases_bind_the_d1_worker() {
     let dir = project(&[
         (
@@ -488,7 +541,7 @@ fn d1_databases_bind_the_d1_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-d1", "app-d1-storage"]);
+    assert_eq!(names, ["app", "app-d1", "app-d1-storage", "app-cache"]);
     assert!(dir.join(".wrangler/state/workerd/d1").is_dir());
     let service::Which::Worker(w) = services.get(0).which().unwrap() else {
         panic!("not a worker");
@@ -595,7 +648,7 @@ fn triggers_crons_run_on_the_cron_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-cron", "app-cron-storage"]);
+    assert_eq!(names, ["app", "app-cron", "app-cron-storage", "app-cache"]);
     assert!(dir.join(".wrangler/state/workerd/cron").is_dir());
     let service::Which::Worker(w) = services.get(1).which().unwrap() else {
         panic!("not a worker");
@@ -638,7 +691,10 @@ fn queues_run_on_the_queues_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-queues", "app-queues-storage"]);
+    assert_eq!(
+        names,
+        ["app", "app-queues", "app-queues-storage", "app-cache"]
+    );
     let bindings_of = |i| {
         let service::Which::Worker(w) = services.get(i).which().unwrap() else {
             panic!("not a worker");
@@ -704,7 +760,10 @@ fn workflows_run_on_the_workflows_worker() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-workflows", "app-workflows-storage"]);
+    assert_eq!(
+        names,
+        ["app", "app-workflows", "app-workflows-storage", "app-cache"]
+    );
     let worker = |i| {
         let service::Which::Worker(w) = services.get(i).which().unwrap() else {
             panic!("not a worker");
@@ -966,7 +1025,7 @@ fn assets_route_through_the_assets_service() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-assets"]);
+    assert_eq!(names, ["app", "app-assets", "app-cache"]);
 
     let service::Which::Worker(w) = services.get(0).which().unwrap() else {
         panic!("not a worker");

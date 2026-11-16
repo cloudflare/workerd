@@ -376,7 +376,9 @@ fn report_unmatched_overrides(
         }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
-            Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
+            Ok(service::Which::Disk(_) | service::Which::Cache(_)) => {
+                directories.retain(|n| *n != name);
+            }
             _ => {}
         }
     }

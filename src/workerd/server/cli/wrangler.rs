@@ -35,9 +35,11 @@
 //! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`. `assets`, also
 //! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
-//! `AssetWorker` entrypoint. Without `main` it serves only the files. The server listens on
-//! `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if there are assets, else to the
-//! worker; `--socket-addr http=<addr>` overrides the address.
+//! `AssetWorker` entrypoint. Without `main` it serves only the files. Under `--experimental` the
+//! Worker's `caches` are served by the cache service `<name>-cache`, its entries in
+//! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured", as
+//! before. The server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if
+//! there are assets, else to the worker; `--socket-addr http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
@@ -428,9 +430,11 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
+    let cache = u32::from(workers == 1 && matches!(target, Target::Serve { experimental: true }));
     let mut services = conf.reborrow().init_services(
         workers
             + do_storage
+            + cache
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
@@ -455,6 +459,9 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             set_workflows_engine(worker.reborrow(), &name, &wrangler.workflows);
         }
         set_durable_objects(worker, &classes, &name, serving);
+    }
+    if cache == 1 {
+        cache_service(&mut services, &name, &storage)?;
     }
     if do_storage == 1 {
         disk_service(
@@ -735,6 +742,27 @@ fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     let mut disk = service.init_disk();
     disk.set_path(path.to_string_lossy());
     disk.set_writable(true);
+}
+
+/// The cache service `<name>-cache`, last in `services`, its entries under `storage`, as the Cache
+/// API backend of the Worker, `services[0]`.
+fn cache_service(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    name: &str,
+    storage: &Path,
+) -> Result<(), String> {
+    let dir = storage.join("cache");
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let cache = format!("{name}-cache");
+    let last = services.len() - 1;
+    let mut service = services.reborrow().get(last);
+    service.set_name(&cache);
+    service.init_cache().set_path(dir.to_string_lossy());
+    let Ok(service::Which::Worker(Ok(worker))) = services.reborrow().get(0).which() else {
+        unreachable!("services[0] is the Worker");
+    };
+    worker.init_cache_api_outbound().set_name(&cache);
+    Ok(())
 }
 
 /// The Worker `name` of the bundled module `/workerd/<module>`, with `flags`, its Durable Objects
