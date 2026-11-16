@@ -2026,9 +2026,16 @@ class StdioFile final: public File {
     if (microtaskScheduled) return;
     microtaskScheduled = true;
 
-    // Create ephemeral callback with weak reference for safety
-    auto callback = js.wrapSimpleFunction(js.v8Context(),
-        [weakThis = weakThis->addRef()](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
+    // The microtask holds a weak reference, so the file may be dropped before it runs.
+    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(
+        js.v8Isolate, &flushMicrotask, jsg::wrapOpaque(js.v8Context(), weakThis->addRef()));
+  }
+
+  static void flushMicrotask(v8::Local<v8::Data> data) {
+    auto& js = jsg::Lock::current();
+    jsg::liftKjMicrotask(js.v8Isolate, data, [&]() {
+      auto weakThis =
+          jsg::unwrapOpaque<kj::Own<WeakRef<StdioFile>>>(js.v8Isolate, data.As<v8::Value>());
       weakThis->runIfAlive([&](StdioFile& self) {
         self.microtaskScheduled = false;
 
@@ -2042,8 +2049,7 @@ class StdioFile final: public File {
           }
         }
       });
-    }, jsg::Once::YES);
-    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
+    });
   }
 };
 
