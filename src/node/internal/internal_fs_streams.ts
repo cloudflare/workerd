@@ -734,6 +734,7 @@ Object.setPrototypeOf(ReadStream.prototype, Readable.prototype);
 Object.setPrototypeOf(ReadStream, Readable);
 
 Object.defineProperty(ReadStream.prototype, 'autoClose', {
+  __proto__: null,
   get(this: ReadStream): boolean {
     validateThisInternalField(this, kFs, 'ReadStream');
     return this._readableState?.autoDestroy || false;
@@ -744,7 +745,7 @@ Object.defineProperty(ReadStream.prototype, 'autoClose', {
       this._readableState.autoDestroy = _val;
     }
   },
-});
+} as PropertyDescriptor);
 
 ReadStream.prototype.close = function (
   cb: ErrorOnlyCallback = (_err: unknown): void => {}
@@ -754,11 +755,12 @@ ReadStream.prototype.close = function (
 };
 
 Object.defineProperty(ReadStream.prototype, 'pending', {
+  __proto__: null,
   get(this: ReadStream): boolean {
     return this.fd === null;
   },
   configurable: true,
-});
+} as PropertyDescriptor);
 
 // ======================================================================================
 
@@ -1109,6 +1111,7 @@ Object.setPrototypeOf(WriteStream.prototype, Writable.prototype);
 Object.setPrototypeOf(WriteStream, Writable);
 
 Object.defineProperty(WriteStream.prototype, 'autoClose', {
+  __proto__: null,
   get(this: WriteStream): boolean {
     validateThisInternalField(this, kFs, 'WriteStream');
     return this._writableState?.autoDestroy || false;
@@ -1119,7 +1122,7 @@ Object.defineProperty(WriteStream.prototype, 'autoClose', {
       this._writableState.autoDestroy = val;
     }
   },
-});
+} as PropertyDescriptor);
 
 WriteStream.prototype.close = function (
   this: WriteStream,
@@ -1150,11 +1153,12 @@ WriteStream.prototype.close = function (
 WriteStream.prototype.destroySoon = WriteStream.prototype.end;
 
 Object.defineProperty(WriteStream.prototype, 'pending', {
+  __proto__: null,
   get(this: WriteStream): boolean {
     return this.fd === null;
   },
   configurable: true,
-});
+} as PropertyDescriptor);
 
 export function createReadStream(
   path: FilePath,

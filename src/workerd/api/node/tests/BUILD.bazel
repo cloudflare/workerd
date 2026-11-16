@@ -338,6 +338,12 @@ wd_test(
 )
 
 wd_test(
+    src = "process-stdio-prototype-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-stdio-prototype-test.js"],
+)
+
+wd_test(
     src = "process-nodejs-test.wd-test",
     data = ["process-nodejs-test.js"],
 )

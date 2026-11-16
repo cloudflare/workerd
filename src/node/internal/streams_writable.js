@@ -111,6 +111,7 @@ const kEnded = 1 << 30;
 // TODO(benjamingr) it is likely slower to do it this way than with free functions
 function makeBitMapDescriptor(bit) {
   return {
+    __proto__: null,
     // This is not a breaking change according to Node.js but better safe than sorry.
     // Ref: https://github.com/nodejs/node/pull/49834
     enumerable: !streamsNodejsV24Compat,
