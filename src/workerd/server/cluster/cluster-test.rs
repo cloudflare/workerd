@@ -2,8 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::rc::Rc;
+
+use cluster_logic::cache;
+use cluster_logic::lease::Timing;
 use futures::executor::block_on;
 
+use super::Cluster;
+use super::Setup;
 use super::check_conditional_writes;
 use crate::Bucket;
 use crate::Error;
@@ -70,5 +76,75 @@ fn probe_writes_of_unknown_outcome_are_settled_by_reading_the_probe() {
             panic!("a store whose versions never match passed");
         };
         assert!(message.starts_with("the bucket refused a conditional write whose condition held"));
+    });
+}
+
+fn cluster(bucket: &Bucket, node: &str) -> Rc<Cluster> {
+    let setup = Setup {
+        url: String::new(),
+        options: Vec::new(),
+        node: node.to_owned(),
+        address: format!("{node}:1"),
+        timing: Timing::DEFAULT,
+        key: Vec::new(),
+    };
+    Cluster::over(bucket.clone(), setup)
+}
+
+/// A lease round's renewal, sent at `at`, as `Cluster::maintain` counts it.
+async fn renew(cluster: &Cluster, at: u64) {
+    let until = cluster.renew(at).await.unwrap();
+    cluster.lease.borrow_mut().renewed(at, Ok(until));
+}
+
+/// `cache_view` is `cache-test.rs`'s `Sim::leases`.
+#[test]
+fn the_cache_view_is_the_simulations() {
+    block_on(async {
+        let t = cache::Timing::DEFAULT;
+        let bucket = Bucket::memory("");
+        let (a, b) = (cluster(&bucket, "a"), cluster(&bucket, "b"));
+        let none = (Vec::new(), false, false);
+        assert_eq!(a.cache_view(super::now_ms(), &t), none);
+        a.join().await.unwrap();
+        b.join().await.unwrap();
+        // Registered, renewed, never listed.
+        let r = a.registered.get().unwrap();
+        assert_eq!(a.cache_view(r, &t), none);
+        renew(&a, r).await;
+        renew(&b, r).await;
+        a.peers(r + 1).await.unwrap();
+        let both = vec!["a".to_owned(), "b".to_owned()];
+        assert_eq!(a.cache_view(r + 1, &t), (both.clone(), true, false));
+        // Stale from the listing's start, the lease renewed meanwhile.
+        renew(&a, r + 10_000).await;
+        let stale = r + 1 + t.stale_ms;
+        assert_eq!(a.cache_view(stale - 1, &t), (both.clone(), true, false));
+        assert_eq!(a.cache_view(stale, &t), (both.clone(), false, false));
+        // Active `join_ms` after the registration answered.
+        renew(&a, r + 15_000).await;
+        renew(&b, r + 15_000).await;
+        a.peers(r + 20_000).await.unwrap();
+        let joined = r + t.join_ms;
+        assert_eq!(a.cache_view(joined - 1, &t), (both.clone(), true, false));
+        assert_eq!(a.cache_view(joined, &t), (both.clone(), true, true));
+        // Fenced a copy's lease before the lease's own margin: 20 s from
+        // the renewal's send, less 4 s of skew and 1.04 s.
+        a.peers(r + 28_000).await.unwrap();
+        let fenced = r + 15_000 + 20_000 - 4_000 - t.lease_wait_ms();
+        assert_eq!(a.cache_view(fenced - 1, &t), (both.clone(), true, true));
+        assert_eq!(a.cache_view(fenced, &t), (both.clone(), false, false));
+        // A listing has the live records: b's expired.
+        renew(&a, r + 30_000).await;
+        a.peers(r + 36_000).await.unwrap();
+        let alone = vec!["a".to_owned()];
+        assert_eq!(a.cache_view(r + 36_000, &t), (alone.clone(), true, true));
+        // An older listing that ends later is not kept.
+        a.peers(r + 30_000).await.unwrap();
+        assert_eq!(a.cache_view(r + 36_000, &t), (alone.clone(), true, true));
+        a.start_draining();
+        assert_eq!(a.cache_view(r + 36_000, &t), (alone.clone(), true, false));
+        a.deregister().await.unwrap();
+        assert_eq!(a.cache_view(r + 36_000, &t), (alone, false, false));
     });
 }

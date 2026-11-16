@@ -19,10 +19,10 @@
 //! match answers one or several byte ranges, and `If-None-Match` or `If-Modified-Since` with a
 //! 304. An expired entry is a miss, and is removed when read.
 //!
-//! What entries mean is decided here; where they live is a [`Store`]'s, of which a
-//! [`Directory`] is the only one. An entry is a record, a file: a line with its expiry in ms
-//! since the epoch, then the response as HTTP/1.1, its body as it was put, still
-//! content-encoded. Its key is `<sha256 of namespace \0 key, lowercase hex>`. A put writes a
+//! What entries mean is decided here; where they live is a [`Store`]'s: a [`Directory`], or
+//! with `Config.cluster` the nodes' one cache (`cache-cluster.rs`). An entry is a record, a
+//! file: a line with its expiry in ms since the epoch, then the response as HTTP/1.1, its body
+//! as it was put, still content-encoded. Its key is `<sha256 of namespace \0 key, lowercase hex>`. A put writes a
 //! draft and has the store put it once the whole body was read and matched its
 //! `Content-Length`, so an entry is never partial. Disk I/O is synchronous, as in `disk`.
 
@@ -60,11 +60,13 @@ use worker::ScheduledResult;
 use workerd_capnp::cache_directory;
 
 use crate::Result;
+use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::channels::PendingToken;
 use crate::channels::RequestMetadata;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
+use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::text;
 use crate::services::cf_blob_json;
@@ -365,6 +367,21 @@ trait Store {
 
     /// Drops a record of `key` found expired or corrupt. Not a write: what any reader may do.
     async fn expire(&self, key: &str) -> Result<()>;
+
+    /// A message from cluster node `from`, a request that names it as `forwardedBy`.
+    async fn message(
+        &self,
+        from: &str,
+        _method: Method,
+        _url: &[u8],
+        _headers: HeadersRef<'_>,
+        _body: Pin<&mut AsyncInputStream>,
+        _response: ServiceResponse<'_>,
+    ) -> Result<()> {
+        Err(kj::failed!(
+            "a cache outside a cluster got a message from {from}"
+        ))
+    }
 }
 
 /// The records in a directory, each the file named for its key.
@@ -420,7 +437,8 @@ struct Cache {
     store: Box<dyn Store>,
 }
 
-/// A `cache` service: the Cache API's backend, its entries in a directory.
+/// A `cache` service: the Cache API's backend, its entries in a directory, or shared by the
+/// nodes of a cluster.
 pub struct CacheService(Rc<Cache>);
 
 /// `path_override` is the CLI's `--directory-path` for this service.
@@ -429,6 +447,7 @@ pub fn make_cache_service(
     conf: cache_directory::Reader<'_>,
     path_override: Option<&str>,
     factory: &Rc<Factory>,
+    cluster: Option<&Rc<ClusterNode>>,
 ) -> Result<Rc<dyn Channel>> {
     if !factory.experimental() {
         return Err(kj::failed!(
@@ -454,15 +473,20 @@ pub fn make_cache_service(
             "Directory of cache \"{name}\" not found: {path}"
         ));
     }
-    let (factory, store) = (Rc::clone(factory), Box::new(Directory(root)));
+    let store: Box<dyn Store> = match cluster {
+        Some(node) => Box::new(clustered::store(name, &root, node, factory)?),
+        None => Box::new(Directory(root)),
+    };
+    let factory = Rc::clone(factory);
     Ok(Rc::new(CacheService(Rc::new(Cache { factory, store }))))
 }
 
 impl Channel for CacheService {
     fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
         let key = cf_blob_json(&metadata).and_then(|cf| cache_key(&cf));
+        let from = ffi::request_metadata_forwarded_by(&metadata).into();
         let cache = Rc::clone(&self.0);
-        Ok(CacheRequest { cache, key }.into_kj())
+        Ok(CacheRequest { cache, key, from }.into_kj())
     }
 
     fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
@@ -532,10 +556,12 @@ async fn drain(mut body: Pin<&mut AsyncInputStream>) -> Result<()> {
     Ok(())
 }
 
-/// One request to a [`CacheService`], for the entry of `key`, else of its URL.
+/// One request to a [`CacheService`], for the entry of `key`, else of its URL, or a message
+/// from cluster node `from`.
 struct CacheRequest {
     cache: Rc<Cache>,
     key: Option<String>,
+    from: Option<String>,
 }
 
 impl CacheRequest {
@@ -774,6 +800,12 @@ impl Service for CacheRequest {
         body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
+        if let Some(from) = &self.from {
+            let store = &self.cache.store;
+            return store
+                .message(from, method, url, headers, body, response)
+                .await;
+        }
         let namespace = headers
             .get_by_name("CF-Cache-Namespace")
             .unwrap_or_default();
@@ -808,6 +840,9 @@ impl Interface for CacheRequest {
         Err(unsupported("Cache services"))
     }
 }
+
+#[path = "cache-cluster.rs"]
+mod clustered;
 
 #[cfg(test)]
 #[path = "cache-test.rs"]

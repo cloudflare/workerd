@@ -53,7 +53,10 @@ pub use crate::tasks::task_run;
 pub mod ffi {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
+        type AsyncInputStream = kj::io::ffi::AsyncInputStream;
         type AsyncIoStream = kj::io::ffi::AsyncIoStream;
+        type AsyncOutputStream = kj::io::ffi::AsyncOutputStream;
+        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
@@ -145,6 +148,14 @@ pub mod ffi {
     struct FacetStartInfo {
         id: KjOwn<ActorIdHandle>,
         actor_class: Box<ActorClassChannel>,
+    }
+
+    /// A response to an `HttpCall`: its status, the value of the header asked for (empty if it
+    /// has none), and its body.
+    struct HttpAnswer {
+        status: u32,
+        header: String,
+        body: KjOwn<AsyncInputStream>,
     }
 
     /// A config error, or else a warning, as the in-process server (in_process.rs) reports it.
@@ -667,6 +678,10 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> KjOwn<RpcClient>;
+        /// A service on a cluster peer, by `WorkerdDebugPort.getEntrypoint` over `session`: a
+        /// worker's default entrypoint, or a service that is not a worker. Pipelined, and it
+        /// keeps the session alive, as `rpc_client_debug_actor`.
+        fn rpc_client_debug_entrypoint(session: &RpcClient, service: &str) -> KjOwn<RpcClient>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -694,6 +709,21 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             hook: Box<MovedHook>,
         ) -> KjOwn<WorkerInterface>;
+        /// An HTTP request made from Rust: its body is written, then its response awaited.
+        type HttpCall;
+        /// Starts `method url` with `headers` and a body of `length` bytes on `interface`.
+        fn http_call(
+            interface: KjOwn<WorkerInterface>,
+            method: HttpMethod,
+            url: &str,
+            headers: &HttpHeaders,
+            length: u64,
+        ) -> KjOwn<HttpCall>;
+        /// The request's body, to write all `length` bytes to.
+        fn http_call_body<'a>(call: Pin<&'a mut HttpCall>) -> Pin<&'a mut AsyncOutputStream>;
+        /// Ends the request's body and awaits the response, with the value of `header`, a
+        /// name as sent (in lowercase, as `http::HeaderMap` sends it).
+        async fn http_call_response(call: KjOwn<HttpCall>, header: &str) -> Result<HttpAnswer>;
 
         /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
         /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.

@@ -5,6 +5,7 @@
 //! One instance's view of the cluster: what the server calls. Runs on the
 //! server's loop thread, inside its tokio `current_thread` runtime.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -13,6 +14,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use cluster_logic::cache;
 use cluster_logic::lease;
 use cluster_logic::lease::Lease;
 use cluster_logic::lease::Step;
@@ -87,6 +89,8 @@ pub struct Cluster {
     bucket: Bucket,
     key: Vec<u8>,
     lease: RefCell<Lease>,
+    /// When the registration, `join`'s renewal, answered.
+    registered: Cell<Option<u64>>,
     alarms: Index,
 }
 
@@ -118,6 +122,7 @@ impl Cluster {
             claims: RefCell::new(HashMap::new()),
             key: setup.key,
             lease: RefCell::new(Lease::new(setup.timing)),
+            registered: Cell::new(None),
         })
     }
 
@@ -152,6 +157,13 @@ impl Cluster {
     /// Live peers' records, as the bucket lists them now.
     pub async fn peers(&self, now_ms: u64) -> Result<Vec<crate::NodeRecord>> {
         self.registry.peers(now_ms).await
+    }
+
+    /// Where `node` listens, while the listing has it live.
+    pub fn address(&self, node: &str, now_ms: u64) -> Option<String> {
+        self.registry
+            .listed_live(node, now_ms)
+            .then(|| self.registry.address(node))?
     }
 
     pub async fn acquire_or_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<Route> {
@@ -496,7 +508,9 @@ impl Cluster {
         let probe = format!("nodes/{}.probe", self.node());
         check_conditional_writes(&self.bucket, &probe).await?;
         let until = self.renew(now_ms()).await?;
-        self.lease.borrow_mut().renewed(now_ms(), Ok(until));
+        let now = now_ms();
+        self.lease.borrow_mut().renewed(now, Ok(until));
+        self.registered.set(Some(now));
         Ok(())
     }
 
@@ -504,6 +518,23 @@ impl Cluster {
     /// while it does.
     pub fn lease_holds(&self) -> bool {
         self.lease.borrow().holds(now_ms())
+    }
+
+    /// `cache::Cache::set`'s view, `fresh` and `active` at `now_ms`, as
+    /// `cache-test.rs`'s `Sim::leases` makes them: the nodes of the latest
+    /// listing, fresh from when it started; the lease, from when its renewal
+    /// was sent; the join, from when the registration answered. Peers judge
+    /// the lease by clocks up to `safety_ms` ahead, so the cache stops one
+    /// copy's lease before that. A node that drains is not active, and one
+    /// that left not fresh.
+    pub fn cache_view(&self, now_ms: u64, timing: &cache::Timing) -> (Vec<String>, bool, bool) {
+        let (listed, view) = self.registry.listing().unzip();
+        let lease = self.lease.borrow();
+        let fenced = lease.left || !lease.holds(now_ms + timing.lease_wait_ms());
+        let fresh = !fenced && timing.fresh(now_ms, listed);
+        let joined = timing.active(now_ms, listed, self.registered.get());
+        let active = fresh && joined && !self.is_draining();
+        (view.unwrap_or_default(), fresh, active)
     }
 }
 

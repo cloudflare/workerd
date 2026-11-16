@@ -304,6 +304,11 @@ impl Temporary {
         Ok((temp, file))
     }
 
+    /// This file, opened to read.
+    pub fn open(&self) -> Result<std::fs::File> {
+        std::fs::File::open(&self.0).map_err(|e| io_kj_error(&e))
+    }
+
     /// Closes `file`, this file's handle, and renames this file to `path`.
     pub fn rename(self, file: std::fs::File, path: &Path) -> Result<()> {
         drop(file);

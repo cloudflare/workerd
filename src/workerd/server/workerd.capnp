@@ -509,7 +509,10 @@ struct CacheDirectory {
   # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
   # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
   # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
-  # file in the directory, so entries survive a restart. Experimental: requires `--experimental`.
+  # file in the directory, so entries survive a restart. With `Config.cluster`, the instances
+  # share one cache instead, which every instance must name the same: an entry lives on one
+  # instance, and the directory holds this instance's in `cluster-<instance>/`, emptied as it
+  # starts. Experimental: requires `--experimental`.
 
   path @0 :Text;
   # The directory, as in `DiskDirectory`: relative to the current directory, and if not

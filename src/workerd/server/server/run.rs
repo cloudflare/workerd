@@ -467,14 +467,18 @@ pub async fn run(
                     }
                     Either::Right((stopped, _)) => stopped,
                 };
-                // Released before the lease goes, so nothing is served after it. Until the
-                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again. With
-                // objects still running, which stopping very many can leave, it stays a member:
-                // peers take over every object it did not hand off once its lease expires, after
-                // this process exited.
+                // Released before the lease goes, so nothing is served after it, and gone no
+                // sooner than `leave`, so no cache copy outlives it either. Until the
+                // deregistration lands (milliseconds after that, or the lease's 20 s if it fails),
+                // a peer that reads this node's record still finds it live and routes here again.
+                // With objects still running, which stopping very many can leave, it stays a
+                // member: peers take over every object it did not hand off once its lease
+                // expires, after this process exited.
                 if stopped {
-                    let deregister = node.cluster.deregister();
+                    let deregister = async {
+                        tokio::time::sleep_until(deadlines.leave).await;
+                        node.cluster.deregister().await
+                    };
                     match tokio::time::timeout_at(deadlines.connections, deregister).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),

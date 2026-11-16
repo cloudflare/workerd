@@ -1498,7 +1498,8 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
-        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
+        let node = cluster.as_ref();
+        cluster_services(config, &mut services, node, overrides, &factory, &report)?;
 
         let server = Rc::new(Self {
             report,
@@ -1834,22 +1835,10 @@ async fn make_service(
                     .map(Service::Assets),
             ))
         }
-        Ok(service::Which::Cache(cache)) => {
-            let cache = cache.map_err(capnp_error)?;
-            let path = overrides
-                .directories
-                .get(name)
-                .filter(|_| !report.from_deployment(name))
-                .map(String::as_str);
-            Ok(invalid_on_error(
-                name,
-                report,
-                crate::services::cache::make_cache_service(name, cache, path, factory)
-                    .map(Service::Leaf),
-            ))
+        // Made once the cluster, if any, is joined (`cluster_services`).
+        Ok(service::Which::Bucket(_) | service::Which::Cache(_)) => {
+            Ok(Service::Leaf(Rc::new(InvalidConfigChannel)))
         }
-        // Made once the cluster is joined (`make_bucket_services`).
-        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
         Err(capnp::NotInSchema(_)) => {
             report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -2008,20 +1997,37 @@ impl Server {
 #[path = "config-test.rs"]
 mod tests;
 
-/// Replaces each `bucket` service's stand-in with the directory of the
-/// cluster's bucket it names.
-fn make_bucket_services(
+/// Replaces the stand-ins of the services made once the cluster, if any, is joined: each `bucket`
+/// with the directory of the cluster's bucket it names, and each `cache` with one whose entries
+/// the cluster's nodes share, else in its directory.
+fn cluster_services(
     config: config::Reader<'_>,
     services: &mut Services,
     cluster: Option<&Rc<ClusterNode>>,
+    overrides: &Overrides,
     factory: &Rc<Factory>,
     report: &Reporter,
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
-        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
-            continue;
-        };
         let name = text(conf.get_name())?;
+        let bucket = match conf.which() {
+            Ok(service::Which::Bucket(bucket)) => bucket,
+            Ok(service::Which::Cache(cache)) => {
+                let cache = cache.map_err(capnp_error)?;
+                let path = overrides
+                    .directories
+                    .get(&name)
+                    .filter(|_| !report.from_deployment(&name))
+                    .map(String::as_str);
+                let made = crate::services::cache::make_cache_service(
+                    &name, cache, path, factory, cluster,
+                );
+                let service = invalid_on_error(&name, report, made.map(Service::Leaf));
+                services.0.insert(name, service);
+                continue;
+            }
+            _ => continue,
+        };
         let Some(node) = cluster else {
             report.service_error(&name, "A bucket service requires Config.cluster.");
             continue;
