@@ -13,7 +13,9 @@
 
 const {
   ArrayPrototypePush,
+  FunctionPrototypeCall,
   ObjectDefineProperty,
+  SymbolIterator,
   TypeError: TypeErrorCtor,
 } = primordials;
 
@@ -39,6 +41,10 @@ const BAD_TRANSFER =
 const BAD_TRANSFER_ITEM =
   "Incorrect type for an element of the 'transfer' field on " +
   "'StructuredCloneOptions': the provided value is not of type 'object'.";
+// After V8's texts for the same failures in for...of.
+const ITERATOR_NOT_OBJECT =
+  'Result of the Symbol.iterator method is not an object';
+const RESULT_NOT_OBJECT = 'Iterator result is not an object';
 
 function isObject(value: unknown): value is object {
   return (
@@ -48,23 +54,41 @@ function isObject(value: unknown): value is object {
 
 // WebIDL's conversion to sequence<object>: any iterable, consumed through its
 // own iterator (the user's, by contract), into an array of our own that the
-// native side can read without running user code.
+// native side can read without running user code. Spelled out rather than
+// written as for...of, which differs from WebIDL's "create a sequence from an
+// iterable" in two observable ways: it reads [Symbol.iterator] a second time
+// after the check, and it closes the iterator when an element is rejected.
 function toObjectSequence(value: unknown): object[] {
   if (!isObject(value)) {
     throw new TypeErrorCtor(BAD_TRANSFER);
   }
-  const iterable = value as { [Symbol.iterator]?: unknown };
-  if (typeof iterable[primordials.SymbolIterator] !== 'function') {
+  const method: unknown = (value as Record<symbol, unknown>)[SymbolIterator];
+  if (typeof method !== 'function') {
     throw new TypeErrorCtor(BAD_TRANSFER);
   }
+  const iterator: unknown = FunctionPrototypeCall(method, value);
+  if (!isObject(iterator)) {
+    throw new TypeErrorCtor(ITERATOR_NOT_OBJECT);
+  }
+  const next = (iterator as { next?: unknown }).next;
   const list: object[] = [];
-  for (const item of iterable as Iterable<unknown>) {
+  for (;;) {
+    const result: unknown = FunctionPrototypeCall(
+      next as (this: unknown) => unknown,
+      iterator
+    );
+    if (!isObject(result)) {
+      throw new TypeErrorCtor(RESULT_NOT_OBJECT);
+    }
+    if ((result as { done?: unknown }).done) {
+      return list;
+    }
+    const item = (result as { value?: unknown }).value;
     if (!isObject(item)) {
       throw new TypeErrorCtor(BAD_TRANSFER_ITEM);
     }
     ArrayPrototypePush(list, item);
   }
-  return list;
 }
 
 // A method, so the function has no `prototype` and is not a constructor, like

@@ -39,6 +39,11 @@ export {
   nonTransferableObjectsRejected,
   arrayIteratorUse,
   elementGetters,
+  iteratorMethodReadOnce,
+  nextReadOnce,
+  iteratorNotClosedOnRejectedElement,
+  nonObjectIteratorRejected,
+  nonObjectIteratorResultRejected,
 } from 'transfer-conversion';
 
 export {

@@ -31,7 +31,7 @@ follows JSG's conversions.
 | --- | --- | --- | --- | --- |
 | 1 | `structuredClone.length` | 0 | 1 (WebIDL: the optional options argument does not count) | `functionShape` |
 | 2 | Source text | `function structuredClone() { [native code] }` | the method's source | `sourceText` |
-| 3 | Values accepted as `transfer` | Arrays only, so not Sets, iterators, or Proxies of arrays | any iterable (WebIDL `sequence<object>`), including those three | `iterablesOtherThanArrays` |
+| 3 | Values accepted as `transfer` | Arrays only, so not Sets, iterators, or Proxies of arrays | any iterable (WebIDL `sequence<object>`), including those three, read as WebIDL reads one: `[Symbol.iterator]` and `next` once each, and the iterator not closed when an element is rejected | `iterablesOtherThanArrays`, `iteratorMethodReadOnce`, `nextReadOnce`, `iteratorNotClosedOnRejectedElement`, `nonObjectIteratorRejected`, `nonObjectIteratorResultRejected` |
 | 4 | Message when `transfer` is rejected (primitives, `null`, non-iterable objects; a TypeError in both) | `... is not of type 'Array'.` | `... is not of type 'sequence<object>'.` | `nonObjectMemberRejected`, `nonIterableObjectRejected` |
 | 5 | A non-object `transfer` element, including an array hole (a TypeError in both) | reaches the serializer: `Object is not transferable` | rejected by the conversion: `... an element of the 'transfer' field ... not of type 'object'.` | `nonObjectElementsRejected` |
 | 6 | An array's `[Symbol.iterator]` | not called; elements read by index | called once (WebIDL iterates the sequence, user iterator by contract) | `arrayIteratorUse` |

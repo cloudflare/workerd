@@ -144,3 +144,125 @@ export const elementGetters = {
     strictEqual(reads, 1);
   },
 };
+
+// The remaining tests use iterables that are not Arrays, so C++ rejects each
+// one as a whole, without reading [Symbol.iterator] (ledger #3). They pin how
+// TypeScript reads one, which follows WebIDL's "create a sequence from an
+// iterable" rather than for...of.
+
+function rejectedByCpp(transfer, buffer) {
+  throws(() => structuredClone(buffer, { transfer }), {
+    name: 'TypeError',
+    message: CPP_BAD_TRANSFER,
+  });
+  strictEqual(buffer.byteLength, 4);
+}
+
+export const iteratorMethodReadOnce = {
+  test() {
+    const buffer = new ArrayBuffer(4);
+    let reads = 0;
+    const transfer = {
+      get [Symbol.iterator]() {
+        reads++;
+        return () => [buffer].values();
+      },
+    };
+    if (usingTsImpl) {
+      deepStrictEqual(transferred(transfer, buffer), [0, 4]);
+      strictEqual(reads, 1);
+    } else {
+      rejectedByCpp(transfer, buffer);
+      strictEqual(reads, 0);
+    }
+  },
+};
+
+export const nextReadOnce = {
+  test() {
+    const buffer = new ArrayBuffer(4);
+    const other = new ArrayBuffer(4);
+    let reads = 0;
+    const transfer = {
+      [Symbol.iterator]() {
+        const inner = [buffer, other].values();
+        return {
+          get next() {
+            reads++;
+            return () => inner.next();
+          },
+        };
+      },
+    };
+    if (usingTsImpl) {
+      deepStrictEqual(transferred(transfer, buffer), [0, 4]);
+      strictEqual(other.byteLength, 0);
+      strictEqual(reads, 1);
+    } else {
+      rejectedByCpp(transfer, buffer);
+      strictEqual(reads, 0);
+    }
+  },
+};
+
+export const iteratorNotClosedOnRejectedElement = {
+  test() {
+    const buffer = new ArrayBuffer(4);
+    let returns = 0;
+    const transfer = {
+      [Symbol.iterator]() {
+        return {
+          next: () => ({ done: false, value: 1 }),
+          return() {
+            returns++;
+            return {};
+          },
+        };
+      },
+    };
+    if (usingTsImpl) {
+      throws(() => structuredClone(buffer, { transfer }), {
+        name: 'TypeError',
+        message: TS_BAD_ITEM,
+      });
+      strictEqual(buffer.byteLength, 4);
+    } else {
+      rejectedByCpp(transfer, buffer);
+    }
+    strictEqual(returns, 0);
+  },
+};
+
+export const nonObjectIteratorRejected = {
+  test() {
+    const buffer = new ArrayBuffer(4);
+    const transfer = { [Symbol.iterator]: () => 1 };
+    if (usingTsImpl) {
+      throws(() => structuredClone(buffer, { transfer }), {
+        name: 'TypeError',
+        message: 'Result of the Symbol.iterator method is not an object',
+      });
+      strictEqual(buffer.byteLength, 4);
+    } else {
+      rejectedByCpp(transfer, buffer);
+    }
+  },
+};
+
+export const nonObjectIteratorResultRejected = {
+  test() {
+    const buffer = new ArrayBuffer(4);
+    const transfer = {
+      [Symbol.iterator]: () => ({ next: () => 1 }),
+    };
+    if (usingTsImpl) {
+      throws(() => structuredClone(buffer, { transfer }), {
+        name: 'TypeError',
+        message: 'Iterator result is not an object',
+      });
+      strictEqual(buffer.byteLength, 4);
+    } else {
+      rejectedByCpp(transfer, buffer);
+    }
+  },
+};
