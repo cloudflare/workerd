@@ -13,8 +13,8 @@ import unsafe from 'workerd:unsafe';
 
 const MODE = env.MODE;
 
-// createRequire() returns a jsg::Function: a v8::Function created in C++ whose native state, the
-// referrer, can be copied into a Worker started from the snapshot.
+// createRequire() returns a v8::Function over a static callback whose data is the referrer, a
+// string, which a startup snapshot serializes as it is.
 const require = MODE === 'create-require' ? createRequire('/worker.js') : null;
 
 // AsyncLocalStorage.bind() returns a jsg::Function too, but its native state holds the bound
