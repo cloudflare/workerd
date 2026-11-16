@@ -9,11 +9,11 @@
 //! `repl` evaluates JavaScript typed at a console ([`repl`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Five modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
+// Six modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
 // to FFI declarations; socket_fd.rs, where a descriptor number from the command line becomes an
 // owned descriptor; rseq.rs, which reads a glibc symbol and edits the environment before any
-// thread starts; and repl/terminal.rs, which puts the terminal in raw mode. Everything else is
-// safe code over std, socket2 and the bridges.
+// thread starts; repl/terminal.rs, which puts the terminal in raw mode; and repl/interrupt.rs,
+// which takes SIGINT. Everything else is safe code over std, socket2 and the bridges.
 
 mod args;
 mod bridge;

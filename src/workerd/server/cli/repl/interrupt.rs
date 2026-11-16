@@ -7,7 +7,8 @@
 //! rather than ending the process: the session stops awaiting it. A second comes only if the
 //! session could not abandon the input, because its JavaScript runs without yielding, and ends the
 //! process as SIGINT does by default, as does a SIGINT while no input runs. A process that ignores
-//! SIGINT when the REPL starts goes on ignoring it.
+//! SIGINT when the REPL starts goes on ignoring it: [`keep_ignoring`] ignores it again once the
+//! process context is set up, since debug builds of KJ install a crash handler for SIGINT then.
 //!
 //! [`take_interrupts`] blocks SIGINT before the REPL starts any other thread, so that every thread
 //! blocks it, and starts a thread that takes each one with `sigwait()`. A SIGINT is taken at once
@@ -44,12 +45,16 @@ static STATE: Mutex<State> = Mutex::new(State::Idle);
 /// Whether a thread of [`take_interrupts`] takes SIGINT. Set before the console's thread starts.
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
+/// Whether SIGINT was ignored when the REPL started, so that [`keep_ignoring`] ignores it again.
+static IGNORED: AtomicBool = AtomicBool::new(false);
+
 /// Blocks SIGINT and starts the thread that takes it, unless SIGINT is ignored. Must be called
 /// before the process starts any other thread, which would not block SIGINT, and could be the one
 /// it is delivered to. If SIGINT is ignored or the thread cannot start, SIGINT does what it would
 /// otherwise, and no input is abandoned.
 pub fn take_interrupts() {
     if ignored() {
+        IGNORED.store(true, Ordering::Relaxed);
         return;
     }
     let signals = sigint();
@@ -64,6 +69,18 @@ pub fn take_interrupts() {
         return;
     }
     TAKEN.store(true, Ordering::Relaxed);
+}
+
+/// Ignores SIGINT again if it was ignored when [`take_interrupts`] ran. Must be called once the
+/// process context is set up, which in debug builds installs KJ's crash handler for SIGINT in
+/// place of the disposition the process started with.
+pub fn keep_ignoring() {
+    if IGNORED.load(Ordering::Relaxed) {
+        // SAFETY: ignoring a signal installs no handler, and SIG_IGN is a valid disposition.
+        unsafe {
+            libc::signal(libc::SIGINT, libc::SIG_IGN);
+        }
+    }
 }
 
 /// SIGINT abandons an input while this is held.
