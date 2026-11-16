@@ -1303,9 +1303,10 @@ impl<'s> Lock<'s> {
             version: Some(v8::ffi::tunneled_exception_serialization_version()),
             ..Default::default()
         };
-        if let Ok(data) =
-            self.try_catch(|lock| ser::serialize_with_options(lock, exception, options))?
-        {
+        // C++ JSG keeps only the bytes too.
+        if let Ok(data) = self.try_catch(|lock| {
+            ser::serialize_with_options(lock, exception, options).map(ser::Serialized::into_data)
+        })? {
             details.push((v8::ffi::tunneled_exception_detail_id(), data));
             if self.feature_flags().get_enhanced_error_serialization() {
                 details.push((v8::ffi::tunneled_exception_enhanced_detail_id(), vec![1]));

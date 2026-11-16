@@ -36,6 +36,7 @@ struct IsolateState;
 struct GcVisitor;
 struct SerializeOptions;
 struct DeserializeOptions;
+struct Serialized;
 enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
 enum class JsErrorType : ::std::uint8_t;
@@ -622,26 +623,34 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 // In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
 // and the other way round; see ser.c++.
 //
-// Writes `value` as jsg::Serializer does with `options`: native errors as host objects if
+// Writes `value` as jsg::Serializer does with `options`, after transferring each value of
+// `transfer` as jsg::Serializer::transfer() does: native errors as host objects if
 // `options.errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd
 // API objects through their serializers, in the format of `options.version` if it has one, or of
-// V8's latest version, after a header unless `options.omit_header`. Stores the bytes in `result`
-// and returns true, or returns false if serialization threw, leaving the exception pending: a
-// DataCloneError, also for a version V8 can't write, or what a getter, Proxy trap or serializer
-// threw.
+// V8's latest version, after a header unless `options.omit_header`. Detaches the transferred
+// ArrayBuffers, stores the bytes and the backing stores of the SharedArrayBuffers and transferred
+// ArrayBuffers in `result`, and returns true, or returns false if anything threw, leaving the
+// exception pending: a TypeError or DataCloneError for a value that can't be transferred, a
+// DataCloneError for one that can't be serialized or for a version V8 can't write, or what a
+// getter, Proxy trap or serializer threw.
 bool local_serialize(Isolate* isolate,
     const Local& value,
     const SerializeOptions& options,
-    ::rust::Vec<uint8_t>& result);
-// Reads a value as jsg::Deserializer does with `options`, and returns it, or none if
-// deserialization threw, leaving the exception pending: a DataCloneError, also for a version V8
-// can't read. Runs no JavaScript but the deserialize functions of classes implemented in
+    ::rust::Slice<const Local> transfer,
+    Serialized& result);
+// Reads a value as jsg::Deserializer does with `options` and the given backing stores (borrowed
+// jsg::v8::BackingStore addresses, shared for `shared_array_buffers` and not for
+// `transferred_array_buffers`), and returns it, or none if deserialization threw, leaving the
+// exception pending: a DataCloneError, also for a version V8 can't read or a SharedArrayBuffer
+// beyond those given. Runs no JavaScript but the deserialize functions of classes implemented in
 // JavaScript, once it has read the value. Throws a KJ exception, labeled with
 // `diagnostic_context`, if the header is to be read and is missing or of an unsupported version.
 MaybeLocal value_deserialize(Isolate* isolate,
     ::rust::Slice<const uint8_t> data,
     const DeserializeOptions& options,
-    ::rust::Str diagnostic_context);
+    ::rust::Str diagnostic_context,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers);
 
 // JSON
 // As jsg::Lock::parseJson() and serializeJson(), through v8::JSON.

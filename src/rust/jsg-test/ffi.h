@@ -129,20 +129,26 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
-// Serializes `value` into `result` with C++ JSG's jsg::Serializer and the version and header of
-// `options`, for comparison with Rust JSG's. Returns false if serialization throws, leaving the
-// exception pending.
+// Serializes `value` with C++ JSG's jsg::Serializer and `options` (but errors_are_host_objects,
+// which jsg::Serializer reads from the lock), after transferring each value of `transfer`, for
+// comparison with Rust JSG's. Stores what jsg::Serializer::release() returns in `result`, each
+// backing store as a heap-allocated std::shared_ptr that Rust owns. Returns false if
+// serialization throws, leaving the exception pending.
 bool cpp_serialize(Isolate* isolate,
     ::workerd::rust::jsg::Local value,
     const ::workerd::rust::jsg::SerializeOptions& options,
-    ::rust::Vec<uint8_t>& result);
-// Deserializes `data` with C++ JSG's jsg::Deserializer and `options`, labeled with
-// `diagnostic_context`. Returns none if deserialization throws, leaving the exception pending: a
-// KJ exception becomes a JavaScript one, as a JSG method's glue makes it one.
+    ::rust::Slice<const ::workerd::rust::jsg::Local> transfer,
+    ::workerd::rust::jsg::Serialized& result);
+// Deserializes `data` with C++ JSG's jsg::Deserializer, `options` and the given backing stores
+// (borrowed std::shared_ptr addresses), labeled with `diagnostic_context`. Returns none if
+// deserialization throws, leaving the exception pending: a KJ exception becomes a JavaScript one,
+// as a JSG method's glue makes it one.
 ::workerd::rust::jsg::MaybeLocal cpp_deserialize(Isolate* isolate,
     ::rust::Slice<const uint8_t> data,
     const ::workerd::rust::jsg::DeserializeOptions& options,
-    ::rust::Str diagnostic_context);
+    ::rust::Str diagnostic_context,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers);
 // Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
 // comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
 bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);

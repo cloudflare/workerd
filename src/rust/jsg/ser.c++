@@ -59,6 +59,31 @@ void throwDataCloneError(v8::Isolate* isolate, kj::StringPtr message) {
   throwDataCloneError(isolate, newString(isolate, message));
 }
 
+// Throws a TypeError with `message`, as JSG_FAIL_REQUIRE(TypeError, ...) does, unless execution is
+// terminating.
+void throwTypeError(v8::Isolate* isolate, kj::StringPtr message) {
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(v8::Exception::TypeError(newString(isolate, message)));
+}
+
+// The backing store at `address`, a heap-allocated std::shared_ptr<v8::BackingStore> that Rust's
+// jsg::v8::BackingStore owns.
+const std::shared_ptr<v8::BackingStore>& backingStoreAt(size_t address) {
+  return *reinterpret_cast<const std::shared_ptr<v8::BackingStore>*>(address);
+}
+
+// Moves `stores` into `addresses` as heap-allocated std::shared_ptrs, which Rust takes ownership
+// of.
+void releaseBackingStores(
+    kj::Vector<std::shared_ptr<v8::BackingStore>>& stores, ::rust::Vec<size_t>& addresses) {
+  addresses.reserve(stores.size());
+  for (auto& store: stores) {
+    addresses.push_back(
+        reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(kj::mv(store))));
+  }
+  stores.clear();
+}
+
 // Whether V8 can write and read `version` of its format, from the oldest that jsg::Serializer
 // writes to V8's latest. Throws a DataCloneError, as `what` ("Serialization" or
 // "Deserialization") of that version, if not.
@@ -101,21 +126,68 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     return true;
   }
 
+  // Transfers `value`, an ArrayBuffer or a view of one, as jsg::Serializer::transfer() does: the
+  // data refers to the buffer by number, and the buffer is detached once the value is written.
+  // Returns false if `value` can't be transferred, leaving a TypeError or DataCloneError pending.
+  bool transfer(v8::Local<v8::Value> value) {
+    v8::Local<v8::ArrayBuffer> buffer;
+    if (value->IsArrayBufferView()) {
+      buffer = value.As<v8::ArrayBufferView>()->Buffer();
+    } else if (value->IsArrayBuffer()) {
+      buffer = value.As<v8::ArrayBuffer>();
+    } else {
+      throwTypeError(isolate, "Object is not transferable"_kj);
+      return false;
+    }
+    // A view of a SharedArrayBuffer, which can't be detached.
+    if (!buffer->IsDetachable()) {
+      throwDataCloneError(isolate, "Object is not transferable."_kj);
+      return false;
+    }
+    // A value given twice is transferred once. Values are compared, not their buffers, as
+    // jsg::Serializer compares them, so that the numbers are the same.
+    for (auto& transferred: transferredValues) {
+      if (transferred == value) return true;
+    }
+    auto id = static_cast<uint32_t>(transferredValues.size());
+    transferredValues.add(isolate, value);
+    transferredBackingStores.add(buffer->GetBackingStore());
+    ser.TransferArrayBuffer(id, buffer);
+    // Detached once the value is written, as jsg::Serializer::release() detaches it, so that a
+    // getter that serialization runs sees the buffer intact, and V8 still finds the buffer of a
+    // view written after it.
+    buffersToDetach.add(isolate, buffer);
+    return true;
+  }
+
   // Returns false if serialization threw, leaving the exception pending.
   bool write(v8::Local<v8::Value> value) {
     if (ser.WriteValue(isolate->GetCurrentContext(), value).IsNothing()) return false;
     return jsSerializables.writePendingData().IsJust();
   }
 
-  ::rust::Vec<uint8_t> release() {
+  // Detaches the transferred buffers and moves the data and the backing stores into `result`, as
+  // jsg::Serializer::release() does. Returns false if detaching threw, leaving the exception
+  // pending.
+  bool release(Serialized& result) {
+    for (auto& global: buffersToDetach) {
+      auto buffer = global.Get(isolate);
+      // JavaScript that serialization ran may have detached it already, as a nested
+      // structuredClone() that transfers it does.
+      if (buffer->IsDetachable() && !buffer->WasDetached() &&
+          buffer->Detach(v8::Local<v8::Value>()).IsNothing()) {
+        return false;
+      }
+    }
     auto [data, size] = ser.Release();
     KJ_DEFER(free(data));
-    ::rust::Vec<uint8_t> result;
-    result.reserve(size);
+    result.data.reserve(size);
     for (auto byte: kj::arrayPtr(data, size)) {
-      result.push_back(byte);
+      result.data.push_back(byte);
     }
-    return result;
+    releaseBackingStores(sharedBackingStores, result.shared_array_buffers);
+    releaseBackingStores(transferredBackingStores, result.transferred_array_buffers);
+    return true;
   }
 
   void ThrowDataCloneError(v8::Local<v8::String> message) override {
@@ -165,14 +237,15 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     return ::workerd::jsg::writeApiObject(isolate, ser, object);
   }
 
-  // Numbers each SharedArrayBuffer, as jsg::Serializer does. The buffers are not passed on: the
-  // data refers to them by number, and no deserializer is given them.
+  // Numbers each SharedArrayBuffer and keeps its backing store, as jsg::Serializer does. The data
+  // refers to the buffer by number; a deserializer given the backing stores shares it.
   v8::Maybe<uint32_t> GetSharedArrayBufferId(
       v8::Isolate*, v8::Local<v8::SharedArrayBuffer> buffer) override {
     for (auto i: kj::indices(sharedArrayBuffers)) {
       if (sharedArrayBuffers[i] == buffer) return v8::Just(static_cast<uint32_t>(i));
     }
     sharedArrayBuffers.add(isolate, buffer);
+    sharedBackingStores.add(buffer->GetBackingStore());
     return v8::Just(static_cast<uint32_t>(sharedArrayBuffers.size() - 1));
   }
 
@@ -194,6 +267,11 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // Globals, since V8 hands the delegate values in handle scopes of its own, which end before
   // serialization does.
   kj::Vector<v8::Global<v8::SharedArrayBuffer>> sharedArrayBuffers;
+  kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
+  // The values given to transfer(), the backing stores of their buffers, and the buffers.
+  kj::Vector<v8::Global<v8::Value>> transferredValues;
+  kj::Vector<std::shared_ptr<v8::BackingStore>> transferredBackingStores;
+  kj::Vector<v8::Global<v8::ArrayBuffer>> buffersToDetach;
   v8::Local<v8::Value> prototypeOfObject;
   v8::Local<v8::Private> jsSerializeModeKey;
   v8::Local<v8::Private> domExceptionBrandKey;
@@ -204,24 +282,29 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
 class Deserializer final: public v8::ValueDeserializer::Delegate {
  public:
-  Deserializer(
-      v8::Isolate* isolate, ::rust::Slice<const uint8_t> data, const DeserializeOptions& options)
+  Deserializer(v8::Isolate* isolate,
+      ::rust::Slice<const uint8_t> data,
+      const DeserializeOptions& options,
+      ::rust::Slice<const size_t> sharedArrayBuffers)
       : isolate(isolate),
         preserveStackInErrors(options.preserve_stack_in_errors),
+        sharedArrayBuffers(sharedArrayBuffers),
         deser(isolate, data.data(), data.size(), this),
         jsSerializables(isolate, deser, ::workerd::jsg::PreserveStack(preserveStackInErrors)) {}
   // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
   ~Deserializer() noexcept(true) {}
 
-  // Applies the header and version options as jsg::Deserializer's constructor does: reads the
-  // header unless `options.read_header` is false, then reads in `options.version` if it has one.
+  // Applies the header and version options and hands over the transferred buffers as
+  // jsg::Deserializer's constructor does: reads the header unless `options.read_header` is false,
+  // then reads in `options.version` if it has one.
   // If the header is missing or of an unsupported version, throws the KJ exception that
   // jsg::Deserializer throws, labeled with `diagnosticContext`, which reaches JavaScript as an
   // internal error. Returns false, leaving a DataCloneError pending, if V8 can't read the
   // version, or if execution is terminating.
   bool init(::rust::Slice<const uint8_t> data,
       const DeserializeOptions& options,
-      ::rust::Str diagnosticContext) {
+      ::rust::Str diagnosticContext,
+      ::rust::Slice<const size_t> transferredArrayBuffers) {
     if (options.read_header) {
       auto context = kj::heapString(diagnosticContext.data(), diagnosticContext.size());
       if (::workerd::jsg::readHeader(
@@ -233,6 +316,10 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     if (options.has_version) {
       if (!checkVersion(isolate, options.version, "Deserialization"_kj)) return false;
       deser.SetWireFormatVersion(options.version);
+    }
+    for (auto i: kj::indices(transferredArrayBuffers)) {
+      deser.TransferArrayBuffer(static_cast<uint32_t>(i),
+          v8::ArrayBuffer::New(isolate, backingStoreAt(transferredArrayBuffers[i])));
     }
     return true;
   }
@@ -256,8 +343,14 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
     return ::workerd::jsg::readApiObject(isolate, deser, tag);
   }
 
-  // V8's GetSharedArrayBufferFromId() throws for a SharedArrayBuffer, which the data only refers
-  // to by number.
+  // A new SharedArrayBuffer over the backing store the data numbers `id`, as jsg::Deserializer
+  // creates. V8 reports the data as malformed if this returns nothing, as for an id that names no
+  // buffer, as jsg::Deserializer's does.
+  v8::MaybeLocal<v8::SharedArrayBuffer> GetSharedArrayBufferFromId(
+      v8::Isolate*, uint32_t id) override {
+    if (id >= sharedArrayBuffers.size()) return {};
+    return v8::SharedArrayBuffer::New(isolate, backingStoreAt(sharedArrayBuffers[id]));
+  }
 
  private:
   // Throws a DataCloneError, as jsg::Deserializer does, rather than an internal error: like V8's
@@ -269,6 +362,8 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
 
   v8::Isolate* isolate;
   bool preserveStackInErrors;
+  // Borrowed jsg::v8::BackingStore addresses.
+  ::rust::Slice<const size_t> sharedArrayBuffers;
   v8::ValueDeserializer deser;
   // Reads the instances of classes implemented in JavaScript, after `deser`, which it reads from.
   ::workerd::jsg::JsSerializableReader jsSerializables;
@@ -280,22 +375,26 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
 bool local_serialize(Isolate* isolate,
     const Local& value,
     const SerializeOptions& options,
-    ::rust::Vec<uint8_t>& result) {
+    ::rust::Slice<const Local> transfer,
+    Serialized& result) {
   if (exceptionPending(isolate)) return false;
   Serializer serializer(isolate, options);
   if (!serializer.init(options)) return false;
-  if (!serializer.write(local_as_ref_from_ffi<v8::Value>(value))) return false;
-  result = serializer.release();
-  return true;
+  for (auto& item: transfer) {
+    if (!serializer.transfer(local_as_ref_from_ffi<v8::Value>(item))) return false;
+  }
+  return serializer.write(local_as_ref_from_ffi<v8::Value>(value)) && serializer.release(result);
 }
 
 MaybeLocal value_deserialize(Isolate* isolate,
     ::rust::Slice<const uint8_t> data,
     const DeserializeOptions& options,
-    ::rust::Str diagnostic_context) {
+    ::rust::Str diagnostic_context,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers) {
   if (exceptionPending(isolate)) return {};
-  Deserializer deserializer(isolate, data, options);
-  if (!deserializer.init(data, options, diagnostic_context)) return {};
+  Deserializer deserializer(isolate, data, options, shared_array_buffers);
+  if (!deserializer.init(data, options, diagnostic_context, transferred_array_buffers)) return {};
   return maybe_local_to_ffi(deserializer.read());
 }
 
