@@ -128,6 +128,29 @@ pub mod ffi {
         ptr: usize,
     }
 
+    /// The options of `ser::serialize_with_options` that the C++ shim applies, as
+    /// `jsg::Serializer::Options`.
+    #[derive(Debug, Clone, Copy)]
+    struct SerializeOptions {
+        /// Whether to write `version` rather than V8's latest version.
+        has_version: bool,
+        version: u32,
+        omit_header: bool,
+        /// `jsg::Lock::isUsingEnhancedErrorSerialization()`.
+        errors_are_host_objects: bool,
+    }
+
+    /// The options of `ser::deserialize_with` that the C++ shim applies, as
+    /// `jsg::Deserializer::Options`.
+    #[derive(Debug, Clone, Copy)]
+    struct DeserializeOptions {
+        /// Whether to read in `version` rather than the header's version.
+        has_version: bool,
+        version: u32,
+        read_header: bool,
+        preserve_stack_in_errors: bool,
+    }
+
     /// Mirrors `v8::BackingStoreInitializationMode`. Must be kept in sync with
     /// the V8-defined enum in `v8-array-buffer.h`.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -806,8 +829,7 @@ pub mod ffi {
         pub unsafe fn local_serialize(
             isolate: *mut Isolate,
             value: &Local,
-            errors_are_host_objects: bool,
-            version: KjMaybe<u32>,
+            options: &SerializeOptions,
             result: &mut Vec<u8>,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
@@ -815,7 +837,8 @@ pub mod ffi {
         pub unsafe fn value_deserialize(
             isolate: *mut Isolate,
             data: &[u8],
-            preserve_stack_in_errors: bool,
+            options: &DeserializeOptions,
+            diagnostic_context: &str,
         ) -> Result<MaybeLocal>;
 
         // JSON

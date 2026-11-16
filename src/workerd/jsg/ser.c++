@@ -675,6 +675,31 @@ Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed borr
       preserveStackInErrors(borrowed.preserveStackInErrors),
       readDepth(1) {}
 
+void Deserializer::readHeaderOrFail(Lock& js,
+    v8::ValueDeserializer& deser,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<kj::StringPtr> diagnosticContext) {
+  JSG_TRY(js) {
+    check(deser.ReadHeader(js.v8Context()));
+  }
+  JSG_CATCH(exception) {
+    (void)exception;
+    // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
+    // version at zero if the header is absent or its version could not be decoded.
+    auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
+    auto message = kj::str(
+        "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
+        diagnosticContext.orDefault("unknown"), "; bytes=", data.size(), "; header=", header,
+        "; wireVersion=", deser.GetWireFormatVersion(),
+        "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
+        "; v8=", v8::V8::GetVersion(), "]");
+    LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
+    // Header failures are internal faults. Suppress duplicate reporting when this exception
+    // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
+    kj::throwException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
+  }
+}
+
 void Deserializer::init(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
@@ -682,25 +707,7 @@ void Deserializer::init(Lock& js,
   auto options = kj::mv(maybeOptions).orDefault({});
   externalHandler = options.externalHandler;
   if (options.readHeader) {
-    JSG_TRY(js) {
-      check(deser.ReadHeader(js.v8Context()));
-    }
-    JSG_CATCH(exception) {
-      (void)exception;
-      // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
-      // version at zero if the header is absent or its version could not be decoded.
-      auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
-      auto message = kj::str(
-          "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
-          options.diagnosticContext.orDefault("unknown"), "; bytes=", data.size(),
-          "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
-          "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
-          "; v8=", v8::V8::GetVersion(), "]");
-      LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
-      // Header failures are internal faults. Suppress duplicate reporting when this exception
-      // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
-      kj::throwException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
-    }
+    readHeaderOrFail(js, deser, data, options.diagnosticContext);
   }
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {
@@ -1053,6 +1060,18 @@ v8::Maybe<bool> writeNativeError(
     return v8::Nothing<bool>();
   } catch (...) {
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::Maybe<bool> readHeader(v8::Isolate* isolate,
+    v8::ValueDeserializer& deser,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<kj::StringPtr> diagnosticContext) {
+  try {
+    Deserializer::readHeaderOrFail(Lock::from(isolate), deser, data, diagnosticContext);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
     return v8::Nothing<bool>();
   }
 }

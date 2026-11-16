@@ -1301,6 +1301,7 @@ impl<'s> Lock<'s> {
         let mut details = Vec::new();
         let options = ser::SerializeOptions {
             version: Some(v8::ffi::tunneled_exception_serialization_version()),
+            ..Default::default()
         };
         if let Ok(data) =
             self.try_catch(|lock| ser::serialize_with_options(lock, exception, options))?

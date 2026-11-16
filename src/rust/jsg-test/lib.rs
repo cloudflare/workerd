@@ -23,6 +23,8 @@ mod ffi {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type SerializeOptions = jsg::v8::ffi::SerializeOptions;
+        type DeserializeOptions = jsg::v8::ffi::DeserializeOptions;
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
@@ -159,22 +161,30 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
-        /// Serializes `value` into `result` with C++ JSG's `jsg::Serializer`. Returns false if
-        /// serialization throws, leaving the exception pending.
+        /// Serializes `value` into `result` with C++ JSG's `jsg::Serializer` and the version and
+        /// header of `options`. Returns false if serialization throws, leaving the exception
+        /// pending.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn cpp_serialize(
             isolate: *mut Isolate,
             value: Local,
+            options: &SerializeOptions,
             result: &mut Vec<u8>,
         ) -> Result<bool>;
 
-        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Returns none if
-        /// deserialization throws, leaving the exception pending, which is a JavaScript exception
-        /// even where C++ JSG throws a KJ exception, as a JSG method's glue makes it one.
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer` and `options`, labeled with
+        /// `diagnostic_context`. Returns none if deserialization throws, leaving the exception
+        /// pending, which is a JavaScript exception even where C++ JSG throws a KJ exception, as a
+        /// JSG method's glue makes it one.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
-        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+        pub unsafe fn cpp_deserialize(
+            isolate: *mut Isolate,
+            data: &[u8],
+            options: &DeserializeOptions,
+            diagnostic_context: &str,
+        ) -> Result<MaybeLocal>;
 
         /// Fails with the KJ exception C++ JSG's `jsg::Lock::exceptionToKj()` creates for
         /// `value`, or returns false if creating it threw, leaving the exception pending.
@@ -826,7 +836,22 @@ impl Harness {
     ///
     /// Panics if serialization throws.
     pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
-        Self::cpp_try_serialize(lock, value).expect("C++ JSG should serialize the value")
+        Self::cpp_serialize_with(lock, value, jsg::ser::SerializeOptions::default())
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer` and `options`, to compare with
+    /// [`jsg::ser::serialize_with_options`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization throws.
+    pub fn cpp_serialize_with<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+        options: jsg::ser::SerializeOptions,
+    ) -> Vec<u8> {
+        Self::cpp_try_serialize_with(lock, value, options)
+            .expect("C++ JSG should serialize the value")
     }
 
     /// Serializes `value` with C++ JSG's `jsg::Serializer`, as [`Self::cpp_serialize`] does.
@@ -842,12 +867,43 @@ impl Harness {
         lock: &mut jsg::Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Vec<u8>, jsg::Error> {
+        Self::cpp_try_serialize_with(lock, value, jsg::ser::SerializeOptions::default())
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer` and `options`, as
+    /// [`Self::cpp_serialize_with`] does.
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if serialization throws.
+    ///
+    /// # Panics
+    ///
+    /// Panics if C++ JSG throws a KJ exception.
+    pub fn cpp_try_serialize_with<'s>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+        options: jsg::ser::SerializeOptions,
+    ) -> Result<Vec<u8>, jsg::Error> {
+        let options = jsg::v8::ffi::SerializeOptions {
+            has_version: options.version.is_some(),
+            version: options.version.unwrap_or_default(),
+            omit_header: options.omit_header,
+            // C++ JSG asks the lock.
+            errors_are_host_objects: false,
+        };
         let mut data = Vec::new();
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open, which `value` belongs to.
-        let ok =
-            unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi(), &mut data) }
-                .expect("C++ JSG should throw only JavaScript exceptions");
+        let ok = unsafe {
+            ffi::cpp_serialize(
+                lock.isolate().as_ffi(),
+                value.into_ffi(),
+                &options,
+                &mut data,
+            )
+        }
+        .expect("C++ JSG should throw only JavaScript exceptions");
         if ok {
             Ok(data)
         } else {
@@ -862,7 +918,22 @@ impl Harness {
     ///
     /// Panics if deserialization throws.
     pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
-        Self::cpp_try_deserialize(lock, data).expect("C++ JSG should deserialize the data")
+        Self::cpp_deserialize_with(lock, data, jsg::ser::DeserializeOptions::default())
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer` and `options`, to compare with
+    /// [`jsg::ser::deserialize_with`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if deserialization throws.
+    pub fn cpp_deserialize_with<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+        options: jsg::ser::DeserializeOptions,
+    ) -> v8::Local<'s, v8::Value> {
+        Self::cpp_try_deserialize_with(lock, data, options)
+            .expect("C++ JSG should deserialize the data")
     }
 
     /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, as [`Self::cpp_deserialize`]
@@ -881,11 +952,41 @@ impl Harness {
         lock: &mut jsg::Lock<'s>,
         data: &[u8],
     ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        Self::cpp_try_deserialize_with(lock, data, jsg::ser::DeserializeOptions::default())
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer` and `options`, as
+    /// [`Self::cpp_try_deserialize`] does.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::cpp_try_deserialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the harness throws anything but a JavaScript exception.
+    pub fn cpp_try_deserialize_with<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+        options: jsg::ser::DeserializeOptions,
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        let ffi_options = jsg::v8::ffi::DeserializeOptions {
+            has_version: options.version.is_some(),
+            version: options.version.unwrap_or_default(),
+            read_header: options.read_header,
+            preserve_stack_in_errors: options.preserve_stack_in_errors,
+        };
+        let diagnostic_context = options.diagnostic_context.unwrap_or("unknown");
         // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
         unsafe {
             v8::Local::from_ffi_maybe(
-                ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
-                    .expect("the harness should throw only JavaScript exceptions"),
+                ffi::cpp_deserialize(
+                    lock.isolate().as_ffi(),
+                    data,
+                    &ffi_options,
+                    diagnostic_context,
+                )
+                .expect("the harness should throw only JavaScript exceptions"),
             )
         }
         .ok_or_else(jsg::Error::pending)

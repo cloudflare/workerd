@@ -63,6 +63,40 @@ fn assert_read(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, data: &[u8], che
     );
 }
 
+/// Serializes the value of `expr` with `options`, and checks that the bytes are those C++ JSG
+/// writes with them, and that what Rust JSG and C++ JSG read from them with `read` satisfies
+/// `check`, a JavaScript expression of `v`.
+fn assert_round_trip_with(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    expr: &str,
+    options: jsg::ser::SerializeOptions,
+    read: jsg::ser::DeserializeOptions,
+    check: &str,
+) {
+    let value = eval(lock, ctx, expr);
+    let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+    assert_eq!(
+        data,
+        Harness::cpp_serialize_with(lock, value, options),
+        "{expr}: {options:?}"
+    );
+
+    let copy = jsg::ser::deserialize_with(lock, &data, read).unwrap();
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {read:?}: Rust JSG read: {check}"
+    );
+
+    let copy = Harness::cpp_deserialize_with(lock, &data, read);
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {read:?}: C++ JSG read: {check}"
+    );
+}
+
 /// Serializes the value of `expr`, which must throw, and returns the exception.
 fn serialize_exception<'s>(
     lock: &mut jsg::Lock<'s>,
@@ -190,6 +224,7 @@ fn errors_without_their_stacks() {
         let data = jsg::ser::serialize(lock, value)?;
         let options = jsg::ser::DeserializeOptions {
             preserve_stack_in_errors: false,
+            ..Default::default()
         };
         let copy = jsg::ser::deserialize_with(lock, &data, options)?;
         ctx.set_global(lock, "v", copy);
@@ -526,7 +561,10 @@ fn an_older_version_is_written_and_read_back() {
         let check = "v instanceof Uint8Array && v[2] === 3";
         let value = eval(lock, ctx, expr);
         let latest = jsg::ser::serialize(lock, value).unwrap();
-        let options = jsg::ser::SerializeOptions { version: Some(13) };
+        let options = jsg::ser::SerializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
         let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
         assert_eq!(data[..2], [0xff, 13]);
         // Version 14 added the flags of an ArrayBufferView.
@@ -548,7 +586,10 @@ fn a_version_v8_cannot_write_throws_data_clone_error() {
         let value = eval(lock, ctx, "1");
         let caught = lock
             .try_catch(|lock| {
-                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let options = jsg::ser::SerializeOptions {
+                    version: Some(12),
+                    ..Default::default()
+                };
                 let result = jsg::ser::serialize_with_options(lock, value, options);
                 assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
                 result
@@ -559,6 +600,143 @@ fn a_version_v8_cannot_write_throws_data_clone_error() {
             ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
                 .unwrap()
         );
+        Ok(())
+    });
+}
+
+#[test]
+fn versions_and_headers_are_written_and_read_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr =
+            "({ a: [1, 'x'], m: new Map([[1, 2]]), d: new Date(7), u: new Uint8Array([3]) })";
+        let check = "v.a[1] === 'x' && v.m.get(1) === 2 && v.d.getTime() === 7 && v.u[0] === 3";
+        let latest = header(lock)[1].into();
+        for version in [None, Some(13), Some(14), Some(latest)] {
+            let options = jsg::ser::SerializeOptions {
+                version,
+                ..Default::default()
+            };
+            let read = jsg::ser::DeserializeOptions::default();
+            assert_round_trip_with(lock, ctx, expr, options, read, check);
+
+            // Without a header, the reader is told the version.
+            let options = jsg::ser::SerializeOptions {
+                version: Some(version.unwrap_or(latest)),
+                omit_header: true,
+            };
+            let read = jsg::ser::DeserializeOptions {
+                version: options.version,
+                read_header: false,
+                ..Default::default()
+            };
+            assert_round_trip_with(lock, ctx, expr, options, read, check);
+        }
+
+        // The version given overrides the header's.
+        let options = jsg::ser::SerializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        assert_round_trip_with(lock, ctx, expr, options, read, check);
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_read_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let latest = u32::from(header(lock)[1]);
+        for version in [0, 12, latest + 1] {
+            let caught = lock
+                .try_catch(|lock| {
+                    let read = jsg::ser::DeserializeOptions {
+                        version: Some(version),
+                        read_header: false,
+                        ..Default::default()
+                    };
+                    let result = jsg::ser::deserialize_with(lock, b"_", read);
+                    assert!(
+                        result.as_ref().is_err_and(jsg::Error::is_pending),
+                        "{version}"
+                    );
+                    result
+                })
+                .unwrap();
+            let exception = caught.expect_err("deserialization should throw");
+            assert_error(
+                lock,
+                ctx,
+                exception,
+                "DataCloneError",
+                &format!("Deserialization version {version} is not supported."),
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn errors_without_their_stacks_are_read_as_cpp_jsg_reads_them() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+            ..Default::default()
+        };
+        assert_round_trip_with(
+            lock,
+            ctx,
+            "Object.assign(new TypeError('t'), { stack: 'original', code: 1 })",
+            jsg::ser::SerializeOptions::default(),
+            read,
+            "v instanceof TypeError && v.code === 1 && typeof v.stack === 'string' && \
+             v.stack !== 'original'",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn header_errors_name_the_diagnostic_context() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            diagnostic_context: Some("RPC result"),
+            ..Default::default()
+        };
+        let err = jsg::ser::deserialize_with(lock, b"\x49\x02", read).unwrap_err();
+        assert!(!err.is_pending());
+        assert!(
+            err.message
+                .contains("[context=RPC result; bytes=2; header=missing;"),
+            "{}",
+            err.message
+        );
+
+        // Without a context, the label is C++ JSG's default.
+        let err =
+            jsg::ser::deserialize_with(lock, b"\x49\x02", jsg::ser::DeserializeOptions::default())
+                .unwrap_err();
+        assert!(!err.is_pending());
+        assert!(
+            err.message
+                .contains("[context=unknown; bytes=2; header=missing;"),
+            "{}",
+            err.message
+        );
+
+        // Without a header to read, the same bytes are a value.
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(15),
+            read_header: false,
+            ..Default::default()
+        };
+        let value = jsg::ser::deserialize_with(lock, b"\x49\x02", read).unwrap();
+        ctx.set_global(lock, "v", value);
+        assert!(ctx.eval::<bool>(lock, "v === 1").unwrap());
         Ok(())
     });
 }

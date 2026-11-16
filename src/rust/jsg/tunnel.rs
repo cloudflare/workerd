@@ -190,6 +190,7 @@ impl TunneledException {
         {
             let options = ser::DeserializeOptions {
                 preserve_stack_in_errors: false,
+                ..Default::default()
             };
             // What deserializing it throws is ignored.
             if let Ok(exception) =

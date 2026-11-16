@@ -21,19 +21,27 @@
 //!   copy from the class's prototype, without calling its constructor, and passes it the data
 //!   with the class's `deserialize` function once it has read the whole value.
 //!
+//! [`serialize_with_options`] and [`deserialize_with`] take the options of
+//! `jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals,
+//! except `treatClassInstancesAsPlainObjects`.
+//!
 //! A `SharedArrayBuffer` is written as a reference that [`deserialize`] cannot resolve. Transfer
-//! lists, externals and the `jsg::Serializer` options other than `version` are not supported.
+//! lists and externals are not supported.
 
 use crate::Error;
 use crate::Lock;
 use crate::v8;
 
-/// Options of [`serialize_with_options`], as those of `jsg::Serializer::Options` it supports.
+/// Options of [`serialize_with_options`], as those of `jsg::Serializer::Options` it supports. The
+/// default is `jsg::Serializer`'s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SerializeOptions {
     /// The version of V8's format to write, rather than the latest. V8 writes versions 13 and
     /// later, up to its latest.
     pub version: Option<u32>,
+    /// Whether to leave out the header, which holds the version. Data without one is read with
+    /// [`DeserializeOptions::read_header`] false and the version it was written in.
+    pub omit_header: bool,
 }
 
 /// Serializes `value`, with a header, as `jsg::Serializer` does.
@@ -63,7 +71,12 @@ pub fn serialize_with_options<'s>(
     options: SerializeOptions,
 ) -> Result<Vec<u8>, Error> {
     value.debug_assert_isolate(lock);
-    let errors_are_host_objects = lock.feature_flags().get_enhanced_error_serialization();
+    let ffi_options = v8::ffi::SerializeOptions {
+        has_version: options.version.is_some(),
+        version: options.version.unwrap_or_default(),
+        omit_header: options.omit_header,
+        errors_are_host_objects: lock.feature_flags().get_enhanced_error_serialization(),
+    };
     v8::call_into_js(lock, |lock| {
         let mut data = Vec::new();
         // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active, and
@@ -72,8 +85,7 @@ pub fn serialize_with_options<'s>(
             v8::ffi::local_serialize(
                 lock.isolate().as_ffi(),
                 value.as_ffi(),
-                errors_are_host_objects,
-                options.version.into(),
+                &ffi_options,
                 &mut data,
             )
         }?;
@@ -103,17 +115,29 @@ pub fn deserialize<'s>(
 }
 
 /// The options of [`deserialize_with`], those of `jsg::Deserializer::Options` that it supports.
-#[derive(Debug, Clone, Copy)]
+/// The default is `jsg::Deserializer`'s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeserializeOptions {
+    /// The version of V8's format to read the data in, rather than the one its header holds. Set
+    /// it for data written without a header. V8 reads versions 13 and later, up to its latest.
+    pub version: Option<u32>,
+    /// Whether the data begins with a header. `true` by default.
+    pub read_header: bool,
     /// Whether an error read from the data gets the `stack` it was written with. If not, it
     /// keeps the stack it gets when created. `true` by default, as in C++ JSG.
     pub preserve_stack_in_errors: bool,
+    /// What the data is, such as `"RPC result"`, to tell apart the internal errors for a missing
+    /// or unsupported header, which are logged. A fixed label, so never user data.
+    pub diagnostic_context: Option<&'static str>,
 }
 
 impl Default for DeserializeOptions {
     fn default() -> Self {
         Self {
+            version: None,
+            read_header: true,
             preserve_stack_in_errors: true,
+            diagnostic_context: None,
         }
     }
 }
@@ -122,12 +146,21 @@ impl Default for DeserializeOptions {
 ///
 /// # Errors
 ///
-/// As for [`deserialize`].
+/// As for [`deserialize`]. If the header is read, the internal error for a missing or unsupported
+/// one names `options.diagnostic_context`. A version V8 can't read fails with a pending
+/// `DataCloneError`.
 pub fn deserialize_with<'s>(
     lock: &mut Lock<'s>,
     data: &[u8],
     options: DeserializeOptions,
 ) -> Result<v8::Local<'s, v8::Value>, Error> {
+    let ffi_options = v8::ffi::DeserializeOptions {
+        has_version: options.version.is_some(),
+        version: options.version.unwrap_or_default(),
+        read_header: options.read_header,
+        preserve_stack_in_errors: options.preserve_stack_in_errors,
+    };
+    let diagnostic_context = options.diagnostic_context.unwrap_or("unknown");
     v8::call_into_js(lock, |lock| {
         // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active. The
         // result belongs to the lock's scope.
@@ -135,7 +168,8 @@ pub fn deserialize_with<'s>(
             v8::ffi::value_deserialize(
                 lock.isolate().as_ffi(),
                 data,
-                options.preserve_stack_in_errors,
+                &ffi_options,
+                diagnostic_context,
             )
         }?;
         // SAFETY: as above.

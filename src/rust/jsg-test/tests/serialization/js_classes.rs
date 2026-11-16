@@ -458,6 +458,7 @@ fn errors_keep_their_stacks_as_native_errors_do() {
             assert_eq!(data, Harness::cpp_serialize(lock, value));
             let options = jsg::ser::DeserializeOptions {
                 preserve_stack_in_errors: false,
+                ..Default::default()
             };
             let copy = jsg::ser::deserialize_with(lock, &data, options)?;
             ctx.set_global(lock, "v", copy);
@@ -522,6 +523,7 @@ fn records_are_read_as_their_flags_say() {
             bytes.extend_from_slice(&data);
             let options = jsg::ser::DeserializeOptions {
                 preserve_stack_in_errors: false,
+                ..Default::default()
             };
             let copy = jsg::ser::deserialize_with(lock, &bytes, options)?;
             ctx.set_global(lock, "v", copy);

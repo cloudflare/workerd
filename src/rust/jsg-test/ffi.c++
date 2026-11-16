@@ -372,11 +372,17 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
-bool cpp_serialize(
-    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result) {
+bool cpp_serialize(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    const ::workerd::rust::jsg::SerializeOptions& options,
+    ::rust::Vec<uint8_t>& result) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   try {
-    ::workerd::jsg::Serializer serializer(js);
+    ::workerd::jsg::Serializer serializer(js,
+        ::workerd::jsg::Serializer::Options{
+          .version = options.has_version ? kj::Maybe<uint32_t>(options.version) : kj::none,
+          .omitHeader = options.omit_header,
+        });
     serializer.write(js,
         ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
     for (auto byte: serializer.release().data) {
@@ -388,12 +394,22 @@ bool cpp_serialize(
   }
 }
 
-::workerd::rust::jsg::MaybeLocal cpp_deserialize(
-    Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const ::workerd::rust::jsg::DeserializeOptions& options,
+    ::rust::Str diagnostic_context) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = kj::heapString(diagnostic_context.data(), diagnostic_context.size());
   try {
     JSG_TRY(js) {
-      ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+      ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()),
+          kj::none, kj::none,
+          ::workerd::jsg::Deserializer::Options{
+            .version = options.has_version ? kj::Maybe<uint32_t>(options.version) : kj::none,
+            .readHeader = options.read_header,
+            .preserveStackInErrors = options.preserve_stack_in_errors,
+            .diagnosticContext = context.asPtr(),
+          });
       v8::Local<v8::Value> result = deserializer.readValue(js);
       return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
     }

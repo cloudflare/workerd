@@ -266,9 +266,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `writeNativeError`, `readNativeError`,
-`JsSerializableWriter`, `JsSerializableReader` and `newDataCloneError`), through which workerd's
-API objects, DOMExceptions, native errors and instances of classes implemented in JavaScript
-serialize, since their serializers are written against C++ JSG and give each one format;
+`readHeader`, `JsSerializableWriter`, `JsSerializableReader` and `newDataCloneError`), through
+which workerd's API objects, DOMExceptions, native errors and instances of classes implemented in
+JavaScript serialize, since their serializers are written against C++ JSG and give each one format;
 `newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
 through which Rust creates and reads DOMExceptions without depending on how DOMException is
 implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through which Rust describes a value as
@@ -1116,12 +1116,13 @@ such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a 
 buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
 given only the bytes can resolve, so data containing one can't be read back.
 
-Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
-`SerializeOptions::version`, the version of V8's format to write rather than the latest, as
-`jsg::Serializer::Options::version` does; a version V8 can't write throws `DataCloneError`.
-`jsg::ser::deserialize_with` takes `DeserializeOptions::preserve_stack_in_errors`, as
-`jsg::Deserializer::Options::preserveStackInErrors` does. Transfer lists, externals and the other
-options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+`jsg::ser::serialize_with_options` and `jsg::ser::deserialize_with` take the options of
+`jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals, except
+`treatClassInstancesAsPlainObjects`, as `SerializeOptions` and `DeserializeOptions`: the version
+of V8's format to write or read rather than the latest or the header's, whether there is a header,
+whether errors get back their `stack`, and the label of the internal error for a missing or
+unsupported header. A version V8 can't write or read throws `DataCloneError`. Transfer lists and
+externals are not supported. The C++ side is `src/rust/jsg/ser.c++`.
 
 ## JSON
 

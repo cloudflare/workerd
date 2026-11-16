@@ -479,6 +479,16 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
       v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
   friend v8::MaybeLocal<v8::Object> readNativeError(
       v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
+  friend v8::Maybe<bool> readHeader(v8::Isolate* isolate,
+      v8::ValueDeserializer& deser,
+      kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<kj::StringPtr> diagnosticContext);
+
+  // Reads the header of `data` from `deser`, as the readHeader option says. See readHeader().
+  static void readHeaderOrFail(Lock& js,
+      v8::ValueDeserializer& deser,
+      kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<kj::StringPtr> diagnosticContext);
   friend class JsSerializableReader;
 
   // Reads a native error that Serializer::writeNativeError() wrote, once its tag has been read.
@@ -569,6 +579,16 @@ constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
 // JavaScript.
 v8::Maybe<bool> writeNativeError(
     v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error);
+
+// Reads the header of `data`, which `deser` reads, as Deserializer does with its readHeader option.
+// A missing header or one of an unsupported version throws a KJ exception that is logged
+// periodically, labeled with `diagnosticContext` (Deserializer::Options::diagnosticContext), and
+// reaches JavaScript as an internal error. Returns nothing, leaving the termination pending, if
+// execution is terminating.
+v8::Maybe<bool> readHeader(v8::Isolate* isolate,
+    v8::ValueDeserializer& deser,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<kj::StringPtr> diagnosticContext);
 
 // Reads a native error that writeNativeError() wrote, once its SERIALIZATION_TAG_NATIVE_ERROR has
 // been read, as Deserializer's ReadHostObject() does, restoring its `stack` as `preserveStack`

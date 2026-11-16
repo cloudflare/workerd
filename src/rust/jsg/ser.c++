@@ -9,7 +9,7 @@
 // writeNativeError() and readNativeError(), instances of the runtime's classes implemented in
 // JavaScript through JsSerializableWriter and JsSerializableReader, and workerd API objects, such
 // as Blob and Headers, and DOMExceptions, however they are implemented, through writeApiObject()
-// and readApiObject().
+// and readApiObject(). They read the header through readHeader().
 
 #include "ffi.h"
 
@@ -55,11 +55,27 @@ void throwDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
   }
 }
 
+void throwDataCloneError(v8::Isolate* isolate, kj::StringPtr message) {
+  throwDataCloneError(isolate, newString(isolate, message));
+}
+
+// Whether V8 can write and read `version` of its format, from the oldest that jsg::Serializer
+// writes to V8's latest. Throws a DataCloneError, as `what` ("Serialization" or
+// "Deserialization") of that version, if not.
+bool checkVersion(v8::Isolate* isolate, uint32_t version, kj::StringPtr what) {
+  if (version >= MIN_SERIALIZATION_VERSION &&
+      version <= v8::CurrentValueSerializerFormatVersion()) {
+    return true;
+  }
+  throwDataCloneError(isolate, kj::str(what, " version ", version, " is not supported."));
+  return false;
+}
+
 class Serializer final: public v8::ValueSerializer::Delegate {
  public:
-  Serializer(v8::Isolate* isolate, bool errorsAreHostObjects)
+  Serializer(v8::Isolate* isolate, const SerializeOptions& options)
       : isolate(isolate),
-        errorsAreHostObjects(errorsAreHostObjects),
+        errorsAreHostObjects(options.errors_are_host_objects),
         prototypeOfObject(v8::Object::New(isolate)->GetPrototype()),
         jsSerializeModeKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY))),
@@ -70,19 +86,17 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
   ~Serializer() noexcept(true) {}
 
-  // Writes the header, of `version` if there is one, as jsg::Serializer does for its `version`
-  // option. Returns false, leaving a DataCloneError pending, if V8 can't write that version.
-  bool writeHeader(kj::Maybe<uint32_t> version) {
-    KJ_IF_SOME(v, version) {
-      // SetWriteVersion() fails a V8 check, rather than throwing, for a version it can't write.
-      if (v < MIN_SERIALIZATION_VERSION || v > v8::CurrentValueSerializerFormatVersion()) {
-        throwDataCloneError(isolate,
-            newString(isolate, kj::str("Serialization version ", v, " is not supported.")));
-        return false;
-      }
-      if (ser.SetWriteVersion(v).IsNothing()) return false;
+  // Applies the version and header options as jsg::Serializer's constructor does. Returns false,
+  // leaving a DataCloneError pending, if V8 can't write the version.
+  bool init(const SerializeOptions& options) {
+    if (options.has_version) {
+      // For a version above V8's latest, SetWriteVersion() throws a DataCloneError whose message
+      // V8 can't format, which aborts the process, and jsg::Serializer KJ_ASSERTs on one below
+      // the minimum. checkVersion() throws a DataCloneError naming the version instead.
+      if (!checkVersion(isolate, options.version, "Serialization"_kj)) return false;
+      if (ser.SetWriteVersion(options.version).IsNothing()) return false;
     }
-    ser.WriteHeader();
+    if (!options.omit_header) ser.WriteHeader();
     return true;
   }
 
@@ -183,28 +197,37 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
 class Deserializer final: public v8::ValueDeserializer::Delegate {
  public:
-  Deserializer(v8::Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserveStackInErrors)
+  Deserializer(
+      v8::Isolate* isolate, ::rust::Slice<const uint8_t> data, const DeserializeOptions& options)
       : isolate(isolate),
-        preserveStackInErrors(preserveStackInErrors),
+        preserveStackInErrors(options.preserve_stack_in_errors),
         deser(isolate, data.data(), data.size(), this),
         jsSerializables(isolate, deser, ::workerd::jsg::PreserveStack(preserveStackInErrors)) {}
   // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
   ~Deserializer() noexcept(true) {}
 
-  // Reads the header as jsg::Deserializer does. If it is missing or of an unsupported version,
-  // throws a KJ exception, which reaches JavaScript as an internal error; if execution is
-  // terminating, returns false.
-  bool readHeader(::rust::Slice<const uint8_t> data) {
-    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only turns what it caught into a KJ exception.
-    v8::TryCatch tryCatch(isolate);
-    if (deser.ReadHeader(isolate->GetCurrentContext()).IsJust()) return true;
-    MaybeLocal exception;
-    if (!catch_exception(tryCatch, exception)) return false;
-    // Only header metadata, never bytes of the value.
-    auto header = data.empty() ? "empty" : data[0] == 0xff ? "present" : "missing";
-    KJ_FAIL_REQUIRE("Unable to deserialize cloned data due to invalid or unsupported version.",
-        data.size(), header, deser.GetWireFormatVersion(),
-        v8::CurrentValueSerializerFormatVersion());
+  // Applies the header and version options as jsg::Deserializer's constructor does: reads the
+  // header unless `options.read_header` is false, then reads in `options.version` if it has one.
+  // If the header is missing or of an unsupported version, throws the KJ exception that
+  // jsg::Deserializer throws, labeled with `diagnosticContext`, which reaches JavaScript as an
+  // internal error. Returns false, leaving a DataCloneError pending, if V8 can't read the
+  // version, or if execution is terminating.
+  bool init(::rust::Slice<const uint8_t> data,
+      const DeserializeOptions& options,
+      ::rust::Str diagnosticContext) {
+    if (options.read_header) {
+      auto context = kj::heapString(diagnosticContext.data(), diagnosticContext.size());
+      if (::workerd::jsg::readHeader(
+              isolate, deser, kj::arrayPtr(data.data(), data.size()), context.asPtr())
+              .IsNothing()) {
+        return false;
+      }
+    }
+    if (options.has_version) {
+      if (!checkVersion(isolate, options.version, "Deserialization"_kj)) return false;
+      deser.SetWireFormatVersion(options.version);
+    }
+    return true;
   }
 
   // Returns none if deserialization threw, leaving the exception pending.
@@ -249,22 +272,23 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
 // Serialization
 bool local_serialize(Isolate* isolate,
     const Local& value,
-    bool errors_are_host_objects,
-    kj::Maybe<uint32_t> version,
+    const SerializeOptions& options,
     ::rust::Vec<uint8_t>& result) {
   if (exceptionPending(isolate)) return false;
-  Serializer serializer(isolate, errors_are_host_objects);
-  if (!serializer.writeHeader(version)) return false;
+  Serializer serializer(isolate, options);
+  if (!serializer.init(options)) return false;
   if (!serializer.write(local_as_ref_from_ffi<v8::Value>(value))) return false;
   result = serializer.release();
   return true;
 }
 
-MaybeLocal value_deserialize(
-    Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors) {
+MaybeLocal value_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const DeserializeOptions& options,
+    ::rust::Str diagnostic_context) {
   if (exceptionPending(isolate)) return {};
-  Deserializer deserializer(isolate, data, preserve_stack_in_errors);
-  if (!deserializer.readHeader(data)) return {};
+  Deserializer deserializer(isolate, data, options);
+  if (!deserializer.init(data, options, diagnostic_context)) return {};
   return maybe_local_to_ffi(deserializer.read());
 }
 
