@@ -144,19 +144,18 @@ class Serializer final: public v8::ValueSerializer::Delegate {
       throwDataCloneError(isolate, "Object is not transferable."_kj);
       return false;
     }
-    // A value given twice is transferred once. Values are compared, not their buffers, as
-    // jsg::Serializer compares them, so that the numbers are the same.
-    for (auto& transferred: transferredValues) {
-      if (transferred == value) return true;
+    // Each buffer is transferred once, however many times it or views of it are listed, as
+    // jsg::Serializer transfers it: V8 must be told about a buffer only once.
+    for (auto& transferred: transferredBuffers) {
+      if (transferred == buffer) return true;
     }
-    auto id = static_cast<uint32_t>(transferredValues.size());
-    transferredValues.add(isolate, value);
-    transferredBackingStores.add(buffer->GetBackingStore());
-    ser.TransferArrayBuffer(id, buffer);
+    auto id = static_cast<uint32_t>(transferredBuffers.size());
     // Detached once the value is written, as jsg::Serializer::release() detaches it, so that a
     // getter that serialization runs sees the buffer intact, and V8 still finds the buffer of a
     // view written after it.
-    buffersToDetach.add(isolate, buffer);
+    transferredBuffers.add(isolate, buffer);
+    transferredBackingStores.add(buffer->GetBackingStore());
+    ser.TransferArrayBuffer(id, buffer);
     return true;
   }
 
@@ -170,7 +169,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // jsg::Serializer::release() does. Returns false if detaching threw, leaving the exception
   // pending.
   bool release(Serialized& result) {
-    for (auto& global: buffersToDetach) {
+    for (auto& global: transferredBuffers) {
       auto buffer = global.Get(isolate);
       // JavaScript that serialization ran may have detached it already, as a nested
       // structuredClone() that transfers it does.
@@ -268,10 +267,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // serialization does.
   kj::Vector<v8::Global<v8::SharedArrayBuffer>> sharedArrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
-  // The values given to transfer(), the backing stores of their buffers, and the buffers.
-  kj::Vector<v8::Global<v8::Value>> transferredValues;
+  // The buffers transfer() transferred, in the order they are numbered, and their backing stores.
+  kj::Vector<v8::Global<v8::ArrayBuffer>> transferredBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> transferredBackingStores;
-  kj::Vector<v8::Global<v8::ArrayBuffer>> buffersToDetach;
   v8::Local<v8::Value> prototypeOfObject;
   v8::Local<v8::Private> jsSerializeModeKey;
   v8::Local<v8::Private> domExceptionBrandKey;

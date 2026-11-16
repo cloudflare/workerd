@@ -352,10 +352,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Maybe<ExternalHandler&> externalHandler;
 
   kj::Vector<jsg::JsRef<JsValue>> sharedArrayBuffers;
-  kj::Vector<jsg::JsRef<JsValue>> arrayBuffers;
-  // ArrayBuffers passed to transfer() that still need to be detached. We defer detaching until
-  // release() (i.e. after write()) -- see transfer() for why.
-  kj::Vector<jsg::V8Ref<v8::ArrayBuffer>> arrayBuffersToDetach;
+  // The buffers transferred, in the order they are numbered. release() detaches them, after
+  // write() -- see transfer() for why.
+  kj::Vector<jsg::V8Ref<v8::ArrayBuffer>> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   // The data of the instances of classes implemented in JavaScript written by the current

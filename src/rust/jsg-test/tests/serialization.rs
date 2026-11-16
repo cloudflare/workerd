@@ -987,6 +987,18 @@ fn transferred_array_buffers_move_to_the_deserializer() {
             "b.byteLength === 0 && u.length === 0",
             "v[0][0] === 3 && v[0].buffer.byteLength === 2",
         );
+        // A view and its buffer, and two views of one buffer, transfer the buffer once.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); globalThis.u = new Uint8Array(b, 4); u[0] = 7;
+             globalThis.w = new Uint8Array(b);
+             globalThis.value = { u, b }; globalThis.transfer = [u, b, w];",
+            3,
+            1,
+            "b.byteLength === 0 && u.length === 0 && w.length === 0",
+            "v.u[0] === 7 && v.u.buffer === v.b && v.b.byteLength === 8",
+        );
         // A getter that serialization runs sees the buffer intact: it is detached afterwards.
         assert_transfer(
             lock,
@@ -998,6 +1010,22 @@ fn transferred_array_buffers_move_to_the_deserializer() {
             1,
             "b.byteLength === 0",
             "v.size === 8 && v.b.byteLength === 8",
+        );
+        // A getter that serialization runs can detach a transferred buffer itself, as a nested
+        // structuredClone() that transfers it does. release() doesn't detach it again, which V8
+        // happens to allow today, and passes on the backing store it took in transfer(). The
+        // HTML standard throws a DataCloneError for a buffer detached by then; both serializers
+        // differ from it alike, so this checks only that they agree and don't crash.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); new Uint8Array(b)[0] = 42;
+             globalThis.value = { get moved() { return new Uint8Array(b.transfer()); } };
+             globalThis.transfer = [b];",
+            1,
+            1,
+            "b.detached",
+            "v.moved[0] === 42 && v.moved.length === 8",
         );
         // A buffer that the value doesn't hold is still detached, and passed on.
         assert_transfer(

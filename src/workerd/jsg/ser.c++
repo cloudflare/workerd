@@ -539,9 +539,9 @@ Serializer::Released Serializer::release() {
 
   // Now that serialization is complete, detach the ArrayBuffers that were transferred. We
   // intentionally defer this until after write() -- see transfer() for details.
-  if (!arrayBuffersToDetach.empty()) {
+  if (!arrayBuffers.empty()) {
     auto& js = jsg::Lock::current();
-    for (auto& arrayBuffer: arrayBuffersToDetach) {
+    for (auto& arrayBuffer: arrayBuffers) {
       auto handle = arrayBuffer.getHandle(js);
       // JS run during write() (e.g. an accessor getter performing a nested structuredClone that
       // transfers the same buffer, or calling ArrayBuffer.prototype.transfer()) may have already
@@ -556,7 +556,6 @@ Serializer::Released Serializer::release() {
 
   sharedArrayBuffers.clear();
   arrayBuffers.clear();
-  arrayBuffersToDetach.clear();
   auto pair = ser.Release();
   return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
@@ -586,13 +585,14 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   JSG_REQUIRE(arrayBuffer->IsDetachable(), DOMDataCloneError, "Object is not transferable.");
 
   uint32_t n;
+  // Each buffer is transferred once, however many times it or views of it are listed: V8 must
+  // be told about a buffer only once.
   for (n = 0; n < arrayBuffers.size(); n++) {
-    // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n].getHandle(js) == value) {
+    if (arrayBuffers[n].getHandle(js) == arrayBuffer) {
       return;
     }
   }
-  arrayBuffers.add(jsg::JsRef(js, value));
+  arrayBuffers.add(js.v8Ref(arrayBuffer));
 
   backingStores.add(arrayBuffer->GetBackingStore());
   ser.TransferArrayBuffer(n, arrayBuffer);
@@ -617,9 +617,6 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   //    that is in the transfer list while serialization is still running. Detaching up front (as we
   //    used to) would show such a getter a prematurely-detached buffer; deferring matches the spec
   //    (the buffer is still detached by the time structuredClone() returns, in release()).
-  //
-  // A vector is required because the transfer list may contain multiple ArrayBuffers.
-  arrayBuffersToDetach.add(js.v8Ref(arrayBuffer));
 }
 
 void Serializer::write(Lock& js, const JsValue& value) {
