@@ -23,12 +23,17 @@ kj::Promise<void> startTls(kj::StringPtr hostName) {
 class MockHttpService: public kj::HttpService {
  public:
   virtual ~MockHttpService() {}
+
+  // The method of the last request.
+  kj::Maybe<kj::HttpMethod> requestMethod;
+
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
-    KJ_UNIMPLEMENTED("not exercised by test");
+    requestMethod = method;
+    return kj::READY_NOW;
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -79,6 +84,19 @@ class DeferredHostService final: public kj::HttpService {
 
  private:
   kj::String& seenHost;
+};
+
+class UnusedResponse final: public kj::HttpService::Response {
+ public:
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_UNIMPLEMENTED("not exercised by test");
+  }
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    KJ_UNIMPLEMENTED("not exercised by test");
+  }
 };
 
 class TestConnectResponse: public kj::HttpService::ConnectResponse {
@@ -293,4 +311,69 @@ KJ_TEST("http connect host outlives the call") {
   ::kj::rust::HttpConnectSettings settings = {.use_tls = false, .tls_starter = kj::none};
   proxy->connect(host.asBytes().as<Rust>(), headers, connection, tunnel, settings).wait(waitScope);
   KJ_EXPECT(seenHost == host, seenHost);
+}
+
+KJ_TEST("a request's method crosses to Rust and back by its name") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto mock = kj::heap<MockHttpService>();
+  auto& mockRef = *mock;
+  auto proxy = kj::rust::tests::new_proxy_http_service(kj::mv(mock));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  auto body = kj::newOneWayPipe(static_cast<uint64_t>(0));
+  UnusedResponse response;
+
+  auto method = kj::HttpMethod::PROPFIND;
+  proxy
+      ->request(kj::toCharSequence(method).asBytes().as<Rust>(), "/"_kj.asBytes().as<Rust>(),
+          headers, *body.in, response)
+      .wait(waitScope);
+  auto& received = KJ_ASSERT_NONNULL(mockRef.requestMethod);
+  KJ_EXPECT(received == method, received);
+}
+
+KJ_TEST("a method name from Rust that kj refuses fails the request") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto mock = kj::heap<MockHttpService>();
+  auto& mockRef = *mock;
+  auto proxy = kj::rust::tests::new_proxy_http_service(kj::mv(mock));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  auto body = kj::newOneWayPipe(static_cast<uint64_t>(0));
+  UnusedResponse response;
+
+  // Rust's http::Method takes BLOCK, and C++ refuses it, since kj doesn't know it as a method;
+  // Rust itself refuses "GE T", which is not a token.
+  for (kj::StringPtr name: {"BLOCK"_kj, "GE T"_kj}) {
+    KJ_EXPECT_THROW_MESSAGE("invalid HTTP method",
+        proxy
+            ->request(
+                name.asBytes().as<Rust>(), "/"_kj.asBytes().as<Rust>(), headers, *body.in, response)
+            .wait(waitScope));
+  }
+  // CONNECT is a method, but a request can't carry it.
+  KJ_EXPECT_THROW_MESSAGE("use connect() for CONNECT requests",
+      proxy
+          ->request("CONNECT"_kj.asBytes().as<Rust>(), "/"_kj.asBytes().as<Rust>(), headers,
+              *body.in, response)
+          .wait(waitScope));
+  KJ_EXPECT(mockRef.requestMethod == kj::none);
+}
+
+KJ_TEST("a bad method name from Rust is reported with bytes outside ASCII escaped") {
+  // Rust's http::Method refuses such names before they cross, so call the C++ side directly.
+  const kj::byte name[] = {'B', 'L', 0xc3, 0xb6, 'C', 'K'};
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+    kj::rust::httpMethodFromRust(::rust::Slice<const kj::byte>(name, sizeof(name)));
+  })) {
+    for (char c: e.getDescription()) {
+      KJ_EXPECT(static_cast<kj::byte>(c) < 0x80, e.getDescription());
+    }
+  } else {
+    KJ_FAIL_EXPECT("expected an exception");
+  }
 }

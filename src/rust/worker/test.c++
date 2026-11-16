@@ -389,12 +389,14 @@ class StubWorker final: public WorkerInterface {
   bool testCalled = false;
   bool connectCalled = false;
   kj::String connectHost;
+  kj::Maybe<kj::HttpMethod> requestMethod;
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
+    requestMethod = method;
     auto body = response.send(200, "OK", headers, kj::str("STUB").size());
     return body->write("STUB"_kjb).attach(kj::mv(body));
   }
@@ -538,6 +540,24 @@ KJ_TEST("cxx_worker delegates request to the wrapped C++ worker") {
       client->request(kj::HttpMethod::GET, "http://test/"_kj, headers).response.wait(waitScope);
   KJ_ASSERT(response.statusCode == 200);
   KJ_ASSERT(response.body->readAllText().wait(waitScope) == "STUB");
+}
+
+KJ_TEST("cxx_worker passes the request method to the wrapped C++ worker by name") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+  // The method goes from C++ to Rust (RustWorkerInterface) and back (CxxWorkerInterface).
+  auto client = newClient(new_cxx_worker(kj::mv(stub)));
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  auto method = kj::HttpMethod::PROPFIND;
+  auto response = client->request(method, "http://test/"_kj, headers).response.wait(waitScope);
+  KJ_ASSERT(response.statusCode == 200);
+  auto& received = KJ_ASSERT_NONNULL(stubRef.requestMethod);
+  KJ_EXPECT(received == method, received);
 }
 
 KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {

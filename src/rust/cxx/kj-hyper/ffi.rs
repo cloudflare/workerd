@@ -20,7 +20,6 @@ pub use bridge::ConnectResponse;
 pub use bridge::Ecdsa;
 pub use bridge::HttpHeaderTable;
 pub use bridge::HttpHeaders;
-pub use bridge::HttpMethod;
 pub use bridge::HttpServiceResponse;
 pub use bridge::TlsStarterCallback;
 pub use bridge::WebSocket;
@@ -30,11 +29,11 @@ pub use bridge::WsCompression;
 pub use bridge::WsOffer;
 pub use bridge::ecdsa_verify;
 pub use bridge::for_each_header;
+pub use bridge::method_allowed;
 pub use bridge::new_body_stream;
 pub use bridge::new_connect_response;
 pub use bridge::new_rust_io_stream;
 pub use bridge::new_tls_starter;
-pub use bridge::parse_method;
 pub use bridge::pump_tunnel;
 pub use bridge::tls_starter_set;
 pub use bridge::websocket_agreement;
@@ -110,7 +109,6 @@ mod bridge {
 
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
-        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
         type ConnectResponse = kj::http::ffi::ConnectResponse;
         type WebSocket = kj::http::ffi::WebSocket;
@@ -142,8 +140,10 @@ mod bridge {
             arena: &[u8],
             lens: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
-        /// kj's parse of a request method; false for one kj has no name for.
-        fn parse_method(name: &[u8], method: &mut HttpMethod) -> bool;
+        /// Whether the server hands a request with the method `name` to its handler rather than
+        /// answering kj's 501: only for a method kj knows by name, as kj's `HttpServer` does
+        /// without `allowOtherMethods`.
+        fn method_allowed(name: &[u8]) -> bool;
         /// `BoringSSL`'s check of a DER `signature` over `message` by `public_key`, an encoded
         /// point on the algorithm's curve (a `subjectPublicKey`'s contents).
         fn ecdsa_verify(
@@ -157,8 +157,8 @@ mod bridge {
 
         fn new_rust_io_stream(io: Box<RustIo>) -> KjOwn<AsyncIoStream>;
         fn new_body_stream(body: Box<RustBody>) -> KjOwn<AsyncInputStream>;
-        /// `kj::HttpService::Response` for a request of `method` with `headers`, which decide
-        /// whether it is a WebSocket handshake and whether that handshake is acceptable.
+        /// `kj::HttpService::Response` for a request of `method` (its name) with `headers`, which
+        /// decide whether it is a WebSocket handshake and whether that handshake is acceptable.
         ///
         /// # Safety
         ///
@@ -167,7 +167,7 @@ mod bridge {
         /// ([`Borrowing`] does).
         unsafe fn new_server_response(
             response: Box<ServerResponse>,
-            method: HttpMethod,
+            method: &[u8],
             headers: &HttpHeaders,
             compression: WebSocketCompression,
             errors: KjMaybe<&WebSocketErrorHandler>,
@@ -332,13 +332,13 @@ pub fn headers_from_block<'t>(
     })
 }
 
-/// `kj::HttpService::Response` for a request of `method` with `headers`.
+/// `kj::HttpService::Response` for a request of `method` (its name) with `headers`.
 ///
 /// The headers decide whether the request is a WebSocket handshake and whether that handshake is
 /// acceptable. A WebSocket the response accepts reports protocol errors through `errors`.
 pub fn new_server_response<'e>(
     response: Box<ServerResponse>,
-    method: HttpMethod,
+    method: &[u8],
     headers: &HttpHeaders,
     compression: WebSocketCompression,
     errors: KjMaybe<&'e WebSocketErrorHandler>,
