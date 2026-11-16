@@ -637,9 +637,10 @@ KJ_TEST("REPL reloads a config in place") {
   KJ_EXPECT(fixture.evalAwait("(await s.reload()) === s") == "true");
   KJ_EXPECT(fixture.evalAwait(FETCH_MAIN) == "'two'");
   KJ_EXPECT(fixture.eval("workerd.servers.length") == "1");
-  // What the replaced server handed out fails.
+  // What the replaced server handed out fails, saying how to get its replacement.
   KJ_EXPECT_STARTS_WITH(fixture.evalAwait("await main.fetch('http://x/')"),
-      "Uncaught Error: The server for reload.capnp was reloaded.");
+      "Uncaught Error: The server for reload.capnp was reloaded. Get a new one from its "
+      "service(), socket() or durableObject().");
 
   // A config that no longer loads leaves the server as it was.
   fixture.setConfig("reload.capnp", BROKEN_CONFIG);
