@@ -1,0 +1,9 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The per-request issue collector. It is a package of its own, beside the C++ that owns it
+# (//src/workerd/io:issues), and depends on nothing in workerd.
+wd_rust_crate(
+    name = "issues",
+    cxx_bridge_src = "ffi.rs",
+    visibility = ["//visibility:public"],
+)
