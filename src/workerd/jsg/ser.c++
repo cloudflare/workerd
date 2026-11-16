@@ -369,6 +369,7 @@ void Serializer::writeNativeError(Lock& js, v8::Local<v8::Object> error) {
       js, KeyCollectionFilter::OWN_ONLY, PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
 
   auto obj = js.obj();
+  auto ownDataProperties = js.isUsingErrorSerializationOwnDataProperties();
   for (size_t n = 0; n < names.size(); n++) {
     auto name = names.get(js, n);
     // The name typically comes from the prototype and therefore
@@ -379,7 +380,15 @@ void Serializer::writeNativeError(Lock& js, v8::Local<v8::Object> error) {
     // out here.
     if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
 
-    obj.set(js, name, errorObj.get(js, name));
+    // A data property, as when reading, copies the value without running a setter. set() runs a
+    // setter that Object.prototype has for the name instead, and an own `__proto__` replaces the
+    // object's prototype; it is kept for Workers without error_serialization_own_data_properties.
+    auto value = errorObj.get(js, name);
+    if (ownDataProperties) {
+      obj.createDataProperty(js, name, value);
+    } else {
+      obj.set(js, name, value);
+    }
   }
   write(js, obj);
 }

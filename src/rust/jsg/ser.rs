@@ -11,7 +11,9 @@
 //! `jsg::Serializer` with its default options. That covers what V8's serializer supports, plus:
 //!
 //! - Native errors, as host objects with their own properties (including `stack`), when the
-//!   `enhanced_error_serialization` compatibility flag is on.
+//!   `enhanced_error_serialization` compatibility flag is on. The properties are copied as data
+//!   properties with the `error_serialization_own_data_properties` flag, and assigned without it,
+//!   which runs a setter that `Object.prototype` has for one's name instead.
 //! - Workerd API objects whose C++ type is serializable, such as `Blob` and `Headers`, through
 //!   their own serializers, and a `DOMException`, whichever implementation made it, as C++ JSG
 //!   writes it. Rust resources are not serializable.

@@ -257,8 +257,17 @@ fn errors_lose_what_cpp_jsg_loses() {
             "v.name === 'Error' && !Object.hasOwn(v, 'name') && v.message === 'm'",
         );
 
-        // The other own properties are copied with an assignment, which runs a setter that
-        // `Object.prototype` has for the property instead of copying it.
+        Ok(())
+    });
+}
+
+/// Without `error_serialization_own_data_properties`, an error's other own properties are
+/// assigned, which runs a setter that `Object.prototype` has for one instead of copying it, and
+/// sets the prototype of the copy for an own `__proto__`, which is lost.
+#[test]
+fn error_properties_are_assigned_without_own_data_properties() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(
             lock,
             "globalThis.setterRuns = 0;
@@ -278,12 +287,80 @@ fn errors_lose_what_cpp_jsg_loses() {
         assert!(ctx.eval::<bool>(lock, "globalThis.setterRuns === 2").unwrap());
         ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
 
-        // An own `__proto__` sets the prototype of the object it is copied to, and is lost.
+        // A setter that throws makes both serializers throw.
+        ctx.eval_raw(
+            lock,
+            "Object.defineProperty(Object.prototype, 'x', {
+               set(value) { throw new Error('setter'); },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        let value = eval(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), 'x', { value: 1, enumerable: true })",
+        );
+        for cpp in [false, true] {
+            let caught = lock
+                .try_catch(|lock| {
+                    let result = if cpp {
+                        Harness::cpp_try_serialize(lock, value)
+                    } else {
+                        jsg::ser::serialize(lock, value)
+                    };
+                    assert!(result.as_ref().is_err_and(jsg::Error::is_pending), "{cpp}");
+                    result
+                })
+                .unwrap();
+            assert_error(lock, ctx, caught.expect_err("setter"), "Error", "setter");
+        }
+        ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
+
         assert_round_trip(
             lock,
             ctx,
             "Object.defineProperty(new Error('e'), '__proto__', { value: { y: 1 }, enumerable: true })",
             "!Object.hasOwn(v, '__proto__') && v.y === undefined && v.message === 'e'",
+        );
+        Ok(())
+    });
+}
+
+/// With `error_serialization_own_data_properties`, an error's other own properties are copied as
+/// data properties, so no setter that `Object.prototype` has for one runs, and an own `__proto__`
+/// is copied like any other property.
+#[test]
+fn error_properties_are_copied_as_data_properties() {
+    let harness = Harness::with_flags(|mut flags| {
+        flags.set_enhanced_error_serialization(true);
+        flags.set_error_serialization_own_data_properties(true);
+    });
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.setterRuns = 0;
+             Object.defineProperty(Object.prototype, 'x', {
+               set(value) { globalThis.setterRuns++; throw new Error('setter'); },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), 'x', { value: 1, enumerable: true })",
+            "Object.hasOwn(v, 'x') && v.x === 1",
+        );
+        assert!(ctx.eval::<bool>(lock, "globalThis.setterRuns === 0").unwrap());
+        ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
+
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), '__proto__', { value: { y: 1 }, enumerable: true })",
+            "Object.getOwnPropertyDescriptor(v, '__proto__').value.y === 1 && \
+             Object.getPrototypeOf(v) === Error.prototype && v.message === 'e'",
         );
         Ok(())
     });
