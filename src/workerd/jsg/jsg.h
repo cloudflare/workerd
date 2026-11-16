@@ -2682,8 +2682,13 @@ class ExternalMemoryTarget: public IsolateLiveness {
   void maybeDeferAdjustment(ssize_t amount) const;
   void adjustNow(Lock& js, ssize_t amount) const;
 
+  // Reports a decrease (`amount` < 0) to `target`, this target's isolate, whose lock the caller
+  // holds, with a pending rise netted into it. Never passes V8 a rise.
+  void decreaseNow(v8::Isolate* target, int64_t amount) const;
+
   // Tracks changes to external memory that were applied from a thread that did not hold the
-  // isolate lock. These will be applied the next time the lock is taken.
+  // isolate lock. These are applied the next time the lock is taken, or netted into a decrease
+  // made under it.
   mutable std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
   static_assert(std::atomic<int64_t>::is_always_lock_free);
 
@@ -2704,14 +2709,15 @@ class ExternalMemoryAdjustment final {
   // Adjust the amount of external memory report up or down.
   void adjust(ssize_t amount);
 
-  // Like adjust, except that the adjustment is applied immediately with no deferral.
+  // Like adjust(), but reports immediately when `js` locks this adjustment's isolate.
+  // Otherwise, defers to that isolate's next lock; a destroyed isolate receives no update.
   void adjustNow(Lock& js, ssize_t amount);
 
   // Set a specific amount of external memory to be attributed, overriding
   // the previous amount.
   void set(size_t amount);
 
-  // Like set(), except that the adjustment is applied immediately with no deferral.
+  // Like set(), but follows adjustNow()'s rules for reporting under `js`.
   void setNow(Lock& js, size_t amount);
 
   inline size_t getAmount() const {
