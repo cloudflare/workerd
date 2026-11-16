@@ -291,13 +291,19 @@ class Serializer final: v8::ValueSerializer::Delegate {
   }
 
  private:
-  // A Serializer that writes to `ser`, which another delegate drives; see writeApiObject().
+  // A Serializer that writes to `ser`, which another delegate drives; see writeApiObject(). The
+  // other delegate writes the top-level value, so every value this writes is nested in it.
   struct Borrowed {};
   Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed);
   friend v8::Maybe<bool> writeApiObject(
       v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
   friend v8::Maybe<bool> writeNativeError(
       v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error);
+  friend class JsSerializableWriter;
+
+  // Writes the data that writeJsSerializable() queued, as follows a top-level value. Writing one's
+  // data may queue more.
+  void writePendingJsSerializableData(Lock& js);
 
   // Writes the native error `error` as a host object (see writeNativeError()).
   void writeNativeError(Lock& js, v8::Local<v8::Object> error);
@@ -374,7 +380,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
   v8::Local<v8::Private> jsSerializeModeKey;
 
   // The DOM_EXCEPTION_BRAND_KEY private symbol, the brand of the bootstrap's DOMException, which
-  // IsHostObject() also checks class instances for. Empty as jsSerializeModeKey is.
+  // IsHostObject() also checks class instances for, and writeJsSerializable() checks them for to
+  // tell whether one is an error.
   v8::Local<v8::Private> domExceptionBrandKey;
 
   // The actual ValueSerializer. Note that it's important to define this last because its
@@ -463,6 +470,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
  private:
   // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
+  // The other delegate reads the top-level value, so every value this reads is nested in it.
   struct Borrowed {
     bool preserveStackInErrors = true;
   };
@@ -471,6 +479,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
       v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
   friend v8::MaybeLocal<v8::Object> readNativeError(
       v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
+  friend class JsSerializableReader;
 
   // Reads a native error that Serializer::writeNativeError() wrote, once its tag has been read.
   v8::Local<v8::Object> readNativeError(Lock& js);
@@ -544,9 +553,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 };
 
 // For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or
-// v8::ValueDeserializer with a delegate of their own but write native errors and workerd API
-// objects in the same format as Serializer and Deserializer, through the same code. Each returns
-// an empty result, leaving the exception pending, if what it runs throws.
+// v8::ValueDeserializer with a delegate of their own but write native errors, instances of classes
+// implemented in JavaScript and workerd API objects in the same format as Serializer and
+// Deserializer, through the same code. Each returns an empty result, leaving the exception pending,
+// if what it runs throws.
 
 // The tag with which a native error written as a host object begins. Keep in sync with the
 // nativeError serialization tag defined in worker-interface.capnp.
@@ -581,11 +591,57 @@ v8::Maybe<bool> writeApiObject(
 v8::MaybeLocal<v8::Object> readApiObject(
     v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
 
-// Returns the exports of the bootstrap module named `specifier` in the current context if it has
-// been loaded (see BootstrapModules), or kj::none, as Deserializer finds them to look up a class
-// implemented in JavaScript. Runs no JavaScript.
-kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(
-    v8::Isolate* isolate, kj::StringPtr specifier);
+// Writes instances of classes implemented in JavaScript (SERIALIZATION_TAG_JS_SERIALIZABLE) to
+// `ser`, as Serializer writes them. Use one for the whole of a serialization: it queues each
+// instance's data to follow the top-level value, and keeps the classes it has found. It holds V8
+// handles, so destroy it with the isolate locked.
+class JsSerializableWriter {
+ public:
+  JsSerializableWriter(v8::Isolate* isolate, v8::ValueSerializer& ser);
+  KJ_DISALLOW_COPY_AND_MOVE(JsSerializableWriter);
+
+  // Writes `object`, an instance whose JS_SERIALIZE_MODE_KEY mark, which the caller has read, is
+  // `mark`, as Serializer's WriteHostObject() does, and queues its data. A mark that describes no
+  // class throws DataCloneError. Calls the class's `clone`, which runs JavaScript.
+  v8::Maybe<bool> write(v8::Local<v8::Object> object, v8::Local<v8::Value> mark);
+
+  // Writes the data of the instances that write() has written, once the top-level value has been
+  // written, as Serializer::write() does. Writing one's data may write more instances, whose data
+  // it writes too.
+  v8::Maybe<bool> writePendingData();
+
+ private:
+  v8::Isolate* isolate;
+  Serializer serializer;
+};
+
+// Reads instances of classes implemented in JavaScript from `deser`, as Deserializer reads them.
+// Use one for the whole of a deserialization: it initializes the instances once the top-level value
+// has been read, and keeps the classes it has found. It holds V8 handles, so destroy it with the
+// isolate locked.
+class JsSerializableReader {
+ public:
+  JsSerializableReader(
+      v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
+  KJ_DISALLOW_COPY_AND_MOVE(JsSerializableReader);
+
+  // Reads an instance once its SERIALIZATION_TAG_JS_SERIALIZABLE has been read, as Deserializer's
+  // ReadHostObject() does: makes it from its class's prototype, which the data names among the
+  // bootstrap's loaded modules, for finish() to initialize. Runs no JavaScript. Data that names no
+  // class that opted into the protocol throws DataCloneError.
+  v8::MaybeLocal<v8::Object> read();
+
+  // Once the top-level value has been read: reads the data of the instances that read() made,
+  // which follows it, and initializes them with their classes' `deserialize` functions, as
+  // Deserializer::readValue() does. Runs JavaScript, and so throws DataCloneError instead if C++
+  // code has disallowed JavaScript execution (DisallowJavaScriptScope). Does nothing if read()
+  // made none.
+  v8::Maybe<bool> finish();
+
+ private:
+  v8::Isolate* isolate;
+  Deserializer deserializer;
+};
 
 // Creates the DOMException named DataCloneError with `message` that Serializer's
 // ThrowDataCloneError() throws.

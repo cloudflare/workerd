@@ -212,7 +212,10 @@ Serializer::Serializer(Lock& js, Options options)
 }
 
 Serializer::Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed)
-    : treatClassInstancesAsPlainObjects(true),
+    : writeDepth(1),
+      treatClassInstancesAsPlainObjects(true),
+      treatErrorsAsHostObjects(js.isUsingEnhancedErrorSerialization()),
+      domExceptionBrandKey(IsolateBase::getDomExceptionBrandKey(js.v8Isolate)),
       ser(ser) {}
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
@@ -626,15 +629,17 @@ void Serializer::write(Lock& js, const JsValue& value) {
   KJ_ON_SCOPE_FAILURE(if (writeDepth == 1) pendingJsSerializableData.clear());
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
 
+  if (writeDepth == 1) writePendingJsSerializableData(js);
+}
+
+void Serializer::writePendingJsSerializableData(Lock& js) {
   // A top-level value is followed by the data of the instances of classes implemented in
   // JavaScript that it contains, in the order they were written. Writing one's data may add more.
-  if (writeDepth == 1) {
-    for (size_t i = 0; i < pendingJsSerializableData.size(); i++) {
-      auto data = pendingJsSerializableData[i].getHandle(js);
-      KJ_ASSERT(check(ser.WriteValue(js.v8Context(), data)));
-    }
-    pendingJsSerializableData.clear();
+  for (size_t i = 0; i < pendingJsSerializableData.size(); i++) {
+    auto data = pendingJsSerializableData[i].getHandle(js);
+    KJ_ASSERT(check(ser.WriteValue(js.v8Context(), data)));
   }
+  pendingJsSerializableData.clear();
 }
 
 Deserializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
@@ -667,7 +672,8 @@ Deserializer::Deserializer(
 Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed borrowed)
     : totalInputSize(0),
       deser(deser),
-      preserveStackInErrors(borrowed.preserveStackInErrors) {}
+      preserveStackInErrors(borrowed.preserveStackInErrors),
+      readDepth(1) {}
 
 void Deserializer::init(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
@@ -1082,13 +1088,64 @@ v8::MaybeLocal<v8::Object> readApiObject(
   }
 }
 
-kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(
-    v8::Isolate* isolate, kj::StringPtr specifier) {
-  auto& js = Lock::from(isolate);
-  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return kj::none);
-  return modules.tryGetLoadedExports(js, specifier).map([](JsValue exports) {
-    return v8::Local<v8::Value>(exports);
-  });
+JsSerializableWriter::JsSerializableWriter(v8::Isolate* isolate, v8::ValueSerializer& ser)
+    : isolate(isolate),
+      serializer(Lock::from(isolate), ser, Serializer::Borrowed{}) {}
+
+v8::Maybe<bool> JsSerializableWriter::write(
+    v8::Local<v8::Object> object, v8::Local<v8::Value> mark) {
+  try {
+    serializer.writeJsSerializable(Lock::from(isolate), object, mark);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::Maybe<bool> JsSerializableWriter::writePendingData() {
+  try {
+    serializer.writePendingJsSerializableData(Lock::from(isolate));
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+JsSerializableReader::JsSerializableReader(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack)
+    : isolate(isolate),
+      deserializer(Lock::from(isolate),
+          deser,
+          Deserializer::Borrowed{.preserveStackInErrors = bool(preserveStack)}) {}
+
+v8::MaybeLocal<v8::Object> JsSerializableReader::read() {
+  try {
+    return deserializer.readJsSerializable(Lock::from(isolate));
+  } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
+v8::Maybe<bool> JsSerializableReader::finish() {
+  if (deserializer.pendingJsSerializables.empty()) return v8::Just(true);
+  try {
+    deserializer.finishJsSerializables(Lock::from(isolate));
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
