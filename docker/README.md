@@ -12,6 +12,25 @@ It has no shell and no package manager. It runs as the non-root user `nonroot`
 (65532:65532) and works on a read-only root filesystem. It is built for
 `linux/amd64` and `linux/arm64`.
 
+## Tags
+
+Every release of workerd to npm also publishes the image:
+
+- `<version>`, such as `1.20261116.1`: that release.
+- `latest`: the newest release.
+- `beta`: the newest prerelease (versions that start with `0.`).
+
+These match the npm dist-tags of the `workerd` package. Each image comes with
+an SBOM and a provenance attestation, and is signed with
+[cosign](https://docs.sigstore.dev/) keyless signing by the release workflow.
+Verify the signature with cosign 3 or later:
+
+```sh
+cosign verify docker.io/cloudflare/workerd:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/cloudflare/workerd/.github/workflows/release.yml@refs/heads/main
+```
+
 ## Serving a wrangler project
 
 By default the image runs
@@ -100,3 +119,22 @@ docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile <dir
 `docker/test.sh <image> <platform>` checks that an image runs `--version` and
 serves a project as described above. `.github/workflows/deps-updater.yml` keeps
 the digest of the base image current.
+
+## Publishing
+
+Three jobs in `.github/workflows/release.yml` publish the image once a release's
+`workerd` npm packages are published. `publish-image` builds the image from the
+release's binaries, pushes it by digest only and signs that digest.
+`verify-image` pulls the digest on an amd64 and an arm64 runner and runs
+`docker/test.sh` on it. `tag-image` then points the tags at the digest. A
+digest that fails its tests stays untagged, and no tag moves.
+
+The jobs run only on `main`, and only once the repository has:
+
+- the Actions variable `DOCKER_HUB_USERNAME`, a Docker Hub user that can push
+  to `cloudflare/workerd`;
+- the Actions secret `DOCKER_HUB_ACCESS_TOKEN`, an access token of that user
+  with read and write access.
+
+Until the variable is set, the jobs are skipped. `verify-image` pulls without
+logging in, so `cloudflare/workerd` must be public.
