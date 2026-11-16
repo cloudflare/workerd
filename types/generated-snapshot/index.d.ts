@@ -16475,6 +16475,7 @@ declare module "cloudflare:sockets" {
  * - Binding-level operations:
  *   `await env.STREAM.videos.upload`
  *   `await env.STREAM.videos.createDirectUpload`
+ *   `await env.STREAM.clip`
  *   `await env.STREAM.videos.*`
  *   `await env.STREAM.watermarks.*`
  * - Per-video operations:
@@ -16521,6 +16522,19 @@ interface StreamBinding {
   createDirectUpload(
     params: StreamDirectUploadCreateParams,
   ): Promise<StreamDirectUpload>;
+  /**
+   * Creates a new video by clipping a time range from an existing video.
+   * @param videoId The unique identifier of the source video to clip from.
+   * @param params The time range to clip from the source video.
+   * @returns The details of the newly created clip.
+   * @throws {NotFoundError} if the source video is not found
+   * @throws {BadRequestError} if the time range is invalid or extends past the end of the source video
+   * @throws {BadRequestError} if the source video is a live stream recording
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {RateLimitedError} if the account has too many videos processing at once
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  clip(videoId: string, params: StreamClipParams): Promise<StreamVideo>;
   videos: StreamVideos;
   watermarks: StreamWatermarks;
 }
@@ -16557,10 +16571,13 @@ interface StreamVideoHandle {
   delete(): Promise<void>;
   /**
    * Creates a signed URL token for a video.
+   * @param options Optional settings for the token.
    * @returns The signed token that was created.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the options are invalid, e.g. `expiresAt` is in the past or more than 24 hours away, `notBefore` is not before `expiresAt`, or the signing key is not found or does not belong to the account
    * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
    */
-  generateToken(): Promise<string>;
+  generateToken(options?: StreamSignedTokenOptions): Promise<string>;
   downloads: StreamScopedDownloads;
   captions: StreamScopedCaptions;
 }
@@ -16670,6 +16687,13 @@ interface StreamVideo {
    * Public details associated with the video.
    */
   publicDetails: StreamPublicDetails | null;
+  /**
+   * The unique customer code associated with the video.
+   *
+   * Use this to construct URLs that require a customer code, such as player URLs using signed tokens.
+   * `https://customer-{customerCode}.cloudflarestream.com/{token}/iframe`
+   */
+  customerCode: string;
 }
 type StreamVideoStatus = {
   /**
@@ -16828,6 +16852,98 @@ type StreamUrlUploadParams = {
    */
   watermarkId?: string;
 };
+type StreamClipParams = {
+  /**
+   * The point in the source video, in whole seconds, where the clip starts.
+   */
+  startTimeSeconds: number;
+  /**
+   * The point in the source video, in whole seconds, where the clip ends.
+   * Must be greater than `startTimeSeconds` and no later than the end of the
+   * source video.
+   */
+  endTimeSeconds: number;
+};
+type StreamSignedTokenOptions = {
+  /**
+   * The signing key to sign the token with. When omitted, the token is signed
+   * with a key Stream manages for the account.
+   */
+  signingKey?: StreamSigningKey;
+  /**
+   * When the token stops being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be in the future and no more than 24 hours from now.
+   * Defaults to one hour from now.
+   */
+  expiresAt?: Date | number;
+  /**
+   * When the token starts being accepted, as a `Date` or a Unix timestamp in
+   * seconds. Must be earlier than `expiresAt`. Defaults to one hour ago.
+   */
+  notBefore?: Date | number;
+  /**
+   * Whether the token can also be used to access the video's MP4 downloads.
+   * @default false
+   */
+  downloadable?: boolean;
+  /**
+   * Rules that allow or block viewers by IP address or country. Rules are
+   * evaluated in order, and the first rule that matches is applied.
+   */
+  accessRules?: StreamAccessRule[];
+  /**
+   * Additional flags for the token.
+   */
+  flags?: StreamSignedTokenFlags;
+};
+type StreamSigningKey = {
+  /**
+   * The ID of a Stream signing key.
+   */
+  id: string;
+  /**
+   * The base64-encoded private key, in PEM format, for the signing key.
+   */
+  pem: string;
+};
+type StreamSignedTokenFlags = {
+  /**
+   * Whether the token serves the original video without transformations.
+   * @default false
+   */
+  original?: boolean;
+};
+type StreamAccessRuleAction = "allow" | "block";
+type StreamAccessRule =
+  | {
+      /**
+       * Matches every request. Use as the last rule to set a default action.
+       */
+      type: "any";
+      action: StreamAccessRuleAction;
+    }
+  | {
+      /**
+       * Matches requests from the listed IP addresses or CIDR ranges.
+       */
+      type: "ip.src";
+      action: StreamAccessRuleAction;
+      /**
+       * IPv4 or IPv6 addresses or CIDR ranges.
+       */
+      ip: string[];
+    }
+  | {
+      /**
+       * Matches requests from the listed countries.
+       */
+      type: "ip.geoip.country";
+      action: StreamAccessRuleAction;
+      /**
+       * Two-letter ISO 3166-1 alpha-2 country codes.
+       */
+      country: string[];
+    };
 interface StreamScopedCaptions {
   /**
    * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
@@ -16862,6 +16978,15 @@ interface StreamScopedCaptions {
    * @throws {InternalError} if an unexpected error occurs
    */
   list(language?: string): Promise<StreamCaption[]>;
+  /**
+   * Gets the WebVTT file for a caption or subtitle track.
+   * @param language The BCP 47 language tag of the track.
+   * @returns The track's WebVTT file as a stream.
+   * @throws {NotFoundError} if the video is not found, it has no caption for this language, or a generated caption has not finished
+   * @throws {BadRequestError} if the language is not a valid BCP 47 tag
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  get(language: string): Promise<ReadableStream>;
   /**
    * Removes the captions or subtitles from a video.
    * @param language The BCP 47 language tag to remove.
