@@ -639,6 +639,9 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
                 true => quote_spanned!(span=> ::cxx::private::RustSlice::from_mut(#var)),
             },
             Type::KjDate(_) => quote_spanned!(span=> #var.into()),
+            Type::KjException(_) => {
+                quote_spanned!(span=> ::cxx::private::kj_exception_into_raw(#var))
+            }
             ty if types.needs_indirect_abi(ty) => quote_spanned!(span=> #var.as_mut_ptr()),
             _ => quote!(#var),
         }
@@ -778,6 +781,9 @@ fn expand_cxx_function_shim(efn: &ExternFn, types: &Types) -> TokenStream {
                     quote_spanned!(span=> ::kj_rs::new_callbacks_promise_future(&#call))
                 }
                 Type::KjDate(_) => quote_spanned!(span=> #call.into()),
+                Type::KjException(_) => {
+                    quote_spanned!(span=> ::cxx::private::kj_exception_from_raw(#call))
+                }
                 _ => call,
             },
         };
@@ -1112,6 +1118,10 @@ fn expand_rust_function_shim_impl(
                 }
             }
             Type::KjDate(_) => quote!(#var.into()),
+            Type::KjException(_) => {
+                requires_unsafe = true;
+                quote_spanned!(span=> ::cxx::private::kj_exception_from_raw(#var))
+            }
             ty if types.needs_indirect_abi(ty) => {
                 requires_unsafe = true;
                 quote_spanned!(span=> ::cxx::core::ptr::read(#var))
@@ -1156,6 +1166,7 @@ fn expand_rust_function_shim_impl(
             }
         }
         Type::UniquePtr(_) => Some(quote_spanned!(span=> ::cxx::UniquePtr::into_raw)),
+        Type::KjException(_) => Some(quote_spanned!(span=> ::cxx::private::kj_exception_into_raw)),
         Type::Ref(ty) => match &ty.inner {
             Type::Ident(ident) if ident.rust == RustString => match ty.mutable {
                 false => Some(quote_spanned!(span=> ::cxx::private::RustString::from_ref)),
@@ -2169,6 +2180,9 @@ fn expand_extern_type(ty: &Type, types: &Types, style: ExternTypeStyle) -> Token
         }
         Type::KjDate(span) => {
             quote_spanned!(*span=> i64)
+        }
+        Type::KjException(span) => {
+            quote_spanned!(*span=> *mut ::cxx::private::KjExceptionRepr)
         }
         _ => quote!(#ty),
     }

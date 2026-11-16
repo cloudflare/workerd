@@ -1331,11 +1331,8 @@ void exception_throw(const kj::Exception& exception) {
   kj::throwException(exception.clone());
 }
 
-::rust::String exception_text(const AbortReason& error) {
-  // Raising the error across the bridge is the bridge's own KjError -> kj::Exception conversion.
-  return kj::str(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
-    error.raise();
-  }))).as<kj_rs::RustCopyUncheckedUtf8>();
+::rust::String exception_text(kj::Exception error) {
+  return kj::str(error).as<kj_rs::RustCopyUncheckedUtf8>();
 }
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json) {

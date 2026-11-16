@@ -179,3 +179,105 @@ fn test_kj_arc_in_shared_struct() {
     let expected = "::rust::ManuallyDrop<::Holder> holder$(::std::move(holder));";
     assert!(implementation.contains(expected));
 }
+
+const BRIDGE_KJ_EXCEPTION: &str = r#"
+    #[cxx::bridge]
+    mod ffi {
+        unsafe extern "C++" {
+            fn take_exception(id: u64, exception: KjException) -> Result<()>;
+            fn return_exception() -> KjException;
+        }
+
+        extern "Rust" {
+            fn rust_take_exception(exception: KjException);
+            fn rust_return_exception() -> KjException;
+        }
+    }
+"#;
+
+#[test]
+fn test_kj_exception_by_value() {
+    let opt = cxx_gen::Opt::default();
+    let source = BRIDGE_KJ_EXCEPTION.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let header = str::from_utf8(&generated.header).unwrap();
+    let implementation = str::from_utf8(&generated.implementation).unwrap();
+
+    // C++ functions take and return kj::Exception by value; the exception crosses the
+    // boundary as a kj::Exception* that the receiving side owns.
+    assert!(implementation.contains(
+        "::rust::repr::Result cxxbridge1$take_exception(::std::uint64_t id, ::kj::Exception *exception) noexcept"
+    ));
+    assert!(implementation.contains("take_exception$(id, ::rust::repr::takeException(exception))"));
+    assert!(implementation.contains(
+        "new (return$) ::kj::Exception *(::rust::repr::releaseException(return_exception$()))"
+    ));
+
+    // Rust functions too, as C++ sees them.
+    assert!(header.contains("void rust_take_exception(::kj::Exception exception)"));
+    assert!(header.contains("::kj::Exception rust_return_exception()"));
+    assert!(implementation.contains("::rust::repr::releaseException(::std::move(exception))"));
+    assert!(implementation.contains("::rust::MaybeUninit<::kj::Exception *> return$;"));
+    assert!(implementation.contains("return ::rust::repr::takeException(return$.value);"));
+}
+
+#[test]
+fn test_kj_exception_only_by_value() {
+    const BY_VALUE_ONLY: &str =
+        "KjException is only supported by value, as a function argument or return value";
+    let bridges = [
+        ("struct S { exception: KjException }", BY_VALUE_ONLY),
+        (
+            "extern \"Rust\" { fn f(exception: &KjException); }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "unsafe extern \"C++\" { unsafe fn f(exception: *mut KjException); }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "extern \"Rust\" { fn f(exceptions: &[KjException]); }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "unsafe extern \"C++\" { fn f(callback: fn(exception: KjException)); }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "unsafe extern \"C++\" { fn f(callback: fn() -> KjException); }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "extern \"Rust\" { async fn f() -> Result<KjException>; }",
+            BY_VALUE_ONLY,
+        ),
+        (
+            "extern \"Rust\" { fn f(exceptions: Vec<KjException>); }",
+            "unsupported element type of Vec",
+        ),
+        (
+            "extern \"Rust\" { fn f(exception: Box<KjException>); }",
+            "unsupported target type of Box",
+        ),
+        (
+            "unsafe extern \"C++\" { fn f(exception: KjMaybe<KjException>); }",
+            "unsupported kj::Maybe target type",
+        ),
+        (
+            "unsafe extern \"C++\" { type KjException; }",
+            "reserved name",
+        ),
+    ];
+    for (bridge, expected) in bridges {
+        let source = format!("#[cxx::bridge] mod ffi {{ {bridge} }}");
+        let opt = cxx_gen::Opt::default();
+        let Err(error) = generate_header_and_cc(source.parse().unwrap(), &opt) else {
+            panic!("{bridge} generated code");
+        };
+        let messages: Vec<String> = error.into_iter().map(|error| error.to_string()).collect();
+        assert!(
+            messages.iter().any(|message| message == expected),
+            "{bridge}: {messages:?}"
+        );
+    }
+}
