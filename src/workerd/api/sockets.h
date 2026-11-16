@@ -152,7 +152,7 @@ struct SocketStreamErrnos final: public kj::Refcounted {
 //
 // ServiceWorkerGlobalScope::connect() creates one and abandons it when the handler finishes, since
 // `response` lives only that long.
-class ConnectAcceptance final: public kj::Refcounted {
+class ConnectAcceptance final {
  public:
   ConnectAcceptance(kj::HttpService::ConnectResponse& response, const kj::HttpHeaderTable& table)
       : state(Pending{response}),

@@ -252,10 +252,10 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // secure. The handler can't run that handshake, so it accepts the connection itself once it
     // has made it secure further along. WorkerEntrypoint::connect() lets such a connection through
     // only when connect_handler_immediate_tls is enabled.
-    kj::Maybe<kj::Own<ConnectAcceptance>> acceptance;
+    kj::Maybe<kj::Rc<ConnectAcceptance>> acceptance;
     if (settings.useTls) {
       KJ_ASSERT(FeatureFlags::get(js).getConnectHandlerImmediateTls());
-      acceptance = kj::refcounted<ConnectAcceptance>(response, ioContext.getHeaderTable());
+      acceptance = kj::rc<ConnectAcceptance>(response, ioContext.getHeaderTable());
     } else {
       response.accept(200, "OK", headers);
     }
@@ -267,7 +267,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // throwing, synchronously or asynchronously, or by being canceled. Set up before anything below
     // can throw. On a normal return, it moves into the returned promise's attachments.
     auto abandonAcceptance = kj::defer(
-        [acceptance = acceptance.map([](kj::Own<ConnectAcceptance>& a) { return kj::addRef(*a); }),
+        [acceptance = acceptance.map([](kj::Rc<ConnectAcceptance>& a) { return a.addRef(); }),
             reason = unacceptedReason.clone()]() mutable {
       KJ_IF_SOME(a, acceptance) {
         a->abandon(reason);
@@ -323,7 +323,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
     jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(socketConnection), kj::mv(clientAddress),
         kj::str(host), SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
-        SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
+        SocketProtocol::TCP, kj::str(host) /* domain */, false /* isDefaultFetchPort */, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required. This holds
     // even while the connection waits for accept(): the handler needs its socket to make the
@@ -331,7 +331,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
     jsSocket->initInbound(requestedSecureTransport,
         acceptance.map(
-            [&](kj::Own<ConnectAcceptance>& a) { return ioContext.addObject(kj::addRef(*a)); }));
+            [&](kj::Rc<ConnectAcceptance>& a) { return ioContext.addObject(a.addRef()); }));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
@@ -339,7 +339,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     KJ_IF_SOME(a, acceptance) {
       // A handler that returns normally without accepting is an error in the handler: throwing
       // fails the connection and reports it like any other exception the handler throws.
-      result = result.then([a = kj::addRef(*a), reason = kj::mv(unacceptedReason)]() mutable {
+      result = result.then([a = a.addRef(), reason = kj::mv(unacceptedReason)]() mutable {
         JSG_REQUIRE(!a->abandon(reason), Error, reason);
       });
     }
