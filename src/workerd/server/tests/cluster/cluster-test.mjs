@@ -367,6 +367,12 @@ class ClusterNode {
     return result;
   }
 
+  // Sends the node `signal` without waiting for it to exit.
+  signal(signal) {
+    assert(this.#child !== null, 'node not started');
+    this.#child.kill(signal);
+  }
+
   async stop({ signal = 'SIGTERM', timeoutMs = 10_000 } = {}) {
     if (this.#child === null) return null;
     const child = this.#child;
@@ -3114,6 +3120,141 @@ test(
       }
       await assertLoadServed(await finish(), nodes);
     });
+  }
+);
+
+// The status of `GET /ready` on a cluster port, or undefined once nothing
+// answers within a second.
+async function readiness(port) {
+  const signal = AbortSignal.timeout(1000);
+  return (
+    await fetch(`http://127.0.0.1:${port}/ready`, { signal }).catch(() => null)
+  )?.status;
+}
+
+// The first status other than 200 that `GET /ready` on a cluster port
+// answers, within `ms`.
+async function untilNotReady(port, ms = 5000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const status = await readiness(port);
+    if (status !== 200) return status;
+    assert(Date.now() < deadline, `port ${port} still ready after ${ms} ms`);
+    await sleep(20);
+  }
+}
+
+// The shutdown delay, in seconds, of the nodes in the tests below, which
+// WORKERD_SHUTDOWN_DELAY_MS sets.
+const SHUTDOWN_DELAY_S = 6;
+
+test(
+  'cluster: a node serves its DOs through its shutdown delay, then hands them off',
+  SIGTERM_DRAINS,
+  async () => {
+    // Only the first node is sent SIGTERM; the peer is killed at the end.
+    const nodeEnv = () => ({
+      WORKERD_SHUTDOWN_DELAY_MS: `${SHUTDOWN_DELAY_S * 1000}`,
+    });
+    await withCluster(
+      2,
+      async ({ nodes: [stopping, peer], bucket, nodeKeys }) => {
+        const key = nodeKeys.get(stopping.nodeId);
+        const first = await fetchJson(
+          stopping.httpPort,
+          '/increment?name=delayed'
+        );
+        assert.strictEqual(first.body.nodeId, stopping.nodeId);
+        assert.strictEqual(await readiness(stopping.clusterPort), 200);
+
+        const stoppedAt = Date.now();
+        const exit = stopping.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        // Not ready from the signal on, so what routes by readiness stops
+        // sending requests here.
+        assert.strictEqual(await untilNotReady(stopping.clusterPort), 503);
+
+        // Until the delay ends, the node serves what it still gets, and its
+        // DO, which it still owns, runs here whichever node it is asked on.
+        // The node stays a member of the cluster. The requests stop 2 s
+        // before the delay does, so that none lands in the handoff; what
+        // slow CI answers only after the delay may have met the handoff, so
+        // only what is answered within it shows where the DO runs.
+        const delayEnd = stoppedAt + SHUTDOWN_DELAY_S * 1000;
+        let count = first.body.count;
+        let served = 0;
+        while (Date.now() < delayEnd - 2000) {
+          for (const node of [stopping, peer]) {
+            const response = await fetchJson(
+              node.httpPort,
+              '/increment?name=delayed',
+              { timeoutMs: 10_000 }
+            );
+            assert.strictEqual(
+              response.status,
+              200,
+              JSON.stringify(response.body)
+            );
+            assert.strictEqual(response.body.count, ++count);
+            const owner = await bucket.owner(response.body.id);
+            if (Date.now() < delayEnd) {
+              assert.strictEqual(response.body.nodeId, stopping.nodeId);
+              assert.strictEqual(owner, key);
+              served++;
+            }
+          }
+          const members = await bucket.nodes();
+          if (Date.now() < delayEnd) assert(members.includes(key));
+          await sleep(200);
+        }
+        assert(served > 0, 'no request was answered within the delay');
+        assert.notStrictEqual(await readiness(stopping.clusterPort), 200);
+
+        // Then it drains as it would at once without the delay: it hands
+        // the DO off and leaves.
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        assert(stopMs >= SHUTDOWN_DELAY_S * 1000, `stopped in ${stopMs} ms`);
+        assert(!(await bucket.nodes()).includes(key));
+        const moved = await fetchJson(peer.httpPort, '/increment?name=delayed');
+        assert.strictEqual(moved.status, 200, JSON.stringify(moved.body));
+        assert.strictEqual(moved.body.nodeId, peer.nodeId);
+        assert.strictEqual(moved.body.count, count + 1);
+      },
+      { nodeEnv }
+    );
+  }
+);
+
+test(
+  'cluster: a second SIGTERM cuts the shutdown delay short',
+  SIGTERM_DRAINS,
+  async () => {
+    const nodeEnv = () => ({ WORKERD_SHUTDOWN_DELAY_MS: '600000' });
+    await withCluster(
+      1,
+      async ({ nodes: [node], bucket, nodeKeys }) => {
+        await fetchJson(node.httpPort, '/increment?name=cut-short');
+        node.signal('SIGTERM');
+        assert.strictEqual(await untilNotReady(node.clusterPort), 503);
+        // In the delay, not draining: the node is still a member well after
+        // a drain would have handed its one DO off and left.
+        await sleep(2000);
+        assert((await bucket.nodes()).includes(nodeKeys.get(node.nodeId)));
+        const response = await fetchJson(
+          node.httpPort,
+          '/increment?name=cut-short'
+        );
+        assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+
+        const stoppedAt = Date.now();
+        const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        const stopMs = Date.now() - stoppedAt;
+        // Within the stop timeout of 10 s, with time to exit.
+        assert(stopMs < 11_500, `stopped in ${stopMs} ms`);
+      },
+      { nodeEnv }
+    );
   }
 );
 
