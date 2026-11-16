@@ -1,0 +1,28 @@
+# A pod to send the sample's requests from, inside the cluster. It meets the "restricted" Pod
+# Security Standard, so it is admitted in a namespace that enforces it. See README.md.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+spec:
+  restartPolicy: Never
+  # busybox `sleep` runs as PID 1 and handles no signals, so it ignores SIGTERM. Delete it at once.
+  terminationGracePeriodSeconds: 0
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: client
+      image: curlimages/curl:8.17.0
+      command: [sleep, infinity]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 32Mi

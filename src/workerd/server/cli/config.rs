@@ -99,6 +99,124 @@ impl Config {
         bytes_from_words(&self.0)
     }
 
+    /// Whether the config has `cluster`.
+    pub fn has_cluster(&self) -> Result<bool, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        Ok(root.has_cluster())
+    }
+
+    /// Joins the config to a cluster at `address`, the value of `--cluster-addr`, if it has no
+    /// `cluster`: adds one with that address and every other setting at its default, so the key
+    /// and bucket come from the environment ([`Self::with_cluster_environment`]) and an `s3://`
+    /// bucket's endpoint and credentials from the `AWS_*` variables. A config with a `cluster` is
+    /// unchanged, since `--cluster-addr` overrides its address. Without either, `advertise`, the
+    /// value of `--cluster-advertise`, is an error.
+    pub fn joining_cluster(
+        self,
+        address: Option<&str>,
+        advertise: Option<&str>,
+    ) -> Result<Self, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        if root.has_cluster() {
+            return Ok(self);
+        }
+        let Some(address) = address else {
+            return match advertise {
+                Some(_) => Err("--cluster-advertise: the config has no cluster. Pass \
+                                --cluster-addr to join one."
+                    .to_owned()),
+                None => Ok(self),
+            };
+        };
+        let mut message = capnp::message::Builder::new_default();
+        message.set_root(root).map_err(|error| error.to_string())?;
+        message
+            .get_root::<config::Builder>()
+            .map_err(|error| error.to_string())?
+            .init_cluster()
+            .set_address(address);
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message),
+        )))
+    }
+
+    /// Fills `cluster.key` and `cluster.bucket` from the environment where the config leaves them
+    /// empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable and
+    /// returns `None` when it is unset or empty. A config without `cluster` is unchanged. A key or
+    /// bucket that neither the config nor the environment sets is an error.
+    pub fn with_cluster_environment(
+        self,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        if !root.has_cluster() {
+            return Ok(self);
+        }
+        let cluster = root.get_cluster().map_err(|error| error.to_string())?;
+        let empty = |text: capnp::Result<capnp::text::Reader<'_>>| -> Result<bool, String> {
+            let text = text.and_then(|text| Ok(text.to_string()?));
+            Ok(text.map_err(|error| error.to_string())?.is_empty())
+        };
+        let key = if empty(cluster.get_key())? {
+            cluster_key(&var)?
+        } else {
+            None
+        };
+        let bucket = if empty(cluster.get_bucket())? {
+            var(CLUSTER_BUCKET)
+        } else {
+            None
+        };
+        let mut missing = Vec::new();
+        if key.is_none() && empty(cluster.get_key())? {
+            missing.push(format!(
+                "cluster.key is not set. Set it in the config, in {CLUSTER_KEY}, or in a file \
+                 named by {CLUSTER_KEY_FILE}."
+            ));
+        }
+        if bucket.is_none() && empty(cluster.get_bucket())? {
+            missing.push(format!(
+                "cluster.bucket is not set. Set it in the config or in {CLUSTER_BUCKET}."
+            ));
+        }
+        if !missing.is_empty() {
+            return Err(missing.join("\n"));
+        }
+        if key.is_none() && bucket.is_none() {
+            return Ok(self);
+        }
+        let mut message = capnp::message::Builder::new_default();
+        message.set_root(root).map_err(|error| error.to_string())?;
+        let mut cluster = message
+            .get_root::<config::Builder>()
+            .and_then(config::Builder::get_cluster)
+            .map_err(|error| error.to_string())?;
+        if let Some(key) = key {
+            cluster.set_key(key.as_str());
+        }
+        if let Some(bucket) = bucket {
+            cluster.set_bucket(bucket.as_str());
+        }
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message),
+        )))
+    }
+
     /// Writes the encoded config to stdout (`compile --config-only`).
     pub fn write_to_stdout(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
@@ -107,6 +225,60 @@ impl Config {
         }
         out.flush()
     }
+}
+
+/// The environment variable that holds the cluster key when the config leaves it empty.
+pub const CLUSTER_KEY: &str = "WORKERD_CLUSTER_KEY";
+/// The environment variable that names a file holding the cluster key, such as a mounted secret.
+pub const CLUSTER_KEY_FILE: &str = "WORKERD_CLUSTER_KEY_FILE";
+/// The environment variable that holds the cluster bucket when the config leaves it empty.
+pub const CLUSTER_BUCKET: &str = "WORKERD_CLUSTER_BUCKET";
+
+/// The cluster key from `CLUSTER_KEY` or the file `CLUSTER_KEY_FILE` names, without trailing
+/// whitespace, such as a file's final newline. `None` when neither is set or the key is blank.
+fn cluster_key(var: impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+    match (var(CLUSTER_KEY), var(CLUSTER_KEY_FILE)) {
+        (Some(_), Some(_)) => Err(format!(
+            "cluster: set only one of {CLUSTER_KEY} and {CLUSTER_KEY_FILE}."
+        )),
+        (Some(key), None) => Ok(non_blank(&key)),
+        (None, Some(path)) => read_key_file(&path)
+            .map(|key| non_blank(&key))
+            .map_err(|error| format!("cluster: {CLUSTER_KEY_FILE}={path}: {error}")),
+        (None, None) => Ok(None),
+    }
+}
+
+/// `key` without trailing whitespace, or `None` if nothing is left.
+fn non_blank(key: &str) -> Option<String> {
+    Some(key.trim_end())
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+}
+
+/// The largest key file read. A key is a few dozen bytes; the limit keeps a mistaken path, such
+/// as a device, from being read without end.
+const MAX_KEY_FILE: u64 = 4096;
+
+/// The text in the regular file at `path`.
+fn read_key_file(path: &str) -> Result<String, String> {
+    // Checked before opening: opening a FIFO blocks, and a device may never end. The check
+    // follows symlinks, as Kubernetes mounts a Secret's files through them.
+    if !std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("not a regular file".to_owned());
+    }
+    let file = File::open(path).map_err(|error| error.to_string())?;
+    let mut key = Vec::new();
+    file.take(MAX_KEY_FILE + 1)
+        .read_to_end(&mut key)
+        .map_err(|error| error.to_string())?;
+    if key.len() as u64 > MAX_KEY_FILE {
+        return Err(format!("larger than {MAX_KEY_FILE} bytes"));
+    }
+    String::from_utf8(key).map_err(|_| "not UTF-8 text. The key must be text.".to_owned())
 }
 
 /// Configs can legitimately be very large and are not malicious, so use an effectively-infinite

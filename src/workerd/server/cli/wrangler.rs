@@ -14,7 +14,11 @@
 //! error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
-//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
+//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The disk
+//! service is named `<name>-do-storage`, or [`CLUSTER_STORAGE`] when `--cluster-addr` joins the
+//! config to a cluster, which defines it even for a project without Durable Objects;
+//! `--directory-path <service>=<dir>` moves it. `workerd compile` translates for a server that
+//! joins no cluster.
 //! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
 //! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
@@ -34,9 +38,9 @@
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
-//! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
-//! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`,
-//! `queues` or `workflows` yet.
+//! no socket, and its Durable Objects stored on the disk service [`CLUSTER_STORAGE`], which each
+//! node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`, `queues`
+//! or `workflows` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,6 +54,7 @@ use workerd_capnp::config;
 use workerd_capnp::service;
 use workerd_capnp::service_designator;
 use workerd_capnp::worker;
+use workerd_server::run::RunOptions;
 
 use crate::config::Config;
 use crate::config::words_from_bytes;
@@ -57,10 +62,13 @@ use crate::process::Process;
 
 const DEFAULT_ADDRESS: &str = "localhost:8787";
 
-/// The disk service a deployment's Durable Objects are stored on: a node's, since a deployment
-/// may define no disk. Each class's objects are in a directory of their own on it, named by the
-/// class's storage key, which names the deployment.
-pub const DEPLOYMENT_STORAGE: &str = "do-storage";
+/// The disk service that holds Durable Objects in a cluster. A deployment's are stored on the
+/// node's, since a deployment may define no disk. A node that serves a wrangler config and joins a
+/// cluster with `--cluster-addr` defines it, so that `--directory-path do-storage=<dir>` is the
+/// same for every project and the node can serve deployments with Durable Objects too. Each
+/// class's objects are in a directory of their own on it, named by the class's storage key, which
+/// names the worker.
+pub const CLUSTER_STORAGE: &str = "do-storage";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -289,19 +297,113 @@ pub fn project_config(dir: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// The error for a wrangler config at `path` that does not exist, naming a wrangler config next to
+/// it under another of the names wrangler looks for, if there is one.
+pub fn missing_config(path: &str) -> String {
+    let given = Path::new(path);
+    let dir = given.parent().unwrap_or_else(|| Path::new(""));
+    let other = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.as_path() != given && candidate.is_file());
+    match other {
+        Some(other) if other.extension().is_some_and(|ext| ext == "toml") => format!(
+            "{path}: No such file. There is a {}, but wrangler.toml is not supported. Convert it \
+             to wrangler.jsonc.",
+            other.display()
+        ),
+        Some(other) => format!("{path}: No such file. Did you mean {}?", other.display()),
+        None => format!("{path}: No such file."),
+    }
+}
+
 /// What a wrangler config is translated into.
 enum Target<'a> {
-    /// A config to serve: the worker named after the config's `name`, else `main`, a socket, and
-    /// a disk service for its Durable Objects under `.wrangler/state/workerd`.
-    Serve { experimental: bool },
+    /// A config to serve with `options`: the worker named after the config's `name`, else `main`,
+    /// a socket, and a disk service for Durable Objects (see [`served_storage`]).
+    Serve {
+        options: &'a RunOptions,
+        experimental: bool,
+    },
     /// A cluster deployment, services only: the worker named `name`, else after the config's
-    /// `name`, and its Durable Objects stored on the node's [`DEPLOYMENT_STORAGE`].
+    /// `name`, and its Durable Objects stored on the node's [`CLUSTER_STORAGE`].
     Deployment { name: Option<&'a str> },
 }
 
-/// The config `workerd serve` runs for the wrangler config at `path`.
-pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config, String> {
-    translate(path, process, &Target::Serve { experimental }).map(|(_, config)| config)
+impl Target<'_> {
+    /// Whether `--directory-path` moves the disk service `service` out of the project.
+    fn moves(&self, service: &str) -> bool {
+        match self {
+            Target::Serve { options, .. } => options.overrides.directories.contains_key(service),
+            Target::Deployment { .. } => false,
+        }
+    }
+}
+
+/// The disk service that holds the Durable Objects of the worker `name`, with `classes`, in a
+/// config served with `options`, and the directory of that service if the config defines it.
+///
+/// Joined to a cluster with `--cluster-addr`, the config defines [`CLUSTER_STORAGE`] even without
+/// Durable Objects of its own, for deployments' ones. If its directory cannot be created, such a
+/// config defines no disk, so the instance still serves and only deployments' Durable Objects
+/// fail on it. Otherwise the config defines `<name>-do-storage` if it has Durable Objects. The
+/// directory is `.wrangler/state/workerd` under `root`, created unless `--directory-path` moves
+/// the service elsewhere.
+fn served_storage(
+    root: &Path,
+    name: &str,
+    classes: &[(String, String, bool)],
+    options: &RunOptions,
+) -> Result<(String, Option<PathBuf>), String> {
+    let joining = options.cluster_address.is_some();
+    let service = if joining {
+        CLUSTER_STORAGE.to_owned()
+    } else {
+        // Named after the worker, so it cannot collide with it.
+        format!("{name}-do-storage")
+    };
+    if name == service {
+        return Err(format!(
+            "name: \"{name}\" is the name of the disk service that holds the Durable Objects in a \
+             cluster. Choose another name."
+        ));
+    }
+    if !joining && classes.is_empty() {
+        return Ok((service, None));
+    }
+    let path = root.join(".wrangler/state/workerd");
+    if options.overrides.directories.contains_key(&service) {
+        return Ok((service, Some(path)));
+    }
+    match fs::create_dir_all(&path) {
+        Ok(()) => Ok((service, Some(path))),
+        Err(e) if !classes.is_empty() => Err(format!(
+            "{}: {e}. Pass --directory-path {service}=<dir> to store Durable Objects elsewhere.",
+            path.display()
+        )),
+        Err(e) => {
+            eprintln!(
+                "{}: {e}. Deployments' Durable Objects cannot run on this instance. Pass \
+                 --directory-path {service}=<dir> to store them elsewhere.",
+                path.display()
+            );
+            Ok((service, None))
+        }
+    }
+}
+
+/// The config `workerd serve` runs with `options` for the wrangler config at `path`.
+pub fn load(
+    path: &str,
+    process: &Process,
+    options: &RunOptions,
+    experimental: bool,
+) -> Result<Config, String> {
+    let target = Target::Serve {
+        options,
+        experimental,
+    };
+    translate(path, process, &target).map(|(_, config)| config)
 }
 
 /// The deployment `workerd deploy` publishes for the wrangler config at `path`, and its name:
@@ -346,14 +448,15 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         bundle(&esbuild(root), root, &wrangler.main, &watch)?
     };
 
-    let serving = matches!(target, Target::Serve { .. });
+    let (storage_service, disk) = match target {
+        Target::Serve { options, .. } => served_storage(root, &name, &classes, options)?,
+        Target::Deployment { .. } => (CLUSTER_STORAGE.to_owned(), None),
+    };
+    // The bundled Workers keep their state here.
     let storage = root.join(".wrangler/state/workerd");
-    if serving && !classes.is_empty() {
-        fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
-    }
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
-    let do_storage = u32::from(serving && !classes.is_empty());
+    let do_storage = u32::from(disk.is_some());
     let mut services = conf.reborrow().init_services(
         1 + do_storage
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
@@ -361,7 +464,15 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             + 2 * u32::from(!wrangler.queues.is_empty())
             + 2 * u32::from(!wrangler.workflows.is_empty()),
     );
-    bundled_services(&mut services, 1 + do_storage, &name, &storage, &wrangler)?;
+    let moved = |service: &str| target.moves(service);
+    bundled_services(
+        &mut services,
+        1 + do_storage,
+        &name,
+        &storage,
+        &wrangler,
+        &moved,
+    )?;
 
     let mut service = services.reborrow().get(0);
     service.set_name(&name);
@@ -387,21 +498,15 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             n.set_unique_key(format!("{name}-{key}"));
             n.set_enable_sql(*sql);
         }
-        if serving {
-            // Named after the worker, so it cannot collide with it.
-            let storage_service = format!("{name}-do-storage");
-            worker
-                .init_durable_object_storage()
-                .set_local_disk(&storage_service);
-            disk_service(services.get(1), &storage_service, &storage);
-        } else {
-            worker
-                .init_durable_object_storage()
-                .set_local_disk(DEPLOYMENT_STORAGE);
-        }
+        worker
+            .init_durable_object_storage()
+            .set_local_disk(&storage_service);
+    }
+    if let Some(path) = disk {
+        disk_service(services.get(1), &storage_service, &path);
     }
 
-    if serving {
+    if matches!(target, Target::Serve { .. }) {
         let mut socket = conf.init_sockets(1).get(0);
         socket.set_name("http");
         socket.set_address(DEFAULT_ADDRESS);
@@ -434,8 +539,24 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
 }
 
 /// `kv_namespaces`, `triggers.crons`, `queues` and `workflows` need `--experimental`, and a
-/// deployment cannot have them yet.
+/// deployment cannot have them yet. Nor can a config joined to a cluster have `kv_namespaces`,
+/// whose large values would stay on the disk of the instance that wrote them, or `queues`, whose
+/// Worker this translation does not set up for a cluster.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
+    if let Target::Serve { options, .. } = target
+        && options.cluster_address.is_some()
+    {
+        for (used, field) in [
+            (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
+            (!wrangler.queues.is_empty(), "queues"),
+        ] {
+            if used {
+                return Err(format!(
+                    "A config that joins a cluster with --cluster-addr cannot have {field} yet."
+                ));
+            }
+        }
+    }
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
         (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
@@ -444,7 +565,9 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
     ] {
         match target {
             _ if !used => {}
-            Target::Serve { experimental: true } => {}
+            Target::Serve {
+                experimental: true, ..
+            } => {}
             Target::Serve { .. } => {
                 return Err(format!(
                     "{field} is an experimental feature which may change or go away in the \
@@ -468,26 +591,42 @@ fn bundled_services(
     name: &str,
     storage: &Path,
     wrangler: &Wrangler,
+    moved: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     if !wrangler.kv_namespaces.is_empty() {
-        kv_services(services, at, &format!("{name}-kv"), &storage.join("kv"))?;
+        let dir = storage.join("kv");
+        kv_services(services, at, &format!("{name}-kv"), &dir, moved)?;
         at += 3;
     }
     let crons = &wrangler.triggers.crons;
     if !crons.is_empty() {
-        cron_services(services, at, name, &storage.join("cron"), crons)?;
+        cron_services(services, at, name, &storage.join("cron"), crons, moved)?;
         at += 2;
     }
     if !wrangler.queues.is_empty() {
         let dir = storage.join("queues");
-        queues_services(services, at, name, &dir, &wrangler.queues)?;
+        queues_services(services, at, name, &dir, &wrangler.queues, moved)?;
         at += 2;
     }
     if !wrangler.workflows.is_empty() {
         let dir = storage.join("workflows");
-        workflows_services(services, at, name, &dir, wrangler)?;
+        workflows_services(services, at, name, &dir, wrangler, moved)?;
     }
     Ok(())
+}
+
+/// Creates `dir`, the directory of the disk service `service`, unless `--directory-path` moves the
+/// service elsewhere (`moved`).
+fn create_disk_dir(dir: &Path, service: &str, moved: &dyn Fn(&str) -> bool) -> Result<(), String> {
+    if moved(service) {
+        return Ok(());
+    }
+    fs::create_dir_all(dir).map_err(|e| {
+        format!(
+            "{}: {e}. Pass --directory-path {service}=<dir> to store it elsewhere.",
+            dir.display()
+        )
+    })
 }
 
 /// The KV Worker `name` at `services[at]`, then its disks under `dir`.
@@ -496,19 +635,14 @@ fn kv_services(
     at: u32,
     name: &str,
     dir: &Path,
+    moved: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     let blobs = dir.join("blobs");
-    fs::create_dir_all(&blobs).map_err(|e| format!("{}: {e}", blobs.display()))?;
-    disk_service(
-        services.reborrow().get(at + 1),
-        &format!("{name}-storage"),
-        dir,
-    );
-    disk_service(
-        services.reborrow().get(at + 2),
-        &format!("{name}-blobs"),
-        &blobs,
-    );
+    for (i, what, path) in [(at + 1, "storage", dir), (at + 2, "blobs", &blobs)] {
+        let service = format!("{name}-{what}");
+        create_disk_dir(path, &service, moved)?;
+        disk_service(services.reborrow().get(i), &service, path);
+    }
     let service = services.reborrow().get(at);
     let bindings = bundled_worker(
         service,
@@ -579,6 +713,7 @@ fn cron_services(
     target: &str,
     dir: &Path,
     crons: &[String],
+    moved: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     // The target's binding sits beside these two.
     if matches!(target, "SCHEDULE" | "CRONS") {
@@ -586,8 +721,8 @@ fn cron_services(
             "A Worker named {target} cannot have triggers.crons."
         ));
     }
-    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-cron");
+    create_disk_dir(dir, &format!("{name}-storage"), moved)?;
     disk_service(
         services.reborrow().get(at + 1),
         &format!("{name}-storage"),
@@ -697,10 +832,11 @@ fn workflows_services(
     target: &str,
     dir: &Path,
     wrangler: &Wrangler,
+    moved: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     let workflows = &wrangler.workflows;
-    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-workflows");
+    create_disk_dir(dir, &format!("{name}-storage"), moved)?;
     disk_service(
         services.reborrow().get(at + 1),
         &format!("{name}-storage"),
@@ -774,9 +910,10 @@ fn queues_services(
     target: &str,
     dir: &Path,
     queues: &Queues,
+    moved: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-queues");
+    create_disk_dir(dir, &format!("{name}-storage"), moved)?;
     disk_service(
         services.reborrow().get(at + 1),
         &format!("{name}-storage"),
@@ -897,7 +1034,13 @@ fn bundle(esbuild: &Path, root: &Path, main: &str, watch: Watch) -> Result<Vec<S
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&out);
-    fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    fs::create_dir_all(&out).map_err(|e| {
+        format!(
+            "{}: {e}. esbuild bundles `main` there. Set \"no_bundle\": true in the wrangler config \
+             to serve the modules as they are.",
+            out.display()
+        )
+    })?;
     let result = run_esbuild(esbuild, root, main, &out, watch);
     let _ = fs::remove_dir_all(&out);
     result
