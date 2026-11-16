@@ -12,7 +12,9 @@
 //! [`set_up_bootstrap_dom_exception`] stands in for.
 
 use jsg::v8;
+use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
+use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 
 use super::exception_to_kj::assert_same_value;
@@ -81,6 +83,30 @@ impl Errors {
     ) -> jsg::Result<Option<String>> {
         Ok(jsg::try_unwrap_dom_exception(lock, value)?
             .map(|(name, message)| format!("{name}: {message}")))
+    }
+}
+
+/// A resource whose property getter fails with a `DOMException`.
+#[jsg_resource]
+struct FailingProperty;
+
+#[jsg_resource]
+impl FailingProperty {
+    #[jsg_property(readonly)]
+    fn get_value(&self) -> jsg::Result<f64> {
+        Err(jsg::Error::new_invalid_state_error("getter"))
+    }
+}
+
+/// A resource whose constructor fails with a `DOMException`.
+#[jsg_resource]
+struct FailingConstructor;
+
+#[jsg_resource]
+impl FailingConstructor {
+    #[jsg_constructor]
+    fn constructor() -> jsg::Result<Self> {
+        Err(jsg::Error::new_not_supported_error("constructor"))
     }
 }
 
@@ -362,6 +388,57 @@ fn thrown_dom_exceptions_convert_back_to_their_name() {
             ),
             format!("{name}: m"),
         );
+    }
+}
+
+/// A constructor and a property getter that fail with a `DOMException` throw it, as a method does,
+/// with either class.
+#[test]
+fn constructors_and_properties_throw_dom_exceptions() {
+    for class in DOM_EXCEPTION_CLASSES {
+        run(&Harness::new(), class, |lock, ctx| {
+            let constructor = jsg::resource::function_template_of::<FailingConstructor>(lock)?;
+            ctx.set_global(lock, "FailingConstructor", constructor);
+            let property = jsg::Rc::new(lock, FailingProperty);
+            ctx.set_global(lock, "failing", property);
+            for (expr, expected, code) in [
+                (
+                    "new FailingConstructor()",
+                    "NotSupportedError: constructor",
+                    9,
+                ),
+                ("failing.value", "InvalidStateError: getter", 11),
+            ] {
+                let thrown: String = ctx
+                    .eval(
+                        lock,
+                        &format!(
+                            "(e => `${{e instanceof Error}} ${{e.name}}: ${{e.message}} \
+                             (${{e.code}})`)({})",
+                            caught(expr)
+                        ),
+                    )
+                    .unwrap();
+                // The bootstrap's stand-in has no `code` getter.
+                let code = match class {
+                    DomExceptionClass::Cpp => code.to_string(),
+                    DomExceptionClass::Bootstrap => "undefined".to_owned(),
+                };
+                assert_eq!(
+                    thrown,
+                    format!("true {expected} ({code})"),
+                    "{expr}, {class:?}"
+                );
+                let is_dom_exception: bool = ctx
+                    .eval(
+                        lock,
+                        &format!("Errors.tryUnwrap({}) !== undefined", caught(expr)),
+                    )
+                    .unwrap();
+                assert!(is_dom_exception, "{expr}, {class:?}");
+            }
+            Ok(())
+        });
     }
 }
 
