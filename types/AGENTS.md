@@ -2,15 +2,16 @@
 
 ## OVERVIEW
 
-Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (via `jsg/rtti.capnp`) + hand-written `defines/*.d.ts`. Rust descriptions come from `TypeInfo` and typed module registration in `src/rust/jsg/`; internal module registration does not make a type an ambient root. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
+Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (via `jsg/rtti.capnp`), the declarations TypeScript emits for the per-isolate bootstrap (`src/per_isolate`), and hand-written `defines/*.d.ts`. Rust descriptions come from `TypeInfo` and typed module registration in `src/rust/jsg/`; internal module registration does not make a type an ambient root. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
 
 ## PIPELINE
 
 1. **RTTI extraction**: `src/worker/` runs inside workerd, imports binary RTTI via `workerd:rtti` + param names from `param-extractor.rs`
 2. **Generation**: `src/generator/` converts Cap'n Proto structures to TS AST nodes (walks types, members, methods recursively via `collectIncluded`)
 3. **Transforms** (ordered, in `src/index.ts`): iterators -> overrides/defines -> global scope extraction -> class-to-interface -> comments -> onmessage declaration; then second pass: import-resolve -> ambient. Importable variant runs separately.
-4. **Defines concatenation**: `defines/*.d.ts` appended after transforms (AI, D1, R2, RPC, Vectorize, etc.)
-5. **Build**: `scripts/build-types.ts` iterates compat-date entrypoints (oldest through experimental), type-checks output against TS libs
+4. **Per-isolate declarations**: `src/per-isolate.ts` collects, when the worker is bundled, what `src/per_isolate/public-types.d.ts` publishes (see "Per-isolate declarations" below). They get the comments transform only, and follow the generated declarations.
+5. **Defines concatenation**: `defines/*.d.ts` appended after transforms (AI, D1, R2, RPC, Vectorize, etc.)
+6. **Build**: `scripts/build-types.ts` iterates compat-date entrypoints (oldest through experimental), type-checks output against TS libs
 
 ### Explicit RTTI metadata
 
@@ -33,6 +34,7 @@ the same emitted name cannot supply overrides or defines for the selected type.
 | Directory             | Purpose                                                                          |
 | --------------------- | -------------------------------------------------------------------------------- |
 | `src/generator/`      | RTTI-to-TS-AST: `structure.ts` (classes/interfaces), `type.ts` (type mapping)    |
+| `src/per-isolate.ts`  | Collects the per-isolate bootstrap's published declarations                      |
 | `src/transforms/`     | 11 post-processing TS transformer factories                                      |
 | `src/worker/`         | Workerd-hosted entry; imports RTTI binary + virtual modules                      |
 | `defines/`            | Hand-written `.d.ts` for APIs not expressible via C++ RTTI (~25 files)           |
@@ -44,15 +46,49 @@ the same emitted name cannot supply overrides or defines for the selected type.
 
 ### Where type changes belong
 
-Types in this project come from three layers. Changes must be made in the correct layer:
+Types in this project come from four layers. Changes must be made in the correct layer:
 
 | Layer                    | Location                                           | When to use                                                                                                |
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements, whose C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)` (`dom-exception.d.ts`, `url.d.ts`, `urlpattern.d.ts`) or, for a global scope method, a `never` member in the global scope's override (`structured-clone.d.ts`) |
+| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest; their C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
+| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements but does not publish (`dom-exception.d.ts`, `url.d.ts`, `urlpattern.d.ts`, and `structured-clone.d.ts` for `structuredClone()`, a global scope method, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override) |
 
-Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, or `defines/`).
+Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, the per-isolate implementation, or `defines/`).
+
+### Per-isolate declarations
+
+A class the per-isolate bootstrap implements declares its public surface in
+its own TypeScript, and `src/per_isolate/public-types.d.ts` publishes it with
+`export type { Name } from './module'`, which needs the module to
+`export type { Name }`. The generator copies each published declaration from
+the declaration file TypeScript emits for the module (with `stripInternal`),
+in the manifest's order, at every compatibility date. Because what TypeScript
+emits is what users get:
+
+- **Overload signatures are the public signatures.** A method or constructor
+  that converts its arguments as WebIDL does takes `unknown`; declare the
+  public signature as an overload above it. TypeScript emits overloads and
+  leaves the implementation signature out. An argument only internal callers
+  pass gets an extra overload marked `/** @internal */`.
+- **What the implementation installs itself is declared, not implemented.**
+  A static installed with `ObjectDefineProperties` is a
+  `declare static readonly NAME: type;` field. A prototype member, or a
+  prototype parent, set up outside the class body goes in an interface
+  merged with the class, which the generator folds into the class's
+  declaration: its members join the class's, and its one `extends` becomes
+  the class's, if the class has none.
+- **Member form is API.** A getter and a property are not interchangeable:
+  a subclass overriding one as the other fails to compile (TS2610, TS2611),
+  so changing a member's form is a breaking type change.
+- **A published declaration refers only to globals and published
+  declarations.** The generator rejects a reference to another of the
+  bootstrap's declarations, and a published name that RTTI or a define also
+  declares.
+- `#private` members, `//` comments and `@internal` members do not reach the
+  output. JSDoc does, and the comments transform adds the standard MDN
+  comments by name.
 
 ### Naming conventions
 
@@ -78,7 +114,7 @@ Types in `defines/*.d.ts` become **top-level ambient declarations** visible to e
 
 ### Snapshot regeneration
 
-After any change that affects types (C++ API changes, `JSG_TS_OVERRIDE` edits, `defines/` modifications), regenerate the snapshot:
+After any change that affects types (C++ API changes, `JSG_TS_OVERRIDE` edits, signatures of published per-isolate classes, `defines/` modifications), regenerate the snapshot:
 
 ```shell
 just generate-types
