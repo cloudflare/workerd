@@ -76,6 +76,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   Serializer(v8::Isolate* isolate, const SerializeOptions& options)
       : isolate(isolate),
         errorsAreHostObjects(options.errors_are_host_objects),
+        classInstancesAsPlainObjects(options.class_instances_as_plain_objects),
         prototypeOfObject(v8::Object::New(isolate)->GetPrototype()),
         jsSerializeModeKey(v8::Private::ForApi(
             isolate, newString(isolate, ::workerd::jsg::JS_SERIALIZE_MODE_KEY))),
@@ -128,6 +129,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     return true;
   }
 
+  // Decides as jsg::Serializer::IsHostObject() does.
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
     if (object->InternalFieldCount() > 0) return v8::Just(true);
     bool isJsSerializable;
@@ -138,8 +140,12 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     if (!hasPrivateUnlessPlain(object, domExceptionBrandKey).To(&isDomException)) {
       return v8::Nothing<bool>();
     }
-    return v8::Just(
-        isJsSerializable || isDomException || (errorsAreHostObjects && object->IsNativeError()));
+    if (isJsSerializable || isDomException) return v8::Just(true);
+    if (object->IsNativeError()) return v8::Just(errorsAreHostObjects);
+    if (classInstancesAsPlainObjects) return v8::Just(false);
+    // Any other object whose prototype is not Object.prototype, a class instance, is a host
+    // object, which writeApiObject() rejects with a DataCloneError.
+    return v8::Just(object->GetPrototype() != prototypeOfObject);
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
@@ -184,6 +190,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   v8::Isolate* isolate;
   bool errorsAreHostObjects;
+  bool classInstancesAsPlainObjects;
   // Globals, since V8 hands the delegate values in handle scopes of its own, which end before
   // serialization does.
   kj::Vector<v8::Global<v8::SharedArrayBuffer>> sharedArrayBuffers;

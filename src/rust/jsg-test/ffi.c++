@@ -382,6 +382,7 @@ bool cpp_serialize(Isolate* isolate,
         ::workerd::jsg::Serializer::Options{
           .version = options.has_version ? kj::Maybe<uint32_t>(options.version) : kj::none,
           .omitHeader = options.omit_header,
+          .treatClassInstancesAsPlainObjects = options.class_instances_as_plain_objects,
         });
     serializer.write(js,
         ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));

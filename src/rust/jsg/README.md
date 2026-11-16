@@ -1117,12 +1117,13 @@ buffer that is not part of the bytes, which neither `ser::deserialize` nor a `js
 given only the bytes can resolve, so data containing one can't be read back.
 
 `jsg::ser::serialize_with_options` and `jsg::ser::deserialize_with` take the options of
-`jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals, except
-`treatClassInstancesAsPlainObjects`, as `SerializeOptions` and `DeserializeOptions`: the version
-of V8's format to write or read rather than the latest or the header's, whether there is a header,
-whether errors get back their `stack`, and the label of the internal error for a missing or
-unsupported header. A version V8 can't write or read throws `DataCloneError`. Transfer lists and
-externals are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+`jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals, as
+`SerializeOptions` and `DeserializeOptions`: the version of V8's format to write or read rather
+than the latest or the header's, whether there is a header, whether class instances are written
+as plain objects or rejected (as RPC rejects them), whether errors get back their `stack`, and the
+label of the internal error for a missing or unsupported header. A version V8 can't write or read
+throws `DataCloneError`. Transfer lists and externals are not supported. The C++ side is
+`src/rust/jsg/ser.c++`.
 
 ## JSON
 

@@ -22,8 +22,7 @@
 //!   with the class's `deserialize` function once it has read the whole value.
 //!
 //! [`serialize_with_options`] and [`deserialize_with`] take the options of
-//! `jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals,
-//! except `treatClassInstancesAsPlainObjects`.
+//! `jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals.
 //!
 //! A `SharedArrayBuffer` is written as a reference that [`deserialize`] cannot resolve. Transfer
 //! lists and externals are not supported.
@@ -31,6 +30,23 @@
 use crate::Error;
 use crate::Lock;
 use crate::v8;
+
+/// What [`serialize_with_options`] does with a class instance.
+///
+/// A class instance is an object whose prototype is not `Object.prototype`, and that is not a
+/// workerd API object, a native error, a `DOMException` or an instance of one of the runtime's
+/// classes implemented in JavaScript.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClassInstances {
+    /// Writes its own properties, as for a plain object, and drops its prototype, as the
+    /// structured clone algorithm does.
+    #[default]
+    AsPlainObjects,
+    /// Throws a `DataCloneError`, as RPC does, so that a class instance is not read back as a
+    /// plain object without its methods. V8 still writes an instance of a subclass of a built-in
+    /// type, such as `Map`, as the built-in type.
+    Reject,
+}
 
 /// Options of [`serialize_with_options`], as those of `jsg::Serializer::Options` it supports. The
 /// default is `jsg::Serializer`'s.
@@ -42,6 +58,9 @@ pub struct SerializeOptions {
     /// Whether to leave out the header, which holds the version. Data without one is read with
     /// [`DeserializeOptions::read_header`] false and the version it was written in.
     pub omit_header: bool,
+    /// What to do with a class instance, as
+    /// `jsg::Serializer::Options::treatClassInstancesAsPlainObjects`.
+    pub class_instances: ClassInstances,
 }
 
 /// Serializes `value`, with a header, as `jsg::Serializer` does.
@@ -64,7 +83,8 @@ pub fn serialize<'s>(
 ///
 /// # Errors
 ///
-/// As for [`serialize`]. A version V8 can't write fails with a pending `DataCloneError`.
+/// As for [`serialize`]. A version V8 can't write fails with a pending `DataCloneError`, and so
+/// does a class instance with [`ClassInstances::Reject`].
 pub fn serialize_with_options<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
@@ -75,6 +95,7 @@ pub fn serialize_with_options<'s>(
         has_version: options.version.is_some(),
         version: options.version.unwrap_or_default(),
         omit_header: options.omit_header,
+        class_instances_as_plain_objects: options.class_instances == ClassInstances::AsPlainObjects,
         errors_are_host_objects: lock.feature_flags().get_enhanced_error_serialization(),
     };
     v8::call_into_js(lock, |lock| {

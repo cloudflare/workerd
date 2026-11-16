@@ -889,6 +889,8 @@ impl Harness {
             has_version: options.version.is_some(),
             version: options.version.unwrap_or_default(),
             omit_header: options.omit_header,
+            class_instances_as_plain_objects: options.class_instances
+                == jsg::ser::ClassInstances::AsPlainObjects,
             // C++ JSG asks the lock.
             errors_are_host_objects: false,
         };

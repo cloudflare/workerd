@@ -12,6 +12,7 @@ use super::assert_deserialization_throws;
 use super::assert_error;
 use super::assert_read;
 use super::assert_round_trip;
+use super::assert_round_trip_with;
 use super::deserialize_exception;
 use super::eval;
 use super::header;
@@ -345,6 +346,27 @@ fn instances_round_trip() {
         assert_eq!(
             take_log(lock, ctx),
             "deserialize 1,deserialize 3,deserialize 2"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn instances_are_written_when_class_instances_are_rejected() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_up_classes(lock, ctx);
+        // An instance's mark is found before it could be taken for a class instance.
+        let reject = jsg::ser::SerializeOptions {
+            class_instances: jsg::ser::ClassInstances::Reject,
+            ..Default::default()
+        };
+        assert_round_trip_with(
+            lock,
+            ctx,
+            "[new Point(1)]",
+            reject,
+            jsg::ser::DeserializeOptions::default(),
+            "Object.getPrototypeOf(v[0]) === Point.prototype && v[0].x === 2",
         );
         Ok(())
     });
