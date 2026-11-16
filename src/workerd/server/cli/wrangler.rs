@@ -10,8 +10,8 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `triggers` (`crons`), `queues`, `workflows`, `no_bundle` and `$schema`. Any other field is an
-//! error rather than silently ignored.
+//! `triggers` (`crons`), `queues`, `workflows`, `d1_databases`, `no_bundle` and `$schema`. Any
+//! other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
@@ -28,15 +28,18 @@
 //! `/workerd/workflows.js`), the engine of this Worker's `workflowsEngine`; each binding is the
 //! Workflow API over it, and its instances are in `.wrangler/state/workerd/workflows/`.
 //! `limits.steps` and `default_retention` apply; `concurrency` and `jurisdiction` are ignored;
-//! `schedules`, and a `script_name` other than this Worker, are errors. The
-//! server listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>`
-//! overrides it.
+//! `schedules`, and a `script_name` other than this Worker, are errors. `d1_databases`, also
+//! `--experimental`, are served by the Worker `<name>-d1` (the bundled module `/workerd/d1.js`):
+//! each binding is the D1 API over it, with the database's `preview_database_id`, else its
+//! `database_id`, else its binding name in its props, as `wrangler dev` names local databases;
+//! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`. The server
+//! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
 //! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`,
-//! `queues` or `workflows` yet.
+//! `queues`, `workflows` or `d1_databases` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -88,7 +91,29 @@ struct Wrangler {
     #[serde(default)]
     workflows: Vec<Workflow>,
     #[serde(default)]
+    d1_databases: Vec<D1Database>,
+    #[serde(default)]
     no_bundle: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct D1Database {
+    binding: String,
+    database_id: Option<String>,
+    preview_database_id: Option<String>,
+    #[serde(rename = "database_name")]
+    _database_name: Option<String>,
+    #[serde(rename = "migrations_table")]
+    _migrations_table: Option<String>,
+    #[serde(rename = "migrations_dir")]
+    _migrations_dir: Option<String>,
+    #[serde(rename = "migrations_pattern")]
+    _migrations_pattern: Option<String>,
+    #[serde(rename = "database_internal_env")]
+    _database_internal_env: Option<String>,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -359,7 +384,8 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
-            + 2 * u32::from(!wrangler.workflows.is_empty()),
+            + 2 * u32::from(!wrangler.workflows.is_empty())
+            + 2 * u32::from(!wrangler.d1_databases.is_empty()),
     );
     bundled_services(&mut services, 1 + do_storage, &name, &storage, &wrangler)?;
 
@@ -433,14 +459,15 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces`, `triggers.crons`, `queues` and `workflows` need `--experimental`, and a
-/// deployment cannot have them yet.
+/// `kv_namespaces`, `triggers.crons`, `queues`, `workflows` and `d1_databases` need
+/// `--experimental`, and a deployment cannot have them yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
         (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
         (!wrangler.queues.is_empty(), "queues"),
         (!wrangler.workflows.is_empty(), "workflows"),
+        (!wrangler.d1_databases.is_empty(), "d1_databases"),
     ] {
         match target {
             _ if !used => {}
@@ -459,7 +486,7 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
     Ok(())
 }
 
-/// The KV, cron, Queues and Workflows Workers `wrangler` asks for, with their disks under
+/// The KV, cron, Queues, Workflows and D1 Workers `wrangler` asks for, with their disks under
 /// `storage`, from `services[at]`. Each is named after the worker, `<name>-<kind>`, so it cannot
 /// collide with it.
 fn bundled_services(
@@ -486,7 +513,30 @@ fn bundled_services(
     if !wrangler.workflows.is_empty() {
         let dir = storage.join("workflows");
         workflows_services(services, at, name, &dir, wrangler)?;
+        at += 2;
     }
+    if !wrangler.d1_databases.is_empty() {
+        d1_services(services, at, &format!("{name}-d1"), &storage.join("d1"))?;
+    }
+    Ok(())
+}
+
+/// The D1 Worker `name` at `services[at]`, then its disk `dir`.
+fn d1_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    dir: &Path,
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    disk_service(
+        services.reborrow().get(at + 1),
+        &format!("{name}-storage"),
+        dir,
+    );
+    let service = services.reborrow().get(at);
+    let class = Some(("DATABASE", "D1Database"));
+    bundled_worker(service, name, "d1.js", &[], class, 1);
     Ok(())
 }
 
@@ -612,12 +662,14 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let kv = &wrangler.kv_namespaces;
     let producers = &wrangler.queues.producers;
     let workflows = &wrangler.workflows;
+    let d1 = &wrangler.d1_databases;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
     let n = wrangler.vars.len() + do_bindings.len() + kv.len();
-    let mut bs = worker.init_bindings((n + producers.len() + workflows.len()) as u32);
+    let m = n + producers.len() + workflows.len();
+    let mut bs = worker.init_bindings((m + d1.len()) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -659,6 +711,21 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         let mut fetcher = wrapped.init_inner_bindings(1).get(0);
         fetcher.set_name("fetcher");
         workflow_binding(fetcher.init_service(), name, &w.name);
+    }
+    for (i, d) in d1.iter().enumerate() {
+        let mut b = bs.reborrow().get((m + i) as u32);
+        b.set_name(&d.binding);
+        let mut wrapped = b.init_wrapped();
+        wrapped.set_module_name("cloudflare-internal:d1-api");
+        let mut fetcher = wrapped.init_inner_bindings(1).get(0);
+        fetcher.set_name("fetcher");
+        let mut designator = fetcher.init_service();
+        designator.set_name(format!("{name}-d1"));
+        let id = (d.preview_database_id.as_ref())
+            .or(d.database_id.as_ref())
+            .unwrap_or(&d.binding);
+        let props = serde_json::json!({ "database": id });
+        designator.init_props().set_json(props.to_string());
     }
 }
 
