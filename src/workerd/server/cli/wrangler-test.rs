@@ -457,6 +457,82 @@ fn kv_namespaces_bind_the_kv_worker() {
 }
 
 #[test]
+fn d1_databases_bind_the_d1_worker() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "d1_databases": [
+                   { "binding": "A", "database_name": "a", "database_id": "id-a",
+                     "migrations_dir": "m" },
+                   { "binding": "B", "database_name": "b" },
+                   { "binding": "C", "database_id": "id-c", "preview_database_id": "p" }] }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("d1_databases"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("d1_databases"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-d1", "app-d1-storage"]);
+    assert!(dir.join(".wrangler/state/workerd/d1").is_dir());
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let bound: Vec<_> = w
+        .unwrap()
+        .get_bindings()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            let worker::binding::Which::Wrapped(w) = b.which().unwrap() else {
+                panic!("not wrapped");
+            };
+            let w = w.unwrap();
+            let fetcher = w.get_inner_bindings().unwrap().get(0);
+            let worker::binding::Which::Service(d) = fetcher.which().unwrap() else {
+                panic!("not a service");
+            };
+            let d = d.unwrap();
+            let service_designator::props::Which::Json(props) = d.get_props().which().unwrap()
+            else {
+                panic!("no JSON props");
+            };
+            let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+            (
+                text(b.get_name().unwrap()),
+                text(w.get_module_name().unwrap()),
+                text(d.get_name().unwrap()),
+                text(props.unwrap()),
+            )
+        })
+        .collect();
+    let d1 = |b: &str, id: &str| {
+        (
+            b.into(),
+            "cloudflare-internal:d1-api".into(),
+            "app-d1".into(),
+            format!(r#"{{"database":"{id}"}}"#),
+        )
+    };
+    assert_eq!(bound, [d1("A", "id-a"), d1("B", "B"), d1("C", "p")]);
+}
+
+#[test]
 fn triggers_crons_require_experimental() {
     let dir = project(&[
         (
