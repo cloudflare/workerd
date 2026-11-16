@@ -16,7 +16,7 @@ KJ_TEST("checkPrime rejects excessive num_checks") {
 
 KJ_TEST("checkPrime rejects oversized candidate") {
   auto bigBuf = kj::heapArray<kj::byte>(2000);
-  memset(bigBuf.begin(), 0xFF, bigBuf.size());
+  bigBuf.asPtr().fill(0xFF);
   KJ_EXPECT_THROW_MESSAGE("exceeds maximum size", checkPrime(bigBuf.asPtr(), 1));
 }
 

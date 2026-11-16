@@ -41,8 +41,22 @@ using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
+// The V8 private symbols under which a class implemented in the per-isolate bootstrap keeps an
+// error's name and message, as strings, when its `name` and `message` are accessors, as WebIDL
+// attributes are. V8's ToDetailString() reads only data properties, so it can't describe such an
+// error; toDetailString(), and so kj::str() of a handle, reads these instead.
+constexpr kj::StringPtr ERROR_NAME_KEY = "workerd:errorName"_kj;
+constexpr kj::StringPtr ERROR_MESSAGE_KEY = "workerd:errorMessage"_kj;
+
+// Describes `value` for a log, as kj::str() of a handle does: as V8's ToDetailString() does,
+// except that an object holding strings under ERROR_NAME_KEY and ERROR_MESSAGE_KEY is described
+// as V8 describes an error with that name and message, as `name: message`. Runs no JavaScript,
+// and takes no jsg::Lock, for native code that holds none, such as Rust JSG's shims. Requires an
+// entered context. Fails, as ToDetailString() does, only if execution is terminating.
+v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value);
+
 kj::String stringifyHandle(v8::Local<v8::Value> value);
-}
+}  // namespace workerd::jsg
 
 namespace v8 {
 // Allows v8 handles to be passed to kj::str() as well as KJ_LOG and related macros.
@@ -3193,12 +3207,19 @@ class Lock {
     }
   }
 
-  virtual Ref<DOMException> domException(
+  // Creates a DOMException without running JavaScript. Its stack is `stackValue` if given, or
+  // else captured from the current one.
+  virtual JsObject domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
-  // The DOMException that `value` unwraps as, as a `DOMException&` parameter unwraps it: `value`
-  // or the first object in its prototype chain that is one. Runs no JavaScript.
-  virtual kj::Maybe<DOMException&> tryUnwrapDOMException(v8::Local<v8::Value> value) = 0;
+  struct DomExceptionInfo {
+    kj::String name;
+    kj::String message;
+  };
+
+  // If `value` is a DOMException, returns the name and message it was created with, which own
+  // properties shadowing its attributes do not change. Does not run JavaScript.
+  virtual kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) = 0;
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
   //

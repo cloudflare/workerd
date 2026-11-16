@@ -445,6 +445,9 @@ size_t local_array_buffer_get_backing_store(const Local& buffer);
 size_t local_array_buffer_view_byte_offset(const Local& view);
 size_t local_array_buffer_view_byte_length(const Local& view);
 uint8_t* local_array_buffer_view_buffer_data(const Local& view);
+// Returns the address of the first byte the view covers and sets `byte_length` to how many it
+// covers, which is zero for a view that is detached or that does not lie within its buffer.
+uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
 size_t local_array_buffer_view_element_size(const Local& view);
 bool local_array_buffer_view_is_integer_type(const Local& view);
@@ -608,7 +611,8 @@ bool local_serialize(Isolate* isolate,
     kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result);
 // Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
-// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
+// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript
+// but the deserialize functions of classes implemented in JavaScript, once it has read the value.
 // Throws a KJ exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(
     Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors);
@@ -644,10 +648,15 @@ MaybeLocal dom_exception_create_from_bytes(
 // exception_create_from_bytes() reads it. Never fails.
 Local js_error_create_from_bytes(
     Isolate* isolate, JsErrorType error_type, ::rust::Slice<const uint8_t> message);
-// If `value` unwraps as a DOMException, as jsg::tryGetDOMExceptionNameAndMessage() unwraps it,
-// stores its name and message and returns true; otherwise returns false. Runs no JavaScript.
-bool dom_exception_try_unwrap(
-    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
+// Sets `isDomException` to whether `value` is a DOMException, as
+// jsg::tryGetDOMExceptionNameAndMessage() tells, and if it is, stores its name and message.
+// Returns false, calling nothing in V8, while an exception or a termination is pending. Runs no
+// JavaScript.
+bool dom_exception_try_unwrap(Isolate* isolate,
+    const Local& value,
+    bool& isDomException,
+    ::rust::String& name,
+    ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);

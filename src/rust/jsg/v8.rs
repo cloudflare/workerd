@@ -326,6 +326,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_byte_offset(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_byte_length(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_buffer_data(view: &Local) -> *mut u8;
+        pub unsafe fn local_array_buffer_view_data(view: &Local, byte_length: &mut usize) -> usize;
         pub unsafe fn local_array_buffer_view_get_buffer(
             isolate: *mut Isolate,
             view: &Local,
@@ -735,7 +736,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_is_detachable(buffer: &Local) -> bool;
 
         // Value-level shared check
-        pub fn local_array_buffer_is_shared(value: &Local) -> bool;
+        pub unsafe fn local_array_buffer_is_shared(value: &Local) -> bool;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -824,10 +825,12 @@ pub mod ffi {
             error_type: JsErrorType,
             message: &[u8],
         ) -> Local;
+        // Returns false, calling nothing in V8, while an exception or a termination is pending.
         // Fallible only if no context is entered.
         pub unsafe fn dom_exception_try_unwrap(
             isolate: *mut Isolate,
             value: &Local,
+            is_dom_exception: &mut bool,
             name: &mut String,
             message: &mut String,
         ) -> Result<bool>;
@@ -2046,7 +2049,9 @@ impl<'s, T> Local<'s, T> {
     /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
     /// method.
     ///
-    /// Corresponds to `v8::Value::ToDetailString()`.
+    /// Corresponds to C++ JSG's `workerd::jsg::toDetailString()`: `v8::Value::ToDetailString()`,
+    /// except that an error implemented in the per-isolate bootstrap, such as its `DOMException`,
+    /// whose `name` and `message` are accessors, is described by the name and message it holds.
     ///
     /// # Errors
     ///
@@ -2780,7 +2785,8 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// This performs a value-level check, allowing code that receives a
     /// `Local<ArrayBuffer>` via cast to distinguish shared buffers.
     pub fn is_shared(&self) -> bool {
-        ffi::local_array_buffer_is_shared(self.raw())
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_array_buffer_is_shared(self.raw()) }
     }
 
     /// Returns the `BackingStore` for this `ArrayBuffer`.
@@ -2875,15 +2881,14 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return &[];
         }
-        // SAFETY: buffer_data() + byte_offset() gives the start of the view's region;
-        // byte_length() bytes are valid until JS runs, which the lock borrow prevents.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts(ptr.cast_const(), self.byte_length())
-        }
+        // SAFETY: `data` points to the `len` bytes the view covers, which are valid until JS
+        // runs, which the lock borrow prevents.
+        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
     }
 
     /// Returns a mutable byte slice of the view's visible region.
@@ -2908,29 +2913,42 @@ impl<'s> Local<'s, ArrayBufferView> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return &mut [];
         }
-        // SAFETY: caller guarantees exclusive access; same pointer derivation
-        // as as_slice; the lock borrow keeps JS from running.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts_mut(ptr, self.byte_length())
-        }
+        // SAFETY: caller guarantees exclusive access; `data` points to the `len` bytes the
+        // view covers; the lock borrow keeps JS from running.
+        unsafe { std::slice::from_raw_parts_mut(data, len) }
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        if self.is_empty() {
+        // SAFETY: handle is valid within the current HandleScope.
+        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
+        if len == 0 {
             return Vec::new();
         }
-        // SAFETY: same pointer derivation as as_slice; no JS can run before the copy
-        // completes.
-        unsafe {
-            let ptr = self.buffer_data().byte_add(self.byte_offset());
-            std::slice::from_raw_parts(ptr.cast_const(), self.byte_length()).to_vec()
-        }
+        // SAFETY: `data` points to the `len` bytes the view covers; no JS can run before the
+        // copy completes.
+        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }.to_vec()
     }
+}
+
+/// Returns the first of the elements of type `E` that the `ArrayBufferView` `view` covers, and
+/// how many it covers.
+///
+/// V8 reads a view's offset and length from the V8 heap and does not always check them against
+/// the buffer, so a view that does not lie within its buffer covers nothing here.
+///
+/// # Safety
+/// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
+unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
+    let mut byte_length = 0;
+    // SAFETY: the caller guarantees the handle.
+    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) };
+    (data as *mut E, byte_length / size_of::<E>())
 }
 
 // `TypedArray`-specific implementations
@@ -3062,15 +3080,14 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                if self.is_empty() {
+                // SAFETY: handle is valid within the current HandleScope.
+                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
+                if len == 0 {
                     return &[];
                 }
-                // SAFETY: handle is valid; non-empty guarantees non-null data pointer.
-                // data() returns the ArrayBuffer base; byte_offset() gives this view's start.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts(ptr.cast_const(), self.len())
-                }
+                // SAFETY: `data` points to the `len` elements the view covers, which are
+                // valid until JS runs, which the lock borrow prevents.
+                unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -3099,15 +3116,14 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
-                if self.is_empty() {
+                // SAFETY: handle is valid within the current HandleScope.
+                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
+                if len == 0 {
                     return &mut [];
                 }
-                // SAFETY: caller guarantees exclusive access to this buffer region;
-                // handle is valid and non-empty guarantees a non-null data pointer.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts_mut(ptr, self.len())
-                }
+                // SAFETY: caller guarantees exclusive access to this buffer region; `data`
+                // points to the `len` elements the view covers.
+                unsafe { std::slice::from_raw_parts_mut(data, len) }
             }
 
             /// Returns an iterator over the elements.
@@ -3378,6 +3394,10 @@ impl WriteFlags {
     pub fn bits(self) -> i32 {
         self as i32
     }
+
+    fn null_terminates(self) -> bool {
+        self.bits() & Self::NullTerminate.bits() != 0
+    }
 }
 
 impl std::ops::BitOr for WriteFlags {
@@ -3483,7 +3503,8 @@ impl<'s> Local<'s, String> {
     ///
     /// # Panics
     ///
-    /// Panics if `buffer.len() < length`.
+    /// Panics if `offset + length` exceeds the string's length, or if `buffer` has fewer than
+    /// `length` elements, plus one when `flags` includes [`WriteFlags::NullTerminate`].
     ///
     /// Corresponds to `v8::String::Write()`.
     pub fn write(
@@ -3494,11 +3515,9 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u16],
         flags: WriteFlags,
     ) {
-        assert!(
-            buffer.len() >= length as usize,
-            "buffer too small for requested length"
-        );
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        self.assert_write_range(offset, length, buffer.len(), flags);
+        // SAFETY: Lock guarantees the isolate is locked; the range lies within the string and
+        // buffer has room for it and any terminator.
         unsafe {
             ffi::local_string_write_v2(
                 lock.isolate().as_ffi(),
@@ -3518,7 +3537,8 @@ impl<'s> Local<'s, String> {
     ///
     /// # Panics
     ///
-    /// Panics if `buffer.len() < length`.
+    /// Panics if `offset + length` exceeds the string's length, or if `buffer` has fewer than
+    /// `length` elements, plus one when `flags` includes [`WriteFlags::NullTerminate`].
     ///
     /// Corresponds to `v8::String::WriteOneByte()`.
     pub fn write_one_byte(
@@ -3529,11 +3549,9 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u8],
         flags: WriteFlags,
     ) {
-        assert!(
-            buffer.len() >= length as usize,
-            "buffer too small for requested length"
-        );
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        self.assert_write_range(offset, length, buffer.len(), flags);
+        // SAFETY: Lock guarantees the isolate is locked; the range lies within the string and
+        // buffer has room for it and any terminator.
         unsafe {
             ffi::local_string_write_one_byte_v2(
                 lock.isolate().as_ffi(),
@@ -3544,6 +3562,20 @@ impl<'s> Local<'s, String> {
                 flags.bits(),
             );
         }
+    }
+
+    // V8 checks neither bound in release builds.
+    fn assert_write_range(self, offset: u32, length: u32, buffer_len: usize, flags: WriteFlags) {
+        assert!(
+            offset
+                .checked_add(length)
+                .is_some_and(|end| i64::from(end) <= i64::from(self.length())),
+            "offset + length exceeds string length"
+        );
+        assert!(
+            buffer_len >= length as usize + usize::from(flags.null_terminates()),
+            "buffer too small for requested length"
+        );
     }
 
     /// Writes the string as UTF-8 into `buffer`.
@@ -4857,6 +4889,11 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         // Clone before clearing — clear_wrappable_data zeroes data_ptr.
         let saved = trait_ptr.clone();
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
+        // The resource is alive until `drop_rc`.
+        let resource = saved.as_gc_ref();
+        if resource.has_drop_impl() {
+            GcVisitor::detach_for_drop(resource);
+        }
         saved.drop_rc();
     }
 }
@@ -4931,6 +4968,9 @@ pub(crate) enum VisitMode {
     /// To detach the value from its owner, under the lock of the given isolate; see
     /// [`GcVisitor::is_detaching`].
     Detach(*mut ffi::Isolate),
+    /// To detach the references of a resource that is being dropped from it, before its `Drop`
+    /// runs; see [`GcVisitor::detach_for_drop`].
+    DetachForDrop,
 }
 
 impl GcVisitor {
@@ -4965,12 +5005,32 @@ impl GcVisitor {
         value.trace(&mut visitor);
     }
 
+    /// Detaches the references of `resource`, whose last owner is dropping it, before its `Drop`
+    /// runs. `Drop` has `&mut self`, so it can move a reference out of a field, and a moved
+    /// `jsg::Rc` would otherwise stay weak and keep the dropped resource as its parent, which its
+    /// next owner's visit asserts against. Every `jsg::Rc` and C++ `jsg::Ref` of an isolate whose
+    /// lock this thread holds becomes strong again and forgets its parent, as a moved C++
+    /// `jsg::Ref` does; the others are left as they are, as is every `TracedGlobal`. This can run
+    /// during the garbage collector's sweep, when the value of a weak `TracedGlobal` may already
+    /// be dead, so making one strong could revive a freed value.
+    ///
+    /// A child without a wrapper is visited once here, to make what it holds strong, and again
+    /// when its field drops, to make it weak, even if `Drop` moves nothing. So a chain of
+    /// resources that each implement `Drop` costs time quadratic in its length.
+    pub(crate) fn detach_for_drop(resource: &dyn GarbageCollected) {
+        let mut visitor = Self {
+            handle: ffi::GcVisitor { ptr: 0 },
+            mode: VisitMode::DetachForDrop,
+        };
+        resource.trace(&mut visitor);
+    }
+
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
     /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        matches!(self.mode, VisitMode::Detach(_))
+        matches!(self.mode, VisitMode::Detach(_) | VisitMode::DetachForDrop)
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -5000,6 +5060,8 @@ impl GcVisitor {
     ///
     /// - A detaching visit runs under the lock of its isolate, and panics for a reference of
     ///   another, or of a closed isolate.
+    /// - A drop visit (see [`GcVisitor::detach_for_drop`]) changes the reference only if this
+    ///   thread holds the lock of the reference's isolate, and otherwise leaves it as it is.
     /// - A GC visit on behalf of another isolate, which debug builds assert against, leaves the
     ///   reference as it is: a strong reference stays strong, so its target leaks rather than
     ///   its counts racing. So does a GC visit once the reference's isolate is closed, which it
@@ -5013,6 +5075,9 @@ impl GcVisitor {
                 "attempt to use a {what} in an isolate other than the one it was created in"
             );
             return true;
+        }
+        if self.mode == VisitMode::DetachForDrop {
+            return state.this_thread_holds_lock();
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
@@ -5093,9 +5158,9 @@ impl GcVisitor {
     /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
     /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
-        if global.state.is_closed() {
-            // The isolate is being torn down, and its handles are left to `Dispose`, as those
-            // of a dropped `TracedGlobal` are.
+        // Once the isolate is being torn down, its handles are left to `Dispose`, as those of a
+        // dropped `TracedGlobal` are. A drop visit leaves them as well; see `detach_for_drop`.
+        if global.state.is_closed() || self.mode == VisitMode::DetachForDrop {
             return;
         }
         if let VisitMode::Detach(isolate) = self.mode {
@@ -5284,6 +5349,22 @@ pub unsafe fn resolve_method_receiver<R: 'static>(
     let ptr =
         unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
     ptr?.resolve::<R>()
+}
+
+/// Borrows the resource that [`resolve_receiver`] or [`resolve_method_receiver`] resolved from
+/// `this`, for no longer than `this` is borrowed.
+///
+/// A callback passes a borrow of its own `this` handle, a local, so the borrow of the resource
+/// ends with the call, whatever lifetime the method names for its receiver.
+///
+/// # Safety
+///
+/// `resource` was resolved from `this`, the receiver of the callback that is running.
+#[doc(hidden)]
+pub unsafe fn borrow_receiver<'a, R>(resource: NonNull<R>, _this: &'a Local<'_, Value>) -> &'a R {
+    // SAFETY: the caller guarantees that `resource` points at the resource of `this`, whose
+    // wrapper keeps it alive during the call, which `'a` cannot outlive.
+    unsafe { resource.as_ref() }
 }
 
 impl WrappableRc {

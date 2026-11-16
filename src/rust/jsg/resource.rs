@@ -35,6 +35,7 @@ use crate::Traced;
 use crate::Type;
 use crate::UnionMember;
 use crate::UnionTypes;
+use crate::fast_api::FastCallback;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
 use crate::isolate_state::Releasable;
@@ -79,8 +80,10 @@ use crate::v8::ffi::Wrappable;
 /// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
 /// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
 /// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
-/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. See `README.md` §Safety
-/// rules, rule 2, and <https://github.com/cloudflare/workerd/issues/7976>.
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A resource's own `Drop`
+/// impl may move an `Rc` out of a plain field (see
+/// [`crate::GarbageCollected::has_drop_impl`]). See `README.md` §Safety rules, rule 2, and
+/// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource. Taken by `Drop`.
     handle: ManuallyDrop<std::rc::Rc<R>>,
@@ -238,7 +241,9 @@ impl<R: Resource> Rc<R> {
     /// can resolve the resource via `resolve_resource`.
     ///
     /// # Panics
-    /// Panics if `lock` belongs to an isolate other than the resource's.
+    /// Panics if `lock` belongs to an isolate other than the resource's, if `info` is not a
+    /// construct call of a resource type's constructor, or if its `this` already wraps a
+    /// resource: an object keeps the resource it wraps, which its methods borrow while they run.
     pub fn attach_to_this(&self, lock: &Lock<'_>, info: &mut v8::FunctionCallbackInfo<'_>) {
         self.assert_in_isolate_of(lock);
         self.wrappable.attach_to_this(info);
@@ -528,7 +533,11 @@ impl<R: Resource> Traced for Rc<R> {
 }
 
 // Weak references don't keep the target alive and have no GC edges to trace.
-crate::jsg_traced!(<R: Resource> Weak<R>);
+impl<R: Resource + Send> Traced for Weak<R> {
+    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+}
+
+impl<R: Resource + Send> crate::HoldsNoGcReferences for Weak<R> {}
 
 /// The resource's node, as C++ reports a `jsg::Ref`; nothing for a resource of another isolate,
 /// whose wrapper the snapshot cannot read.
@@ -742,7 +751,7 @@ fn get_resource_descriptor<R: Resource>(
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
-                    fast: fast.into(),
+                    fast: fast.map(FastCallback::into_ffi).into(),
                     length,
                 });
             }
@@ -801,7 +810,7 @@ fn get_resource_descriptor<R: Resource>(
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
-                    fast: fast.into(),
+                    fast: fast.map(FastCallback::into_ffi).into(),
                     length,
                 });
             }

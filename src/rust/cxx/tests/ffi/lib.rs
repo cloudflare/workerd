@@ -516,6 +516,11 @@ mod other {
     }
 
     #[repr(C)]
+    pub struct ThrowingCopy {
+        pub value: u64,
+    }
+
+    #[repr(C)]
     pub struct E {
         e: u64,
         e_str: CxxString,
@@ -554,6 +559,12 @@ mod other {
     // Safety: the test fixture provides valid bridge pointers and matching layouts.
     unsafe impl ExternType for D {
         type Id = type_id!("tests::D");
+        type Kind = Trivial;
+    }
+
+    // Safety: the test fixture provides valid bridge pointers and matching layouts.
+    unsafe impl ExternType for ThrowingCopy {
+        type Id = type_id!("tests::ThrowingCopy");
         type Kind = Trivial;
     }
 

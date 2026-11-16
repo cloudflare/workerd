@@ -571,8 +571,7 @@ KJ_TEST("getSockaddr builds a connectable address from a raw struct sockaddr") {
 
   auto listener = parseNow(io, "127.0.0.1")->listen();
 
-  struct sockaddr_in sin;
-  memset(&sin, 0, sizeof(sin));
+  struct sockaddr_in sin {};
   sin.sin_family = AF_INET;
   sin.sin_port = htons(static_cast<uint16_t>(listener->getPort()));
   sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -707,8 +706,7 @@ KJ_TEST("restrictPeers blocks disallowed connect() with KJ's error text") {
 
   // getSockaddr() itself accepts the address; the filter applies when it is used (KJ rejects
   // eagerly there too, a difference only in when the same error surfaces).
-  struct sockaddr_in sin;
-  memset(&sin, 0, sizeof(sin));
+  struct sockaddr_in sin {};
   sin.sin_family = AF_INET;
   sin.sin_port = htons(1);
   sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -877,7 +875,7 @@ KJ_TEST("write() to a reset peer surfaces a DISCONNECTED exception") {
   pair.server = nullptr;
 
   auto chunk = kj::heapArray<kj::byte>(64 * 1024);
-  memset(chunk.begin(), 0, chunk.size());
+  chunk.asPtr().fill(0);
   kj::Maybe<kj::Exception> maybeException;
   for (int i = 0; i < 100 && maybeException == kj::none; i++) {
     maybeException = kj::runCatchingExceptions([&]() { pair.client->write(chunk).wait(ws); });
@@ -894,7 +892,7 @@ KJ_TEST("write_all applies backpressure: it stays pending against a peer that ne
   // Write far more than the combined send+recv socket buffers to a peer that never reads: the
   // write must NOT complete (write_all's try_write hits WouldBlock and awaits WRITABLE).
   auto payload = kj::heapArray<kj::byte>(16 * 1024 * 1024);
-  memset(payload.begin(), 0x5a, payload.size());
+  payload.asPtr().fill(0x5a);
   auto write = pair.client->write(payload);
   // Give the loop real turns; a correct write stays pending under backpressure.
   for (int i = 0; i < 5; i++) {
@@ -921,8 +919,7 @@ KJ_TEST("getSockaddr builds a connectable IPv6 address from a raw sockaddr_in6")
 
   auto listener = parseNow(io, "[::1]")->listen();
 
-  struct sockaddr_in6 sin6;
-  memset(&sin6, 0, sizeof(sin6));
+  struct sockaddr_in6 sin6 {};
   sin6.sin6_family = AF_INET6;
   sin6.sin6_port = htons(static_cast<uint16_t>(listener->getPort()));
   sin6.sin6_addr = in6addr_loopback;
@@ -1282,14 +1279,13 @@ KJ_TEST("an address with no socket addresses fails connect() and listen() with a
 
 #if !_WIN32
 KJ_TEST("getSockaddr keeps a zero-initialized sockaddr_un usable and prints it like KJ") {
-  // The conventional way to build a sockaddr_un: memset to zero, strcpy the path, pass
+  // The conventional way to build a sockaddr_un: zero-initialize it, strcpy the path, pass
   // sizeof(sockaddr_un). The trailing NULs are part of the address KJ stores verbatim and reads
   // up to the first NUL (safeUnixPath); listen(), connect() and toString() must all work.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto path = freshUnixSocketPath("raw-un");
-  struct sockaddr_un sun;
-  memset(&sun, 0, sizeof(sun));
+  struct sockaddr_un sun {};
   sun.sun_family = AF_UNIX;
   KJ_REQUIRE(path.size() < sizeof(sun.sun_path));
   memcpy(sun.sun_path, path.begin(), path.size());
@@ -1440,8 +1436,7 @@ KJ_TEST("getSockaddr re-encodes a sockaddr from its fields: garbage past the fam
   // their bytes.
   auto io = setupTokioAsyncIo();
 
-  struct sockaddr_in clean;
-  memset(&clean, 0, sizeof(clean));
+  struct sockaddr_in clean {};
   clean.sin_family = AF_INET;
   clean.sin_port = htons(8080);
   clean.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1449,27 +1444,25 @@ KJ_TEST("getSockaddr re-encodes a sockaddr from its fields: garbage past the fam
   KJ_EXPECT(expected == "127.0.0.1:8080", expected);
 
   struct sockaddr_storage dirty;
-  memset(&dirty, 0xAB, sizeof(dirty));
+  kj::asBytes(dirty).fill(0xAB);
   memcpy(&dirty, &clean, offsetof(struct sockaddr_in, sin_zero));  // fields only; sin_zero dirty
   KJ_EXPECT(io.getNetwork().getSockaddr(&dirty, sizeof(dirty))->toString() == expected);
   KJ_EXPECT(io.getNetwork().getSockaddr(&dirty, sizeof(clean))->toString() == expected);
 
-  struct sockaddr_in6 clean6;
-  memset(&clean6, 0, sizeof(clean6));
+  struct sockaddr_in6 clean6 {};
   clean6.sin6_family = AF_INET6;
   clean6.sin6_port = htons(8080);
   clean6.sin6_addr.s6_addr[15] = 1;
   auto expected6 = io.getNetwork().getSockaddr(&clean6, sizeof(clean6))->toString();
   KJ_EXPECT(expected6 == "[::1]:8080", expected6);
-  memset(&dirty, 0xCD, sizeof(dirty));
+  kj::asBytes(dirty).fill(0xCD);
   memcpy(&dirty, &clean6, sizeof(clean6));
   KJ_EXPECT(io.getNetwork().getSockaddr(&dirty, sizeof(dirty))->toString() == expected6);
 
   // A length shorter than the family's struct, or a family this backend does not speak, is
   // rejected up front rather than read past or handed to Rust half-initialized.
   KJ_EXPECT_THROW_MESSAGE("too short", io.getNetwork().getSockaddr(&clean, sizeof(clean) - 1));
-  struct sockaddr unspec;
-  memset(&unspec, 0, sizeof(unspec));
+  struct sockaddr unspec {};
   unspec.sa_family = AF_UNSPEC;
   KJ_EXPECT_THROW_MESSAGE(
       "unsupported socket address family", io.getNetwork().getSockaddr(&unspec, sizeof(unspec)));
@@ -1481,8 +1474,7 @@ KJ_TEST("getSockaddr re-encodes a sockaddr_un by its pathname, however long the 
   // length without the NUL: the same path, so the same address.
   auto io = setupTokioAsyncIo();
   auto path = freshUnixSocketPath("re-encode");
-  struct sockaddr_un sun;
-  memset(&sun, 0, sizeof(sun));
+  struct sockaddr_un sun {};
   sun.sun_family = AF_UNIX;
   KJ_REQUIRE(path.size() < sizeof(sun.sun_path));
   memcpy(sun.sun_path, path.begin(), path.size());
@@ -1492,7 +1484,7 @@ KJ_TEST("getSockaddr re-encodes a sockaddr_un by its pathname, however long the 
   KJ_EXPECT(io.getNetwork().getSockaddr(&sun, exact + 1)->toString() == expected);
   KJ_EXPECT(io.getNetwork().getSockaddr(&sun, exact)->toString() == expected);
   // Garbage after the NUL is not part of a pathname address either.
-  memset(sun.sun_path + path.size() + 1, 0xEE, sizeof(sun.sun_path) - path.size() - 1);
+  kj::arrayPtr(sun.sun_path).slice(path.size() + 1).fill('\xEE');
   KJ_EXPECT(io.getNetwork().getSockaddr(&sun, sizeof(sun))->toString() == expected);
 }
 
@@ -1561,8 +1553,7 @@ KJ_TEST("unix-abstract: addresses are refused off Linux with KJ's message") {
 
 KJ_TEST("wrapConnectingSocketFd is an intentional UNIMPLEMENTED stub") {
   auto io = setupTokioAsyncIo();
-  struct sockaddr_in sin;
-  memset(&sin, 0, sizeof(sin));
+  struct sockaddr_in sin {};
   sin.sin_family = AF_INET;
   KJ_EXPECT_THROW_MESSAGE("wrapConnectingSocketFd is not implemented",
       io.getLowLevelProvider().wrapConnectingSocketFd(
@@ -1577,8 +1568,7 @@ KJ_TEST("unsupported connecting-socket wrapping closes a transferred socket") {
   kj::OwnFd transferred(duplicate);
   pair.client = nullptr;
 
-  struct sockaddr_in address;
-  memset(&address, 0, sizeof(address));
+  struct sockaddr_in address {};
   address.sin_family = AF_INET;
   address.sin_port = htons(pair.listener->getPort());
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1644,10 +1634,9 @@ KJ_TEST("getSockaddr keeps a pathname that fills sun_path with no terminating NU
   // KJ allows the unterminated form (the address's length is what ends the path). It must print
   // whole; std refuses to bind or connect it (no room for its NUL), which is where that surfaces.
   auto io = setupTokioAsyncIo();
-  struct sockaddr_un sun;
-  memset(&sun, 0, sizeof(sun));
+  struct sockaddr_un sun {};
   sun.sun_family = AF_UNIX;
-  memset(sun.sun_path, 'x', sizeof(sun.sun_path));
+  kj::arrayPtr(sun.sun_path).fill('x');
   sun.sun_path[0] = '/';
   auto shown = io.getNetwork().getSockaddr(&sun, sizeof(sun))->toString();
   KJ_EXPECT(shown.size() == 5 + sizeof(sun.sun_path), shown.size());
@@ -1662,8 +1651,7 @@ KJ_TEST("addresses cloned concurrently on two threads share their network's filt
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
   kj_rs_io::TokioNetwork network;
-  struct sockaddr_in sin;
-  memset(&sin, 0, sizeof(sin));
+  struct sockaddr_in sin {};
   sin.sin_family = AF_INET;
   sin.sin_port = htons(80);
   sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);

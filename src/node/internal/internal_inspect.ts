@@ -1831,8 +1831,15 @@ function formatError(
   ctx: Context,
   keys: PropertyKey[]
 ): string {
+  let stack: string;
+  try {
+    stack = getStackString(ctx, err);
+  } catch {
+    // Such as for a prototype whose name getter has a brand check, as
+    // DOMException.prototype's has.
+    return Object.prototype.toString.call(err);
+  }
   const name = err.name != null ? (err.name as string | object) : 'Error';
-  let stack = getStackString(ctx, err);
 
   removeDuplicateErrorKeys(ctx, keys, err, stack);
 

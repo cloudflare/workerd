@@ -497,24 +497,26 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
 
     auto lock = cache.lru.cleanList.lockExclusive();
     auto params = context.getParams();
-    kj::String prevKey;
+    kj::ArrayPtr<const byte> prevKey = nullptr;
     for (auto kv: params.getList()) {
       KJ_ASSERT(kv.hasValue());  // values that don't exist aren't listed!
       KJ_ASSERT(nextExpectedKey != keysToFetch.end());
 
-      // TODO(perf): This copy of the key is not really needed, we use the key from `keysToFetch`
-      //   instead. But the capnp representation is a byte array which isn't null-terminated
-      //   which would make the code difficult below.
-      auto key = kj::str(kv.getKey().asChars());
+      // The response key is only used for comparisons below: the key handed to the cache is
+      // the matching `keysToFetch` entry, so a view into the response message suffices here.
+      // The bytes are not NUL-terminated (nor followed by padding), so compare ArrayPtrs
+      // rather than StringPtrs; the orderings agree because StringPtr compares via
+      // ArrayPtr<const char> anyway.
+      kj::ArrayPtr<const byte> key(kv.getKey().begin(), kv.getKey().size());
 
       KJ_ASSERT(key >= prevKey, "storage returned keys in non-sorted order?");
 
       // Find matching key in keysToFetch, possibly marking missing keys as absent.
       for (;;) {
-        if (nextExpectedKey == keysToFetch.end() || key < *nextExpectedKey) {
+        if (nextExpectedKey == keysToFetch.end() || key < nextExpectedKey->asBytes()) {
           // This may be a duplicate due to a retry. Ignore it.
           break;
-        } else if (key == *nextExpectedKey) {
+        } else if (key == nextExpectedKey->asBytes()) {
           fetchedEntries.add(
               cache.addReadResultToCache(lock, kj::mv(*nextExpectedKey), kv.getValue(), options));
           ++nextExpectedKey;
@@ -531,7 +533,7 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
         fulfill();
       }
 
-      prevKey = kj::mv(key);
+      prevKey = key;
     }
     cache.evictOrOomIfNeeded(lock);
     return kj::READY_NOW;

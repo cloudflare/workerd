@@ -1437,6 +1437,11 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-buffered-amount-test.wd-test",
+    data = ["websocket-buffered-amount-test.js"],
+)
+
+wd_test(
     src = "websocket-constructor-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-constructor-test.js"],

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the DOMException benchmarks against the C++ implementation
+# (jsg/dom-exception.h). No compatibilityDate, so that the variants supply
+# it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "dom-exception-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "dom-exception.js")],
+      )
+    ),
+  ],
+);
