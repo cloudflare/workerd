@@ -181,6 +181,11 @@ canceled, and what it started, such as a request, goes on; `_` and `_error` stay
 JavaScript that runs without awaiting, such as a loop, can't be stopped that way: press Ctrl+C
 again to end the REPL. On Windows, Ctrl+C ends the REPL.
 
+Ctrl+C at a terminal, and `kill -INT` from elsewhere, send the REPL SIGINT. One that arrives while
+no input runs ends the REPL, unless the terminal is editing a line, which takes Ctrl+C as a key.
+A REPL started with SIGINT ignored, as a shell without job control starts a background job,
+ignores it: SIGINT neither stops awaiting an input nor ends the REPL.
+
 ### History
 
 On a terminal, each line you submit is saved to `~/.workerd_repl_history` as you submit it, and

@@ -62,6 +62,8 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
         colors: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
     };
     entry::without_config(verbose, move || {
+        #[cfg(unix)]
+        interrupt::keep_ignoring();
         let mut runtime = kj_rs_tokio::Runtime::new()?;
         let session = match bridge::ffi::repl_session_new(runtime.context(), &options) {
             Ok(session) => session,

@@ -116,9 +116,15 @@ test('--autogate refuses a name that is not an autogate', async () => {
   assert(stderr.includes('test-workerd'), stderr);
 });
 
-// Starts `workerd repl --experimental ...args` for a test to give input to as it goes.
-function startRepl(args) {
-  const child = spawn(env.WORKERD_BINARY, ['repl', '--experimental', ...args], {
+// Starts `workerd repl --experimental ...args` for a test to give input to as it goes. With
+// `ignoringInterrupts`, the REPL starts with SIGINT ignored, as a shell without job control starts
+// a background job.
+function startRepl(args, { ignoringInterrupts = false } = {}) {
+  const command = [env.WORKERD_BINARY, 'repl', '--experimental', ...args];
+  const [program, ...programArgs] = ignoringInterrupts
+    ? ['/bin/sh', '-c', `trap '' INT; exec "$0" "$@"`, ...command]
+    : command;
+  const child = spawn(program, programArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...env, WORKERD_REPL_HISTORY: '' },
   });
@@ -242,6 +248,22 @@ test(
     assert.deepStrictEqual(exit, { code: null, signal: 'SIGINT' });
   }
 );
+
+test('a REPL started with SIGINT ignored ignores it', unixOnly, async () => {
+  const repl = startRepl([], { ignoringInterrupts: true });
+  repl.send("console.log('ready')");
+  await repl.waitFor(({ stdout }) => stdout.includes('ready'));
+  repl.interrupt();
+  repl.send('1 + 1');
+  // A REPL that SIGINT ends never prints the result, so wait on its exit too.
+  await Promise.race([
+    repl.waitFor(({ stdout }) => stdout.endsWith('2\n')),
+    repl.exited.then((exit) =>
+      assert.fail(`exited: ${JSON.stringify(exit)}\n${repl.output.stderr}`)
+    ),
+  ]);
+  assert.strictEqual(await repl.end(), 0, repl.output.stderr);
+});
 
 test('an environment evaluates input as the console does', async () => {
   const { code, results, stderr } = await repl(

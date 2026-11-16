@@ -9,10 +9,10 @@
 //! ([`repl`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Four modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
+// Five modules allow `unsafe`: bridge.rs and repl/bridge.rs, whose `cxx::bridge` macros expand
 // to FFI declarations; socket_fd.rs, where a descriptor number from the command line becomes an
-// owned descriptor; and repl/terminal.rs, which puts the terminal in raw mode. Everything else is
-// safe code over std, socket2 and the bridges.
+// owned descriptor; repl/terminal.rs, which puts the terminal in raw mode; and repl/interrupt.rs,
+// which takes SIGINT. Everything else is safe code over std, socket2 and the bridges.
 
 mod args;
 mod bridge;
