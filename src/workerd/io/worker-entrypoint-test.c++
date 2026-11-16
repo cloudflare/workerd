@@ -6,6 +6,7 @@
 
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/exception.h>
 
@@ -1471,9 +1472,9 @@ struct CpuLimitKillAfterWebSocketAccept {
       // Once the microtask signals, it is about to spin.
       jsg::JsObject(js.v8Context()->Global())
           .set(js, "signalSpinning"_kj,
-              jsg::JsValue(js.wrapSimpleFunction(
-                  js.v8Context(), [this](jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) {
-        spinning.store(true, std::memory_order_release);
+              jsg::JsValue(
+                  makeFunction(js, spinning, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+        stateOf<std::atomic<bool>>(info).store(true, std::memory_order_release);
       })));
     });
 

@@ -5,6 +5,7 @@
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/events.h>
 #include <workerd/jsg/script.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
@@ -13,15 +14,12 @@
 namespace workerd::api {
 namespace {
 
-using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
-
 // The seam's functions as JS functions, taking the same arguments as the bootstrap's utils
 // members.
 jsg::JsObject makeSeam(jsg::Lock& js) {
   auto seam = js.obj();
-  auto context = js.v8Context();
-  const auto add = [&](kj::StringPtr name, Callback callback) {
-    seam.set(js, name, jsg::JsValue(js.wrapReturningFunction(context, kj::mv(callback))));
+  const auto add = [&](kj::StringPtr name, LiftedCallback callback) {
+    seam.set(js, name, jsg::JsValue(makeLiftedFunction(js, callback)));
   };
 
   add("setListenerCountHook"_kj,

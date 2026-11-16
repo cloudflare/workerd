@@ -7,6 +7,7 @@
 #include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/jsg/type-wrapper.h>
+#include <workerd/tests/js-function.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
@@ -2297,13 +2298,16 @@ KJ_TEST("JsReadableStream pipeTo drives a queued TypeScript source into a native
         KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
     auto underlying = js.obj();
     underlying.set(js, "start"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
-      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
-      close.call(js, controller);
+        jsg::JsValue(makeFunction(js, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::liftKj(info, [&]() {
+        auto& js = jsg::Lock::from(info.GetIsolate());
+        auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+        auto enqueue =
+            KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+        enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+        auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+        close.call(js, controller);
+      });
     })));
     auto source =
         JsReadableStream(js, constructor.newInstance(js, jsg::JsValue(underlying)).addRef(js));
