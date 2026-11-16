@@ -13,13 +13,13 @@
 //               props = (json = "{\"bucket\": \"<name>\"}"))
 //
 // Each R2 object is one object in `BLOBS`, a `bucket` service (the
-// cluster's bucket, or a local store), at `<bucket>/<key>`, as celld lays
-// out R2: there is no index, so the store's listing is the bucket's and a
-// tool reading the store sees the objects under their names. Metadata is
-// stored as celld stores it: the content headers as headers, and
-// customMetadata, cacheExpiry, checksums and the storage class as one JSON
-// value, escaped to ASCII, in the user metadata `celld-r2`. An object
-// without it reads its user metadata as its customMetadata.
+// cluster's bucket, or a local store), at `<bucket>/<key>`. There is no
+// index, so the store's listing is the bucket's and a tool reading the
+// store sees the objects under their names. The content headers are stored
+// as headers, and customMetadata, cacheExpiry, checksums and the storage
+// class as one JSON value, escaped to ASCII, in the user metadata
+// `workerd-r2`. An object without it reads its user metadata as its
+// customMetadata.
 //
 // The config that runs this module (`bundled = "/workerd/r2.js"`) is an
 // interface: cli/wrangler.rs and hand-written configs write it. Anything
@@ -61,7 +61,7 @@ const TEST_MIN_PART = 50;
 // multi-key delete.
 const PARALLEL = 16;
 // The user metadata holding the R2 record.
-const ENVELOPE = 'celld-r2';
+const ENVELOPE = 'workerd-r2';
 // capnp's JSON for an unset UInt64 with a default of all ones.
 const UNSET = 18446744073709551615n;
 // Before the store's token in a list cursor.
@@ -328,8 +328,8 @@ const HTTP_FIELDS = [
   ['cacheControl', 'Cache-Control'],
 ];
 
-// The R2 record a put or a multipart upload is created with, as celld
-// writes it, refused if its customMetadata is too large.
+// The R2 record a put or a multipart upload is created with, refused if
+// its customMetadata is too large.
 function envelope(req, checksums = {}) {
   const http = {};
   for (const [field] of [...HTTP_FIELDS, ['cacheExpiry']]) {
