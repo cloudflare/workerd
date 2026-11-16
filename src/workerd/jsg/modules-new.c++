@@ -1377,17 +1377,13 @@ v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
 // new URL(specifier, import.meta.url).href. The idea is that it allows
 // resolving import specifiers relative to the current modules base URL.
 // Note that we do not validate that the resolved URL actually matches
-// anything in the registry. A functor with a clone() rather than a lambda, so
-// that a startup snapshot can carry the function of a module whose top level
-// touched import.meta (jsg::WrappableFunctionImpl's snapshotClone()).
-struct ImportMetaResolve {
-  kj::String href;
-
-  ImportMetaResolve clone() const {
-    return {kj::str(href)};
-  }
-
-  JsValue operator()(Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+// anything in the registry. The module's URL is the function's data, a
+// string, so a startup snapshot carries the function of a module whose
+// top level touched import.meta as it is.
+void importMetaResolve(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = Lock::from(args.GetIsolate());
+    auto href = js.toString(args.DataV2().As<v8::Value>());
     // Node.js and the HTML spec both require import.meta.resolve to be called
     // with a specifier argument; calling it with none is a TypeError rather
     // than silently resolving the string "undefined".
@@ -1405,7 +1401,7 @@ struct ImportMetaResolve {
         specifier = kj::mv(nodeSpec);
       }
     }
-    KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href.asArray())) {
+    KJ_IF_SOME(resolved, Url::tryParse(specifier.asPtr(), href.asPtr())) {
       // import.meta.resolve is specified to be equivalent to
       // `new URL(specifier, import.meta.url).href` (see the comment above).
       // The WHATWG URL parser already collapses dot segments (including the
@@ -1423,8 +1419,8 @@ struct ImportMetaResolve {
     // Node.js/HTML import.meta.resolve throws when the specifier cannot be
     // resolved to a URL; it must not return null.
     js.throwException(js.typeError(kj::str("Invalid module specifier: ", specifier)));
-  }
-};
+  });
+}
 
 // Set up the special `import.meta` property for the module.
 void importMeta(
@@ -1480,7 +1476,11 @@ void importMeta(
           }
         }
 
-        auto resolve = js.wrapReturningFunction(js.v8Context(), ImportMetaResolve{kj::str(href)});
+        isolateRegisterExternalReference(
+            js.v8Isolate, reinterpret_cast<intptr_t>(&importMetaResolve));
+        // href is not a context-level thing, so this is OK.
+        auto resolve = check(v8::Function::New(
+            js.v8Context(), &importMetaResolve, v8::Local<v8::Value>(js.str(href))));
 
         if (meta->CreateDataProperty(
                     js.v8Context(), v8::Local<v8::String>(js.strIntern("resolve"_kj)), resolve)
