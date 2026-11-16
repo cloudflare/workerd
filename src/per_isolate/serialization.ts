@@ -37,7 +37,14 @@
 //   which may refer to the instance itself.
 // - deserialize(instance, data) initializes an instance from the data.
 //
-// Either mark is ignored on an object whose prototype is Object.prototype or
+// A class that replaces a C++ class under a flag can instead keep the C++
+// class's format, which readers without the flag, an RPC peer's included,
+// must read: markStandIn(instance, tag) marks an instance with the tag of the
+// JSG_SERIALIZABLE C++ type it stands in for, which writes it with its
+// serializeStandIn() (see HasSerializeStandIn in jsg/resource.h). It is read
+// as the C++ type's deserialize() decides.
+//
+// Any mark is ignored on an object whose prototype is Object.prototype or
 // null: to keep plain objects cheap, the serializer does not check them for
 // one. Mark instances of a class, or of a prototype of the runtime's own.
 // User code can give an instance either prototype, and so have it copied as a
@@ -167,6 +174,12 @@ function markCloneable<T extends object>(
   (instance as Record<symbol, unknown>)[kSerializeMode] = cloneable;
 }
 
+// Marks `instance` as serializable as an instance of the JSG_SERIALIZABLE C++
+// type whose serialization tag is `tag`, a positive integer, is.
+function markStandIn(instance: object, tag: number): void {
+  (instance as Record<symbol, unknown>)[kSerializeMode] = tag;
+}
+
 // Whether `proto` is SharedArrayBuffer.prototype, recognized by its own
 // @@toStringTag. Not by the SharedArrayBuffer global: a zygote preparing a
 // startup snapshot fails when the bootstrap touches it, as V8 adds it only
@@ -229,6 +242,7 @@ export type { Cloneable };
 export type SerializationHelpers = {
   markUncloneable: typeof markUncloneable;
   markCloneable: typeof markCloneable;
+  markStandIn: typeof markStandIn;
   makeCloneable: typeof makeCloneable;
   getOwnDataProperty: typeof getOwnDataProperty;
 };
@@ -236,6 +250,7 @@ export type SerializationHelpers = {
 module.exports = ObjectFreeze({
   markUncloneable,
   markCloneable,
+  markStandIn,
   makeCloneable,
   getOwnDataProperty,
 } satisfies SerializationHelpers);

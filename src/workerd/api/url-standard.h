@@ -195,8 +195,7 @@ class URL: public jsg::Object {
   // ].filter((test) => URL.canParse(test));
   //
   static bool canParse(jsg::USVString url, jsg::Optional<jsg::USVString> base = kj::none);
-  static jsg::JsString createObjectURL(
-      jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object);
+  static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<JsFile, JsBlob> object);
   static void revokeObjectURL(jsg::Lock& js, jsg::USVString object_url);
 
   JSG_RESOURCE_TYPE(URL) {

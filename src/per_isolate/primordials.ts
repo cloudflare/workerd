@@ -263,6 +263,7 @@ const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
 // Replaces each lone surrogate with U+FFFD: WebIDL's USVString conversion,
 // after ToString.
 const StringPrototypeToWellFormed = uncurryThis(String.prototype.toWellFormed);
+const StringPrototypeToLowerCase = uncurryThis(String.prototype.toLowerCase);
 
 // RegExp
 // RegExpBuiltinExec: the builtin, whatever user code makes RegExp.prototype.exec.
@@ -662,12 +663,17 @@ const EventTargetRemoveEventListener = uncurryThis(
   EventTargetCtor.prototype.removeEventListener
 ) as (target: object, type: string, listener: () => void) => void;
 
-// Throws for any receiver but a Blob (a File included): a brand check.
-const BlobPrototypeSlice = uncurryThis(globalThis.Blob.prototype.slice) as (
-  blob: Blob,
-  start?: number,
-  end?: number
-) => Blob;
+// Throws for any receiver but a C++ Blob (a File included): a brand check.
+// Undefined under the TS_BLOB autogate, which leaves the C++ Blob out (see
+// blob/blob.ts's isBlob()).
+const BlobPrototypeSlice =
+  globalThis.Blob === undefined
+    ? undefined
+    : (uncurryThis(globalThis.Blob.prototype.slice) as (
+        blob: Blob,
+        start?: number,
+        end?: number
+      ) => Blob);
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
@@ -867,6 +873,7 @@ module.exports = ObjectFreeze({
   StringPrototypeStartsWith,
   StringPrototypeIndexOf,
   StringPrototypeToWellFormed,
+  StringPrototypeToLowerCase,
 
   // RegExp
   RegExpPrototypeExec,

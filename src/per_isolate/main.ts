@@ -407,6 +407,49 @@ if (autogates['ts-event-source']) {
   }
 }
 
+// The TypeScript Blob and File replace the C++ ones, which global-scope.h
+// then leaves out. Installed as JSG_NESTED_TYPE installs the C++ classes.
+// Loaded before url/url, whose createObjectURL() recognizes them.
+if (autogates['ts-blob']) {
+  const { Blob, File } = require('blob/blob');
+  // What the C++ bridge reads, which it finds already loaded.
+  require('blob/cpp_exports');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    Blob: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: Blob,
+    },
+    File: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: File,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      Blob: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: Blob,
+      },
+      File: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: File,
+      },
+    });
+  }
+}
+
 // The TypeScript URL and URLSearchParams replace the C++ ones, which
 // global-scope.h then leaves out. Installed as WebIDL installs an interface:
 // own, non-enumerable properties of the global, and not on its prototype.

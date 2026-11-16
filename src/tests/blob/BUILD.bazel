@@ -1,0 +1,33 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The Blob suite runs the same test modules under a cell per implementation
+# and flag combination. See AGENTS.md. Every cell gets --experimental, which
+# the opt-in cells need for spec_compliant_property_attributes and
+# immutable_api_prototypes.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_BLOB, which swaps in the TypeScript implementation under a cell
+# whose USING_TS_IMPL binding says C++.
+
+blob_suite_srcs = glob(["*.js"]) + ["blob-modules.capnp"]
+
+[wd_test(
+    src = "blob%s-cpp.wd-test" % cell,
+    args = ["--experimental"],
+    data = blob_suite_srcs,
+    generate_all_autogates_variant = False,
+) for cell in [
+    "",
+    "-legacy-flags",
+    "-opt-in",
+]]
+
+[wd_test(
+    src = "blob%s-ts.wd-test" % cell,
+    args = ["--experimental"],
+    data = blob_suite_srcs,
+) for cell in [
+    "",
+    "-legacy-flags",
+    "-opt-in",
+]]

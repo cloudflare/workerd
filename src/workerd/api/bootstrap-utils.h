@@ -29,6 +29,17 @@ class BootstrapUtils {
   // Undefined if `value` is not a ReadableStream of either implementation, else "locked",
   // "disturbed" (unlocked, but read from) or "readable".
   static jsg::JsValue readableStreamState(jsg::Lock& js, jsg::JsValue value);
+
+  // The largest Blob the isolate allows, in bytes (LimitEnforcer::getBlobSizeLimit()).
+  static double blobSizeLimit(jsg::Lock& js);
+
+  // A ReadableStream, of whichever implementation the compat flags give the global, over a copy of
+  // `bytes` (a Uint8Array), as the C++ Blob's stream() makes one. Requires an IoContext.
+  static jsg::JsValue blobStream(jsg::Lock& js, jsg::JsValue bytes);
+
+  // Records a use of a Blob's contents with the FeatureObserver, as the C++ Blob does: `kind` is
+  // 0 for arrayBuffer() or bytes(), 1 for text(), and 2 for stream().
+  static void recordBlobUse(jsg::Lock& js, jsg::JsValue kind);
 };
 
 }  // namespace workerd::api

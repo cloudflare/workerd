@@ -93,8 +93,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
         requestSize = data.size();
       }
-      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        requestSize = blob->getSize();
+      KJ_CASE_ONEOF(blob, JsBlob) {
+        requestSize = blob.getSize(js);
       }
     }
     KJ_IF_SOME(size, requestSize) {

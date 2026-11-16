@@ -8,8 +8,12 @@
 #include "js-readable-stream.h"
 #include "streams/readable.h"
 
+#include <workerd/io/io-context.h>
+#include <workerd/io/observer.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 
 namespace workerd::api {
 
@@ -59,6 +63,39 @@ jsg::JsValue BootstrapUtils::readableStreamState(jsg::Lock& js, jsg::JsValue val
     return js.str("readable"_kj);
   }
   return js.undefined();
+}
+
+double BootstrapUtils::blobSizeLimit(jsg::Lock& js) {
+  return static_cast<double>(Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit());
+}
+
+jsg::JsValue BootstrapUtils::blobStream(jsg::Lock& js, jsg::JsValue bytes) {
+  auto u8 = JSG_REQUIRE_NONNULL(
+      bytes.tryCast<jsg::JsUint8Array>(), TypeError, "blobStream() expects a Uint8Array");
+  // Pass no backing so that newMemorySource copies: the bytes are a V8 ArrayBuffer's, and the
+  // stream is read from the kj event loop where the isolate's MPK-protected sandbox pages are
+  // unreadable.
+  auto stream =
+      JsReadableStream::create(js, IoContext::current(), newMemorySource(u8.asArrayPtr()));
+  return kj::mv(stream).toJsValue(js);
+}
+
+void BootstrapUtils::recordBlobUse(jsg::Lock& js, jsg::JsValue kind) {
+  auto n = JSG_REQUIRE_NONNULL(
+      kind.tryCast<jsg::JsNumber>(), TypeError, "recordBlobUse() expects a number");
+  switch (static_cast<int>(KJ_REQUIRE_NONNULL(n.value(js)))) {
+    case 0:
+      FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_ARRAY_BUFFER);
+      break;
+    case 1:
+      FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_TEXT);
+      break;
+    case 2:
+      FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
+      break;
+    default:
+      JSG_FAIL_REQUIRE(TypeError, "recordBlobUse() expects 0, 1 or 2");
+  }
 }
 
 }  // namespace workerd::api

@@ -250,6 +250,12 @@ class IsolateBase {
   virtual kj::Maybe<v8::Local<v8::Object>> deserialize(
       Lock& js, uint tag, Deserializer& deserializer) = 0;
 
+  // Writes `instance`, an instance of a class implemented in JavaScript that stands in for the
+  // JSG_SERIALIZABLE type whose tag is `tag`, as that type's are written, tag first. Returns false
+  // if no type with that tag declares serializeStandIn() (see HasSerializeStandIn).
+  virtual bool serializeStandIn(
+      Lock& js, uint tag, v8::Local<v8::Object> instance, Serializer& serializer) = 0;
+
   // Registers the TypeHandler singleton for a type registered with this isolate, keyed by
   // typeid(TypeHandler<T>). Called during isolate construction (see jsg::Isolate's
   // constructors); the handler pointer must have static storage duration (the instances
@@ -1342,6 +1348,16 @@ class Isolate: public IsolateBase {
       return func(*wrapper, js, tag, deserializer);
     } else {
       return kj::none;
+    }
+  }
+  bool serializeStandIn(
+      Lock& js, uint tag, v8::Local<v8::Object> instance, Serializer& serializer) override {
+    auto* wrapper = getWrapperByContext(js);
+    KJ_IF_SOME(func, wrapper->standInSerializerMap.find(tag)) {
+      func(js, instance, serializer);
+      return true;
+    } else {
+      return false;
     }
   }
 

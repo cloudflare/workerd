@@ -16,6 +16,7 @@
 namespace workerd::api {
 
 class Blob;
+class JsBlob;
 class FormData;
 class JsWritableStream;
 struct JsReadableWritablePair;
@@ -55,7 +56,7 @@ class JsReadableStream final {
     kj::ArrayPtr<const kj::byte> view;
 
     explicit Buffer(kj::Array<const kj::byte> data);
-    Buffer(jsg::Lock& js, jsg::Ref<Blob> data);
+    Buffer(jsg::Lock& js, const JsBlob& data);
   };
 
   struct Impl {
@@ -86,7 +87,7 @@ class JsReadableStream final {
   JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data);
   JsReadableStream(jsg::Lock& js, kj::String data);
   JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view);
-  JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob);
+  JsReadableStream(jsg::Lock& js, JsBlob blob);
   JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams);
   JsReadableStream(jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams);
 
@@ -213,7 +214,7 @@ class JsReadableStream final {
   jsg::Promise<kj::String> text(jsg::Lock& js, uint64_t limit);
   jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js, uint64_t limit);
   jsg::Promise<jsg::JsRef<jsg::JsValue>> json(jsg::Lock& js, uint64_t limit);
-  jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js, uint64_t limit, kj::String contentType);
+  jsg::Promise<JsBlob> blob(jsg::Lock& js, uint64_t limit, kj::String contentType);
 
   // Fully drains the stream into the given sink. If end is EndStream::YES, the sink is closed after
   // the stream is fully drained. Deferred proxying is supported transparently if the underlying
@@ -273,6 +274,10 @@ class JsReadableStream final {
 
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  // The stream as a JavaScript value, as wrapping it would make it, for code that hands values to
+  // JavaScript itself. The stream must not be null.
+  jsg::JsValue toJsValue(jsg::Lock& js) &&;
 
   // Describe this type to RTTI (and therefore to generated TypeScript) exactly as a
   // ReadableStream. See the delegated-RTTI support in jsg/rtti.h.

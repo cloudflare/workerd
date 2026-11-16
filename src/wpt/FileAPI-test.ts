@@ -4,6 +4,11 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript File (the TS_BLOB autogate) inherits from Blob as WebIDL
+// says an interface object does; the C++ one does not
+// (src/tests/blob/AGENTS.md).
+const usingTsBlob = Object.getPrototypeOf(File) === Blob;
+
 const ENDINGS_EXPECTED_FAILURES = [
   'Valid "endings" value: "transparent"',
   'Valid "endings" value: "native"',
@@ -142,7 +147,7 @@ export default {
   'idlharness.any.js': {
     comment:
       'Blob.text(), arrayBuffer() and bytes() throw synchronously on a bad receiver instead of returning a rejected promise. ' +
-      'Blob.textStream() is not implemented. The File interface object does not inherit from Blob and has the wrong length. ' +
+      'Blob.textStream() is not implemented. The File interface object has the wrong length, and in C++ does not inherit from Blob. ' +
       'FileReader is not implemented, and FileList only exists for <input type=file> and drag and drop in browsers.',
     expectedFailures: [
       'Blob interface: operation text()',
@@ -151,7 +156,9 @@ export default {
       'Blob interface: operation textStream()',
       'Blob interface: new Blob(["TEST"]) must inherit property "textStream()" with the proper type',
       'Blob interface: new File(["myFileBits"], "myFileName") must inherit property "textStream()" with the proper type',
-      'File interface: existence and properties of interface object',
+      ...(usingTsBlob
+        ? []
+        : ['File interface: existence and properties of interface object']),
       'File interface object length',
     ],
     omittedTests: [/^FileList /, /^FileReader /, /new FileReader\(\)/],
@@ -231,11 +238,13 @@ export default {
   },
   'unicode.any.js': {
     comment:
-      'Strings in blobParts should be converted as USVString, replacing unpaired surrogates with U+FFFD, but Blob::BitsValue uses kj::String (blob.h) and they come back unreplaced',
-    expectedFailures: [
-      'Test that unpaired surrogates are replaced by Blob constructor',
-      'Test that unpaired surrogates are replaced by File constructor',
-    ],
+      'Strings in blobParts should be converted as USVString, replacing unpaired surrogates with U+FFFD, but the C++ Blob::BitsValue uses kj::String (blob.h) and they come back unreplaced',
+    expectedFailures: usingTsBlob
+      ? []
+      : [
+          'Test that unpaired surrogates are replaced by Blob constructor',
+          'Test that unpaired surrogates are replaced by File constructor',
+        ],
   },
   'url/url-charset.window.js': {
     comment: 'Opens blob URLs with window.open()',

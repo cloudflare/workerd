@@ -220,9 +220,9 @@ KJ_TEST("JsReadableStream null stream consumption yields empty results") {
                        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsUint8Array> bytes) {
       KJ_EXPECT(bytes.getHandle(js).size() == 0);
       return JsReadableStream().blob(js, kLimit, kj::str("text/plain"));
-    }).then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
-      KJ_EXPECT(blob->getSize() == 0);
-      KJ_EXPECT(blob->getType() == "text/plain"_kj);
+    }).then(js, [](jsg::Lock& js, JsBlob blob) {
+      KJ_EXPECT(blob.getSize(js) == 0);
+      KJ_EXPECT(blob.getType(js) == "text/plain"_kj);
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -317,9 +317,9 @@ KJ_TEST("JsReadableStream blob carries the given content type") {
 
     JsReadableStream stream(js, kj::str(kData));
     auto promise = stream.blob(js, kLimit, kj::str("text/plain;charset=UTF-8"))
-                       .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
-      KJ_EXPECT(blob->getSize() == int(kData.size()));
-      KJ_EXPECT(blob->getType() == "text/plain;charset=UTF-8"_kj);
+                       .then(js, [](jsg::Lock& js, JsBlob blob) {
+      KJ_EXPECT(blob.getSize(js) == kData.size());
+      KJ_EXPECT(blob.getType(js) == "text/plain;charset=UTF-8"_kj);
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -3883,9 +3883,9 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
                       KJ_EXPECT(js.toString(obj.get(js, "hello"_kj)) == "world"_kj);
                       return forBlob.blob(js, kLimit, kj::str("text/plain"));
                     }))
-            .then(js, [](jsg::Lock& js, jsg::Ref<Blob> blob) {
-      KJ_EXPECT(blob->getSize() == kData.size());
-      KJ_EXPECT(blob->getType() == "text/plain"_kj);
+            .then(js, [](jsg::Lock& js, JsBlob blob) {
+      KJ_EXPECT(blob.getSize(js) == kData.size());
+      KJ_EXPECT(blob.getType(js) == "text/plain"_kj);
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -3943,8 +3943,8 @@ KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prot
                     }))
             .then(js,
                 JSG_VISITABLE_LAMBDA((objectPrototype = jsg::JsRef(js, objectPrototype)),
-                    (objectPrototype), (jsg::Lock& js, jsg::Ref<Blob> blob) {
-                      KJ_EXPECT(blob->getSize() == kData.size());
+                    (objectPrototype), (jsg::Lock& js, JsBlob blob) {
+                      KJ_EXPECT(blob.getSize(js) == kData.size());
                       objectPrototype.getHandle(js).delete_(js, "then"_kj);
                     }));
     return env.context.awaitJs(js, kj::mv(promise));

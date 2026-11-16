@@ -258,9 +258,15 @@ concept SelfConvertible = requires(Lock& js,
 template <typename TypeWrapper>
 class SelfUnwrap {
  public:
+  // The type's name in error messages: its `jsgTypeName`, if it declares one, such as the name of
+  // the JavaScript class it stands for, and otherwise its C++ name.
   template <SelfConvertible T>
-  static constexpr const std::type_info& getName(T*) {
-    return typeid(T);
+  static constexpr decltype(auto) getName(T*) {
+    if constexpr (requires { T::jsgTypeName; }) {
+      return static_cast<const char*>(T::jsgTypeName);
+    } else {
+      return (typeid(T));
+    }
   }
 
   template <SelfConvertible T>

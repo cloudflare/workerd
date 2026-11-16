@@ -456,6 +456,16 @@ void Serializer::writeJsSerializable(
     if (eh.trySerializeClassInstance(js, *this, object)) return;
   }
 
+  // A mark that is a positive integer is the tag of the JSG_SERIALIZABLE type the instance stands
+  // in for, which writes it.
+  if (mark->IsUint32()) {
+    auto tag = mark.As<v8::Uint32>()->Value();
+    if (tag != 0 && IsolateBase::from(js.v8Isolate).serializeStandIn(js, tag, object, *this)) {
+      return;
+    }
+    throwDataCloneErrorForObject(js, object);
+  }
+
   auto& cls = getJsSerializableClass(js, object, mark);
   v8::Local<v8::Function> clone = cls.clone.getHandle(js);
   // Stays valid when jsSerializableClasses grows, which moves the string but not its text.

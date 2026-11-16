@@ -149,6 +149,7 @@ struct BootstrapState final: public jsg::BootstrapModules {
   V(ArrayBufferView)                                                                               \
   V(DataView)                                                                                      \
   V(Promise)                                                                                       \
+  V(Proxy)                                                                                         \
   V(SharedArrayBuffer)                                                                             \
   V(Uint8Array)
 
@@ -452,6 +453,39 @@ static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args)
   });
 }
 
+static void BlobSizeLimit(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.num(api::BootstrapUtils::blobSizeLimit(js));
+  });
+}
+
+static void BlobStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::blobStream(js, jsg::JsValue(args[0])));
+  });
+}
+
+// Whether a BufferSource's buffer can be resized or grown by user code, as JsBufferSource reports
+// it: a resizable ArrayBuffer, a growable SharedArrayBuffer, or a view over either.
+static void IsResizableBufferSource(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto source = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsBufferSource>(),
+        TypeError, "isResizableBufferSource() expects a BufferSource");
+    return js.boolean(source.isResizable());
+  });
+}
+
+static void RecordBlobUse(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    api::BootstrapUtils::recordBlobUse(js, jsg::JsValue(args[0]));
+    return v8::Local<v8::Value>(js.undefined());
+  });
+}
+
 // Structured-clones a MessagePort message as postMessage() does: serializes it (which can throw
 // a DataCloneError, and runs any getters on it), rejects a SharedArrayBuffer anywhere in it, and
 // returns the deserialized copy.
@@ -607,6 +641,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "readableStreamState",
+    "blobSizeLimit",
+    "blobStream",
+    "recordBlobUse",
+    "isResizableBufferSource",
     "DOMExceptionBase",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
@@ -650,6 +688,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
+    getMethod(js, BlobSizeLimit),
+    getMethod(js, BlobStream),
+    getMethod(js, RecordBlobUse),
+    getMethod(js, IsResizableBufferSource),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
   };
 

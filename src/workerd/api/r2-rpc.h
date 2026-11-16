@@ -119,7 +119,7 @@ class R2Error: public jsg::Object {
 };
 
 using R2PutValue =
-    kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
+    kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, JsBlob>;
 
 // Converts bodies that are too large for an inline JSRPC message into streams. Known stream lengths
 // are preserved by the JSRPC stream transport.

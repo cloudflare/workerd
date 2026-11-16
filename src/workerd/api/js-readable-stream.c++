@@ -280,11 +280,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
   });
 }
 
-jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
+jsg::Promise<JsBlob> getReadableStreamBlob(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit, kj::String contentType) {
   return consumeReadableStreamArrayBuffer(js, obj, limit,
       [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::JsArrayBuffer buffer) mutable {
-    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer), kj::mv(contentType));
+    return JsBlob::create(js, jsg::JsBufferSource(buffer), kj::mv(contentType));
   });
 }
 
@@ -765,8 +765,8 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
 // kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
 // kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
 // branches alike.
-JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
-    : Buffer(kj::heapArray(data->getData(js))) {}
+JsReadableStream::Buffer::Buffer(jsg::Lock& js, const JsBlob& data)
+    : Buffer(kj::heapArray(data.getData(js))) {}
 
 namespace {
 
@@ -825,8 +825,8 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view)
     : JsReadableStream(js, view.getHandle(js).copy()) {}
 
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
+JsReadableStream::JsReadableStream(jsg::Lock& js, JsBlob blob)
+    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, blob))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
     : JsReadableStream(js, urlSearchParams->toString()) {}
@@ -834,6 +834,20 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams>
 JsReadableStream::JsReadableStream(
     jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams)
     : JsReadableStream(js, urlSearchParams->toString()) {}
+
+jsg::JsValue JsReadableStream::toJsValue(jsg::Lock& js) && {
+  auto& i = KJ_ASSERT_NONNULL(impl, "cannot convert a null JsReadableStream");
+  KJ_SWITCH_ONEOF(i.stream) {
+    KJ_CASE_ONEOF(legacy, jsg::Ref<ReadableStream>) {
+      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStream>>());
+      return jsg::JsValue(handler.wrap(js, kj::mv(legacy)));
+    }
+    KJ_CASE_ONEOF(ts, jsg::JsRef<jsg::JsObject>) {
+      return ts.getHandle(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
@@ -1290,18 +1304,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> JsReadableStream::json(jsg::Lock& js, uin
   });
 }
 
-jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
-    jsg::Lock& js, uint64_t limit, kj::String contentType) {
+jsg::Promise<JsBlob> JsReadableStream::blob(jsg::Lock& js, uint64_t limit, kj::String contentType) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
-          return js.rejectedPromise<jsg::Ref<Blob>>(js.typeError(kBodyUsedError));
+          return js.rejectedPromise<JsBlob>(js.typeError(kBodyUsedError));
         }
         return stream->getController().readAllBytes(js, limit).then(js,
             [contentType = kj::mv(contentType)](
                 jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-          return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
+          return JsBlob::create(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
@@ -1312,7 +1325,7 @@ jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
   }
 
   // A null stream yields an empty Blob with the given Content-Type.
-  return js.resolvedPromise(js.alloc<Blob>(kj::mv(contentType)));
+  return js.resolvedPromise(JsBlob::createEmpty(js, kj::mv(contentType)));
 }
 
 // pumpTo and pipeTo/pipeThrough are similar but serve different purposes.

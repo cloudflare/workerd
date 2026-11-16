@@ -1059,6 +1059,13 @@ struct DeserializeInvoker<TypeWrapper,
   }
 };
 
+// Whether a JSG_SERIALIZABLE type T declares
+// `static void serializeStandIn(Lock&, v8::Local<v8::Object> instance, Serializer&)`, which writes
+// an instance of a class implemented in JavaScript that stands in for T, as T's serialize() would
+// write a T, after the tag (see serializeStandIn() in ser.h).
+template <typename T>
+concept HasSerializeStandIn = requires { &T::serializeStandIn; };
+
 // SFINAE helper to detect if a type has a static method called `constructor`.
 // Includes a static_assert to provide a clear error if the method exists but is non-static.
 template <typename T, typename = void>
@@ -1156,6 +1163,13 @@ class DynamicResourceTypeMap {
   using DeserializeFunc = v8::Local<v8::Object>(
       TypeWrapper&, Lock& js, uint tag, Deserializer& deserializer);
   kj::HashMap<uint, DeserializeFunc*> deserializerMap;
+
+  // Map tag numbers to the serializers of instances of classes implemented in JavaScript that
+  // stand in for a JSG_SERIALIZABLE type, written as that type's are (see serializeStandIn() in
+  // ser.h). Like SerializeFunc, a StandInSerializeFunc starts by writing the tag.
+  using StandInSerializeFunc = void(
+      Lock& js, v8::Local<v8::Object> instance, Serializer& serializer);
+  kj::HashMap<uint, StandInSerializeFunc*> standInSerializerMap;
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -1880,6 +1894,14 @@ class ResourceWrapper {
         serializer.writeRawUint32(static_cast<uint>(T::jsgSerializeTag));
         SerializeInvoker<TypeWrapper, T>::call(wrapper, static_cast<T&>(instance), js, serializer);
       });
+
+      if constexpr (HasSerializeStandIn<T>) {
+        wrapper.standInSerializerMap.insert(static_cast<uint>(T::jsgSerializeTag),
+            [](Lock& js, v8::Local<v8::Object> instance, auto& serializer) {
+          serializer.writeRawUint32(static_cast<uint>(T::jsgSerializeTag));
+          T::serializeStandIn(js, instance, serializer);
+        });
+      }
 
       if constexpr (!T::jsgSerializeOneway) {
         typename TypeWrapper::DeserializeFunc* deserializeFunc =

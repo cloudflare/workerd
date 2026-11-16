@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/api/blob-bridge.h>
 #include <workerd/api/streams/writable.h>
 #include <workerd/api/url-bridge.h>
 #include <workerd/io/worker-fs.h>
@@ -200,7 +201,7 @@ class FileSystemModule final: public jsg::Object {
     jsg::Optional<kj::String> type;
     JSG_STRUCT(type);
   };
-  jsg::Ref<Blob> openAsBlob(jsg::Lock& js, FilePath path, OpenAsBlobOptions options);
+  JsBlob openAsBlob(jsg::Lock& js, FilePath path, OpenAsBlobOptions options);
 
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_METHOD(stat);
@@ -322,12 +323,12 @@ struct FileSystemFileWriteParams {
   jsg::Optional<uint32_t> position;
   // Yes, wrapping the kj::Maybe with a jsg::Optional is intentional here. We need to
   // be able to accept null or undefined values and handle them per the spec.
-  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>, kj::String>>> data;
+  jsg::Optional<kj::Maybe<kj::OneOf<JsBlob, jsg::JsRef<jsg::JsBufferSource>, kj::String>>> data;
   JSG_STRUCT(type, size, position, data);
 };
 
 using FileSystemWritableData =
-    kj::OneOf<jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>, kj::String, FileSystemFileWriteParams>;
+    kj::OneOf<JsBlob, jsg::JsRef<jsg::JsBufferSource>, kj::String, FileSystemFileWriteParams>;
 
 class FileSystemFileHandle final: public FileSystemHandle {
  public:
@@ -343,7 +344,7 @@ class FileSystemFileHandle final: public FileSystemHandle {
     JSG_STRUCT(keepExistingData);
   };
 
-  jsg::Promise<jsg::Ref<File>> getFile(
+  jsg::Promise<JsFile> getFile(
       jsg::Lock& js);
 
   jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
