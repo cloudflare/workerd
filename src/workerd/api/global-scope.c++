@@ -259,6 +259,20 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     } else {
       response.accept(200, "OK", headers);
     }
+    kj::ConstString unacceptedReason =
+        "The connect() handler finished without accepting a connection that requested "
+        "secureTransport 'on'. Call socket.accept() once the connection is secure."_kjc;
+    // `response` goes away once this request is over, and the handler's socket can outlive it, so
+    // the acceptance must give `response` up however the handler finishes: by returning or
+    // throwing, synchronously or asynchronously, or by being canceled. Set up before anything below
+    // can throw. On a normal return, it moves into the returned promise's attachments.
+    auto abandonAcceptance = kj::defer(
+        [acceptance = acceptance.map([](kj::Own<ConnectAcceptance>& a) { return kj::addRef(*a); }),
+            reason = unacceptedReason.clone()]() mutable {
+      KJ_IF_SOME(a, acceptance) {
+        a->abandon(reason);
+      }
+    });
 
     // Using neuterable stream to manage lifetime of stream promises. We MUST neuter this when the
     // promise returned to the caller resolves because `connection` is owned by the caller and will
@@ -323,20 +337,13 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
     auto result = ioContext.awaitJs(js, kj::mv(promise));
     KJ_IF_SOME(a, acceptance) {
-      kj::ConstString reason =
-          "The connect() handler finished without accepting a connection that requested "
-          "secureTransport 'on'. Call socket.accept() once the connection is secure."_kjc;
-      // `response` goes away once the request is over, however the handler finishes. A handler
-      // that returns normally without accepting is an error in the handler: throwing fails the
-      // connection and reports it like any other exception the handler throws.
-      result = result
-                   .then([a = kj::addRef(*a), reason = reason.clone()]() mutable {
+      // A handler that returns normally without accepting is an error in the handler: throwing
+      // fails the connection and reports it like any other exception the handler throws.
+      result = result.then([a = kj::addRef(*a), reason = kj::mv(unacceptedReason)]() mutable {
         JSG_REQUIRE(!a->abandon(reason), Error, reason);
-      }).attach(kj::defer([a = kj::mv(a), reason = kj::mv(reason)]() mutable {
-        a->abandon(reason);
-      }));
+      });
     }
-    return result.attach(kj::mv(span), kj::mv(deferredNeuter));
+    return result.attach(kj::mv(span), kj::mv(abandonAcceptance), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import { connect } from 'cloudflare:sockets';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { ok, strictEqual, throws } from 'assert';
+import { ok, rejects, strictEqual, throws } from 'assert';
 
 export class ConnectProxy extends WorkerEntrypoint {
   async connect(socket) {
@@ -122,6 +122,13 @@ export class ImmediateTlsRelay extends WorkerEntrypoint {
       { secureTransport: 'on' }
     );
     await upstream.opened;
+    // Only the socket passed to a connect() handler has a connection to accept.
+    strictEqual(upstream.requestedSecureTransport, undefined);
+    throws(() => upstream.accept(), {
+      name: 'TypeError',
+      message:
+        'accept() can only be called on the socket passed to a connect() handler.',
+    });
     socket.accept();
     // A second accept() changes nothing.
     socket.accept();
@@ -182,6 +189,47 @@ export class ImmediateTlsClosesFirst extends WorkerEntrypoint {
         "The connect() handler's socket closed before it accepted the connection.",
     });
   }
+}
+
+// Throws before returning a promise, after queueing an accept() that runs once connect() has
+// unwound. The connection fails with the throw, and the late accept() must not answer the peer:
+// by then nothing is waiting for the answer.
+export class ImmediateTlsThrowsSynchronously extends WorkerEntrypoint {
+  connect(socket) {
+    queueMicrotask(() => {
+      try {
+        socket.accept();
+      } catch {
+        // Expected: the connection already failed.
+      }
+    });
+    throw new Error('connect() handler failed before accepting');
+  }
+}
+
+// Tries to pass its socket to another entrypoint before accepting the connection, which fails:
+// only this handler can answer the peer. Then accepts and reports the failure to the peer.
+export class ImmediateTlsTransfersBeforeAccepting extends WorkerEntrypoint {
+  async connect(socket) {
+    // The handler's socket opens without waiting for accept(). Transferring it any earlier fails
+    // for that reason instead.
+    await socket.opened;
+    await rejects(this.env.SOCKET_SINK.take(socket), {
+      name: 'DataCloneError',
+      message:
+        'A Socket can only be serialized after its connection has been accepted. Call ' +
+        '`socket.accept()` before transferring the socket over RPC.',
+    });
+    socket.accept();
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode('transfer-refused'));
+    await writer.close();
+  }
+}
+
+// The RPC target ImmediateTlsTransfersBeforeAccepting tries to pass its socket to.
+export class SocketSink extends WorkerEntrypoint {
+  take(socket) {}
 }
 
 // A peer that didn't ask for TLS gets its connection accepted on delivery, and accept() does

@@ -71,6 +71,12 @@ const unitTests :Workerd.Config = (
           (name = "CLOSES_FIRST", service = (
             name = "connect-handler-test-immediate-tls-endpoint",
             entrypoint = "ImmediateTlsClosesFirst")),
+          (name = "THROWS_SYNCHRONOUSLY", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsThrowsSynchronously")),
+          (name = "TRANSFERS_BEFORE_ACCEPTING", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsTransfersBeforeAccepting")),
           (name = "PLAINTEXT_PEER", service = (
             name = "connect-handler-test-immediate-tls-endpoint",
             entrypoint = "ImmediateTlsPlaintextPeer")),
@@ -91,6 +97,9 @@ const unitTests :Workerd.Config = (
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "TLS_PORT", fromEnvironment = "TLS_PORT"),
           (name = "CONNECT_ENDPOINT_PORT", fromEnvironment = "CONNECT_ENDPOINT_PORT"),
+          (name = "SOCKET_SINK", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "SocketSink")),
         ],
       )
     ),

@@ -295,7 +295,7 @@ class Socket: public jsg::Object {
 
   // For the socket passed to a connect() handler, the secureTransport its peer asked for.
   // Undefined on any other socket.
-  kj::Maybe<kj::StringPtr> getRequestedSecureTransport() const;
+  jsg::Optional<kj::StringPtr> getRequestedSecureTransport() const;
 
   // Marks this socket as the one passed to a connect() handler, whose peer asked for
   // `requestedSecureTransport`. `acceptance` is set when the connection waits for accept().

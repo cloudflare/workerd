@@ -1138,7 +1138,7 @@ bool ConnectAcceptance::abandon(kj::StringPtr reason) {
   return false;
 }
 
-kj::Maybe<kj::StringPtr> Socket::getRequestedSecureTransport() const {
+jsg::Optional<kj::StringPtr> Socket::getRequestedSecureTransport() const {
   return requestedSecureTransport.map([](SecureTransportKind kind) {
     switch (kind) {
       case SecureTransportKind::OFF:

@@ -83,6 +83,22 @@ export const immediateTlsRefusedWhenHandlerClosesFirst = {
   },
 };
 
+export const immediateTlsRefusedWhenHandlerThrowsSynchronously = {
+  async test(ctrl, env) {
+    await expectRefused(env.THROWS_SYNCHRONOUSLY);
+  },
+};
+
+export const immediateTlsSocketNotTransferableBeforeAccept = {
+  async test(ctrl, env) {
+    const socket = env.TRANSFERS_BEFORE_ACCEPTING.connect('db.example:5432', {
+      secureTransport: 'on',
+    });
+    await socket.opened;
+    strictEqual(await readAll(socket), 'transfer-refused');
+  },
+};
+
 // A handler without connect_handler_immediate_tls can't make the connection secure, so the
 // connection is refused before it runs.
 export const immediateTlsRefusedWithoutFlag = {
