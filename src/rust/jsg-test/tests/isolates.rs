@@ -157,7 +157,7 @@ fn global_of_another_isolate_panics() {
     });
 }
 
-/// Two isolates run on different threads, so memory that belongs to one must not become
+/// Two isolates can run on different threads, so memory that belongs to one must not become
 /// another's.
 #[test]
 fn backing_store_of_another_isolate_panics_when_wrapped() {

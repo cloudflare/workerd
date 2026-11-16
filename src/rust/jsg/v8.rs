@@ -1471,8 +1471,8 @@ pub struct BackingStore {
 
 impl Drop for BackingStore {
     fn drop(&mut self) {
-        // SAFETY: ptr was obtained from a `local_*_get_backing_store` FFI call
-        // and is uniquely owned by self.
+        // SAFETY: ptr was obtained from `backing_store_new_resizable` or a
+        // `local_*_get_backing_store` FFI call and is uniquely owned by self.
         unsafe { ffi::backing_store_drop(self.ptr.get()) }
     }
 }
@@ -1484,21 +1484,21 @@ impl BackingStore {
     /// The resulting `BackingStore` can be passed to [`ArrayBuffer::from_backing_store`]
     /// to create a resizable `ArrayBuffer`.
     pub fn new_resizable(lock: &mut Lock<'_>, byte_length: usize, max_byte_length: usize) -> Self {
-        // SAFETY: the lock's isolate is entered, which V8 requires in order to allocate, and
-        // V8 guarantees a non-null result or crashes on OOM.
+        // SAFETY: the lock's isolate is entered, which V8 requires in order to allocate when
+        // the V8 sandbox is enabled, and V8 guarantees a non-null result or crashes on OOM.
         let ptr = unsafe { ffi::backing_store_new_resizable(byte_length, max_byte_length) };
         // SAFETY: ptr is a freshly allocated shared_ptr, uniquely owned, of a store allocated
         // for the lock's isolate.
         unsafe { Self::from_raw(ptr, Arc::clone(lock.isolate_state())) }
     }
 
-    /// Wraps a `usize` address returned by a `local_*_get_backing_store` FFI call.
+    /// Wraps a `usize` address returned by `backing_store_new_resizable` or a
+    /// `local_*_get_backing_store` FFI call.
     ///
     /// # Safety
-    /// `ptr` must be a non-zero value returned by one of the
-    /// `local_*_get_backing_store` FFI functions, and the caller must transfer
-    /// unique ownership to this `BackingStore`. `isolate` must be the state of the isolate
-    /// the store was created in or whose buffer it was taken from.
+    /// `ptr` must be a non-zero value returned by one of those FFI functions, and the caller
+    /// must transfer unique ownership to this `BackingStore`. `isolate` must be the state of
+    /// the isolate the store was created in or whose buffer it was taken from.
     #[expect(clippy::expect_used, reason = "the caller guarantees a non-zero `ptr`")]
     unsafe fn from_raw(ptr: usize, isolate: Arc<IsolateState>) -> Self {
         Self {
@@ -1566,6 +1566,9 @@ impl BackingStore {
     /// concurrently write to this memory. The caller must ensure no concurrent
     /// writes occur for the duration of the borrow.
     ///
+    /// The store must belong to `lock`'s isolate: another isolate's JavaScript, which `lock`
+    /// does not exclude, can write to the memory.
+    ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
@@ -1587,12 +1590,21 @@ impl BackingStore {
     /// The caller must ensure no other live reference (shared or mutable) to
     /// this memory region exists for the duration of the borrow.
     ///
+    /// # Panics
+    ///
+    /// Panics if the store belongs to another isolate: that isolate's JavaScript, which `lock`
+    /// does not exclude, can write to the memory.
+    ///
     /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
     /// interrogating the backing store shared_ptr being singular for the lifetime
     /// of the current Rust execution model.
     #[doc(hidden)]
     #[inline]
-    pub unsafe fn as_mut_slice<'b>(&'b mut self, _lock: &'b mut crate::Lock<'_>) -> &'b mut [u8] {
+    pub unsafe fn as_mut_slice<'b>(&'b mut self, lock: &'b mut crate::Lock<'_>) -> &'b mut [u8] {
+        assert!(
+            Arc::ptr_eq(&self.isolate, lock.isolate_state()),
+            "attempt to borrow a BackingStore in an isolate other than the one it belongs to"
+        );
         if self.is_empty() {
             return &mut [];
         }
