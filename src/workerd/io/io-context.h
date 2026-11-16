@@ -138,6 +138,10 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   kj::Weak<IoContext_IncomingRequest> addWeak() {
     return addWeakToThis();
   }
+
+  kj::Maybe<issues::IssueCollector&> getIssueCollector() {
+    return metrics->getIssueCollector();
+  }
   ~IoContext_IncomingRequest() noexcept(false);
 
   IoContext& getContext() {
@@ -376,6 +380,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   RequestObserver& getMetrics() {
     return *getCurrentIncomingRequest().metrics;
+  }
+
+  // The issue collector of the current incoming request, attributed like getWorkerTracer().
+  kj::Maybe<issues::IssueCollector&> getIssueCollector() {
+    if (incomingRequests.empty()) return kj::none;
+    return getCurrentIncomingRequest().getIssueCollector();
   }
 
   kj::Maybe<BaseTracer&> getWorkerTracer() {

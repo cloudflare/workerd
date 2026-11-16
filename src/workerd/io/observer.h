@@ -7,6 +7,7 @@
 // e.g. to collect logs and metrics.
 
 #include <workerd/io/features.capnp.h>
+#include <workerd/io/issues.h>
 #include <workerd/io/trace.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
@@ -173,6 +174,14 @@ class RequestObserver: public kj::Refcounted {
   // type may be reported multiple times during a single request; implementations should deduplicate.
   virtual void reportInternalException(
       const kj::Exception& e, jsg::InternalExceptionObserver::Detail detail) {}
+
+  // The collector for this request's issues, or none if the embedder does not want issues for it.
+  // The embedder owns it and ends it from its destructor, once it knows the outcome. The observer
+  // outlives the IncomingRequest, so issues reported while the request drains, logs its uncaught
+  // exception or sends a synthetic 500 are still collected.
+  virtual kj::Maybe<issues::IssueCollector&> getIssueCollector() {
+    return kj::none;
+  }
 
   // Wrap the given WorkerInterface with a version that collects metrics. This method may only be
   // called once, and only one method call may be made to the returned interface.

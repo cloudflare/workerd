@@ -366,6 +366,9 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
   wasDelivered = true;
   deliveredLocation = location;
   metrics->delivered();
+  KJ_IF_SOME(collector, metrics->getIssueCollector()) {
+    collector.setEvent(eventType);
+  }
 
   KJ_IF_SOME(tracker, context->tryGetAsyncTracker()) {
     asyncTraceResource = tracker.create(AsyncKind::REQUEST, eventType);
@@ -636,14 +639,16 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
 
   kj::Maybe<BaseTracer&> tracer;
   kj::Maybe<RequestObserver&> metrics;
+  kj::Maybe<issues::IssueCollector&> collector;
   KJ_IF_SOME(request, traceRequest) {
     KJ_DASSERT(&request.getContext() == this);
     tracer = request.getWorkerTracer();
     metrics = request.getMetrics();
+    collector = request.getIssueCollector();
   }
   bool inspectorEnabled = worker->getIsolate().isInspectorEnabled();
 
-  if (tracer == kj::none && !inspectorEnabled) {
+  if (tracer == kj::none && !inspectorEnabled && collector == kj::none) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
@@ -674,6 +679,16 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
   KJ_IF_SOME(detail, error.internalException) {
     KJ_IF_SOME(m, metrics) {
       m.reportInternalException(exception, detail);
+    }
+  }
+
+  KJ_IF_SOME(c, collector) {
+    if (source != UncaughtExceptionSource::INTERNAL &&
+        source != UncaughtExceptionSource::INTERNAL_ASYNC) {
+      issues::Error issueErrors[] = {{.name = error.name,
+        .message = error.message,
+        .stack = error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; })}};
+      c.report(issues::UNCAUGHT_EXCEPTION, error.message, nullptr, issueErrors, nullptr);
     }
   }
 
@@ -1697,6 +1712,9 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 }
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  KJ_IF_SOME(collector, getIssueCollector()) {
+    collector.breadcrumb(issues::BreadcrumbKind::CALL_STARTED, ""_kj, operationName);
+  }
   TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }

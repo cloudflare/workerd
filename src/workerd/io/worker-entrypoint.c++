@@ -31,6 +31,37 @@ kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
   return value.map([](kj::String& text) -> kj::StringPtr { return text; });
 }
 
+// The path of `url`, without its query or fragment, which may carry secrets.
+kj::String pathOf(kj::StringPtr url) {
+  size_t start = 0;
+  KJ_IF_SOME(scheme, url.find("://"_kj)) {
+    auto authority = scheme + 3;
+    start = url.slice(authority).findFirst('/').map([&](size_t i) {
+      return authority + i;
+    }).orDefault(url.size());
+  }
+  auto rest = url.slice(start);
+  size_t end = rest.size();
+  KJ_IF_SOME(i, rest.findFirst('?')) end = kj::min(end, i);
+  KJ_IF_SOME(i, rest.findFirst('#')) end = kj::min(end, i);
+  return kj::str(rest.asArray().first(end));
+}
+
+// Tells the request's issue collector the status the request returns. A 5xx is also reported as an
+// issue, since it may be the only sign that something failed. The caller holds a reference to the
+// observer, which owns the collector and ends it after the status is known.
+void noteIssueStatus(RequestObserver& metrics, uint status) {
+  if (status == 0) return;
+  KJ_IF_SOME(collector, metrics.getIssueCollector()) {
+    collector.setStatus(status);
+    if (status >= 500) {
+      issues::Field fields[] = {{"status"_kj, static_cast<int64_t>(status)}};
+      collector.report(issues::HTTP_SERVER_ERROR, kj::str("Worker returned HTTP ", status), fields,
+          nullptr, nullptr);
+    }
+  }
+}
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -450,6 +481,10 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
   incomingRequest->delivered("fetch"_kj);
 
+  KJ_IF_SOME(collector, incomingRequest->getIssueCollector()) {
+    collector.setRequest(kj::str(method), pathOf(url));
+  }
+
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
@@ -538,6 +573,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
             PERFETTO_FLOW_FROM_POINTER(this));
         proxyTask = kj::mv(deferredProxy.proxyTask);
+        noteIssueStatus(*metricsForCatch, wrappedResponse->getHttpResponseStatus());
         KJ_IF_SOME(t, workerTracer) {
           auto httpResponseStatus = wrappedResponse->getHttpResponseStatus();
           if (httpResponseStatus != 0) {
@@ -652,6 +688,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         if (wrappedResponse->isSent()) return;
         kj::HttpHeaders errorHeaders(threadContext.getHeaderTable());
         wrappedResponse->send(statusCode, statusText, errorHeaders, static_cast<uint64_t>(0));
+        noteIssueStatus(*metricsForCatch, statusCode);
         KJ_IF_SOME(t, workerTracer) {
           t.setReturn(
               kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
@@ -894,8 +931,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
           // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
           // necessarily an internal error) and correspond to HTTP error 503.
           response.reject(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
+          noteIssueStatus(*metrics, 503);
         } else {
           response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+          noteIssueStatus(*metrics, 500);
         }
         KJ_IF_SOME(t, workerTracer) {
           t.setReturn(kj::none,
