@@ -33,6 +33,18 @@ function maybeAddComment(node: ts.Node, comment?: string): void {
   );
 }
 
+// `record[key]` if `record` has it as its own property. The comments data
+// are plain objects, whose prototype has members such as `toString`, which
+// a member without a comment of its own must not find.
+function lookup<T>(
+  record: Record<string, T> | undefined,
+  key: string
+): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key)
+    ? record[key]
+    : undefined;
+}
+
 function createVisitor(data: CommentsData): ts.Visitor {
   return (node) => {
     if (
@@ -40,8 +52,8 @@ function createVisitor(data: CommentsData): ts.Visitor {
       node.name !== undefined &&
       ts.isIdentifier(node.name)
     ) {
-      const comments = data[node.name.text];
-      maybeAddComment(node, comments?.["$"]);
+      const comments = lookup(data, node.name.text);
+      maybeAddComment(node, lookup(comments, "$"));
       for (const member of node.members) {
         if (member.name !== undefined && ts.isIdentifier(member.name)) {
           let key = member.name.text;
@@ -51,7 +63,7 @@ function createVisitor(data: CommentsData): ts.Visitor {
             hasModifier(ts.getModifiers(member), ts.SyntaxKind.StaticKeyword);
           if (isStatic) key = `static:${key}`;
 
-          maybeAddComment(member, comments?.[key]);
+          maybeAddComment(member, lookup(comments, key));
         }
       }
     }
@@ -61,8 +73,8 @@ function createVisitor(data: CommentsData): ts.Visitor {
       node.name !== undefined &&
       ts.isIdentifier(node.name)
     ) {
-      const comments = data[node.name.text];
-      maybeAddComment(node, comments?.["$"]);
+      const comments = lookup(data, node.name.text);
+      maybeAddComment(node, lookup(comments, "$"));
     }
 
     if (
@@ -72,8 +84,8 @@ function createVisitor(data: CommentsData): ts.Visitor {
       const declaration = node.declarationList.declarations[0];
       const name = declaration.name;
       if (ts.isIdentifier(name)) {
-        const comments = data[name.text];
-        maybeAddComment(node, comments?.["$"]);
+        const comments = lookup(data, name.text);
+        maybeAddComment(node, lookup(comments, "$"));
       }
     }
 
