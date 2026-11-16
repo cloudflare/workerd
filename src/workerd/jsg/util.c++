@@ -697,6 +697,48 @@ void throwInternalError(
   }
 }
 
+void liftKjMicrotask(
+    v8::Isolate* isolate, v8::Local<v8::Data> data, kj::FunctionParam<void()> func) {
+  auto& js = Lock::from(isolate);
+  v8::Context::Scope contextScope(
+      data.As<v8::Value>().As<v8::Object>()->GetCreationContextChecked(isolate));
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): reports what it catches, and rethrows a termination.
+  v8::TryCatch tryCatch(isolate);
+  try {
+    try {
+      func();
+    } catch (kj::Exception& exception) {
+      // May throw JsExceptionThrown while decoding a tunneled error; see LiftKj_.
+      throwInternalError(isolate, kj::mv(exception));
+    }
+  } catch (JsExceptionThrown&) {
+    // Now in `tryCatch`.
+  } catch (std::exception& exception) {
+    throwInternalError(isolate, exception.what());
+  } catch (...) {
+    throwInternalError(
+        isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
+  }
+
+  if (tryCatch.HasCaught() && tryCatch.CanContinue()) {
+    // Reported by hand: V8 only reports an exception to a verbose v8::TryCatch on the way out of
+    // a JavaScript call, so one that C++ threw would be dropped.
+    auto exception = tryCatch.Exception();
+    tryCatch.Reset();
+    try {
+      js.reportError(JsValue(exception));
+    } catch (JsExceptionThrown&) {
+      // Describing the exception ran JavaScript that threw. `tryCatch` has what it threw, and
+      // drops it unless it is a termination.
+    } catch (kj::Exception& reportingError) {
+      KJ_LOG(ERROR, "failed to report an exception thrown in a microtask", reportingError);
+    }
+  }
+  if (tryCatch.HasCaught() && !tryCatch.CanContinue()) {
+    tryCatch.ReThrow();
+  }
+}
+
 bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description) {
   static const constexpr kj::StringPtr NAMES[] = {
 #define V(name, _) name##_kj,

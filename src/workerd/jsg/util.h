@@ -17,6 +17,7 @@
 
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -551,6 +552,17 @@ Ret liftKj(v8::Isolate* isolate, Func&& func) {
   return LiftKj_<decltype(func())>::template apply<v8::Isolate*, Func, Ret>(
       isolate, kj::fwd<Func>(func));
 }
+
+// Runs `func` as the body of a v8::MicrotaskCallbackWithData whose data is `data`, an object made
+// in the context the microtask was enqueued in. Unlike a function microtask, which V8 runs in the
+// function's context, V8 runs such a callback in whatever context is current when the queue is
+// drained, possibly none, with no handler around it, and expects nothing but a termination to be
+// pending when it returns (RunSingleMicrotask in builtins-microtask-queue-gen.cc and
+// Runtime_RunMicrotaskCallback). So this enters `data`'s context and, unlike liftKj(), reports
+// every other exception through Lock::reportError() instead of leaving it scheduled on the
+// isolate.
+void liftKjMicrotask(
+    v8::Isolate* isolate, v8::Local<v8::Data> data, kj::FunctionParam<void()> func);
 
 namespace _ {
 
