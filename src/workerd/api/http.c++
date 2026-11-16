@@ -1327,7 +1327,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
         // as long as the websocket connection.
         // The actor still retains its reference to the manager, so any subsequent requests prior
         // to hibernation will not need to re-obtain a reference.
-        wsPromise = wsPromise.attach(kj::addRef(hib));
+        wsPromise = wsPromise.attach(kj::mv(hib));
       }
     }
     return wsPromise;

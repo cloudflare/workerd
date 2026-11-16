@@ -78,10 +78,6 @@ void HibernationManagerImpl::forgetOwningHolder() {
   KJ_UNIMPLEMENTED("HibernationManagerImpl::forgetOwningHolder not yet implemented (EW-10817)");
 }
 
-kj::Own<Worker::Actor::HibernationManager> HibernationManagerImpl::addRef() {
-  KJ_UNIMPLEMENTED("HibernationManagerImpl::addRef not yet implemented (EW-10817)");
-}
-
 void HibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
   KJ_UNIMPLEMENTED("HibernationManagerImpl::setEventTimeout not yet implemented (EW-10817)");
 }
