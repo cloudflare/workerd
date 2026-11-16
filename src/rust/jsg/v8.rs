@@ -1038,10 +1038,11 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
-        // For the receiver of a method registered with a `v8::Signature`, which V8 has checked.
+        // Like `unwrap_resource_trait_object`, without the marker check, for the receiver of a
+        // method registered with a `v8::Signature`.
         pub unsafe fn unwrap_method_receiver(
             isolate: *mut Isolate,
-            value: Local, /* v8::LocalObject */
+            value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
 
         // Empty if an exception or a termination is pending; see `call_into_js()`.
@@ -5343,19 +5344,17 @@ pub fn resolve_receiver<R: 'static>(
 }
 
 /// Like [`resolve_receiver`], for the receiver of a method registered with a
-/// `v8::Signature`.
+/// `v8::Signature`, which makes it a Rust resource wrapper, so it skips the marker check.
 ///
-/// # Safety
-///
-/// V8 must have checked `value` against the signature of a method of a resource type.
+/// Any other value gives `None`, so a method callback that safe code registers without a
+/// signature throws rather than aborting the process.
 #[doc(hidden)]
-pub unsafe fn resolve_method_receiver<R: 'static>(
+pub fn resolve_method_receiver<R: 'static>(
     lock: &mut Lock<'_>,
     value: Local<'_, Value>,
 ) -> Option<NonNull<R>> {
-    // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
-    // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
-    // keeps alive.
+    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
     let ptr =
         unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
     ptr?.resolve::<R>()
