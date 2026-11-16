@@ -3584,6 +3584,11 @@ impl<'s> Local<'s, String> {
     /// [`WriteFlags`] constants. Use [`WriteFlags::ReplaceInvalidUtf8`] to replace lone
     /// surrogates with U+FFFD; without it, they are written as WTF-8, not valid UTF-8.
     ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` is empty and `flags` includes [`WriteFlags::NullTerminate`]: the
+    /// terminator always needs a byte, and V8 aborts the process without one.
+    ///
     /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
         &self,
@@ -3591,7 +3596,12 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u8],
         flags: WriteFlags,
     ) -> usize {
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid for `capacity` bytes.
+        assert!(
+            buffer.len() >= usize::from(flags.null_terminates()),
+            "buffer too small for the null terminator"
+        );
+        // SAFETY: Lock guarantees the isolate is locked; buffer is valid for `buffer.len()` bytes,
+        // and has room for a terminator if one is written.
         unsafe {
             ffi::local_string_write_utf8_v2(
                 lock.isolate().as_ffi(),
