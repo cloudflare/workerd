@@ -19,18 +19,13 @@ namespace workerd::api {
 
 namespace {
 
-// Recognizes the TypeScript implementation's WritableStream (including subclasses) by the own
-// api-symbol brand its constructor stamps on every instance; the writable counterpart of
-// isTypeScriptReadableStream(), where the reasoning is spelled out. Runs no JavaScript, answers
-// false for proxies, and is recognition rather than authentication: user code can stamp the
-// reflection-visible brand on an object of its own, so consumers re-validate against the real
-// #-brand -- here, the writer acquisition that JsWritableStream::serialize() performs before it
-// writes anything to the wire.
+// The WritableStream constructor stamps the private brand used for no-JS recognition,
+// matching isTypeScriptReadableStream(). Proxies do not convey the private-field brand.
 bool isTypeScriptWritableStream(jsg::Lock& js, jsg::JsObject obj) {
   if (v8::Local<v8::Value>(obj)->IsProxy()) {
     return false;
   }
-  return obj.has(js, js.symbolInternal("kWritableStreamBrand"), jsg::JsObject::HasOption::OWN);
+  return obj.getPrivate(js, "kWritableStreamBrand"_kj).isTrue();
 }
 
 bool getWritableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
@@ -66,7 +61,8 @@ jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
 // rejects if the stream is closed/closing (TypeError "This WritableStream has been
 // closed.") or errors first. flush is a workerd extension (not in the WHATWG spec); the
 // TS side implements it as a positional marker in the controller's write queue,
-// mirroring the legacy internal controller's Flush write-event.
+// mirroring the legacy internal controller's Flush write-event. On a native sink, the
+// marker also waits for the Durable Object output gate (WritableStreamNativeSink::flush()).
 jsg::Promise<void> writableStreamFlush(jsg::Lock& js, jsg::JsObject obj) {
   jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamFlush", obj);
   // The result must be a promise
@@ -702,8 +698,7 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // sink operation can be outstanding. Backpressure accounting lives in the TS
       // machinery and is driven by this hook promise's settlement, so a synchronously
       // resolved promise is spec-normal.
-      if (len > 0 && ioContext.getActor() == kj::none &&
-          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+      if (len > 0 && ioContext.getActor() == kj::none) {
         bool syncSuccess = false;
         KJ_TRY {
           syncSuccess = active.sink->tryWriteSync(data.asPtr());
@@ -843,6 +838,17 @@ jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
   }
   // Already released (an abort raced ahead, or a repeated close); nothing to end.
   return js.resolvedPromise();
+}
+
+jsg::Optional<jsg::Promise<void>> WritableStreamNativeSink::flush(jsg::Lock& js) {
+  // The wait touches neither the sink nor the in-flight flags, so a pipeFrom() that moves
+  // the sink, or an abort() or detach() during the wait, leaves it valid. The latter two
+  // reject the flush through the TS queue, which then ignores the wait's settlement.
+  auto& ioContext = IoContext::current();
+  KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+    return ioContext.awaitIo(js, kj::mv(lock));
+  }
+  return kj::none;
 }
 
 jsg::Promise<void> WritableStreamNativeSink::abort(

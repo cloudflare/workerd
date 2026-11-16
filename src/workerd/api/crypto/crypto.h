@@ -357,8 +357,11 @@ struct CryptoKeyPair {
   JSG_STRUCT(publicKey, privateKey);
 };
 
-class SubtleCrypto: public jsg::Object {
+class SubtleCrypto final: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -387,17 +390,14 @@ class SubtleCrypto: public jsg::Object {
     // The additional authentication data to include.
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> additionalData;
 
-    // The desired length of the authentication tag. May be 0 - 128.
-    // Note: the spec specifies this as a Web IDL byte (== signed char in C++), not an int, but JS
-    //   has no such 8-bit integer animal.
-    jsg::Optional<int> tagLength;
+    // The desired length of the authentication tag, validated by the selected algorithm.
+    jsg::Optional<double> tagLength;
 
     // The initial value of the counter block for AES-CTR.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> counter;
 
     // The length, in bits, of the rightmost part of the counter block that is incremented.
-    // See above why we use int instead of int8_t.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
     jsg::Optional<int> length;
 
@@ -1000,9 +1000,25 @@ class DigestStream: public WritableStream {
 
 // Implements the Crypto interface as prescribed by:
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
-class Crypto: public jsg::Object {
+class Crypto final: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
+  // Both Crypto and SubtleCrypto are stateless, so a worker started from a snapshot gets a fresh
+  // pair from the constructor above. If the zygote's `subtle` had a wrapper, the restored Crypto
+  // then takes the restored SubtleCrypto behind it (snapshotRelink()), so that `crypto.subtle` is
+  // still the object the top level saw.
+  static constexpr bool jsgSnapshotStateless = true;
+
+  kj::Array<const jsg::Wrappable*> snapshotReferences() const override {
+    return kj::arr(snapshotReferenceTo(*subtle));
+  }
+
+  void snapshotRelink(kj::ArrayPtr<jsg::Wrappable* const> restored) override {
+    KJ_IF_SOME(restoredSubtle, snapshotRelinkedRef<SubtleCrypto>(restored[0])) {
+      subtle = kj::mv(restoredSubtle);
+    }
+  }
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 

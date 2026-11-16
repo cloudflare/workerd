@@ -1,30 +1,30 @@
 'use strict';
 
-// CompressionStream and DecompressionStream — Compression Streams spec
+// CompressionStream and DecompressionStream - Compression Streams spec
 // pairs implemented over the synchronous C++ codec handle minted by
 // utils.newCompressionCodec (api/compression.h CompressionCodec).
 //
-// ARCHITECTURE: the codec core is the C++ CodecStage — eager on push,
+// ARCHITECTURE: the codec core is the C++ CodecStage - eager on push,
 // buffering its own output. The pair is a JS writable sink feeding the
 // handle plus a QUEUED byte-capable readable whose queue the sink drains
 // the output into, in bounded pieces (see DELIVERY below).
 //
 // SEMANTICS:
-//   - EAGER PUSH: write(chunk) runs the codec synchronously; corrupt
+//  - EAGER PUSH: write(chunk) runs the codec synchronously; corrupt
 //     input rejects the WRITE and a strict-mode incomplete stream
-//     rejects the CLOSE — the spec's transform()/flush() error timing.
-//   - LEGACY-PARITY SETTLEMENT: writes settle as soon as the codec
-//     consumed the chunk, without waiting for reads — matching the C++
+//     rejects the CLOSE - the spec's transform()/flush() error timing.
+//  - LEGACY-PARITY SETTLEMENT: writes settle as soon as the codec
+//     consumed the chunk, without waiting for reads - matching the C++
 //     implementation this replaces (which had no write backpressure),
 //     not the standard TransformStream's one-chunk lookahead. The
 //     divergence is deliberate and carried forward.
-//   - DELIVERY: the sink moves each write's output out of the stage
+//  - DELIVERY: the sink moves each write's output out of the stage
 //     buffer and into the readable's queue before the write settles, as
 //     chunks of at most kPieceSize. The backlog therefore waits in
 //     ArrayBuffers, which V8 accounts against the isolate, and the stage
 //     holds output only within a single push/end; peak memory is the
 //     output plus one piece, and no chunk exceeds kPieceSize.
-//   - BYTE-CAPABLE READABLE: legacy parity — the C++ pair's readable
+//  - BYTE-CAPABLE READABLE: legacy parity - the C++ pair's readable
 //     accepts BYOB readers, so this one does too (WHATWG describes a
 //     default stream here). A BYOB read is filled from the queued pieces
 //     by the controller.
@@ -38,20 +38,15 @@ import type {
   RingBufferConstructor,
 } from './ring-buffer';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 import type { ViewExtentHelpers } from './view-extent';
 
-const {
-  MathMin,
-  ObjectDefineProperties,
-  SymbolToStringTag,
-  TypeError,
-  Uint8Array,
-  uncurryThis,
-} = primordials;
+const { ObjectDefineProperties, SymbolToStringTag, TypeError, uncurryThis } =
+  primordials;
 
 const { isSharedArrayBuffer } = utils;
 
-// Captured for primordials discipline — ToString coercion per spec.
+// Captured for primordials discipline - ToString coercion per spec.
 const StringCoerce = String;
 
 const {
@@ -64,8 +59,17 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { isActualObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kEnumerable,
+  kNullProtoObject,
+  QueuingStrategyRecord,
+  UnderlyingSinkRecord,
+  UnderlyingSourceRecord,
+  toStringTagProperty,
+} = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -90,15 +94,14 @@ const byteControllerError = uncurryThis(
 
 // The synchronous codec handle produced by utils.newCompressionCodec: an
 // internal JSG resource (CompressionCodec in api/compression.h). Its methods
-// live on a per-isolate JSG prototype that user code can never reach — the
+// live on a per-isolate JSG prototype that user code can never reach - the
 // handle instances are module-private and the type is registered as neither a
-// global nor a nested type — so plain method calls are pollution-safe here
+// global nor a nested type - so plain method calls are pollution-safe here
 // (the same reachability argument as the #-brand internals).
 interface CodecHandle {
   push(chunk: ArrayBuffer | ArrayBufferView): void;
   end(): void;
-  pullInto(view: ArrayBufferView): number;
-  available(): number;
+  pull(maxBytes: number): Uint8Array | undefined;
   clear(): void;
 }
 
@@ -116,7 +119,7 @@ const newCodec = utils.newCompressionCodec as (
 // Validates a chunk and copies its CURRENT bytes. Runs synchronously
 // inside writer.write() (via the strategy size callback), so resizing,
 // detaching, or mutating the buffer after write() returns cannot change
-// what the codec consumes — matching the C++ implementation, whose adapter
+// what the codec consumes - matching the C++ implementation, whose adapter
 // copies inside write() for exactly these hazards. Detached or
 // out-of-bounds inputs, DataViews included, copy as empty (a codec no-op;
 // see view-extent.ts).
@@ -149,7 +152,7 @@ function createCodecPair(
   mode: 'compress' | 'decompress',
   format: unknown
 ): CodecPair {
-  // Spec: format is ToString-coerced, then validated — the handle
+  // Spec: format is ToString-coerced, then validated - the handle
   // factory performs the validation with the same TypeError message as
   // the legacy constructor.
   const formatString = StringCoerce(format);
@@ -158,10 +161,10 @@ function createCodecPair(
   let writableController: object | undefined;
   let readableController: object;
   // Set, with the reason, once the readable takes no more chunks: its
-  // reader cancelled it, or the pair errored. Enqueuing runs user code —
+  // reader cancelled it, or the pair errored. Enqueuing runs user code -
   // resolving a user's read looks up `then` on the result (see
   // defaultReaderRead in readable.ts), and a getter there can cancel the
-  // reader or error the pair through the Node.js interop hook — so a drain
+  // reader or error the pair through the Node.js interop hook - so a drain
   // checks this between pieces rather than enqueue into a stream that
   // would throw, and leaves the rest of the output undelivered.
   let finished = false;
@@ -182,7 +185,7 @@ function createCodecPair(
   };
 
   // Codec failure (corrupt input on write; strict end checks on close):
-  // error the readable side — the writable errors via the sink throw
+  // error the readable side - the writable errors via the sink throw
   // itself. Mirrors the legacy implementation's cancelInternal, which
   // rejected pending reads and errored the state machine on any codec
   // exception.
@@ -201,10 +204,8 @@ function createCodecPair(
   // errored/canceled writable rejects writes before the sink hooks run).
   const drainStage = (): void => {
     while (!finished) {
-      const available = handle.available();
-      if (available <= 0) return;
-      const out = new Uint8Array(MathMin(available, kPieceSize));
-      handle.pullInto(out);
+      const out = handle.pull(kPieceSize);
+      if (out === undefined) return;
       byteControllerEnqueue(readableController, out);
     }
   };
@@ -212,7 +213,7 @@ function createCodecPair(
   // A codec error rejects the write or close. The output the codec
   // produced before the error point (e.g. the final valid bytes preceding
   // trailing junk) is moved into the readable first, so each waiting read
-  // receives a piece of it, and erroring then drops what remains queued —
+  // receives a piece of it, and erroring then drops what remains queued -
   // the WPT-pinned order: output first, error on later reads.
   const failCodec = (e: unknown): never => {
     drainStage();
@@ -249,80 +250,84 @@ function createCodecPair(
     return 1;
   };
 
+  const sinkStart = (c: object): void => {
+    writableController = c;
+  };
+  const sinkWrite = (): void => {
+    const entry = snapshots.shift();
+    if (entry === undefined) {
+      throw new TypeError(
+        'Compression streams internal error: snapshot queue desync'
+      );
+    }
+    if (!entry.ok) {
+      // An invalid chunk errors BOTH sides - the spec's transform-time
+      // TypeError, which TransformStreamError propagates to the readable
+      // and the writable alike (WPT bad-chunks pins the read rejecting
+      // too). Without failBoth a pending read on the readable would
+      // hang. This deliberately differs from the identity streams'
+      // per-write rejection: CompressionStream is a standard API.
+      failBoth(entry.error);
+      throw entry.error;
+    }
+    // EAGER: the codec consumes the snapshot; a codec error throws
+    // HERE, rejecting the write - the spec's transform-time error
+    // timing. The throw errors the writable via the sink machinery;
+    // the readable is errored explicitly, mirroring the legacy
+    // cancelInternal path.
+    try {
+      handle.push(entry.copied);
+    } catch (e) {
+      failCodec(e);
+    }
+    // Writes never wait for reads (legacy-parity settlement): the
+    // output moves into the readable's queue, which buffers it without
+    // bound. A pair torn down during the drain (from user code run by
+    // an enqueue) leaves the rest of the output undelivered, and the
+    // write still succeeds: the spec's transform enqueues its output,
+    // and how it splits it is implementation-defined, so this is a
+    // transform that enqueued it as one chunk before the teardown.
+    // The teardown has errored the writable, which rejects the writes
+    // queued behind this one.
+    drainStage();
+  };
+  const sinkClose = (): void => {
+    // Z_FINISH plus the strict-mode end checks; a throw rejects the
+    // close (the spec's flush-time error timing) with the same
+    // both-sides error propagation as write above.
+    try {
+      handle.end();
+    } catch (e) {
+      failCodec(e);
+    }
+    // Deliver the flush tail, then close: queued bytes are served to
+    // later reads before the close lands (queued byte-stream
+    // semantics). A pair torn down during the drain ends it as in
+    // write above, and then follows the spec's flush: a readable
+    // errored meanwhile rejects the close with its error; one its
+    // reader cancelled is already closed, and the close succeeds.
+    // When a BYOB read's view is left holding a partial element,
+    // close() errors the readable and throws, and the throw rejects
+    // writer.close() in turn.
+    drainStage();
+    if (finished) {
+      if (readableErrored) throw finishReason;
+      return;
+    }
+    byteControllerClose(readableController);
+  };
+  const sinkAbort = (reason: unknown): void => {
+    failBoth(reason);
+  };
   const writable = new WritableStream(
-    {
-      __proto__: null,
-      start: (c: object): void => {
-        writableController = c;
-      },
-      write: (): void => {
-        const entry = snapshots.shift();
-        if (entry === undefined) {
-          throw new TypeError(
-            'Compression streams internal error: snapshot queue desync'
-          );
-        }
-        if (!entry.ok) {
-          // An invalid chunk errors BOTH sides — the spec's transform-time
-          // TypeError, which TransformStreamError propagates to the readable
-          // and the writable alike (WPT bad-chunks pins the read rejecting
-          // too). Without failBoth a pending read on the readable would
-          // hang. This deliberately differs from the identity streams'
-          // per-write rejection: CompressionStream is a standard API.
-          failBoth(entry.error);
-          throw entry.error;
-        }
-        // EAGER: the codec consumes the snapshot; a codec error throws
-        // HERE, rejecting the write — the spec's transform-time error
-        // timing. The throw errors the writable via the sink machinery;
-        // the readable is errored explicitly, mirroring the legacy
-        // cancelInternal path.
-        try {
-          handle.push(entry.copied);
-        } catch (e) {
-          failCodec(e);
-        }
-        // Writes never wait for reads (legacy-parity settlement): the
-        // output moves into the readable's queue, which buffers it without
-        // bound. A pair torn down during the drain (from user code run by
-        // an enqueue) leaves the rest of the output undelivered, and the
-        // write still succeeds: the spec's transform enqueues its output,
-        // and how it splits it is implementation-defined, so this is a
-        // transform that enqueued it as one chunk before the teardown.
-        // The teardown has errored the writable, which rejects the writes
-        // queued behind this one.
-        drainStage();
-      },
-      close: (): void => {
-        // Z_FINISH plus the strict-mode end checks; a throw rejects the
-        // close (the spec's flush-time error timing) with the same
-        // both-sides error propagation as write above.
-        try {
-          handle.end();
-        } catch (e) {
-          failCodec(e);
-        }
-        // Deliver the flush tail, then close: queued bytes are served to
-        // later reads before the close lands (queued byte-stream
-        // semantics). A pair torn down during the drain ends it as in
-        // write above, and then follows the spec's flush: a readable
-        // errored meanwhile rejects the close with its error; one its
-        // reader cancelled is already closed, and the close succeeds.
-        // When a BYOB read's view is left holding a partial element,
-        // close() errors the readable and throws, and the throw rejects
-        // writer.close() in turn.
-        drainStage();
-        if (finished) {
-          if (readableErrored) throw finishReason;
-          return;
-        }
-        byteControllerClose(readableController);
-      },
-      abort: (reason: unknown): void => {
-        failBoth(reason);
-      },
-    },
-    { __proto__: null, size: sizeAndSnapshot }
+    new UnderlyingSinkRecord<unknown>(
+      sinkAbort, // abort
+      sinkClose, // close
+      sinkStart, // start
+      undefined, // type
+      sinkWrite // write
+    ),
+    new QueuingStrategyRecord(undefined, sizeAndSnapshot)
   );
   writableRef = writable;
 
@@ -330,25 +335,28 @@ function createCodecPair(
   // the sink drains into. highWaterMark 0 documents that production is
   // write-driven; the drains enqueue regardless of desiredSize (unbounded
   // buffering, exactly like the legacy pair).
+  const sourceCancel = (reason: unknown): void => {
+    // Reader-side cancel tears down the write side, mirroring the
+    // legacy adapter's cancel -> abortWrite path. Erroring a
+    // closed/errored writable is a spec no-op, so no state check is
+    // needed. The cancel itself drops the queued output.
+    finish(reason);
+    if (writableController !== undefined) {
+      writableControllerError(writableController, reason);
+    }
+  };
   const readable = new ReadableStream(
-    {
-      __proto__: null,
-      type: 'bytes',
-      start: (c: object): void => {
+    new UnderlyingSourceRecord<Uint8Array>(
+      undefined, // autoAllocateChunkSize
+      sourceCancel, // cancel
+      undefined, // expectedLength
+      undefined, // pull
+      (c: object): void => {
         readableController = c;
-      },
-      cancel: (reason: unknown): void => {
-        // Reader-side cancel tears down the write side, mirroring the
-        // legacy adapter's cancel → abortWrite path. Erroring a
-        // closed/errored writable is a spec no-op, so no state check is
-        // needed. The cancel itself drops the queued output.
-        finish(reason);
-        if (writableController !== undefined) {
-          writableControllerError(writableController, reason);
-        }
-      },
-    },
-    { __proto__: null, highWaterMark: 0 }
+      }, // start
+      'bytes' // type
+    ),
+    new QueuingStrategyRecord(0, undefined)
   );
 
   // The Node.js interop hook errors one half without running the sink's
@@ -382,6 +390,7 @@ class CompressionStream {
   }
 
   constructor(format: unknown) {
+    markUncloneable(this);
     this.#pair = createCodecPair('compress', format);
   }
 
@@ -407,6 +416,7 @@ class DecompressionStream {
   }
 
   constructor(format: unknown) {
+    markUncloneable(this);
     this.#pair = createCodecPair('decompress', format);
   }
 
@@ -422,14 +432,14 @@ class DecompressionStream {
 }
 
 ObjectDefineProperties(CompressionStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   readable: kEnumerable,
   writable: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('CompressionStream'),
 });
 
 ObjectDefineProperties(DecompressionStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   readable: kEnumerable,
   writable: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('DecompressionStream'),

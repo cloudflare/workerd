@@ -10,6 +10,9 @@ Rust's internal crate graph as Bazel targets (which would introduce a toolchain
 cycle).
 """
 
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain", "use_cc_toolchain")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_rust//rust:toolchain.bzl", "rust_stdlib_filegroup")
 
 # rustc_lib contains host compiler libraries plus prebuilt target metadata. A
@@ -63,14 +66,58 @@ _STDLIB_CRATES = [
     "unwind",
 ]
 
+def _shell_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+# Cargo links the standard library's build scripts, which run on the execution platform. They link
+# as Bazel links C++ executables, with the C++ toolchain's driver and flags, so the action needs no
+# host C compiler. Cargo runs the linker from each crate's directory, while the toolchain's paths
+# are relative to the execution root, which build_std.sh exports. Returns the wrapper and the
+# environment the driver needs (on macOS, Xcode's).
+def _linker_wrapper(ctx, cc_toolchain):
+    feature_configuration = cc_common.configure_features(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        requested_features = ctx.features,
+        unsupported_features = ctx.disabled_features,
+    )
+    variables = cc_common.create_link_variables(
+        feature_configuration = feature_configuration,
+        cc_toolchain = cc_toolchain,
+    )
+    driver = cc_common.get_tool_for_action(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+    )
+    flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+        variables = variables,
+    )
+    wrapper = ctx.actions.declare_file(ctx.label.name + "-linker.sh")
+    ctx.actions.write(
+        output = wrapper,
+        content = "#!/usr/bin/env bash\ncd \"$BUILD_STD_EXECROOT\" && exec {} \"$@\"\n".format(
+            " ".join([_shell_quote(arg) for arg in [driver] + flags]),
+        ),
+        is_executable = True,
+    )
+    env = cc_common.get_environment_variables(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+        variables = variables,
+    )
+    return wrapper, env
+
 def _rust_build_std_impl(ctx):
+    cc_toolchain = find_cc_toolchain(ctx)
+    linker, linker_env = _linker_wrapper(ctx, cc_toolchain)
     outputs = [
         ctx.actions.declare_file("{}/lib{}_{}.rlib".format(ctx.label.name, crate, crate))
         for crate in _STDLIB_CRATES
     ]
 
     output_dir = outputs[0].dirname
-    patches = ctx.files._patches
     ctx.actions.run(
         mnemonic = "RustBuildStd",
         progress_message = "Building the Rust standard library with {} instrumentation".format(ctx.attr.sanitizer),
@@ -84,13 +131,18 @@ def _rust_build_std_impl(ctx):
             ctx.attr.target_triple,
             ctx.attr.sanitizer,
             " ".join(ctx.attr.rustflags),
-            str(len(patches)),
-        ] + [patch.path for patch in patches] + _STDLIB_CRATES,
+            linker.path,
+        ] + _STDLIB_CRATES,
         inputs = depset(
-            ctx.files.rust_src + ctx.files.rust_toolchain_files + patches,
+            ctx.files.rust_src + ctx.files.rust_toolchain_files,
+            transitive = [cc_toolchain.all_files] + [
+                files[DefaultInfo].default_runfiles.files
+                for files in ctx.attr.rust_toolchain_files
+            ],
         ),
         outputs = outputs,
-        tools = [ctx.executable.cargo, ctx.executable.rustc],
+        env = linker_env,
+        tools = [ctx.executable.cargo, ctx.executable.rustc, linker],
     )
 
     return [DefaultInfo(files = depset(outputs))]
@@ -112,11 +164,9 @@ rust_build_std = rule(
             allow_single_file = True,
             cfg = "exec",
         ),
-        "_patches": attr.label(
-            default = Label("//patches/rust:patches"),
-            allow_files = True,
-        ),
     },
+    fragments = ["cpp"],
+    toolchains = use_cc_toolchain(),
 )
 
 def instrumented_rust_std(
@@ -139,7 +189,13 @@ def instrumented_rust_std(
         rustc = rust_tools + "//:rustc",
         rust_src = rust_src + "//:rust_src",
         rust_src_manifest = rust_src + "//:library/Cargo.toml",
-        rust_toolchain_files = [rust_tools + "//:rustc_lib"],
+        # rustc's libraries, and the prebuilt standard library and self-contained linker that the
+        # build scripts link with.
+        rust_toolchain_files = [
+            rust_tools + "//:rustc_lib",
+            rust_tools + "//:rust-lld",
+            rust_tools + "//:rust_std-" + target_triple,
+        ],
         rustflags = rustflags,
         sanitizer = sanitizer,
         target_triple = target_triple,

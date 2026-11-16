@@ -114,6 +114,14 @@ export default {
     comment: 'EventSource does not support relative URLs in workerd',
     expectedFailures: true,
   },
+  'format-bom-split.any.js': {
+    comment: 'EventSource does not support relative URLs in workerd',
+    expectedFailures: true,
+  },
+  'format-bom-utf-16.any.js': {
+    comment: 'EventSource does not support relative URLs in workerd',
+    expectedFailures: true,
+  },
   'format-bom.any.js': {
     comment: 'EventSource does not support relative URLs in workerd',
     expectedFailures: true,
@@ -150,11 +158,19 @@ export default {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
   },
+  'format-field-id-redirect.any.js': {
+    comment: 'EventSource does not support relative URLs in workerd',
+    expectedFailures: true,
+  },
   'format-field-id.any.js': {
     comment: 'EventSource does not support relative URLs in workerd',
     expectedFailures: true,
   },
   'format-field-parsing.any.js': {
+    comment: 'EventSource does not support relative URLs in workerd',
+    expectedFailures: true,
+  },
+  'format-field-retry-bogus-2.any.js': {
     comment: 'EventSource does not support relative URLs in workerd',
     expectedFailures: true,
   },

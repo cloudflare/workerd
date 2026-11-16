@@ -485,6 +485,37 @@ export const webCryptoModernAlgorithmsRequireCompatFlag = {
   },
 };
 
+export const chachaDerivedKeyRequiresCompatFlag = {
+  async test() {
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32),
+      'HKDF',
+      false,
+      ['deriveKey']
+    );
+    const algorithm = {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(16),
+    };
+    for (const target of ['ChaCha20-Poly1305', { name: 'chacha20-poly1305' }]) {
+      for (const params of [
+        algorithm,
+        { ...algorithm, info: new Uint8Array() },
+      ]) {
+        await rejects(
+          crypto.subtle.deriveKey(params, baseKey, target, true, ['encrypt']),
+          {
+            name: 'NotSupportedError',
+            message: /Unrecognized derived key type/,
+          }
+        );
+      }
+    }
+  },
+};
+
 export const webCryptoSignAlgorithmIgnoresUnrelatedContext = {
   async test() {
     const keyPair = await crypto.subtle.generateKey(

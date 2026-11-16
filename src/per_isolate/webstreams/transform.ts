@@ -1,6 +1,6 @@
 'use strict';
 
-// TransformStream and TransformStreamDefaultController (WHATWG Streams §6).
+// TransformStream and TransformStreamDefaultController (WHATWG Streams section 6).
 //
 // A TransformStream is a {readable, writable} pair: the writable side's sink
 // runs the transformer over incoming chunks, which enqueue results onto the
@@ -9,7 +9,7 @@
 //
 // The two inner streams are created with module-owned source/sink objects
 // (safe to property-read), and all cross-controller operations dispatch
-// through prototype methods CAPTURED at bootstrap — never through the
+// through prototype methods CAPTURED at bootstrap - never through the
 // user-patchable prototypes.
 
 import type {
@@ -21,6 +21,7 @@ import type {
   WritableStream as WritableStreamType,
 } from './types';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 
 const {
   ObjectDefineProperties,
@@ -34,6 +35,7 @@ const {
   TypeError,
   getProtoGetter,
   uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { markPromiseHandled } = utils;
@@ -42,6 +44,9 @@ const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
+  QueuingStrategyRecord,
+  UnderlyingSinkRecord,
+  UnderlyingSourceRecord,
   toStringTagProperty,
   promiseResolvedWith,
   newHandledPending,
@@ -49,6 +54,8 @@ const {
   convertQueuingStrategy,
   convertTransformer,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
@@ -112,7 +119,6 @@ function makeTransformerAlgorithms<I, O>(
 ): TransformerAlgorithms<I> {
   let transform: TransformerAlgorithms<I>['transform'];
   if (transformFn !== undefined) {
-    const callTransform = uncurryThis(transformFn);
     // Adopts the result (PromiseResolve) rather than settling a new
     // promise with it as cancel and flush do: on the per-chunk path
     // that would cost an allocation and a microtask or two per write.
@@ -120,7 +126,9 @@ function makeTransformerAlgorithms<I, O>(
     // the spec.
     transform = (chunk: I) => {
       try {
-        return PromiseResolve(callTransform(transformer, chunk, controller));
+        return PromiseResolve(
+          FunctionPrototypeCall(transformFn, transformer, chunk, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -128,10 +136,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let flush: TransformerAlgorithms<I>['flush'];
   if (flushFn !== undefined) {
-    const callFlush = uncurryThis(flushFn);
     flush = () => {
       try {
-        return promiseResolvedWith(callFlush(transformer, controller));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(flushFn, transformer, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -139,10 +148,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let cancel: TransformerAlgorithms<I>['cancel'];
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancel = (reason: unknown) => {
       try {
-        return promiseResolvedWith(callCancel(transformer, reason));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(cancelFn, transformer, reason)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -186,6 +196,7 @@ class TransformStreamDefaultController<
   }
 
   constructor(privateSymbol: symbol, stream: TransformStream<I, O>) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
   }
@@ -214,7 +225,7 @@ class TransformStreamDefaultController<
 class TransformStream<I = unknown, O = unknown> {
   #readable: ReadableStreamType<O>;
   #writable: WritableStreamType<I>;
-  // Undefined for ELIDED (zero-algorithm) transforms — no controller is
+  // Undefined for ELIDED (zero-algorithm) transforms - no controller is
   // allocated when there are no transformer callbacks to receive it.
   // @ts-expect-error -- retained for debugging/future use
   #controller?: TransformStreamDefaultController<I, O> | undefined;
@@ -258,11 +269,11 @@ class TransformStream<I = unknown, O = unknown> {
       try {
         readableControllerEnqueue(readableController, chunk);
       } catch (e) {
-        // size() threw — error the writable side and unblock backpressure.
+        // size() threw - error the writable side and unblock backpressure.
         stream.#errorWritableAndUnblockWrite(e);
         // Spec step 5.2: throw stream.[[readable]].[[storedError]], not
         // the caught exception.  When size() calls controller.error(e1)
-        // then throws e2, the storedError is e1 — the first error wins.
+        // then throws e2, the storedError is e1 - the first error wins.
         // When size() closed the readable first (readable.cancel(),
         // terminate()), the readable has no stored error and this throws
         // undefined, as the spec and Node do.
@@ -293,7 +304,7 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   #setBackpressure(backpressure: boolean): void {
-    // Resolve the previous change promise and mint a fresh one — anyone
+    // Resolve the previous change promise and mint a fresh one - anyone
     // awaiting the old promise (the sink's write algorithm) proceeds.
     this.#backpressureChange.resolve();
     this.#backpressureChange = newHandledPending();
@@ -372,7 +383,7 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   #errorWritableAndUnblockWrite(reason: unknown): void {
-    // Spec: TransformStreamErrorWritableAndUnblockWrite step 1 —
+    // Spec: TransformStreamErrorWritableAndUnblockWrite step 1 -
     // TransformStreamDefaultControllerClearAlgorithms.  Prevents a
     // later readable.cancel() from invoking the transformer's cancel
     // callback after the stream has already errored/terminated.
@@ -388,6 +399,7 @@ class TransformStream<I = unknown, O = unknown> {
     writableStrategy: QueuingStrategy<I> = kNullProtoObject as QueuingStrategy<I>,
     readableStrategy: QueuingStrategy<O> = kNullProtoObject as QueuingStrategy<O>
   ) {
+    markUncloneable(this);
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the transformer is typed `object` (null and every other
     // primitive throw, nothing is read), and each strategy is a
@@ -538,16 +550,16 @@ class TransformStream<I = unknown, O = unknown> {
 
     // --- The inner streams (both paths) ---
     this.#writable = new WritableStream(
-      {
-        __proto__: null,
-        start: (c: object) => {
+      new UnderlyingSinkRecord<I>(
+        (reason: unknown) => this.#finish('abort', reason), // abort
+        () => this.#finish('close'), // close
+        (c: object) => {
           this.#writableController = c;
           return startPromise;
-        },
-        write: sinkWrite,
-        close: () => this.#finish('close'),
-        abort: (reason: unknown) => this.#finish('abort', reason),
-      },
+        }, // start
+        undefined, // type
+        sinkWrite // write
+      ),
       // Converted already: the inner stream reads its own data properties,
       // and its default highWaterMark (1) is the TransformStream's.
       writableStrategyDict as QueuingStrategy<I>
@@ -558,32 +570,27 @@ class TransformStream<I = unknown, O = unknown> {
       return this.#backpressureChange.promise;
     };
     this.#readable = new ReadableStream(
-      {
-        __proto__: null,
-        start: (c: object) => {
+      new UnderlyingSourceRecord<O>(
+        undefined, // autoAllocateChunkSize
+        (reason: unknown) => this.#finish('cancel', reason), // cancel
+        // Non-standard workerd extension: the TOTAL bytes the readable
+        // side will produce (undefined = unknown), from which the C++
+        // bridge derives a Content-Length for bodies built from this
+        // transform.
+        expectedLength, // expectedLength
+        sourcePull, // pull
+        (c: object) => {
           this.#readableController = c;
           return startPromise;
-        },
-        pull: sourcePull,
-        cancel: (reason: unknown) => this.#finish('cancel', reason),
-      },
-      {
-        __proto__: null,
+        }, // start
+        undefined // type
+      ),
+      new QueuingStrategyRecord(
         // The TransformStream default, where the ReadableStream's is 1.
-        highWaterMark: readableStrategyDict.highWaterMark ?? 0,
-        size: readableStrategyDict.size,
-      }
+        readableStrategyDict.highWaterMark ?? 0, // highWaterMark
+        readableStrategyDict.size // size
+      )
     );
-    // Non-standard workerd extension: the TOTAL bytes the readable side
-    // will produce (undefined = unknown). Advertised through the
-    // readable's controller so the C++ bridge derives a Content-Length
-    // for bodies built from this transform; not enforced here.
-    if (expectedLength !== undefined) {
-      readableInternals.setControllerExpectedLength(
-        this.#readableController,
-        expectedLength
-      );
-    }
 
     // --- Start the transformer (the elided path has none to start) ---
     if (controller === undefined) {
@@ -592,7 +599,7 @@ class TransformStream<I = unknown, O = unknown> {
       const startResult: unknown =
         startFn === undefined
           ? undefined
-          : uncurryThis(startFn)(transformer, controller);
+          : FunctionPrototypeCall(startFn, transformer, controller);
       startHolder.resolve(startResult as void | PromiseLike<void>);
     }
 
@@ -620,21 +627,21 @@ class TransformStream<I = unknown, O = unknown> {
 }
 
 ObjectDefineProperties(TransformStream, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(TransformStreamDefaultController, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(TransformStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   readable: kEnumerable,
   writable: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('TransformStream'),
 });
 ObjectDefineProperties(TransformStreamDefaultController.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   desiredSize: kEnumerable,
   enqueue: kEnumerable,
   error: kEnumerable,

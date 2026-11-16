@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the URL benchmarks against the C++ standard implementation
+# (api/url-standard.h). No compatibilityDate, so that the variants supply
+# it; url_standard is pinned, so every variant measures the ada path.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url-cpp",
+      worker = (
+        modules = [(name = "worker", esModule = embed "url.js")],
+        compatibilityFlags = ["url_standard"],
+      )
+    ),
+  ],
+);

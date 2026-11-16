@@ -6,8 +6,7 @@ implementations:
 - the C++ JSG method, `ServiceWorkerGlobalScope::structuredClone` in
   `src/workerd/api/global-scope.c++`;
 - the TypeScript one, `src/per_isolate/structured-clone.ts`. `main.ts` installs
-  it under the experimental `typescript_implemented_structured_clone` flag,
-  which needs the `per-isolate-javascript-bootstrap` autogate.
+  it under the experimental `typescript_implemented_structured_clone` flag.
 
 The layout follows `src/tests/streams/AGENTS.md`:
 
@@ -66,5 +65,4 @@ bazel test //src/tests/structured-clone/...
 ```
 
 Targets: `structured-clone-cpp@` and `structured-clone-ts@`, each with
-`@all-compat-flags` and `@all-autogates` variants. `@all-autogates` on the C++
-cell turns on the bootstrap without the flag, so it still runs C++.
+`@all-compat-flags` and `@all-autogates` variants.

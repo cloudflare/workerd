@@ -8,6 +8,7 @@ load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+load("//build/bazelflare:exec_properties.bzl", "link_exec_properties")
 
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
@@ -68,6 +69,7 @@ wd_cc_embed(
 wd_rust_binary(
     name = "workerd",
     srcs = ["workerd.rs"],
+    exec_properties = link_exec_properties(),
     malloc = ":malloc",
     test = False,
     tool = True,
@@ -86,20 +88,24 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["config-compiler.h"],
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
+    test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
+        "//src/workerd/server/cluster",
         "//src/workerd/server/server:workerd-server",
-        "@crates_vendor//:capnp",
-        "@crates_vendor//:clap",
-        "@crates_vendor//:socket2",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//capnp",
+        "@crates_vendor//clap",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
+        "@crates_vendor//socket2",
+        "@crates_vendor//tokio",
     ] + select({
         "@platforms//os:windows": [
-            "@crates_vendor//:libc",
-            "@crates_vendor//:windows-sys",
+            "@crates_vendor//libc",
+            "@crates_vendor//windows-sys",
         ],
-        "//conditions:default": ["@crates_vendor//:libc"],
+        "//conditions:default": ["@crates_vendor//libc"],
     }),
 )
 
@@ -170,26 +176,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "pyodide",
-    srcs = [
-        "pyodide.c++",
-    ],
-    hdrs = [
-        "pyodide.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/api:pyodide",
-        "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
-    ],
-)
-
-wd_cc_library(
     name = "workerd-debug-port-client",
     srcs = [
         "workerd-debug-port-client.c++",
@@ -208,11 +194,26 @@ wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
-    ],
+        "workerd-api-isolate.h",
+    ] + select({
+        # See WORKERD_API_UNSPLIT_TEMPLATES in workerd-api-isolate.h.
+        "@platforms//os:windows": [],
+        "//conditions:default": [
+            "workerd-api-templates-0.c++",
+            "workerd-api-templates-1.c++",
+            "workerd-api-templates-2.c++",
+            "workerd-api-templates-3.c++",
+            "workerd-api-templates-4.c++",
+            "workerd-api-templates-5.c++",
+            "workerd-api-templates-6.c++",
+            "workerd-api-templates-7.c++",
+        ],
+    }),
     hdrs = [
         "workerd-api.h",
     ],
     implementation_deps = [
+        "//src/rust/jsg:ffi",
         "//src/workerd/api:analytics-engine",
         "//src/workerd/api:capnp",
         "//src/workerd/api:kv",
@@ -220,20 +221,22 @@ wd_cc_library(
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
+        "//src/workerd/api/memory-cache-api",
+        "//src/workerd/api/memory-cache-api:ffi.rs@cxx",
         "//src/workerd/io:promise-wrapper",
     ],
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
+    }) + select({
+        "@platforms//os:windows": ["WORKERD_API_UNSPLIT_TEMPLATES"],
+        "//conditions:default": [],
     }),
-    # TODO(EW-11081): This is temporarily disabled because it takes a lifetime to complete.
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
         ":compiled-bindings_capnp",
         ":fallback-service",
-        ":pyodide",
         ":workerd-debug-port-client",
         ":workerd_capnp",
         "//src/cloudflare",
@@ -250,9 +253,12 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
+        "//src/workerd/server/cron:cron-js",
+        "//src/workerd/server/kv:kv-js",
+        "//src/workerd/server/queues:queues-js",
+        "//src/workerd/server/workflows:workflows-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ] + select({
         ":set_use_transpiler": ["//src/rust/transpiler"],
         "//conditions:default": [],
@@ -386,7 +392,7 @@ wd_capnp_library(
 )
 
 kj_test(
-    size = "large",
+    size = "enormous",
     src = "server-test.c++",
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],

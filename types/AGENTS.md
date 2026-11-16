@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Generates `@cloudflare/workers-types` `.d.ts` files from C++ RTTI (via `jsg/rtti.capnp`) + hand-written `defines/*.d.ts`. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
+Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (via `jsg/rtti.capnp`) + hand-written `defines/*.d.ts`. Rust descriptions come from `TypeInfo` and typed module registration in `src/rust/jsg/`; internal module registration does not make a type an ambient root. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
 
 ## PIPELINE
 
@@ -50,7 +50,7 @@ Types in this project come from three layers. Changes must be made in the correc
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.) |
+| **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for APIs the per-isolate bootstrap implements, whose C++ counterparts declare `JSG_TS_OVERRIDE(type X = never)` (`dom-exception.d.ts`, `url.d.ts`, `urlpattern.d.ts`) |
 
 Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, or `defines/`).
 

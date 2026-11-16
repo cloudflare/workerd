@@ -50,8 +50,6 @@ pub mod ffi {
         fn release_version() -> &'static [u8];
         fn perfetto_supported() -> bool;
         fn fuzzilli_supported() -> bool;
-        /// The package lock file of the current Pyodide release.
-        fn pyodide_lock() -> Result<String>;
     }
 
     extern "Rust" {

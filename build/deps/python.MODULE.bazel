@@ -2,6 +2,14 @@ python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(python_version = "3.13")
 use_repo(python, "python_3_13")
 
+# Python actions can run on a Linux remote executor even when the host isn't Linux (see
+# build/bazelflare), so each hub also resolves wheels for linux_x86_64. Wheels are fetched lazily,
+# only for platforms a build selects.
+PIP_TARGET_PLATFORMS = [
+    "{os}_{arch}",
+    "linux_x86_64",
+]
+
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
     hub_name = "v8_python_deps",
@@ -9,10 +17,12 @@ pip.parse(
     # TODO(alexeagle): switch back to upstream when v8 comes via bzlmod
     # requirements_lock = "@v8//:bazel/requirements.txt",
     requirements_lock = "//build/deps:v8.requirements.txt",
+    target_platforms = PIP_TARGET_PLATFORMS,
 )
 pip.parse(
     hub_name = "py_deps",
     python_version = "3.13",
     requirements_lock = "//build/deps:requirements.txt",
+    target_platforms = PIP_TARGET_PLATFORMS,
 )
 use_repo(pip, "py_deps", "v8_python_deps")

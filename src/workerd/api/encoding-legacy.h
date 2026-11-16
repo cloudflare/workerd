@@ -33,7 +33,7 @@ class LegacyDecoder final: public Decoder {
   LegacyDecoder& operator=(LegacyDecoder&&) noexcept = default;
   KJ_DISALLOW_COPY(LegacyDecoder);
 
-  Encoding getEncoding() override {
+  Encoding getEncoding() const override {
     return encoding;
   }
 

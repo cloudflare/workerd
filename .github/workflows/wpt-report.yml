@@ -18,6 +18,7 @@ jobs:
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
+      build_target: '//src/wpt/...'
       test_target: '//src/wpt/...'
       upload_test_logs: true
       fetch_depth: 0
@@ -30,7 +31,7 @@ jobs:
     needs: [test]
     uses: ./.github/workflows/_wpt.yml
     with:
-        image: ubuntu-22.04
+        image: ubuntu-24.04
         logs_artifact: 'test-logs-linux-X64.zip'
         report_artifact: 'wpt-report.json'
 

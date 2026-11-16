@@ -91,6 +91,7 @@ export {
   abortThenControllerErrorInFlightRejects,
   controllerErrorThenAbortInFlight,
   abortSignalReason,
+  abortSignalReadAfterAbort,
   concurrentAbortPromiseIdentity,
 } from 'abort-matrix';
 

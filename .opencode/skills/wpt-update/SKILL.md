@@ -174,7 +174,14 @@ case-sensitive path relative to the `wpt_directory` declared in
 `src/wpt/BUILD.bazel`.
 
 Discovery excludes non-JavaScript files and JavaScript files whose paths
-contain `.tentative.` or `/tentative/`.
+contain `.tentative.` or `/tentative/`, unless the `wpt_test` sets
+`include_tentative = True`. In those suites, tentative files have config keys,
+and upstream dropping the `.tentative` label renames the suite.
+
+The harness reports config keys without a discovered file as `Configuration
+was provided for the following tests that have not been found in the WPT
+repo`. This error aborts the whole suite before any test runs, so fix stale
+keys first and then rerun to see the per-suite results.
 
 Config keys MUST remain in ascending order as enforced by ESLint's `sort-keys`
 rule. Compare the complete raw key: punctuation affects ordering, so `-` sorts

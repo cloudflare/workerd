@@ -69,7 +69,7 @@ _gen_compile_cache = rule(
         "srcs": attr.label_list(mandatory = True, allow_files = True),
         # How the runtime compiles these sources; V8 rejects a cache built the other way.
         #   "module":   CompileModule (ESM bundles)
-        #   "function": CompileFunction with one context extension (per-isolate scripts)
+        #   "function": CompileFunction with the pseudo-global parameters (per-isolate scripts)
         "kind": attr.string(default = "module", values = ["module", "function"]),
         "_tool": attr.label(
             executable = True,

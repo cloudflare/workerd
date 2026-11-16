@@ -9,6 +9,7 @@
 import { validateNumber, validateObject } from 'node-internal:validators';
 import { Buffer } from 'node-internal:internal_buffer';
 import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import { signals } from 'node-internal:internal_os_constants';
 import type { ValidEncoding } from 'node-internal:internal_fs_utils';
 import type { UserInfo, CpuInfo, NetworkInterfaceInfo } from 'node:os';
 
@@ -231,42 +232,7 @@ export const constants = {
     EWOULDBLOCK: 11,
     EXDEV: 18,
   },
-  signals: {
-    __proto__: null,
-    SIGHUP: 1,
-    SIGINT: 2,
-    SIGQUIT: 3,
-    SIGILL: 4,
-    SIGTRAP: 5,
-    SIGABRT: 6,
-    SIGIOT: 6,
-    SIGBUS: 7,
-    SIGFPE: 8,
-    SIGKILL: 9,
-    SIGUSR1: 10,
-    SIGSEGV: 11,
-    SIGUSR2: 12,
-    SIGPIPE: 13,
-    SIGALRM: 14,
-    SIGTERM: 15,
-    SIGCHLD: 17,
-    SIGSTKFLT: 16,
-    SIGCONT: 18,
-    SIGSTOP: 19,
-    SIGTSTP: 20,
-    SIGTTIN: 21,
-    SIGTTOU: 22,
-    SIGURG: 23,
-    SIGXCPU: 24,
-    SIGXFSZ: 25,
-    SIGVTALRM: 26,
-    SIGPROF: 27,
-    SIGWINCH: 28,
-    SIGIO: 29,
-    SIGPOLL: 29,
-    SIGPWR: 30,
-    SIGSYS: 31,
-  },
+  signals,
   priority: {
     __proto__: null,
     PRIORITY_LOW: 19,
@@ -280,7 +246,6 @@ export const constants = {
 Object.freeze(constants);
 Object.freeze(constants.dlopen);
 Object.freeze(constants.errno);
-Object.freeze(constants.signals);
 Object.freeze(constants.priority);
 
 export default {

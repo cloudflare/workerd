@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 import * as fssync from 'node-internal:internal_fs_sync';
 import { default as cffs } from 'cloudflare-internal:filesystem';
+import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 import type {
   FStatOptions,
   MkdirTempSyncOptions,
@@ -1347,7 +1348,10 @@ export function writeFile(
   } = validateWriteFileArgs(path, data, options);
 
   callWithSingleArgCallback<number>(
-    () => cffs.writeAll(validatedPath, validatedData, { append, exclusive }),
+    () =>
+      isStdioFd(validatedPath)
+        ? writeStdio(validatedPath, [validatedData])
+        : cffs.writeAll(validatedPath, validatedData, { append, exclusive }),
     callback
   );
 }

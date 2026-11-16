@@ -10,7 +10,7 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 9e069ce4e8d513aa4975bb90936e6b2179845114..794919e1154a944b9e6013e64952eb88cf9010d5 100644
+index ed79e1aa7d3975ccf173e03ebea18de40ed5d75a..10ffc0d981dc80c315f4836689d7fd74fbd53406 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -19,6 +19,7 @@ load(
@@ -21,7 +21,7 @@ index 9e069ce4e8d513aa4975bb90936e6b2179845114..794919e1154a944b9e6013e64952eb88
  )
  load(":bazel/v8-generators.bzl", "v8_torque_files")
  
-@@ -4806,22 +4807,20 @@ filegroup(
+@@ -4817,22 +4818,20 @@ filegroup(
      ],
  )
  
@@ -50,7 +50,7 @@ index 9e069ce4e8d513aa4975bb90936e6b2179845114..794919e1154a944b9e6013e64952eb88
  )
  
  v8_mksnapshot(
-@@ -5073,7 +5072,6 @@ v8_binary(
+@@ -5084,7 +5083,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -59,10 +59,10 @@ index 9e069ce4e8d513aa4975bb90936e6b2179845114..794919e1154a944b9e6013e64952eb88
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index e3fb161199f276eb04369c0605279317258191ab..df60f89397365ff5d64637b2de8ffef68890ed0d 100644
+index 06ed05fa8b235de80c1fdb8715d3d0698ac175e4..f04144c5720382e2ea2c342a1173209a8efa03e5 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -358,6 +358,15 @@ def v8_library(
+@@ -362,6 +362,15 @@ def v8_library(
              **kwargs
          )
  
@@ -78,7 +78,7 @@ index e3fb161199f276eb04369c0605279317258191ab..df60f89397365ff5d64637b2de8ffef6
  def _v8_target_cpu_transition_impl(settings,
                                     attr, # @unused
                                    ):
-@@ -428,13 +437,16 @@ _v8_mksnapshot = rule(
+@@ -432,13 +441,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -97,7 +97,7 @@ index e3fb161199f276eb04369c0605279317258191ab..df60f89397365ff5d64637b2de8ffef6
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -878,3 +890,34 @@ def v8_build_config(name, arch):
+@@ -883,3 +895,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )
@@ -133,7 +133,7 @@ index e3fb161199f276eb04369c0605279317258191ab..df60f89397365ff5d64637b2de8ffef6
 +    },
 +)
 diff --git a/bazel/v8-generators.bzl b/bazel/v8-generators.bzl
-index 63a01ac3b3e94b9823418ab28da05ce9ec10f6f1..c780d04552ea89cd7e12aa23d3b3ad5de09b4cda 100644
+index 76a18ec27965a3b1c3fa275b4e9a131cf9d9bf09..0903126d1c9ff9d13994961019110c1cd2828cc8 100644
 --- a/bazel/v8-generators.bzl
 +++ b/bazel/v8-generators.bzl
 @@ -4,6 +4,8 @@

@@ -81,6 +81,10 @@
   // Forward all arguments and new.target so subclassing works correctly.
   // NOTE: Exactly 1 argument defined to match WebAssembly.Instance length
   function Instance(module) {
+    // Like the native constructor, throw when called without `new`.
+    if (new.target === undefined) {
+      throw new TypeError("WebAssembly.Instance must be invoked with 'new'");
+    }
     const instance = Reflect.construct(
       originalInstance,
       arguments,
@@ -92,8 +96,12 @@
     } catch {}
     return instance;
   }
-  // Point the shim's prototype at the original so instanceof checks continue to work.
-  Instance.prototype = originalInstance.prototype;
+  // Point the shim's prototype at the original so instanceof checks continue to work. Like the
+  // native constructor's, it is read-only.
+  Object.defineProperty(Instance, 'prototype', {
+    value: originalInstance.prototype,
+    writable: false,
+  });
   Object.defineProperty(Instance.prototype, 'constructor', {
     value: Instance,
     writable: true,

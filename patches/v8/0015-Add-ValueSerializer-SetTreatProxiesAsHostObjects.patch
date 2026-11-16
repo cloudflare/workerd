@@ -30,10 +30,10 @@ index c9234089b2e663ea0ea8f495af59d64de32622a7..5be6fcf6465fcc5698f260bdfad22939
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index d71d1e0ac2e6d083390fe2bfdb2d2fa202314aa5..07194637998c16fb131719abde8a3eae91dcf546 100644
+index 9ed7fa2898a72f3fecf99a7594131283bcc38af3..26d5712f1d23bbbdc5a7c9ef0991d602fab7c05d 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3709,6 +3709,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3759,6 +3759,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -45,7 +45,7 @@ index d71d1e0ac2e6d083390fe2bfdb2d2fa202314aa5..07194637998c16fb131719abde8a3eae
                                          Local<Value> value) {
    auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index e958020b01e9c6cc85d50880506a1bdc7ef146f6..1a6d2d8e4b281f532ef001661919e406a923211a 100644
+index f4880dd4486ed16438691c4a91977fa4d811c9d7..71757920aaf30c0e10ecee300d2cb17c7ce32bbc 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -360,6 +360,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
@@ -73,7 +73,7 @@ index e958020b01e9c6cc85d50880506a1bdc7ef146f6..1a6d2d8e4b281f532ef001661919e406
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1325,7 +1334,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1322,7 +1331,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  

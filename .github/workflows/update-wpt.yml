@@ -21,7 +21,7 @@ jobs:
   # as patches, and the independent pull-request job verifies them before applying them on top
   # of its own copy of the bump.
   update:
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-24.04-16core
     timeout-minutes: 240
     outputs:
       updated: ${{ steps.update.outputs.updated }}

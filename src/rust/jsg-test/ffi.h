@@ -24,15 +24,33 @@ using Isolate = v8::Isolate;
 
 struct EvalResult;
 
+class TestBootstrapModules;
+
 class EvalContext {
  public:
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
+  ~EvalContext() noexcept(false);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Catches an exception with a `v8::TryCatch` and then, without resetting it, evaluates `code`,
+  // as C++ that runs JavaScript while its TryCatch holds a caught exception does.
+  EvalResult eval_with_caught_exception(::rust::Str code) const;
+  // Has `registerModules` add builtin modules, then calls the callback of the one named
+  // `specifier`, as importing it does. Returns its exports, or the exception it threw.
+  EvalResult call_builtin_module(
+      ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+      ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
+  // Makes `exports` the exports of the loaded bootstrap module named `specifier`, among which the
+  // deserializer looks up classes implemented in JavaScript (jsg::BootstrapModules), until the
+  // context's callback returns.
+  void set_bootstrap_module(::rust::Str specifier, ::workerd::rust::jsg::Local exports) const;
 
   v8::Isolate* v8Isolate;
   v8::Global<v8::Context> v8Context;
+
+ private:
+  mutable kj::Maybe<kj::Own<TestBootstrapModules>> bootstrapModules;
 };
 
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
@@ -72,15 +90,34 @@ enum class GcType : uint8_t;
 // Triggers garbage collection for testing purposes.
 void request_gc(Isolate* isolate, GcType gc_type);
 
+// Requests a termination and runs JavaScript until V8 delivers it. On return the termination
+// exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
+// was terminated.
+void terminate_and_deliver(Isolate* isolate);
+
+// Runs the isolate's pending microtasks, as the event loop does after each task.
+void run_microtasks(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
 // v8::HeapStatistics::used_global_handles_size() of the isolate.
 size_t used_global_handles_size(Isolate* isolate);
 
+// Takes a heap snapshot of the isolate and returns it serialized as JSON.
+::rust::String take_heap_snapshot(Isolate* isolate);
+
+// sizeof(::workerd::rust::jsg::Wrappable).
+size_t rust_wrappable_size();
+
 // Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
+
+// Calls a function that C++ JSG wrapped (Lock::wrapReturningFunction()), whose data is also an
+// opaque wrapper, and returns whether rust::jsg::fci_get_data_wrappable() finds a Rust Wrappable
+// in it.
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 
 // Returns an empty v8::MaybeLocal, to test how it reaches Rust.
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local();
@@ -88,8 +125,76 @@ size_t used_global_handles_size(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
+// Serializes `value` into `result` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's.
+// Returns false if serialization throws, leaving the exception pending.
+bool cpp_serialize(
+    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Returns none if deserialization throws,
+// leaving the exception pending: a KJ exception becomes a JavaScript one, as a JSG method's glue
+// makes it one.
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Throws the KJ exception C++ JSG's jsg::Lock::exceptionToKj() creates for `value`, for
+// comparison with Rust JSG's. Returns false if creating it threw, leaving the exception pending.
+bool cpp_exception_to_kj(Isolate* isolate, ::workerd::rust::jsg::Local value);
+
+// Converts `exception` to a kj::Exception and back, as C++ JSG does. Returns none if converting it
+// threw, leaving that exception pending.
+::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
+    Isolate* isolate, ::workerd::rust::jsg::Local exception);
+
+// The key of the V8 private property `name`, as the per-isolate bootstrap's
+// utils.getPrivateSymbol() gives it to JavaScript.
+::workerd::rust::jsg::Local private_symbol(Isolate* isolate, ::rust::Str name);
+
+// Disallows JavaScript execution, as jsg::DisallowJavaScriptScope does for JSG code, without V8's
+// own guard, or allows it again.
+void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed);
+
+// Gives `object` `name` and `message` under jsg::ERROR_NAME_KEY and jsg::ERROR_MESSAGE_KEY, as an
+// error implemented in the per-isolate bootstrap holds them. Throws a KJ exception if it is not
+// an object.
+void set_error_slots(
+    Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message);
+
+// Creates an instance of the per-isolate bootstrap's DOMException, as
+// jsg::newBootstrapDomException() does, whose prototype is `prototype`, with `name`, `message` and
+// `stack`. Throws a KJ exception if `prototype` is not an object.
+::workerd::rust::jsg::Local new_bootstrap_dom_exception(Isolate* isolate,
+    ::workerd::rust::jsg::Local prototype,
+    ::rust::Str name,
+    ::rust::Str message,
+    ::rust::Str stack);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
+
+// Configures the process's autogates to exactly `names`, each without the `workerd-autogate-`
+// prefix, ignoring WORKERD_ALL_AUTOGATES.
+void set_autogates_for_test(::rust::Slice<const ::rust::Str> names);
+// Deinitializes the autogate configuration, so that the gates follow WORKERD_ALL_AUTOGATES again.
+void deinit_autogates_for_test();
+
+// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
+// only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
+// and runs a full GC again. Neither call's handles outlive the call.
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
+
+// Calls `callback` in a new C++ jsg::AsyncContextFrame that stores `value` under the tests'
+// storage key, as AsyncLocalStorage.run() does, then makes the previous frame current again.
+void run_in_async_context(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    size_t data,
+    ::rust::Fn<void(size_t)> callback);
+
+// The value the current async context frame stores under the tests' storage key, or empty in the
+// root frame or a frame that stores none.
+::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate);
+
+// Returns whether C++ jsg::AsyncContextFrame::current() finds no frame, i.e. sees the root frame.
+bool cpp_sees_root_frame(Isolate* isolate);
 
 }  // namespace rust::jsg_test
 

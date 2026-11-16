@@ -5,9 +5,11 @@ import { connect } from 'cloudflare:sockets';
 import { ok, strictEqual } from 'assert';
 
 export const connectHandler = {
-  async test() {
+  async test(ctrl, env) {
     // Check that the connect handler can send a message through a socket
-    const socket = connect('localhost:8081');
+    const socket = connect(
+      `${env.SIDECAR_HOSTNAME}:${env.CONNECT_HANDLER_PORT}`
+    );
     await socket.opened;
     const dec = new TextDecoder();
     let result = '';
@@ -17,12 +19,13 @@ export const connectHandler = {
     result += dec.decode();
 
     // The TCP listener reports the accepted connection's peer address, which for this loopback
-    // connection is an ephemeral port on some spelling of localhost.
+    // connection is an ephemeral port on a loopback address (the test may listen on any of
+    // 127.0.0.0/8).
     const prefix = 'hello:';
     ok(result.startsWith(prefix), result);
     const remoteAddress = result.slice(prefix.length);
     ok(
-      /^(127\.0\.0\.1|\[(::1|::ffff:127\.0\.0\.1)\]):[0-9]+$/.test(
+      /^(127(\.[0-9]+){3}|\[(::1|::ffff:127(\.[0-9]+){3})\]):[0-9]+$/.test(
         remoteAddress
       ),
       `Unexpected remote address: ${remoteAddress}`
@@ -33,11 +36,11 @@ export const connectHandler = {
 };
 
 export const connectHandlerProxy = {
-  async test() {
+  async test(ctrl, env) {
     // Check that we can get a message proxied through a connect handler. This call connects us with
     // an instance of Server, which serves as a proxy for an instance of OtherServer, as defined in
     // connect-handler-test-proxy.js.
-    const socket = connect('localhost:8082');
+    const socket = connect(`${env.SIDECAR_HOSTNAME}:${env.CONNECT_PROXY_PORT}`);
     await socket.opened;
     const dec = new TextDecoder();
     let result = '';

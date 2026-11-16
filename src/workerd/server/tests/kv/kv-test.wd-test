@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "kv-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "kv-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        bindings = [
+          ( name = "KV",
+            kvNamespace = ( name = "kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
+          ( name = "SAME",
+            kvNamespace = ( name = "kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
+          ( name = "OTHER",
+            kvNamespace = ( name = "kv", props = ( json = "{\"namespace\": \"other\"}" ) ) ),
+          ( name = "KV_WORKER",
+            service = ( name = "kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
+          ( name = "DISK", service = "TEST_TMPDIR" ),
+        ],
+      )
+    ),
+    # Its objects and large values both in TEST_TMPDIR.
+    ( name = "kv",
+      worker = (
+        modules = [ ( name = "kv.js", bundled = "/workerd/kv.js" ) ],
+        compatibilityFlags = ["rpc"],
+        bindings = [
+          ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),
+          ( name = "BLOBS", service = "TEST_TMPDIR" ),
+          ( name = "TEST_CLOCK", json = "true" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "KVNamespace", uniqueKey = "KVNamespace", enableSql = true ),
+        ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+      )
+    ),
+  ],
+);

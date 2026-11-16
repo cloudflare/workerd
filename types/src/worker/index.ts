@@ -4,8 +4,8 @@
 
 import { StructureGroups } from '@workerd/jsg/rtti';
 import { Message } from 'capnp-es';
-import extraDefinitions from 'raw:../../defines';
 import comments from 'virtual:comments.json';
+import extraDefinitions from 'virtual:defines';
 import paramNames from 'virtual:param-names.json';
 import rtti from 'workerd:rtti';
 import { installParameterNames } from '../generator/parameter-names';

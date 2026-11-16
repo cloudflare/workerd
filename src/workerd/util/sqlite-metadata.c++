@@ -100,10 +100,18 @@ SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized(bool allowUnconfi
   KJ_UNREACHABLE;
 }
 
-void SqliteMetadata::beforeSqliteReset() {
-  // We'll need to recreate the table on the next operation.
-  tableCreated = false;
+void SqliteMetadata::beforeSqliteClose(SqliteDatabase::CloseReason reason) {
+  // Drop the alarm cache in both cases. After a reset() the alarm is gone; after a close() the
+  // next read must reach the closed connection and throw rather than report a stale value.
   cacheState = kj::none;
+
+  if (reason == SqliteDatabase::CloseReason::RESET) {
+    // The table is deleted along with the database and will need to be recreated on the next
+    // operation. Leave `tableCreated` alone on close(): the table still exists in the file, and
+    // clearing the flag would make getAlarmUncached() report "no alarm" without consulting the
+    // (closed) database.
+    tableCreated = false;
+  }
 }
 
 }  // namespace workerd

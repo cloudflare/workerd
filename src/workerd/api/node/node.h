@@ -2,8 +2,6 @@
 
 #include "crypto.h"
 #include "diagnostics-channel.h"
-#include "inspector.h"
-#include "module-source.h"
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
@@ -13,6 +11,7 @@
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/util.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -34,19 +33,11 @@ namespace workerd::api::node {
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
-  V(TimersUtil, "node-internal:timers")                                                            \
-  V(InspectorModule, "node-internal:inspector")
+  V(TimersUtil, "node-internal:timers")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
 // flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
-//
-// Note: `node-internal:inspector` is intentionally in NODEJS_MODULES (always registered) rather
-// than here. It is an internal, non-user-importable module imported by the public
-// `node:inspector` TypeScript layer, so it must resolve whenever that layer loads. Its actual
-// functionality is gated at runtime: a Connection can only be created when the experimental
-// `enable_nodejs_inspector_local_dev` flag created the isolate's V8 inspector, and never in a
-// multi-tenant production process.
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 
 bool isNodeJsCompatEnabled(auto featureFlags) {
@@ -79,28 +70,21 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
+// The RTTI registry (api/rtti.c++) only has the one-argument addBuiltinModule(), and no source
+// storage to map, so it takes the plain form.
 template <class Registry>
 void addNodeJsCompatModule(
-    Registry& registry, jsg::Module::Reader module, const ModuleSource* moduleSource) {
-  if (moduleSource != nullptr) {
-    if constexpr (requires {
-                    registry.addBuiltinModule(module.getName(),
-                        moduleSource->get(module.getSrc().asChars()), module.getType(),
-                        module.getCompileCache().asBytes());
-                  }) {
-      if (module.which() == jsg::Module::SRC) {
-        registry.addBuiltinModule(module.getName(), moduleSource->get(module.getSrc().asChars()),
-            module.getType(), module.getCompileCache().asBytes());
-        return;
-      }
-    }
+    Registry& registry, jsg::Module::Reader module, const jsg::ModuleSource* moduleSource) {
+  if constexpr (requires { registry.addBuiltinModule(module, kj::none, moduleSource); }) {
+    registry.addBuiltinModule(module, kj::none, moduleSource);
+  } else {
+    registry.addBuiltinModule(module);
   }
-  registry.addBuiltinModule(module);
 }
 
 template <class Registry>
 void registerNodeJsCompatModules(
-    Registry& registry, auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    Registry& registry, auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
 #define V(T, N)                                                                                    \
   registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
@@ -234,13 +218,13 @@ void registerNodeJsCompatModules(
     }
   }
 
-  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);
 }
 
 template <class TypeWrapper>
 kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
-    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
 #define V(M, N)                                                                                    \
@@ -252,14 +236,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   }
 #undef V
 
-  if (moduleSource == nullptr) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
-        builder, NODE_BUNDLE, [](jsg::Module::Reader) { return true; });
-  } else {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE,
-        [](jsg::Module::Reader) { return true; },
-        [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
-  }
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, moduleSource);
 
   // Register Rust-implemented Node.js modules that declare Internal
   // visibility. The adapter registers only the modules whose declared type
@@ -267,7 +244,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   // by the same registration functions run in
   // getExternalNodeJsCompatModuleBundle().
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
 
@@ -275,7 +252,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
 }
 
 kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
-    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
   if (isNodeJsCompatEnabled(featureFlags)) {
@@ -351,12 +328,8 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
       }
       return true;
     };
-    if (moduleSource == nullptr) {
-      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter));
-    } else {
-      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter),
-          [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
-    }
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builder, NODE_BUNDLE, kj::mv(filter), moduleSource);
   } else if (featureFlags.getNodeJsAls()) {
     // The AsyncLocalStorage API can be enabled independently of the rest
     // of the nodejs_compat layer.
@@ -386,7 +359,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   // legacy path registers Rust modules unconditionally with their declared
   // type).
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
   return builder.finish();
@@ -399,4 +372,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_INSPECTOR_ISOLATE_TYPES
+      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES

@@ -26,6 +26,7 @@
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
+#include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/io.h>
 #include <kj/miniposix.h>
@@ -86,11 +87,19 @@ namespace {
 // TODO(someday): Suppression is needed to get several python tests to pass under LSan. Investigate
 // if this is an actual leak (perhaps a bug in V8 itself since it is suppressed there?) at a later
 // time.
+//
+// glibc's resolver keeps per-thread state, including a 28-byte `sockaddr_in6` per name server
+// that `__res_context_send` allocates, and frees it as the thread exits, after the thread's
+// pthread key destructors. DNS lookups run on the blocking pool of a loop thread's tokio runtime,
+// which kj-rs-tokio shuts down without joining (see `EnteredRuntime`). So the process can exit
+// while a pool thread is exiting: ASan's key destructor has already removed it from the threads
+// LSan scans, but glibc has not yet freed its resolver state, and LSan reports that as a leak.
 #if __has_feature(address_sanitizer)
 extern "C" __attribute__((no_sanitize("address"))) __attribute__((visibility("default")))
 __attribute__((used)) const char*
 __lsan_default_suppressions() {
-  return "leak:<unknown module>\n";
+  return "leak:<unknown module>\n"
+         "leak:__res_context_send\n";
 }
 #endif
 
@@ -242,7 +251,13 @@ class Bootstrap {
           openWritableDirectory(kj::str(path)), "package disk cache dir must exist");
     }
     KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
-      python.pyodideDiskCacheRoot = openWritableDirectory(kj::str(path));
+      // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
+      // directory).
+      auto dir = fs->getCurrentPath().eval(kj::str(path)).toNativeString(true);
+      // The server takes the directory as UTF-8, which the working directory need not be.
+      KJ_REQUIRE(!kj::encodeUtf16(dir).hadErrors,
+          "--pyodide-bundle-disk-cache-dir does not resolve to a UTF-8 path", dir);
+      options.pyodideBundleDiskCacheDir = kj::mv(dir);
     }
     python.createSnapshot = serveOrTest.python_save_snapshot;
     python.createBaselineSnapshot = serveOrTest.python_save_baseline_snapshot;
@@ -277,6 +292,7 @@ class Bootstrap {
     KJ_IF_SOME(compatDate, testOptions.compat_date) {
       options.testCompatibilityDateOverride = kj::str(compatDate);
     }
+    options.syncStorage = false;
   }
 
   // The `bench` options that apply to the process. Bench mode is on before any worker compiles.
@@ -323,16 +339,6 @@ bool fuzzilli_supported() {
 #else
   return false;
 #endif
-}
-
-::rust::String pyodide_lock() {
-  capnp::MallocMessageBuilder message;
-  // TODO(EW-8977): Implement option to specify python worker flags.
-  auto features = message.getRoot<CompatibilityFlags>();
-  features.setPythonWorkers(true);
-  auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(features));
-  auto lock = KJ_REQUIRE_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
-  return lock.as<RustCopyUncheckedUtf8>();
 }
 
 int32_t with_process_context(

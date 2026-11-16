@@ -26,6 +26,11 @@ def test_path_ordering():
                 f"site-packages path {path} appears before python_modules path"
             )
 
+    vendor_path = "/session/metadata/vendor"
+    assert sys.path.index(vendor_path) == python_modules_index + 1, (
+        f"{vendor_path} does not follow {python_modules_path} in sys.path"
+    )
+
     # Verify system paths come before the vendor path
     system_paths = [
         "/lib/python312.zip",

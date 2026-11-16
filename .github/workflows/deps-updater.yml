@@ -35,7 +35,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
-        run: bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml
+        run: bazel fetch --repo_env=CARGO_BAZEL_REPIN=all --repo=@crates_vendor
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request
@@ -52,6 +52,7 @@ jobs:
             This is an automated pull request for updating the dependencies of workerd.
           delete-branch: true
           add-paths: |
+            MODULE.bazel.lock
             build/deps/gen
             deps/rust
             .github/workflows

@@ -3,6 +3,7 @@
 #include "blob.h"
 #include "events.h"
 
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/ser.h>
 
@@ -46,19 +47,22 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     // If that second dispatch throws, the exception propagates: the delivery microtask
     // fails.
     JSG_TRY(js) {
-      dispatchEventImpl(
-          js, js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES));
+      dispatchEventImpl(js,
+          js.alloc<MessageEvent>(js, value, kj::String(), messageevent::MessagePort(JSG_THIS),
+              kj::none, Trusted::YES));
     }
     JSG_CATCH(exception) {
       dispatchEventImpl(js,
-          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS,
-              kj::none, Trusted::YES));
+          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(),
+              messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES));
     }
     return;
   }
 
   auto result = dispatchEventImpl(js,
-      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
+      js.alloc<MessageEvent>(
+          js, value, kj::String(), messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES),
+      policy);
   KJ_IF_SOME(exception, result.firstException) {
     // A 'message' listener threw. Its exception was reported (and the remaining 'message'
     // listeners still ran); additionally surface it as a 'messageerror' event on this port,
@@ -66,7 +70,7 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     // report-only: a throwing 'messageerror' listener triggers no further reaction.
     dispatchEventImpl(js,
         js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
-            JSG_THIS, kj::none, Trusted::YES),
+            messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES),
         DispatchExceptionPolicy::REPORT);
   }
 }
@@ -219,6 +223,25 @@ void MessagePort::setOnMessage(
   // The attribute's trampoline registration and removal flow through
   // listenerCountChanged(), which starts and stops the port; nothing else to do here.
   setEventHandlerAttribute(js, "message"_kj, kj::mv(handler));
+}
+
+namespace {
+
+jsg::JsValue getBootstrapClass(jsg::Lock& js, kj::StringPtr name) {
+  // main.ts requires the module whenever the autogate is enabled.
+  auto exports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "messagechannel/messagechannel"_kj),
+      "the per-isolate bootstrap did not load messagechannel/messagechannel");
+  return KJ_ASSERT_NONNULL(exports.tryCast<jsg::JsObject>()).get(js, name);
+}
+
+}  // namespace
+
+jsg::JsValue MessageChannelModule::getMessageChannel(jsg::Lock& js) {
+  return getBootstrapClass(js, "MessageChannel"_kj);
+}
+
+jsg::JsValue MessageChannelModule::getMessagePort(jsg::Lock& js) {
+  return getBootstrapClass(js, "MessagePort"_kj);
 }
 
 jsg::Ref<MessageChannel> MessageChannel::constructor(jsg::Lock& js) {

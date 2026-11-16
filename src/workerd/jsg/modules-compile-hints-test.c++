@@ -4,10 +4,13 @@
 
 #include "jsg-test.h"
 
+#include <workerd/jsg/modules-new.h>
+
 namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
+WD_STRONG_BOOL(CollectCompileHints);
 
 struct HintsContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(HintsContext) {}
@@ -19,10 +22,22 @@ constexpr kj::StringPtr SOURCE = "function used() { return 42; }\n"
                                  "export function handler() { return used() + 1; }\n"
                                  "export const result = used();\n"_kj;
 
+// Two modules, one importing the other, for the module registry tests.
+constexpr kj::StringPtr LIB_SOURCE = "export function square(x) { return x * x; }\n"
+                                     "export function cube(x) { return x * x * x; }\n"_kj;
+constexpr kj::StringPtr MAIN_SOURCE = "import { square } from './lib.js';\n"
+                                      "function unused() { return 0; }\n"
+                                      "export function handler() { return square(3) + 1; }\n"
+                                      "export const result = square(6);\n"_kj;
+
 // V8 reports a function's start as the opening parenthesis of its parameter list.
-int startPosition(kj::StringPtr functionName) {
-  auto nameStart = KJ_ASSERT_NONNULL(SOURCE.find(kj::str(functionName, "(")));
+int startPosition(kj::StringPtr source, kj::StringPtr functionName) {
+  auto nameStart = KJ_ASSERT_NONNULL(source.find(kj::str(functionName, "(")));
   return static_cast<int>(nameStart + functionName.size());
+}
+
+int startPosition(kj::StringPtr functionName) {
+  return startPosition(SOURCE, functionName);
 }
 
 v8::MaybeLocal<v8::Module> resolveNothing(v8::Local<v8::Context> context,
@@ -44,11 +59,22 @@ class HintsObserver final: public CompilationObserver {
     ++calls;
     lastHintCount = hintCount;
     lastEagerFunctionCount = eagerFunctionCount;
+    totalEagerFunctionCount += eagerFunctionCount;
   }
 
   mutable uint calls = 0;
   mutable size_t lastHintCount = 0;
   mutable size_t lastEagerFunctionCount = 0;
+  mutable size_t totalEagerFunctionCount = 0;
+  mutable uint cachesFound = 0;
+  mutable uint cachesGenerated = 0;
+
+  void onCompileCacheFound(v8::Isolate*) const override {
+    ++cachesFound;
+  }
+  void onCompileCacheGenerated(v8::Isolate*) const override {
+    ++cachesGenerated;
+  }
 };
 
 template <typename Func>
@@ -114,6 +140,289 @@ void compileAndEvaluateModule(kj::ArrayPtr<const kj::byte> compileCache,
     auto result = check(
         getNamespace(js, module)->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "result"_kj)));
     KJ_EXPECT(check(result->Int32Value(js.v8Context())) == 42);
+  });
+}
+
+// Adds lib.js and main.js to the context's module registry, evaluates main.js, and returns its
+// namespace.
+v8::Local<v8::Object> addAndEvaluateModules(jsg::Lock& js,
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> libHints,
+    kj::ArrayPtr<const int> mainHints) {
+  auto registry = ModuleRegistryImpl<HintsIsolate_TypeWrapper>::from(js);
+  auto libPath = kj::Path::parse("lib.js");
+  registry->add(
+      libPath, ModuleRegistry::ModuleInfo(js, "lib.js", LIB_SOURCE.asArray(), observer, libHints));
+  auto mainPath = kj::Path::parse("main.js");
+  registry->add(mainPath,
+      ModuleRegistry::ModuleInfo(js, "main.js", MAIN_SOURCE.asArray(), observer, mainHints));
+
+  auto module = KJ_ASSERT_NONNULL(registry->resolve(js, mainPath)).module.getHandle(js);
+  instantiateModule(js, module);
+  return getNamespace(js, module);
+}
+
+void callHandler(jsg::Lock& js, v8::Local<v8::Object> ns) {
+  auto handler = check(ns->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "handler"_kj)));
+  check(handler.As<v8::Function>()->Call(js.v8Context(), js.v8Undefined(), 0, nullptr));
+}
+
+using NewRegistry = modules::ModuleRegistry;
+
+kj::Arc<NewRegistry> newHintsRegistry() {
+  const auto base = "file:///bundle/"_url;
+  modules::ModuleBundle::BundleBuilder bundle(base);
+  bundle.addEsmModule("./nested/../lib.js", LIB_SOURCE.asArray());
+  bundle.addEsmModule("main.js", MAIN_SOURCE.asArray());
+  bundle.addEsmModule("unresolved.js", SOURCE.asArray());
+  bundle.addSyntheticModule("text", modules::Module::newTextModuleHandler("text"_kj.asArray()));
+  modules::ModuleBundle::BuiltinBuilder builtins;
+  builtins.addEsm("test:builtin"_url, SOURCE.asArray());
+  return NewRegistry::Builder(base).add(bundle.finish()).add(builtins.finish()).finish();
+}
+
+template <typename Func>
+void withNewRegistry(const NewRegistry& registry,
+    Func&& func,
+    CollectCompileHints collect = CollectCompileHints::YES,
+    const CompilationObserver& observer = CompilationObserver()) {
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](HintsIsolate::Lock& lock) {
+    IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();
+    if (collect) IsolateBase::from(lock.v8Isolate).enableCompileHints();
+    JSG_WITHIN_CONTEXT_SCOPE(
+        lock, lock.newContext<HintsContext>().getHandle(lock), [&](jsg::Lock& js) {
+      auto attached = registry.attachToIsolate(js, observer);
+      func(js);
+    });
+  });
+}
+
+v8::Local<v8::Object> resolveNewNamespace(jsg::Lock& js, kj::StringPtr name) {
+  auto ns = KJ_ASSERT_NONNULL(NewRegistry::tryResolveModuleNamespace(js, name));
+  return KJ_ASSERT_NONNULL(ns.tryCast<JsObject>());
+}
+
+kj::Array<int>& findHints(kj::Array<ProducedCompileHints>& hints, kj::StringPtr name) {
+  for (auto& module: hints) {
+    if (module.name == name) return module.functionPositions;
+  }
+  KJ_FAIL_ASSERT("missing hints", name);
+}
+
+KJ_TEST("the new registry consumes copied hints and prefers its shared code cache afterwards") {
+  const auto base = "file:///bundle/"_url;
+  for (bool ownedSource: {false, true}) {
+    modules::ModuleBundle::BundleBuilder bundle(base);
+    {
+      auto hints = kj::arr(startPosition("handler"), startPosition("used"), -1);
+      if (ownedSource) {
+        bundle.addEsmModule(
+            "main.js", copyToArc(SOURCE), modules::Module::Flags::ESM, kj::none, hints);
+      } else {
+        bundle.addEsmModule("main.js", SOURCE.asArray(), modules::Module::Flags::ESM, hints);
+      }
+      // Lazy resolution must not retain the caller's hint storage.
+      hints = nullptr;
+    }
+    auto registry = NewRegistry::Builder(base).add(bundle.finish()).finish();
+    HintsObserver observer;
+    auto evaluate = [&](jsg::Lock& js) { callHandler(js, resolveNewNamespace(js, "main.js")); };
+    withNewRegistry(*registry, evaluate, CollectCompileHints::NO, observer);
+    KJ_EXPECT(observer.calls == 1);
+    KJ_EXPECT(observer.lastHintCount == 3);
+    KJ_EXPECT(observer.lastEagerFunctionCount == 2);
+    KJ_EXPECT(observer.cachesGenerated == 1);
+
+    // A second isolate consumes the bytecode generated by the hinted compilation.
+    withNewRegistry(*registry, evaluate, CollectCompileHints::NO, observer);
+    KJ_EXPECT(observer.calls == 1);
+    KJ_EXPECT(observer.cachesFound == 1);
+    KJ_EXPECT(observer.cachesGenerated == 1);
+  }
+}
+
+KJ_TEST("new registry hint production takes precedence over supplied hints") {
+  const auto base = "file:///bundle/"_url;
+  modules::ModuleBundle::BundleBuilder bundle(base);
+  int hints[] = {startPosition("unused")};
+  bundle.addEsmModule("main.js", SOURCE.asArray(), modules::Module::Flags::ESM, hints);
+  auto registry = NewRegistry::Builder(base).add(bundle.finish()).finish();
+  HintsObserver observer;
+  withNewRegistry(*registry, [&](jsg::Lock& js) {
+    resolveNewNamespace(js, "main.js");
+    auto produced = getProducedCompileHints(js);
+    KJ_ASSERT(produced.size() == 1);
+    KJ_EXPECT(produced[0].functionPositions == kj::arr(startPosition("used")).asPtr());
+  }, CollectCompileHints::YES, observer);
+  KJ_EXPECT(observer.calls == 0);
+  KJ_EXPECT(observer.cachesGenerated == 0);
+}
+
+KJ_TEST("the new registry merges compile hints across instances of a bundle module") {
+  auto registry = newHintsRegistry();
+  kj::Array<ProducedCompileHints> hints;
+  withNewRegistry(*registry, [&](jsg::Lock& js) {
+    auto main = resolveNewNamespace(js, "main.js");
+    auto initial = getProducedCompileHints(js);
+    KJ_EXPECT(findHints(initial, "main.js").size() == 0);
+    KJ_EXPECT(findHints(initial, "./nested/../lib.js").size() == 1);
+    callHandler(js, main);
+    auto lib = resolveNewNamespace(js, "lib.js?copy#fragment");
+    auto cube = check(lib->Get(js.v8Context(), js.str("cube"_kj)));
+    check(cube.As<v8::Function>()->Call(js.v8Context(), js.v8Undefined(), 0, nullptr));
+    // These resolved modules must not appear in the result.
+    resolveNewNamespace(js, "text");
+    resolveNewNamespace(js, "test:builtin");
+    hints = getProducedCompileHints(js);
+  });
+  KJ_ASSERT(hints.size() == 2, hints.size());
+  auto& libHints = findHints(hints, "./nested/../lib.js"_kj);
+  auto& mainHints = findHints(hints, "main.js"_kj);
+  KJ_ASSERT(libHints.size() == 2, libHints.size());
+  KJ_EXPECT(libHints[0] == startPosition(LIB_SOURCE, "square"));
+  KJ_EXPECT(libHints[1] == startPosition(LIB_SOURCE, "cube"));
+  KJ_ASSERT(mainHints.size() == 1, mainHints.size());
+  KJ_EXPECT(mainHints[0] == startPosition(MAIN_SOURCE, "handler"));
+
+  // Both registries return V8 positions in the same format.
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  withContext(isolate, [&](jsg::Lock& js) {
+    HintsObserver observer;
+    addAndEvaluateModules(js, observer, libHints, mainHints);
+    KJ_EXPECT(observer.totalEagerFunctionCount == 3, observer.totalEagerFunctionCount);
+  });
+}
+
+KJ_TEST("a shared new registry records compile hints separately for each isolate") {
+  auto registry = newHintsRegistry();
+  withNewRegistry(*registry, [&](jsg::Lock& js) {
+    callHandler(js, resolveNewNamespace(js, "main.js"));
+    auto hints = getProducedCompileHints(js);
+    KJ_EXPECT(findHints(hints, "main.js"_kj).size() == 1);
+  });
+  withNewRegistry(*registry, [&](jsg::Lock& js) {
+    KJ_EXPECT(getProducedCompileHints(js).size() == 0);
+    resolveNewNamespace(js, "test:builtin");
+    KJ_EXPECT(getProducedCompileHints(js).size() == 0);
+    resolveNewNamespace(js, "main.js");
+    auto hints = getProducedCompileHints(js);
+    KJ_ASSERT(hints.size() == 2, hints.size());
+    KJ_EXPECT(findHints(hints, "main.js"_kj).size() == 0);
+    auto& libHints = findHints(hints, "./nested/../lib.js"_kj);
+    KJ_ASSERT(libHints.size() == 1, libHints.size());
+    KJ_EXPECT(libHints[0] == startPosition(LIB_SOURCE, "square"));
+  });
+}
+
+KJ_TEST("a shared registry uses the receiving isolate's compile hint policy") {
+  auto registry = newHintsRegistry();
+  for (auto collect: {CollectCompileHints::NO, CollectCompileHints::YES, CollectCompileHints::NO,
+         CollectCompileHints::YES}) {
+    withNewRegistry(*registry, [&](jsg::Lock& js) {
+      resolveNewNamespace(js, "main.js");
+      auto hints = getProducedCompileHints(js);
+      KJ_EXPECT(hints.size() == (collect ? 2 : 0), collect);
+    }, collect);
+  }
+}
+
+KJ_TEST("a failed compilation does not register a module in the hint session") {
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  withContext(isolate, [&](jsg::Lock& js) {
+    IsolateBase::from(js.v8Isolate).enableCompileHints();
+    CompilationObserver observer;
+    bool failed = false;
+    js.tryCatch([&] {
+      ModuleRegistry::ModuleInfo info(js, "invalid.js", "export const = ;"_kj.asArray(), observer);
+    }, [&](Value exception) {
+      failed = true;
+      KJ_EXPECT(exception.getHandle(js)->IsNativeError());
+    });
+    KJ_EXPECT(failed);
+    KJ_EXPECT(getProducedCompileHints(js).size() == 0);
+  });
+}
+
+KJ_TEST("the module registry produces hints per module, which make V8 compile eagerly") {
+  kj::Array<int> libHints;
+  kj::Array<int> mainHints;
+  {
+    HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+    withContext(isolate, [&](jsg::Lock& js) {
+      CompilationObserver observer;
+      IsolateBase::from(js.v8Isolate).enableCompileHints();
+      auto ns = addAndEvaluateModules(js, observer, nullptr, nullptr);
+      // As a first request would.
+      callHandler(js, ns);
+
+      auto produced = getProducedCompileHints(js);
+      KJ_ASSERT(produced.size() == 2, produced.size());
+      for (auto& module: produced) {
+        if (module.name == "lib.js") {
+          libHints = kj::mv(module.functionPositions);
+        } else if (module.name == "main.js") {
+          mainHints = kj::mv(module.functionPositions);
+        } else {
+          KJ_FAIL_EXPECT("unexpected module", module.name);
+        }
+      }
+    });
+  }
+
+  // `square` ran during evaluation, `cube` never ran.
+  KJ_ASSERT(libHints.size() == 1, libHints.size());
+  KJ_EXPECT(libHints[0] == startPosition(LIB_SOURCE, "square"));
+  // `handler` ran after evaluation, `unused` never ran.
+  KJ_ASSERT(mainHints.size() == 1, mainHints.size());
+  KJ_EXPECT(mainHints[0] == startPosition(MAIN_SOURCE, "handler"));
+
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  withContext(isolate, [&](jsg::Lock& js) {
+    HintsObserver observer;
+    auto ns = addAndEvaluateModules(js, observer, libHints, mainHints);
+    KJ_EXPECT(observer.calls == 2);
+    // `square` and `handler`.
+    KJ_EXPECT(observer.totalEagerFunctionCount == 2, observer.totalEagerFunctionCount);
+    auto result = check(ns->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "result"_kj)));
+    KJ_EXPECT(check(result->Int32Value(js.v8Context())) == 36);
+    // Modules compiled without production report nothing.
+    KJ_EXPECT(getProducedCompileHints(js).size() == 0);
+  });
+}
+
+KJ_TEST("modules compiled without hint production return no hints") {
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  withContext(isolate, [&](jsg::Lock& js) {
+    CompilationObserver observer;
+    ModuleRegistry::ModuleInfo info(js, "normal.js", SOURCE.asArray(), observer);
+    auto module = info.module.getHandle(js);
+    instantiateModule(js, module);
+    callHandler(js, getNamespace(js, module));
+
+    KJ_EXPECT(getProducedCompileHints(js, module).size() == 0);
+  });
+}
+
+KJ_TEST("producing hints ignores a code cache and hints to consume") {
+  auto cache = produceCodeCache();
+  const int hints[] = {startPosition("used")};
+
+  HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+  withContext(isolate, [&](jsg::Lock& js) {
+    HintsObserver observer;
+    IsolateBase::from(js.v8Isolate).enableCompileHints();
+    ModuleRegistry::ModuleInfo info(js, "main.js", SOURCE.asArray(), cache, observer, hints);
+    KJ_EXPECT(observer.calls == 0);
+    auto module = info.module.getHandle(js);
+    check(module->InstantiateModule(js.v8Context(), &resolveNothing));
+    check(module->Evaluate(js.v8Context()));
+    callHandler(js, getNamespace(js, module));
+
+    auto produced = getProducedCompileHints(js, module);
+    KJ_ASSERT(produced.size() == 2, produced.size());
+    KJ_EXPECT(produced[0] == startPosition("used"));
+    KJ_EXPECT(produced[1] == startPosition("handler"));
   });
 }
 

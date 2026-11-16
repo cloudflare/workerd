@@ -18,6 +18,16 @@
 
 import { strictEqual, ok } from 'node:assert';
 
+// The TypeScript URLPattern (the TS_URL_PATTERN autogate, in the
+// @all-autogates variant) matches with the builtin RegExp exec, so the
+// patched one is never called (src/tests/urlpattern/AGENTS.md, ledger #5).
+// It is an own property of the global; JSG puts the C++ one on the
+// global's prototype.
+const usingTsUrlPattern = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis),
+  'URLPattern'
+);
+
 export const urlpatternRegexSearchOobRegression = {
   async test() {
     const realExec = RegExp.prototype.exec;
@@ -83,7 +93,8 @@ export const urlpatternRegexSearchOobRegression = {
       // Should not crash — the hardened code rejects non-Array results.
       const result2 = p2.exec({ pathname: '/y' });
       // After the fix, non-array results are treated as no-match (null).
-      strictEqual(result2, null);
+      // The TypeScript implementation does not call the patched exec.
+      strictEqual(result2 === null, !usingTsUrlPattern);
     } finally {
       armed = false;
       RegExp.prototype.exec = realExec;

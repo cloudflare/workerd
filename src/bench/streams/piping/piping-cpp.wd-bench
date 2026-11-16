@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+using PipingModules = import "piping-modules.capnp";
+
+# Runs the piping benchmarks against the legacy C++ implementation;
+# piping-ts.wd-bench runs the identical modules against the TypeScript
+# implementation. No compatibilityDate and no flags: see
+# src/bench/streams/AGENTS.md.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-cpp",
+      worker = (
+        modules = PipingModules.modules,
+      )
+    ),
+  ],
+);

@@ -1,7 +1,7 @@
 diff -u5 -r sqlite-src-pristine/src/shell.c.in sqlite-src-modified/src/shell.c.in
 --- sqlite-src-pristine/src/shell.c.in	2026-08-19 19:37:52
 +++ sqlite-src-modified/src/shell.c.in	2026-08-19 21:03:33
-@@ -2942,10 +2942,15 @@
+@@ -3573,10 +3573,15 @@
      cli_printf(out,
             "Number of times run:                 %d\n", iCur);
      iCur = sqlite3_stmt_status(pArg->pStmt, SQLITE_STMTSTATUS_MEMUSED, bReset);
@@ -15,8 +15,8 @@ diff -u5 -r sqlite-src-pristine/src/shell.c.in sqlite-src-modified/src/shell.c.i
    }
  
  #ifdef __linux__
-   displayLinuxIoStats(pArg->out);
- #endif
+   if( (pArg->mStats & CLISTAT_IO)!=0 ){
+     displayLinuxIoStats(pArg->out);
 diff -u5 -r sqlite-src-pristine/src/sqlite.h.in sqlite-src-modified/src/sqlite.h.in
 --- sqlite-src-pristine/src/sqlite.h.in	2026-08-19 19:37:52
 +++ sqlite-src-modified/src/sqlite.h.in	2026-08-19 21:02:27

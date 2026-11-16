@@ -276,6 +276,14 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  if (maybeTailStreamWriter == kj::none) {
+    return;
+  }
+  addSpanUpdateInternal(spanId, kj::mv(update), getTime());
+}
+
+void WorkerTracer::addSpanUpdateInternal(
+    tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -285,7 +293,7 @@ void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& u
   auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
       topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
   auto size = update.size();
-  tailStreamWriter->report(context, kj::mv(update), getTime(), size);
+  tailStreamWriter->report(context, kj::mv(update), timestamp, size);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -457,11 +465,11 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
         tracing::InvocationSpanContext(context.getTraceId(), context.getInvocationId(),
             parentSpanId.orDefault(tracing::SpanId::nullId), context.getTraceFlags());
 
-    // Not applying size accounting for Onset since it is sent separately
-    writer->report(onsetContext,
-        tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
-            attributes.releaseAsArray()),
-        timestamp, 0);
+    // The tail event owns the onset on the heap.
+    auto onset = kj::heap<tracing::Onset>(
+        context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray());
+    auto onsetSize = sizeof(tracing::Onset) + onset->size();
+    writer->report(onsetContext, kj::mv(onset), timestamp, onsetSize);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
@@ -486,9 +494,6 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
       !trace->exceededExceptionLimit && trace->exceptions.empty()) {
     LOG_PERIODICALLY(WARNING,
         "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
-        trace->eventInfo);
-  } else if (outcome != EventOutcome::EXCEPTION && !trace->exceptions.empty()) {
-    LOG_PERIODICALLY(WARNING, "NOSENTRY reporting trace with exceptions, but no exception outcome",
         trace->eventInfo);
   }
 

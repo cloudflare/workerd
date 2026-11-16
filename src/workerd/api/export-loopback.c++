@@ -41,4 +41,26 @@ jsg::Ref<DurableObjectClass> LoopbackDurableObjectClass::call(jsg::Lock& js, Opt
   return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channelObj)));
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackServiceStub::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectClass::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackDurableObjectNamespace::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(
+        kj::refcounted<LoopbackDurableObjectNamespace>(copy.channel, kj::mv(copy.idFactory),
+            actorCallRetriesAllowed, loopbackClass->cloneForSnapshot(), persistent));
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> LoopbackColoLocalActorNamespace::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<LoopbackColoLocalActorNamespace>(
+      getChannel(), loopbackClass->cloneForSnapshot()));
+}
+
 }  // namespace workerd::api

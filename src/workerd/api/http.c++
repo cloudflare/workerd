@@ -19,7 +19,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -139,6 +138,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+    }
+    KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
+      return ExtractedBody(js, JsReadableStream(js, searchParams.serialize(js)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
   }
@@ -1078,10 +1081,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
-      kj::StringPtr otherStatusText = otherResponse->getStatusText();
-      if (otherStatusText != defaultStatusText(statusCode)) {
-        statusText = kj::str(otherStatusText);
-      }
+      statusText = otherResponse->statusText.clone();
       headers = js.alloc<Headers>(js, *otherResponse->headers);
       cf = otherResponse->cf.deepClone(js);
       KJ_IF_SOME(otherWs, otherResponse->webSocket) {
@@ -1208,12 +1208,9 @@ jsg::Ref<Response> Response::json_(
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
-        auto otherStatusText = res->getStatusText();
         auto newInit = InitializerDict{
           .status = res->statusCode,
-          .statusText = otherStatusText == nullptr ||
-                        otherStatusText == defaultStatusText(res->statusCode)
-                        ? jsg::Optional<kj::String>() : kj::str(otherStatusText),
+          .statusText = res->statusText.clone(),
           .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
           .cf = res->cf.getRef(js),
           .encodeBody =
@@ -1345,14 +1342,14 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     }
     auto maybeLength = jsBody.tryGetLength(js, encoding);
     auto stream = newSystemStream(
-        outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding, context,
+        outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), encoding, context,
         flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody.pumpTo(js, kj::mv(stream), EndStream::YES);
   } else {
-    outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
+    outer.send(statusCode, getReasonPhrase(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1361,6 +1358,13 @@ int Response::getStatus() {
   return statusCode;
 }
 kj::StringPtr Response::getStatusText() {
+  KJ_IF_SOME(text, statusText) {
+    return text;
+  }
+  // The Fetch spec leaves the status message empty unless something sets it.
+  return ""_kj;
+}
+kj::StringPtr Response::getReasonPhrase() {
   KJ_IF_SOME(text, statusText) {
     return text;
   }
@@ -1609,16 +1613,12 @@ template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A stub's own policy applies only when it was given one and the userland
-// retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
-// the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
-// a disabled rollout must never get that far.
+// actor call retries. A stub's own policy applies when it was given one. Otherwise the runtime's
+// default applies.
 kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
   if (!fetcher.supportsActorCallRetries()) return kj::none;
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
-      return ActorRetryPolicy::userDefined(userPolicy);
-    }
+  KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
+    return ActorRetryPolicy::userDefined(userPolicy);
   }
   return ActorRetryPolicy::systemDefault();
 }
@@ -2262,10 +2262,8 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   }
 
   // TODO(someday): Fill response CF blob from somewhere?
-  kj::Maybe<kj::String> maybeStatusText = statusText == defaultStatusText(statusCode)
-      ? kj::Maybe<kj::String>()
-      : kj::str(statusText);
-  return js.alloc<Response>(js, statusCode, kj::mv(maybeStatusText), kj::mv(responseHeaders),
+  // A network response's status message is the reason phrase the server sent.
+  return js.alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(responseHeaders),
       nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
 }
 
@@ -2335,6 +2333,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
+            .statusText = kj::str("OK"),
             .headers = kj::mv(headers),
           }));
     }
@@ -2369,6 +2368,46 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
+kj::Maybe<Fetcher::ChannelSnapshot> Fetcher::channelForSnapshot() const {
+  // A Fetcher bound to a live channel or an IoContext-bound factory belongs to one IoContext (a
+  // cross-context factory is copyForSnapshot()'s concern). One that registered a connect override
+  // (ctx.mapVirtualHost()) left that override on the zygote's global scope, which the restored
+  // Worker's fresh global scope does not have.
+  if (registeredConnectOverride) return kj::none;
+  KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
+    return ChannelSnapshot{channel, requiresHost, isInHouse, rpcCompatGateBypassed};
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<Fetcher>> Fetcher::copyForSnapshot() const {
+  KJ_IF_SOME(c, channelForSnapshot()) {
+    return kj::refcounted<Fetcher>(c.channel, c.requiresHost, c.isInHouse, c.rpcCompatGateBypassed);
+  }
+  if (registeredConnectOverride) return kj::none;
+  // A cross-context factory is not tied to one IoContext; it transfers if it can copy itself.
+  KJ_IF_SOME(factory, channelOrClientFactory.tryGet<kj::Own<CrossContextOutgoingFactory>>()) {
+    KJ_IF_SOME(copy, factory->cloneForSnapshot()) {
+      return kj::refcounted<Fetcher>(kj::mv(copy), requiresHost, isInHouse);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> Fetcher::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::mv(copy));
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::Ref<Fetcher>> Fetcher::cloneForSnapshot() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return jsg::Ref<Fetcher>(kj::mv(copy));
+  }
+  return kj::none;
+}
+
 void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
   if (registeredConnectOverride) {
     return;
@@ -2400,6 +2439,14 @@ void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
 kj::String Fetcher::mapVirtualHost(jsg::Lock& js, uint16_t port) {
   registerOverride(js, port);
   return kj::str(KJ_ASSERT_NONNULL(host), ":", KJ_ASSERT_NONNULL(this->port));
+}
+
+kj::Maybe<kj::Own<ExtendedFetcher>> ExtendedFetcher::copyForSnapshot() const {
+  KJ_IF_SOME(c, channelForSnapshot()) {
+    return kj::refcounted<ExtendedFetcher>(
+        c.channel, c.requiresHost, KJ_ASSERT_NONNULL(port), c.isInHouse, c.rpcCompatGateBypassed);
+  }
+  return kj::none;
 }
 
 kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
@@ -2674,13 +2721,13 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
 
 static jsg::Promise<void> throwOnError(
     jsg::Lock& js, kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
-  return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {
+  return promise.then(js, [method = kj::str(method)](jsg::Lock&, jsg::Ref<Response> response) {
     uint status = response->getStatus();
     // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
     //   should people really use fetch() if they want to inspect error responses?
     JSG_REQUIRE(status >= 200 && status < 300, Error,
         kj::str("HTTP ", method, " request failed: ", response->getStatus(), " ",
-            response->getStatusText()));
+            response->getReasonPhrase()));
   });
 }
 
@@ -2735,8 +2782,8 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
       // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
       //   should people really use fetch() if they want to inspect error responses?
       JSG_FAIL_REQUIRE(Error,
-          kj::str(
-              "HTTP GET request failed: ", response->getStatus(), " ", response->getStatusText()));
+          kj::str("HTTP GET request failed: ", response->getStatus(), " ",
+              response->getReasonPhrase()));
     } else {
       return parseResponse(js, kj::mv(response), kj::mv(type));
     }
@@ -2780,6 +2827,45 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   subInit.method = kj::str("DELETE");
   return throwOnError(js, "DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
+
+namespace {
+
+// Awaits an event sent through a service binding. With `rpc_dispose_cancels_call`, the returned
+// promise gets a `[Symbol.dispose]()` method, as a JSRPC call's promise has: disposing the promise
+// while the event is in flight cancels the event, and the promise rejects with an `AbortError`.
+// Disposing it once the event has finished does nothing. Either way it is a plain Promise.
+template <typename T, typename Func>
+auto awaitDisposableEvent(jsg::Lock& js,
+    IoContext& ioContext,
+    kj::StringPtr methodName,
+    kj::Promise<T> event,
+    Func&& func) {
+  if (!FeatureFlags::get(js).getRpcDisposeCancelsCall()) {
+    return ioContext.awaitIo(js, kj::mv(event), kj::fwd<Func>(func));
+  }
+
+  // The event holds its own reference, so collecting the promise doesn't cancel the event.
+  auto canceler = kj::rc<kj::Canceler>();
+  auto cancelable = canceler->wrap(kj::mv(event)).attach(canceler.addRef());
+  auto promise = ioContext.awaitIo(js, kj::mv(cancelable), kj::fwd<Func>(func));
+
+  promise.setDispose(js,
+      js.wrapSimpleFunction(js.v8Context(),
+          [canceler = ioContext.addObject(canceler.addRef().toOwn()), methodName](
+              jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    // `this` is the promise when it's called as `promise[Symbol.dispose]()`, as `using` does.
+    KJ_IF_SOME(self, jsg::JsValue(info.This()).tryCast<jsg::JsPromise>()) {
+      if (self.state() != jsg::PromiseState::PENDING) return;
+      // Nobody may be waiting for the rejection, as with a `using` declaration.
+      self.markAsHandled(js);
+    }
+    canceler->cancel(JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The ", methodName,
+        "() call was canceled because its promise was disposed."));
+  }));
+  return promise;
+}
+
+}  // namespace
 
 jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
     kj::String queueName,
@@ -2826,7 +2912,8 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
 
   auto eventRef =
       kj::addRef(*event);  // attempt to work around windows-specific null pointer deref.
-  return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
+  return awaitDisposableEvent(js, ioContext, "queue"_kj,
+      worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
       [event = kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
     return Fetcher::QueueResult{
       .outcome = kj::str(result.outcome),
@@ -2854,7 +2941,7 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
     }
   }
 
-  return ioContext.awaitIo(js,
+  return awaitDisposableEvent(js, ioContext, "scheduled"_kj,
       worker->runScheduled(scheduledTime, cron).attach(kj::mv(worker), kj::mv(cron)),
       [](jsg::Lock& js, WorkerInterface::ScheduledResult result) {
     return Fetcher::ScheduledResult{
@@ -3142,4 +3229,18 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Fetch API cannot load: ", url));
   }
 }
+kj::Maybe<kj::Own<jsg::Wrappable>> ExtendedFetcher::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::mv(copy));
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::Ref<Fetcher>> ExtendedFetcher::cloneForSnapshot() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return jsg::Ref<Fetcher>(kj::mv(copy));
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api

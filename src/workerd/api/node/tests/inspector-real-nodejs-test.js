@@ -143,6 +143,148 @@ export const notificationsAreEmitted = {
   },
 };
 
+export const reentrantPostsAreDeliveredInOrder = {
+  async test() {
+    const session = new Session();
+    session.connect();
+
+    // post() callbacks run while the connection delivers messages, so a post() from a callback
+    // dispatches reentrantly. Its response is delivered after the current callback returns.
+    // Session reports exceptions thrown by callbacks instead of propagating them, so failures
+    // are forwarded to reject() explicitly.
+    const order = [];
+    await new Promise((resolve, reject) => {
+      const guard =
+        (fn) =>
+        (...args) => {
+          try {
+            fn(...args);
+          } catch (e) {
+            reject(e);
+          }
+        };
+      session.post(
+        'Profiler.enable',
+        guard((err) => {
+          assert.ifError(err);
+          order.push('A:start');
+          session.post(
+            'Profiler.setSamplingInterval',
+            { interval: 100 },
+            guard((err) => {
+              assert.ifError(err);
+              order.push('B:start');
+              session.post(
+                'Profiler.disable',
+                guard((err) => {
+                  assert.ifError(err);
+                  order.push('C');
+                  resolve();
+                })
+              );
+              order.push('B:end');
+            })
+          );
+          order.push('A:end');
+        })
+      );
+    });
+    assert.deepStrictEqual(order, [
+      'A:start',
+      'A:end',
+      'B:start',
+      'B:end',
+      'C',
+    ]);
+    session.disconnect();
+  },
+};
+
+export const notificationsFromCallbacksAreDeliveredImmediately = {
+  test() {
+    const session = new Session();
+    session.connect();
+    const logged = [];
+    session.on('Runtime.consoleAPICalled', (msg) => {
+      logged.push(msg.params.args[0].value);
+    });
+    session.post('Runtime.enable', () => {
+      console.log('from-callback');
+    });
+    // The notification is raised while the callback runs, and delivered before post() returns.
+    assert.ok(logged.includes('from-callback'), JSON.stringify(logged));
+    session.disconnect();
+  },
+};
+
+export const reentryFromEvaluatedCodeIsHandled = {
+  test() {
+    const session = new Session();
+    session.connect();
+    let contextId;
+    session.once('Runtime.executionContextCreated', (msg) => {
+      contextId = msg.params.context.id;
+    });
+    session.post('Runtime.enable');
+    assert.strictEqual(typeof contextId, 'number');
+
+    // Code evaluated by the session's own V8 inspector calling back into the session cannot
+    // dispatch, but may disconnect.
+    let reentrantError;
+    globalThis.reenterInspectorSession = () => {
+      try {
+        session.post('Runtime.enable');
+      } catch (e) {
+        reentrantError = e;
+      }
+      session.disconnect();
+    };
+    try {
+      session.post('Runtime.evaluate', {
+        expression: 'reenterInspectorSession()',
+        contextId,
+      });
+    } finally {
+      delete globalThis.reenterInspectorSession;
+    }
+    assert.match(String(reentrantError), /not connected/);
+    assert.throws(() => session.post('Runtime.enable'), {
+      code: 'ERR_INSPECTOR_NOT_CONNECTED',
+    });
+  },
+};
+
+export const throwingCallbacksAreReported = {
+  test() {
+    const session = new Session();
+    session.connect();
+    const reported = [];
+    const onError = (event) => {
+      reported.push(event.error);
+      event.preventDefault();
+    };
+    globalThis.addEventListener('error', onError);
+    try {
+      const boom = new Error('boom');
+      session.post('Profiler.enable', () => {
+        throw boom;
+      });
+      assert.deepStrictEqual(reported, [boom]);
+
+      // The session keeps working after a callback throws.
+      let result;
+      session.post('Profiler.disable', (err, params) => {
+        result = { err, params };
+      });
+      assert.ifError(result.err);
+      assert.strictEqual(typeof result.params, 'object');
+    } finally {
+      globalThis.removeEventListener('error', onError);
+      session.disconnect();
+    }
+  },
+};
+
 export const defaultExportsArePresent = {
   test() {
     assert.strictEqual(typeof inspector.Session, 'function');

@@ -297,24 +297,127 @@ fn constant_factory_lowercases_rust_name_without_changing_js_name() {
     };
     let registrations = collect_constant_registrations(&input);
     let registration = &registrations[0];
-    let factory: syn::ImplItemFn = syn::parse2(registration.factory.clone()).unwrap();
+    let factory: syn::ImplItemFn = syn::parse2(registration.factory()).unwrap();
     assert_eq!(factory.sig.ident, "max_bytes_member");
     assert_eq!(registration.source_name, "MAX_BYTES");
     assert_eq!(
         registration.automatic.to_string(),
         quote!(Self::max_bytes_member()).to_string()
     );
-    let syn::Stmt::Expr(member, None) = &factory.block.stmts[0] else {
-        panic!("expected the factory to return a Member");
-    };
+    let member: syn::Expr = syn::parse2(registration.member.clone()).unwrap();
     assert_eq!(
-        member_field(member, "name").to_token_stream().to_string(),
+        member_field(&member, "name").to_token_stream().to_string(),
         quote!("maxPayload".to_owned()).to_string()
     );
     assert_eq!(
-        member_field(member, "value").to_token_stream().to_string(),
+        member_field(&member, "value").to_token_stream().to_string(),
         quote!(jsg::ConstantValue::from(Self::MAX_BYTES)).to_string()
     );
+    let description = description(registration).unwrap();
+    assert_eq!(
+        member_field(&description, "name")
+            .to_token_stream()
+            .to_string(),
+        quote!("maxPayload").to_string()
+    );
+}
+
+/// The `jsg::rtti::Member` expression that a registration's factory describes its member with.
+fn description(registration: &MemberRegistration) -> Option<syn::Expr> {
+    registration
+        .description
+        .clone()
+        .map(|description| syn::parse2(description).unwrap())
+}
+
+#[test]
+fn factories_build_members_and_descriptions_separately() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn foo(&self) {}
+        }
+    };
+    let registrations = collect_method_registrations(&input);
+    let factory: syn::ImplItemFn = syn::parse2(registrations[0].factory()).unwrap();
+    assert_eq!(
+        factory.sig.output.to_token_stream().to_string(),
+        quote!(-> impl jsg::MemberDefinition).to_string()
+    );
+    let syn::Stmt::Expr(syn::Expr::Call(definition), None) = &factory.block.stmts[0] else {
+        panic!("expected a described member");
+    };
+    assert_eq!(
+        definition.func.to_token_stream().to_string(),
+        quote!(jsg::described_member).to_string()
+    );
+    assert_eq!(definition.args.len(), 2);
+}
+
+#[test]
+fn method_descriptions_skip_injected_parameters() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn with_this(this: jsg::Rc<Self>, lock: &mut jsg::Lock, value: u32) {}
+            #[jsg_method]
+            fn with_self(&self, lock: &mut jsg::Lock, value: u32) {}
+            #[jsg_method]
+            fn without_self(lock: &mut jsg::Lock, value: u32) {}
+        }
+    };
+    let registrations = collect_method_registrations(&input);
+    for (registration, is_static) in registrations.iter().zip([false, false, true]) {
+        let description = description(registration).unwrap();
+        assert_eq!(
+            member_field(&description, "is_static")
+                .to_token_stream()
+                .to_string(),
+            quote!(#is_static).to_string()
+        );
+        let syn::Expr::Macro(args) = member_field(&description, "args") else {
+            panic!("expected a vec! of parameters");
+        };
+        let args = args.mac.tokens.to_string();
+        assert!(args.contains("\"value\""), "{args}");
+        assert!(!args.contains("this") && !args.contains("lock"), "{args}");
+    }
+}
+
+/// The arms of the `match placement` in a property factory, by pattern.
+fn placement_arms(registration: MemberRegistration) -> Vec<(String, syn::Expr)> {
+    let factory: syn::ImplItemFn = syn::parse2(registration.factory()).unwrap();
+    assert_eq!(factory.sig.inputs.len(), 1);
+    let syn::Expr::Match(placement) = syn::parse2(registration.member).unwrap() else {
+        panic!("expected a placement-dependent factory");
+    };
+    placement
+        .arms
+        .iter()
+        .map(|arm| (arm.pat.to_token_stream().to_string(), (*arm.body).clone()))
+        .collect()
+}
+
+fn assert_member(
+    member: &syn::Expr,
+    member_type: &proc_macro2::TokenStream,
+    fields: &[(&str, proc_macro2::TokenStream)],
+) {
+    let syn::Expr::Struct(constructor) = member else {
+        panic!("expected a Member constructor");
+    };
+    assert_eq!(
+        constructor.path.to_token_stream().to_string(),
+        member_type.to_string()
+    );
+    assert_eq!(constructor.fields.len(), fields.len() + 1); // and `name`
+    for (field, expected) in fields {
+        assert_eq!(
+            member_field(member, field).to_token_stream().to_string(),
+            expected.to_string(),
+            "field `{field}`"
+        );
+    }
 }
 
 #[test]
@@ -334,77 +437,687 @@ fn property_factories_select_matching_getter_and_setter_callback_shapes() {
             kind,
             Some(parse_quote!(get_value)),
             Some(parse_quote!(set_value)),
+            false,
+            &quote!(jsg::rtti::Type::Number),
         )
         .unwrap();
         assert_eq!(
             registration.automatic.to_string(),
             quote!(Self::get_value_member(#automatic_placement)).to_string()
         );
-        let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
-        assert_eq!(factory.sig.inputs.len(), 1);
-        let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
-            panic!("expected a placement-dependent factory");
-        };
-        assert_eq!(placement.arms.len(), 2);
-        for (arm, pattern, member_type, getter, setter) in [
-            (
-                &placement.arms[0],
-                quote!(jsg::PropertyPlacement::Prototype),
-                quote!(jsg::Member::Property),
-                quote!(Self::get_value_callback()),
-                quote!(Some(Self::set_value_callback())),
-            ),
-            (
-                &placement.arms[1],
-                quote!(jsg::PropertyPlacement::Instance),
-                quote!(jsg::Member::InstanceProperty),
-                quote!(Self::get_value_instance_callback()),
-                quote!(Some(Self::set_value_instance_callback())),
-            ),
-        ] {
-            assert_eq!(arm.pat.to_token_stream().to_string(), pattern.to_string());
-            let syn::Expr::Struct(member) = arm.body.as_ref() else {
-                panic!("expected a Member constructor");
-            };
-            assert_eq!(
-                member.path.to_token_stream().to_string(),
-                member_type.to_string()
-            );
-            assert_eq!(
-                member_field(&arm.body, "getter_callback")
-                    .to_token_stream()
-                    .to_string(),
-                getter.to_string()
-            );
-            assert_eq!(
-                member_field(&arm.body, "setter_callback")
-                    .to_token_stream()
-                    .to_string(),
-                setter.to_string()
-            );
-        }
+        let arms = placement_arms(registration);
+        assert_eq!(arms.len(), 3);
+        assert_eq!(
+            arms[0].0,
+            quote!(jsg::PropertyPlacement::Prototype).to_string()
+        );
+        assert_member(
+            &arms[0].1,
+            &quote!(jsg::Member::Property),
+            &[
+                ("kind", quote!(jsg::PropertyKind::Prototype)),
+                ("getter_callback", quote!(Self::get_value_callback())),
+                ("setter_callback", quote!(Some(Self::set_value_callback()))),
+            ],
+        );
+        assert_eq!(
+            arms[1].0,
+            quote!(jsg::PropertyPlacement::Instance).to_string()
+        );
+        assert_member(
+            &arms[1].1,
+            &quote!(jsg::Member::InstanceProperty),
+            &[
+                (
+                    "getter_callback",
+                    quote!(Self::get_value_instance_callback()),
+                ),
+                (
+                    "setter_callback",
+                    quote!(Some(Self::set_value_instance_callback())),
+                ),
+            ],
+        );
+        // A setter cannot be lazy: the lazy arm registers a lazy-kind
+        // `Member::Property`, which template creation rejects.
+        assert_eq!(
+            arms[2].0,
+            quote!(jsg::PropertyPlacement::LazyInstance).to_string()
+        );
+        assert_member(
+            &arms[2].1,
+            &quote!(jsg::Member::Property),
+            &[
+                ("kind", quote!(jsg::PropertyKind::LazyInstance)),
+                ("getter_callback", quote!(Self::get_value_callback())),
+                ("setter_callback", quote!(Some(Self::set_value_callback()))),
+            ],
+        );
     }
 }
 
 #[test]
-fn readonly_property_factories_omit_setters_for_both_placements() {
+fn readonly_property_factories_omit_setters_for_every_placement() {
     let registration = emit_property_group(
         "value",
         PropertyKind::Prototype,
         Some(parse_quote!(get_value)),
         None,
+        false,
+        &quote!(jsg::rtti::Type::Number),
     )
     .unwrap();
-    let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
-    let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
-        panic!("expected a placement-dependent factory");
-    };
-    for arm in &placement.arms {
+    let arms = placement_arms(registration);
+    assert_eq!(arms.len(), 3);
+    for (_, member) in &arms[..2] {
         assert_eq!(
-            member_field(&arm.body, "setter_callback")
+            member_field(member, "setter_callback")
                 .to_token_stream()
                 .to_string(),
             quote!(None).to_string()
         );
     }
+    assert_member(
+        &arms[2].1,
+        &quote!(jsg::Member::LazyInstanceProperty),
+        &[
+            (
+                "getter_callback",
+                quote!(Self::get_value_instance_callback()),
+            ),
+            ("read_only", quote!(false)),
+        ],
+    );
+}
+
+#[test]
+fn lazy_instance_property_factory_is_writable_unless_readonly() {
+    for is_readonly in [false, true] {
+        let registration = emit_property_group(
+            "value",
+            PropertyKind::LazyInstance,
+            Some(parse_quote!(get_value)),
+            None,
+            is_readonly,
+            &quote!(jsg::rtti::Type::Number),
+        )
+        .unwrap();
+        assert_eq!(
+            registration.automatic.to_string(),
+            quote!(Self::get_value_member(jsg::PropertyPlacement::LazyInstance)).to_string()
+        );
+        let arms = placement_arms(registration);
+        assert_eq!(
+            arms[2].0,
+            quote!(jsg::PropertyPlacement::LazyInstance).to_string()
+        );
+        assert_member(
+            &arms[2].1,
+            &quote!(jsg::Member::LazyInstanceProperty),
+            &[
+                (
+                    "getter_callback",
+                    quote!(Self::get_value_instance_callback()),
+                ),
+                ("read_only", quote!(#is_readonly)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn parse_jsg_property_args_accepts_lazy_instance() {
+    let (kind, name, readonly) =
+        parse_jsg_property_args(quote!(lazy_instance, name = "v", readonly)).unwrap();
+    assert_eq!(kind, PropertyKind::LazyInstance);
+    assert_eq!(name.as_deref(), Some("v"));
+    assert!(readonly);
+}
+
+#[test]
+fn parse_jsg_property_args_rejects_conflicting_placements() {
+    for args in [
+        quote!(lazy_instance, instance),
+        quote!(prototype, lazy_instance),
+        quote!(instance, prototype),
+    ] {
+        let error = parse_jsg_property_args(args).unwrap_err().to_string();
+        assert!(
+            error.contains("conflicting placement: specify only one of"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn lazy_instance_property_with_setter_is_rejected() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_property(lazy_instance)]
+            fn get_value(&self) -> u32 { 0 }
+            #[jsg_property(lazy_instance)]
+            fn set_value(&self, v: u32) {}
+        }
+    };
+    let error = collect_property_registrations(&input)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        error.contains("a `lazy_instance` property cannot have a setter"),
+        "{error}"
+    );
+}
+
+fn parse_registration_mode(attr: proc_macro2::TokenStream) -> syn::Result<RegistrationMode> {
+    parse_impl_args(attr).map(|args| args.mode)
+}
+
+fn parse_nested_types(attr: proc_macro2::TokenStream) -> syn::Result<Vec<NestedTypeArg>> {
+    parse_impl_args(attr).map(|args| args.nested_types)
+}
+
+fn nested_type_names(attr: proc_macro2::TokenStream) -> Vec<(Option<String>, String)> {
+    parse_nested_types(attr)
+        .unwrap()
+        .iter()
+        .map(|arg| {
+            let ty = &arg.ty;
+            (
+                arg.name.as_ref().map(ToString::to_string),
+                quote! { #ty }.to_string().replace(' ', ""),
+            )
+        })
+        .collect()
+}
+
+fn nested_types_error(attr: proc_macro2::TokenStream) -> String {
+    parse_nested_types(attr).err().unwrap().to_string()
+}
+
+#[test]
+fn parse_nested_types_empty() {
+    assert!(nested_type_names(quote! {}).is_empty());
+    assert!(nested_type_names(quote! { nested_types() }).is_empty());
+}
+
+#[test]
+fn parse_nested_types_types_and_names() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo, Name = Bar, crate::a::Baz, Other = ::x::Y,) }),
+        [
+            (None, "Foo".to_owned()),
+            (Some("Name".to_owned()), "Bar".to_owned()),
+            (None, "crate::a::Baz".to_owned()),
+            (Some("Other".to_owned()), "::x::Y".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn parse_nested_types_repeated_list() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo), nested_types(Bar) }),
+        [(None, "Foo".to_owned()), (None, "Bar".to_owned())]
+    );
+}
+
+#[test]
+fn parse_nested_types_registers_unraw_name() {
+    let args = parse_nested_types(quote! { nested_types(r#type = Foo) }).unwrap();
+    let registration = nested_type_registration(&args[0]).to_string();
+    assert!(registration.contains("\"type\""), "{registration}");
+}
+
+#[test]
+fn parse_nested_types_rejects_other_arguments() {
+    for attr in [
+        quote! { name = "Foo" },
+        quote! { custom_trace },
+        quote! { nested(Foo) },
+    ] {
+        assert!(
+            nested_types_error(attr).contains("`nested_types(...)`"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn parse_nested_types_rejects_duplicates() {
+    assert_eq!(
+        nested_types_error(quote! { nested_types(Foo, a::Bar, a::Bar) }),
+        "duplicate nested type"
+    );
+    assert_eq!(
+        nested_types_error(quote! { nested_types(Name = Foo, r#Name = Bar) }),
+        "duplicate nested type name"
+    );
+}
+
+#[test]
+fn parse_nested_types_allows_type_under_several_names() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo, Name = Foo) }).len(),
+        2
+    );
+}
+
+#[test]
+fn struct_args_accept_the_struct_flags() {
+    assert!(validate_struct_args(quote! {}).is_none());
+    assert!(validate_struct_args(quote! { name = "Foo", custom_trace }).is_none());
+    assert!(validate_struct_args(quote! { memory_info, ts_root, name = "Foo" }).is_none());
+    assert!(validate_struct_args(quote! { custom_memory_info }).is_none());
+    assert!(
+        validate_struct_args(quote! { ts_override = "{ a(): void }", ts_define = "type A = 1;" })
+            .is_none()
+    );
+}
+
+#[test]
+fn struct_args_reject_impl_block_args() {
+    for attr in [quote! { nested_types(Foo) }, quote! { custom_members }] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(
+            err.contains("belongs on the #[jsg_resource] impl block"),
+            "{err}"
+        );
+    }
+}
+
+#[test]
+fn struct_args_reject_unknown_flags() {
+    for attr in [
+        quote! { memroy_info },
+        quote! { custom_trace, memroy_info },
+        quote! { name = Foo },
+        quote! { memory_info = true },
+        quote! { ts_root(yes) },
+    ] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(err.contains("expected `name = \"...\"`"), "{err}");
+    }
+}
+
+#[test]
+fn struct_args_reject_repeated_flags() {
+    for attr in [
+        quote! { memory_info, memory_info },
+        quote! { custom_trace, ts_root, custom_trace },
+        quote! { name = "Foo", name = "Bar" },
+    ] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(err.contains("can be given once"), "{err}");
+    }
+}
+
+#[test]
+fn nested_types_and_custom_members_together_are_rejected() {
+    for attr in [
+        quote! { custom_members, nested_types(Foo) },
+        quote! { nested_types(Foo), custom_members },
+    ] {
+        assert!(
+            nested_types_error(attr).starts_with("`nested_types(...)` cannot be combined"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn nested_types_are_registered_after_members() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn foo(&self) {}
+        }
+    };
+    let expanded = expand_resource_impl(quote! { nested_types(Bar) }, &input).to_string();
+    let method = expanded.find("Self :: foo_member ()").unwrap();
+    let nested = expanded.find("jsg :: nested_type :: < Bar >").unwrap();
+    assert!(method < nested, "{expanded}");
+}
+
+#[test]
+fn property_descriptions_follow_the_requested_placement() {
+    let ty = quote!(jsg::rtti::Type::Number);
+    for (setter, is_readonly, accessor_readonly, lazy_readonly) in [
+        (Some(parse_quote!(set_value)), false, false, false),
+        (None, false, true, false),
+        (None, true, true, true),
+    ] {
+        let registration = emit_property_group(
+            "value",
+            PropertyKind::Prototype,
+            Some(parse_quote!(get_value)),
+            setter,
+            is_readonly,
+            &ty,
+        )
+        .unwrap();
+        let description = description(&registration).unwrap();
+        assert_eq!(
+            member_field(&description, "ty")
+                .to_token_stream()
+                .to_string(),
+            ty.to_string()
+        );
+        assert_eq!(
+            member_field(&description, "prototype")
+                .to_token_stream()
+                .to_string(),
+            quote!(matches!(placement, jsg::PropertyPlacement::Prototype)).to_string()
+        );
+        let syn::Expr::Match(readonly) = member_field(&description, "readonly") else {
+            panic!("expected a placement-dependent `readonly`");
+        };
+        let arms: Vec<_> = readonly
+            .arms
+            .iter()
+            .map(|arm| arm.body.to_token_stream().to_string())
+            .collect();
+        assert_eq!(
+            arms,
+            [
+                quote!({ #accessor_readonly }).to_string(),
+                quote!(#lazy_readonly).to_string()
+            ]
+        );
+    }
+
+    let inspect = emit_property_group(
+        "value",
+        PropertyKind::Inspect,
+        Some(parse_quote!(get_value)),
+        None,
+        false,
+        &ty,
+    )
+    .unwrap();
+    assert!(inspect.description.is_none());
+}
+
+#[test]
+fn dispose_factories_register_undescribed_symbol_members() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_async_dispose]
+            fn close_async<'s>(&self, lock: &mut Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+                todo!()
+            }
+        }
+    };
+    let (registrations, errors) = collect_dispose_registrations(&input, RegistrationMode::Custom);
+    assert!(errors.is_empty());
+    let factories: Vec<_> = registrations
+        .iter()
+        .map(|r| {
+            (
+                r.factory_name.to_string(),
+                r.member.to_string(),
+                r.description.is_none(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        factories,
+        [
+            (
+                "close_dispose_member".to_owned(),
+                quote!(jsg::Member::Dispose {
+                    callback: Self::close_callback()
+                })
+                .to_string(),
+                true,
+            ),
+            (
+                "close_async_async_dispose_member".to_owned(),
+                quote!(jsg::Member::AsyncDispose {
+                    callback: Self::close_async_callback()
+                })
+                .to_string(),
+                true,
+            ),
+        ]
+    );
+
+    // A type registers one disposer of each kind automatically, and not a second of a kind.
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert!(errors.is_empty());
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_dispose]
+            fn close_again(&self) {}
+        }
+    };
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn callable_factory_registers_and_describes_the_callable_callback() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            fn call(&self, value: String) -> bool { true }
+        }
+    };
+    let (registrations, error) =
+        collect_callable_registrations(&input, RegistrationMode::Automatic);
+    assert!(error.is_none());
+    let [registration] = registrations.as_slice() else {
+        panic!("expected one registration");
+    };
+    assert_eq!(registration.factory_name, "call_callable_member");
+    let factory = registration.factory().to_string();
+    assert!(
+        factory
+            .contains("jsg :: Member :: Callable { callback : Self :: call_callable_callback () }"),
+        "{factory}"
+    );
+    assert!(
+        factory.contains("jsg :: rtti :: Member :: Callable"),
+        "{factory}"
+    );
+    let expanded = expand_resource_impl(quote!(), &input).to_string();
+    assert!(
+        expanded.contains("Self :: call_callable_member ()"),
+        "{expanded}"
+    );
+}
+
+// A method can be both a method and the callable, since their factories and callbacks differ.
+#[test]
+fn method_can_also_be_the_callable() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            #[jsg_method]
+            fn call(&self) {}
+        }
+    };
+    let expanded = expand_resource_impl(quote!(), &input);
+    let file: syn::File = syn::parse2(expanded.clone()).unwrap();
+    assert!(
+        !file
+            .items
+            .iter()
+            .any(|item| matches!(item, syn::Item::Macro(_))),
+        "{expanded}"
+    );
+    let expanded = expanded.to_string();
+    assert!(expanded.contains("Self :: call_member ()"), "{expanded}");
+    assert!(
+        expanded.contains("Self :: call_callable_member ()"),
+        "{expanded}"
+    );
+}
+
+#[test]
+fn second_callable_is_rejected_only_with_automatic_registration() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            fn first(&self) {}
+            #[jsg_callable]
+            fn second(&self) {}
+        }
+    };
+    let (registrations, error) =
+        collect_callable_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    let error = error.unwrap().to_string();
+    assert!(
+        error.contains("a resource type has at most one #[jsg_callable]"),
+        "{error}"
+    );
+    let (registrations, error) = collect_callable_registrations(&input, RegistrationMode::Custom);
+    assert_eq!(registrations.len(), 2);
+    assert!(error.is_none());
+}
+
+#[test]
+fn iterable_factory_registers_and_describes_the_iterator_method() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_iterable]
+            #[jsg_method]
+            fn entries_of(&self) -> jsg::Rc<Entries> { todo!() }
+        }
+    };
+    let (registrations, error) =
+        collect_iterable_registrations(&input, RegistrationMode::Automatic);
+    assert!(error.is_none());
+    let [registration] = registrations.as_slice() else {
+        panic!("expected one registration");
+    };
+    assert_eq!(registration.factory_name, "entries_of_iterable_member");
+    let factory = registration.factory().to_string();
+    assert!(
+        factory.contains(
+            "jsg :: Member :: Iterable { callback : Self :: entries_of_iterable_callback () }"
+        ),
+        "{factory}"
+    );
+    assert!(
+        factory.contains("jsg :: rtti :: Member :: Iterator { name : \"entriesOf\""),
+        "{factory}"
+    );
+    // The method is registered both ways.
+    let expanded = expand_resource_impl(quote!(), &input).to_string();
+    assert!(
+        expanded.contains("Self :: entries_of_member ()"),
+        "{expanded}"
+    );
+    assert!(
+        expanded.contains("Self :: entries_of_iterable_member ()"),
+        "{expanded}"
+    );
+}
+
+#[test]
+fn second_iterable_is_rejected_only_with_automatic_registration() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_iterable]
+            fn first(&self) {}
+            #[jsg_iterable]
+            fn second(&self) {}
+        }
+    };
+    let (registrations, error) =
+        collect_iterable_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    let error = error.unwrap().to_string();
+    assert!(
+        error.contains("a resource type has at most one #[jsg_iterable]"),
+        "{error}"
+    );
+    let (registrations, error) = collect_iterable_registrations(&input, RegistrationMode::Custom);
+    assert_eq!(registrations.len(), 2);
+    assert!(error.is_none());
+}
+
+fn parse_inherit_intrinsic(attr: proc_macro2::TokenStream) -> syn::Result<Option<String>> {
+    parse_impl_args(attr).map(|args| args.inherit_intrinsic.map(|variant| variant.to_string()))
+}
+
+fn inherit_intrinsic_error(attr: proc_macro2::TokenStream) -> String {
+    parse_inherit_intrinsic(attr).unwrap_err().to_string()
+}
+
+#[test]
+fn parse_inherit_intrinsic_accepts_a_variant() {
+    assert_eq!(parse_inherit_intrinsic(quote! {}).unwrap(), None);
+    assert_eq!(
+        parse_inherit_intrinsic(quote! { inherit_intrinsic = IteratorPrototype }).unwrap(),
+        Some("IteratorPrototype".to_owned())
+    );
+    assert_eq!(
+        parse_inherit_intrinsic(
+            quote! { nested_types(Foo), inherit_intrinsic = IteratorPrototype }
+        )
+        .unwrap(),
+        Some("IteratorPrototype".to_owned())
+    );
+}
+
+#[test]
+fn parse_inherit_intrinsic_rejects_invalid_values() {
+    assert!(
+        inherit_intrinsic_error(quote! { inherit_intrinsic = "IteratorPrototype" })
+            .starts_with("expected a `jsg::Intrinsic` variant"),
+    );
+    assert!(
+        inherit_intrinsic_error(quote! { inherit_intrinsic = jsg::Intrinsic::IteratorPrototype })
+            .starts_with("expected a `jsg::Intrinsic` variant without a path"),
+    );
+    assert!(
+        inherit_intrinsic_error(
+            quote! { inherit_intrinsic = IteratorPrototype, inherit_intrinsic = IteratorPrototype }
+        )
+        .starts_with("duplicate `inherit_intrinsic`"),
+    );
+    // Only the name-value form is recognized.
+    assert!(inherit_intrinsic_error(quote! { inherit_intrinsic }).starts_with("expected"));
+}
+
+#[test]
+fn inherit_intrinsic_and_custom_members_together_are_rejected() {
+    for attr in [
+        quote! { custom_members, inherit_intrinsic = IteratorPrototype },
+        quote! { inherit_intrinsic = IteratorPrototype, custom_members },
+    ] {
+        assert!(
+            inherit_intrinsic_error(attr).starts_with("`inherit_intrinsic` cannot be combined"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn inherit_intrinsic_is_registered() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn next(&self) {}
+        }
+    };
+    let expanded =
+        expand_resource_impl(quote! { inherit_intrinsic = IteratorPrototype }, &input).to_string();
+    assert!(
+        expanded.contains("registry . inherit_intrinsic (jsg :: Intrinsic :: IteratorPrototype)"),
+        "{expanded}"
+    );
+    assert!(expanded.contains("Self :: next_member ()"), "{expanded}");
 }

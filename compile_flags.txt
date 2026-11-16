@@ -27,7 +27,6 @@
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-brotli
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-gzip
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-http
--isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-tls
 -isystembazel-bin/src/rust/cxx/_virtual_includes/core/
 -isystembazel-bin/src/rust/cxx/kj-rs/_virtual_includes/kj-rs-lib/
 -isystemexternal/+http_archive+v8/include
@@ -136,4 +135,4 @@
 -Wunused-lambda-capture
 -Wunused-variable
 -no-canonical-prefixes
--fbracket-depth=512
+-fbracket-depth=1024

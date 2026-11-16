@@ -133,14 +133,6 @@ pub unsafe trait MaybeItem: Sized {
             Some(val) => <Self as MaybeItem>::some(val),
         }
     }
-    fn drop_in_place(value: &mut KjMaybe<Self>) {
-        if <Self as MaybeItem>::is_some(value) {
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-            unsafe {
-                value.some.assume_init_drop();
-            }
-        }
-    }
 }
 
 /// Macro to implement [`MaybeItem`] for `T` which implment [`HasNiche`].
@@ -396,7 +388,17 @@ pub(crate) mod repr {
 
     impl<T: MaybeItem> Drop for KjMaybe<T> {
         fn drop(&mut self) {
-            T::drop_in_place(self);
+            if self.is_some() {
+                // Safety: `is_some` says that `some` holds a value, and nothing reads it after
+                // this.
+                unsafe {
+                    self.some.assume_init_drop();
+                }
+            }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "maybe-test.rs"]
+mod tests;

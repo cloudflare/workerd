@@ -13,7 +13,7 @@ without this the C++ half of a Rust binary is dropped from the report.
 diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
 --- a/rust/private/rustc.bzl
 +++ b/rust/private/rustc.bzl
-@@ -2170,7 +2170,7 @@ def rustc_compile_action(
+@@ -2254,7 +2254,7 @@ def rustc_compile_action(
      executable = crate_info.output if crate_info.type == "bin" or crate_info.is_test else None
  
      instrumented_files_kwargs = {

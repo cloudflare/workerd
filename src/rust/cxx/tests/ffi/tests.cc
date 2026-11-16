@@ -739,6 +739,16 @@ void c_take_ref_rust_vec_index(const rust::Vec<uint8_t> &v) {
   }
 }
 
+ThrowingCopy::ThrowingCopy(const ThrowingCopy &other) : value(other.value) {
+  if (value == 0) {
+    throw std::runtime_error("copy failed");
+  }
+}
+
+void c_copy_assign_rust_vec(rust::Vec<ThrowingCopy> &dst, const rust::Vec<ThrowingCopy> &src) {
+  dst = src;
+}
+
 void c_take_ref_rust_vec_copy(const rust::Vec<uint8_t> &v) {
   // The std::copy() will make sure rust::Vec<>::const_iterator satisfies the
   // requirements for std::iterator_traits.
@@ -822,6 +832,13 @@ size_t c_fail_kj_exception_with_details_return_primitive() {
   // Add some test details - these will be type_id + data pairs
   ex.setDetail(42, kj::heapArray("test detail 1"_kjb));
   ex.setDetail(999, kj::heapArray("another detail"_kjb));
+  kj::throwException(kj::mv(ex));
+}
+
+size_t c_fail_kj_exception_with_empty_detail_return_primitive() {
+  auto ex = KJ_EXCEPTION(FAILED, "test exception with empty detail");
+  // An empty kj::Array has a null data pointer.
+  ex.setDetail(7, nullptr);
   kj::throwException(kj::mv(ex));
 }
 
@@ -1268,6 +1285,32 @@ extern "C" const char *cxx_run_test() noexcept {
   char expected[] = {static_cast<char>(195), static_cast<char>(191)};
   KJ_ASSERT(kj::arrayPtr(latin1.c_str(), latin1.length()) ==
             kj::arrayPtr(expected));
+  KJ_ASSERT(rust::String::latin1("", 0).empty());
+
+  {
+    std::string every_byte, want;
+    for (int b = 0; b <= 0xff; ++b) {
+      every_byte.push_back(static_cast<char>(b));
+      if (b < 0x80) {
+        want.push_back(static_cast<char>(b));
+      } else {
+        want.push_back(static_cast<char>(0xc0 | (b >> 6)));
+        want.push_back(static_cast<char>(0x80 | (b & 0x3f)));
+      }
+    }
+    rust::String converted =
+        rust::String::latin1(every_byte.data(), every_byte.size());
+    KJ_ASSERT(std::string(converted) == want);
+  }
+
+  // Non-ASCII bytes after ASCII prefixes around SIMD block sizes.
+  for (size_t prefix : {0, 1, 31, 32, 33, 64, 100}) {
+    std::string head(prefix, 'a'), tail(40, 'b');
+    std::string input = head + "\xe9z\xff" + tail;
+    std::string want = head + "\xc3\xa9z\xc3\xbf" + tail;
+    rust::String converted = rust::String::latin1(input.data(), input.size());
+    KJ_ASSERT(std::string(converted) == want, prefix);
+  }
 
   // Test Slice<T> explicit constructor from container
   {

@@ -1,0 +1,12 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+wd_bench(
+    src = "structured-clone.wd-bench",
+    data = ["structured-clone.js"],
+)
+
+wd_bench(
+    src = "cloneable-clone.wd-bench",
+    args = ["--experimental"],
+    data = ["cloneable-clone.js"],
+)

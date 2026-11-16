@@ -44,6 +44,7 @@ WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
+class Event;
 class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
@@ -61,6 +62,8 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
 
+class BaseTracer;
+class EmbedderBootstrap;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -75,6 +78,13 @@ class InputGate;
 class OutputGate;
 
 class StoredExternalHandler;
+
+// The number of non-hibernatable WebSockets a Durable Object instance has accepted and not yet
+// released. Refcounted because each WebSocket gives back its count from its own destructor, which
+// can run after the actor is destroyed.
+struct NonHibernatableWebSocketCount: public kj::Refcounted {
+  uint32_t count = 0;
+};
 
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
@@ -307,7 +317,6 @@ class Worker::Script: public kj::AtomicRefcounted {
       kj::StringPtr id,
       const Source& source,
       IsolateObserver::StartType startType,
-      bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan,
@@ -333,14 +342,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Determines whether a devtools inspector client can be attached.
   enum class InspectorPolicy {
     DISALLOW,
-    ALLOW_UNTRUSTED,
     ALLOW_FULLY_TRUSTED,
   };
 
   // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
-  // Usually it matches the script ID. An exception is preview isolates: there, each preview
-  // session has one isolate which may load many iterations of the script (this allows the
-  // inspector session to stay open across them).
+  // Usually it matches the script ID.
   // The Isolate object owns the Api object and outlives it in order to report teardown timing.
   // The Api object is created before the Isolate object and does not strictly require
   // request-specific information.
@@ -356,6 +362,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
+  // Get the Worker::Isolate of a V8 isolate that a Worker::Isolate created.
+  static const Isolate& from(v8::Isolate* isolate);
 
   // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
   // safe since we call it in a signal handler.
@@ -363,9 +371,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // We give a reference to the callback to the limit enforcer, so it has to outlive the limit
   // enforcer. The Isolate outlives the limit enforcer. If this function is called a second time, we
   // throw to avoid invalidating references.
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) const;
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
-  kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+  kj::Maybe<kj::Function<void()>> getCpuLimitNearlyExceededCallback() const;
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
   // At least one of signalOffset or terminatedOffset must be provided. The instance handle is
@@ -412,7 +420,6 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
       kj::Own<workerd::VirtualFileSystem> vfs,
-      bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
       // Must be provided if and only if the worker's compatibility flags
@@ -445,26 +452,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   uint getLockSuccessCount() const;
 
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  // Also adds a special JSON value to the header identified by `controlHeaderId`, for compatibility
-  // with internal Cloudflare systems.
   //
-  // This overload will dispatch all inspector messages on the _calling thread's_ `kj::Executor`.
-  // When linked against vanilla V8, this means that CPU profiling will only profile JavaScript
-  // running on the _calling thread_, which will most likely only be inspector console commands, and
-  // is not typically desired.
-  //
-  // For the above reason , this overload is currently only suitable for use by the internal Workers
-  // Runtime codebase, which patches V8 to profile whichever thread currently holds the `v8::Locker`
-  // for this Isolate.
-  kj::Promise<void> attachInspector(kj::Timer& timer,
-      kj::Duration timerOffset,
-      kj::HttpService::Response& response,
-      const kj::HttpHeaderTable& headerTable,
-      kj::HttpHeaderId controlHeaderId) const;
-
-  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  //
-  // This overload will dispatch all inspector messages on the `kj::Executor` passed in via
+  // All inspector messages are dispatched on the `kj::Executor` passed in via
   // `isolateThreadExecutor`. For CPU profiling to work as expected, this `kj::Executor` must be
   // associated with the same thread which executes the Worker's JavaScript.
   kj::Promise<void> attachInspector(kj::Own<const kj::Executor> isolateThreadExecutor,
@@ -478,6 +467,20 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // logWarningOnce() only logs the warning if it has not already been logged for this
   // worker instance.
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
+
+  // A line that a PREPARE_SNAPSHOT zygote's top-level code wrote to the console. Whether the
+  // zygote's run counts is known only once its snapshot is accepted, so under ConsoleMode::STDOUT
+  // the zygote's lines wait here instead of going to stdout/stderr: the owner flushes them when
+  // the snapshot is used, and drops them with the isolate when the Worker starts without one and
+  // evaluates the top level itself.
+  struct DeferredConsoleLine {
+    kj::String text;
+    bool toStderr;
+  };
+  void deferConsoleLine(DeferredConsoleLine line) const;
+
+  // Writes the deferred lines to stdout/stderr in order and clears them.
+  void flushDeferredConsoleOutput();
 
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
@@ -568,7 +571,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Own<AsyncTraceIsolate>> asyncTraceIsolate;
   kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
-  kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Maybe<kj::Function<void()>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Vector<DeferredConsoleLine>> deferredConsoleLines;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 
@@ -650,6 +654,21 @@ class Worker::Api {
     return nullptr;
   }
 
+  // Bootstrap scripts the embedder contributes to the per-isolate bootstrap, run after workerd's
+  // own in every context the bootstrap runs in. The result must outlive every such context. See
+  // EmbedderBootstrap in api/per-isolate-bootstrap.h.
+  virtual kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const {
+    return kj::none;
+  }
+
+  // Where V8 reads the source of the per-isolate bootstrap scripts from, if the embedder keeps
+  // it somewhere other than the compiled-in bundles; see jsg/module-source.h. The result must
+  // outlive every isolate. The embedder passes the same object when it registers its module
+  // bundles, so that every compiled-in source is served the same way.
+  virtual const jsg::ModuleSource* getModuleSource() const {
+    return nullptr;
+  }
+
   struct NewContextOptions {
     // If the worker is using the new module registry system, this is the registry to
     // install on the newly created context. If null, the old system is assumed.
@@ -697,6 +716,17 @@ class Worker::Api {
   // Only `workerd bench` delivers the bench event, so the default implementation throws.
   virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const;
+
+  // An event listener's callback (api::EventTarget::HandlerFunction).
+  using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
+
+  // Unwraps the callbacks of the top-level event listeners a Worker started from a startup
+  // snapshot re-registers. An Api without it (the default) keeps a zygote whose top level
+  // registered a global listener from producing a snapshot.
+  virtual kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&>
+  tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+    return kj::none;
+  }
 
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.
@@ -794,11 +824,13 @@ class Worker::Lock {
       const jsg::JsMessage& message = jsg::JsMessage(),
       kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
-  // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
+  // Logs a kj::Exception to the debug console only, leaving the trace to the caller, which can
+  // add the exception to it without holding the lock. `error` is how jsg::describeAsJsError()
+  // described the exception. If the exception has a serialized JS error attached as a detail, that
   // error may be extracted and used.
-  void logUncaughtException(UncaughtExceptionSource source,
+  void logUncaughtExceptionToConsole(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
+      const jsg::JsErrorDescription& error);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
@@ -842,6 +874,10 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
+
+  // The part of logUncaughtException() that reports to the debug console.
+  void logUncaughtExceptionToConsole(
+      UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message);
 
   Worker& worker;
   kj::Own<Impl> impl;
@@ -917,6 +953,8 @@ class Worker::Actor final: public kj::Refcounted {
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
   static bool idsEqual(const Id& a, const Id& b);
 
+  using HibernationReason = rpc::Trace::OnHibernateEventInfo::Reason;
+
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
   class Loopback {
@@ -927,6 +965,18 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
 
     virtual kj::Own<Loopback> addRef() = 0;
+
+    // Runs `actor`'s onHibernate handler by calling Worker::Actor::runOnHibernate() with the
+    // embedder's per-request objects. It lives here because, like hibernatable WebSocket events,
+    // the hook runs without an inbound request. `actor` is explicit because a Loopback can outlive
+    // its actor.
+    //
+    // Returns kj::none if the actor has no handler, or if the embedder doesn't deliver the hook
+    // through the Loopback.
+    virtual kj::Maybe<kj::Promise<void>> runOnHibernate(
+        Worker::Actor& actor, HibernationReason reason) {
+      return kj::none;
+    }
   };
 
   // The HibernationManager class manages HibernatableWebSockets created by an actor.
@@ -1063,6 +1113,32 @@ class Worker::Actor final: public kj::Refcounted {
   // support publicly).
   void ensureConstructed(IoContext&);
 
+  // Whether the actor's class instance has an onHibernate handler. Always false without the
+  // experimental compatibility flag. Reads state that requests modify, so only call it while the
+  // actor is idle.
+  bool hasOnHibernateHandler();
+
+  // Runs the actor's onHibernate handler, then waits for the storage writes it made to be flushed.
+  // Call it before a planned shutdown(), and only if hasOnHibernateHandler() returns
+  // true; skipping the call keeps the shutdown timing of actors without a handler unchanged.
+  //
+  // The handler runs on a lightweight IncomingRequest built from the given objects. This doesn't
+  // call addRef(), whose request tracking would cancel the shutdown that called it. When the
+  // handler finishes, or this call is canceled while it runs, any work it left behind is
+  // canceled, so no more JavaScript runs in the actor.
+  //
+  // abort() cancels this call. The outcome is reported to `observer` and to the ActorObserver,
+  // unless this call is canceled before the handler finishes. Failures of the handler itself don't
+  // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
+  // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
+  //
+  // `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's requests.
+  kj::Promise<void> runOnHibernate(HibernationReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
   // IoContext objects prolong the lifetime of their Actor.
@@ -1116,6 +1192,9 @@ class Worker::Actor final: public kj::Refcounted {
 
   ActorObserver& getMetrics();
 
+  // Counts the non-hibernatable WebSockets this actor has accepted, to enforce a limit on them.
+  kj::Rc<NonHibernatableWebSocketCount> getNonHibernatableWebSocketCount();
+
   InputGate& getInputGate();
   OutputGate& getOutputGate();
 
@@ -1161,6 +1240,9 @@ class Worker::Actor final: public kj::Refcounted {
     return *worker;
   }
 
+  // True if this actor is a facet rather than a root Durable Object.
+  bool isFacet();
+
   void assertCanSetAlarm();
 
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
@@ -1202,6 +1284,12 @@ class Worker::Actor final: public kj::Refcounted {
   friend class Worker;
 
   kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
+
+  kj::Promise<void> runOnHibernateImpl(HibernationReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 };
 
 WD_STRONG_BOOL(PopulateVersionInfoMetadata);

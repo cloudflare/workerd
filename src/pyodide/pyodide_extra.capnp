@@ -2,15 +2,6 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 
-struct PackageLock {
-  packageDate @0 :Text;
-  lock @1 :Text;
-}
-const packageLocks :List(PackageLock) = [
-  %PACKAGE_LOCKS
-];
-
-
 struct PythonSnapshotRelease @0x89c66fb883cb6975 {
   # Used to indicate a specific Python release that introduces a change which likely breaks
   # existing memory snapshots.

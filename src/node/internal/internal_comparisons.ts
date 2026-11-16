@@ -53,7 +53,12 @@ import {
   getOwnNonIndexProperties,
 } from 'node-internal:internal_utils';
 
-const kStrict = true;
+const kLoose = 0;
+const kStrict = 1;
+// Strict comparison that does not require both sides to share a prototype.
+const kStrictWithoutPrototypes = 2;
+type CompareMode =
+  typeof kLoose | typeof kStrict | typeof kStrictWithoutPrototypes;
 
 const kNoIterator = 0;
 const kIsArray = 1;
@@ -152,7 +157,7 @@ function areEqualBoxedPrimitives(val1: unknown, val2: unknown) {
 function innerDeepEqual(
   val1: unknown,
   val2: unknown,
-  strict: boolean,
+  strict: CompareMode,
   memos?: Memos
 ) {
   // All identical values are equivalent, as determined by ===.
@@ -171,7 +176,10 @@ function innerDeepEqual(
     if (typeof val2 !== 'object' || val1 === null || val2 === null) {
       return false;
     }
-    if (Object.getPrototypeOf(val1) !== Object.getPrototypeOf(val2)) {
+    if (
+      strict === kStrict &&
+      Object.getPrototypeOf(val1) !== Object.getPrototypeOf(val2)
+    ) {
       return false;
     }
   } else {
@@ -309,7 +317,7 @@ function getEnumerables(val: Object, keys: (string | symbol)[]) {
 function keyCheck(
   val1: Object,
   val2: Object,
-  strict: boolean,
+  strict: CompareMode,
   memos?: Memos,
   iterationType?: number,
   aKeys?: (string | symbol)[]
@@ -417,7 +425,7 @@ function keyCheck(
 function setHasEqualElement(
   set: Set<unknown>,
   val1: unknown,
-  strict: boolean,
+  strict: CompareMode,
   memo: Memos
 ) {
   // Go looking.
@@ -475,17 +483,17 @@ function mapMightHaveLoosePrim(
   const curB = b.get(altValue);
   if (
     (curB === undefined && !b.has(altValue)) ||
-    !innerDeepEqual(item, curB, false, memo)
+    !innerDeepEqual(item, curB, kLoose, memo)
   ) {
     return false;
   }
-  return !a.has(altValue) && innerDeepEqual(item, curB, false, memo);
+  return !a.has(altValue) && innerDeepEqual(item, curB, kLoose, memo);
 }
 
 function setEquiv(
   a: Set<unknown>,
   b: Set<unknown>,
-  strict: boolean,
+  strict: CompareMode,
   memo: Memos
 ) {
   // This is a lazily initiated Set of entries which have to be compared
@@ -544,7 +552,7 @@ function mapHasEqualEntry(
   map: Map<unknown, unknown>,
   key1: unknown,
   item1: unknown,
-  strict: boolean,
+  strict: CompareMode,
   memo: Memos
 ) {
   // To be able to handle cases like:
@@ -566,7 +574,7 @@ function mapHasEqualEntry(
 function mapEquiv(
   a: Map<unknown, unknown>,
   b: Map<unknown, unknown>,
-  strict: boolean,
+  strict: CompareMode,
   memo: Memos
 ) {
   let set = null;
@@ -603,8 +611,8 @@ function mapEquiv(
         if (!mapHasEqualEntry(set, a, key, item, strict, memo)) return false;
       } else if (
         !strict &&
-        (!a.has(key) || !innerDeepEqual(a.get(key), item, false, memo)) &&
-        !mapHasEqualEntry(set, a, key, item, false, memo)
+        (!a.has(key) || !innerDeepEqual(a.get(key), item, kLoose, memo)) &&
+        !mapHasEqualEntry(set, a, key, item, kLoose, memo)
       ) {
         return false;
       }
@@ -618,7 +626,7 @@ function mapEquiv(
 function objEquiv(
   a: Object,
   b: Object,
-  strict: boolean,
+  strict: CompareMode,
   keys: (string | symbol)[],
   memos: Memos,
   iterationType?: number
@@ -684,6 +692,18 @@ function objEquiv(
   return true;
 }
 
-export function isDeepStrictEqual(val1: unknown, val2: unknown) {
-  return innerDeepEqual(val1, val2, kStrict);
+export function isDeepEqual(val1: unknown, val2: unknown): boolean {
+  return innerDeepEqual(val1, val2, kLoose);
+}
+
+export function isDeepStrictEqual(
+  val1: unknown,
+  val2: unknown,
+  skipPrototype = false
+): boolean {
+  return innerDeepEqual(
+    val1,
+    val2,
+    skipPrototype ? kStrictWithoutPrototypes : kStrict
+  );
 }

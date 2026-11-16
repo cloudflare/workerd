@@ -150,7 +150,7 @@ class ZlibContext final {
 
   CompressionError constructError(kj::StringPtr message) const {
     auto streamMsg = core.msg();
-    if (streamMsg != nullptr) message = streamMsg;
+    if (streamMsg != nullptr) message = kj::mv(streamMsg);
 
     return {kj::str(message), kj::str(ZlibStream::errorCodeName(err)), err};
   };
@@ -183,6 +183,9 @@ class ZlibUtil final: public jsg::Object {
  public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {

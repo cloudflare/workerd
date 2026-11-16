@@ -28,8 +28,16 @@ class ColoLocalActorNamespace: public jsg::Object {
 
   jsg::Ref<Fetcher> get(jsg::Lock& js, kj::String actorId);
 
+  // A binding transfers through a startup snapshot as its channel number.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
     JSG_METHOD(get);
+  }
+
+ protected:
+  uint getChannel() const {
+    return channel;
   }
 
  private:
@@ -66,6 +74,10 @@ class DurableObjectId: public jsg::Object {
     return id->getJurisdiction();
   }
 
+  // An ID made at a Worker's top level (idFromName() and friends need no IoContext) transfers
+  // through a startup snapshot; the ActorId is plain data.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
     JSG_METHOD(equals);
@@ -99,6 +111,9 @@ class DurableObject final: public Fetcher {
   jsg::Optional<kj::StringPtr> getName() {
     return id->getName();
   }
+
+  // A stub is minted per request around an IoOwn: never transferred through a startup snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(DurableObject) {
     JSG_INHERIT(Fetcher);
@@ -245,33 +260,8 @@ class DurableObjectNamespace: public jsg::Object {
     };
     jsg::Optional<VersionOptions> version;
 
-    JSG_STRUCT(locationHint, routingMode, version);
-
-    // DurableObjectLocationHint values from https://developers.cloudflare.com/durable-objects/reference/data-location/#provide-a-location-hint
-    JSG_STRUCT_TS_DEFINE(
-      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "apac-ne" | "apac-se" | "oc" | "afr" | "me";
-      type DurableObjectRoutingMode = "primary-only");
-
-    JSG_STRUCT_TS_OVERRIDE({
-      locationHint?: DurableObjectLocationHint;
-      routingMode?: DurableObjectRoutingMode;
-      version: never;
-    });
-  };
-
-  // The options of get(), getByName() and getExisting() for workers with the `experimental`
-  // compatibility flag, which see `retry` in addition to GetDurableObjectOptions. Other workers
-  // get a GetDurableObjectOptions, which never reads a `retry` property, so a getter there is
-  // never invoked. Only one of the two structs appears in a worker's types, so each defines the
-  // helper types, and this one takes the name the method overrides below refer to.
-  struct GetDurableObjectOptionsWithRetry {
-    jsg::Optional<kj::String> locationHint;
-    jsg::Optional<kj::String> routingMode;
-    jsg::Optional<GetDurableObjectOptions::VersionOptions> version;
-
     // Limits on how the runtime retries calls through the returned stub. Omitted fields use the
-    // runtime's defaults. Always validated, but applied only while DURABLE_OBJECT_RETRIES_USERLAND
-    // is on.
+    // runtime's defaults.
     //
     // The fields are non-coercible doubles so that the conversion can reject fractions and
     // out-of-range values itself, and non-numbers such as null throw instead of becoming 0.
@@ -290,61 +280,61 @@ class DurableObjectNamespace: public jsg::Object {
 
     JSG_STRUCT(locationHint, routingMode, version, retry);
 
+    // DurableObjectLocationHint values from https://developers.cloudflare.com/durable-objects/reference/data-location/#provide-a-location-hint
     JSG_STRUCT_TS_DEFINE(
       type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "apac-ne" | "apac-se" | "oc" | "afr" | "me";
       type DurableObjectRoutingMode = "primary-only");
 
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectNamespaceGetDurableObjectOptions {
-      locationHint?: DurableObjectLocationHint;
-      routingMode?: DurableObjectRoutingMode;
-      version?: { cohort?: string };
-      retry?: DurableObjectRetryOptions;
-    });
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version?: { cohort?: string };
+          retry?: DurableObjectRetryOptions;
+        });
+      } else {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version: never;
+          retry?: DurableObjectRetryOptions;
+        });
+      }
+    }
   };
 
   // Gets a durable object by ID or creates it if it doesn't already exist.
   jsg::Ref<DurableObject> get(
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
-  jsg::Ref<DurableObject> getWithRetry(jsg::Lock& js,
-      jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptionsWithRetry> options);
 
   // Gets a durable object by name or creates it if it doesn't already exist.
   //
   // Short for `idFromName()` followed by `get()`.
   jsg::Ref<DurableObject> getByName(
       jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptions> options);
-  jsg::Ref<DurableObject> getByNameWithRetry(
-      jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptionsWithRetry> options);
 
   // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
   // by cloudflare only.
   jsg::Ref<DurableObject> getExisting(
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
-  jsg::Ref<DurableObject> getExistingWithRetry(jsg::Lock& js,
-      jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptionsWithRetry> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
   jsg::Ref<DurableObjectNamespace> jurisdiction(
       jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction);
 
+  // A binding transfers through a startup snapshot as its channel number and a copy of its ID
+  // factory. A namespace built around a live factory belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD_NAMED(get, getWithRetry);
-      JSG_METHOD_NAMED(getByName, getByNameWithRetry);
-      if (flags.getDurableObjectGetExisting()) {
-        JSG_METHOD_NAMED(getExisting, getExistingWithRetry);
-      }
-    } else {
-      JSG_METHOD(get);
-      JSG_METHOD(getByName);
-      if (flags.getDurableObjectGetExisting()) {
-        JSG_METHOD(getExisting);
-      }
+    JSG_METHOD(get);
+    JSG_METHOD(getByName);
+    if (flags.getDurableObjectGetExisting()) {
+      JSG_METHOD(getExisting);
     }
     JSG_METHOD(jurisdiction);
 
@@ -365,7 +355,22 @@ class DurableObjectNamespace: public jsg::Object {
     }
   }
 
- private:
+ protected:
+  // What snapshotClone() copies of a namespace bound to a channel number, for subclasses to build
+  // their own copies from. None for a namespace built around a live factory.
+  struct SnapshotCopy {
+    uint channel;
+    kj::Own<ActorIdFactory> idFactory;
+  };
+  kj::Maybe<SnapshotCopy> copyForSnapshot() const {
+    KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+      KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
+        return SnapshotCopy{.channel = channelNumber, .idFactory = kj::mv(factory)};
+      }
+    }
+    return kj::none;
+  }
+
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
   ActorCallRetriesAllowed actorCallRetriesAllowed;
@@ -373,15 +378,11 @@ class DurableObjectNamespace: public jsg::Object {
   // See doc comment on the constructor.
   Persistent persistent;
 
+ private:
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options,
-      kj::Maybe<UserDefinedRetryPolicy> retryPolicy);
-  jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
-      ActorGetMode mode,
-      jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptionsWithRetry> options);
+      jsg::Optional<GetDurableObjectOptions> options);
 };
 
 class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
@@ -515,6 +516,10 @@ class DurableObjectClass: public jsg::Object {
 
   kj::Rc<IoChannelFactory::ActorClassChannel> getChannel(IoContext& ioctx);
 
+  // A binding transfers through a startup snapshot as its channel number. A class carried as a
+  // capability belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()
 
@@ -540,7 +545,6 @@ class DurableObjectClass: public jsg::Object {
       api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
       api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass,               \
       api::DurableObjectNamespace::GetDurableObjectOptions::VersionOptions,                        \
-      api::DurableObjectNamespace::GetDurableObjectOptionsWithRetry,                               \
-      api::DurableObjectNamespace::GetDurableObjectOptionsWithRetry::RetryOptions
+      api::DurableObjectNamespace::GetDurableObjectOptions::RetryOptions
 
 }  // namespace workerd::api

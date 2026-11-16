@@ -4,7 +4,7 @@
 
 #pragma once
 
-// V8 code caches for worker-supplied code, kept in a store that the embedder provides.
+// V8 code caches for JavaScript, kept in a store that the embedder provides.
 //
 // V8 validates a code cache only against its own version, its flags, its read-only snapshot and
 // the source length; it does not check the source content (see the warning on
@@ -19,6 +19,7 @@
 #include <v8-script.h>
 
 #include <kj/array.h>
+#include <kj/function.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -30,8 +31,8 @@ namespace workerd::jsg {
 // source text, the way it is compiled and process-wide V8 state (version and flags), so the key is
 // independent of the name a module or script is compiled under.
 struct CodeCacheKey {
-  // How the UTF-8 source is turned into a V8 string and compiled. Units are distinct because their
-  // UTF-8 decoders may treat invalid input differently.
+  // How the source is turned into a V8 string and compiled. Distinct encodings and compilation
+  // shapes must not share an entry, even when their source bytes are identical.
   enum class Unit : uint8_t {
     // ScriptCompiler::CompileModule of the source as decoded by v8::String::NewFromUtf8 (the
     // legacy module registry).
@@ -41,12 +42,18 @@ struct CodeCacheKey {
     // ScriptCompiler::CompileUnboundScript of the source as decoded by
     // v8::String::NewFromUtf8 (a service-worker syntax main script).
     CLASSIC_SCRIPT = 3,
+    // CompileModule of external Latin-1 or UTF-16 source, in either module registry.
+    ONE_BYTE_ESM = 4,
+    TWO_BYTE_ESM = 5,
+    // CompileFunction of UTF-8 source, with no parameters and zero or one context extension.
+    FUNCTION = 6,
+    FUNCTION_WITH_CONTEXT = 7,
   };
 
   kj::FixedArray<kj::byte, 32> sourceSha256;
   Unit unit;
 
-  static CodeCacheKey compute(Unit unit, kj::ArrayPtr<const char> utf8Source);
+  static CodeCacheKey compute(Unit unit, kj::ArrayPtr<const char> source);
 
   bool operator==(const CodeCacheKey& other) const;
   kj::uint hashCode() const;
@@ -137,20 +144,21 @@ class IsolateCodeCache {
   // vouch for. Their prepared lookups are kept.
   void forgetPreparedSources();
 
-  // Compiles a module, consuming the store's cache for `key` if it has one. `origin` must have
-  // `is_module` set.
-  v8::MaybeLocal<v8::Module> compileModule(v8::Isolate* isolate,
-      const CodeCacheKey& key,
-      v8::Local<v8::String> source,
-      const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer);
+  template <typename T>
+  using CompileCallback = kj::FunctionParam<v8::MaybeLocal<T>(
+      v8::ScriptCompiler::Source*, v8::ScriptCompiler::CompileOptions)>;
 
-  // Compiles a classic script, consuming the store's cache for `key` if it has one.
-  v8::MaybeLocal<v8::UnboundScript> compileScript(v8::Isolate* isolate,
+  // Selects the store's bytecode and invokes the V8 operation on both hits and misses. The
+  // callback consumes cached data through V8's compile API; a miss may retain its result for
+  // deferred serialization. T is Module, UnboundScript or Function. The key must identify the
+  // exact source and compilation shape used by the callback.
+  template <typename T>
+  v8::MaybeLocal<T> compile(v8::Isolate* isolate,
       const CodeCacheKey& key,
       v8::Local<v8::String> source,
       const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer);
+      const CompilationObserver& observer,
+      CompileCallback<T> compileWithOptions);
 
   // Opens a production window: until it is closed, a miss may elect this isolate to produce the
   // cache, which produceDeferred() then does. The window must not be open already.
@@ -165,7 +173,8 @@ class IsolateCodeCache {
   void discardDeferred();
 
  private:
-  using Compiled = kj::OneOf<v8::Global<v8::Module>, v8::Global<v8::UnboundScript>>;
+  using Compiled =
+      kj::OneOf<v8::Global<v8::Module>, v8::Global<v8::UnboundScript>, v8::Global<v8::Function>>;
 
   struct Pending {
     kj::Own<CodeCacheStore::Producer> producer;
@@ -177,14 +186,6 @@ class IsolateCodeCache {
     size_t size;
     CodeCacheKey key;
   };
-
-  template <typename T, typename Compile>
-  v8::MaybeLocal<T> compile(v8::Isolate* isolate,
-      const CodeCacheKey& key,
-      v8::Local<v8::String> source,
-      const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer,
-      Compile&& compileWithOptions);
 
   static void produce(v8::Isolate* isolate,
       CodeCacheStore::Producer& producer,

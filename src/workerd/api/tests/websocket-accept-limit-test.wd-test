@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "websocket-accept-limit-test", worker = .testWorker),
+  ],
+);
+
+const testWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "websocket-accept-limit-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "WebSocketLimitObject", uniqueKey = "websocket-accept-limit-test-object"),
+    (className = "WebSocketServerObject", uniqueKey = "websocket-accept-limit-test-server"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  globalOutbound = (name = "websocket-accept-limit-test", entrypoint = "webSocketServer"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "WebSocketLimitObject"),
+    (name = "server", durableObjectNamespace = "WebSocketServerObject"),
+  ],
+);

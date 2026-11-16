@@ -80,7 +80,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 exports_files(["library/Cargo.toml"])
-""",
+""",{patches}
     sha256 = "{sha256}",
     strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
     type = "tar.xz",
@@ -575,6 +575,9 @@ def gen_rust_nightly(repo):
         date=date,
         url=rust_src["xz_url"],
         sha256=rust_src["xz_hash"],
+        patches=format_attr_list(
+            {"patch_strip": 1, "patches": repo["patches"]} if "patches" in repo else {}
+        ),
     )
 
 

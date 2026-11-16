@@ -127,16 +127,26 @@ function nextClose(ws) {
 }
 
 // DO with an alarm for verifying deleteAllDurableObjects() cancels alarms.
-let alarmTriggers = 0;
+// The IDs of the objects whose alarms fired.
+const alarmsFired = new Set();
 export class AlarmObject extends DurableObject {
+  #fired = null;
   get scheduledTime() {
     return this.ctx.storage.getAlarm();
   }
-  async scheduleIn(delay) {
-    await this.ctx.storage.setAlarm(Date.now() + delay);
+  async scheduleAt(time) {
+    await this.ctx.storage.setAlarm(time);
+  }
+  // Answers once the alarm has fired.
+  async fireAt(time) {
+    const { promise, resolve } = Promise.withResolvers();
+    this.#fired = resolve;
+    await this.ctx.storage.setAlarm(time);
+    await promise;
   }
   alarm() {
-    alarmTriggers++;
+    alarmsFired.add(this.ctx.id.toString());
+    this.#fired?.();
   }
 }
 
@@ -233,17 +243,31 @@ export const test_delete_all_durable_objects = {
 
 export const test_delete_all_durable_objects_alarms = {
   async test(ctrl, env, ctx) {
-    const id = env.ALARM.newUniqueId();
-    const stub = env.ALARM.get(id);
+    // An alarm that fired before the deletion proves nothing, so a machine
+    // too slow to delete within `delay` tries again with a longer one.
+    for (let delay = 500; ; delay *= 2) {
+      const id = env.ALARM.newUniqueId();
+      const time = Date.now() + delay;
+      await env.ALARM.get(id).scheduleAt(time);
 
-    const alarmsBefore = alarmTriggers;
-    await stub.scheduleIn(500);
-    assert.notStrictEqual(await stub.scheduledTime, null);
+      // Delete everything — alarms should be cancelled and not fire. The
+      // deletion is done when the call returns, so an alarm that has fired
+      // by then fired before it.
+      const deleted = unsafe.deleteAllDurableObjects();
+      const firedBefore = alarmsFired.has(id.toString());
+      await deleted;
+      if (firedBefore) {
+        assert.ok(delay < 8000, `no alarm of ${delay} ms outlasted deletion`);
+        continue;
+      }
+      assert.strictEqual(await env.ALARM.get(id).scheduledTime, null);
 
-    // Delete everything — alarms should be cancelled and not fire.
-    await unsafe.deleteAllDurableObjects();
-    await scheduler.wait(1000);
-    assert.strictEqual(alarmTriggers, alarmsBefore); // alarm did not fire
+      // The deleted alarm would have fired before another object's alarm
+      // set a second after it.
+      await env.ALARM.get(env.ALARM.newUniqueId()).fireAt(time + 1000);
+      assert.ok(!alarmsFired.has(id.toString()), 'the deleted alarm fired');
+      return;
+    }
   },
 };
 

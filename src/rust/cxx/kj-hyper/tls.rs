@@ -369,15 +369,15 @@ fn directly_trusted(end_entity: &CertificateDer<'_>, now: UnixTime) -> Result<()
 
     let cert = x509_cert::Certificate::from_der(end_entity)
         .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
-    let tbs = &cert.tbs_certificate;
+    let tbs = &cert.tbs_certificate();
     let now = now.as_secs();
-    if now < tbs.validity.not_before.to_unix_duration().as_secs() {
+    if now < tbs.validity().not_before.to_unix_duration().as_secs() {
         return Err(CertificateError::NotValidYet.into());
     }
-    if now > tbs.validity.not_after.to_unix_duration().as_secs() {
+    if now > tbs.validity().not_after.to_unix_duration().as_secs() {
         return Err(CertificateError::Expired.into());
     }
-    for extension in tbs.extensions.iter().flatten() {
+    for extension in tbs.extensions().into_iter().flatten() {
         let value = extension.extn_value.as_bytes();
         let permitted = if extension.extn_id == rfc5280::ID_CE_EXT_KEY_USAGE {
             let usages = ExtendedKeyUsage::from_der(value)

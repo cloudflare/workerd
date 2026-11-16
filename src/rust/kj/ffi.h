@@ -8,6 +8,7 @@
 #include <rust/cxx.h>
 
 #include <kj/compat/http.h>
+#include <kj/debug.h>
 
 namespace kj::rust {
 
@@ -99,8 +100,9 @@ inline kj::HttpHeaderId toHeaderId(BuiltinIndicesEnum id) {
       return kj::HttpHeaderId::RANGE;
     case kj::HttpHeaders::BuiltinIndicesEnum::CONTENT_RANGE:
       return kj::HttpHeaderId::CONTENT_RANGE;
-      break;
   }
+  // Rust can hold any integer in the enum, so this is reachable.
+  KJ_FAIL_REQUIRE("not a builtin header id", static_cast<uint>(id));
 }
 
 inline void set_header(HttpHeaders& headers, BuiltinIndicesEnum id, ::rust::Str value) {

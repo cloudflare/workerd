@@ -3,14 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
-#include "requirements.h"
-
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/strings.h>
 
-#include <openssl/sha.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
 #include <capnp/dynamic.h>
@@ -19,7 +16,6 @@
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
 #include <kj/debug.h>
-#include <kj/encoding.h>
 #include <kj/string.h>
 
 namespace workerd::api::pyodide {
@@ -69,6 +65,20 @@ static uint32_t readToTarget(
 
 uint32_t ReadOnlyBuffer::read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
+}
+
+uint32_t ReadOnlyBuffer::getSize() {
+  return source.size();
+}
+
+jsg::Ref<ReadOnlyBuffer> ReadOnlyBuffer::fromBundleDataModule(
+    jsg::Lock& js, jsg::Bundle::Reader bundle, kj::StringPtr name) {
+  for (auto module: bundle.getModules()) {
+    if (module.which() == jsg::Module::DATA && module.getName() == name) {
+      return js.alloc<ReadOnlyBuffer>(module.getData().asBytes());
+    }
+  }
+  KJ_FAIL_REQUIRE("Pyodide bundle has no data module with the expected name", name);
 }
 
 kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
@@ -218,8 +228,6 @@ PyodideMetadataReader::State::State(const State& other)
     : mainModule(kj::str(other.mainModule)),
       moduleInfo(other.moduleInfo.clone()),
       pyodideVersion(kj::str(other.pyodideVersion)),
-      packagesVersion(kj::str(other.packagesVersion)),
-      packagesLock(kj::str(other.packagesLock)),
       isWorkerdFlag(other.isWorkerdFlag),
       isTracingFlag(other.isTracingFlag),
       snapshotToDisk(other.snapshotToDisk),
@@ -254,23 +262,6 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
           kj::str("Python module python_modules/", mainModuleBase, ".so clashes with main module"));
     }
   }
-}
-
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) {
-  for (auto pkgLock: *PACKAGE_LOCKS) {
-    if (pkgLock.getPackageDate() == pythonSnapshotRelease.getPackages()) {
-      return kj::str(pkgLock.getLock());
-    }
-  }
-
-  // From Pyodide 314 on, we don't use packages inside the lockfile.
-  // All packages used by the worker should come from PyPI and be bundled inside the worker.
-  // To avoid breaking existing workers, we return an empty lockfile if no packages are found.
-  if (pythonSnapshotRelease.getPackages().size() == 0) {
-    return kj::str("{\"packages\":{}}");
-  }
-
-  return kj::none;
 }
 
 const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
@@ -318,27 +309,6 @@ void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> d
   } else {
     return;
   }
-}
-
-kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes) {
-  kj::byte hash[SHA256_DIGEST_LENGTH]{};
-  SHA256(bytes.begin(), bytes.size(), hash);
-  return kj::str("sha256-", kj::encodeBase64(kj::arrayPtr(hash, SHA256_DIGEST_LENGTH)));
-}
-
-void verifyPyodideBundleIntegrity(
-    kj::StringPtr version, kj::StringPtr expectedIntegrity, kj::ArrayPtr<const kj::byte> bytes) {
-  // The "dev" bundle is built locally from the current tree and has no published checksum.
-  if (version == "dev") {
-    return;
-  }
-  // Every released bundle must have a published checksum; refuse to use one without it.
-  KJ_REQUIRE(expectedIntegrity != nullptr && expectedIntegrity.size() > 0,
-      "Pyodide bundle is missing an integrity checksum; refusing to use it.", version);
-  auto actualIntegrity = computePyodideBundleIntegrity(bytes);
-  KJ_REQUIRE(actualIntegrity == expectedIntegrity,
-      "Pyodide bundle integrity check failed: the bundle does not match the expected checksum.",
-      version, expectedIntegrity, actualIntegrity);
 }
 
 }  // namespace workerd::api::pyodide

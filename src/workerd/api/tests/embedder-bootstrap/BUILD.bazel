@@ -1,0 +1,11 @@
+load("@workerd//:build/wd_ts_script_bundle.bzl", "wd_ts_script_bundle")
+
+# A stand-in for an embedder's per-isolate bootstrap scripts, run by
+# //src/workerd/api:per-isolate-embedder-bootstrap-test.
+wd_ts_script_bundle(
+    name = "embedder_bootstrap_test",
+    embedder_prefix = "test-embedder/",
+    schema_id = "0xc4b1e5a3f2d79e61",
+    scripts = glob(["**/*.ts"]),
+    tsconfig_json = "tsconfig.json",
+)

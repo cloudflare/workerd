@@ -125,6 +125,41 @@ export const contentFromReadableStream = {
   },
 };
 
+// String chunks, in the transformed body and in streamed replacement
+// content, are read as their UTF-8 encoding beside the byte chunks
+// around them (parity).
+export const stringChunksAreUtf8 = {
+  async test() {
+    const mixed = (first, second) =>
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(first));
+          c.enqueue(second);
+          c.close();
+        },
+      });
+
+    strictEqual(
+      await new HTMLRewriter()
+        .transform(new Response(mixed('<p>caf', '\u00e9</p>')))
+        .text(),
+      '<p>caf\u00e9</p>'
+    );
+
+    strictEqual(
+      await new HTMLRewriter()
+        .on('div', {
+          element(element) {
+            element.replace(mixed('<b>new', '</b>'), { html: true });
+          },
+        })
+        .transform(new Response('<div>old</div>'))
+        .text(),
+      '<b>new</b>'
+    );
+  },
+};
+
 // An IdentityTransformStream body fed by a concurrent writer.
 export const identityStreamBody = {
   async test() {

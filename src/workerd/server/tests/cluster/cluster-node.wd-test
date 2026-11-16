@@ -1,0 +1,36 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# A node whose application is a deployment in the bucket (cluster-deployment.wd-test): its own
+# config holds only what is the node's, its disk, its socket and the cluster block. The socket
+# serves "main", which the deployment defines. The disk is named `do-storage`, where
+# `workerd deploy` stores a wrangler project's Durable Objects.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "do-storage",
+      disk = (
+        writable = true,
+        allowDotfiles = true,
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "main" ),
+  ],
+
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = [
+      "aws_region=us-east-1",
+      "aws_access_key_id=wdtest",
+      "aws_secret_access_key=wdtest-secret",
+    ],
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+  ),
+);

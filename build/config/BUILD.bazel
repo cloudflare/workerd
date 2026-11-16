@@ -12,6 +12,19 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# Whether the container tests get their images (see //images/container-client-test:images.bzl).
+bool_flag(
+    name = "container_test_images",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "container_test_images_enabled",
+    flag_values = {":container_test_images": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # V8 flags to pass to gen-compile-cache when producing the compile caches
 # embedded in the builtin bundles (//src/node, //src/per_isolate, ...).
 # Must match the flags used by the consumer when compiling, otherwise flag
@@ -20,4 +33,33 @@ repeatable_string_flag(
     name = "compile_cache_v8_flags",
     build_setting_default = [],
     visibility = ["//visibility:public"],
+)
+
+# The remote executor of the build, if it has larger runners for the links of select binaries (see
+# link_exec_properties in //build/bazelflare:exec_properties.bzl).
+string_flag(
+    name = "link_executor",
+    build_setting_default = "",
+    values = [
+        "",
+        "bazelflare",
+        "bazelflare-internal",
+        "internal-rbe",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "link_on_bazelflare",
+    flag_values = {":link_executor": "bazelflare"},
+)
+
+config_setting(
+    name = "link_on_bazelflare_internal",
+    flag_values = {":link_executor": "bazelflare-internal"},
+)
+
+config_setting(
+    name = "link_on_rbe_ci",
+    flag_values = {":link_executor": "internal-rbe"},
 )

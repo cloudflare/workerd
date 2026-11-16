@@ -1,0 +1,56 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# A node serves its own "router" worker (cluster-router.js) beside the bucket's deployments.
+# "router" binds "main" from a usable deployment (cluster-deployment.wd-test), "throws" and
+# "broken-do" from deployments with a broken service, "clashing" from a deployment skipped during
+# composition (cluster-broken-deployments.wd-test), and "nowhere", which nothing defines. Its tails
+# and its accessBindingService refer to services that cannot run.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "do-storage",
+      disk = (
+        writable = true,
+        allowDotfiles = true,
+      )
+    ),
+
+    ( name = "router",
+      worker = (
+        modules = [
+          ( name = "cluster-router.js", esModule = embed "cluster-router.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        bindings = [
+          ( name = "MAIN", service = "main" ),
+          ( name = "THROWS", service = "throws" ),
+          ( name = "SKIPPED", service = "clashing" ),
+          ( name = "UNKNOWN", service = "nowhere" ),
+          ( name = "BROKEN_DO",
+            durableObjectNamespace = ( className = "Counter", serviceName = "broken-do" ) ),
+        ],
+        tails = ["throws", "clashing", "nowhere"],
+        accessBindingService = ( name = "main", entrypoint = "Nope" ),
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "router" ),
+  ],
+
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = [
+      "aws_region=us-east-1",
+      "aws_access_key_id=wdtest",
+      "aws_secret_access_key=wdtest-secret",
+    ],
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+  ),
+);

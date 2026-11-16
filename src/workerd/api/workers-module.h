@@ -74,10 +74,13 @@ class WorkflowEntrypoint: public jsg::Object {
 
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
 // for extending.
-class EntrypointsModule: public jsg::Object {
+class EntrypointsModule final: public jsg::Object {
  public:
   EntrypointsModule() = default;
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -101,7 +104,7 @@ class EntrypointsModule: public jsg::Object {
   void retryable(jsg::Lock& js, jsg::Arguments<jsg::Value> methods);
 
   jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
-  jsg::JsSymbol getOnEvictSymbol(jsg::Lock& js);
+  jsg::JsSymbol getOnHibernateSymbol(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
@@ -122,7 +125,7 @@ class EntrypointsModule: public jsg::Object {
     // Experimental until the runtime delivers the hook, so that no one can define a handler that
     // never runs.
     if (flags.getWorkerdExperimental()) {
-      JSG_LAZY_INSTANCE_PROPERTY(onEvict, getOnEvictSymbol);
+      JSG_LAZY_INSTANCE_PROPERTY(onHibernate, getOnHibernateSymbol);
     }
   }
 };

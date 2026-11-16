@@ -1,0 +1,8 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The bucket cluster's decision core. std only: nothing here may do I/O or
+# read a clock, so it has no dependencies to do them with.
+wd_rust_crate(
+    name = "cluster-logic",
+    visibility = ["//src/workerd/server:__subpackages__"],
+)

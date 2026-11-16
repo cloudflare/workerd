@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -42,6 +43,11 @@ RUST_ICU_VERSION_PINS = (
     ROOT / "src/rust/i18n/BUILD.bazel",
 )
 RUST_ICU_VERSION = re.compile(r'(?<="RUST_ICU_MAJOR_VERSION_NUMBER": ")\d+(?=")')
+
+# V8 builds these crates from Chromium's third_party/rust. Every crate in their
+# runtime dependency trees must resolve to the version Chromium builds V8 with.
+CHROMIUM_CRATE_ROOTS = ("temporal_capi",)
+CARGO_TOML = ROOT / "deps/rust/Cargo.toml"
 
 
 def run(args, *, cwd=ROOT, check=True, env=None, stdout=None):
@@ -144,6 +150,143 @@ def _update_rust_icu_version():
             f"Updated RUST_ICU_MAJOR_VERSION_NUMBER to {version}. Check that the pinned "
             f"rust_icu_sys provides bindgen/lib_{version}.rs; update the crate if it does not."
         )
+
+
+def _chromium_crate_versions(commit):
+    """Return _reachable_versions() of Chromium's chromium_crates_io/Cargo.lock."""
+    with urlopen(
+        "https://chromium.googlesource.com/chromium/src/third_party/rust/+/"
+        f"{commit}/chromium_crates_io/Cargo.lock?format=TEXT",
+        timeout=30,
+    ) as response:
+        return _reachable_versions(
+            tomllib.loads(base64.b64decode(response.read()).decode())
+        )
+
+
+def _reachable_versions(lock):
+    """Return {name: [version, ...]} for the crates CHROMIUM_CRATE_ROOTS reach in `lock`.
+
+    Lockfile dependency edges don't record their kind, so this also reaches proc
+    macros and build dependencies. Only crates in _chromium_crate_tree() are looked
+    up, and it excludes those.
+    """
+    packages = {
+        (package["name"], package["version"]): package.get("dependencies", [])
+        for package in lock["package"]
+    }
+    locked = {}
+    for name, version in packages:
+        locked.setdefault(name, []).append(version)
+
+    def resolve(dependency):
+        # Cargo writes "name" when the lockfile holds one version of the crate, and
+        # "name version" or "name version (source)" when it holds several.
+        name, *rest = dependency.split()
+        if rest:
+            return name, rest[0]
+        (version,) = locked[name]
+        return name, version
+
+    pending = []
+    for root in CHROMIUM_CRATE_ROOTS:
+        versions = locked.get(root, [])
+        if len(versions) != 1:
+            raise ValueError(
+                f"Chromium's Cargo.lock must lock exactly one version of {root}, "
+                f"but locks {', '.join(versions) or 'none'}"
+            )
+        pending.append((root, versions[0]))
+    reachable = set()
+    while pending:
+        package = pending.pop()
+        if package not in reachable:
+            reachable.add(package)
+            pending.extend(map(resolve, packages[package]))
+
+    versions = {}
+    for name, version in sorted(reachable):
+        versions.setdefault(name, []).append(version)
+    return versions
+
+
+def _chromium_version(chromium, name):
+    """Return Chromium's version of a crate, or None if there isn't exactly one."""
+    versions = chromium.get(name, [])
+    return versions[0] if len(versions) == 1 else None
+
+
+def _cargo(*args, check=True, stdout=None):
+    # The cargo of the Rust toolchain Bazel builds with, not whichever is on PATH.
+    cargo = ["bazel", "run", "@rules_rust//tools/upstream_wrapper:cargo", "--"]
+    return run(
+        [*cargo, *args, "--manifest-path", CARGO_TOML], check=check, stdout=stdout
+    ).stdout
+
+
+def _chromium_crate_tree():
+    """Return the (name, version) runtime dependencies of CHROMIUM_CRATE_ROOTS."""
+    args = ["tree", "--target=all", "--edges=normal,no-proc-macro"]
+    for root in CHROMIUM_CRATE_ROOTS:
+        args += ["--package", root]
+    tree = _cargo(*args, "--prefix=none", "--format={p}", stdout=subprocess.PIPE)
+    packages = (line.split()[:2] for line in tree.splitlines() if line)
+    return {(name, version.removeprefix("v")) for name, version in packages}
+
+
+def _exact_pins():
+    """Return {name: version} for the dependencies that Cargo.toml pins with `=`."""
+    dependencies = tomllib.loads(CARGO_TOML.read_text())["dependencies"]
+    pins = {}
+    for name, spec in dependencies.items():
+        version = spec if isinstance(spec, str) else spec.get("version", "")
+        if version.startswith("="):
+            pins[name] = version.removeprefix("=")
+    return pins
+
+
+def _update_chromium_crates(v8_deps):
+    commit = _v8_dependency_commit("third_party/rust", v8_deps)
+    chromium = _chromium_crate_versions(commit)
+
+    # Exact pins in Cargo.toml hold crates that Cargo would otherwise resolve
+    # newer than Chromium's versions. Move them first, since moving a pinned crate
+    # can move others along with it. `cargo add` keeps each dependency's features,
+    # and moves all the pins in one resolution, since one pin's new version may
+    # require another's.
+    pins = _exact_pins()
+    repins = []
+    for name, version in sorted(_chromium_crate_tree()):
+        target = _chromium_version(chromium, name)
+        if pins.get(name) == version and target not in (None, version):
+            repins.append(f"{name}@={target}")
+    if repins:
+        _cargo("add", *repins)
+
+    # Cargo.lock alone holds the rest. If Cargo refuses a version, it prints why,
+    # and the check below names the crate.
+    for name, version in _chromium_crate_tree():
+        target = _chromium_version(chromium, name)
+        if target not in (None, version):
+            _cargo("update", f"{name}@{version}", "--precise", target, check=False)
+
+    mismatched = [
+        f"{name} {version} (Chromium: {', '.join(chromium.get(name, [])) or 'none'})"
+        for name, version in sorted(_chromium_crate_tree())
+        if _chromium_version(chromium, name) != version
+    ]
+    if mismatched:
+        raise ValueError(
+            f"Crates differ from Chromium's third_party/rust at {commit}: "
+            f"{', '.join(mismatched)}. If Cargo cannot downgrade a crate by itself, "
+            f'pin it with `<crate> = {{ version = "=<version>" }}` in {CARGO_TOML}.'
+        )
+
+    # Bazel builds the crates from cargo-bazel-lock.json, which must be regenerated
+    # after Cargo.toml or Cargo.lock changes (see build/deps/rust.MODULE.bazel).
+    # Regenerate it even if this run changed neither, since an earlier run that
+    # failed the check above, or a pin added by hand, may have.
+    run(["bazel", "fetch", "--repo_env=CARGO_BAZEL_REPIN=1", "--repo=@crates_vendor"])
 
 
 def _update_module(tag, patch_names):
@@ -273,6 +416,7 @@ def finish_update(target):
         ]
     )
     _update_rust_icu_version()
+    _update_chromium_crates((CHECKOUT / "DEPS").read_text())
 
 
 def parse_args():

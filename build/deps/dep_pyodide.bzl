@@ -18,7 +18,7 @@ PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/"
 def _stdlib_wheels_repo_impl(rctx):
     # Built-in Python package support has been removed, so workers can no longer
     # request arbitrary packages. The checked-in lock files
-    # (src/pyodide/python-lock/) are pre-filtered to contain exactly the
+    # (src/pyodide/bundle/python-lock/) are pre-filtered to contain exactly the
     # packages that are still loaded at runtime (the CPython stdlib modules and
     # the shared libraries they depend on). We download just those wheels. They
     # are embedded directly into the Pyodide bundle.
@@ -55,7 +55,7 @@ def _pyodide_packages(*, tag, **_kwds):
     _stdlib_wheels_repo(
         name = name,
         tag = tag,
-        lockfile = "@workerd//src/pyodide:python-lock/pyodide-lock_%s.json" % tag,
+        lockfile = "@workerd//src/pyodide/bundle:python-lock/pyodide-lock_%s.json" % tag,
     )
     return [name]
 
@@ -116,7 +116,7 @@ def _snapshot_http_files_version(
         dedicated_numpy_vendor_snapshot_hash = None,
         dedicated_numpy_vendor_snapshot_integrity = None,
         **_kwds):
-    # Snapshots produced by src/pyodide/make_snapshots.py live in the pyodide-capnp-bin bucket, keyed
+    # Snapshots produced by src/pyodide/scripts/make_snapshots.py live in the pyodide-capnp-bin bucket, keyed
     # by their sha256 digest. The fastapi dedicated snapshot was produced by the production validator
     # and lives in the vendor bucket under its file name.
     return (_snapshot_http_file(name, baseline_snapshot, baseline_snapshot_integrity, PYODIDE_CAPN_BIN + "baseline-snapshot/", baseline_snapshot_hash) +

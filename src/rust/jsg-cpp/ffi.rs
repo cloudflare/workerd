@@ -1,0 +1,326 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+#![allow(
+    unsafe_code,
+    reason = "the cxx bridge expands to unsafe FFI glue, and `Ref::get` casts the C++ object it \
+              owns to `&T`"
+)]
+
+//! The bridge to `jsg-cpp.h`, and [`Ref<T>`](crate::Ref), which needs `unsafe` to lend the C++
+//! object it holds as `&T` and to move handles across the bridge.
+
+use std::marker::PhantomData;
+
+use jsg::v8;
+use kj_rs::KjMaybe;
+use kj_rs::KjOwn;
+
+#[cxx::bridge(namespace = "workerd::rust::jsg_cpp")]
+mod bridge {
+    #[namespace = "workerd::rust::jsg"]
+    unsafe extern "C++" {
+        include!("workerd/rust/jsg/ffi.h");
+        type GcVisitor = jsg::v8::ffi::GcVisitor;
+        type MemoryTracker = jsg::v8::ffi::MemoryTracker;
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/jsg-cpp/jsg-cpp.h");
+
+        /// A `jsg::Ref` to a C++ JSG resource, at a stable address; see `jsg-cpp.h`.
+        type CppRef;
+
+        /// A new strong reference to the same object. The isolate must be locked by this
+        /// thread, as for copying a `jsg::Ref`.
+        fn cpp_ref_clone(cpp_ref: &CppRef) -> KjOwn<CppRef>;
+        /// The address of the C++ object, of the type the reference was made for.
+        fn cpp_ref_object(cpp_ref: &CppRef) -> usize;
+        /// Visits the reference as C++ GC tracing visits a `jsg::Ref` field.
+        ///
+        /// # Safety
+        ///
+        /// `visitor` is the visitor of a visit in progress.
+        unsafe fn cpp_ref_visit(visitor: *mut GcVisitor, cpp_ref: &CppRef);
+        /// Reports the reference to a heap snapshot as C++ reports a `jsg::Ref` field, under
+        /// the edge `edge_name`.
+        ///
+        /// # Safety
+        ///
+        /// `edge_name` is a NUL-terminated string literal, or null for none: V8 reads it after
+        /// the snapshot's BuildEmbedderGraph callback returns.
+        unsafe fn cpp_ref_track(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            cpp_ref: &CppRef,
+        );
+        /// Makes the reference strong again and forgets its parent, as moving a C++ `jsg::Ref`
+        /// does; see `jsg::GcVisitor::is_detaching`. Requires the isolate lock.
+        fn cpp_ref_detach(cpp_ref: &CppRef);
+    }
+
+    impl KjOwn<CppRef> {}
+}
+
+pub use bridge::CppRef;
+
+/// A C++ JSG resource type that Rust can hold as a [`Ref<T>`](Ref), receive as an argument and
+/// return to JavaScript.
+///
+/// `Self` is the opaque type that a crate's `#[cxx::bridge]` declares for the C++ class (`type
+/// Fetcher;`), so [`Ref::get`] lends it and the bridge's per-method shims can take `&Self`. The
+/// two functions are that bridge's per-type shims, which instantiate `cppRefTryUnwrap<T>()` and
+/// `cppRefWrap<T>()` of `jsg-cpp.h`:
+///
+/// ```c++
+/// inline kj::Maybe<kj::Own<CppRef>> fetcher_try_unwrap(v8::Isolate* isolate, Local value) {
+///   return cppRefTryUnwrap<api::Fetcher>(isolate, kj::mv(value));
+/// }
+/// inline MaybeLocal fetcher_wrap(v8::Isolate* isolate, const CppRef& ref) {
+///   return cppRefWrap<api::Fetcher>(isolate, ref);
+/// }
+/// ```
+///
+/// # Safety
+///
+/// `try_unwrap` only returns references made for the C++ class `Self` stands for, and `wrap`
+/// instantiates `cppRefWrap` with that class: [`Ref::get`] lends the object as `Self`.
+pub unsafe trait CppResource: Sized + 'static {
+    /// The JavaScript class name, for error messages.
+    fn class_name() -> &'static str;
+
+    /// The C++ class's name as `jsg::fullyQualifiedTypeName()` gives it, such as
+    /// `workerd::api::Fetcher`. The RTTI export refers to the C++ class's description by it.
+    fn fully_qualified_name() -> &'static str;
+
+    /// A reference to the object that `value` wraps, if it wraps an instance of the class or of
+    /// a subclass. Fails only if the class is not registered with the isolate.
+    ///
+    /// # Safety
+    /// The isolate is locked by this thread with a context entered and a `HandleScope` open, and
+    /// `value` is a handle in that scope.
+    unsafe fn try_unwrap(
+        isolate: *mut v8::ffi::Isolate,
+        value: v8::ffi::Local,
+    ) -> Result<KjMaybe<KjOwn<CppRef>>, cxx::KjException>;
+
+    /// The JavaScript wrapper of `cpp_ref`, or empty with an exception pending.
+    ///
+    /// # Safety
+    /// As for `try_unwrap`, and `cpp_ref` was made by this type's `try_unwrap`, or by a shim
+    /// that returns a `jsg::Ref` of this class.
+    unsafe fn wrap(isolate: *mut v8::ffi::Isolate, cpp_ref: &CppRef) -> v8::ffi::MaybeLocal;
+}
+
+/// Calls a per-method shim, which runs its C++ in `callCpp()` (`jsg-cpp.h`).
+///
+/// `shim` is given the isolate and returns whether the C++ completed. If it did not, the
+/// exception is pending, and the error is one for which [`jsg::Error::is_pending`] is true. While
+/// execution is terminating, `shim` is not called and the error is the same, as for a call into
+/// JavaScript.
+///
+/// # Errors
+///
+/// A pending error, if the C++ threw or execution is terminating.
+pub fn call_cpp(
+    lock: &mut jsg::Lock<'_>,
+    shim: impl FnOnce(*mut v8::ffi::Isolate) -> bool,
+) -> Result<(), jsg::Error> {
+    if lock.is_execution_terminating() {
+        return Err(jsg::Error::pending());
+    }
+    if shim(lock.isolate().as_ffi()) {
+        Ok(())
+    } else {
+        Err(jsg::Error::pending())
+    }
+}
+
+/// [`call_cpp`] for a shim that returns a C++ resource through `callCppForRef<Class>()`
+/// (`jsg-cpp.h`), which stores it in the slot `shim` is given.
+///
+/// # Errors
+///
+/// As for [`call_cpp`].
+///
+/// # Safety
+///
+/// The shim instantiates `callCppForRef` with the class `T` stands for, or a subclass.
+pub unsafe fn call_cpp_for_ref<T: CppResource>(
+    lock: &mut jsg::Lock<'_>,
+    shim: impl FnOnce(*mut v8::ffi::Isolate, &mut KjMaybe<KjOwn<CppRef>>) -> bool,
+) -> Result<Option<Ref<T>>, jsg::Error> {
+    let mut slot = KjMaybe::None;
+    call_cpp(lock, |isolate| shim(isolate, &mut slot))?;
+    // SAFETY: the shim made the reference for `T`'s class (this function's contract), under
+    // `lock`, so to an object of `lock`'s isolate.
+    Ok(Option::from(slot).map(|inner| unsafe { Ref::from_cpp(lock, inner) }))
+}
+
+/// A strong reference from Rust to a C++ JSG resource, like a `jsg::Ref<T>` field of a C++
+/// resource.
+///
+/// - [`get`](Self::get) lends `T`, the bridge's opaque type for the C++ class, whose per-method
+///   shims take `&T`. They run the C++ in `callCpp()` (`jsg-cpp.h`) and need the isolate lock, so
+///   they take the `Lock`.
+/// - As an argument, it accepts an instance of the class or of a subclass, as a C++ `jsg::Ref<T>`
+///   parameter does, and runs no JavaScript to check it.
+/// - To JavaScript, it is the object's existing wrapper, or a new one for its dynamic type.
+/// - A resource field holding one is traced like a C++ `jsg::Ref` field. As for a `jsg::Rc`, a
+///   `Ref` moved out of a field lives in a `jsg::Cell` or `jsg::RefCell`, which make it strong
+///   on the way out; see `src/rust/jsg/README.md` §Safety rules, rule 2.
+///
+/// Only the lock of the object's isolate guards its reference count and the object, so the
+/// reference is a [`jsg::LockGuarded`]: everything but dropping takes a `Lock` of that isolate and
+/// panics for another's, and a drop without the lock is queued for the next lock. That makes it
+/// `Send`, as a `jsg::Rc` is. It is not `Sync`.
+pub struct Ref<T: CppResource> {
+    inner: jsg::LockGuarded<KjOwn<CppRef>>,
+    _type: PhantomData<fn() -> T>,
+}
+
+impl<T: CppResource> Ref<T> {
+    /// Takes the reference a per-type shim returns, such as a getter of the C++ resource that
+    /// returns a `jsg::Ref<T>`.
+    ///
+    /// # Safety
+    /// `inner` was made for an object of `lock`'s isolate, of the C++ class `T` stands for or of a
+    /// subclass, through a `jsg::Ref<Class>`.
+    pub unsafe fn from_cpp(lock: &mut jsg::Lock<'_>, inner: KjOwn<CppRef>) -> Self {
+        Self {
+            // SAFETY: C++ JSG objects are used by whichever thread holds their isolate's lock, and
+            // a `jsg::Ref` may be dropped without the lock once its isolate is disposed.
+            inner: unsafe { jsg::LockGuarded::new(lock, inner) },
+            _type: PhantomData,
+        }
+    }
+
+    /// Lends the object, for no longer than `lock`'s scope.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the object's.
+    pub fn get<'a, 's: 'a>(&'a self, lock: &jsg::Lock<'s>) -> &'a T {
+        let inner = self.inner.get(lock);
+        // SAFETY: the object is a live instance of the class `T` stands for (`from_cpp` and
+        // `CppResource`'s contracts), which `inner` keeps alive. `T` is a cxx opaque type:
+        // zero-sized and interior-mutable, so the reference claims no bytes of the object.
+        unsafe { &*(bridge::cpp_ref_object(inner) as *const T) }
+    }
+
+    /// The `CppRef`, to pass to a shim that takes `const CppRef&`, for no longer than `lock`'s
+    /// scope.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the object's.
+    pub fn as_cpp<'a, 's: 'a>(&'a self, lock: &jsg::Lock<'s>) -> &'a CppRef {
+        self.inner.get(lock)
+    }
+
+    /// Makes another strong reference to the object, as copying a `jsg::Ref` does.
+    ///
+    /// # Panics
+    /// Panics if `lock` belongs to an isolate other than the object's.
+    #[must_use]
+    pub fn clone(&self, lock: &mut jsg::Lock<'_>) -> Self {
+        let inner = bridge::cpp_ref_clone(self.inner.get(lock));
+        // SAFETY: the clone refers to the same object as `self`, of `lock`'s isolate, as `get`
+        // checked.
+        unsafe { Self::from_cpp(lock, inner) }
+    }
+}
+
+impl<T: CppResource> jsg::Traced for Ref<T> {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        let Some(inner) = self.inner.get_for_visit(visitor) else {
+            return;
+        };
+        match visitor.as_ffi() {
+            // SAFETY: the visitor's pointer is valid for the duration of the visit.
+            Some(visitor) => unsafe { bridge::cpp_ref_visit(visitor, inner) },
+            None => bridge::cpp_ref_detach(inner),
+        }
+    }
+}
+
+/// The C++ resource's node, as C++ reports a `jsg::Ref` field; nothing for a snapshot of another
+/// isolate, as for a `jsg::Rc`.
+impl<T: CppResource> jsg::MemoryInfo for Ref<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut jsg::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        let Some(inner) = self.inner.get_for_memory_info(tracker) else {
+            return;
+        };
+        let edge_name = edge_name.map_or(std::ptr::null(), std::ffi::CStr::as_ptr);
+        // SAFETY: the name is a literal or null.
+        unsafe { bridge::cpp_ref_track(tracker.as_ffi(), edge_name, inner) };
+    }
+}
+
+impl<T: CppResource> jsg::Type for Ref<T> {
+    fn class_name() -> &'static str {
+        T::class_name()
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_object()
+    }
+}
+
+impl<T: CppResource> jsg::TypeInfo for Ref<T> {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::CppStructure {
+            name: T::class_name(),
+            fully_qualified_name: T::fully_qualified_name(),
+        }
+    }
+}
+
+impl<'s, T: CppResource> jsg::ToJS<'s> for Ref<T> {
+    fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        if lock.is_execution_terminating() {
+            return Err(jsg::Error::pending());
+        }
+        let inner = self.inner.get(lock);
+        // SAFETY: `lock` stands for the isolate being locked with a context entered and the
+        // HandleScope `'s` open, and the object is of that isolate, as `get` checked; `inner` was
+        // made for `T`'s class.
+        let wrapper = unsafe { T::wrap(lock.isolate().as_ffi(), inner) };
+        // SAFETY: the wrapper is a handle in the scope `'s`.
+        unsafe { v8::Local::from_ffi_maybe(wrapper) }.ok_or_else(jsg::Error::pending)
+    }
+}
+
+impl<'s, T: CppResource> jsg::FromJS<'s> for Ref<T> {
+    type ResultType = Self;
+
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
+    fn type_name() -> String {
+        T::class_name().to_owned()
+    }
+
+    fn from_js(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self, jsg::Error> {
+        let type_name = value.type_of(lock);
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            jsg::Error::new_type_error(format!("expected {}, got {type_name}", T::class_name()))
+        })
+    }
+
+    fn try_from_js(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self>, jsg::Error> {
+        // SAFETY: as in `to_js`, and `value` is a handle in the scope `'s`.
+        let inner = unsafe { T::try_unwrap(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        // SAFETY: `try_unwrap` makes references for `T`'s class (`CppResource`'s contract), to
+        // the object `value`, a handle of `lock`'s isolate, wraps.
+        Ok(Option::from(inner).map(|inner| unsafe { Self::from_cpp(lock, inner) }))
+    }
+}

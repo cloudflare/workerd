@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/module-source.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/observer.h>
@@ -415,13 +416,19 @@ class Module {
       kj::Maybe<CodeCacheKey> codeCacheKey = kj::none);
 
   // Creates a new ESM module that does not take ownership of the given code.
-  // The backing data must have static process lifetime. This is used to
+  // The source and any embedded compileCache must have static process lifetime. This is used to
   // construct ESM modules from compiled-in built-in modules.
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
-  static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      kj::ArrayPtr<const char> code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
   // The source is already encoded as Latin-1 or UTF-16 for V8.
-  static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      StaticExternalStringSource code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
 
   // The following methods are used to create the evaluation callbacks for various
   // kinds of common simple synthetic module types. The module registry is not
@@ -576,17 +583,19 @@ class ModuleBundle {
 
     // Adds source backed by static process-lifetime storage, such as a
     // compiled-in string literal. Use the Arc<OwnedAscii> overload for all
-    // other source buffers.
+    // other source buffers. Both overloads copy `compileHints` into the shared definition.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::ArrayPtr<const char> code,
-        Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
+        Module::Flags flags = Module::Flags::ESM,
+        kj::ArrayPtr<const int> compileHints = nullptr) KJ_LIFETIMEBOUND;
 
     // Adds source with shared ownership of its backing storage. See
     // ModuleRegistry::Builder::newCodeCacheKey() for `codeCacheKey`.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::Arc<OwnedAscii> code,
         Module::Flags flags = Module::Flags::ESM,
-        kj::Maybe<CodeCacheKey> codeCacheKey = kj::none) KJ_LIFETIMEBOUND;
+        kj::Maybe<CodeCacheKey> codeCacheKey = kj::none,
+        kj::ArrayPtr<const int> compileHints = nullptr) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addWasmModule(kj::StringPtr name,
         kj::ArrayPtr<const kj::byte> data,
@@ -611,12 +620,16 @@ class ModuleBundle {
     BuiltinBuilder& addSynthetic(
         const Url& id, BundleBuilder::EvaluateCallback callback) KJ_LIFETIMEBOUND;
 
-    // The source must be backed by static process-lifetime storage.
-    BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The source and any embedded compileCache must be backed by static process-lifetime storage.
+    BuiltinBuilder& addEsm(const Url& id,
+        kj::ArrayPtr<const char> source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
     // The UTF-8 source shares ownership of its backing storage.
     BuiltinBuilder& addEsm(const Url& id, kj::Arc<OwnedAscii> source) KJ_LIFETIMEBOUND;
-    // The source is already encoded as Latin-1 or UTF-16 for V8.
-    BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
+    // The source is already encoded as Latin-1 or UTF-16 for V8. Both buffers have process lifetime.
+    BuiltinBuilder& addEsm(const Url& id,
+        StaticExternalStringSource source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
 
     // Adds a module that is implemented in C++ as a jsg::Object
     template <typename T, typename TypeWrapper>
@@ -643,19 +656,19 @@ class ModuleBundle {
   static kj::Own<ModuleBundle> newFallbackBundle(
       Builder::ResolveCallback callback) KJ_WARN_UNUSED_RESULT;
 
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle);
+  // Adds the bundle's modules of the builder's type. If `moduleSource` is given, V8 reads each
+  // source module from the storage it provides (see jsg/module-source.h) instead of the
+  // compiled-in bytes.
+  static void getBuiltInBundleFromCapnp(
+      BuiltinBuilder& builder, Bundle::Reader bundle, const ModuleSource* moduleSource = nullptr);
 
   // Overload that accepts a per-module filter predicate. Only modules for which
   // the filter returns true are added to the builder. This is used for per-module
   // feature flag gating (e.g., individual node:* modules behind compat flags).
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
-      kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
-
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-      Bundle::Reader bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
-      kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
+      const ModuleSource* moduleSource = nullptr);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 
@@ -866,6 +879,20 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
 
   friend class Module::Evaluator;
 };
+
+// The address of the evaluation-steps callback every synthetic module of the new registry is
+// created with. V8 stores it as a Foreign on the module, so a startup snapshot needs it in the
+// external-reference table (jsg::isolateRegisterExternalReference), like the legacy registry's
+// getSyntheticModuleEvalRef().
+intptr_t getSyntheticModuleEvaluationStepsRef();
+
+// For jsg::IsolateBase::createSnapshotBlob: stores the v8::Module of every module that the
+// registry bound to `context` instantiated in the snapshot with `creator.AddData(context, ...)`,
+// and returns the records (see SnapshotArtifact::newModuleRegistryRecords) from which
+// ModuleRegistry::attachToIsolate rebuilds the registry of an isolate restored from the blob. The
+// registry forgets the modules, so it is unusable afterwards; the zygote is discarded anyway.
+kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordIsolateModuleRegistryForSnapshot(
+    v8::Local<v8::Context> context, v8::SnapshotCreator& creator);
 
 constexpr ModuleRegistry::Builder::Options operator|(
     const ModuleRegistry::Builder::Options& a, const ModuleRegistry::Builder::Options& b) {

@@ -105,6 +105,17 @@ class AsyncLocalStorage final: public jsg::Object {
 
   kj::Arc<jsg::AsyncContextFrame::StorageKey> getKey();
 
+  // The clone gets a key of its own: a key only identifies its instance, and no frame that holds
+  // a value under the original's can come with it, since frames are not transferable. A default
+  // value is a JavaScript value, which a clone cannot hold, so an instance that has one is not
+  // transferable either.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    if (defaultValue != kj::none) return kj::none;
+    auto clone = kj::refcounted<AsyncLocalStorage>();
+    clone->name = name.clone();
+    return ownAsWrappable(kj::mv(clone));
+  }
+
  private:
   kj::Arc<jsg::AsyncContextFrame::StorageKey> key;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> defaultValue;
@@ -252,6 +263,9 @@ class AsyncHooksModule final: public jsg::Object {
  public:
   AsyncHooksModule() = default;
   AsyncHooksModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   JSG_RESOURCE_TYPE(AsyncHooksModule) {
     JSG_NESTED_TYPE(AsyncLocalStorage);

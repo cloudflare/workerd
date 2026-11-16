@@ -1,0 +1,172 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+//! The errors a `Lock` creates and throws reach JavaScript as errors of their type, with their
+//! message.
+
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
+
+#[jsg_resource]
+struct Thrower;
+
+#[jsg_resource]
+impl Thrower {
+    #[jsg_method]
+    fn throw_error(&self, lock: &mut jsg::Lock, message: String) {
+        lock.throw_error(&message);
+    }
+
+    #[jsg_method]
+    fn throw_invalid_string_length(&self, lock: &mut jsg::Lock) {
+        lock.throw_exception(&jsg::Error::invalid_string_length());
+    }
+
+    /// Throws `value`, and then, if `then` is given, throws it too, which must not replace
+    /// `value`.
+    #[jsg_method]
+    fn throw_value<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: jsg::v8::Local<'s, jsg::v8::Value>,
+        then: Option<jsg::v8::Local<'s, jsg::v8::Value>>,
+    ) -> jsg::Result<()> {
+        let err = lock.throw_value(value);
+        assert!(err.is_pending());
+        if let Some(then) = then {
+            return Err(lock.throw_value(then));
+        }
+        Err(err)
+    }
+
+    #[jsg_method]
+    fn null_prototype_object<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::v8::Local<'s, jsg::v8::Object> {
+        lock.new_object_with_null_prototype()
+    }
+
+    #[jsg_method]
+    fn range_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        message: String,
+    ) -> jsg::v8::Local<'s, jsg::v8::Object> {
+        lock.range_error(&message)
+    }
+}
+
+fn caught(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, call: &str, check: &str) -> bool {
+    ctx.eval::<bool>(
+        lock,
+        &format!(
+            "{{ let caught;
+               try {{ {call}; }} catch (e) {{ caught = e; }}
+               {check} }}"
+        ),
+    )
+    .unwrap()
+}
+
+#[test]
+fn throw_error_throws_an_error_with_the_message() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
+        assert!(caught(
+            lock,
+            ctx,
+            "thrower.throwError('boom')",
+            "caught.constructor === Error && caught.message === 'boom'"
+        ));
+        // A message with a multi-byte character reaches JavaScript whole.
+        assert!(caught(
+            lock,
+            ctx,
+            "thrower.throwError('héllo')",
+            "caught.message === 'héllo'"
+        ));
+        Ok(())
+    });
+}
+
+#[test]
+fn invalid_string_length_is_v8s_range_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
+        assert!(caught(
+            lock,
+            ctx,
+            "thrower.throwInvalidStringLength()",
+            "caught instanceof RangeError && caught.message === 'Invalid string length'"
+        ));
+        // The same error V8 throws for a string it cannot create.
+        assert!(caught(
+            lock,
+            ctx,
+            "'x'.repeat(2 ** 30)",
+            "caught instanceof RangeError && caught.message === 'Invalid string length'"
+        ));
+        Ok(())
+    });
+}
+
+#[test]
+fn range_error_is_a_range_error_object() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "const e = thrower.rangeError('out of range');
+                 e instanceof RangeError && e.message === 'out of range'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn throw_value_throws_the_value_itself() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
+        assert!(caught(
+            lock,
+            ctx,
+            "globalThis.value = { thrown: true }; thrower.throwValue(value)",
+            "caught === value"
+        ));
+        assert!(caught(lock, ctx, "thrower.throwValue(42)", "caught === 42"));
+        // A second throw leaves the first exception pending.
+        assert!(caught(
+            lock,
+            ctx,
+            "thrower.throwValue('first', 'second')",
+            "caught === 'first'"
+        ));
+        Ok(())
+    });
+}
+
+#[test]
+fn null_prototype_object_has_no_prototype() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "{ const o = thrower.nullPrototypeObject();
+                   Object.getPrototypeOf(o) === null && Reflect.ownKeys(o).length === 0 }"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}

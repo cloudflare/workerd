@@ -1,0 +1,33 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The DOMException suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. Every cell needs
+# --experimental for service_binding_extra_handlers,
+# enable_web_file_system and enable_abortsignal_rpc.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_DOM_EXCEPTION, which swaps in the TypeScript implementation
+# under a cell whose USING_TS_IMPL binding says C++.
+
+dom_exception_suite_srcs = glob(["*.js"]) + ["dom-exception-modules.capnp"]
+
+[wd_test(
+    src = "dom-exception%s-cpp.wd-test" % cell,
+    args = ["--experimental"],
+    data = dom_exception_suite_srcs,
+    generate_all_autogates_variant = False,
+) for cell in [
+    "",
+    "-legacy-flags",
+    "-opt-in",
+]]
+
+[wd_test(
+    src = "dom-exception%s-ts.wd-test" % cell,
+    args = ["--experimental"],
+    data = dom_exception_suite_srcs,
+) for cell in [
+    "",
+    "-legacy-flags",
+    "-opt-in",
+]]

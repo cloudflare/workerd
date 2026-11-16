@@ -140,8 +140,9 @@ mod bridge {
         /// meantime. Returns the wake latch (see `TokioPort::take_wake_latch`).
         fn wait_forever(&self) -> bool;
 
-        /// Like `wait_forever`, but additionally returns after `timeout_ns` nanoseconds. The
-        /// C++ side computes the timeout from `kj::TimerImpl::timeoutToNextEvent()`.
+        /// Like `wait_forever`, but additionally returns after `timeout_ns` nanoseconds. A zero
+        /// timeout behaves like `poll()`. The C++ side computes the timeout from
+        /// `kj::TimerImpl::timeoutToNextEvent()`.
         fn wait_timeout_ns(&self, timeout_ns: u64) -> bool;
 
         /// Non-blocking: let the tokio scheduler run already-ready tasks for a bounded number of

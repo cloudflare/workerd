@@ -7,30 +7,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup Linux
-      shell: bash
-      if: runner.os == 'Linux'
-      run: |
-        export DEBIAN_FRONTEND=noninteractive
-        wget https://apt.llvm.org/llvm.sh
-        sed -i '/apt-get install/d' llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 22
-        # keep in sync with build/ci.bazelrc
-        sudo apt-get install -y -qq --no-install-recommends \
-          clang-22 \
-          lld-22 \
-          libunwind-22-dev \
-          libc++-22-dev \
-          libclang-rt-22-dev \
-          llvm-22
-        sudo ln -s /usr/bin/llvm-symbolizer-22 /usr/bin/llvm-symbolizer
-        sudo ln -s /usr/bin/llvm-profdata-22 /usr/bin/llvm-profdata
-        sudo ln -s /usr/bin/llvm-cov-22 /usr/bin/llvm-cov
-        echo "build:linux --repo_env=CC=/usr/lib/llvm-22/bin/clang" >> .bazelrc
-        echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-22/bin/ld.lld" >> .bazelrc
-        echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-22/bin/ld.lld" >> .bazelrc
-        echo "build:linux --repo_env=AR=/usr/lib/llvm-22/bin/llvm-ar" >> .bazelrc
     - name: Setup Windows
       shell: pwsh
       env:

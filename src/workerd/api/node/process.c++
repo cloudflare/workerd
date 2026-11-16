@@ -81,6 +81,11 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   return js.undefined();
 }
 
+jsg::JsObject ProcessModule::getInternalModule(jsg::Lock& js, kj::String specifier) {
+  return JSG_REQUIRE_NONNULL(js.resolveInternalModule(specifier), Error,
+      kj::str("Failed to resolve internal module ", specifier));
+}
+
 jsg::JsObject ProcessModule::getEnvObject(jsg::Lock& js) {
   if (FeatureFlags::get(js).getPopulateProcessEnv()) {
     KJ_IF_SOME(env, js.getWorkerEnv()) {
@@ -119,8 +124,10 @@ namespace {
 }  // namespace
 
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
-  // Node.js version - represents the most current Node.js version supported
-  // by the platform, as defined in node-version.h
+  // Node.js version reported by the platform, as defined in node-version.h. The
+  // `nodejs_process_version_24` compatibility flag selects the Node.js 24 series instead of 22.
+  auto nodeVersion =
+      FeatureFlags::get(js).getNodeJsProcessVersion24() ? nodeVersion24 : nodeVersion22;
   // We don't want to provide real versions, these are provided as empty strings just for compat.
 
   static const kj::StringPtr keys[] = {

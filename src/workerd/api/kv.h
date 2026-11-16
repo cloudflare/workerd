@@ -152,6 +152,10 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String name);
   jsg::Ref<JsRpcPromise> deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+  // A binding transfers through a startup snapshot as its channel number, name and headers. A
+  // namespace carried as a capability belongs to one IoContext.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
   JSG_RESOURCE_TYPE(KvNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);

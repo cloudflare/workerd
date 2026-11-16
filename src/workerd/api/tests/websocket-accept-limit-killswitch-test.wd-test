@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "websocket-accept-limit-killswitch-test", worker = .testWorker),
+  ],
+  autogates = ["workerd-autogate-durable-object-websocket-limit-killswitch"],
+);
+
+const testWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "websocket-accept-limit-killswitch-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "WebSocketLimitObject", uniqueKey = "websocket-accept-limit-killswitch-test-object"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "WebSocketLimitObject"),
+  ],
+);

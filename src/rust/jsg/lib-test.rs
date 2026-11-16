@@ -108,3 +108,110 @@ fn expected_prefix_without_tunneling_tag_is_redacted() {
     assert_eq!(err.message, "expected someCondition; some message");
     assert!(err.is_internal);
 }
+
+// =============================================================================
+// error_message_for_v8 / utf8_prefix
+// =============================================================================
+
+#[test]
+fn utf8_prefix_keeps_bytes_that_fit() {
+    assert_eq!(utf8_prefix(b"abc", 3), b"abc");
+    assert_eq!(utf8_prefix(b"abc", 4), b"abc");
+    assert_eq!(utf8_prefix(b"", 0), b"");
+}
+
+#[test]
+fn utf8_prefix_cuts_ascii_at_the_limit() {
+    assert_eq!(utf8_prefix(b"abcdef", 4), b"abcd");
+    assert_eq!(utf8_prefix(b"abcdef", 1), b"a");
+    assert_eq!(utf8_prefix(b"abcdef", 0), b"");
+}
+
+#[test]
+fn utf8_prefix_does_not_cut_inside_a_sequence() {
+    // "aé" is 61 C3 A9: a limit of 2 falls inside the two-byte sequence.
+    let bytes = "aé".as_bytes();
+    assert_eq!(utf8_prefix(bytes, 2), b"a");
+    assert_eq!(utf8_prefix(bytes, 1), b"a");
+    assert_eq!(utf8_prefix(bytes, 3), bytes);
+
+    // A four-byte sequence followed by an ASCII byte.
+    let bytes = "😀z".as_bytes();
+    for limit in 1..4 {
+        assert_eq!(utf8_prefix(bytes, limit), b"", "limit {limit}");
+    }
+    assert_eq!(utf8_prefix(bytes, 4), "😀".as_bytes());
+    assert_eq!(utf8_prefix(bytes, 5), bytes);
+
+    // The cut lands between two multi-byte characters.
+    let bytes = "éé".as_bytes();
+    assert_eq!(utf8_prefix(bytes, 2), "é".as_bytes());
+    assert_eq!(utf8_prefix(bytes, 3), "é".as_bytes());
+}
+
+#[test]
+fn utf8_prefix_of_invalid_bytes_moves_back_at_most_three() {
+    // Continuation bytes with no lead byte are not valid UTF-8. The cut moves back over at most
+    // three of them, and never runs off the start.
+    assert_eq!(utf8_prefix(&[0x80, 0x80, 0x80], 2), b"");
+    assert_eq!(utf8_prefix(&[0x61, 0x80, 0x80, 0x80], 2), b"");
+    assert_eq!(utf8_prefix(&[0x80; 8], 6), &[0x80; 3]);
+    assert_eq!(utf8_prefix(&[0x80; 8], 3), b"");
+}
+
+#[test]
+fn error_message_for_v8_keeps_a_short_message() {
+    assert_eq!(error_message_for_v8(b"boom"), b"boom");
+    assert_eq!(error_message_for_v8(b""), b"");
+}
+
+#[test]
+fn error_message_for_v8_cuts_to_v8s_limit() {
+    let max = usize::try_from(v8::String::MAX_LENGTH).unwrap();
+    // Zeroed, so that the allocation costs no physical memory until it is read, and the cut
+    // reads one byte of it.
+    let message = vec![0u8; max + 1];
+    assert_eq!(error_message_for_v8(&message).len(), max);
+    assert_eq!(error_message_for_v8(&message[..max]).len(), max);
+}
+
+#[test]
+fn dom_exception_name_outside_exception_type_is_kept() {
+    let err = from_description("expected q; jsg.DOMException(QuotaExceededError): full");
+    assert_eq!(
+        err.name,
+        ErrorName::DomException("QuotaExceededError".into())
+    );
+    assert!(err.name.is_dom_exception());
+    assert_eq!(err.name.class(), None);
+    assert_eq!(err.message, "full");
+}
+
+#[test]
+fn dom_syntax_error_is_not_the_javascript_class() {
+    let err = from_description("jsg.DOMException(SyntaxError): bad");
+    assert!(err.name.is_dom_exception());
+    assert_ne!(err.name, ExceptionType::SyntaxError);
+    assert_eq!(
+        from_description("jsg.SyntaxError: bad").name,
+        ExceptionType::SyntaxError
+    );
+}
+
+#[test]
+fn error_names_compare_by_what_they_throw() {
+    let dom = ErrorName::DomException("DataError".into());
+    assert_eq!(ErrorName::from(ExceptionType::DataError), dom);
+    assert_eq!(ErrorName::Class(ExceptionType::DataError), dom);
+    assert_eq!(dom, ExceptionType::DataError);
+    assert_eq!(ExceptionType::DataError, dom);
+    assert_ne!(
+        ErrorName::Class(ExceptionType::SyntaxError),
+        ErrorName::DomException("SyntaxError".into())
+    );
+    assert_eq!(
+        ErrorName::from(ExceptionType::TypeError).class(),
+        Some(ExceptionType::TypeError)
+    );
+    assert_eq!(ErrorName::Class(ExceptionType::AbortError).class(), None);
+}

@@ -7,6 +7,7 @@
 //
 // This file contains misc utility functions used elsewhere.
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/observer.h>
 
 #include <v8-array-buffer.h>
 #include <v8-exception.h>
@@ -21,6 +22,22 @@
 #include <kj/string.h>
 
 #include <typeinfo>
+
+#ifdef __clang__
+// Marks a function that can run JavaScript, or force a GC, before it returns. JavaScript run in the
+// middle of a C++ method can free the state the method borrowed, so the jsg-js-reentry clang-tidy
+// check reports borrows used after a call to a marked function. The check also treats any function
+// that takes a jsg::Lock&, V8's script entry points, and functions whose body in the same
+// translation unit calls one of those as running JavaScript, so this is needed only where none of
+// that is visible: type-erased calls, and functions that find the lock themselves.
+#define JSG_MAY_RUN_JS __attribute__((annotate("jsg_may_run_js")))
+// Marks a function that takes a jsg::Lock& but never runs JavaScript or forces a GC, such as an
+// accessor for a handle. The jsg-js-reentry check does not count calls to it, or to its overrides.
+#define JSG_NO_JS __attribute__((annotate("jsg_no_js")))
+#else
+#define JSG_MAY_RUN_JS
+#define JSG_NO_JS
+#endif
 
 namespace v8 {
 class Isolate;
@@ -87,6 +104,41 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 v8::Local<v8::Value> exceptionToJs(
     v8::Isolate* isolate, kj::Exception&& exception, ExceptionToJsOptions options = {});
 
+// The `name`, `message` and `stack` properties of the JavaScript error that a kj::Exception
+// converts to.
+struct JsErrorDescription {
+  kj::String name;
+  kj::String message;
+
+  // The `stack` property, which normally begins by repeating the name and the message. None if
+  // the error has no stack trace beyond that.
+  kj::Maybe<kj::String> stack;
+
+  // Set if the exception is internal, meaning its details are hidden from JavaScript: what
+  // InternalExceptionObserver::reportInternalException() is told about it.
+  kj::Maybe<InternalExceptionObserver::Detail> internalException;
+
+  // The internal error id that `message` refers to, if it refers to one. `internalException` has
+  // the id only if the exception was logged under it.
+  kj::Maybe<InternalExceptionObserver::Detail::InternalErrorId> internalErrorId;
+};
+
+// Describes the JavaScript error that exceptionToJs() converts `exception` to when
+// `options.trusted` is set, without creating it. This needs neither the isolate lock nor V8, so
+// it can be called while another thread runs JavaScript in the isolate.
+//
+// Like exceptionToJs(), this logs the full details of an internal exception to stderr, under the
+// id that `message` refers to, and reports the exception to `observer`. Pass the observer of the
+// isolate that the exception is described for, which exceptionToJs() would report it to. To
+// convert the exception afterwards without logging and reporting it a second time, pass the
+// description as ExceptionToJsOptions::alreadyDescribed.
+//
+// A tunneled JavaScript error is described from the JsExceptionMetadata recorded when it was
+// tunneled, which holds at most 4KB of each property. A stack that is cut off before its first
+// frame is left out.
+JsErrorDescription describeAsJsError(
+    const kj::Exception& exception, kj::Maybe<const InternalExceptionObserver&> observer);
+
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
@@ -96,8 +148,28 @@ void throwInternalError(
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 
-// Detail type for JavaScript exception metadata (error type and stack trace)
+// Marker detail present when the TUNNELED_EXCEPTION_DETAIL_ID payload was written with enhanced
+// error serialization. Only that format lets the reader drop the stacks of the errors it contains,
+// so untrusted readers ignore a payload without this marker. Its value is a single byte, not
+// empty, so that runtimes whose Rust bridge cannot copy an empty detail can still read it.
+constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID = 0xbdc917cdea1f7681ull;
+
+// Detail type for JavaScript exception metadata (error type, message and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
+
+// The version of V8's serialization format in which addExceptionDetail() writes the value of a
+// tunneled exception. It is fixed so that we don't break compatibility if V8 introduces a new
+// version. It can be bumped to match the new version once all of production is updated to
+// understand it.
+constexpr uint32_t TUNNELED_EXCEPTION_SERIALIZATION_VERSION = 15;
+
+// The longest error type, stack trace or message that addJsExceptionMetadata() keeps, in bytes.
+constexpr size_t JS_EXCEPTION_METADATA_MAX_FIELD_SIZE = 4096;
+
+// Whether `description`, an object's description by toDetailString() (jsg.h), starts with the
+// name of an error type whose description createTunneledException() keeps as it is, after "jsg."
+// (JS_ERROR_TYPES and DOMException). The description of any other value follows "jsg.Error: ".
+bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description);
 
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
@@ -106,8 +178,11 @@ constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_I
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
-// Extract and add JavaScript exception metadata (error type and stack trace) to the KJ exception.
-// Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
+// Extract and add JavaScript exception metadata (error type, message and stack trace) to the KJ
+// exception. Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
+//
+// describeAsJsError() describes a tunneled error from this metadata, so an exception that gets the
+// serialized copy above must get the metadata too.
 void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 // Attach the Durable Object id that produced an exception before it is propagated over RPC.
@@ -424,6 +499,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
       return;
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the promise with what it caught.
     v8::TryCatch tryCatch(isolate);
     try {
       try {
@@ -555,6 +631,11 @@ using ExternalStringSource = kj::OneOf<kj::ArrayPtr<const char>,
     kj::Arc<OwnedAscii>,
     kj::Arc<OwnedUtf16>>;
 
+struct CodeCacheKey;
+// Hashes the exact external-string representation handed to CompileModule().
+CodeCacheKey codeCacheKeyForModule(const ExternalStringSource& source);
+CodeCacheKey codeCacheKeyForModule(StaticExternalStringSource source);
+
 inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
   return kj::arc<OwnedAscii>(kj::heapArray(source));
 }
@@ -603,6 +684,11 @@ v8::Local<v8::String> newExternalString(Lock& js, StaticExternalStringSource buf
 
 // Like the overload above. An Arc buffer is shared: the V8 string takes its own reference.
 v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& buf);
+
+// Copies `buf` into a buffer from the isolate's ExternalStringAllocator and returns an external
+// string over it. The buffer is freed when V8 disposes of the string.
+v8::Local<v8::String> copyToExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+v8::Local<v8::String> copyToExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

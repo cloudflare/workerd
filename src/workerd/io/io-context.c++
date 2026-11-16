@@ -341,12 +341,15 @@ tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanCont
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
 void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
-  delivered(location.function, location);
+  delivered(location.function, DropQueuedCrossContextActions::NO, location);
 }
 
-void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLocation location) {
+void IoContext::IncomingRequest::delivered(kj::StringPtr eventType,
+    DropQueuedCrossContextActions dropQueuedActions,
+    kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
-  if (!context->incomingRequests.empty()) {
+  bool hadRequest = !context->incomingRequests.empty();
+  if (hadRequest) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
     // longer current. Make sure to attribute accumulated CPU time to it.
     auto& oldFront = context->incomingRequests.front();
@@ -395,6 +398,11 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
     // Record a new incoming request to actor metrics.
     a.getMetrics().startRequest();
   }
+
+  // A stateless context has a single request, before which nothing could reach its queue.
+  if (!hadRequest && context->actor != kj::none) {
+    context->handleActionsQueuedWhileIdle(eventType, dropQueuedActions);
+  }
 }
 
 kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> clockClamp) {
@@ -426,34 +434,13 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!context->isShared()) {
     // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
     // request is still current so those spans close before the request outcome is reported.
-    while (!context->canceler.isEmpty()) {
-      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
-        KJ_IF_SOME(e, context->abortException) {
-          context->canceler.cancel(e);
-        } else {
-          context->canceler.cancel(JSG_KJ_EXCEPTION(
-              FAILED, Error, "The execution context responding to this call was canceled."));
-        }
-      })) {
-        // Canceler unlinks the callback before destroying its promise, so another attempt makes
-        // progress after a promise destructor throws.
-        if (cancellationException == kj::none) {
-          cancellationException = kj::mv(exception);
-        }
+    cancellationException = context->cancelPendingWork([&]() -> kj::Exception {
+      KJ_IF_SOME(e, context->abortException) {
+        return e.clone();
       }
-    }
-
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->tasks.clear(); })) {
-      if (cancellationException == kj::none) {
-        cancellationException = kj::mv(exception);
-      }
-    }
-
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->waitUntilTasks.clear(); })) {
-      if (cancellationException == kj::none) {
-        cancellationException = kj::mv(exception);
-      }
-    }
+      return JSG_KJ_EXCEPTION(
+          FAILED, Error, "The execution context responding to this call was canceled.");
+    }, ClearTasks::YES);
   }
 
   // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
@@ -491,13 +478,10 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       //
       // We couldn't do this in abort() because it can be called from inside a task that could
       // be canceled, and a self-cancellation would lead to a crash.
-
-      if (!context->canceler.isEmpty()) {
-        context->canceler.cancel(e);
-      }
-      context->timeoutManager->cancelAll();
-      context->tasks.clear();
-      context->waitUntilTasks.clear();
+      //
+      // The abort has already been reported, so a destructor that throws during this cleanup
+      // adds nothing: it is dropped.
+      context->cancelPendingWork([&]() { return e.clone(); }, ClearTasks::YES);
     }
   }
 
@@ -508,6 +492,44 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   KJ_IF_SOME(exception, cancellationException) {
     unwindDetector.catchExceptionsIfUnwinding(
         [&]() { kj::throwExceptionUnlessUnwinding(kj::mv(exception)); });
+  }
+}
+
+kj::Maybe<kj::Exception> IoContext::cancelPendingWork(
+    kj::FunctionParam<kj::Exception()> makeReason, ClearTasks clearTasks) {
+  kj::Maybe<kj::Exception> firstException;
+  auto runStep = [&](auto&& step) {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions(step)) {
+      if (firstException == kj::none) {
+        firstException = kj::mv(exception);
+      }
+    }
+  };
+  // Canceler unlinks each callback before destroying its promise, so retrying makes progress
+  // after a destructor throws.
+  while (!canceler.isEmpty()) {
+    runStep([&]() { canceler.cancel(makeReason()); });
+  }
+  runStep([&]() { timeoutManager->cancelAll(); });
+  if (clearTasks) {
+    runStep([&]() { tasks.clear(); });
+  }
+  runStep([&]() { waitUntilTasks.clear(); });
+  return firstException;
+}
+
+void IoContext::IncomingRequest::cancelPendingWorkForHibernation() {
+  // This request must still be current: canceled work may have spans that read its timer.
+  waitedForWaitUntil = true;
+  context->reentryDisabled = true;
+  // Cross-context promise reactions queued for this context would run on its next turn. The
+  // context is about to be destroyed, which drops them anyway; drop them now. The task only runs
+  // on its own event-loop turns, never within this call, so it is safe to destroy here.
+  context->deleteQueueSignalTask = nullptr;
+  KJ_IF_SOME(exception, context->cancelPendingWork([]() {
+    return JSG_KJ_EXCEPTION(FAILED, Error, "The Durable Object is hibernating.");
+  }, ClearTasks::NO)) {
+    LOG_EXCEPTION("onHibernateCleanup", exception);
   }
 }
 
@@ -571,6 +593,25 @@ void IoContext::logWarningOnce(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logWarningOnce(description);
 }
 
+void IoContext::logWarningLater(kj::String description) {
+  logWarningLaterImpl(kj::mv(description), WarnOnce::NO);
+}
+
+void IoContext::logWarningOnceLater(kj::String description) {
+  logWarningLaterImpl(kj::mv(description), WarnOnce::YES);
+}
+
+void IoContext::logWarningLaterImpl(kj::String description, WarnOnce once) {
+  if (!hasCurrentIncomingRequest()) return;
+  addTask(run([description = kj::mv(description), once](Worker::Lock& lock) {
+    if (once) {
+      lock.logWarningOnce(description);
+    } else {
+      lock.logWarning(description);
+    }
+  }));
+}
+
 void IoContext::logErrorOnce(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logErrorOnce(description);
 }
@@ -587,18 +628,22 @@ void IoContext::logUncaughtException(
 void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     kj::Exception&& exception,
     kj::Maybe<IncomingRequest&> incomingRequest) {
+  // The request whose trace the exception goes in.
+  kj::Maybe<IncomingRequest&> traceRequest = incomingRequest;
+  if (traceRequest == kj::none && !incomingRequests.empty()) {
+    traceRequest = getCurrentIncomingRequest();
+  }
+
   kj::Maybe<BaseTracer&> tracer;
   kj::Maybe<RequestObserver&> metrics;
-  KJ_IF_SOME(request, incomingRequest) {
+  KJ_IF_SOME(request, traceRequest) {
     KJ_DASSERT(&request.getContext() == this);
     tracer = request.getWorkerTracer();
     metrics = request.getMetrics();
-  } else if (!incomingRequests.empty()) {
-    tracer = getWorkerTracer();
-    metrics = getMetrics();
   }
+  bool inspectorEnabled = worker->getIsolate().isInspectorEnabled();
 
-  if (tracer == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+  if (tracer == kj::none && !inspectorEnabled) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
@@ -613,33 +658,105 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     return;
   }
 
+  // Make sure this is logged even if another exception occurs trying to log it to the trace or
+  // the devtools inspector, e.g. if `runImpl` throws before calling logUncaughtExceptionToConsole.
+  // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
+  KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
+
+  // The exception as JavaScript would see it, which takes neither JavaScript nor the isolate lock
+  // to find out. An internal exception is logged and reported to the isolate's observer in the
+  // process, as it is when it is converted to JavaScript.
+  auto error = jsg::describeAsJsError(exception, worker->getIsolate().getApi().getObserver());
+
+  // The request's observer is told as well. An isolate observer that passes the report on to the
+  // current request by looking up IoContext::tryCurrent() finds no current IoContext here, as the
+  // isolate lock is not held.
+  KJ_IF_SOME(detail, error.internalException) {
+    KJ_IF_SOME(m, metrics) {
+      m.reportInternalException(exception, detail);
+    }
+  }
+
+  KJ_IF_SOME(t, tracer) {
+    // An intermediate report of an exception that passes from JavaScript to C++ is redundant in
+    // the trace; see addExceptionToTrace() in worker.c++.
+    if (source != UncaughtExceptionSource::INTERNAL &&
+        source != UncaughtExceptionSource::INTERNAL_ASYNC) {
+      auto& request = KJ_ASSERT_NONNULL(traceRequest);
+
+      // A request's clock moves only when it is synced, which is otherwise done on entering the
+      // isolate. Sync it to get the time the exception is logged at rather than the time
+      // JavaScript last ran, as IncomingRequest::nowForTraceOnset() does for the onset.
+      request.ioChannelFactory->getTimer().syncTime();
+      auto timestamp = now(request);
+
+      // The exception belongs to the request as a whole, and no JavaScript is running whose async
+      // context could name a more specific user span, so report it under the request's root user
+      // span.
+      auto userSpan = request.getRootUserTraceSpan();
+      auto spanContext = request.getInvocationSpanContextForUserSpan(userSpan);
+
+      auto errorInfo =
+          tracing::ErrorInfo::fromErrorProperties(kj::str(error.name), kj::str(error.message),
+              error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
+      t.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
+          kj::mv(errorInfo.stack));
+    }
+  }
+
+  if (!inspectorEnabled) {
+    // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
+    if (kj::_::Debug::shouldLog(kj::LogSeverity::INFO)) {
+      KJ_IF_SOME(stack, error.stack) {
+        KJ_LOG(INFO, "uncaught exception", source, stack);
+      } else {
+        // An error without a stack trace has a stack that is just its name and message.
+        auto stack = kj::str(error.name, ": ", error.message);
+        KJ_LOG(INFO, "uncaught exception", source, stack);
+      }
+    }
+    return;
+  }
+
   struct RunnableImpl: public Runnable {
     UncaughtExceptionSource source;
     kj::Exception exception;
-    kj::Maybe<IncomingRequest&> incomingRequest;
+    const jsg::JsErrorDescription& error;
 
     RunnableImpl(UncaughtExceptionSource source,
         kj::Exception&& exception,
-        kj::Maybe<IncomingRequest&> incomingRequest)
+        const jsg::JsErrorDescription& error)
         : source(source),
           exception(kj::mv(exception)),
-          incomingRequest(incomingRequest) {}
+          error(error) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, kj::mv(exception), incomingRequest);
+      lock.logUncaughtExceptionToConsole(source, kj::mv(exception), error);
     }
   };
 
-  // Make sure this is logged even if another exception occurs trying to log it to the devtools inspector,
-  // e.g. if `runImpl` throws before calling logUncaughtException.
-  // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
-  KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
-  RunnableImpl runnable(source, kj::mv(exception), incomingRequest);
-  // TODO(perf): Is it worth using an async lock here? The only case where it really matters is
-  //   when a trace worker is active, but maybe they'll be more common in the future. To take an
-  //   async lock here, we'll probably have to update all the call sites of this method... ick.
+  RunnableImpl runnable(source, kj::mv(exception), error);
   runImpl(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
+}
+
+void IoContext::requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report) {
+  if (incomingRequests.empty()) {
+    // As in runSingle(), the abort explains the failure better.
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwException(ex.clone());
+    }
+    // Not necessarily a bug (e.g. an idle actor), so throw a JS error, but report it in case it is
+    // one.
+    if (report) {
+      LOG_PERIODICALLY(WARNING, "IoContext::run() without a current IncomingRequest",
+          lastDeliveredLocation, kj::getStackTrace());
+    }
+    auto e = JSG_KJ_EXCEPTION(FAILED, Error,
+        "Couldn't complete operation because the execution context has no request in progress.");
+    e.setDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    kj::throwException(kj::mv(e));
+  }
 }
 
 void IoContext::abort(kj::Exception&& e) {
@@ -653,6 +770,11 @@ void IoContext::abort(kj::Exception&& e) {
     a.shutdownActorCache(e.clone());
   }
   abortFlag.reject(kj::mv(e));
+}
+
+kj::Exception IoContext::abortWithoutReasonException() {
+  return JSG_KJ_EXCEPTION(
+      FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -928,6 +1050,7 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
         ? ctx.worker->takeAsyncLockWithoutRequest(nullptr)
         : ctx.worker->takeAsyncLock(ctx.getMetrics());
     return lockPromise.then([weakContext = kj::mv(weakContext)](Worker::AsyncLock asyncLock) {
+      // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
       KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before hang abort")
           .abortFromHang(asyncLock);
     });
@@ -1713,6 +1836,7 @@ void IoContext::runImpl(Runnable& runnable,
       // Run microtask checkpoint with an active IoContext
       {
         // Running the microtask queue can itself trigger a pending exception in the isolate.
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
         v8::TryCatch tryCatch(workerLock.getIsolate());
 
         js.runMicrotasks();
@@ -1752,6 +1876,7 @@ void IoContext::runImpl(Runnable& runnable,
           // It is possible that a microtask got enqueued during pumpMsgLoop execution
           // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
           // without an active IoContext
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
           v8::TryCatch tryCatch(workerLock.getIsolate());
 
           js.runMicrotasks();
@@ -1780,6 +1905,7 @@ void IoContext::runImpl(Runnable& runnable,
           v8::Isolate::kFullGarbageCollection);
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): reset before the exception is used.
     v8::TryCatch tryCatch(workerLock.getIsolate());
     try {
       runnable.run(workerLock);
@@ -1807,6 +1933,11 @@ void IoContext::runImpl(Runnable& runnable,
           JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
         } else {
           auto jsException = tryCatch.Exception();
+          auto jsMessage = tryCatch.Message();
+          // Reset, so that the exception isn't pending while it is logged and tunneled: that reads
+          // its properties, whose getters may call into Rust JSG, which fails while an exception
+          // is pending.
+          tryCatch.Reset();
 
           // TODO(someday): We log "uncaught exception" here whenever throwing from JS to C++.
           //   However, the C++ code calling us may still catch the exception and do its own logging,
@@ -1817,7 +1948,7 @@ void IoContext::runImpl(Runnable& runnable,
           //   useful. We should improve the tunneling to include stack traces and ensure that all
           //   consumers do in fact log exceptions, then we can remove this.
           workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
-              jsg::JsValue(jsException), jsg::JsMessage(tryCatch.Message()));
+              jsg::JsValue(jsException), jsg::JsMessage(jsMessage));
 
           jsg::throwTunneledException(workerLock.getIsolate(), jsException);
         }
@@ -1826,18 +1957,11 @@ void IoContext::runImpl(Runnable& runnable,
   });
 }
 
-static constexpr auto kAsyncIoErrorMessage =
-    "Disallowed operation called within global scope. Asynchronous I/O "
-    "(ex: fetch() or connect()), setting a timeout, and generating random "
-    "values are not allowed within global scope. To fix this error, perform this "
-    "operation within a handler. "
-    "https://developers.cloudflare.com/workers/runtime-apis/handlers/";
-
 IoContext& IoContext::current() {
   if (!hasCurrent()) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
     KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
-    isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
+    isolate->ThrowError(jsg::v8StrIntern(isolate, NO_REQUEST_MESSAGE));
     throw jsg::JsExceptionThrown();
   } else {
     return *threadLocalRequest;
@@ -1988,25 +2112,74 @@ jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // The promise that is returned is held by the IoContext itself, so when the
   // IoContext is destroyed, the promise will be canceled and the loop will
-  // end. On each iteration of the loop we want to reset the cross thread
-  // signal in the delete queue, then wait on the promise. Once the promise
-  // is fulfilled, we will run an empty task to prompt the IoContext to drain
-  // the DeleteQueue.
+  // end. On each iteration of the loop we wait for the delete queue's cross
+  // thread signal, then run the queued actions.
   try {
+    auto& queue = *context->deleteQueue.queue;
+    auto signal = queue.resetCrossThreadSignal();
     for (;;) {
-      co_await context->deleteQueue.queue->resetCrossThreadSignal();
-      co_await context->run([](auto& lock) {
-        auto& context = IoContext::current();
-        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-        auto& state = KJ_ASSERT_NONNULL(*l);
-        for (auto& action: state.actions) {
-          action(lock);
-        }
-        state.actions.clear();
-      });
+      co_await signal;
+
+      // Re-arm first, so that an action scheduled during the run wakes us again.
+      signal = queue.resetCrossThreadSignal();
+
+      // Without a request, the actions wait for an actor's next one, whose delivered() runs them.
+      // A stateless context gets no other request, so they wait until it is destroyed. An earlier
+      // run may also have taken them already.
+      if (context->incomingRequests.empty() || !queue.hasQueuedActions()) {
+        continue;
+      }
+
+      kj::Promise<void> actionsRun = context->runQueuedActions();
+      if (context->actor != kj::none) {
+        // As in delivered(), keep the request draining until the run is done, so the actions
+        // aren't stranded until the actor's next request. Other contexts end with their request.
+        auto forked = actionsRun.fork();
+        context->addWaitUntil(forked.addBranch());
+        actionsRun = forked.addBranch();
+      }
+      co_await actionsRun;
+      if (context->abortException != kj::none) {
+        co_return;
+      }
     }
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
+  }
+}
+
+kj::Promise<void> IoContext::runQueuedActions() {
+  bool tookActions = false;
+  try {
+    co_await runSingle([&tookActions](Worker::Lock& lock) {
+      // Take all the actions out first, since one may schedule another.
+      tookActions = true;
+      for (auto& action: IoContext::current().deleteQueue.queue->takeActions()) {
+        action(lock);
+      }
+    });
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    // Only losing the request before the actions were taken leaves them queued for the next one.
+    // Anything else aborts, including an action's own failure, whatever its exception's details.
+    if (tookActions || e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) == kj::none) {
+      abort(kj::mv(e));
+    }
+  }
+}
+
+void IoContext::handleActionsQueuedWhileIdle(
+    kj::StringPtr eventType, DropQueuedCrossContextActions drop) {
+  if (drop) {
+    // Destroyed at the end of this scope, without the queue's lock held.
+    auto dropped = deleteQueue.queue->takeActions();
+    if (dropped.size() > 0) {
+      LOG_PERIODICALLY(WARNING, "NOSENTRY IoContext dropped queued cross-context actions",
+          eventType, dropped.size());
+    }
+  } else if (deleteQueue.queue->hasQueuedActions()) {
+    // Run them as a waitUntil task, so that the request can't finish draining before they have run.
+    addWaitUntil(runQueuedActions());
   }
 }
 }  // namespace workerd

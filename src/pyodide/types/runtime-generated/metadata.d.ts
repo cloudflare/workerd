@@ -13,6 +13,8 @@ declare namespace MetadataReader {
     python_check_rng_state?: boolean;
     python_workflows_implicit_dependencies?: boolean;
     python_process_pth_files?: boolean;
+    python_shared_standard_library?: boolean;
+    python_dedicated_snapshot_keep_import_caches?: boolean;
   }
 
   const isWorkerd: () => boolean;
@@ -30,8 +32,6 @@ declare namespace MetadataReader {
   const getMemorySnapshotSize: () => number;
   const disposeMemorySnapshot: () => void;
   const getPyodideVersion: () => string;
-  const getPackagesVersion: () => string;
-  const getPackagesLock: () => string;
   const read: (index: number, position: number, buffer: Uint8Array) => number;
   const getCompatibilityFlags: () => CompatibilityFlags;
   const setCpuLimitNearlyExceededCallback: (

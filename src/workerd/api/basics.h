@@ -23,7 +23,6 @@ namespace workerd::api {
 class EventTarget;
 class AbortSignal;
 class AbortController;
-class ActorState;
 
 WD_STRONG_BOOL(Trusted);
 
@@ -279,73 +278,6 @@ class Event: public jsg::Object {
   }
 };
 
-class ExtendableEvent: public Event {
- public:
-  // Runtime-only (the JS constructor is deleted); always trusted.
-  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
-
-  // While ExtendableEvent is defined by the spec to be constructable, there's really not a
-  // lot of reason currently to do so, especially with the restriction that waitUntil can
-  // only be called on trusted events (which have to originate from within the system).
-  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
-
-  void waitUntil(kj::Promise<void> promise);
-
-  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(ExtendableEvent) {
-    JSG_INHERIT(Event);
-    JSG_METHOD(waitUntil);
-
-#if !WORKERD_API_BASICS_TEST
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(actorState, getActorState);
-#endif
-
-    JSG_TS_OVERRIDE({ actorState: never });
-    // Omit `actorState` from definitions
-  }
-};
-
-// An implementation of the Web Platform Standard CustomEvent API
-class CustomEvent: public Event {
- public:
-  struct CustomEventInit final {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-    JSG_STRUCT(bubbles, cancelable, composed, detail);
-
-    operator Event::Init();
-  };
-
-  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
-
-  static jsg::Ref<CustomEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init);
-
-  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(CustomEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
-    JSG_TS_OVERRIDE(<T = any> {
-      get detail(): T;
-    });
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("detail", detail);
-  }
-
- private:
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(detail);
-  }
-};
-
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
  public:
@@ -474,6 +406,38 @@ class EventTarget: public jsg::Object {
 
   static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
+  // A listener as recorded for a startup snapshot: its identity, and the callback and receiver
+  // its registration derived from it.
+  struct SnapshotListener {
+    kj::StringPtr type;
+    v8::Local<v8::Object> identity;
+    v8::Local<v8::Function> callback;
+    v8::Local<v8::Value> receiver;
+    bool once;
+    bool passive;
+  };
+
+  // Enumerates JS-registered listeners for the startup snapshot's PREPARE pass, in per-type
+  // insertion order. Internally-registered listeners (the on<type> attribute trampolines) are
+  // skipped: their identity is a synthesized object owned by the C++ attribute state. Throws for a
+  // listener registered with a `signal`, whose abort algorithm lives on the signal.
+  void forEachSnapshotListener(
+      jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb);
+
+  // Re-registers a listener forEachSnapshotListener() recorded, on the fresh global scope of a
+  // Worker started from the snapshot. Unlike addEventListener(), it runs no JavaScript and reads
+  // nothing from `identity`: `callback` already carries the receiver the original registration
+  // gave it.
+  struct SnapshotListenerOptions {
+    bool once = false;
+    bool passive = false;
+  };
+  void restoreSnapshotListener(jsg::Lock& js,
+      kj::StringPtr type,
+      v8::Local<v8::Object> identity,
+      HandlerFunction callback,
+      SnapshotListenerOptions options);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
@@ -481,7 +445,8 @@ class EventTarget: public jsg::Object {
   // addEventListener() and removeEventListener() — including once-listener removal during
   // dispatch and {signal}-triggered removals — and on managed event handler attribute
   // activation and deactivation, whose trampoline occupies a regular listener slot.
-  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown. Hooks registered
+  // through EventTargetBootstrap::setListenerCountHook() are called on the same occasions.
   virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
@@ -508,6 +473,19 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback);
 
  private:
+  friend class EventTargetBootstrap;
+
+  // Calls listenerCountChanged(), then the bootstrap hook registered for `type`, if any.
+  void notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count);
+
+  struct ListenerCountHook {
+    kj::String type;
+    jsg::JsRef<jsg::JsFunction> hook;
+  };
+  // Hooks registered through EventTargetBootstrap::setListenerCountHook(), at most one per type.
+  // Only EventTargets implemented in the per-isolate bootstrap have any, and then one or two.
+  kj::Vector<ListenerCountHook> listenerCountHooks;
+
   struct EventHandler {
     // The listener's identity (the function or object passed to addEventListener, or a
     // synthesized object for internally-registered listeners), used for removeEventListener
@@ -754,9 +732,9 @@ class AbortSignal final: public EventTarget {
   // Registers a native callback to be invoked with the abort exception if/when this signal
   // aborts. The callback runs under the isolate lock in the IoContext that is current at
   // registration time: synchronously when the abort is triggered within that context,
-  // otherwise delivered on that context's next turn, and dropped entirely (never invoked)
-  // once that context has been destroyed. If the signal can never abort, the callback is
-  // never invoked and no registration is made.
+  // otherwise as a cross-context action (see DeleteQueue::scheduleAction()), and dropped
+  // entirely (never invoked) once that context has been destroyed. If the signal can never
+  // abort, the callback is never invoked and no registration is made.
   //
   // Dropping the returned handle (safe from any thread) unregisters the callback: once the
   // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
@@ -831,7 +809,7 @@ class AbortSignal final: public EventTarget {
 
   // One native abort action, shared between this signal and one consumer. The action is
   // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
-  // triggered there; otherwise on that context's next turn), always under the isolate lock,
+  // triggered there; otherwise as addAbortAction() describes), always under the isolate lock,
   // and never again after the consumer's RAII handle clears the slot. Because the handle is
   // held by (or attached to) objects the owning request destroys, an IoContext teardown
   // reclaims the action without ever touching the signal; the signal side retains only this
@@ -945,6 +923,12 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
 
+  // Whether a request to arm the RPC subscription has been queued on rpcReceiverContext. Queued
+  // only once, so registrations can't pile requests up on an idle actor; it arms the subscription
+  // unless the context is aborted or destroyed, or its idle actor's onHibernate event drops it,
+  // first.
+  bool rpcSubscriptionRequested = false;
+
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
 
@@ -1056,8 +1040,7 @@ class Scheduler final: public jsg::Object {
   api::Event, api::Event::Init, api::EventTarget, api::EventTarget::EventListenerOptions,          \
       api::EventTarget::AddEventListenerOptions, api::EventTarget::HandlerObject,                  \
       api::AbortController, api::AbortSignal, api::AbortAlgorithmHandle, api::Scheduler,           \
-      api::Scheduler::WaitOptions, api::ExtendableEvent, api::CustomEvent,                         \
-      api::CustomEvent::CustomEventInit
+      api::Scheduler::WaitOptions
 // The list of basics.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

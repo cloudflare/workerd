@@ -293,6 +293,11 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
 
   kj::Promise<void> pumpFromNative(kj::Ptr<ReadableStreamSource> source, bool end);
 
+  // Transitions `inner` to `Ended` and returns a promise that ends the stream it held, which the
+  // promise owns until it settles. Every path that ends the stream goes through here, so the
+  // stream is ended at most once; a capnp ByteStream rejects a second end().
+  kj::Promise<void> endInner();
+
   // Unwrap `inner` as a `kj::AsyncOutputStream`.
   kj::AsyncOutputStream& getInner();
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
@@ -451,24 +456,8 @@ kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
   nativeInput.identityLength = uint64_t{0};
 
   if (end) {
-    // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
-    //   can go away.
-    KJ_SWITCH_ONEOF(inner) {
-      KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
-        KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
-          co_await ee.end();
-        } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
-          aio.shutdownWrite();
-        }
-      }
-      KJ_CASE_ONEOF(gz, kj::Own<GzipAsyncOutputStream>) {
-        co_await gz->end();
-      }
-      KJ_CASE_ONEOF(br, kj::Own<BrotliAsyncOutputStream>) {
-        co_await br->end();
-      }
-      KJ_CASE_ONEOF(e, Ended) {}
-    }
+    // Not end(): this pump may outlive the IoContext, so it must not register a pending event.
+    co_await endInner();
   }
 }
 
@@ -481,6 +470,10 @@ StreamEncoding EncodedAsyncOutputStream::disownEncodingResponsibility() {
 kj::Promise<void> EncodedAsyncOutputStream::end() {
   if (inner.is<Ended>()) return kj::READY_NOW;
 
+  return endInner().attach(ioContext.registerPendingEvent());
+}
+
+kj::Promise<void> EncodedAsyncOutputStream::endInner() {
   kj::Promise<void> promise = kj::READY_NOW;
 
   // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
@@ -505,7 +498,7 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
 
   inner.init<Ended>();
 
-  return promise.attach(ioContext.registerPendingEvent());
+  return promise;
 }
 
 void EncodedAsyncOutputStream::abort(kj::Exception reason) {

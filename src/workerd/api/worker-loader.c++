@@ -245,6 +245,7 @@ static Worker::Script::ModuleContent extractWasmModuleContent(
     .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
     .compiledModule = kj::mv(compiled),
     .compiledWithEsmIntegrationBuiltins = js.isWasmEsmIntegrationBuiltinsEnabled(),
+    .compiledWithWasmSourceUrlSupport = js.isWasmSourceUrlSupportEnabled(),
   };
 }
 
@@ -436,6 +437,10 @@ kj::Own<CompatibilityFlags::Reader> WorkerLoader::extractCompatFlags(
   }
 
   return capnp::clone(compatFlagsBuilder.asReader());
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> WorkerLoader::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<WorkerLoader>(channel, compatDateValidation));
 }
 
 }  // namespace workerd::api

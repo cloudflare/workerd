@@ -360,6 +360,16 @@ const E = {
   jsrpcExceptionV:
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"}]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"makePostAbortCallTester"},{"name":"jsrpc.target_kind","value":"entrypoint"},{"name":"jsrpc.operation","value":"call"},{"name":"jsrpc.caller_span_id","value":"0000000000000008"}]}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000002"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"exception","name":"Error","message":"test broken critical section","stack":"    at worker:144:13"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"failCriticalSection"},{"name":"jsrpc.target_kind","value":"transient"},{"name":"jsrpc.operation","value":"call"},{"name":"jsrpc.caller_span_id","value":"0000000000000009"}]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
 
+  // tail-worker-test-on-hibernate.js, and its buffered tail worker logging each trace's event
+  onHibernateFetch:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"OnHibernateObject","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://x/","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  onHibernate:
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"OnHibernateObject","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"onHibernate","reason":"inactive"}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  onHibernateFetchTrace:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"log","level":"log","message":["[{\\"request\\":{\\"url\\":\\"http://x/\\",\\"method\\":\\"GET\\",\\"headers\\":{}},\\"response\\":{\\"status\\":200}}]"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  onHibernateTrace:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"log","level":"log","message":["[{\\"reason\\":\\"inactive\\"}]"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+
   // cacheMode
   cacheMode:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"cacheMode","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
@@ -437,6 +447,12 @@ const expected = [
   // was captured at acceptWebSocket() time and restored when the DO was woken up.
   n(E.wsHibernation, [n(E.wsMessage), n(E.wsClose)]),
   n(E.wsThrow),
+
+  // onHibernate: the hook runs without a caller, so its trace is a root
+  n(E.onHibernateFetch),
+  n(E.onHibernate),
+  n(E.onHibernateFetchTrace),
+  n(E.onHibernateTrace),
 
   // cacheMode: standalone
   n(E.cacheMode),

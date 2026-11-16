@@ -327,46 +327,52 @@ export const cancelBodyThenConsume = {
   },
 };
 
+// A source that declares the 10 bytes it delivers.
+function tenByteSource() {
+  return new ReadableStream({
+    expectedLength: 10,
+    start(c) {
+      c.enqueue(enc.encode('hellohello'));
+      c.close();
+    },
+  });
+}
+
 // Full fetch round-trip: a JS ReadableStream as a fetch() body, echoed
 // back by the SELF service and read via async iteration (the
-// streams-test.js rs shape, workerd#5113 family).
+// streams-test.js rs shape, workerd#5113 family). The source's declared
+// expectedLength is the subrequest's Content-Length.
 export const fetchBodyRoundtrip = {
   async test(ctrl, env) {
     const resp = await env.SELF.fetch('http://example.org', {
       method: 'POST',
-      body: new ReadableStream({
-        expectedLength: 10,
-        start(c) {
-          c.enqueue(enc.encode('hellohello'));
-          c.close();
-        },
-      }),
+      body: tenByteSource(),
     });
     const chunks = [];
     for await (const chunk of resp.body) {
       chunks.push(...chunk);
     }
     strictEqual(new TextDecoder().decode(new Uint8Array(chunks)), 'hellohello');
+    strictEqual(resp.headers.get('observed-content-length'), '10');
   },
 };
 
 // The same round-trip with the stream attached via new Request() (the
-// streams-test.js rsRequest shape, workerd#5113 regression).
+// streams-test.js rsRequest shape, workerd#5113 regression), and with
+// that Request copied by new Request(request), which moves the body to
+// a new stream: the declared length is the Content-Length of both.
 export const fetchRequestBodyRoundtrip = {
   async test(ctrl, env) {
-    const resp = await env.SELF.fetch(
+    const makeRequest = () =>
       new Request('http://example.org', {
         method: 'POST',
-        body: new ReadableStream({
-          expectedLength: 10,
-          start(c) {
-            c.enqueue(enc.encode('hellohello'));
-            c.close();
-          },
-        }),
-      })
-    );
-    strictEqual(await resp.text(), 'hellohello');
+        body: tenByteSource(),
+      });
+    for (const request of [makeRequest(), new Request(makeRequest())]) {
+      const resp = await env.SELF.fetch(request);
+      strictEqual(await resp.text(), 'hellohello');
+      strictEqual(resp.headers.get('observed-content-length'), '10');
+    }
   },
 };
 

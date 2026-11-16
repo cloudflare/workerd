@@ -21,7 +21,6 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/compiled-bindings.capnp.h>
 #include <workerd/server/fallback-service.h>
-#include <workerd/server/pyodide.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
@@ -73,6 +72,7 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
       timer(timer),
       monotonicClock(monotonicClock),
       network(network),
+      weakNetwork(network),
       entropySource(entropySource),
       fs(fs),
       options(kj::mv(options)),
@@ -85,7 +85,9 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           timer, entropySource, headerTableBuilder, httpOverCapnpFactory, byteStreamFactory),
       headerTable(buildHeaderTable(headerTableBuilder, this->config)),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenHandler(factory),
+      channelTokenHandler(factory,
+          this->config.hasCluster() ? kj::Maybe<kj::StringPtr>(this->config.getCluster().getKey())
+                                    : kj::none),
       tasks(*this) {
   // The config's logging settings go on top of the caller's.
   auto& logging = this->options->loggingOptions;
@@ -394,7 +396,7 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -433,6 +435,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     if (outcome == EventOutcome::OK) {
       outcome = RequestObserver::outcomeFromException(exception, source);
     }
+  }
+
+  void reportOnHibernateOutcome(EventOutcome hookOutcome) override {
+    if (outcome == EventOutcome::OK) outcome = hookOutcome;
   }
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -1051,6 +1057,67 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
 };
 
+// The tracer of one event on `worker`, or none if the event has no tails. A dynamic worker's tails
+// are its source's; the server passes it none in `tails`.
+kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::Actor&> actor,
+    ::rust::Box<WorkerInterfaceList> tails) {
+  kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
+  kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
+  for (size_t i = 0; i < tails->len(); i++) {
+    (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
+  }
+  KJ_IF_SOME(dynamic, worker.dynamicSource) {
+    for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
+    for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
+  }
+  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty()) return kj::none;
+
+  auto executionModel =
+      actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
+  kj::Maybe<kj::String> durableObjectId;
+  KJ_IF_SOME(a, actor) {
+    KJ_SWITCH_ONEOF(a.getId()) {
+      KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+        durableObjectId = id->toString();
+      }
+      KJ_CASE_ONEOF(id, kj::String) {
+        durableObjectId = kj::str(id);
+      }
+    }
+  }
+  auto tailStreamWriter = tracing::initializeTailStreamWriter(
+      streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
+      entrypointName.clone(), executionModel, kj::mv(durableObjectId));
+  kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
+      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
+
+  // The buffered tail workers get the trace once it completes. The observer and the IoContext
+  // each hold the tracer, so it lives until every event is recorded.
+  if (!bufferedTailWorkers.empty()) {
+    worker.waitUntilTasks.add(tracer->onComplete().then(
+        kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
+                          kj::Own<Trace> trace) mutable -> kj::Promise<void> {
+      for (auto& tailWorker: tailWorkers) {
+        auto event = kj::heap<api::TraceCustomEvent>(
+            api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
+        co_await tailWorker->customEvent(kj::mv(event));
+      }
+    })));
+  }
+  auto& threadContext = worker.factory.getImpl().threadContext;
+  tracer->setMakeUserRequestSpanFunc(
+      [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
+          tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+    return SpanParent(kj::rc<UserSpanObserver>(
+        kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
+        kj::mv(traceId), traceFlags));
+  });
+  return kj::mv(tracer);
+}
+
 kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     IoChannelFactory::SubrequestMetadata metadata,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -1061,63 +1128,10 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   auto& threadContext = worker.factory.getImpl().threadContext;
 
-  // The test event is not traced. A dynamic worker's tails are its source's; the server passes
-  // it none.
-  kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
-  kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
-  if (entrypointName.orDefault("") != "test"_kj) {
-    for (size_t i = 0; i < tails->len(); i++) {
-      (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
-    }
-    KJ_IF_SOME(dynamic, worker.dynamicSource) {
-      for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
-      for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
-    }
-  }
-
+  // The test event is not traced.
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
-  if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
-    auto executionModel =
-        actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-    kj::Maybe<kj::String> durableObjectId;
-    KJ_IF_SOME(a, actor) {
-      KJ_SWITCH_ONEOF(a->getId()) {
-        KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
-          durableObjectId = id->toString();
-        }
-        KJ_CASE_ONEOF(id, kj::String) {
-          durableObjectId = kj::str(id);
-        }
-      }
-    }
-    auto tailStreamWriter = tracing::initializeTailStreamWriter(
-        streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
-    auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
-        entrypointName.clone(), executionModel, kj::mv(durableObjectId));
-    kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
-        kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
-
-    // The buffered tail workers get the trace once it completes. The observer and the IoContext
-    // each hold the tracer, so it lives until every event is recorded.
-    if (!bufferedTailWorkers.empty()) {
-      worker.waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
-                            kj::Own<Trace> trace) mutable -> kj::Promise<void> {
-        for (auto& tailWorker: tailWorkers) {
-          auto event = kj::heap<api::TraceCustomEvent>(
-              api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
-          co_await tailWorker->customEvent(kj::mv(event));
-        }
-      })));
-    }
-    tracer->setMakeUserRequestSpanFunc(
-        [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
-            tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-      return SpanParent(kj::rc<UserSpanObserver>(
-          kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
-          kj::mv(traceId), traceFlags));
-    });
-    workerTracer = kj::mv(tracer);
+  if (entrypointName.orDefault("") != "test"_kj) {
+    workerTracer = makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails));
   }
 
   kj::Own<RequestObserver> observer =
@@ -1180,6 +1194,23 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
       kj::mv(channels), kj::mv(tails), kj::none);
 }
 
+kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
+    const ActorHandle& actor,
+    ::rust::Str className,
+    ::rust::Box<ChannelFactory> channels,
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Own<RequestMetadata> metadata) {
+  auto& impl = worker.getImpl();
+  auto& actorRef = actor.getActor();
+  auto entrypointName = kj::str(className);
+  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails));
+  auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
+  auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
+  return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer),
+      kj::mv(metadata->restoredSelfTokenFactory));
+}
+
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
     kj::Own<WorkerInterface> worker, ::rust::Slice<const uint64_t> params) {
   capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));
@@ -1226,6 +1257,31 @@ kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& m
 
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent) {
   if (persistent) metadata.fromPersistentStub = Persistent::YES;
+}
+
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata) {
+  return metadata.forwardedBy.map([](const kj::String& s) { return toRustString(s); });
+}
+
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node) {
+  metadata.forwardedBy = kj::str(node);
+}
+
+bool request_metadata_from_handoff(const RequestMetadata& metadata) {
+  return metadata.fromHandoff.toBool();
+}
+
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata) {
+  ::rust::Vec<::rust::String> result;
+  result.reserve(metadata.causedBy.size());
+  for (auto& object: metadata.causedBy) result.push_back(toRustString(object));
+  return result;
+}
+
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy) {
+  metadata.fromHandoff = FromHandoff(fromHandoff);
+  metadata.causedBy = KJ_MAP(object, causedBy) { return kj::str(object); };
 }
 
 namespace {
@@ -1486,11 +1542,22 @@ void indexDynamicChannels(CompiledWorker::Impl& impl, DynamicWorkerSource& sourc
   });
 }
 
+// Loads the Pyodide bundle a Python worker's flags select (server/pyodide.rs).
 kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags::Reader flags) {
   if (!flags.getPythonWorkers()) co_return;
   KJ_IF_SOME(release, getPythonSnapshotRelease(flags)) {
-    co_await fetchPyodideBundle(factory.options->pythonConfig, getPythonBundleName(release),
-        release.getIntegrity(), factory.network, factory.timer);
+    auto& options = *factory.options;
+    auto& manager = options.pythonConfig.pyodideBundleManager;
+    auto version = getPythonBundleName(release);
+    if (manager.getPyodideBundle(version) != kj::none) co_return;
+    auto bytes = co_await pyodide_bundle_fetch(
+        toRust(options.pyodideBundleDiskCacheDir.map(
+            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
+        toRust(version), toRust(release.getIntegrity()));
+    // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
+    // this one waited.
+    if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;
+    manager.setPyodideBundleData(kj::mv(version), kj::heapArray<kj::byte>(kj::from<Rust>(bytes)));
   }
 }
 
@@ -1503,17 +1570,49 @@ bool hasWasmModules(const WorkerSource& source) {
   return false;
 }
 
-bool supportsStartupSnapshot(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
-  return !featureFlags.getPythonWorkers() && !featureFlags.getNewModuleRegistry() &&
-      !source.variant.is<WorkerSource::ScriptSource>() && !hasWasmModules(source);
+// Whether a Worker's top level can be evaluated in a zygote isolate and baked into a startup
+// snapshot. Only the TypeScript streams implementation qualifies: with the C++ implementation a
+// stream whose pull() or start() is still pending when top-level evaluation ends leaves a C++
+// promise continuation reachable from the context (a v8::Function whose callback is an
+// unregistered template instantiation and whose FunctionTemplateInfo data is a JS object), which
+// CreateBlob() cannot serialize. The TypeScript implementation keeps those continuations in
+// JavaScript, so a pending pull transfers with the context.
+//
+// Every binding must be of a kind that transfers through the snapshot
+// (WorkerdApi::isBindingTransferableThroughSnapshot()): the zygote compiles the real bindings
+// into `env`, and the Worker started from the snapshot takes `env` out of it complete. `globals`
+// is the Worker's encoded Globals message; a dynamic Worker has none (its `env` arrives as
+// capabilities rather than channel numbers) and never qualifies.
+bool supportsStartupSnapshot(kj::StringPtr name,
+    CompatibilityFlags::Reader featureFlags,
+    const WorkerSource& source,
+    kj::Maybe<kj::ArrayPtr<const uint64_t>> globals) {
+  if (!featureFlags.getTypeScriptImplementedStreams() || featureFlags.getPythonWorkers() ||
+      source.variant.is<WorkerSource::ScriptSource>() || hasWasmModules(source)) {
+    return false;
+  }
+  KJ_IF_SOME(words, globals) {
+    capnp::FlatArrayMessageReader reader(asWords(words), CONFIG_READER_OPTIONS);
+    for (auto global: reader.getRoot<Globals>().getGlobals()) {
+      if (!WorkerdApi::isBindingTransferableThroughSnapshot(global)) {
+        KJ_LOG(INFO, "startup snapshot skipped: a binding of this kind cannot be transferred", name,
+            global.getName(), static_cast<uint>(global.which()));
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
-}  // namespace
-
-kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& constFactory,
+// `factory_new_worker()`, which records the timing of each phase in the worker's
+// `startupTiming`. The isolate gets an inspector, and is registered with it, only if `registrar` is
+// given.
+kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFactory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
-    kj::Maybe<kj::Own<DynamicSource>> dynamicSource) {
+    kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
+    kj::Maybe<InspectorServiceIsolateRegistrar&> registrar) {
   auto& factory = constFactory.getImpl();
   auto name = kj::str(spec.name);
   TRACE_EVENT("workerd", "factory_new_worker()", "name", name.cStr());
@@ -1561,17 +1660,20 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   KJ_IF_SOME(header, spec.access_blob_header) impl->accessBlobHeader = kj::str(header);
 
   co_await preloadPython(factory, featureFlags);
+  auto& timing = impl->startupTiming;
+  auto startTime = api::BenchTiming::now();
 
   // The file system roots use their defaults; the config does not expose mount points.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource));
+
+  KJ_REQUIRE(experimental || moduleFallback == kj::none,
+      "The module fallback service is an experimental feature. "
+      "You must run workerd with `--experimental` to use the module fallback service.");
 
   // Python workers never use the new module registry, whatever their flags say.
   bool usingNewModuleRegistry = isNewModuleRegistryEnabled(featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (usingNewModuleRegistry) {
-    KJ_REQUIRE(experimental,
-        "The new ModuleRegistry implementation is an experimental feature. "
-        "You must run workerd with `--experimental` to use this feature.");
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
@@ -1617,11 +1719,27 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
+  // With the inspector enabled it is always fully trusted.
+  auto inspectorPolicy = registrar == kj::none
+      ? Worker::Isolate::InspectorPolicy::DISALLOW
+      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code
   // to produce a V8 startup snapshot of it.
+  // Not when an inspector is configured, by the server (--inspector-addr) or
+  // by the Worker's flags (node:inspector): the inspector attaches to the
+  // Worker's isolate, and top-level code must run there for DevTools to see its console output
+  // and stop at its breakpoints.
+  bool inspectorConfigured = inspectorPolicy != Worker::Isolate::InspectorPolicy::DISALLOW ||
+      featureFlags.getEnableNodeJsInspectorLocalDev();
+  kj::Maybe<kj::ArrayPtr<const uint64_t>> envGlobals;
+  if (!impl->isDynamic) envGlobals = kj::from<Rust>(spec.globals);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
-  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
-      supportsStartupSnapshot(featureFlags, workerSource)) {
+  // Not with a module fallback service either: the zygote has none, so a top level that tolerates
+  // a failed import (`try { await import(x) } catch {}`) would bake the failure in.
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) && !inspectorConfigured &&
+      moduleFallback == kj::none &&
+      supportsStartupSnapshot(impl->name, featureFlags, workerSource, envGlobals)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
     ErrorReporter zygoteErrors;
@@ -1629,26 +1747,40 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         makeIsolate(kj::str(impl->name, "-snapshot"), Worker::Isolate::InspectorPolicy::DISALLOW,
             jsg::SnapshotConfig(
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
-    auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
-        IsolateObserver::StartType::COLD, SpanParent(nullptr),
-        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
-        zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
-    // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
-    // zygote isolate breaks snapshot creation.
-    auto zygote =
-        kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
-            [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
-                v8::Local<v8::Object>) { compileBindings(lock, api, target); },
-            IsolateObserver::StartType::COLD, SpanParent(nullptr),
-            Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
-    if (zygoteErrors.errors.empty()) {
+    // Anything the zygote throws while compiling, evaluating or serializing only means this
+    // Worker starts without a snapshot and evaluates its top level itself, printing what the
+    // zygote's run only deferred.
+    kj::Maybe<kj::Own<Worker>> zygote;
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
+          IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
+          api::pyodide::ArtifactBundler::makeDisabledBundler(),
+          // The registry only holds the bundle's definitions; each isolate attaches its own
+          // instances (jsg::modules::ModuleRegistry::attachToIsolate()).
+          newModuleRegistry.map(
+              [](kj::Arc<jsg::modules::ModuleRegistry>& registry) { return registry.addRef(); }));
+      // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
+      // zygote isolate breaks snapshot creation.
+      zygote =
+          kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+              [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+                  v8::Local<v8::Object>) { compileBindings(lock, api, target); },
+              IsolateObserver::StartType::COLD, SpanParent(nullptr),
+              Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
+    })) {
+      KJ_LOG(INFO, "startup snapshot skipped: the zygote Worker threw", impl->name,
+          exception.getDescription());
+    } else if (zygoteErrors.errors.empty()) {
       kj::Own<jsg::SnapshotArtifact> artifact;
       zygoteIsolate->runInLockScope(
           Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
         artifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
       });
-      // TODO(soon): start the Worker from the snapshot artifact.
-      (void)artifact;
+      snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = artifact->addRef()});
+      // The zygote's run is the one that counts: what its top level wrote to the console is
+      // printed now.
+      zygoteIsolate->flushDeferredConsoleOutput();
     } else {
       auto errors = kj::strArray(zygoteErrors.errors, "\n");
       KJ_LOG(
@@ -1656,21 +1788,15 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     }
   }
 
-  // With the inspector enabled it is always fully trusted.
-  auto& registrar = factory.inspectorRegistrar;
-  auto inspectorPolicy = registrar == kj::none
-      ? Worker::Isolate::InspectorPolicy::DISALLOW
-      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+  auto isolateStart = api::BenchTiming::now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
+  timing.isolate = api::BenchTiming::now() - isolateStart;
   KJ_IF_SOME(r, registrar) {
-    r->registerIsolate(impl->name, *isolate);
+    r.registerIsolate(impl->name, *isolate);
   }
 
   if (!usingNewModuleRegistry) {
     KJ_IF_SOME(fallback, moduleFallback) {
-      KJ_REQUIRE(experimental,
-          "The module fallback service is an experimental feature. "
-          "You must run workerd with `--experimental` to use the module fallback service.");
       auto& apiIsolate = isolate->getApi();
       apiIsolate.setModuleFallbackCallback(
           [client = kj::heap<fallback::FallbackServiceClient>(kj::str(fallback)),
@@ -1708,23 +1834,32 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
 
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
+  auto scriptStart = api::BenchTiming::now();
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), false, errorReporter,
+      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
+  timing.script = api::BenchTiming::now() - scriptStart;
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the
   // Worker constructed first; the handle is held until then.
+  auto workerStart = api::BenchTiming::now();
   auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {
     impl->ctxExportsHandle = lock.v8Ref(ctxExports);
-    compileBindings(lock, api, target);
+    // A Worker started from a startup snapshot takes `env` out of the snapshot complete with the
+    // bindings the zygote compiled into it.
+    if (!jsg::IsolateBase::from(lock.v8Isolate).isStartingFromSnapshot()) {
+      compileBindings(lock, api, target);
+    }
   },
       IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+  timing.worker = api::BenchTiming::now() - workerStart;
 
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
       [&](Worker::Lock& lock) { lock.validateHandlers(errorReporter); });
+  timing.total = api::BenchTiming::now() - startTime;
 
   impl->info = WorkerInfo{
     .entrypoints = ErrorReporter::toRust(errorReporter.entrypoints),
@@ -1741,6 +1876,52 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   };
   impl->worker = kj::mv(worker);
   co_return kj::heap<CompiledWorker>(kj::mv(impl));
+}
+
+// Compiles a throwaway copy of the config's worker `services[configService]`, destroys it, and
+// returns how long the phases of compiling it took.
+//
+// The copy has no inspector, even when the inspector is enabled. It couldn't be registered: it
+// shares the worker's name, which the inspector's registry holds only once. And an inspector that
+// nothing can connect to would only add to the time measured.
+kj::Promise<api::WorkerStartupTiming> startThrowawayWorker(
+    const WorkerFactory& factory, const WorkerSpec& spec, uint32_t configService) {
+  auto compiled = co_await compileWorker(factory, spec, configService, kj::none, kj::none);
+  auto& impl = compiled->getImpl();
+  // `worker_set_ctx_exports()` would drop the handle under the lock; nothing calls it for a copy.
+  impl.getWorker().runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
+      [&](Worker::Lock&) { impl.ctxExportsHandle = kj::none; });
+  KJ_REQUIRE(
+      impl.info.errors.empty(), "the worker failed to start", kj::strArray(impl.info.errors, "\n"));
+  co_return impl.startupTiming;
+}
+
+}  // namespace
+
+kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
+    const WorkerSpec& spec,
+    kj::Maybe<uint32_t> configService,
+    kj::Maybe<kj::Own<DynamicSource>> dynamicSource) {
+  auto registrar = factory.getImpl().inspectorRegistrar.map(
+      [](kj::Own<InspectorServiceIsolateRegistrar>& r) -> InspectorServiceIsolateRegistrar& {
+    return *r;
+  });
+  return compileWorker(factory, spec, configService, kj::mv(dynamicSource), registrar);
+}
+
+kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
+    const WorkerSpec& spec,
+    uint32_t configService,
+    ::rust::Slice<const uint64_t> params) {
+  capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));
+  capnp::MallocMessageBuilder groupMessage;
+  co_await api::benchWorkerStartup(
+      paramsMessage.getRoot<bench::BenchParams>(), [&factory, &spec, configService]() {
+    return startThrowawayWorker(factory, spec, configService);
+  }, groupMessage.initRoot<bench::BenchReport::Group>());
+  auto words = capnp::messageToFlatArray(groupMessage);
+  co_return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+      .as<kj_rs::RustCopy>();
 }
 
 WorkerInfo worker_info(const CompiledWorker& worker) {

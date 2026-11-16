@@ -8,6 +8,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/trace-stream.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/util/mimetype.h>
 
@@ -24,28 +25,35 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       kj::Rc<IoChannelFactory::SubrequestChannel> service,
       kj::Maybe<kj::String> cfBlobJson,
-      Persistent fromPersistentStub)
+      Persistent fromPersistentStub,
+      FromHandoff fromHandoff,
+      kj::Maybe<kj::String> forwardedBy,
+      kj::Array<kj::String> causedBy)
       : httpOverCapnpFactory(httpOverCapnpFactory),
         service(kj::mv(service)),
         cfBlobJson(kj::mv(cfBlobJson)),
-        fromPersistentStub(fromPersistentStub) {}
+        fromPersistentStub(fromPersistentStub),
+        fromHandoff(fromHandoff),
+        forwardedBy(kj::mv(forwardedBy)),
+        causedBy(kj::mv(causedBy)) {}
 
   kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
     IoChannelFactory::SubrequestMetadata metadata;
     metadata.cfBlobJson = cfBlobJson.clone();
     metadata.fromPersistentStub = fromPersistentStub;
+    metadata.fromHandoff = fromHandoff;
+    metadata.forwardedBy = kj::mv(forwardedBy);
+    metadata.causedBy = kj::mv(causedBy);
     context.initResults(capnp::MessageSize{4, 1})
         .setHttp(httpOverCapnpFactory.kjToCapnp(getService()->startRequest(kj::mv(metadata))));
     return kj::READY_NOW;
   }
 
   kj::Promise<void> sendTraces(SendTracesContext context) override {
-    auto traces =
-        KJ_MAP(trace, context.getParams().getTraces()) { return kj::refcounted<Trace>(trace); };
-    auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
+    auto event = api::TraceCustomEvent::fromRpc(api::TraceCustomEvent::TYPE, context.getParams());
     auto worker = getWorker();
     auto result = co_await worker->customEvent(kj::mv(event));
-    context.getResults().getResult().setOutcome(result.outcome);
+    context.initResults(capnp::MessageSize{4, 0}).initResult().setOutcome(result.outcome);
   }
 
   kj::Promise<void> prewarm(PrewarmContext context) override {
@@ -55,6 +63,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     throwUnsupported();
   }
   kj::Promise<void> runAlarm(RunAlarmContext context) override {
+    throwUnsupported();
+  }
+  kj::Promise<void> abandonAlarm(AbandonAlarmContext context) override {
     throwUnsupported();
   }
   kj::Promise<void> queue(QueueContext context) override {
@@ -72,12 +83,14 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   }
 
   kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-    auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
+    auto customEvent = tracing::TailStreamCustomEvent::fromRpc(context.getParams());
     auto cap = customEvent->getCap();
     capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
     pipelineBuilder.setTopLevel(cap);
     context.setPipeline(pipelineBuilder.build());
-    context.getResults().setTopLevel(kj::mv(cap));
+    // The results message lives as long as the session, so size it to fit rather than taking
+    // the default 8 KiB first segment.
+    context.initResults(capnp::MessageSize{4, 1}).setTopLevel(kj::mv(cap));
 
     auto worker = getWorker();
     auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));
@@ -89,6 +102,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> service;
   kj::Maybe<kj::String> cfBlobJson;
   Persistent fromPersistentStub;
+  FromHandoff fromHandoff;
+  kj::Maybe<kj::String> forwardedBy;
+  kj::Array<kj::String> causedBy;
 
   kj::Rc<IoChannelFactory::SubrequestChannel> getService() {
     auto result =
@@ -99,7 +115,11 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
 
   // Events other than HTTP carry no cf blob.
   kj::Own<WorkerInterface> getWorker() {
-    return getService()->startRequest({});
+    IoChannelFactory::SubrequestMetadata metadata;
+    metadata.fromHandoff = fromHandoff;
+    metadata.forwardedBy = kj::mv(forwardedBy);
+    metadata.causedBy = kj::mv(causedBy);
+    return getService()->startRequest(kj::mv(metadata));
   }
 
   [[noreturn]] void throwUnsupported() {
@@ -116,9 +136,14 @@ kj::Promise<void> WorkerdBootstrapImpl::startEvent(StartEventContext context) {
   auto params = context.getParams();
   kj::Maybe<kj::String> cfBlobJson;
   if (params.hasCfBlobJson()) cfBlobJson = kj::str(params.getCfBlobJson());
+  kj::Maybe<kj::String> forwardedBy;
+  if (params.hasForwardedBy()) forwardedBy = kj::str(params.getForwardedBy());
   context.initResults(capnp::MessageSize{4, 1})
-      .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(),
-          kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub())));
+      .setDispatcher(
+          kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(), kj::mv(cfBlobJson),
+              Persistent(params.getFromPersistentStub()), FromHandoff(params.getFromHandoff()),
+              kj::mv(forwardedBy),
+              KJ_MAP(object, params.getCausedBy()) { return kj::str(object); }));
   return kj::READY_NOW;
 }
 
@@ -178,15 +203,28 @@ RpcClient::Impl& RpcClient::getImpl() const {
 }
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
-  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(stream)));
+  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream));
+  auto target = session->rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
+}
+
+kj::Own<RpcClient> rpc_client_debug_actor(
+    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId) {
+  auto& impl = session.getImpl();
+  auto peer = impl.session->rpcSystem.bootstrap().castAs<rpc::WorkerdDebugPort>();
+  auto request = peer.getActorRequest();
+  request.setService(kj::str(service));
+  request.setEntrypoint(kj::str(className));
+  request.setActorId(kj::str(actorId));
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(
+      impl.factory, kj::addRef(*impl.session), request.send().getActor()));
 }
 
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson) {
   auto& impl = client.getImpl();
-  auto bootstrap = impl.rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
-  auto request = bootstrap.startEventRequest(capnp::MessageSize{4, 0});
+  auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
   KJ_IF_SOME(cf, cfBlobJson) request.setCfBlobJson(kj::str(cf));
   auto dispatcher = request.send().getDispatcher();
   // Workerd-to-workerd RPC does not support `restore()`, so Frankenvalues need no handler.
@@ -196,8 +234,114 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
   co_return rust::worker::CustomEventResult{.outcome = rust::worker::toRustOutcome(result.outcome)};
 }
 
+kj::Own<WorkerInterface> rpc_client_start_request(
+    const RpcClient& client, kj::Own<RequestMetadata> metadata) {
+  auto& impl = client.getImpl();
+  auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
+  KJ_IF_SOME(cf, metadata->cfBlobJson) request.setCfBlobJson(cf);
+  request.setFromPersistentStub(metadata->fromPersistentStub == Persistent::YES);
+  request.setFromHandoff(metadata->fromHandoff.toBool());
+  KJ_IF_SOME(node, metadata->forwardedBy) request.setForwardedBy(node);
+  auto causedBy = request.initCausedBy(metadata->causedBy.size());
+  for (auto i: kj::indices(metadata->causedBy)) causedBy.set(i, metadata->causedBy[i]);
+  auto dispatcher = request.send().getDispatcher();
+  auto& factory = impl.factory.getImpl();
+  return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,
+      getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+}
+
+namespace {
+// Where the interface a `MovedWatcher` forwards to runs.
+enum class Reach { LOCAL, PEER };
+
+// Forwards every event to `inner`, and tells `hook` of each that fails with a `moved` answer.
+//
+// On a peer, any other failure that neither side marked as before or after delivery is marked as
+// after it: the request may have run there, so it is not replayed. It stays retryable for the
+// application to decide. Such a failure that is a disconnect is the peer or the connection to it
+// failing, not the object, so `hook` is told of that too.
+class MovedWatcher final: public WorkerInterface {
+ public:
+  MovedWatcher(kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook, Reach reach)
+      : inner(kj::mv(inner)),
+        hook(kj::mv(hook)),
+        reach(reach) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    return watch(inner->request(method, url, headers, requestBody, response));
+  }
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return watch(inner->connect(host, headers, connection, response, kj::mv(settings)));
+  }
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return watch(inner->prewarm(url));
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return watch(inner->runScheduled(scheduledTime, cron));
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return watch(inner->runAlarm(scheduledTime, retryCount));
+  }
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return watch(inner->abandonAlarm(scheduledTime));
+  }
+  kj::Promise<bool> test() override {
+    return watch(inner->test());
+  }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    return watch(inner->bench(params, report));
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return watch(inner->customEvent(kj::mv(event)));
+  }
+
+ private:
+  kj::Own<WorkerInterface> inner;
+  ::rust::Box<MovedHook> hook;
+  Reach reach;
+
+  // An interface outlives the promises of its events.
+  template <typename T>
+  kj::Promise<T> watch(kj::Promise<T> promise) {
+    KJ_TRY {
+      co_return co_await promise;
+    }
+    KJ_CATCH(exception) {
+      if (jsg::isActorPredecessorRejection(exception)) {
+        hook->moved();
+      } else if (reach == Reach::PEER &&
+          exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none &&
+          exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
+        if (exception.getType() == kj::Exception::Type::DISCONNECTED) hook->lost();
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      }
+      kj::throwException(kj::mv(exception));
+    }
+  }
+};
+}  // namespace
+
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook) {
+  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook), Reach::LOCAL);
+}
+
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook) {
+  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook), Reach::PEER);
+}
+
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client) {
-  return client.getImpl().rpcSystem.onDisconnect();
+  return client.getImpl().session->rpcSystem.onDisconnect();
 }
 
 // =======================================================================================

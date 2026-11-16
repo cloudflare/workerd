@@ -8,6 +8,7 @@
 
 #include "worker-factory.h"
 
+#include <workerd/api/bench.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -91,6 +92,8 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
+  // Expires with this factory, which owns every container cleanup that uses `network`.
+  WeakOwner<kj::Network&> weakNetwork;
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
   kj::Own<Options> options;
@@ -198,6 +201,9 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   kj::Maybe<jsg::V8Ref<v8::Object>> ctxExportsHandle;
 
   WorkerInfo info;
+  // How long the phases of compiling the worker took, which `workerd bench` reports for the
+  // throwaway copies `factory_bench_startup()` compiles.
+  api::WorkerStartupTiming startupTiming;
 
   const Worker& getWorker() const {
     return *KJ_ASSERT_NONNULL(worker);
@@ -215,8 +221,13 @@ class ActorStorage::Impl final: public kj::Refcounted {
       kj::String uniqueKey,
       ::rust::Box<ActorNamespaceHandle> actors);
 
+  // Declared first: the VFS's hooks and the alarm scheduler call into it.
+  ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
+  // What SQLite opens files through: `vfsDirectory`, or in a cluster a wrapper that fences opens
+  // on the lease and reports WAL writes, which the cluster ignores for the scheduler's database.
+  kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
@@ -239,14 +250,24 @@ class ActorStorage::Impl final: public kj::Refcounted {
 
 class RpcClient::Impl final {
  public:
-  Impl(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> connection)
+  // A connection and its RPC system, shared by the capabilities obtained over it.
+  struct Session: public kj::Refcounted {
+    explicit Session(kj::Own<kj::AsyncIoStream> connection)
+        : connection(kj::mv(connection)),
+          rpcSystem(*this->connection) {}
+    kj::Own<kj::AsyncIoStream> connection;
+    capnp::TwoPartyClient rpcSystem;
+  };
+
+  Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)
       : factory(factory),
-        connection(kj::mv(connection)),
-        rpcSystem(*this->connection) {}
+        session(kj::mv(session)),
+        target(kj::mv(target)) {}
 
   const WorkerFactory& factory;
-  kj::Own<kj::AsyncIoStream> connection;
-  capnp::TwoPartyClient rpcSystem;
+  kj::Own<Session> session;
+  // Where events go: the session's bootstrap, or an actor obtained over it.
+  rpc::WorkerdBootstrap::Client target;
 };
 
 // The `WorkerdBootstrap` a peer sees over capnp: every event it starts goes to `service`.

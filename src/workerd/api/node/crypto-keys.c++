@@ -9,7 +9,10 @@
 #include <workerd/api/crypto/keys.h>
 
 #include <ncrypto.h>
+#include <openssl/bytestring.h>
 #include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/mem.h>
 
 #include <climits>
 #include <map>
@@ -53,13 +56,12 @@ class SecretKey final: public CryptoKey::Impl {
     };
   }
 
+  size_t getSymmetricKeySize() const override {
+    return keyData.size();
+  }
+
   bool equals(const CryptoKey::Impl& other) const override final {
-    if (this == &other) return true;
-    if (other.getType() != "secret"_kj) return false;
-    KJ_IF_SOME(o, kj::dynamicDowncastIfAvailable<const SecretKey>(other)) {
-      return equalsImpl(o.rawKeyData());
-    }
-    return false;
+    return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
   }
 
   bool equalsImpl(kj::ArrayPtr<const kj::byte> other) const {
@@ -72,8 +74,9 @@ class SecretKey final: public CryptoKey::Impl {
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
-        " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
+    JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,
+        getAlgorithmName(),
+        " key only supports exporting \"raw\", \"raw-secret\" & \"jwk\", not \"", format, "\".");
 
     if (format == "jwk") {
       SubtleCrypto::JsonWebKey jwk;
@@ -399,10 +402,10 @@ kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::
 
   if (key->getType() == "secret"_kj) {
     // For secret keys, we only pay attention to the format option, which will be
-    // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw"
+    // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw-secret"
     // format in Web Crypto. The "jwk" option is handled above.
     JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
-    return convertExportKeyData(key->impl->exportKey(js, "raw"_kj));
+    return convertExportKeyData(key->impl->exportKey(js, "raw-secret"_kj));
   }
 
   kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
@@ -445,24 +448,10 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return found != mapping.end() ? found->second : name;
 }
 
-uint32_t CryptoImpl::getSymmetricKeySize(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+double CryptoImpl::getSymmetricKeySize(jsg::Ref<CryptoKey> key) {
   JSG_REQUIRE(
       key->getType() == "secret"_kj, TypeError, "Only secret keys have a symmetric key size");
-  KJ_SWITCH_ONEOF(key->getAlgorithm(js)) {
-    KJ_CASE_ONEOF(algorithm, CryptoKey::AesKeyAlgorithm) {
-      return algorithm.length;
-    }
-    KJ_CASE_ONEOF(algorithm, CryptoKey::HmacKeyAlgorithm) {
-      return algorithm.length;
-    }
-    KJ_CASE_ONEOF(algorithm, CryptoKey::ArbitraryKeyAlgorithm) {
-      return algorithm.length.orDefault(0);
-    }
-    KJ_CASE_ONEOF_DEFAULT {
-      return 0;
-    }
-  }
-  KJ_UNREACHABLE;
+  return static_cast<double>(key->impl->getSymmetricKeySize());
 }
 
 jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData) {
@@ -612,6 +601,61 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   }
 
   KJ_UNREACHABLE;
+}
+
+jsg::Ref<CryptoKey> CryptoImpl::toCryptoKey(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    kj::OneOf<kj::String, SubtleCrypto::ImportKeyAlgorithm> algorithmParam,
+    bool extractable,
+    kj::Array<kj::String> keyUsages) {
+  // The new key must not let JS read material that the source key keeps private.
+  JSG_REQUIRE(key->getExtractable() || !extractable, DOMInvalidAccessError,
+      "Cannot create an extractable CryptoKey from a non-extractable key.");
+
+  auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
+
+  if (key->getType() == "secret"_kj) {
+    auto exported = key->impl->exportKey(js, "raw-secret"_kj);
+    auto& raw = KJ_ASSERT_NONNULL(exported.tryGet<jsg::JsRef<jsg::JsArrayBuffer>>());
+    return SubtleCrypto::importKeySync(js, "raw-secret"_kj,
+        jsg::JsBufferSource(raw.getHandle(js)).addRef(js), kj::mv(algorithm), extractable,
+        keyUsages);
+  }
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  auto evp = JSG_REQUIRE_NONNULL(
+      tryGetKey(key), DOMNotSupportedError, "Unsupported key type for toCryptoKey().");
+  bool isPrivate = key->getType() == "private"_kj;
+
+  // Web Crypto imports every asymmetric algorithm workerd supports from spki (public keys) and
+  // pkcs8 (private keys).
+  uint8_t* der = nullptr;
+  size_t derLen = 0;
+  KJ_DEFER(if (der != nullptr) {
+    OPENSSL_cleanse(der, derLen);
+    OPENSSL_free(der);
+  });
+  bssl::ScopedCBB cbb;
+  JSG_REQUIRE(CBB_init(cbb.get(), 0) &&
+          (isPrivate ? EVP_marshal_private_key(cbb.get(), evp.get())
+                     : EVP_marshal_public_key(cbb.get(), evp.get())) &&
+          CBB_finish(cbb.get(), &der, &derLen),
+      DOMNotSupportedError, "Unsupported key type for toCryptoKey().");
+
+  auto result = SubtleCrypto::importKeySync(js, isPrivate ? "pkcs8"_kj : "spki"_kj,
+      jsg::JsBufferSource(jsg::JsUint8Array::create(js, kj::arrayPtr(der, derLen))).addRef(js),
+      kj::mv(algorithm), extractable, keyUsages);
+
+  // The Ed25519 and X25519 importers accept any SPKI/PKCS8 key, so check here that the key
+  // material is of the requested type.
+  auto name = result->getAlgorithmName();
+  if (name == "Ed25519"_kj || name == "NODE-ED25519"_kj) {
+    JSG_REQUIRE(evp.id() == EVP_PKEY_ED25519, DOMDataError, "Invalid key type");
+  } else if (name == "X25519"_kj) {
+    JSG_REQUIRE(evp.id() == EVP_PKEY_X25519, DOMDataError, "Invalid key type");
+  }
+
+  return result;
 }
 
 CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
@@ -883,7 +927,7 @@ jsg::JsUint8Array CryptoImpl::statelessDH(
   KJ_ASSERT(privateKeyAlg == publicKeyAlg, "Mismatched public and private key types");
   KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
-      auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
+      auto data = ncrypto::DHPointer::stateless(pvtKey, pubKey);
       JSG_REQUIRE(data, Error, "Failed to derive shared diffie-hellman secret");
       kj::ArrayPtr<const kj::byte> ptr(static_cast<const kj::byte*>(data.get()), data.size());
       return jsg::JsUint8Array::create(js, ptr);

@@ -28,4 +28,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "decode-non-utf8", esModule = embed "decode-non-utf8.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
   (name = "pollution", esModule = embed "pollution.js"),
+  (name = "transfer", esModule = embed "transfer.js"),
 ];

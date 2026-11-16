@@ -6,6 +6,7 @@
 
 #include "ada.h"
 
+#include <workerd/api/urlpattern-regex.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/array.h>
@@ -37,16 +38,6 @@ namespace urlpattern {
 // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 class URLPattern final: public jsg::Object {
  public:
-  class URLPatternRegexEngine {
-   public:
-    URLPatternRegexEngine() = default;
-    using regex_type = jsg::JsRef<jsg::JsRegExp>;
-    static std::optional<regex_type> create_instance(std::string_view pattern, bool ignore_case);
-    static std::optional<std::vector<std::optional<std::string>>> regex_search(
-        std::string_view input, const regex_type& pattern);
-    static bool regex_match(std::string_view input, const regex_type& pattern);
-  };
-
   // A structure providing matching patterns for individual components
   // of a URL. When a URLPattern is created, or when a URLPattern is
   // used to match or test against a URL, the input can be given as
@@ -60,7 +51,8 @@ class URLPattern final: public jsg::Object {
     jsg::Optional<jsg::USVString> baseURL;
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
-    JSG_STRUCT_TS_OVERRIDE(URLPatternInit);
+    // Declared in types/defines/urlpattern.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type URLPatternInit = never);
 
     ada::url_pattern_init toAdaType() const;
   };
@@ -75,10 +67,8 @@ class URLPattern final: public jsg::Object {
     jsg::JsRef<jsg::JsObject> groups;
 
     JSG_STRUCT(input, groups);
-    JSG_STRUCT_TS_OVERRIDE(URLPatternComponentResult {
-                  input: string;
-                  groups: Record<string, string>;
-                });
+    // Declared in types/defines/urlpattern.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type URLPatternComponentResult = never);
   };
 
   // A struct providing the URLPattern matching results for all
@@ -91,19 +81,21 @@ class URLPattern final: public jsg::Object {
 #undef V
 
     JSG_STRUCT(inputs, protocol, username, password, hostname, port, pathname, search, hash);
-    JSG_STRUCT_TS_OVERRIDE(URLPatternResult);
+    // Declared in types/defines/urlpattern.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type URLPatternResult = never);
   };
 
   struct URLPatternOptions final {
     jsg::Optional<bool> ignoreCase;
 
     JSG_STRUCT(ignoreCase);
-    JSG_STRUCT_TS_OVERRIDE(URLPatternOptions);
+    // Declared in types/defines/urlpattern.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type URLPatternOptions = never);
 
     ada::url_pattern_options toAdaType() const;
   };
 
-  explicit URLPattern(ada::url_pattern<URLPatternRegexEngine> i): inner(kj::mv(i)) {};
+  explicit URLPattern(ada::url_pattern<UrlPatternRegexProvider> i): inner(kj::mv(i)) {};
 
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
       jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
@@ -130,10 +122,14 @@ class URLPattern final: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(hasRegExpGroups, getHasRegExpGroups);
     JSG_METHOD(test);
     JSG_METHOD(exec);
+
+    // Declared in types/defines/urlpattern.d.ts, the same for both parsers. Also renames the
+    // references to this class from urlpatternURLPattern.
+    JSG_TS_OVERRIDE(type URLPattern = never);
   }
 
  private:
-  ada::url_pattern<URLPatternRegexEngine> inner;
+  ada::url_pattern<UrlPatternRegexProvider> inner;
 
   static URLPatternInit createURLPatternInit(jsg::Lock& js, const ada::url_pattern_init& other);
   static URLPatternComponentResult createURLPatternComponentResult(

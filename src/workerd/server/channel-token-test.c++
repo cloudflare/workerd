@@ -414,6 +414,24 @@ KJ_TEST("actor channel tokens") {
       "channel token type mismatch", handler.decodeActorClassChannelToken(Usage::RPC, token));
 }
 
+KJ_TEST("instances of a cluster redeem each other's channel tokens") {
+  MockResolver senderResolver, receiverResolver, strangerResolver;
+  auto key = "test-cluster-shared-secret-of-32-bytes"_kj;
+  ChannelTokenHandler sender(senderResolver, key);
+  ChannelTokenHandler receiver(receiverResolver, key);
+  ChannelTokenHandler stranger(strangerResolver, "another-cluster-secret-of-32-bytes"_kj);
+
+  const byte actorId[] = {12, 34, 56, 78};
+  auto token = sender.encodeActorChannelToken(
+      Usage::RPC, "foo-namespace", actorId, "my-actor"_kj, Persistent::NO);
+  auto channel =
+      receiver.decodeSubrequestChannelToken(Usage::RPC, token).downcast<MockActorChannel>();
+  expectActorChannel(*channel, "foo-namespace", actorId, "my-actor"_kj);
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "failed authentication", stranger.decodeSubrequestChannelToken(Usage::RPC, token));
+}
+
 KJ_TEST("channel token with nested channels (all synchronous)") {
   MockResolver resolver;
   ChannelTokenHandler handler(resolver);

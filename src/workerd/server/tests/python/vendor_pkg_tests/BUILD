@@ -74,7 +74,7 @@ vendored_py_wd_test(
 )
 
 # The dedicated numpy snapshot is generated from numpy_vendor.wd-test by
-# src/pyodide/make_snapshots.py, so this test reuses the same template and main module.
+# src/pyodide/scripts/make_snapshots.py, so this test reuses the same template and main module.
 vendored_py_wd_test(
     "existing_dedicated_numpy",
     feature_flags = ["python_dedicated_snapshot"],

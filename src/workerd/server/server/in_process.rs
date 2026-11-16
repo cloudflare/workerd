@@ -8,7 +8,9 @@
 //! the server through the `loopback:` registry: the config's addresses are loopback names, the
 //! test connects to the server's sockets by name and accepts, by name, the connections the
 //! server makes, the `network` services' included (`Loopback::mock_internet`). Config errors and
-//! warnings queue for the test to take as they are reported.
+//! warnings queue for the test to take as they are reported. Tests can mark services as coming
+//! from cluster deployments, as `workerd serve` composes them; the server then serves those as a
+//! cluster node does, and their errors and warnings queue with the rest.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,6 +23,7 @@ use tokio::sync::mpsc;
 use crate::Result;
 use crate::bench;
 use crate::bridge::ffi;
+use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::listen::loopback::LoopbackListener;
@@ -33,6 +36,8 @@ pub struct InProcessServer {
     drain: Notify,
     /// The names the test accepts connections for.
     listeners: RefCell<HashMap<String, Rc<LoopbackListener>>>,
+    /// The services marked as coming from deployments for the next run.
+    deployments: RefCell<Deployments>,
 }
 
 pub fn new_in_process_server(factory: KjOwn<ffi::WorkerFactory>) -> Box<InProcessServer> {
@@ -47,6 +52,7 @@ pub fn new_in_process_server(factory: KjOwn<ffi::WorkerFactory>) -> Box<InProces
         reported: RefCell::new(reported),
         drain: Notify::new(),
         listeners: RefCell::default(),
+        deployments: RefCell::default(),
     })
 }
 
@@ -64,7 +70,28 @@ impl InProcessServer {
             // The receiver lives as long as the sender: both are the server's.
             move |message| drop(reports.send(ffi::ConfigReport { error, message }))
         };
-        Reporter::new(Box::new(report(true)), Box::new(report(false)), true)
+        let deployments = std::mem::take(&mut *self.deployments.borrow_mut());
+        Reporter::new(Box::new(report(true)), Box::new(report(false)), true).with_deployments(
+            deployments,
+            Box::new(report(true)),
+            Box::new(report(false)),
+        )
+    }
+
+    /// Marks `service` in the config as defined by `deployment`.
+    pub fn add_deployment_service(&self, deployment: &str, service: &str) {
+        let mut deployments = self.deployments.borrow_mut();
+        deployments.enabled = true;
+        let deployment = deployment.to_owned();
+        deployments.services.insert(service.to_owned(), deployment);
+    }
+
+    /// Marks absent `service` as defined by skipped deployment `deployment`.
+    pub fn add_skipped_deployment_service(&self, deployment: &str, service: &str) {
+        let mut deployments = self.deployments.borrow_mut();
+        deployments.enabled = true;
+        let deployment = deployment.to_owned();
+        deployments.skipped.insert(service.to_owned(), deployment);
     }
 
     /// The next config error or warning the server reports.

@@ -282,9 +282,24 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   jsg::Promise<jsg::Ref<DurableObjectSnapshot>> snapshot(
       jsg::Lock& js, jsg::Optional<SnapshotOptions> options);
 
+  struct RestoreOptions {
+    // Key-value pairs to write to the database as KV values after the restore, before the
+    // object's constructor runs. Only supported when restoring from a snapshot.
+    jsg::Optional<jsg::Dict<jsg::JsRef<jsg::JsValue>>> kvData;
+
+    JSG_STRUCT(kvData);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectRestoreOptions);
+  };
+
+  // Limits on `RestoreOptions.kvData`, counting keys and serialized values. The storage back-end
+  // holds the data until the object next starts, so it must stay small.
+  static constexpr size_t MAX_RESTORE_KV_ENTRIES = 20;
+  static constexpr size_t MAX_RESTORE_KV_BYTES = 3 * 1024;
+
   // Arrange for the next session to restore from a snapshot or bookmark.
   using RestoreTarget = kj::OneOf<jsg::Ref<DurableObjectSnapshot>, jsg::NonCoercible<kj::String>>;
-  kj::Promise<kj::String> onNextSessionRestore(RestoreTarget target);
+  kj::Promise<kj::String> onNextSessionRestore(
+      jsg::Lock& js, RestoreTarget target, jsg::Optional<RestoreOptions> options);
 
   // Arrange to create replicas for this Durable Object.
   //
@@ -374,7 +389,6 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
  private:
   IoPtr<ActorCacheInterface> cache;
   bool enableSql;
-  uint transactionSyncDepth = 0;
 
   // Set if this is a replica Durable Object.
   kj::Maybe<jsg::Ref<DurableObject>> maybePrimary;
@@ -382,6 +396,10 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(maybePrimary);
   }
+
+  // A facet shares its root's underlying storage, and snapshots and restores apply to the whole
+  // object, so only the root may use them.
+  void requireNotFacet(kj::StringPtr method);
 
   struct AsyncTxnResult {
     jsg::JsRef<jsg::JsValue> value;
@@ -766,27 +784,27 @@ class DurableObjectState: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimaryStub);
 
-      // Types for the `onEvict` export of "cloudflare:durable-objects", which is experimental
+      // Types for the `onHibernate` export of "cloudflare:durable-objects", which is experimental
       // (see EntrypointsModule). JSG_TS_DEFINE_LITERAL because Clang rejects the `module`
       // keyword inside macro arguments.
       JSG_TS_DEFINE_LITERAL(R"(
-        /** Passed to a Durable Object's `[onEvict]` handler. */
-        interface DurableObjectEvictionInfo {
-          /** Why the object is being evicted. More reasons may be added later. */
+        /** Passed to a Durable Object's `[onHibernate]` handler. */
+        interface DurableObjectHibernationInfo {
+          /** Why the object is hibernating. More reasons may be added later. */
           readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
         }
         declare module "cloudflare:durable-objects" {
           /**
-           * Key of a Durable Object's eviction handler, a best-effort hook that runs before the
-           * runtime evicts the object:
+           * Key of a Durable Object's hibernation handler, a best-effort hook that runs before
+           * the object hibernates:
            *
            * ```ts
            * class MyObject extends DurableObject {
-           *   async [onEvict](info: DurableObjectEvictionInfo) {}
+           *   async [onHibernate](info: DurableObjectHibernationInfo) {}
            * }
            * ```
            */
-          export const onEvict: unique symbol;
+          export const onHibernate: unique symbol;
         }
       )");
     }
@@ -871,7 +889,7 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorage, api::DurableObjectState::AbortOptions,                            \
       api::DurableObjectState::ReadReplicationOptions,                                             \
       api::DurableObjectStorage::TransactionOptions, api::DurableObjectStorage::SnapshotOptions,   \
-      api::DurableObjectStorageOperations::ListOptions,                                            \
+      api::DurableObjectStorage::RestoreOptions, api::DurableObjectStorageOperations::ListOptions, \
       api::DurableObjectStorageOperations::GetOptions,                                             \
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
       api::DurableObjectStorageOperations::PutOptions,                                             \

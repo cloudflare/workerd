@@ -34,8 +34,27 @@ impl FeatureFlags {
             data.len()
         );
         let segments = vec![data.to_vec()];
-        let message = capnp::message::Reader::new(segments, ReaderOptions::new());
+        // A Reader charges every read against one traversal limit for as long as it lives, and
+        // this one lives as long as the Realm, with every `reader()` call reading the root. The
+        // bytes are C++'s own canonical encoding rather than untrusted input, so there is no limit.
+        let mut options = ReaderOptions::new();
+        options.traversal_limit_in_words(None);
+        let message = capnp::message::Reader::new(segments, options);
         Self { message }
+    }
+
+    /// Creates flags from a message built in Rust, such as for an RTTI export.
+    pub(crate) fn from_message(
+        message: &capnp::message::Builder<capnp::message::HeapAllocator>,
+    ) -> Self {
+        let segments = message
+            .get_segments_for_output()
+            .iter()
+            .map(|segment| segment.to_vec())
+            .collect();
+        Self {
+            message: capnp::message::Reader::new(segments, ReaderOptions::new()),
+        }
     }
 
     /// Returns the `CompatibilityFlags` reader.

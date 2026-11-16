@@ -21,6 +21,7 @@ the record back through its MOCK service binding (/last-put).
 | Test | Shape |
 | --- | --- |
 | `putJsValueStreamBody` | value stream of Uint8Array chunks, byte-exact at the backend |
+| `putStringChunkBody` | a string chunk stored as its UTF-8 encoding beside a byte chunk, byte-exact at the backend |
 | `putJsByteStreamBody` | 64 KiB chunked byte stream |
 | `putFixedLengthStreamBody` | FixedLengthStream body; the declared length arrives as a concrete Content-Length in the serialized head |
 | `putIdentityStreamBody` | identity body fed by a concurrent writer |

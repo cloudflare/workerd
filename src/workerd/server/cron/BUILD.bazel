@@ -1,0 +1,8 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# Cron triggers, the bundled module `/workerd/cron.js` (Worker.Module.bundled).
+wd_cc_embed(
+    name = "cron-js",
+    src = "cron.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

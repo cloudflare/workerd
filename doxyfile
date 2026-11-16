@@ -1140,7 +1140,7 @@ CLANG_OPTIONS          = -std=c++23     \
                          -stdlib=libc++ \
                          -xc++          \
                          -nostdinc      \
-                         -fbracket-depth=512 \
+                         -fbracket-depth=1024 \
                          -D_FORTIFY_SOURCE=1 \
                          -DCAPNP_VERSION=11000 \
                          -DDEBUG \

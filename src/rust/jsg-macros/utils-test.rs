@@ -21,12 +21,103 @@ fn snake_to_camel_cases() {
 }
 
 #[test]
+fn required_argument_count_uses_from_js_for_js_parameters() {
+    let cases: Vec<(syn::Signature, Vec<syn::Type>)> = vec![
+        (parse_quote!(fn f(&self)), vec![]),
+        (
+            parse_quote!(fn f(&self, a: String, b: u32)),
+            vec![parse_quote!(String), parse_quote!(u32)],
+        ),
+        (
+            parse_quote!(fn f(&self, lock: &mut jsg::Lock, a: String)),
+            vec![parse_quote!(String)],
+        ),
+        (parse_quote!(fn f(lock: &mut Lock)), vec![]),
+        (
+            parse_quote!(fn constructor(this: String)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(lock: &mut Lock, this: String)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(mut this: String, extra: OptionalString)),
+            vec![parse_quote!(String), parse_quote!(OptionalString)],
+        ),
+        (
+            parse_quote!(fn constructor(this: OptionalString)),
+            vec![parse_quote!(OptionalString)],
+        ),
+        (
+            parse_quote!(fn f(a: String, b: jsg::Lenient<u32>, c: u32)),
+            vec![
+                parse_quote!(String),
+                parse_quote!(jsg::Lenient<u32>),
+                parse_quote!(u32),
+            ],
+        ),
+        (
+            parse_quote!(fn f(a: jsg::Nullable<String>)),
+            vec![parse_quote!(jsg::Nullable<String>)],
+        ),
+        (
+            parse_quote!(fn f<'s>(&self, lock: &mut Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>)),
+            vec![parse_quote!(jsg::v8::Local<'_, jsg::v8::Value>)],
+        ),
+        // A rest parameter is not counted.
+        (
+            parse_quote!(fn f(&self, a: String, rest: jsg::Arguments<u32>)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(rest: Arguments<String>)),
+            vec![],
+        ),
+    ];
+    for (sig, types) in cases {
+        let expected = quote::quote! {{
+            let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
+            let mut length = 0u32;
+            for &is_optional in optional {
+                if is_optional {
+                    break;
+                }
+                length += 1;
+            }
+            length
+        }};
+        assert_eq!(
+            required_argument_count(sig.inputs.iter()).to_string(),
+            expected.to_string(),
+            "{sig:?}",
+        );
+    }
+}
+
+#[test]
 fn is_result_type_cases() {
     assert!(is_result_type(&parse_quote!(Result<String, Error>)));
     // Qualified path: last segment is still `Result`.
     assert!(is_result_type(&parse_quote!(std::result::Result<(), ()>)));
     assert!(!is_result_type(&parse_quote!(Option<String>)));
     assert!(!is_result_type(&parse_quote!(String)));
+}
+
+#[test]
+fn is_promise_type_cases() {
+    assert!(is_promise_type(&parse_quote!(v8::Local<'s, v8::Promise>)));
+    assert!(is_promise_type(&parse_quote!(jsg::Promise<'s, String>)));
+    assert!(is_promise_type(&parse_quote!(
+        jsg::Result<v8::Local<'s, v8::Promise>>
+    )));
+    assert!(is_promise_type(&parse_quote!(
+        Result<jsg::Promise<'s, String>, jsg::Error>
+    )));
+    assert!(!is_promise_type(&parse_quote!(v8::Local<'s, v8::Value>)));
+    assert!(!is_promise_type(&parse_quote!(jsg::Result<()>)));
+    assert!(!is_promise_type(&parse_quote!(v8::VoidPromise<'s>)));
+    assert!(!is_promise_type(&parse_quote!(String)));
 }
 
 #[test]
@@ -48,6 +139,20 @@ fn is_attr_cases() {
     assert!(!is_attr(&simple.attrs[0], "jsg_resource"));
     // Qualified path (`jsg_macros::jsg_method`) must also match by last segment.
     assert!(is_attr(&qualified.attrs[0], "jsg_method"));
+}
+
+#[test]
+fn is_null_or_undefined_type_cases() {
+    assert!(is_null_or_undefined_type(&parse_quote!(
+        NullOrUndefined<String>
+    )));
+    assert!(is_null_or_undefined_type(&parse_quote!(
+        jsg::NullOrUndefined<u32>
+    )));
+    assert!(!is_null_or_undefined_type(&parse_quote!(String)));
+    assert!(!is_null_or_undefined_type(&parse_quote!(
+        &NullOrUndefined<String>
+    )));
 }
 
 #[test]
@@ -93,10 +198,6 @@ fn fast_api_signature_cases() {
         fast(parse_quote!(fn f(&self, a: i32, b: u32) -> bool)),
         Some(2)
     );
-    assert_eq!(
-        fast(parse_quote!(fn f(&self, x: jsg::Number) -> Number)),
-        Some(1)
-    );
     assert_eq!(fast(parse_quote!(fn f(a: bool))), Some(1));
     assert_eq!(fast(parse_quote!(fn f(&self) -> ())), Some(0));
 
@@ -107,15 +208,135 @@ fn fast_api_signature_cases() {
         fast(parse_quote!(fn f(&self, lock: &mut Lock, a: i32))),
         None
     );
-    assert_eq!(fast(parse_quote!(fn f(&self, x: f64))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self, x: ::jsg::Number))), Some(1));
-    assert_eq!(fast(parse_quote!(fn f(&self, x: other::Number))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: f64) -> f64)), Some(1));
+    assert_eq!(fast(parse_quote!(fn f(&self, x: f32))), None);
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: ::core::primitive::f64))),
+        None
+    );
     assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), Some(0));
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: u8, y: i16) -> u16)),
+        Some(2)
+    );
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: i8, y: u16) -> i8)),
+        Some(2)
+    );
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i64)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: u64))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> Option<u32>)), None);
     assert_eq!(
         fast(parse_quote!(fn f(&self) -> Result<bool, jsg::Error>)),
         None
     );
     assert_eq!(fast(parse_quote!(fn f<T>(&self, a: i32))), None);
     assert_eq!(fast(parse_quote!(async fn f(&self, a: i32))), None);
+    assert_eq!(
+        fast(parse_quote!(fn f(this: jsg::Rc<Self>, a: i32) -> bool)),
+        None
+    );
+}
+
+#[test]
+fn arguments_element_cases() {
+    let element =
+        |ty: syn::Type| arguments_element(&ty).map(|element| quote::quote!(#element).to_string());
+    assert_eq!(
+        element(parse_quote!(jsg::Arguments<u32>)).as_deref(),
+        Some("u32")
+    );
+    assert_eq!(
+        element(parse_quote!(Arguments<jsg::v8::Local<'s, jsg::v8::Value>>)).as_deref(),
+        Some("jsg :: v8 :: Local < 's , jsg :: v8 :: Value >")
+    );
+    // Another module's `Arguments`, a reference, or no single type argument.
+    assert_eq!(element(parse_quote!(other::Arguments<u32>)), None);
+    assert_eq!(element(parse_quote!(&jsg::Arguments<u32>)), None);
+    assert_eq!(element(parse_quote!(jsg::Arguments)), None);
+    assert_eq!(element(parse_quote!(jsg::Arguments<u32, u32>)), None);
+    assert_eq!(element(parse_quote!(Vec<u32>)), None);
+}
+
+#[test]
+fn is_rc_self_cases() {
+    assert!(is_rc_self(&parse_quote!(jsg::Rc<Self>)));
+    assert!(is_rc_self(&parse_quote!(Rc<Self>)));
+    // Another module's `Rc`, a reference, another type argument, or no argument at all.
+    assert!(!is_rc_self(&parse_quote!(std::rc::Rc<Self>)));
+    assert!(!is_rc_self(&parse_quote!(&jsg::Rc<Self>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc<Other>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc<Self, Self>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Weak<Self>)));
+}
+
+#[test]
+fn this_param_cases() {
+    let this = |sig: syn::Signature| this_param(&sig).map(|param| param.ty.clone());
+
+    assert_eq!(
+        this(parse_quote!(fn f(this: jsg::Rc<Self>, a: i32))),
+        Some(parse_quote!(jsg::Rc<Self>))
+    );
+    // The type is not checked here, and `mut this` is still `this`.
+    assert_eq!(
+        this(parse_quote!(fn f(mut this: String))),
+        Some(parse_quote!(String))
+    );
+    // Only the first parameter counts, and a receiver comes first.
+    assert_eq!(this(parse_quote!(fn f(&self, this: jsg::Rc<Self>))), None);
+    assert_eq!(
+        this(parse_quote!(fn f(lock: &mut Lock, this: jsg::Rc<Self>))),
+        None
+    );
+    assert_eq!(this(parse_quote!(fn f(that: jsg::Rc<Self>))), None);
+    assert_eq!(this(parse_quote!(fn f())), None);
+}
+
+/// Parses TypeScript customizations into `(ts_root, ts_override, ts_define)`.
+fn parse_typescript(
+    tokens: proc_macro2::TokenStream,
+) -> syn::Result<(bool, Option<String>, Option<String>)> {
+    parse_typescript_options(tokens).map(|(ts_root, ts_override, ts_define)| {
+        (
+            ts_root,
+            ts_override.map(|value| value.value()),
+            ts_define.map(|value| value.value()),
+        )
+    })
+}
+
+#[test]
+fn typescript_options_cases() {
+    assert_eq!(parse_typescript(quote! {}).unwrap(), (false, None, None));
+    assert_eq!(
+        parse_typescript(quote! { name = "Foo", ts_root, custom_trace }).unwrap(),
+        (true, None, None)
+    );
+    assert_eq!(
+        parse_typescript(quote! { ts_override = "{ a(): void }", ts_define = r#"type A = "a";"# })
+            .unwrap(),
+        (
+            false,
+            Some("{ a(): void }".to_owned()),
+            Some(r#"type A = "a";"#.to_owned())
+        )
+    );
+}
+
+#[test]
+fn typescript_options_reject_invalid_values() {
+    let error = parse_typescript(quote! { ts_override = Foo }).unwrap_err();
+    assert_eq!(error.to_string(), "expected a string literal of TypeScript");
+    let error = parse_typescript(quote! { ts_define = "a", ts_define = "b" }).unwrap_err();
+    assert_eq!(error.to_string(), "duplicate `ts_define`");
+}
+
+#[test]
+fn invalid_typescript_options_still_evaluate_to_customizations() {
+    let expression = typescript_options(quote! { ts_override = 1 }).to_string();
+    assert!(expression.contains("compile_error"));
+    assert!(expression.contains("TypeScript :: default ()"));
 }

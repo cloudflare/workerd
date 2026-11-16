@@ -11,7 +11,9 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::ToJS;
+use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_struct;
 
 // =============================================================================
 // Shared leaf resource
@@ -75,10 +77,13 @@ fn enum_unit_variant_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Closed,
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Closed,
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
@@ -101,12 +106,15 @@ fn enum_variant_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(Leaf { value: 10 });
+        let child = jsg::Rc::new(lock, Leaf { value: 10 });
 
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Readable(child.clone()),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Readable(child.clone(lock)),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -133,14 +141,17 @@ fn enum_named_variant_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(Leaf { value: 11 });
+        let child = jsg::Rc::new(lock, Leaf { value: 11 });
 
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Errored {
-                reason: child.clone(),
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Errored {
+                    reason: child.clone(lock),
+                },
             },
-        });
-        let wrapped = parent.clone().to_js(lock);
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -156,6 +167,208 @@ fn enum_named_variant_child_kept_alive_through_gc() {
         crate::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+#[jsg_struct]
+struct PlainStruct {
+    pub label: String,
+}
+
+struct PlainData;
+jsg::jsg_traced!(PlainData);
+
+/// `jsg::Weak`, `jsg_traced!` types and a `#[jsg_struct]` of plain data hold no GC references.
+/// (That a `#[jsg_struct]` with a `jsg::Rc` field does is checked by the
+/// `gc-reference-in-std-cell-is-not-traced` compile test.)
+#[test]
+fn holds_no_gc_references_of_jsg_types() {
+    fn holds_no_gc_references<T: jsg::HoldsNoGcReferences>() {}
+    holds_no_gc_references::<jsg::Weak<Leaf>>();
+    holds_no_gc_references::<PlainStruct>();
+    holds_no_gc_references::<std::cell::Cell<Option<PlainStruct>>>();
+    holds_no_gc_references::<PlainData>();
+}
+
+// =============================================================================
+// #[jsg_struct] fields
+// =============================================================================
+
+static NODE_DROPS: AtomicUsize = AtomicUsize::new(0);
+static BACK_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A struct whose field is a GC reference.
+#[jsg_struct]
+struct Link {
+    pub target: jsg::Rc<Back>,
+}
+
+#[jsg_resource]
+struct Node {
+    pub link: jsg::RefCell<Option<Link>>,
+}
+
+impl Drop for Node {
+    fn drop(&mut self) {
+        NODE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Node {}
+
+/// Holds a `Node`'s wrapper, which closes a cycle through the `Node`'s `Link`.
+#[jsg_resource]
+struct Back {
+    node: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+}
+
+impl Drop for Back {
+    fn drop(&mut self) {
+        BACK_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Back {}
+
+/// A `#[jsg_struct]` traces its fields, so a cycle through one is collected: `Node` holds a `Back`
+/// through a `Link`, and `Back` holds the `Node`'s wrapper. Were the `Link` not traced, the
+/// `jsg::Rc<Back>` in it would stay strong and the cycle would never be collected.
+#[test]
+fn cycle_through_struct_field_is_collected() {
+    NODE_DROPS.store(0, Ordering::SeqCst);
+    BACK_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let back = jsg::Rc::new(
+            lock,
+            Back {
+                node: jsg::Cell::new(None),
+            },
+        );
+        let node = jsg::Rc::new(
+            lock,
+            Node {
+                link: jsg::RefCell::new(Some(Link {
+                    target: back.clone(lock),
+                })),
+            },
+        );
+        let node_wrapper = node.clone(lock).to_js(lock)?;
+        back.get(lock)
+            .node
+            .set(Some(node_wrapper.to_traced_global(lock)));
+        // `Back` needs a wrapper for the `jsg::Rc<Back>` in the `Link` to trace it.
+        let _ = back.clone(lock).to_js(lock)?;
+        std::mem::drop(node);
+        std::mem::drop(back);
+        assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(BACK_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(BACK_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+static HOLDER_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A struct whose field holds a JavaScript value, as a C++ `jsg::JsRef<T>` field does.
+#[jsg_struct]
+struct ValueLink {
+    pub value: jsg::v8::TracedGlobal<jsg::v8::Value>,
+}
+
+#[jsg_resource]
+struct Holder {
+    pub link: jsg::RefCell<Option<ValueLink>>,
+}
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Holder {
+    #[jsg_method]
+    fn set_link<'s>(&self, lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) {
+        *self.link.borrow_mut(lock) = Some(ValueLink {
+            value: value.to_traced_global(lock),
+        });
+    }
+}
+
+/// A struct with a `TracedGlobal` field holds GC references, and a cycle through it is
+/// collected: `Holder` keeps a `ValueLink` whose value is the `Holder`'s own wrapper.
+#[test]
+fn cycle_through_struct_js_value_field_is_collected() {
+    HOLDER_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let holder = jsg::Rc::new(
+            lock,
+            Holder {
+                link: jsg::RefCell::new(None),
+            },
+        );
+        let wrapper = holder.clone(lock).to_js(lock)?;
+        *holder.get(lock).link.borrow_mut(lock) = Some(ValueLink {
+            value: wrapper.to_traced_global(lock),
+        });
+        std::mem::drop(holder);
+        assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// A struct taken out of a resource after a GC visit made its `TracedGlobal` weak is strong
+/// again, so a GC leaves its value alone while nothing traces it: `jsg::RefCell::borrow_mut`
+/// detaches the struct before it can leave the cell.
+#[test]
+fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let holder = jsg::Rc::new(
+            lock,
+            Holder {
+                link: jsg::RefCell::new(None),
+            },
+        );
+        let wrapper = holder.clone(lock).to_js(lock)?;
+        ctx.set_global(lock, "holder", wrapper);
+        // Only the `Holder` keeps the value alive; the script ends in `undefined` so that no
+        // `Local` of it outlives the script.
+        ctx.eval_raw(lock, "holder.setLink({ kept: 1 }); undefined")
+            .expect("should evaluate");
+        // The holder's wrapper is reachable, so the visit puts the value's handle in traced mode.
+        crate::Harness::request_gc(lock);
+
+        let link = holder
+            .get(lock)
+            .link
+            .borrow_mut(lock)
+            .take()
+            .expect("set above");
+        crate::Harness::request_gc(lock);
+        let back = link.to_js(lock)?;
+        ctx.set_global(lock, "back", back);
+        assert!(ctx.eval::<bool>(lock, "back.value.kept === 1").unwrap());
         Ok(())
     });
 }

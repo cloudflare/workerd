@@ -3662,37 +3662,6 @@ export const indexof = {
     strictEqual(longBufferString.lastIndexOf(pattern, 1535), 1535);
     strictEqual(longBufferString.lastIndexOf(pattern, 1534), 511);
 
-    // Generate a really long Thue-Morse sequence of 'yolo' and 'swag',
-    // "yolo swag swag yolo swag yolo yolo swag" ..., goes on for about 5MB.
-    // This is hard to search because it all looks similar, but never repeats.
-
-    // countBits returns the number of bits in the binary representation of n.
-    function countBits(n) {
-      let count;
-      for (count = 0; n > 0; count++) {
-        n = n & (n - 1); // remove top bit
-      }
-      return count;
-    }
-    const parts = [];
-    for (let i = 0; i < 1000000; i++) {
-      parts.push(countBits(i) % 2 === 0 ? 'yolo' : 'swag');
-    }
-    const reallyLong = Buffer.from(parts.join(' '));
-    strictEqual(reallyLong.slice(0, 19).toString(), 'yolo swag swag yolo');
-
-    // Expensive reverse searches. Stress test lastIndexOf:
-    pattern = reallyLong.slice(0, 100000); // First 1/50th of the pattern.
-    strictEqual(reallyLong.lastIndexOf(pattern), 4751360);
-    strictEqual(reallyLong.lastIndexOf(pattern, 4000000), 3932160);
-    strictEqual(reallyLong.lastIndexOf(pattern, 3000000), 2949120);
-    pattern = reallyLong.slice(100000, 200000); // Second 1/50th.
-    strictEqual(reallyLong.lastIndexOf(pattern), 4728480);
-    pattern = reallyLong.slice(0, 1000000); // First 1/5th.
-    strictEqual(reallyLong.lastIndexOf(pattern), 3932160);
-    pattern = reallyLong.slice(0, 2000000); // first 2/5ths.
-    strictEqual(reallyLong.lastIndexOf(pattern), 0);
-
     // Test truncation of Number arguments to uint8
     {
       const buf = Buffer.from('this is a test');

@@ -260,6 +260,41 @@ export const teeSurvivorBranchCollected = {
   },
 };
 
+// One tee branch collected while its sibling reads on (parity), the
+// collected branch having read none of the chunks or most of them. Every
+// chunk the sibling has read is released, and the rest stay queued for it.
+export const teeCollectedBranchReleasesWhatSiblingRead = {
+  async test() {
+    for (const readAhead of [0, 6]) {
+      let controller;
+      const rs = new ReadableStream(
+        {
+          start(c) {
+            controller = c;
+          },
+        },
+        new CountQueuingStrategy({ highWaterMark: 4 })
+      );
+      const refs = enqueueTracked(controller, 8);
+      const reader = (() => {
+        const [live, gone] = rs.tee();
+        const goneReader = gone.getReader();
+        for (let i = 0; i < readAhead; i++) goneReader.read();
+        return live.getReader();
+      })();
+      await scheduler.wait(1);
+      gc();
+      for (let i = 0; i < 4; i++) reader.read();
+      await collectGarbage();
+      strictEqual(countAlive(refs.slice(0, 4)), 0, `readAhead=${readAhead}`);
+      strictEqual(countAlive(refs.slice(4)), 4, `readAhead=${readAhead}`);
+      for (let i = 0; i < 4; i++) reader.read();
+      await collectGarbage();
+      strictEqual(countAlive(refs), 0, `readAhead=${readAhead}`);
+    }
+  },
+};
+
 // A pull source with both branches collected (ledger #20). TypeScript
 // releases the source: pull() is never called again. C++ keeps pulling
 // for consumers that no longer exist, so a source that enqueues on every

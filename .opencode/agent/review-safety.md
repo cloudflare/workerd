@@ -32,7 +32,7 @@ work** — do not report style nits or perf opinions, and trust that the others 
 
 1. Load the checklist for each language present in the change:
    - `.c++`, `.h` — `docs/reference/cpp-safety-review-checklist.md`, in full.
-   - `.rs` — the safety-bearing parts of `docs/reference/rust-review-checklist.md`: **CXX Bridge Safety**, **Unsafe Code**, the rule that panics across FFI are undefined behavior under **Error Handling**, and the GC-tracing rule under **JSG Resource Conventions**. The rest of that document is the style reviewer's.
+   - `.rs` — the safety-bearing parts of `docs/reference/rust-review-checklist.md`: **CXX Bridge Safety**, **Unsafe Code**, the rule that panics across FFI are undefined behavior under **Error Handling**, the GC-tracing rule under **JSG Resource Conventions**, and **Rust JSG Safety Rules**. The rest of that document is the style reviewer's.
 
    A CXX bridge change spans `.rs` and its companion `ffi.c++`/`ffi.h` and needs both checklists; the bug is usually in the disagreement between the two sides, not in either one alone.
 
@@ -56,6 +56,7 @@ In Rust:
 - `jsg::Ref<T>` is not `Send` — it holds `Rc` and `UnsafeCell`. Flag any path that moves one across threads, and any `unsafe impl Send`/`Sync` whose justification is missing or does not hold.
 - `Ref<T>`, `Option<Ref<T>>` and `Nullable<Ref<T>>` on a `#[jsg_resource]` are traced for GC; `WeakRef<T>` is not. A resource holding an untraced strong reference is a use-after-free once the child is collected early.
 - `Local::from_ffi()`, `Local::into_ffi()` and isolate pointer dereferences are sound only with the isolate locked and a handle scope active.
+- Rust JSG's C++ shims (`src/rust/jsg/ffi.c++`) check `exceptionPending()` before calling a V8 API that takes a `v8::Local<v8::Context>` or uses the current one, or say in a comment why they needn't, and never throw while execution is terminating. Creating strings, numbers, objects, arrays, error objects or templates while an exception or a termination is pending is safe; don't flag it.
 
 ## Output
 

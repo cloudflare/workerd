@@ -151,6 +151,8 @@ pub struct CompiledBindings {
     pub has_debug_port: bool,
     /// Config errors, without the `service <name>: ` prefix (the caller adds it).
     pub errors: Vec<String>,
+    /// Config errors for bindings that name another service, paired with that target service.
+    pub reference_errors: Vec<(String, String)>,
 }
 
 /// What the worker exports, as its compilation reported them, in that order.
@@ -221,18 +223,8 @@ pub fn compile_bindings(
     Ok(out)
 }
 
-/// Miniflare's own Workflow engine namespaces use this key prefix, which determines actor IDs and
-/// the storage subdirectory; matching it lets both reach the same local instances.
-///
-/// TODO(cleanup): Make this configurable rather than hardcoding Miniflare's prefix; a configurable
-///   key must keep this value for Miniflare.
-pub const WORKFLOW_NAMESPACE_KEY_PREFIX: &str = "miniflare-workflows-";
-
-/// The unique key of the namespace backing the Workflow `workflow_name`.
-#[must_use]
-pub fn workflow_namespace_key(workflow_name: &str) -> String {
-    format!("{WORKFLOW_NAMESPACE_KEY_PREFIX}{workflow_name}")
-}
+// The cluster's deployments are checked against the same keys.
+pub use ::cluster::compose::workflow_namespace_key;
 
 /// The `ctx.exports` globals, numbered after the `subrequest_channels`, `actor_channels` and
 /// `actor_class_channels` the worker's `env` took.
@@ -647,18 +639,22 @@ impl Compiler<'_> {
         let actor_configs = self.actor_configs;
         let config = if let Some(service) = service {
             let Some(classes) = actor_configs.get(service) else {
-                self.error(format!(
-                    "{error_context} refers to a service \"{service}\", but no such service \
-                     is defined."
+                self.out.reference_errors.push((
+                    service.to_owned(),
+                    format!(
+                        "{error_context} refers to a service \"{service}\", but no such service \
+                         is defined."
+                    ),
                 ));
                 return Ok(false);
             };
             let Some(config) = classes.get(class_name) else {
-                self.error(format!(
+                let error = format!(
                     "{error_context} refers to a Durable Object namespace named \
                      \"{class_name}\" in service \"{service}\", but no such Durable Object \
                      namespace is defined by that service."
-                ));
+                );
+                self.out.reference_errors.push((service.to_owned(), error));
                 return Ok(false);
             };
             config

@@ -784,7 +784,7 @@ class WritableStreamController {
 
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
-    virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
+    JSG_NO_JS virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
   };
 
   // PendingAbort is a GC traced struct. Do not hold it with a kj::Own or

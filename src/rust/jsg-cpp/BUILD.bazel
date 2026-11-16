@@ -1,0 +1,42 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Interop between Rust JSG and C++ JSG resources: Rust holding, receiving and returning C++ JSG
+# resources (`jsg_cpp::Ref<T>`), and C++ holding Rust ones (`RustRef<Tag>`). This is the one place
+# where Rust JSG's C++ shims may use C++ JSG. INTEROP_SHIMS are in the allowlist's interop tier,
+# which //src/rust/jsg:cpp-jsg-allowlist-test checks for the constructs it permits (see
+# src/rust/jsg/README.md, "Safety rules", rule 3).
+INTEROP_SHIMS = [
+    "jsg-cpp.h",
+    "ffi.c++",
+]
+
+exports_files(INTEROP_SHIMS)
+
+wd_rust_crate(
+    name = "jsg-cpp",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/jsg",
+    ],
+    cxx_bridge_srcs = ["ffi.rs"],
+    # C++ that includes jsg-cpp.h depends on :ffi, which exports the bridge's headers.
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/jsg"],
+)
+
+# The non-template half of jsg-cpp.h. Per-type and per-method shims, which instantiate the
+# templates in jsg-cpp.h, live with the C++ types they bind.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Provides jsg-cpp.h as <workerd/rust/jsg-cpp/jsg-cpp.h>.
+        ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/jsg",
+    ],
+)

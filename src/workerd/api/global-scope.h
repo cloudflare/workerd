@@ -90,8 +90,11 @@ class URLSearchParams;
 using DOMException = jsg::DOMException;
 
 // A subset of the standard Navigator API.
-class Navigator: public jsg::Object {
+class Navigator final: public jsg::Object {
  public:
+  // Stateless object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
@@ -145,10 +148,14 @@ class Navigator: public jsg::Object {
 // Exposed as a global to provide access to certain Cloudflare-specific
 // configuration details. This is not a standard API and great care should
 // be taken when deciding to expose new properties or methods here.
-class Cloudflare: public jsg::Object {
+class Cloudflare final: public jsg::Object {
  public:
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
+  // Stateless (compatibilityFlags is a lazy property materialized on the JS object),
+  // safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   JSG_RESOURCE_TYPE(Cloudflare) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(compatibilityFlags, getCompatibilityFlags);
@@ -625,7 +632,7 @@ struct ExportedHandler {
 
   ExportedHandler clone(jsg::Lock& js);
 
-  // YES if `fetch` was marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  // YES if `fetch` was marked with retryable().
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
 
@@ -647,9 +654,9 @@ struct BenchExportedHandler {
 // Reading it runs no user code, so a claim can check it before the handler or method runs.
 inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
 
-// Key of the internal symbol exported as `onEvict` from "cloudflare:durable-objects". A Durable
-// Object class defines its eviction handler as the method keyed by this symbol.
-inline constexpr auto ON_EVICT_SYMBOL_KEY = "cloudflare:durable-objects:onEvict"_kjc;
+// Key of the internal symbol exported as `onHibernate` from "cloudflare:durable-objects". A
+// Durable Object class defines its hibernation handler as the method keyed by this symbol.
+inline constexpr auto ON_HIBERNATE_SYMBOL_KEY = "cloudflare:durable-objects:onHibernate"_kjc;
 
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.
@@ -909,6 +916,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
+
+  // The state of this global scope's own that a Worker started from a startup snapshot must see:
+  // the `process` and `Buffer` values the top level resolved or assigned, which live here rather
+  // than on the global object. A null-prototype object, or none when the top level touched
+  // neither. The caller has the context entered.
+  kj::Maybe<jsg::JsObject> getSnapshotState(jsg::Lock& js);
+  // Takes over the state getSnapshotState() returned in the zygote, on the fresh global scope of a
+  // Worker started from the snapshot.
+  void restoreSnapshotState(jsg::Lock& js, jsg::JsObject state);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
@@ -926,7 +942,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    JSG_NESTED_TYPE(DOMException);
+    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+      JSG_NESTED_TYPE(DOMException);
+    }
     JSG_NESTED_TYPE(WorkerGlobalScope);
     if (flags.getSpecCompliantPropertyAttributes()) {
       // EventTarget is also declared on WorkerGlobalScope, but V8's
@@ -1010,7 +1030,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    if (flags.getExposeGlobalMessageChannel()) {
+    // Under the TS_MESSAGE_CHANNEL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript MessageChannel and MessagePort instead.
+    if (flags.getExposeGlobalMessageChannel() && !useTypeScriptMessageChannel()) {
       JSG_NESTED_TYPE(MessageChannel);
       JSG_NESTED_TYPE(MessagePort);
     }
@@ -1023,7 +1045,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(StorageManager);
     }
 
-    JSG_NESTED_TYPE(EventSource);
+    // Under the TS_EVENT_SOURCE autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript EventSource instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_EVENT_SOURCE)) {
+      JSG_NESTED_TYPE(EventSource);
+    }
 
     // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
     if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
@@ -1068,18 +1094,26 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(Navigator);
     }
 
-    if (flags.getSpecCompliantUrl()) {
-      JSG_NESTED_TYPE_NAMED(url::URL, URL);
-      JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
-    } else {
-      JSG_NESTED_TYPE(URL);
-      JSG_NESTED_TYPE(URLSearchParams);
+    // Under the TS_URL autogate, the per-isolate bootstrap (src/per_isolate/main.ts) installs the
+    // TypeScript URL and URLSearchParams instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL)) {
+      if (flags.getSpecCompliantUrl()) {
+        JSG_NESTED_TYPE_NAMED(url::URL, URL);
+        JSG_NESTED_TYPE_NAMED(url::URLSearchParams, URLSearchParams);
+      } else {
+        JSG_NESTED_TYPE(URL);
+        JSG_NESTED_TYPE(URLSearchParams);
+      }
     }
 
-    if (flags.getSpecCompliantUrlpattern()) {
-      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
-    } else {
-      JSG_NESTED_TYPE(URLPattern);
+    // Under the TS_URL_PATTERN autogate, the per-isolate bootstrap installs the TypeScript
+    // URLPattern instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_URL_PATTERN)) {
+      if (flags.getSpecCompliantUrlpattern()) {
+        JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+      } else {
+        JSG_NESTED_TYPE(URLPattern);
+      }
     }
 
     JSG_NESTED_TYPE(Blob);

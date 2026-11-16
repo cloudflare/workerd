@@ -26,13 +26,7 @@ To run the tests:
    docker image rm cf-container-client-test
    ```
 
-5. Build Docker images
-
-   ```shell
-   bazel run //images:load_all
-   ```
-
-6. Run the test
+5. Run the test, which loads its images itself
 
    ```shell
    just stream-test //src/workerd/server/tests/container-client:container-client@

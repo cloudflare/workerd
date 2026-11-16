@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The queuing strategy benchmarks run the same modules under two configs:
+# strategies-cpp against the legacy C++ implementation, strategies-ts
+# against the TypeScript implementation.
+
+strategies_bench_srcs = glob(["*.js"]) + ["strategies-modules.capnp"]
+
+wd_bench(
+    src = "strategies-cpp.wd-bench",
+    data = strategies_bench_srcs,
+)
+
+wd_bench(
+    src = "strategies-ts.wd-bench",
+    args = ["--experimental"],
+    data = strategies_bench_srcs,
+)

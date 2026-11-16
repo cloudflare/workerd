@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "compilation.h"
 #include "jsg.h"
 #include "setup.h"
 #include "util.h"
@@ -24,128 +25,144 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  // Exceptions must not unwind through V8's Module::Instantiate(), which would leave the graph
+  // half-linked.
   using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
+  return liftKj<v8::MaybeLocal<ReturnType>>(
+      Lock::current().v8Isolate, [&]() -> v8::MaybeLocal<ReturnType> {
+    auto& js = Lock::current();
+    v8::MaybeLocal<ReturnType> result;
 
-  auto& js = Lock::current();
-  v8::MaybeLocal<ReturnType> result;
-
-  // The specification for import attributes strongly recommends that embedders
-  // reject import attributes and types they do not understand/implement. This
-  // is because import attributes can alter the interpretation of a module and
-  // are considered to be part of the unique key for caching a module.
-  // Throwing an error for things we do not understand is the safest thing to do.
-  // However, historically we have not followed this guideline in the spec
-  // and unfortunately there are applications deployed that will break if we
-  // started enforcing that guideline without a compat flag.
-  if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
-    JSG_REQUIRE(!js.getThrowOnUnrecognizedImportAssertion(), Error,
-        "Unrecognized import attributes specified");
-  }
-
-  js.tryCatch([&] {
-    auto registry = getModulesForResolveCallback(js.v8Isolate);
-    KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
-
-    auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
-        "referrer passed to resolveCallback isn't in modules table");
-
-    auto spec = kj::str(specifier);
-
-    if (isNodeJsCompatEnabled(js)) {
-      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
-        spec = kj::mv(nodeSpec);
-      }
+    // The specification for import attributes strongly recommends that embedders
+    // reject import attributes and types they do not understand/implement. This
+    // is because import attributes can alter the interpretation of a module and
+    // are considered to be part of the unique key for caching a module.
+    // Throwing an error for things we do not understand is the safest thing to do.
+    // However, historically we have not followed this guideline in the spec
+    // and unfortunately there are applications deployed that will break if we
+    // started enforcing that guideline without a compat flag.
+    if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
+      JSG_REQUIRE(!js.getThrowOnUnrecognizedImportAssertion(), Error,
+          "Unrecognized import attributes specified");
     }
 
-    // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if constexpr (!IsSourcePhase) {
-      if (spec == "node:process") {
-        auto specifierPath =
-            kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                         : "node-internal:legacy_process"_kj);
-        KJ_IF_SOME(info,
-            registry->resolve(
-                js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-          result = info.module.getHandle(js.v8Isolate);
-          return;
+    js.tryCatch([&] {
+      auto registry = getModulesForResolveCallback(js.v8Isolate);
+      KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
+
+      auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
+          "referrer passed to resolveCallback isn't in modules table");
+
+      auto spec = kj::str(specifier);
+
+      if (isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+          spec = kj::mv(nodeSpec);
         }
       }
-    }
 
-    // If the referrer module is a built-in, it is only permitted to resolve
-    // internal modules. If the worker bundle provided an override for a builtin,
-    // then internalOnly will be false.
-    bool internalOnly =
-        ref.type == ModuleRegistry::Type::BUILTIN || ref.type == ModuleRegistry::Type::INTERNAL;
-
-    kj::Path targetPath = ([&] {
-      KJ_TRY {
-        // If the specifier begins with one of our known prefixes, let's not resolve
-        // it against the referrer.
-        if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
-            spec.startsWith("workerd:")) {
-          return kj::Path::parse(spec);
-        }
-        return ref.specifier.parent().eval(spec);
-      }
-      KJ_CATCH(_) {
-        JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", spec, "\".\n  imported from \"",
-            ref.specifier.toString(), "\".");
-      }
-    })();
-
-    KJ_IF_SOME(resolved,
-        registry->resolve(js, targetPath, ref.specifier,
-            internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
-                         : ModuleRegistry::ResolveOption::DEFAULT,
-            ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
+      // Handle process module redirection based on enable_nodejs_process_v2 flag
       if constexpr (!IsSourcePhase) {
-        result = resolved.module.getHandle(js);
-      } else {
-        KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
-          result = sourceObject;
-        } else {
-          js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
-              kj::str("Source phase import not available for module: ", targetPath.toString(),
-                  ".\n  imported from \"", ref.specifier.toString(), "\"")))));
-          return;
+        if (spec == "node:process") {
+          auto specifierPath =
+              kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:process_exports"_kj
+                                                           : "node-internal:legacy_process"_kj);
+          KJ_IF_SOME(info,
+              registry->resolve(
+                  js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+            result = info.module.getHandle(js.v8Isolate);
+            return;
+          }
         }
       }
-    } else {
-      // This is a bit annoying. If the module was not found, then
-      // we need to check to see if it is a prefixed specifier. If it is,
-      // we'll try again with only the specifier and not the ref.specifier
-      // as parent. We have to do it this way just in case the worker bundle
-      // is using the prefix itself. (which isn't likely but is possible).
-      // We only need to do this if internalOnly is false.
-      if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
-        KJ_IF_SOME(resolve,
-            registry->resolve(js, kj::Path::parse(spec), ref.specifier,
-                ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
-                spec.asPtr())) {
-          if constexpr (!IsSourcePhase) {
-            result = resolve.module.getHandle(js);
+
+      // If the referrer module is a built-in, it is only permitted to resolve
+      // internal modules. If the worker bundle provided an override for a builtin,
+      // then internalOnly will be false.
+      bool internalOnly =
+          ref.type == ModuleRegistry::Type::BUILTIN || ref.type == ModuleRegistry::Type::INTERNAL;
+
+      kj::Path targetPath = ([&] {
+        KJ_TRY {
+          // If the specifier begins with one of our known prefixes, let's not resolve
+          // it against the referrer.
+          if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
+              spec.startsWith("workerd:")) {
+            return kj::Path::parse(spec);
+          }
+          return ref.specifier.parent().eval(spec);
+        }
+        KJ_CATCH(_) {
+          JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", spec,
+              "\".\n  imported from \"", ref.specifier.toString(), "\".");
+        }
+      })();
+
+      KJ_IF_SOME(resolved,
+          registry->resolve(js, targetPath, ref.specifier,
+              internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
+                           : ModuleRegistry::ResolveOption::DEFAULT,
+              ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
+        if constexpr (!IsSourcePhase) {
+          result = resolved.module.getHandle(js);
+        } else {
+          KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
+            result = sourceObject;
           } else {
             js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
                 kj::str("Source phase import not available for module: ", targetPath.toString(),
                     ".\n  imported from \"", ref.specifier.toString(), "\"")))));
             return;
           }
-          return;
         }
+      } else {
+        // This is a bit annoying. If the module was not found, then
+        // we need to check to see if it is a prefixed specifier. If it is,
+        // we'll try again with only the specifier and not the ref.specifier
+        // as parent. We have to do it this way just in case the worker bundle
+        // is using the prefix itself. (which isn't likely but is possible).
+        // We only need to do this if internalOnly is false.
+        if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
+          KJ_IF_SOME(resolve,
+              registry->resolve(js, kj::Path::parse(spec), ref.specifier,
+                  ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
+                  spec.asPtr())) {
+            if constexpr (!IsSourcePhase) {
+              result = resolve.module.getHandle(js);
+            } else {
+              js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+                  kj::str("Source phase import not available for module: ", targetPath.toString(),
+                      ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+              return;
+            }
+            return;
+          }
+        }
+        JSG_FAIL_REQUIRE(Error, "No such module \"", targetPath.toString(),
+            "\".\n  imported from \"", ref.specifier.toString(), "\"");
       }
-      JSG_FAIL_REQUIRE(Error, "No such module \"", targetPath.toString(), "\".\n  imported from \"",
-          ref.specifier.toString(), "\"");
-    }
-  }, [&](Value value) {
-    // We do not call js.throwException here since that will throw a JsExceptionThrown,
-    // which we do not want here. Instead, we'll schedule an exception on the isolate
-    // directly and set the result to an empty v8::MaybeLocal.
-    js.v8Isolate->ThrowException(value.getHandle(js));
-    result = v8::MaybeLocal<ReturnType>();
-  });
+    }, [&](Value value) {
+      // We do not call js.throwException here since that will throw a JsExceptionThrown,
+      // which we do not want here. Instead, we'll schedule an exception on the isolate
+      // directly and set the result to an empty v8::MaybeLocal.
+      js.v8Isolate->ThrowException(value.getHandle(js));
+      result = v8::MaybeLocal<ReturnType>();
+    });
 
-  return result;
+    // V8 aborts the process if asked to link a graph that reaches a module which is still
+    // kEvaluating. That happens when a graph linked during a module's evaluation (a nested
+    // require() or dynamic import) imports that module back. Fail the link instead.
+    if constexpr (!IsSourcePhase) {
+      v8::Local<v8::Module> resolved;
+      if (result.ToLocal(&resolved) && resolved->GetStatus() == v8::Module::Status::kEvaluating) {
+        js.v8Isolate->ThrowException(
+            js.v8Error(kj::str("Circular dependency when resolving module: ", specifier)));
+        return {};
+      }
+    }
+
+    return result;
+  });
 }
 
 // Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
@@ -201,6 +218,7 @@ v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
         }
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects with what it caught.
         v8::TryCatch catcher(js.v8Isolate);
         // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);
@@ -279,6 +297,37 @@ v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
   return scope.EscapeMaybe(result);
 }
 
+// Returns false, with no exception pending, if `module`'s graph cannot be linked.
+bool tryInstantiate(Lock& js, v8::Local<v8::Module> module) {
+  return js.tryCatch([&] {
+    jsg::check(module->InstantiateModule(
+        js.v8Context(), resolveModuleCallback<false>, resolveModuleCallback<true>));
+    return true;
+  }, [](Value) { return false; });
+}
+
+// Links and evaluates `module` from a microtask. Nested evaluation never drains the queue, so it
+// runs once the evaluation in progress has unwound to depth 0, when no module that `module`
+// imports is still kEvaluating.
+v8::Local<v8::Promise> deferInstantiation(Lock& js, v8::Local<v8::Module> module) {
+  return js.resolvedPromise()
+      .then(js, [module = js.v8Ref(module)](Lock& js) mutable -> Value {
+    auto handle = module.getHandle(js);
+    if (handle->GetStatus() == v8::Module::Status::kUninstantiated) {
+      jsg::check(handle->InstantiateModule(
+          js.v8Context(), resolveModuleCallback<false>, resolveModuleCallback<true>));
+    }
+    // A microtask cannot drain the queue it runs from, so evaluate as if nested: a top-level
+    // await hands back its pending promise, which the ongoing drain then settles.
+    Lock::ModuleEvaluationScope nested(js);
+    KJ_IF_SOME(pending,
+        instantiateModule(js, handle, InstantiateModuleOptions::ALLOW_PENDING_EVALUATION)) {
+      return js.v8Ref<v8::Value>(pending);
+    }
+    return js.v8Ref<v8::Value>(js.v8Undefined());
+  }).consumeHandle(js);
+}
+
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
@@ -306,8 +355,18 @@ kj::Maybe<v8::Local<v8::Promise>> instantiateModule(
   }
 
   if (status == v8::Module::Status::kUninstantiated) {
-    jsg::check(module->InstantiateModule(
-        context, resolveModuleCallback<false>, resolveModuleCallback<true>));
+    // A nested dynamic import may reach a module that is still kEvaluating, and so cannot be
+    // linked until that evaluation finishes. Its caller accepts a promise, so link it later
+    // rather than fail. A link that fails for any other reason fails again then, rejecting the
+    // import.
+    if (js.isEvaluatingModule() && options == InstantiateModuleOptions::ALLOW_PENDING_EVALUATION) {
+      if (!tryInstantiate(js, module)) {
+        return deferInstantiation(js, module);
+      }
+    } else {
+      jsg::check(module->InstantiateModule(
+          context, resolveModuleCallback<false>, resolveModuleCallback<true>));
+    }
   }
 
   v8::Local<v8::Promise> prom;
@@ -378,43 +437,6 @@ static CompilationObserver::Option convertOption(ModuleInfoCompileOption option)
   KJ_UNREACHABLE;
 }
 
-// Answers V8's per-function compile hint queries from a sorted list of function positions.
-// V8 asks once for each function it would otherwise compile lazily, while compiling the module.
-struct CompileHintsLookup {
-  kj::ArrayPtr<const int> positions;
-  size_t eagerFunctionCount = 0;
-
-  // A v8::CompileHintCallback. Must not throw: V8 calls it from inside its parser.
-  static bool shouldCompileEagerly(int position, void* data) {
-    auto& lookup = *static_cast<CompileHintsLookup*>(data);
-    bool hinted = std::binary_search(lookup.positions.begin(), lookup.positions.end(), position);
-    if (hinted) ++lookup.eagerFunctionCount;
-    return hinted;
-  }
-};
-
-v8::Local<v8::Module> compileEsmModuleWithHints(jsg::Lock& js,
-    v8::Local<v8::String> content,
-    const v8::ScriptOrigin& origin,
-    kj::ArrayPtr<const int> compileHints,
-    const CompilationObserver& observer) {
-  kj::Array<int> sortedHints;
-  if (!std::is_sorted(compileHints.begin(), compileHints.end())) {
-    sortedHints = kj::heapArray(compileHints);
-    std::sort(sortedHints.begin(), sortedHints.end());
-    compileHints = sortedHints;
-  }
-
-  // V8 only calls the callback during CompileModule(), so `lookup` can live on the stack.
-  CompileHintsLookup lookup{.positions = compileHints};
-  v8::ScriptCompiler::Source source(
-      content, origin, &CompileHintsLookup::shouldCompileEagerly, &lookup);
-  auto module = jsg::check(v8::ScriptCompiler::CompileModule(
-      js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCompileHints));
-  observer.onCompileHintsConsumed(js.v8Isolate, compileHints.size(), lookup.eagerFunctionCount);
-  return module;
-}
-
 // Compiles an ES module named `name`. `compile` receives the module's origin and does the
 // actual compilation.
 template <typename Compile>
@@ -438,42 +460,6 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
   return jsg::check(compile(origin));
-}
-
-// Compiles a module, consuming `compileCache` if it is non-empty.
-v8::MaybeLocal<v8::Module> compileWithStaticCache(jsg::Lock& js,
-    v8::Local<v8::String> contentStr,
-    const v8::ScriptOrigin& origin,
-    kj::ArrayPtr<const kj::byte> compileCache) {
-  if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
-    auto cached =
-        std::make_unique<v8::ScriptCompiler::CachedData>(compileCache.begin(), compileCache.size());
-    v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
-    return v8::ScriptCompiler::CompileModule(
-        js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
-  }
-
-  v8::ScriptCompiler::Source source(contentStr, origin);
-  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
-}
-
-// Compiles a bundle module from UTF-8 source. The isolate's code cache takes precedence over
-// compile hints when it is installed.
-v8::MaybeLocal<v8::Module> compileBundleModule(jsg::Lock& js,
-    kj::ArrayPtr<const char> content,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer,
-    kj::ArrayPtr<const int> compileHints) {
-  auto contentStr = jsg::v8Str(js.v8Isolate, content);
-  KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-    auto key = codeCache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
-    return codeCache.compileModule(js.v8Isolate, key, contentStr, origin, observer);
-  }
-  if (compileHints.size() > 0) {
-    return compileEsmModuleWithHints(js, contentStr, origin, compileHints, observer);
-  }
-  v8::ScriptCompiler::Source source(contentStr, origin);
-  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
 }
 
 v8::Local<v8::Module> createSyntheticModule(
@@ -520,11 +506,13 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               ModuleInfoCompileOption::BUNDLE,
               observer,
               [&](const v8::ScriptOrigin& origin) {
-                if (compileCache.size() > 0) {
-                  return compileWithStaticCache(
-                      js, jsg::v8Str(js.v8Isolate, content), origin, compileCache);
-                }
-                return compileBundleModule(js, content, origin, observer, compileHints);
+                return compileModule(js, jsg::v8Str(js.v8Isolate, content), origin, observer,
+                    [&](IsolateCodeCache& cache) -> kj::Maybe<CodeCacheKey> {
+                  return cache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
+                },
+                    {.embeddedCache = compileCache,
+                      .compileHints = compileHints,
+                      .bundleModuleName = name});
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
@@ -538,8 +526,10 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               ModuleInfoCompileOption::BUILTIN,
               observer,
               [&](const v8::ScriptOrigin& origin) {
-                return compileWithStaticCache(
-                    js, jsg::newExternalString(js, content), origin, compileCache);
+                return compileModule(js, jsg::newExternalString(js, content), origin, observer,
+                    [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+                  return codeCacheKeyForModule(content);
+                }, {.embeddedCache = compileCache});
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
@@ -553,8 +543,11 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               ModuleInfoCompileOption::BUILTIN,
               observer,
               [&](const v8::ScriptOrigin& origin) {
-                return compileWithStaticCache(
-                    js, jsg::newExternalOneByteString(js, kj::mv(content)), origin, compileCache);
+                auto source = content->asPtr();
+                return compileModule(js, jsg::newExternalOneByteString(js, kj::mv(content)), origin,
+                    observer, [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+                  return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, source);
+                }, {.embeddedCache = compileCache});
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
@@ -567,6 +560,14 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
   }
 }
 
+v8::Local<v8::Function> ModuleRegistry::CommonJsModuleInfo::compileEvalFunc(
+    Lock& js, CommonJsModuleProvider& provider, kj::StringPtr name, kj::StringPtr content) {
+  v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name));
+  v8::Local<v8::Object> extension = provider.getContext(js);
+  return jsg::check(compileFunction(
+      js, content, origin, extension, IsolateBase::from(js.v8Isolate).getObserver()));
+}
+
 jsg::JsValue ModuleRegistry::CommonJsModuleInfo::getExports(jsg::Lock& js) {
   return provider->getExports(js);
 }
@@ -576,8 +577,10 @@ ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
     : fileScope(kj::mv(fileScope)),
       topLevelDecls(kj::mv(topLevelDecls)) {}
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(
-    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer) {
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl) {
   // destroy the observer after compilation finishes to indicate the end of the process.
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
@@ -585,6 +588,11 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   if (js.isWasmEsmIntegrationBuiltinsEnabled()) {
     options.builtins = v8::WasmModuleObject::CompileOptions::Builtins::kJsString;
     options.imported_string_constants_module = "wasm:js/string-constants";
+  }
+  KJ_IF_SOME(url, sourceUrl) {
+    if (js.isWasmSourceUrlSupportEnabled()) {
+      options.source_url = std::string_view(url.begin(), url.size());
+    }
   }
   return jsg::check(v8::WasmModuleObject::Compile(
       js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));

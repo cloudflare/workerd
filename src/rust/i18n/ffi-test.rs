@@ -45,8 +45,7 @@ fn from_utf16le(to: Encoding, source: &[u8]) -> Vec<u8> {
     target
 }
 
-// `src/workerd/api/node/i18n-test.c++` checks these conversions against the
-// C++ path; these pin down the ICU behaviour that path relies on.
+// ICU. These pin down the ICU behaviour `dispatch` relies on.
 
 #[test]
 fn char_sizes_come_from_icu() {
@@ -147,8 +146,7 @@ fn a_short_target_is_a_failure() {
     assert_eq!(from_uchars(&to, &utf16le("ab"), &mut target), None);
 }
 
-// simdutf. `src/workerd/api/node/i18n-test.c++` checks these conversions
-// against the C++ path; these pin down the behaviour `dispatch` relies on.
+// simdutf. These pin down the simdutf behaviour `dispatch` relies on.
 
 #[test]
 fn latin1_widens_every_byte() {

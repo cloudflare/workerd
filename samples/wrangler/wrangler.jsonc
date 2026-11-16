@@ -1,0 +1,10 @@
+{
+  // workerd reads this file directly: `workerd serve wrangler.jsonc`.
+  "name": "counter",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "vars": { "GREETING": "Hello" },
+  "exports": {
+    "Counter": { "type": "durable-object", "storage": "sqlite" },
+  },
+}

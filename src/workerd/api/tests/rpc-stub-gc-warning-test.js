@@ -26,7 +26,7 @@ async function leakStub(env) {
 
 export default {
   async test(ctrl, env, ctx) {
-    // A leaked RPC stub makes ~JsRpcStub log a warning from a GC finalizer. Reaching that
+    // A leaked RPC stub makes ~JsRpcStub log a warning from inside a collection. Reaching that
     // warning requires the collection to happen while this request is still live, so that
     // IoContext::tryCurrent() and its tracer are both still available -- hence the explicit
     // gc() below rather than waiting for a collection to occur on its own.
@@ -38,12 +38,18 @@ export default {
     //
     // A streaming tail worker must be configured for this to bite: the tracer is what pulls the
     // warning down the path that touches the async context.
-    await leakStub(env);
-
-    // Unwind to a fresh task so the stub is not kept alive by a stack slot, which conservative
-    // stack scanning would otherwise treat as a root.
-    await scheduler.wait(0);
-
+    //
+    // With an inspector attached (the test runs with --inspector-addr), logging the warning also
+    // captures a JS stack trace for the devtools console, which allocates on the V8 heap. An
+    // allocation inside a GC callback can start a nested collection, which the runtime's epilogue
+    // callback does not survive: it is iterating over objects the nested collection would free.
+    // ~JsRpcStub therefore defers the warning to a task of the IoContext instead of logging it
+    // synchronously; a build that makes allocation in the callback fatal checks that.
+    //
+    // A minor collection and a major one release a stub by different routes: the scavenger drops
+    // an unreferenced wrapper from V8's GC epilogue callback, a full collection from a cppgc
+    // finalizer. Leak one stub for each.
+    //
     // Reaching the end of this test at all is the assertion: the process must not abort.
     //
     // Whether the abort actually fires depends on the V8 build. V8 only refuses handle creation
@@ -52,6 +58,14 @@ export default {
     // handle is created silently. Builds with V8 checks enabled sweep within the collection and
     // do abort. The warning is emitted either way, so this test still drives the code path
     // everywhere -- it just cannot fail everywhere.
+    await leakStub(env);
+    // Unwind to a fresh task so the stub is not kept alive by a stack slot, which conservative
+    // stack scanning would otherwise treat as a root.
+    await scheduler.wait(0);
+    gc({ type: 'minor' });
+
+    await leakStub(env);
+    await scheduler.wait(0);
     gc();
     gc();
   },

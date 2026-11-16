@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+using BodyModules = import "body-modules.capnp";
+
+# Runs the body benchmarks against the legacy C++ implementation;
+# body-ts.wd-bench runs the identical modules against the TypeScript
+# implementation. No compatibilityDate and no flags: see
+# src/bench/streams/AGENTS.md.
+#
+# The SELF binding loops back to this worker's fetch handler.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-body-cpp",
+      worker = (
+        modules = BodyModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-body-cpp" ),
+        ],
+      )
+    ),
+  ],
+);

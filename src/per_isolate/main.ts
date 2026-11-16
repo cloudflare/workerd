@@ -33,6 +33,54 @@
 //
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
+// Loaded whatever the compatibility flags, as is every module that sets up a
+// cloneable class that every reader must be able to read (see
+// serialization.ts).
+require('serialization');
+
+// Loaded before any module that may create or recognize a DOMException.
+const { DOMException, QuotaExceededError } = require('dom-exception');
+
+// The TypeScript DOMException replaces the C++ one, which global-scope.h then
+// leaves out, and adds QuotaExceededError, which the C++ one lacks. Installed
+// as JSG_NESTED_TYPE installs the C++ class.
+if (autogates['ts-dom-exception']) {
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    DOMException: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DOMException,
+    },
+    QuotaExceededError: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: QuotaExceededError,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      DOMException: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: DOMException,
+      },
+      QuotaExceededError: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: QuotaExceededError,
+      },
+    });
+  }
+}
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,
@@ -201,7 +249,7 @@ if (compatFlags['typescript_implemented_streams']) {
   // the TypeScript implementation so the hierarchy is consistent.
   //
   // JSG installs nested types on the prototype rather than the instance, so
-  // this reaches every `crypto.DigestStream` — including the lazily created
+  // this reaches every `crypto.DigestStream` - including the lazily created
   // `globalThis.crypto` singleton, which is deliberately not touched here.
   // The attributes match what JSG_NESTED_TYPE installs (ObjectTemplate::Set
   // with no attributes, i.e. all three true), so the swap is invisible to
@@ -279,6 +327,126 @@ if (compatFlags['typescript_implemented_streams']) {
   }
 }
 
+// The TypeScript MessageChannel and MessagePort replace the C++ ones. They are
+// loaded whether or not they become globals: cloudflare-internal:messagechannel
+// (used by node:worker_threads) reads them from this module's exports
+// (MessageChannelModule in api/messagechannel.h).
+if (autogates['ts-message-channel']) {
+  const {
+    MessageChannel,
+    MessagePort,
+  } = require('messagechannel/messagechannel');
+  if (compatFlags['expose_global_message_channel']) {
+    // Installed where JSG_NESTED_TYPE installs the C++ classes, with the same
+    // attributes: always on the global scope's prototype, with all three true,
+    // and under spec_compliant_property_attributes also as own properties of
+    // the global, non-enumerable per Web IDL.
+    ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+      MessageChannel: {
+        __proto__: null,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: MessageChannel,
+      },
+      MessagePort: {
+        __proto__: null,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: MessagePort,
+      },
+    });
+    if (compatFlags['spec_compliant_property_attributes']) {
+      ObjectDefineProperties(globalThis, {
+        MessageChannel: {
+          __proto__: null,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: MessageChannel,
+        },
+        MessagePort: {
+          __proto__: null,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: MessagePort,
+        },
+      });
+    }
+  }
+}
+
+// The TypeScript EventSource replaces the C++ one, which global-scope.h then
+// leaves out. Loaded after the streams globals above, whose reader it
+// captures.
+if (autogates['ts-event-source']) {
+  const { EventSource } = require('eventsource/eventsource');
+  // Installed as the MessageChannel classes above are, matching
+  // JSG_NESTED_TYPE.
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    EventSource: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: EventSource,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      EventSource: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: EventSource,
+      },
+    });
+  }
+}
+
+// The TypeScript URL and URLSearchParams replace the C++ ones, which
+// global-scope.h then leaves out. Installed as WebIDL installs an interface:
+// own, non-enumerable properties of the global, and not on its prototype.
+if (autogates['ts-url']) {
+  const { URL, URLSearchParams } = require('url/url');
+  // The C++ bridge's functions, which it finds already loaded.
+  require('url/cpp_exports');
+  ObjectDefineProperties(globalThis, {
+    URL: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URL,
+    },
+    URLSearchParams: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLSearchParams,
+    },
+  });
+}
+
+// The TypeScript URLPattern replaces the C++ ones, which global-scope.h then
+// leaves out, installed as URL is.
+if (autogates['ts-url-pattern']) {
+  const { URLPattern } = require('urlpattern/urlpattern');
+  ObjectDefineProperties(globalThis, {
+    URLPattern: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLPattern,
+    },
+  });
+}
+
 if (compatFlags['typescript_implemented_structured_clone']) {
   const { structuredClone } = require('structured-clone');
 
@@ -295,6 +463,32 @@ if (compatFlags['typescript_implemented_structured_clone']) {
       enumerable: true,
       writable: true,
       value: structuredClone,
+    },
+  });
+}
+
+// Internal-only: cloneable classes for testing the serialization protocol
+// (serialization.ts), such as over RPC. Gated by an experimental flag that
+// may never lose its experimental annotation.
+if (compatFlags['expose_serialization_test_class']) {
+  const {
+    CloneableTestBox,
+    CloneableTestError,
+  } = require('testing/cloneable-test-box');
+  ObjectDefineProperties(globalThis, {
+    CloneableTestBox: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CloneableTestBox,
+    },
+    CloneableTestError: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CloneableTestError,
     },
   });
 }

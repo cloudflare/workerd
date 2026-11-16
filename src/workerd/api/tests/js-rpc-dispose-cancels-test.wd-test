@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same module runs with and without `rpc_dispose_cancels_call`. Each service binds `SELF` to
+# its own `Callee` entrypoint, so the callee shares the tests' isolate and module globals, and the
+# tests can see whether the callee ran to completion. `UNFLAGGED` is the `Callee` of the service
+# without the flag. Each service has its own streaming tail worker, which checks the outcomes of
+# the sessions it received once the tests have run.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "js-rpc-dispose-cancels",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "rpc", "rpc_dispose_cancels_call"],
+        bindings = [
+          (name = "SELF", service = (name = "js-rpc-dispose-cancels", entrypoint = "Callee")),
+          (name = "UNFLAGGED", service = (name = "js-rpc-dispose-legacy", entrypoint = "Callee")),
+        ],
+        streamingTails = ["tail-cancels"],
+      )
+    ),
+    ( name = "js-rpc-dispose-legacy",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        bindings = [
+          (name = "SELF", service = (name = "js-rpc-dispose-legacy", entrypoint = "Callee")),
+          (name = "UNFLAGGED", service = (name = "js-rpc-dispose-legacy", entrypoint = "Callee")),
+        ],
+        streamingTails = ["tail-legacy"],
+      )
+    ),
+    ( name = "tail-cancels",
+      worker = (
+        modules = .tailModules,
+        compatibilityFlags = ["nodejs_compat", "rpc", "rpc_dispose_cancels_call"],
+      )
+    ),
+    ( name = "tail-legacy",
+      worker = (
+        modules = .tailModules,
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "js-rpc-dispose-cancels-test.js")
+];
+
+const tailModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "js-rpc-dispose-cancels-test-tail.js")
+];

@@ -7,9 +7,12 @@
 #include "actor-call-retry.h"
 #include "basics.h"
 #include "blob.h"
+#include "events.h"
 #include "form-data.h"
 #include "headers.h"
 #include "queue.h"
+#include "request-io.h"
+#include "url-bridge.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
@@ -59,6 +62,8 @@ class Body: public jsg::Object {
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
+      // Before the async generator, which would take a URLSearchParams as an iterable.
+      JsUrlSearchParams,
       jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it
@@ -305,6 +310,13 @@ class Fetcher: public JsRpcClientProvider {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
+
+    // A copy of this factory for the Fetcher's snapshotClone(), made and used outside any isolate
+    // or IoContext. A factory whose state cannot be copied returns none, and the Fetcher does not
+    // transfer through a startup snapshot.
+    virtual kj::Maybe<kj::Own<CrossContextOutgoingFactory>> cloneForSnapshot() const {
+      return kj::none;
+    }
   };
 
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, such as ones
@@ -423,6 +435,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<QueueResult> queue(jsg::Lock& js,
       kj::String queueName,
       kj::Array<ServiceBindingQueueMessage> messages,
@@ -442,6 +456,8 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, noRetry);
   };
 
+  // With `rpc_dispose_cancels_call`, disposing the returned promise while the event is in flight
+  // cancels the event.
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
@@ -456,6 +472,17 @@ class Fetcher: public JsRpcClientProvider {
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
+
+  // A binding transfers through a startup snapshot as the description it is: a channel number
+  // that every request resolves through its own IoContext, or a CrossContextOutgoingFactory that
+  // copies itself (CrossContextOutgoingFactory::cloneForSnapshot()). See http.c++ for what does
+  // not.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
+  // The same copy, as a jsg::Ref for the snapshotClone() of an object that holds this Fetcher (a
+  // WrappedBinding). The copy is of the type that overrides this, so a subclass that does not gets
+  // a plain Fetcher, which its holder must refuse.
+  virtual kj::Maybe<jsg::Ref<Fetcher>> cloneForSnapshot() const;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
@@ -565,7 +592,20 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<kj::String> host;
   kj::Maybe<uint16_t> port;
 
+  // What a copy of a Fetcher bound to a channel number is built from, for snapshotClone(). None
+  // for one bound to a live channel or factory, or that registered a connect override.
+  struct ChannelSnapshot {
+    uint channel;
+    RequiresHostAndProtocol requiresHost;
+    bool isInHouse;
+    RpcCompatGateBypassed rpcCompatGateBypassed;
+  };
+  kj::Maybe<ChannelSnapshot> channelForSnapshot() const;
+
  private:
+  // The base-type copy behind snapshotClone() and cloneForSnapshot().
+  kj::Maybe<kj::Own<Fetcher>> copyForSnapshot() const;
+
   static jsg::Ref<Fetcher> deserializeImpl(jsg::Lock& js,
       rpc::SerializationTag tag,
       jsg::Deserializer& deserializer,
@@ -617,6 +657,12 @@ class ExtendedFetcher final: public Fetcher {
   // Get host and set up override, if needed.
   kj::StringPtr getHost(jsg::Lock& js);
 
+  // A binding with a connection string override transfers through a startup snapshot as its
+  // channel number and port, until reading `host` registers the override on the zygote's global
+  // scope, which the restored Worker's fresh global scope would lack.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Maybe<jsg::Ref<Fetcher>> cloneForSnapshot() const override;
+
   JSG_RESOURCE_TYPE(ExtendedFetcher) {
     JSG_INHERIT(Fetcher);
 
@@ -629,6 +675,9 @@ class ExtendedFetcher final: public Fetcher {
   }
 
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  kj::Maybe<kj::Own<ExtendedFetcher>> copyForSnapshot() const;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
@@ -1128,6 +1177,9 @@ class Response final: public Body {
 
   int getStatus();
   kj::StringPtr getStatusText();
+  // The reason phrase for the HTTP status line and for error messages. Unlike getStatusText(), an
+  // unset status message falls back to the status code's conventional phrase.
+  kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
   bool getOk();
@@ -1217,8 +1269,8 @@ class Response final: public Body {
 
  private:
   int statusCode;
-  // If the statusText is empty, we will derive it from the statusCode. If there's no
-  // match, it will be empty.
+  // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
+  // requires, while getReasonPhrase() derives the status code's conventional phrase.
   kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
@@ -1327,7 +1379,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher, api::RequestIo
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

@@ -4,6 +4,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 
 #include <span>
@@ -59,6 +60,7 @@ void Stdin::reprl(jsg::Lock& js) {
 
   do {
     v8::HandleScope handle_scope(js.v8Isolate);
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): Fuzzilli loop: only prints what was thrown.
     v8::TryCatch try_catch(js.v8Isolate);
     try_catch.SetVerbose(true);
 
@@ -258,6 +260,10 @@ jsg::Promise<void> UnsafeModule::evictAllDurableObjects(
 
 bool UnsafeModule::isTestAutogateEnabled() {
   return util::Autogate::isEnabled(util::AutogateKey::TEST_WORKERD);
+}
+
+bool UnsafeModule::startedFromStartupSnapshot(jsg::Lock& js) {
+  return jsg::IsolateBase::from(js.v8Isolate).isStartingFromSnapshot();
 }
 
 #ifdef WORKERD_FUZZILLI

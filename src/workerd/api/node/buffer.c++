@@ -119,8 +119,8 @@ uint32_t writeInto(jsg::Lock& js,
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, string.length(js), 1024, 536870888);
-      string.writeInto(js, buf, flags);
-      auto backing = decodeHexTruncated(js, buf, false);
+      auto written = string.writeInto(js, buf, flags).written;
+      auto backing = decodeHexTruncated(js, buf.first(written), false);
       auto bytes = backing.asArrayPtr();
       auto amountToCopy = kj::min(bytes.size(), dest.size());
       dest.write(bytes.first(amountToCopy));
@@ -177,8 +177,8 @@ jsg::JsUint8Array decodeStringImpl(
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
-      string.writeInto(js, buf, options);
-      return decodeHexTruncated(js, buf, strict);
+      auto written = string.writeInto(js, buf, options).written;
+      return decodeHexTruncated(js, buf.first(written), strict);
     }
     default:
       KJ_UNREACHABLE;

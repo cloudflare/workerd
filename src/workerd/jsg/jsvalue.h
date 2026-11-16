@@ -141,9 +141,9 @@ class JsValue final {
   bool operator==(const JsValue& other) const;
   bool strictEquals(const JsValue& other) const;
 
-  bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
   JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
@@ -154,7 +154,7 @@ class JsValue final {
   static JsValue fromJson(Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
   static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
-  JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<JsValue> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
   JsValue structuredClone(
@@ -204,7 +204,7 @@ class JsBase {
   explicit JsBase(v8::Local<T> inner): inner(inner) {
     requireOnStack(this);
   }
-  JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
   WeakJsRef<Self> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
  private:
@@ -351,7 +351,11 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   kj::ArrayPtr<T> asArrayPtr() {
     JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
     v8::Local<v8::ArrayBufferView> inner = *this;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    auto buf = inner->GetBuffer();
+#else
     auto buf = inner->Buffer();
+#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -373,7 +377,11 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   template <typename T = kj::byte>
   kj::ArrayPtr<const T> asArrayPtr() const {
     v8::Local<v8::ArrayBufferView> inner = *this;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    auto buf = inner->GetBuffer();
+#else
     auto buf = inner->Buffer();
+#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -432,7 +440,11 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   bool isResizable() const;
 
   bool isImmutable() const {
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    return inner->GetBuffer()->IsImmutable();
+#else
     return inner->Buffer()->IsImmutable();
+#endif
   }
 
   operator JsBufferSource() const;
@@ -467,7 +479,11 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
   kj::ArrayPtr<T> asArrayPtr() {
     JSG_REQUIRE(!isImmutable(), TypeError, "ArrayBufferView is immutable");
     v8::Local<v8::Uint8Array> inner = *this;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    auto buf = inner->GetBuffer();
+#else
     auto buf = inner->Buffer();
+#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -489,7 +505,11 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
   template <typename T = kj::byte>
   kj::ArrayPtr<const T> asArrayPtr() const {
     v8::Local<v8::Uint8Array> inner = *this;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    auto buf = inner->GetBuffer();
+#else
     auto buf = inner->Buffer();
+#endif
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
@@ -529,7 +549,11 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 
   // Set up for later when immutable arraybuffer is a thing
   bool isImmutable() const {
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+    return inner->GetBuffer()->IsImmutable();
+#else
     return inner->Buffer()->IsImmutable();
+#endif
   }
 
   operator JsArrayBufferView() const;
@@ -587,8 +611,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
 
 class JsString final: public JsBase<v8::String, JsString> {
  public:
-  int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
@@ -596,7 +620,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
-  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JSG_NO_JS bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -626,6 +650,13 @@ class JsString final: public JsBase<v8::String, JsString> {
   };
 
   // Copy string contents into a provided buffer (off-heap memory).
+  //
+  // Only the first `written` elements of the buffer are written, and the rest is left as it was.
+  // With NULL_TERMINATION, the last of those elements is the terminator, so it needs room in the
+  // buffer like any other element.
+  //
+  // A caller that sizes the buffer from length() must still use `written`: in a V8 sandbox build,
+  // a corrupted string can report a different length here.
   //
   // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
   // copies data out of V8's heap into your buffer. This makes it safe to use before calling
@@ -674,7 +705,7 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
 
-  void markAsHandled(Lock& js);
+  JSG_NO_JS void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
@@ -803,7 +834,9 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   void delete_(Lock& js, const JsValue& name);
   void delete_(Lock& js, kj::StringPtr name);
 
+  void setPrivate(Lock& js, const jsg::JsString& name, const JsValue& value);
   void setPrivate(Lock& js, kj::StringPtr name, const JsValue& value);
+  JsValue getPrivate(Lock& js, const jsg::JsString& name) KJ_WARN_UNUSED_RESULT;
   JsValue getPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
   bool hasPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 
@@ -889,21 +922,11 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
-#if V8_MAJOR_VERSION >= 15
-    // TODO(cleanup): Drop this and other compatibility shims once support for 14.9 is no longer
-    // needed.
     inner->WriteOneByte(js.v8Isolate, 0, buf.size(), buf.begin(), options);
-#else
-    inner->WriteOneByteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
-#endif
     return kj::mv(buf);
   } else {
     auto buf = kj::heapArray<uint16_t>(inner->Length());
-#if V8_MAJOR_VERSION >= 15
     inner->Write(js.v8Isolate, 0, buf.size(), buf.begin(), options);
-#else
-    inner->WriteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
-#endif
     return kj::mv(buf);
   }
 }
@@ -960,11 +983,12 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   }
 
   // Calls the function with the given receiver and arguments.
-  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue call(
+      Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function with a null receiver and arguments. When null is passed
   // as the receiver, the global object is used instead.
-  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function as a constructor with the given arguments, returning the
   // new object.
@@ -1030,12 +1054,12 @@ class JsRef final {
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 
-  T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
     JsValue handle(value.getHandle(js));
     return KJ_ASSERT_NONNULL(handle.tryCast<T>());
   }
 
-  JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
+  JSG_NO_JS JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
     return JsRef<T>(js, getHandle(js));
   }
 
@@ -1114,7 +1138,7 @@ class WeakJsRef final {
     });
   }
 
-  T getHandle(Lock& js) const {
+  JSG_NO_JS T getHandle(Lock& js) const {
     return KJ_ASSERT_NONNULL(tryGetHandle(js), "attempt to access collected jsg::WeakJsRef target");
   }
 
@@ -1490,11 +1514,7 @@ inline bool JsString::isOneByte(jsg::Lock& js) const {
 }
 
 inline size_t JsString::utf8Length(jsg::Lock& js) const {
-#if V8_MAJOR_VERSION >= 15
   return inner->Utf8Length(js.v8Isolate);
-#else
-  return inner->Utf8LengthV2(js.v8Isolate);
-#endif
 }
 
 template <IsJsValue T>

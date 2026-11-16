@@ -24,6 +24,7 @@ fn wd_test_invocation() {
         "foo.wd-test",
         "--compat-date=2000-01-01",
         "-dTEST_TMPDIR=/tmp/x",
+        "--socket-addr=tcp=127.0.0.1:1234",
     ])
     .command
     else {
@@ -33,6 +34,13 @@ fn wd_test_invocation() {
     assert!(test.predictable);
     assert_eq!(test.compat_date.as_deref(), Some("2000-01-01"));
     assert_eq!(test.filter, None);
+    assert_eq!(
+        test.socket_addr_overrides,
+        [Override {
+            name: "tcp".into(),
+            value: "127.0.0.1:1234".into()
+        }]
+    );
     assert_eq!(
         serve_or_test.directory_overrides,
         [Override {
@@ -65,6 +73,8 @@ fn serve_options() {
         "--async-trace=trace.ndjson",
         "--async-trace-stacks=8",
         "--async-trace-promises",
+        "--cluster-addr=0.0.0.0:7000",
+        "--cluster-advertise=10.0.0.4:7000",
     ])
     .command
     else {
@@ -85,6 +95,8 @@ fn serve_options() {
     assert_eq!(serve_or_test.async_trace_stacks, Some(8));
     assert!(serve_or_test.async_trace_promises);
     assert_eq!(serve.control_fd, Some(3));
+    assert_eq!(serve.cluster_address.as_deref(), Some("0.0.0.0:7000"));
+    assert_eq!(serve.cluster_advertise.as_deref(), Some("10.0.0.4:7000"));
     assert_eq!(
         serve.socket_addr_overrides,
         [Override {
@@ -176,6 +188,7 @@ fn bench_invocation() {
         "--format=json",
         "--output=out.json",
         "--trace",
+        "--no-startup",
         "svc/case",
     ])
     .command
@@ -187,6 +200,7 @@ fn bench_invocation() {
     assert_eq!(bench.format, BenchFormat::Json);
     assert_eq!(bench.output.as_deref(), Some("out.json"));
     assert!(bench.trace);
+    assert!(bench.no_startup);
     assert_eq!(
         bench.filter.map(|f| f.case_pattern),
         Some(Some("case".into()))
@@ -202,6 +216,44 @@ fn bad_values_are_usage_errors() {
         &["serve"],
         &["test", "c.capnp", "a", "b"],
         &["unknown"],
+        // A deploy needs the cluster's bucket, as s3://<bucket>[/<prefix>] or
+        // gs://<bucket>[/<prefix>].
+        &["deploy"],
+        &["deploy", "--bucket=az://cluster"],
+        &["deploy", "--bucket=s3://"],
+        &["deploy", "--bucket=s3:///prefix"],
+        &["deploy", "--bucket=gs://"],
+        &["deploy", "--bucket=gs:///prefix"],
+        &["deploy", "--bucket=cluster"],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--endpoint=s3.example.com",
+        ],
+        &["deploy", "--bucket=s3://cluster", "--endpoint=https://"],
+        &["deploy", "--bucket=s3://cluster", "--endpoint=http:///"],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--endpoint=http://host/base",
+        ],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--endpoint=http://host?x=1",
+        ],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--endpoint=http://user@host",
+        ],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "app.capnp",
+            "appConfig",
+            "extra",
+        ],
     ] {
         let argv = std::iter::once("workerd").chain(args.iter().copied());
         assert!(Main::try_parse_from(argv).is_err(), "{args:?}");
@@ -222,6 +274,111 @@ fn socket_overridden_twice_finds_the_conflict() {
         panic!("expected serve")
     };
     assert_eq!(socket_overridden_twice(&serve), None);
+}
+
+#[test]
+fn deploy_invocation() {
+    let Command::Deploy {
+        project,
+        const_name,
+        deploy,
+    } = parse(&[
+        "deploy",
+        "--experimental",
+        "-I",
+        "inc",
+        "app.capnp",
+        "appConfig",
+        "--name=app",
+        "--bucket",
+        "s3://cluster/prefix",
+        "--endpoint=http://127.0.0.1:9000",
+        "--region=auto",
+    ])
+    .command
+    else {
+        panic!("expected deploy")
+    };
+    assert_eq!(project, "app.capnp");
+    assert_eq!(const_name.as_deref(), Some("appConfig"));
+    assert_eq!(deploy.name.as_deref(), Some("app"));
+    assert_eq!(deploy.import_paths, ["inc"]);
+    assert_eq!(deploy.bucket, "s3://cluster/prefix");
+    assert_eq!(
+        deploy.bucket_options().unwrap(),
+        ["aws_endpoint=http://127.0.0.1:9000", "aws_region=auto"]
+    );
+    assert!(deploy.experimental);
+    assert!(!deploy.binary);
+
+    // The project defaults to the working directory, and the endpoint, region and credentials
+    // to the environment.
+    let Command::Deploy {
+        project,
+        const_name,
+        deploy,
+    } = parse(&["deploy", "--bucket=s3://cluster"]).command
+    else {
+        panic!("expected deploy")
+    };
+    assert_eq!(project, ".");
+    assert_eq!(const_name, None);
+    assert_eq!(deploy.name, None);
+    assert!(deploy.bucket_options().unwrap().is_empty());
+}
+
+#[test]
+fn a_gs_bucket_refuses_s3_flags() {
+    let options = |args: &[&str]| {
+        let Command::Deploy { deploy, .. } = parse(args).command else {
+            panic!("expected deploy")
+        };
+        deploy.bucket_options()
+    };
+    assert_eq!(
+        options(&["deploy", "--bucket=gs://cluster"]),
+        Ok(Vec::new())
+    );
+    for (flag, name) in [
+        ("--endpoint=http://127.0.0.1:9000", "--endpoint"),
+        ("--region=auto", "--region"),
+    ] {
+        assert_eq!(
+            options(&["deploy", "--bucket=gs://cluster/prefix", flag]),
+            Err(format!(
+                "{name} is for an s3:// bucket. Remove it for the gs:// bucket."
+            ))
+        );
+    }
+}
+
+#[test]
+fn deploy_bucket_and_endpoint_forms() {
+    let deploy = |args: &[&str]| {
+        let Command::Deploy { deploy, .. } = parse(args).command else {
+            panic!("expected deploy")
+        };
+        deploy
+    };
+    for bucket in [
+        "s3://cluster",
+        "s3://cluster/",
+        "s3://cluster/a/b",
+        "gs://cluster",
+        "gs://cluster/a/b",
+    ] {
+        let flag = format!("--bucket={bucket}");
+        assert_eq!(deploy(&["deploy", &flag]).bucket, bucket);
+    }
+    for endpoint in [
+        "http://127.0.0.1:9000",
+        "https://s3.example.com/",
+        "https://[::1]:9000",
+    ] {
+        let flag = format!("--endpoint={endpoint}");
+        let parsed = deploy(&["deploy", "--bucket=s3://cluster", &flag]);
+        assert_eq!(parsed.endpoint.as_deref(), Some(endpoint));
+    }
 }
 
 #[test]

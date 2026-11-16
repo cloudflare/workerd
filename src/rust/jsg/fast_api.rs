@@ -22,7 +22,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use crate::Error;
-use crate::Number;
 use crate::Resource;
 use crate::UnitType;
 use crate::scope::unit_value;
@@ -60,34 +59,37 @@ impl FastApiArg for bool {
     }
 }
 
-impl private::Sealed for Number {}
-impl FastApiArg for Number {
-    type Raw = f64;
+impl private::Sealed for f64 {}
+impl FastApiArg for f64 {
+    type Raw = Self;
     const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Ok(Self::new(raw))
+    fn from_raw(raw: Self) -> Result<Self, Error> {
+        Ok(raw)
     }
 }
 
-// Integers come from V8 as doubles, so that their range checks and truncation are the slow path's.
+// Integers come from V8 as doubles, so that their range checks and truncation are the slow
+// path's. V8's own integer argument types convert differently: by default with `ToInt32`'s
+// wrapping, and with `kEnforceRangeBit` they truncate before the range check, so that
+// `2 ** 31 - 0.5` is an `int32_t` and `-0.5` a `uint32_t`. `from_number` converts both like
+// that too (see `wrappable.rs`), as C++ JSG's slow path (`jsg/value.h`) does.
 
-impl private::Sealed for i32 {}
-impl FastApiArg for i32 {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Self::from_number(raw)
-    }
+macro_rules! impl_fast_api_integer_arg {
+    ($($type:ty),*) => {
+        $(
+            impl private::Sealed for $type {}
+            impl FastApiArg for $type {
+                type Raw = f64;
+                const TYPE: FastApiType = FastApiType::Float64;
+                fn from_raw(raw: f64) -> Result<Self, Error> {
+                    Self::from_number(raw)
+                }
+            }
+        )*
+    };
 }
 
-impl private::Sealed for u32 {}
-impl FastApiArg for u32 {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Self::from_number(raw)
-    }
-}
+impl_fast_api_integer_arg!(i8, i16, i32, u8, u16, u32);
 
 // Return values
 
@@ -99,13 +101,39 @@ impl FastApiReturn for bool {
     }
 }
 
-impl FastApiReturn for Number {
-    type Raw = f64;
+impl FastApiReturn for f64 {
+    type Raw = Self;
     const TYPE: FastApiType = FastApiType::Float64;
-    fn into_raw(self) -> f64 {
-        self.value()
+    fn into_raw(self) -> Self {
+        self
     }
 }
+
+// Integers go back to V8 as its `int32_t` or `uint32_t`, which it turns into the same number
+// as `Integer::New` does on the slow path. The narrower types widen to one of the two.
+
+macro_rules! impl_fast_api_integer_return {
+    ($($type:ty => $raw:ty, $variant:ident);* $(;)?) => {
+        $(
+            impl FastApiReturn for $type {
+                type Raw = $raw;
+                const TYPE: FastApiType = FastApiType::$variant;
+                fn into_raw(self) -> $raw {
+                    self.into()
+                }
+            }
+        )*
+    };
+}
+
+impl_fast_api_integer_return!(
+    i8 => i32, Int32;
+    i16 => i32, Int32;
+    i32 => i32, Int32;
+    u8 => u32, Uint32;
+    u16 => u32, Uint32;
+    u32 => u32, Uint32;
+);
 
 impl private::Sealed for () {}
 impl FastApiReturn for () {
@@ -114,28 +142,40 @@ impl FastApiReturn for () {
     fn into_raw(self) {}
 }
 
+/// A fast callback and the C signature V8 calls it with.
+///
+/// Only [`method`] and [`static_method`] make one, from a closure, and nothing can change it, so
+/// the signature is always that of the callback.
+pub struct FastCallback(ffi::FastApiDescriptor);
+
+impl FastCallback {
+    pub(crate) fn into_ffi(self) -> ffi::FastApiDescriptor {
+        self.0
+    }
+}
+
 /// Returns the fast callback of a method of `R`, which `#[jsg_method]` passes as `f`.
 #[doc(hidden)]
-pub fn method<R, Args, F: FastMethod<R, Args>>(f: F) -> ffi::FastApiDescriptor {
-    let _ = f;
-    F::descriptor()
+pub fn method<R, Args, F: FastMethod<R, Args>>(f: F) -> FastCallback {
+    f.descriptor()
 }
 
 /// Returns the fast callback of a static method, which `#[jsg_method]` passes as `f`.
 #[doc(hidden)]
-pub fn static_method<Args, F: FastStaticMethod<Args>>(f: F) -> ffi::FastApiDescriptor {
-    let _ = f;
-    F::descriptor()
+pub fn static_method<Args, F: FastStaticMethod<Args>>(f: F) -> FastCallback {
+    f.descriptor()
 }
 
 /// A closure that captures nothing and calls a method of `R` with the arguments `Args`.
 pub trait FastMethod<R, Args>: UnitType {
-    fn descriptor() -> ffi::FastApiDescriptor;
+    /// Takes the closure because the callback recreates it from its type (see [`unit_value`]).
+    fn descriptor(self) -> FastCallback;
 }
 
 /// A closure that captures nothing and calls a static method with the arguments `Args`.
 pub trait FastStaticMethod<Args>: UnitType {
-    fn descriptor() -> ffi::FastApiDescriptor;
+    /// Takes the closure because the callback recreates it from its type (see [`unit_value`]).
+    fn descriptor(self) -> FastCallback;
 }
 
 // Implements `FastMethod` and `FastStaticMethod` for closures taking these arguments. V8 calls
@@ -149,7 +189,7 @@ macro_rules! impl_fast_methods {
             F: UnitType + Fn(&R, $($ty),*) -> T,
             $($ty: FastApiArg,)*
         {
-            fn descriptor() -> ffi::FastApiDescriptor {
+            fn descriptor(self) -> FastCallback {
                 unsafe extern "C" fn callback<R, T, F, $($ty),*>(
                     receiver: ffi::Local,
                     $($arg: $ty::Raw,)*
@@ -164,17 +204,17 @@ macro_rules! impl_fast_methods {
                     // SAFETY: V8 passes the call's receiver and options.
                     unsafe {
                         call_method(options, receiver, |this: &R| {
-                            // SAFETY: `method()` was handed a value of `F`.
+                            // SAFETY: `descriptor()` was handed a value of `F`.
                             let f = unit_value::<F>();
                             Ok(f(this, $($ty::from_raw($arg)?),*))
                         })
                     }
                 }
-                ffi::FastApiDescriptor {
+                FastCallback(ffi::FastApiDescriptor {
                     callback: callback::<R, T, F, $($ty),*> as *const () as usize,
                     return_type: T::TYPE,
                     arg_types: vec![$($ty::TYPE),*],
-                }
+                })
             }
         }
 
@@ -184,7 +224,7 @@ macro_rules! impl_fast_methods {
             F: UnitType + Fn($($ty),*) -> T,
             $($ty: FastApiArg,)*
         {
-            fn descriptor() -> ffi::FastApiDescriptor {
+            fn descriptor(self) -> FastCallback {
                 unsafe extern "C" fn callback<T, F, $($ty),*>(
                     _receiver: ffi::Local,
                     $($arg: $ty::Raw,)*
@@ -199,17 +239,17 @@ macro_rules! impl_fast_methods {
                     // SAFETY: V8 passes the call's options.
                     unsafe {
                         run(options, || {
-                            // SAFETY: `static_method()` was handed a value of `F`.
+                            // SAFETY: `descriptor()` was handed a value of `F`.
                             let f = unit_value::<F>();
                             Ok(f($($ty::from_raw($arg)?),*))
                         })
                     }
                 }
-                ffi::FastApiDescriptor {
+                FastCallback(ffi::FastApiDescriptor {
                     callback: callback::<T, F, $($ty),*> as *const () as usize,
                     return_type: T::TYPE,
                     arg_types: vec![$($ty::TYPE),*],
-                }
+                })
             }
         }
     };
@@ -267,13 +307,27 @@ unsafe fn run<T: FastApiReturn>(
 }
 
 /// Throws `err` as [`crate::Lock::throw_exception`] does, and returns the value V8 ignores.
+///
+/// A fast callback cannot call into JavaScript, so `err` never stands for a pending exception
+/// (see [`Error::is_pending`]). Nor is it a `DOMException`, which takes a context to create: a
+/// method that returns a `Result` has no fast callback, so `err` is a `TypeError` from the
+/// receiver or argument checks. The throw functions throw nothing while execution is
+/// terminating.
 unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Error) -> T {
+    debug_assert!(
+        !err.name.is_dom_exception(),
+        "a fast callback cannot throw a DOMException"
+    );
     // SAFETY: `options` comes from V8 (caller contract).
     unsafe {
         if err.is_internal {
             ffi::fast_api_throw_internal_error(options, &err.message);
         } else {
-            ffi::fast_api_throw_exception(options, err.name, &err.message);
+            ffi::fast_api_throw_exception(
+                options,
+                err.name.class().unwrap_or(crate::ExceptionType::Error),
+                crate::error_message_for_v8(err.message.as_bytes()),
+            );
         }
     }
     T::default()

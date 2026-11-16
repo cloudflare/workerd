@@ -171,6 +171,9 @@ class WorkerTracer final: public BaseTracer {
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanUpdateInternal(
+      tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp);
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
@@ -220,6 +223,11 @@ class WorkerTracer final: public BaseTracer {
       const kj::ConstString& methodName) override;
 
   void markUnused() override;
+
+  // Whether this invocation's events are streamed to tail workers.
+  bool hasTailStreamWriter() const {
+    return maybeTailStreamWriter != kj::none;
+  }
 
  private:
   PipelineLogLevel pipelineLogLevel;

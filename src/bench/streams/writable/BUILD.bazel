@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The writable benchmarks run the same modules under two configs:
+# writable-cpp against the legacy C++ implementation, writable-ts against
+# the TypeScript implementation.
+
+writable_bench_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
+
+wd_bench(
+    src = "writable-cpp.wd-bench",
+    data = writable_bench_srcs,
+)
+
+wd_bench(
+    src = "writable-ts.wd-bench",
+    args = ["--experimental"],
+    data = writable_bench_srcs,
+)

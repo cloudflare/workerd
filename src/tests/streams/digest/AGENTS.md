@@ -125,4 +125,5 @@ standard-streams machinery changes nothing the suite pins).
 | `reentrancy.js` | staged thenable-check matrix (ledger #3); write issued from a write continuation preserves accumulation order; options-bag getter re-entering the constructor is safe and its value is honored |
 | `backpressure.js` | desiredSize counts and recovers (parity); ready settled |
 | `legacy-shape.js` | unflagged era: `[object Object]`; digest as own instance property (no prototype accessor); bytesWritten stays a bigint prototype accessor; flow unchanged |
+| `transfer.js` | structuredClone() rejects DataCloneError (parity) |
 | `which-impl.js` | implementation detection |

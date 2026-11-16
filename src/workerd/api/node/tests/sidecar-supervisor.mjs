@@ -33,6 +33,12 @@
  *    the right response is bazel's existing flaky-test handling — mark the affected test with
  *    `tags = ["flaky"]`.
  *
+ * A test can also listen on ports of its own, with or without a sidecar: `listen_port_bindings`
+ * maps sockets in the test's config to environment variables, passed as `LISTEN_PORT_BINDINGS`
+ * (`<SOCKET>=<NAME>,...`). The supervisor reserves those ports as in "preallocate" mode, exports
+ * them, and adds `--socket-addr <SOCKET>=<SIDECAR_HOSTNAME>:<PORT>` to the test's command line, so
+ * tests on the same machine never contend for a fixed port.
+ *
  * This architecture is designed to allow running unmodified TCP servers, such as wptserve for the
  * WPT tests. If necessary, IP address randomization can be disabled by setting
  * `sidecar_randomize_ip` to False.
@@ -144,9 +150,7 @@ async function runReportMode({ portsToAssign, sidecarCommand, testArgv }) {
   const ports = await sidecar.portsPromise;
   Object.assign(process.env, ports);
 
-  process.exitCode = child_process.spawnSync(testArgv[0], testArgv.slice(1), {
-    stdio: ['inherit', 'inherit', 'inherit'],
-  }).status;
+  runTest(testArgv);
 
   sidecar.proc.kill();
   await sidecar.exitPromise;
@@ -229,12 +233,45 @@ async function runPreallocateMode({
   });
   await Promise.race([allListening, sidecarDied]);
 
-  process.exitCode = child_process.spawnSync(testArgv[0], testArgv.slice(1), {
-    stdio: ['inherit', 'inherit', 'inherit'],
-  }).status;
+  runTest(testArgv);
 
   sidecar.proc.kill();
   await sidecar.promise;
+}
+
+// === Test process ===========================================================
+
+function runTest(testArgv) {
+  process.exitCode = child_process.spawnSync(testArgv[0], testArgv.slice(1), {
+    stdio: ['inherit', 'inherit', 'inherit'],
+  }).status;
+}
+
+// Reserves a port for each socket in LISTEN_PORT_BINDINGS, exports it, and returns the test's
+// command line with each socket's address overridden to use it.
+async function assignListenPorts(hostname, testArgv) {
+  const bindings = parseList(process.env.LISTEN_PORT_BINDINGS).map(
+    (binding) => {
+      const [socket, envVar] = binding.split('=');
+      return { socket, envVar };
+    }
+  );
+  const ports = await reservePorts(
+    hostname,
+    bindings.map(({ envVar }) => envVar)
+  );
+  Object.assign(process.env, ports);
+  return [
+    ...testArgv,
+    ...bindings.map(
+      ({ socket, envVar }) =>
+        `--socket-addr=${socket}=${hostname}:${ports[envVar]}`
+    ),
+  ];
+}
+
+function parseList(value) {
+  return (value ?? '').split(',').filter((item) => item !== '');
 }
 
 // === Hostname assignment ====================================================
@@ -294,14 +331,18 @@ function assignLoopbackAddress() {
 // === Entrypoint =============================================================
 
 const portMode = process.env.SIDECAR_PORT_MODE ?? 'report';
-const portsToAssign = process.env.PORTS_TO_ASSIGN.split(',');
+const portsToAssign = parseList(process.env.PORTS_TO_ASSIGN);
 const sidecarCommand = process.env.SIDECAR_COMMAND;
-const testArgv = process.argv.slice(2); // Shift off the stuff Node puts in argv
 
 const hostname = assignLoopbackAddress();
 process.env.SIDECAR_HOSTNAME = hostname;
 
-if (portMode === 'preallocate') {
+// Shift off the stuff Node puts in argv.
+const testArgv = await assignListenPorts(hostname, process.argv.slice(2));
+
+if (!sidecarCommand) {
+  runTest(testArgv);
+} else if (portMode === 'preallocate') {
   await runPreallocateMode({
     hostname,
     portsToAssign,

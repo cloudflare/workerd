@@ -29,6 +29,14 @@ wpt_test(
     wpt_directory = "@wpt//:url@module",
 )
 
+# The TypeScript URL and URLSearchParams, against the same expectations.
+wpt_test(
+    name = "url-ts",
+    autogates = ["workerd-autogate-ts-url"],
+    config = "url-test.ts",
+    wpt_directory = "@wpt//:url@module",
+)
+
 wpt_test(
     name = "urlpattern",
     # We use a fixed compat date because new URLPattern implementation
@@ -44,10 +52,33 @@ wpt_test(
     wpt_directory = "@wpt//:urlpattern@module",
 )
 
+# The TypeScript URLPattern, with each parser, against the same
+# expectations.
+wpt_test(
+    name = "urlpattern-ts",
+    autogates = ["workerd-autogate-ts-url-pattern"],
+    compat_date = "2025-04-09",
+    config = "urlpattern-test.ts",
+    wpt_directory = "@wpt//:urlpattern@module",
+)
+
+wpt_test(
+    name = "urlpattern-standard-ts",
+    autogates = ["workerd-autogate-ts-url-pattern"],
+    config = "urlpattern-standard-test.ts",
+    wpt_directory = "@wpt//:urlpattern@module",
+)
+
 wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
     wpt_directory = "@wpt//:dom/abort@module",
+)
+
+wpt_test(
+    name = "webmessaging",
+    config = "webmessaging-test.ts",
+    wpt_directory = "@wpt//:webmessaging@module",
 )
 
 wpt_test(
@@ -57,10 +88,17 @@ wpt_test(
 )
 
 wpt_test(
+    name = "html/webappapis/microtask-queuing",
+    config = "html/webappapis/microtask-queuing-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/microtask-queuing@module",
+)
+
+wpt_test(
     name = "fetch/api",
     size = "large",
     compat_flags = ["strip_bom_in_read_all_text"],
     config = "fetch/api-test.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -74,12 +112,12 @@ wpt_test(
 wpt_test(
     name = "fetch/api-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = [
         "strip_bom_in_read_all_text",
         "typescript_implemented_streams",
     ],
     config = "fetch/api-test-ts.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -88,6 +126,27 @@ wpt_test(
         "//conditions:default": [],
     }),
     wpt_directory = "@wpt//:fetch/api@module",
+)
+
+wpt_test(
+    name = "fetch/misc",
+    size = "large",
+    config = "fetch/misc-test.ts",
+    exclude_test_dirs = [
+        # Runs as its own targets
+        "api",
+        # Opaque Response Blocking is browser-only, and its resources include deliberately invalid
+        # .json files, which cannot be bound as JSON modules
+        "orb",
+    ],
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:fetch@module",
 )
 
 wpt_test(
@@ -106,6 +165,7 @@ wpt_test(
 wpt_test(
     name = "compression",
     config = "compression-test.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -142,9 +202,9 @@ wpt_test(
 wpt_test(
     name = "compression-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "compression-test-ts.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -156,7 +216,6 @@ wpt_test(
 wpt_test(
     name = "streams-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "streams-test-ts.ts",
     wpt_directory = "@wpt//:streams@module",
@@ -165,7 +224,6 @@ wpt_test(
 wpt_test(
     name = "encoding-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = [
         "typescript_implemented_streams",
         "text_decoder_cjk_decoder",
@@ -183,9 +241,21 @@ wpt_test(
 )
 
 wpt_test(
+    name = "hr-time",
+    config = "hr-time-test.ts",
+    wpt_directory = "@wpt//:hr-time@module",
+)
+
+wpt_test(
     name = "performance-timeline",
     config = "performance-timeline-test.ts",
     wpt_directory = "@wpt//:performance-timeline@module",
+)
+
+wpt_test(
+    name = "user-timing",
+    config = "user-timing-test.ts",
+    wpt_directory = "@wpt//:user-timing@module",
 )
 
 wpt_test(
@@ -226,13 +296,65 @@ wpt_test(
     wpt_directory = "@wpt//:webidl@module",
 )
 
+# The TypeScript DOMException, against the same expectations.
+wpt_test(
+    name = "webidl-ts",
+    autogates = ["workerd-autogate-ts-dom-exception"],
+    config = "webidl-test.ts",
+    wpt_directory = "@wpt//:webidl@module",
+)
+
 wpt_test(
     name = "wasm/jsapi",
+    size = "large",
     config = "wasm/jsapi-test.ts",
     extra_wpt_directories = [
         "@wpt//:wasm/jsapi@module",
         "@wpt//:wasm/resources@module",
     ],
     extra_wpt_files = ["@wpt//:wasm/incrementer.wasm"],
+    # Uses 1.6-2.3 cores on average, and up to 3.4.
+    tags = ["cpu:2"],
     wpt_directory = "@wpt//:wasm/jsapi@module",
+)
+
+wpt_test(
+    name = "FileAPI",
+    config = "FileAPI-test.ts",
+    wpt_directory = "@wpt//:FileAPI@module",
+)
+
+wpt_test(
+    name = "console",
+    config = "console-test.ts",
+    wpt_directory = "@wpt//:console@module",
+)
+
+wpt_test(
+    name = "mimesniff/mime-types",
+    config = "mimesniff/mime-types-test.ts",
+    wpt_directory = "@wpt//:mimesniff/mime-types@module",
+)
+
+wpt_test(
+    name = "html/webappapis/atob",
+    config = "html/webappapis/atob-test.ts",
+    # base64.any.js fetches ../../../fetch/data-urls/resources/base64.json
+    extra_wpt_directories = ["@wpt//:fetch/data-urls@module"],
+    wpt_directory = "@wpt//:html/webappapis/atob@module",
+)
+
+wpt_test(
+    name = "html/webappapis/timers",
+    config = "html/webappapis/timers-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/timers@module",
+)
+
+wpt_test(
+    name = "html/webappapis/structured-clone",
+    config = "html/webappapis/structured-clone-test.ts",
+    # META scripts name the battery helpers by absolute path, e.g.
+    # /html/webappapis/structured-clone/structured-clone-battery-of-tests.js
+    extra_wpt_directories = ["@wpt//:html/webappapis/structured-clone@module"],
+    wpt_directory = "@wpt//:html/webappapis/structured-clone@module",
 )

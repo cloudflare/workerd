@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "nodejs-process-version-22-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-version-nodejs-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_process_v2",
+          "no_nodejs_process_version_24"
+        ],
+        bindings = [
+          (name = "EXPECTED_MAJOR_VERSION", text = "22"),
+        ],
+      )
+    ),
+    ( name = "nodejs-process-version-24-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-version-nodejs-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_process_v2",
+          "nodejs_process_version_24"
+        ],
+        bindings = [
+          (name = "EXPECTED_MAJOR_VERSION", text = "24"),
+        ],
+      )
+    ),
+  ],
+);

@@ -12,4 +12,4 @@ assert extra_module.VALUE == 42
 
 
 def test():
-    pass
+    assert expected_extra_dir in sys.path

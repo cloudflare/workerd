@@ -28,11 +28,14 @@ import { mock } from 'node:test';
 import util, {
   inspect,
   callbackify,
+  diff,
   inherits,
   promisify,
   stripVTControlCharacters,
   styleText,
   parseEnv,
+  convertProcessSignalToExitCode as namedConvertProcessSignalToExitCode,
+  setTraceSigInt as namedSetTraceSigInt,
 } from 'node:util';
 
 const remainingMustCallErrors = new Set();
@@ -4490,6 +4493,27 @@ export const utilFormat = {
   },
 };
 
+// An error whose stack can't be read, because reading its name throws, is
+// rendered as an object, as Node renders it.
+export const utilInspectErrorWithThrowingName = {
+  test() {
+    class ThrowingName extends Error {
+      get name() {
+        throw new TypeError('Illegal invocation');
+      }
+    }
+    assert.strictEqual(util.inspect(ThrowingName.prototype), '[object Object]');
+    const withKey = Object.create(ThrowingName.prototype, {
+      tag: { value: 1, enumerable: true },
+    });
+    assert.strictEqual(util.inspect(withKey), '[object Object] { tag: 1 }');
+    assert.strictEqual(
+      util.inspect({ p: ThrowingName.prototype }),
+      '{ p: [object Object] }'
+    );
+  },
+};
+
 export const utilInspectError = {
   // message/util_inspect_error.js
   async test(ctrl, env, ctx) {
@@ -4536,6 +4560,42 @@ export const logTest = {
     assert.strictEqual(args[2], 'test');
 
     console.log = original;
+  },
+};
+
+// Ported from test/parallel/test-abortsignal-cloneable.js, without the
+// MessageChannel transfers.
+export const transferableAbortSignal = {
+  test() {
+    const signal = util.transferableAbortSignal(AbortSignal.abort('boom'));
+    assert.ok(signal instanceof AbortSignal);
+    assert.ok(signal.aborted);
+    assert.strictEqual(signal.reason, 'boom');
+
+    const original = new AbortController().signal;
+    assert.strictEqual(util.transferableAbortSignal(original), original);
+
+    for (const value of [
+      undefined,
+      null,
+      1,
+      'signal',
+      {},
+      { aborted: false },
+    ]) {
+      assert.throws(() => util.transferableAbortSignal(value), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      });
+    }
+  },
+};
+
+export const transferableAbortController = {
+  test() {
+    const ac = util.transferableAbortController();
+    assert.ok(ac instanceof AbortController);
+    assert.strictEqual(ac.signal.aborted, false);
   },
 };
 
@@ -5981,6 +6041,77 @@ export const testParseEnv = {
   },
 };
 
+// Ported from Node.js test/parallel/test-uv-errno.js and test-uv-errmap.js.
+export const testGetSystemError = {
+  test() {
+    const { getSystemErrorMap, getSystemErrorName, getSystemErrorMessage } =
+      util;
+
+    const errMap = getSystemErrorMap();
+    assert.ok(errMap instanceof Map);
+    assert.notStrictEqual(getSystemErrorMap(), errMap);
+    assert.strictEqual(errMap.size, 85);
+    for (const [errno, [name, message]] of errMap) {
+      assert.strictEqual(getSystemErrorName(errno), name);
+      assert.strictEqual(getSystemErrorMessage(errno), message);
+      assert.notStrictEqual(message, `Unknown system error ${errno}`);
+    }
+
+    // The Linux values, which is what Node.js reports on Linux.
+    assert.deepStrictEqual(errMap.get(-2), [
+      'ENOENT',
+      'no such file or directory',
+    ]);
+    assert.deepStrictEqual(errMap.get(-111), [
+      'ECONNREFUSED',
+      'connection refused',
+    ]);
+    assert.deepStrictEqual(errMap.get(-3008), [
+      'EAI_NONAME',
+      'unknown node or service',
+    ]);
+    assert.deepStrictEqual(errMap.get(-4095), ['EOF', 'end of file']);
+    assert.strictEqual(getSystemErrorName(-13), 'EACCES');
+    assert.strictEqual(getSystemErrorMessage(-13), 'permission denied');
+
+    // Mutating a returned map does not affect later calls.
+    errMap.delete(-2);
+    assert.strictEqual(getSystemErrorName(-2), 'ENOENT');
+    assert.ok(getSystemErrorMap().has(-2));
+
+    assert.strictEqual(
+      getSystemErrorName(-111111),
+      'Unknown system error -111111'
+    );
+    assert.strictEqual(
+      getSystemErrorMessage(-111111),
+      'Unknown system error -111111'
+    );
+
+    for (const fn of [getSystemErrorName, getSystemErrorMessage]) {
+      for (const err of ['test', {}, []]) {
+        assert.throws(() => fn(err), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+          message:
+            'The "err" argument must be of type number.' +
+            invalidArgTypeHelper(err),
+        });
+      }
+      for (const err of [0, 1, Infinity, -Infinity, NaN, -1.5]) {
+        assert.throws(() => fn(err), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+          message:
+            'The value of "err" is out of range. ' +
+            'It must be a negative integer. ' +
+            `Received ${err}`,
+        });
+      }
+    }
+  },
+};
+
 export const testNotImplemented = {
   async test() {
     for (const method of ['_errnoException', '_exceptionWithHostPort']) {
@@ -6010,5 +6141,103 @@ export const testEndOfLife = {
     assert.strictEqual(typeof util.isUndefined, 'function');
 
     assert.strictEqual(util.isBuffer(true), false);
+  },
+};
+
+// Ported from test/parallel/test-util-convert-signal-to-exit-code.mjs
+export const convertProcessSignalToExitCode = {
+  async test() {
+    assert.strictEqual(
+      namedConvertProcessSignalToExitCode,
+      util.convertProcessSignalToExitCode
+    );
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGTERM'), 143);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGKILL'), 137);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGINT'), 130);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGHUP'), 129);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGABRT'), 134);
+
+    for (const value of [
+      'INVALID',
+      '',
+      'SIG',
+      undefined,
+      null,
+      123,
+      true,
+      false,
+      {},
+      [],
+      Symbol('test'),
+      () => {},
+    ]) {
+      assert.throws(() => util.convertProcessSignalToExitCode(value), {
+        code: 'ERR_INVALID_ARG_VALUE',
+        name: 'TypeError',
+      });
+    }
+  },
+};
+
+export const setTraceSigInt = {
+  async test() {
+    assert.strictEqual(namedSetTraceSigInt, util.setTraceSigInt);
+    assert.strictEqual(util.setTraceSigInt(true), undefined);
+  },
+};
+
+// Ported from Node.js test/parallel/test-diff.js
+export const testDiff = {
+  test() {
+    assert.strictEqual(util.diff, diff);
+
+    assert.throws(() => diff({}, 'foo'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff('foo', {}), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "expected" argument must be of type string. Received an instance of Object',
+    });
+    assert.throws(() => diff(['1', { b: 2 }], ['1', '2']), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "actual[1]" argument must be of type string. Received an instance of Object',
+    });
+
+    assert.deepStrictEqual(diff('foo', 'foo'), []);
+
+    assert.deepStrictEqual(diff('12345678', '12!!5!7!'), [
+      [0, '1'],
+      [0, '2'],
+      [1, '3'],
+      [1, '4'],
+      [-1, '!'],
+      [-1, '!'],
+      [0, '5'],
+      [1, '6'],
+      [-1, '!'],
+      [0, '7'],
+      [1, '8'],
+      [-1, '!'],
+    ]);
+
+    assert.deepStrictEqual(diff(['1', '2', '3'], ['1', '3', '4']), [
+      [0, '1'],
+      [1, '2'],
+      [0, '3'],
+      [-1, '4'],
+    ]);
+
+    assert.deepStrictEqual(diff('', 'ab'), [
+      [-1, 'a'],
+      [-1, 'b'],
+    ]);
+    assert.deepStrictEqual(diff(['a', 'b'], []), [
+      [1, 'a'],
+      [1, 'b'],
+    ]);
   },
 };

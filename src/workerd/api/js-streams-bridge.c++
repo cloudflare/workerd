@@ -14,9 +14,8 @@ jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
   // is forbidden e.g. during RPC deserialization. See the fuller comment on dispatchCall().
   KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
       "attempted to call into the TypeScript streams implementation during a no-JS scope", name);
-  auto cppExports = KJ_REQUIRE_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
-  auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(cppExports));
-  return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(cppExportsObj.get(js, name)));
+  return KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "webstreams/cpp_exports", name),
+      "missing webstreams/cpp_exports function", name);
 }
 
 kj::Array<kj::byte> stringToBytes(kj::String data) {

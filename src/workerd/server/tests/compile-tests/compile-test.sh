@@ -46,8 +46,12 @@ done
 # Identify the port chosen by the binary
 PORT=$(grep '"socket":"http"' "$PORT_FILE" | sed 's/^.*\"port\"://g' | sed 's/\}//g' |head -n 1)
 
-# Request output
-curl localhost:"$PORT" -o "$OUTPUT"
+# Request output over bash's /dev/tcp, so that the test needs no HTTP client. An HTTP/1.0 response
+# isn't chunked, and its body follows the headers' blank line.
+exec 3<>"/dev/tcp/localhost/$PORT"
+printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
+awk 'body { print } /^\r?$/ { body = 1 }' <&3 > "$OUTPUT"
+exec 3<&-
 
 # Compare the tests to the expected output
 sed -e's/[[:space:]]*$//' "$OUTPUT" > "$FIXED_OUTPUT"

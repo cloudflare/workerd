@@ -56,6 +56,14 @@ export const doTheTest = {
     throws(() => require('invalid'), tlaError);
     throws(() => require('invalid2'), tlaError);
 
+    const processNs = await import('node:process');
+    const requiredProcess = require('node:process');
+    strictEqual(require('process'), requiredProcess);
+    ok(
+      requiredProcess === processNs || requiredProcess === processNs.default,
+      'require("node:process") must resolve to the imported node:process'
+    );
+
     throws(() => require('does not exist'));
     throws(() => createRequire('not a valid path'), {
       message: /The argument must be a file URL object/,

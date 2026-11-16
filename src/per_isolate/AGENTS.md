@@ -1,14 +1,12 @@
 # src/per_isolate/
 
 Per-isolate JavaScript/TypeScript bootstrap: scripts that run synchronously
-at context creation, before any user code. Gated by the
-`per-isolate-javascript-bootstrap` autogate (config:
-`workerd-autogate-per-isolate-javascript-bootstrap`). C++ entry point:
+at context creation, before any user code. C++ entry point:
 `src/workerd/api/per-isolate-bootstrap.c++`.
 
 ## EXECUTION MODEL
 
-- Scripts are compiled as functions with a context-extension object — the
+- Scripts are compiled as functions whose parameters are the
   pseudo-globals `require`, `module`, `exports`, `compatFlags`,
   `autogates`, `primordials`, `utils` are in scope but NOT on
   `globalThis` (see `per_isolate-env.d.ts`).
@@ -23,16 +21,48 @@ at context creation, before any user code. Gated by the
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
-  `expose_draining_reader`.
-  Under `typescript_implemented_structured_clone` it replaces the
+  `expose_draining_reader`, and the internal-testing cloneable
+  `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
+  `src/tests/serialization/`) under `expose_serialization_test_class`.
+- Under the `TS_URL` autogate, `main.ts` installs the TypeScript `URL` and
+  `URLSearchParams` (`url/`), which replace both C++ implementations; see
+  `url/AGENTS.md`.
+- Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
+  `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
+  see `urlpattern/AGENTS.md`.
+- Under `typescript_implemented_structured_clone`, `main.ts` replaces the
   `structuredClone` method on ServiceWorkerGlobalScope.prototype with
   `structured-clone.ts`, a WebIDL layer over the native
   `utils.structuredClone()`; its parity suite and divergence ledger are in
   `src/tests/structured-clone/`.
+- EventTarget subclasses reach the (still C++) EventTarget they extend only
+  through `events/event-target-internals`; see `events/AGENTS.md`.
+- Modules get `DOMException` from `require('dom-exception')`, which
+  `main.ts` loads first, not from the global or `primordials`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
   scripts (deviation from the repo-wide new-file rule; keep consistent).
+
+## EMBEDDER SCRIPTS
+
+An embedder can contribute scripts to the same bootstrap. It builds them with
+`wd_ts_script_bundle(embedder_prefix = "<prefix>/", ...)`, wraps the bundle
+in an `EmbedderBootstrap` (`src/workerd/api/per-isolate-bootstrap.h`), and
+returns it from `Worker::Api::getEmbedderBootstrap()`.
+
+- Order: `primordials`, workerd's `main`, then `<prefix>main`, all before
+  the WeakRef globals are removed. A failure is fatal, as for workerd's.
+- Every embedder script is named under the prefix; `require()` takes the
+  full specifier (`require('embedder/foo')`, not `require('./foo')`).
+- Embedder scripts share the require() cache and pseudo-globals and can
+  `require()` workerd's scripts. workerd's scripts cannot `require()` the
+  embedder's: nothing here may depend on what an embedder provides.
+- `EmbedderBootstrap`'s constructor rejects a prefix that overlaps a
+  workerd script name, so a new top-level directory here must not match
+  an embedder's prefix.
+- Test: `src/workerd/api/per-isolate-embedder-bootstrap-test.c++`, with
+  its stand-in bundle in `src/workerd/api/tests/embedder-bootstrap/`.
 
 ## CONVENTIONS
 
@@ -55,7 +85,65 @@ at context creation, before any user code. Gated by the
   re-exported to users.
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
-  `Symbol.hasInstance`).
+  `Symbol.hasInstance`). A cloneable class (below) brand-checks with a
+  V8-private property instead.
+- C++/bootstrap-only markers and extraction hooks are V8-private
+  properties, keyed by `utils.getPrivateSymbol(name)` (`v8::Private::ForApi`)
+  and read and written as `object[key]`; C++ reaches them by the same name.
+  The properties are neither reflected nor inherited, and the keys must stay
+  in module scope. Ordinary symbols, including `getApiSymbol` results, are
+  reflection-visible and are not secrets.
+- An error class whose `name` and `message` are accessors, as WebIDL
+  attributes are, keeps them as strings under the private keys
+  `workerd:errorName` and `workerd:errorMessage` (`ERROR_NAME_KEY` and
+  `ERROR_MESSAGE_KEY`, `jsg/jsg.h`). `kj::str()` and Rust JSG's
+  `to_detail_string()`, which run no JavaScript, then describe an instance
+  as `name: message`; V8's description reads only data properties. Any such
+  class may use the keys, so they are no brand: brand-check with a key of
+  the class's own, as `dom-exception.ts` does.
+- **Structured serialization** (`structuredClone()`, `postMessage()`, RPC,
+  Durable Object storage) goes through `serialization.ts`, a leaf module
+  modelled on Node.js's js_transferable, which `main.ts` loads whatever the
+  flags; `jsg/ser.h` describes the C++ side and the format. A class whose
+  instances are not serializable marks each one with `markUncloneable()`,
+  so that serializing it throws DataCloneError rather than copying it as a
+  plain object. A cloneable class is set up once with `const cloneable =
+  makeCloneable(ctor, deserializeInfo, clone, deserialize)`, after the
+  class, and its constructor marks each instance with
+  `markCloneable(this, cloneable)`. See "Classes Implemented in JavaScript"
+  in `docs/jsg.md` for a complete example.
+  - `deserializeInfo` (`'module:Export'`) is stored in serialized data,
+    Durable Object storage included, so it can never change. A renamed
+    class keeps its old export as an alias.
+  - The module is required while the bootstrap runs: a reader finds only
+    loaded modules, and any loaded class, whatever the compatibility flags
+    expose, so untrusted data can make an instance of it. A reader may have
+    different flags from the writer. Require the module whatever the flags
+    if every reader must read the class (it replaces a C++ class under a
+    flag); otherwise only under the flags that expose it (an experimental
+    class, such as `testing/cloneable-test-box.ts`).
+  - The export is a data property of `module.exports = { ... }`. The
+    `per_isolate@eslint` test rejects TypeScript value exports, which
+    compile to getters the deserializer can't call.
+  - The deserializer makes an instance from `Export.prototype` without
+    calling the constructor (a DOMException with neither brand, name nor
+    message if the prototype inherits from `DOMException.prototype`, and
+    otherwise a native error if it inherits from `Error.prototype`), then
+    calls `deserialize()` once the whole value has been read. So the state `deserialize()` restores lives under V8-private
+    properties, not `#private` fields, which such an instance lacks, and is
+    brand-checked the same way.
+  - `deserialize()` validates its data completely, with primordials only:
+    the data may come from an untrusted peer. It reads the data's
+    properties with `getOwnDataProperty()`, never `data.x` or
+    destructuring, which read the prototype chain for a property the data
+    lacks. It does not use other objects in it, whose own `deserialize()`
+    may not have run yet.
+  - An error class leaves `stack` to the runtime: the serializer writes it,
+    and the deserializer restores it or not, as for a native error
+    (`preserveStackInErrors`, which has no effect on an error written
+    without enhanced error serialization). A stack it does not restore
+    begins with the error's name and the writer's message, which the
+    serializer writes for that alone: `deserialize()` still sets `message`.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as
@@ -114,7 +202,8 @@ objects whose prototypes are reachable by user code**:
   type checks — both are user-controllable. Use
   `TypedArrayPrototypeGetSymbolToStringTag(value)` for typed arrays
   (returns the internal `[[TypedArrayName]]` or `undefined`) and
-  private-brand `#field in obj` checks for internal classes.
+  private-brand `#field in obj` checks for internal classes (V8-private
+  properties for cloneable classes; see CONVENTIONS).
 
 ### When primordials are NOT required
 
@@ -198,11 +287,25 @@ path, and the same pollution breaks the user's own code in every engine:
   object, notably the user's read promise, which the spec resolves with a
   `{ value, done }` result. Internal reads are not exposed: the backends
   settle them with results whose prototype chain has no `Object.prototype`
-  (`createReadResult` in `webstreams/queue.ts`).
+  (`createReadResult` in `webstreams/queue.ts`). Nor is body consumption
+  through the C++ bridge, which resolves a null-prototype record (see
+  KEY RULES in `webstreams/AGENTS.md`).
 
-Internal-only records should still be null-prototype
-(`{ __proto__: null, ... }`) wherever nothing requires the
-`Object.prototype` chain.
+Internal-only records should still be null-prototype wherever nothing
+requires the `Object.prototype` chain. How depends on how often the record
+is made:
+
+- Made once (module scope, a frozen constant): an object literal,
+  `{ __proto__: kNullProtoObject, ... }`. Avoid `{ __proto__: null, ... }`,
+  which creates a dictionary-mode object with slow properties.
+- Made per chunk, per operation or per stream, and never reachable by user
+  code: an instance of a class passed through `nullPrototypeRecord`
+  (`webstreams/common.ts`), whose constructor sets every member. Any
+  object literal with a `__proto__` member sets its prototype with a
+  runtime call each time it is evaluated, about 20 times the cost of a
+  plain literal or a class instance.
+- With constant contents, however often it is used: hoist one frozen
+  module-level constant instead of making it each time.
 
 ### Never expose primordials to user code
 

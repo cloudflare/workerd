@@ -6,10 +6,10 @@ Subject: Update illegal invocation error message in v8
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 4b47483f3998ada2320ed48f44a30b003ed97b6b..4591cbc5f6d721796efa19ecf02ebdc87b85b0df 100644
+index 2900d2381fa3d9a6d0c1ded7dcfdae559d145064..e3b63554a796bcf261c083922bdc48d3eddd272b 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
-@@ -125,7 +125,11 @@ namespace internal {
+@@ -123,7 +123,11 @@ namespace internal {
      "First argument to % must not be a regular expression")                    \
    T(FunctionBind, "Bind must be called on a function")                         \
    T(GeneratorRunning, "Generator is already running")                          \
@@ -23,10 +23,10 @@ index 4b47483f3998ada2320ed48f44a30b003ed97b6b..4591cbc5f6d721796efa19ecf02ebdc8
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 8749b774f891ebc5969933dde548d2e8434c1440..c92035c192f6a3b87fb1c0268108c75de1f1d53d 100644
+index a05627ed8634ef967c818e778d755561e664e617..6c0e0b20609fcd8452f4b727238715b6e86a84fd 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
-@@ -230,6 +230,17 @@ THREADED_TEST(IsolateOfContext) {
+@@ -232,6 +232,17 @@ THREADED_TEST(IsolateOfContext) {
    CHECK(isolate->IsCurrent());
  }
  
@@ -43,8 +43,8 @@ index 8749b774f891ebc5969933dde548d2e8434c1440..c92035c192f6a3b87fb1c0268108c75d
 +
  static void TestSignatureLooped(const char* operation, Local<Value> receiver,
                                  v8::Isolate* isolate) {
-   auto source = v8::base::UniqueArray<char>::NewForOverwrite(200);
-@@ -247,12 +258,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+   std::array<char, 200> source;
+@@ -249,12 +260,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(10, signature_callback_count);
    } else {
@@ -58,7 +58,7 @@ index 8749b774f891ebc5969933dde548d2e8434c1440..c92035c192f6a3b87fb1c0268108c75d
    }
    signature_expected_receiver_global.Reset();
  }
-@@ -279,12 +285,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
+@@ -281,12 +287,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(3, signature_callback_count);
    } else {

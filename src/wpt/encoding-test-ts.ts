@@ -143,12 +143,14 @@ export default {
   'textdecoder-ignorebom.any.js': {},
   'textdecoder-labels.any.js': {},
   'textdecoder-mistakes.any.js': {
-    comment: 'iso-2022-jp fatal stream state not preserved after throw',
+    comment:
+      'Fatal streaming decoders discard their state on error, so iso-2022-jp state is not preserved and the ASCII byte that ends an incomplete EUC-JP JIS0212 sequence is dropped instead of being decoded',
     disabledTests: [
       // Behavior differs between platforms: on Windows this test passes while
       // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
       'fatal stream: iso-2022-jp',
     ],
+    expectedFailures: ['EUC-JP JIS0212 state after a fatal streaming error'],
   },
   'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {},

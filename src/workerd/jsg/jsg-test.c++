@@ -173,6 +173,7 @@ KJ_TEST("inheritance") {
 
 KJ_TEST("native dispatch rejects same-type shim substitution") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval("let target = new NumberBox(123);"
                  "let source = new NumberBox(456);"
@@ -184,6 +185,7 @@ KJ_TEST("native dispatch rejects same-type shim substitution") {
 
 KJ_TEST("native dispatch rejects inheritance-compatible shim substitution") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval("let target = new NumberBox(123);"
                  "let source = new ExtendedNumberBox(456, 'source');"
@@ -195,6 +197,7 @@ KJ_TEST("native dispatch rejects inheritance-compatible shim substitution") {
 
 KJ_TEST("ResetRoot rejects substituted shim ownership") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval(R"(
       let target = new NumberBox(123);
@@ -208,6 +211,7 @@ KJ_TEST("ResetRoot rejects substituted shim ownership") {
 
 KJ_TEST("native dispatch rejects stale handle after same-tag shim reuse") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval(R"(
       const target = new NumberBox(123);
@@ -640,6 +644,52 @@ KJ_TEST("strong jsg::Data destroyed after isolate teardown") {
   }
 
   // The isolate is now destroyed. Destroying the JsRef must not touch the dead isolate.
+  stored = kj::none;
+}
+
+// Calls `func` within a context of a ProtoIsolate that is destroyed when it returns.
+void runInShortLivedIsolate(kj::FunctionParam<void(ProtoIsolate::Lock&, Lock&)> func) {
+  ProtoIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](ProtoIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.newContext<ProtoContext>().getHandle(lock.v8Isolate),
+        [&](Lock& js) { func(lock, js); });
+  });
+}
+
+// Like a jsg::Data, a Ref<T> can outlive its isolate, and so can the Wrappable it points to. Once
+// the isolate is gone, destroying them must not touch it, whether or not the Wrappable ever had
+// a wrapper.
+
+KJ_TEST("Ref<T> to a child without a wrapper destroyed after isolate teardown") {
+  kj::Maybe<Ref<NumberBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto parent = js.alloc<BoxBox>(js.alloc<NumberBox>(1));
+    // Wrapping the parent visits the child, which has no wrapper of its own.
+    lock.getTypeHandler<Ref<BoxBox>>().wrap(js, parent.addRef());
+    stored = parent->inner.addRef();
+  });
+  stored = kj::none;
+}
+
+KJ_TEST("Ref<T> to a wrapped parent destroyed after isolate teardown") {
+  kj::Maybe<Ref<BoxBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto parent = js.alloc<BoxBox>(js.alloc<NumberBox>(1));
+    lock.getTypeHandler<Ref<BoxBox>>().wrap(js, parent.addRef());
+    stored = kj::mv(parent);
+  });
+  // Destroys the child too.
+  stored = kj::none;
+}
+
+KJ_TEST("Ref<T> whose wrapper was detached destroyed after isolate teardown") {
+  kj::Maybe<Ref<NumberBox>> stored;
+  runInShortLivedIsolate([&](ProtoIsolate::Lock& lock, Lock& js) {
+    auto box = js.alloc<NumberBox>(1);
+    auto wrapper = lock.getTypeHandler<Ref<NumberBox>>().wrap(js, box.addRef());
+    detachWrapperForTest(js.v8Isolate, wrapper.As<v8::Object>());
+    stored = kj::mv(box);
+  });
   stored = kj::none;
 }
 

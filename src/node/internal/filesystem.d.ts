@@ -48,6 +48,9 @@ export function open(
 
 export function close(fd: number): void;
 
+export function tsStdio(): boolean;
+export function stdioPrefix(fd: number): string;
+
 export function write(
   fd: number,
   buffers: ArrayBufferView[],

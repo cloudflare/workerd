@@ -122,6 +122,8 @@ wd_cc_library(
         "//src/workerd/api:fuzzilli",
         "//src/workerd/api:hibernation-event-params",
         "//src/workerd/api:url",
+        "//src/workerd/api:url-bootstrap",
+        "//src/workerd/api:urlpattern-bootstrap",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
@@ -444,6 +446,17 @@ wd_cc_library(
     ],
 )
 
+kj_test(
+    src = "worker-interface-test.c++",
+    deps = [":worker-interface"],
+)
+
+wd_cc_benchmark(
+    name = "bench-revocable-worker-interface",
+    srcs = ["bench-revocable-worker-interface.c++"],
+    deps = [":worker-interface"],
+)
+
 wd_cc_library(
     name = "actor-id",
     hdrs = ["actor-id.h"],
@@ -626,6 +639,13 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-stream-test.c++",
+    deps = [
+        ":io",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
         ":trace",
@@ -645,6 +665,11 @@ kj_test(
     deps = [
         ":io",
     ],
+)
+
+wd_test(
+    src = "caught-exception-reset-test.wd-test",
+    data = ["caught-exception-reset-test.js"],
 )
 
 wd_test(
@@ -747,10 +772,19 @@ kj_test(
 )
 
 kj_test(
+    src = "uncaught-exception-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-own-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -763,9 +797,18 @@ kj_test(
 )
 
 kj_test(
+    src = "io-context-await-js-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "worker-code-cache-test.c++",
     deps = [
         ":io",
+        "//src/workerd/server:workerd-api",
         "//src/workerd/tests:test-fixture",
     ],
 )

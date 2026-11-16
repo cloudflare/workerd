@@ -15,22 +15,22 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "218355340f67452cdc340a290f20ccf77c2c1638148fe28997c4f80568d836f4",
-    strip_prefix = "google-boringssl-6b482f5",
+    sha256 = "b301de6e58c730c36cf64781306c1b576be49f8b2197cb533279667e021e2598",
+    strip_prefix = "google-boringssl-5e7f779",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261020.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261105.0",
 )
 
 # brotli
-bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
+bazel_dep(name = "brotli", version = "1.2.1")
 
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "c76b0032bd5b04787cb0a1e731cf69b19014147613dff14d6100ec776f1174c9",
-    strip_prefix = "capnproto-capnproto-133060e/c++",
+    sha256 = "d7074a849975b8828b8d5811903fe44ca06182e87659ede6bd73c7ca30521a95",
+    strip_prefix = "capnproto-capnproto-4eefccb/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/133060ea1580577b2e368617543c761859931acf",
+    url = "https://github.com/capnproto/capnproto/tarball/4eefccbcf5ea704981a509005ce4f991cf93054f",
 )
 use_repo(http, "capnp-cpp")
 
@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "19dfb44a62ae60ce6b0060de8c0cef5d5c527177",
+    commit = "2a51536dfb3b448bdf3dae70c782ea2879c90904",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -134,10 +134,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "37a5df90b6e1a1e793d8aa7a2df9cee90c5d585dbbbb5d31afc1e56203c059fb",
+    sha256 = "33b0be36ae5ce011d0ed4ec80a74871108b67741061f3551871bbad6a1078f45",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.3.2/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.3.3/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -149,7 +149,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "456ae730017b9b4bd3371927abc82627fd51feef",
+    commit = "ec453dc9abac1ddf39ced752e72a7a80dcda1d91",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

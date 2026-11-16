@@ -11,8 +11,9 @@ Remove this patch once https://github.com/llvm/llvm-project/pull/221064
 is available in our toolchain.
 
 ---
---- std/src/lib.rs
-+++ std/src/lib.rs
+diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
+--- a/library/std/src/lib.rs
++++ b/library/std/src/lib.rs
 @@ -275,6 +275,7 @@
  #![feature(allow_internal_unstable)]
  #![feature(asm_experimental_arch)]
@@ -21,9 +22,11 @@ is available in our toolchain.
  #![feature(cfg_sanitizer_cfi)]
  #![feature(cfg_target_has_threads)]
  #![feature(cfg_target_thread_local)]
---- std/src/os/fd/owned.rs
-+++ std/src/os/fd/owned.rs
-@@ -127,4 +127,14 @@
+diff --git a/library/std/src/os/fd/owned.rs b/library/std/src/os/fd/owned.rs
+--- a/library/std/src/os/fd/owned.rs
++++ b/library/std/src/os/fd/owned.rs
+@@ -126,6 +126,16 @@
+ 
          // Avoid using file descriptors below 3 as they are used for stdio
          let fd = cvt(unsafe { libc::fcntl(self.as_raw_fd(), cmd, 3) })?;
 +
@@ -38,3 +41,4 @@ is available in our toolchain.
 +
          Ok(unsafe { OwnedFd::from_raw_fd(fd) })
      }
+ 

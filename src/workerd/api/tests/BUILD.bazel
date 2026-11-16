@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/lint_test.bzl", "lint_test")
 load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
@@ -13,6 +14,11 @@ wasm_tools_parse(
 wasm_tools_parse(
     name = "js-string-builtins.wasm",
     src = "js-string-builtins.wat",
+)
+
+wasm_tools_parse(
+    name = "wasm-source-url.wasm",
+    src = "wasm-source-url.wat",
 )
 
 exports_files(["starttls-server.pem"])
@@ -33,21 +39,6 @@ wd_test(
         "streams-terminal-state-test.js",
         "streams-terminal-state-worker.js",
     ],
-)
-
-wd_test(
-    src = "eventsource-context-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "eventsource-context-test.js",
-        "eventsource-context-worker.js",
-    ],
-)
-
-wd_test(
-    src = "eventsource-lifetime-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-lifetime-test.js"],
 )
 
 wd_test(
@@ -97,6 +88,35 @@ ts_project(
     deps = ["//src/node:node@tsproject"],
 )
 
+# Type-checks the R2 JSRPC binding contract and its test implementation against the Workers types
+# in the checked-in snapshot. Kept apart from :ts_project because the snapshot's globals conflict
+# with the DOM, WebWorker, and Node.js types that project uses.
+ts_config(
+    name = "r2_binding_service_ts_config",
+    src = "r2-binding-service/tsconfig.json",
+    deps = ["@workerd//tools:base-tsconfig"],
+)
+
+ts_project(
+    name = "r2_binding_service_ts_project",
+    srcs = glob(["r2-binding-service/*.ts"]),
+    composite = True,
+    tsconfig = ":r2_binding_service_ts_config",
+    deps = ["//types:generated_snapshot_experimental"],
+)
+
+lint_test(
+    name = "r2_binding_service",
+    srcs = glob(["r2-binding-service/*.ts"]),
+    data = ["//types:generated-snapshot/experimental/index.d.ts"],
+    eslintrc_json = "@workerd//tools:base.eslint.config.mjs",
+    no_copy_to_bin = [
+        "@workerd//tools:base.eslint.config.mjs",
+        "//types:generated-snapshot/experimental/index.d.ts",
+    ],
+    tsconfig_json = "r2-binding-service/tsconfig.json",
+)
+
 wd_test(
     src = "exported-handler-proxy-test.wd-test",
     data = ["exported-handler-proxy-test.js"],
@@ -115,11 +135,11 @@ wd_test(
 )
 
 wd_test(
-    src = "do-on-evict-symbol-test.wd-test",
+    src = "do-on-hibernate-symbol-test.wd-test",
     args = ["--experimental"],
     data = [
-        "do-on-evict-symbol-test.js",
-        "do-on-evict-symbol-unflagged-test.js",
+        "do-on-hibernate-symbol-test.js",
+        "do-on-hibernate-symbol-unflagged-test.js",
     ],
 )
 
@@ -207,19 +227,30 @@ wd_test(
 )
 
 wd_test(
+    src = "durable-object-offpeak-hint-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-offpeak-hint-test.js"],
+)
+
+wd_test(
     src = "durable-object-snapshots-flag-test.wd-test",
     args = ["--experimental"],
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
-# them from running concurrently with each other while still allowing other tests to run alongside.
-# Bazel only accounts for local resources on local execution, so also keep these tests off remote
-# executors, where two of them can otherwise share a network namespace and collide on bind().
-SOCKET_TEST_TAGS = [
-    "no-remote-exec",
-    "resources:socket:1",
-]
+wd_test(
+    src = "durable-object-restore-kvdata-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-restore-kvdata-test.js"],
+)
+
+# The TCP sockets of connect-handler-test and tail-worker-test, each listening on a port assigned
+# when the test runs (see listen_port_bindings in build/wd_test.bzl).
+CONNECT_HANDLER_PORT_BINDINGS = {
+    "connect-endpoint": "CONNECT_ENDPOINT_PORT",
+    "connect-handler": "CONNECT_HANDLER_PORT",
+    "connect-proxy": "CONNECT_PROXY_PORT",
+}
 
 wd_test(
     src = "connect-handler-test.wd-test",
@@ -231,7 +262,10 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    tags = SOCKET_TEST_TAGS,
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {"connect-starttls": "STARTTLS_PORT"},
+    # The STARTTLS listener's certificate names 127.0.0.1, not the random loopback address the
+    # supervisor would otherwise pick.
+    sidecar_randomize_ip = False,
 )
 
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
@@ -288,6 +322,14 @@ wd_test(
 )
 
 wd_test(
+    src = "temporal-test.wd-test",
+    data = ["temporal-test.js"],
+)
+
+wd_test(
+    # It runs several other tests' workers to trace them, which takes up to 12.5s of the 15s
+    # "medium" timeout in debug builds.
+    size = "large",
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",
@@ -305,17 +347,24 @@ wd_test(
         "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
         "tail-worker-test-throw.js",
+        "tail-worker-test-on-hibernate.js",
+        "tail-worker-test-event-log.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
         "stw-large-log-subject.js",
     ],
-    tags = SOCKET_TEST_TAGS,
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS,
 )
 
 wd_test(
     src = "rpc-stub-gc-warning-test.wd-test",
-    args = ["--experimental"],
+    # An inspector makes the warning capture a JS stack trace; see the test for why that matters.
+    # Port 0 binds an ephemeral port, so parallel runs do not collide.
+    args = [
+        "--experimental",
+        "--inspector-addr=127.0.0.1:0",
+    ],
     data = [
         "rpc-stub-gc-warning-test.js",
         "tail-worker-test-no-op.js",
@@ -537,11 +586,96 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-cross-request-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-cross-request-stream-test.js"],
+)
+
+wd_test(
+    src = "r2-http-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+wd_test(
+    src = "r2-jsrpc-input-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-jsrpc-input-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "r2-jsrpc-response-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-response-test.js",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+)
+
+wd_test(
+    src = "r2-resource-serialization-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-resource-serialization-test.js",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+)
+
+wd_test(
+    src = "r2-resource-serialization-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-resource-serialization-test.js",
+        "r2-resource-serialization-test.wd-test",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+    lint = False,
+)
+
+wd_test(
+    src = "r2-jsrpc-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+)
+
+wd_test(
+    src = "r2-jsrpc-legacy-list-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    size = "large",
+    src = "r2-string-upload-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-string-upload-test.js",
+        "r2-test.js",
+        ":r2_binding_service_ts_project",
+    ],
+)
+
+wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = [
         "instrumentation-tail-worker.js",
         "r2-instrumentation-test.js",
+        "r2-instrumentation-worker.js",
         "r2-test.js",
     ],
 )
@@ -688,6 +822,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-sha3-test.wd-test",
+    data = ["crypto-sha3-test.js"],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],
@@ -730,18 +869,6 @@ wd_test(
         "events-pedantic-test.js",
         "events-test.js",
     ],
-)
-
-wd_test(
-    src = "eventsource-gc-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-gc-test.js"],
-)
-
-wd_test(
-    src = "eventsource-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-test.js"],
 )
 
 wd_test(
@@ -833,7 +960,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -845,7 +971,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -871,6 +996,11 @@ wd_test(
     src = "js-rpc-streams-cancellation-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-streams-cancellation-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-streams-cancel-reason-mixed-test.wd-test",
+    data = ["js-rpc-streams-cancel-reason-mixed-test.js"],
 )
 
 wd_test(
@@ -904,6 +1034,21 @@ wd_test(
 )
 
 wd_test(
+    src = "service-binding-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = ["service-binding-dispose-cancels-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "js-rpc-dispose-cancels-test.js",
+        "js-rpc-dispose-cancels-test-tail.js",
+    ],
+)
+
+wd_test(
     src = "rpc-stub-gc-foreign-span-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -931,7 +1076,20 @@ wd_test(
 wd_test(
     src = "memory-cache-test.wd-test",
     args = ["--experimental"],
-    data = ["memory-cache-test.js"],
+    data = [
+        "memory-cache-test.js",
+        "memory-cache-throws-test.js",
+    ],
+)
+
+wd_test(
+    src = "memory-cache-rust-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "memory-cache-test.js",
+        "memory-cache-test.wd-test",
+        "memory-cache-throws-test.js",
+    ],
 )
 
 wd_test(
@@ -977,6 +1135,14 @@ wd_test(
 )
 
 wd_test(
+    src = "response-status-text-test.wd-test",
+    data = [
+        "response-status-text-target.js",
+        "response-status-text-test.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
@@ -1001,6 +1167,11 @@ wd_test(
     src = "globals-iteration-test.wd-test",
     args = ["--experimental"],
     data = ["globals-iteration-test.js"],
+)
+
+wd_test(
+    src = "temporal-hidden-test.wd-test",
+    data = ["temporal-hidden-test.js"],
 )
 
 wd_test(
@@ -1147,6 +1318,91 @@ wd_test(
     data = ["url-test.js"],
 )
 
+# The @all-compat-flags variant would turn the temporal flag on, which the cases without that flag
+# expect to be off.
+wd_test(
+    # Some 25 Workers, each started from a zygote and then from its snapshot: past the "medium"
+    # timeout in loaded debug builds.
+    size = "large",
+    src = "startup-snapshot-globals-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-globals-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+# Top-level event listeners across a startup snapshot. Only the @all-autogates variant runs the
+# pipeline.
+wd_test(
+    src = "startup-snapshot-listeners-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-listeners-test.js"],
+)
+
+# Module identity across a startup snapshot. Only the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-modules-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-modules-cjs-test.js",
+        "startup-snapshot-modules-test.js",
+    ],
+)
+
+# Live API objects (Headers, URL, TextEncoder, crypto, navigator, node:fs, bindings) across a
+# startup snapshot, and the cases that must fall back. Only the @all-autogates variant runs the
+# pipeline.
+wd_test(
+    src = "startup-snapshot-wrappables-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-wrappables-fs-test.js",
+        "startup-snapshot-wrappables-test.js",
+    ],
+)
+
+# Capability bindings captured at module scope and used at request time, and the kinds that keep
+# a Worker out of the pipeline. Only the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-bindings-test.wd-test",
+    args = ["--experimental"],
+    data = ["startup-snapshot-bindings-test.js"],
+)
+
+# Functions implemented in C++ across a startup snapshot. Only the @all-autogates variant runs the
+# pipeline. The @all-compat-flags variant would turn new_module_registry on, under which the
+# function createRequire('/worker.js') returns does not find ./lib.cjs.
+wd_test(
+    src = "startup-snapshot-functions-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-functions-case-test.js",
+        "startup-snapshot-functions-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
+# Module identity and import.meta across a startup snapshot with the new module registry. Only
+# the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-new-module-registry-case-test.js",
+        "startup-snapshot-new-module-registry-test.js",
+    ],
+)
+
+# Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
+# Only the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-node-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-test.js",
+    ],
+)
+
 wd_test(
     src = "url-searchparams-iterator-uaf-test.wd-test",
     args = ["--experimental"],
@@ -1163,6 +1419,26 @@ wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],
+)
+
+# The limit is off while its kill switch autogate is on, so this has no @all-autogates variant.
+# websocket-accept-limit-killswitch-test below covers the kill switch being on.
+wd_test(
+    # It accepts the 32768 WebSockets of the limit, which takes 13.5s in debug builds.
+    size = "large",
+    src = "websocket-accept-limit-test.wd-test",
+    data = ["websocket-accept-limit-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "websocket-accept-limit-killswitch-test.wd-test",
+    data = ["websocket-accept-limit-killswitch-test.js"],
+)
+
+wd_test(
+    src = "websocket-buffered-amount-test.wd-test",
+    data = ["websocket-buffered-amount-test.js"],
 )
 
 wd_test(
@@ -1240,7 +1516,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -1251,7 +1526,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -1291,6 +1565,15 @@ wd_test(
     data = [
         "wasm-js-string-builtins-test.js",
         ":js-string-builtins.wasm",
+    ],
+)
+
+wd_test(
+    src = "wasm-source-url-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-source-url-test.js",
+        ":wasm-source-url.wasm",
     ],
 )
 
@@ -1358,6 +1641,11 @@ wd_test(
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],
+)
+
+wd_test(
+    src = "actor-cross-context-promise-test.wd-test",
+    data = ["actor-cross-context-promise-test.js"],
 )
 
 wd_test(
@@ -1452,13 +1740,23 @@ wd_test(
 )
 
 wd_test(
-    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    # Needs to fetch pyodide which is not supported under RBE
+)
+
+# Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
+# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+wd_test(
+    size = "enormous",
+    src = "worker-loader-python-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-python-test.js"],
     tags = [
-        "no-remote-exec",
+        "cpu:2",
+        "no-coverage",
+        "python",
+        # Fetches Pyodide.
         "requires-network",
     ],
 )
@@ -1510,12 +1808,6 @@ wd_test(
     data = ["leak-fetch-test.js"],
 )
 
-wd_test(
-    src = "messageport-test.wd-test",
-    args = ["--experimental"],
-    data = ["messageport-test.js"],
-)
-
 js_binary(
     name = "starttls-nodejs-server",
     entry_point = "starttls-nodejs-server.js",
@@ -1559,6 +1851,7 @@ wd_test(
     src = "rpc-error-test.wd-test",
     args = ["--experimental"],
     data = [
+        "rpc-error-mixed-test.js",
         "rpc-error-test.js",
         "rpc-error-test.rpc.js",
     ],
@@ -1677,6 +1970,25 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+# Checks that `workerd bench` runs its startup group with the inspector enabled.
+wd_cli_test(
+    name = "bench-inspector-test",
+    src = "bench-inspector-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "bench",
+        "$(location bench-inspector-test.wd-bench)",
+        "--quick",
+        # Port 0 binds an ephemeral port, so parallel runs do not collide.
+        "--inspector-addr=127.0.0.1:0",
+    ],
+    data = [
+        "bench-inspector-test.js",
+        "bench-inspector-test.wd-bench",
         "//src/workerd/server:workerd",
     ],
 )

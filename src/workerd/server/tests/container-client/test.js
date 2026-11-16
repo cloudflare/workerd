@@ -767,11 +767,14 @@ export class DurableObjectExample extends DurableObject {
       ],
     });
     const monitor = container.monitor().catch((_err) => {});
-    await this.waitUntilContainerIsHealthy();
 
+    // The alias's image is pulled from its registry when the engine doesn't have it, which can
+    // outlast a health check request's timeout. inspect() waits for start() to finish, pull
+    // included.
     const info = await container.inspect();
     assert.strictEqual(info.image, 'cloudflare/debian-trixie');
 
+    await this.waitUntilContainerIsHealthy();
     await container.destroy();
     await monitor;
   }

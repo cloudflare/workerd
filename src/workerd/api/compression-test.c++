@@ -80,7 +80,7 @@ KJ_TEST("CodecStage buffers the output of successive pushes and the flush tail i
     compressor.push(data.slice(offset, offset + 1000));
     // Pulling part of the output between pushes leaves the rest in place.
     if (compressor.available() > 3) {
-      kj::byte few[3];
+      kj::byte few[3]{};
       KJ_EXPECT(compressor.pull(few) == 3);
       compressed.addAll(kj::arrayPtr(few, 3));
     }
@@ -104,7 +104,7 @@ KJ_TEST("CodecStage::clear drops the buffered output") {
   KJ_EXPECT(stage.available() == 100 * 1024);
   stage.clear();
   KJ_EXPECT(stage.empty());
-  kj::byte buf[16];
+  kj::byte buf[16]{};
   KJ_EXPECT(stage.pull(buf) == 0);
 }
 

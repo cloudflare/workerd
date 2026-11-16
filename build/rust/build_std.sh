@@ -15,14 +15,13 @@
 #   TARGET_TRIPLE        Rust target triple.
 #   SANITIZER            rustc -Zsanitizer value.
 #   EXTRA_RUSTFLAGS      Space-separated additional rustc flags (may be empty).
-#   PATCH_COUNT          Number of standard-library patch paths that follow.
-#   PATCH...             Patches to apply to the Rust standard-library sources.
+#   LINKER               Linker for the build scripts, run from the execution root.
 #   CRATE...             Standard-library crates declared as Bazel outputs.
 
 set -euo pipefail
 
 if [[ $# -lt 10 ]]; then
-  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER EXTRA_RUSTFLAGS PATCH_COUNT [PATCH...] CRATE..." >&2
+  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER EXTRA_RUSTFLAGS LINKER CRATE..." >&2
   exit 2
 fi
 
@@ -39,33 +38,12 @@ work=$(abs_path "$5")
 target_triple=$6
 sanitizer=$7
 extra_rustflags=$8
-patch_count=$9
+linker=$(abs_path "$9")
 shift 9
-if ! [[ $patch_count =~ ^[0-9]+$ ]] || ((patch_count > $#)); then
-  echo "invalid PATCH_COUNT: $patch_count" >&2
-  exit 2
-fi
-patches=()
-for ((i = 0; i < patch_count; i++)); do
-  patches+=("$(abs_path "$1")")
-  shift
-done
 crates=("$@")
 
 rm -rf "$target_dir" "$output_dir" "$work"
 mkdir -p "$work/src" "$work/cargo-home" "$output_dir"
-
-if ((patch_count > 0)); then
-  # Bazel inputs are immutable. Copy the source tree before applying patches, leaving the
-  # downloaded rust-src repository untouched.
-  patched_rust_library="$work/rust-library"
-  cp -RL "$rust_library" "$patched_rust_library"
-  chmod -R u+w "$patched_rust_library"
-  for rust_patch in "${patches[@]}"; do
-    (cd "$patched_rust_library" && patch -p0 < "$rust_patch")
-  done
-  rust_library="$patched_rust_library"
-fi
 
 cat > "$work/Cargo.toml" <<'EOF'
 [package]
@@ -107,8 +85,12 @@ export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 # Cargo applies target-specific flags to the generated package and every build-std dependency. The
 # action only builds rlibs; sanitizer runtime selection is deferred to the final Bazel link, where
 # Rust and C++ share Clang's runtime.
-env_name="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
-export "$env_name=-Zsanitizer=$sanitizer${extra_rustflags:+ $extra_rustflags}"
+target_env="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')"
+export "${target_env}_RUSTFLAGS=-Zsanitizer=$sanitizer${extra_rustflags:+ $extra_rustflags}"
+# The build scripts run here, so the target is also the host, and Cargo links them with this.
+export "${target_env}_LINKER=$linker"
+BUILD_STD_EXECROOT=$(pwd -P)
+export BUILD_STD_EXECROOT
 
 "$rust_root/bin/cargo" build \
   --manifest-path "$work/Cargo.toml" \

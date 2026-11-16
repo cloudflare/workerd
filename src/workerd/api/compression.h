@@ -277,13 +277,9 @@ class CompressionCodec final: public jsg::Object {
   // Z_FINISH plus the strict-mode end checks; throws reject the TS pair's close. Idempotent.
   void end();
 
-  // Copies up to view.size() buffered output bytes into the view, returning the count.
-  uint32_t pullInto(jsg::JsBufferSource view);
-
-  // double rather than uint32: a decompression stage buffer can in principle exceed uint32
-  // range (the legacy implementation had the same unbounded buffering); JS numbers carry
-  // the full size exactly.
-  double available();
+  // Moves up to maxBytes buffered output bytes into a new Uint8Array, which is undefined if
+  // no output is buffered. The array's memory is not zeroed first, as the output fills it.
+  jsg::JsValue pull(jsg::Lock& js, uint32_t maxBytes);
 
   // Drops the buffered output: the TS pair's teardown paths, for output a drain cut short by
   // a reader cancel or an error has left in the stage.
@@ -292,8 +288,7 @@ class CompressionCodec final: public jsg::Object {
   JSG_RESOURCE_TYPE(CompressionCodec) {
     JSG_METHOD(push);
     JSG_METHOD(end);
-    JSG_METHOD(pullInto);
-    JSG_METHOD(available);
+    JSG_METHOD(pull);
     JSG_METHOD(clear);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.

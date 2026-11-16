@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dan.lapid@gmail.com>
+Date: Sat, 24 Oct 2026 21:30:00 -0400
+Subject: Keep v8_libshared private to v8
+
+The v8 component depends on v8_base privately in GN, exposing only the
+public headers, so that V8's internal headers don't reach embedders'
+compiles. v8_library takes implementation deps for each ICU variant, and
+v8 depends on v8_libshared through them.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index e0360267ea0d9aad55b4ca292965a9a09cf6cb39..8540b88c12c124043c9742f41214727c88c30505 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -5063,9 +5063,10 @@ v8_library(
+     }),
+     hdrs = [":public_header_files"],
+     copts = ["-Wno-implicit-fallthrough"],
+-    icu_deps = [":icu/v8_libshared"],
++    # Private, as in GN, so that V8's internal headers don't reach embedders' compiles.
++    icu_implementation_deps = [":icu/v8_libshared"],
+     icu_srcs = [":icu/snapshot_files"],
+-    noicu_deps = [":noicu/v8_libshared"],
++    noicu_implementation_deps = [":noicu/v8_libshared"],
+     noicu_srcs = [":noicu/snapshot_files"],
+     visibility = ["//visibility:public"],
+ )
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 4fb746aaa6be07d40b98eab03e32e946f13a7234..1c55073cb5fc5456918c1ff768d242fae210b7fb 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -308,6 +308,8 @@ def v8_library(
+         icu_srcs = [],
+         icu_deps = [],
+         icu_defines = [],
++        noicu_implementation_deps = [],
++        icu_implementation_deps = [],
+         **kwargs):
+     default = _default_args()
+     if _should_emit_noicu_and_icu(noicu_srcs, noicu_deps, noicu_defines, icu_srcs, icu_deps, icu_defines):
+@@ -315,6 +317,7 @@ def v8_library(
+             name = name + "_noicu",
+             srcs = srcs + noicu_srcs,
+             deps = deps + noicu_deps + default.deps,
++            implementation_deps = noicu_implementation_deps,
+             includes = includes + ["noicu/"] + default.includes,
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+@@ -333,6 +336,7 @@ def v8_library(
+             name = name + "_icu",
+             srcs = srcs + icu_srcs,
+             deps = deps + icu_deps + default.deps,
++            implementation_deps = icu_implementation_deps,
+             includes = includes + ["icu/"] + default.includes,
+             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
+             linkopts = linkopts + default.linkopts,

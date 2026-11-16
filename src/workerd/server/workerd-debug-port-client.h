@@ -93,9 +93,12 @@ class WorkerdDebugPortClient: public jsg::Object {
 // JS interface for the workerdDebugPort binding.
 // This binding provides a connect() method to dynamically connect to any workerd
 // instance's debug port.
-class WorkerdDebugPortConnector: public jsg::Object {
+class WorkerdDebugPortConnector final: public jsg::Object {
  public:
   WorkerdDebugPortConnector() = default;
+
+  // Stateless binding object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   // Connect to a remote workerd debug port at the given address.
   // Returns synchronously using kj::newPromisedStream() to defer the TCP connection.

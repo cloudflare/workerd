@@ -162,7 +162,11 @@ Serialized serialize(jsg::Lock& js,
       // can detach the ArrayBuffer. Mutations before batch encoding remain visible.
       v8::Local<v8::ArrayBufferView> view = source;
       Serialized result;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      result.own = view->GetBuffer()->GetBackingStore();
+#else
       result.own = view->Buffer()->GetBackingStore();
+#endif
       result.data = source.asArrayPtr();
       return kj::mv(result);
     } else {
@@ -715,11 +719,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   auto queueEventHolder = kj::refcounted<QueueEventHolder>();
 
   // 2. This is where we call into the worker's queue event handler
-  auto runProm = context.run(
-      [this, entrypointName = entrypointName, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
-          props = kj::mv(props),
-          isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+  auto runProm =
+      context.run([self = kj::addRef(*this), entrypointName = entrypointName,
+                      queueEvent = kj::addRef(*queueEventHolder), versionInfo = kj::mv(versionInfo),
+                      props = kj::mv(props), isDynamicDispatch](
+                      Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -728,8 +732,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // alive as long as the JSG QueueEvent/QueueMessage wrappers exist, even after
     // QueueCustomEvent is destroyed. This prevents a use-after-free under Durable Objects
     // where the IoContext outlives individual queue dispatches.
-    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
-        context.addObject(kj::addRef(*result)), lock,
+    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(self->params),
+        context.addObject(kj::addRef(*self->result)), lock,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch),
         typeHandler);
@@ -900,6 +904,10 @@ kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
     ackArray.add(kj::heapString(msgId));
   }
   return ackArray.finish();
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> WorkerQueue::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<WorkerQueue>(subrequestChannel));
 }
 
 }  // namespace workerd::api

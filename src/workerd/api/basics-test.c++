@@ -2,13 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Filter some stuff from the JSG_RESOURCE_TYPE blocks so that we can actually compile this
-// test without pulling in the world.
-#define WORKERD_API_BASICS_TEST 1
-
 #include "abort-bootstrap.h"
-#include "actor-state.h"
-#include "actor.h"
 #include "basics.h"
 #include "util.h"
 

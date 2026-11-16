@@ -1,0 +1,8 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# The KV Worker, the bundled module `/workerd/kv.js` (Worker.Module.bundled).
+wd_cc_embed(
+    name = "kv-js",
+    src = "kv.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

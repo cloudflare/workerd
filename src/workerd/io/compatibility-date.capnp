@@ -513,7 +513,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry");
+      $compatDisableFlag("legacy_module_registry")
+      $compatEnableDate("2026-11-17");
   # Enables the new module registry implementation, which handles module
   # specifiers as URLs, implements import.meta (url/main/resolve), supports
   # import attributes, and allows a registry to be shared across isolate
@@ -793,9 +794,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   enableRequestSignal @90 :Bool
     $compatEnableFlag("enable_request_signal")
-    $compatDisableFlag("disable_request_signal");
+    $compatDisableFlag("disable_request_signal")
+    $compatEnableDate("2026-11-17");
   # Enables Request.signal for incoming requests.
-  # This feature is still experimental and the compat flag has no default enable date.
 
   connectPassThrough @91 :Bool
     $compatEnableFlag("connect_pass_through")
@@ -1682,10 +1683,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   webCryptoModernAlgorithms @191 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
-  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
-  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
-  # explicitly gated because the draft is still changing and workerd does not implement the full
-  # proposal. The API may change as the draft evolves.
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
+  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3 digests, related key encapsulation helpers,
+  # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
+  # the draft is still changing and workerd does not implement the full proposal. The API may
+  # change as the draft evolves.
 
   wasmEsmIntegrationBuiltins @192 :Bool
       $compatEnableFlag("wasm_esm_integration_builtins");
@@ -1735,11 +1737,115 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The handler's socket then has secureTransport "starttls". Without the flag, it has
   # secureTransport "off" and its startTls() throws.
 
-  typeScriptImplementedStructuredClone @197 :Bool
+  offpeakLocationHint @197 :Bool
+      $compatEnableFlag("offpeak_location_hint")
+      $experimental;
+  # Allows `locationHint: "offpeak"` when getting a Durable Object stub. In production, a new object
+  # created with this hint is placed in a region that is off-peak at the current UTC time. The
+  # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
+  # unsupported.
+
+  pythonSharedStandardLibrary @198 :Bool
+      $compatEnableFlag("python_shared_standard_library")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
+  # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
+  # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
+  # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
+  # archive for writing fails with this flag.
+
+  wasmSourceUrlSupport @199 :Bool
+      $compatEnableFlag("wasm_source_url_support")
+      $compatDisableFlag("no_wasm_source_url_support")
+      $compatEnableDate("2026-12-01");
+  # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
+  # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
+  # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
+  # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
+  # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
+  # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
+  # and module name.
+
+  temporal @200 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-12-01");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
+
+  nodeJsProcessVersion24 @202 :Bool
+      $compatEnableFlag("nodejs_process_version_24")
+      $compatDisableFlag("no_nodejs_process_version_24")
+      $compatEnableDate("2026-11-24");
+  # Reports the latest Node.js 24 release, instead of Node.js 22, as `process.version` and
+  # `process.versions.node`. Libraries feature-sniff on these values, so a Worker that enables the
+  # flag may take code paths written for Node.js 24, even where the Node.js compatibility layer
+  # does not match Node.js 24 behavior. Requires `nodejs_compat` and `enable_nodejs_process_v2`.
+
+  r2BindingsJsrpc @203 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The binding must specify a named entrypoint implementing the R2 backend
+  # methods: head, get, put, delete, list, createMultipartUpload, uploadPart,
+  # abortMultipartUpload, and completeMultipartUpload. Object results use the
+  # corresponding native R2 API types; createMultipartUpload returns an object
+  # containing uploadId. The expected TypeScript interface is type-checked in
+  # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  rpcDisposeCancelsCall @204 :Bool
+      $compatEnableFlag("rpc_dispose_cancels_call")
+      $experimental;
+  # Disposing the promise returned by a JSRPC call while the call is still in flight cancels the
+  # call, and the promise rejects with an `AbortError`. Without the flag, disposing a pending
+  # promise only disposes its result once the call completes.
+  #
+  # The flag only affects the caller. Any callee handles a canceled call by releasing the caller's
+  # capabilities right away, disposing the stubs it received as arguments, so the session can end,
+  # and with it the request, unless the callee holds other stubs or `waitUntil()` tasks. The
+  # method's JavaScript is not interrupted, but a stateless Worker's pending I/O is canceled when
+  # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
+  # like a fetch handler whose client went away.
+  #
+  # A Durable Object's pending I/O belongs to the object, not to the request that started it, so a
+  # canceled call doesn't stop it: the method runs to completion, as a Durable Object's fetch
+  # handler does when its client disconnects. To have a Durable Object stop early, pass it an
+  # `AbortSignal` (`enable_abortsignal_rpc`) and abort the signal when disposing the call. The
+  # object still receives the abort after the call is canceled.
+  #
+  # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
+  # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
+  # event is in flight cancels the event and ends the callee's request.
+
+  exposeSerializationTestClass @205 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox and CloneableTestError classes on globalThis: classes
+  # implemented in the per-isolate bootstrap that are structured cloneable, for testing the
+  # protocol by which such classes are serialized (src/per_isolate/serialization.ts), such as over
+  # RPC. This flag is intended for internal testing only and may never have its experimental
+  # annotation removed.
+
+  pythonDedicatedSnapshotKeepImportCaches @206 :Bool
+      $compatEnableFlag("python_dedicated_snapshot_keep_import_caches")
+      $compatDisableFlag("no_python_dedicated_snapshot_keep_import_caches");
+  # When enabled, a Python Worker restored from a dedicated memory snapshot keeps the import system's
+  # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
+  # collected with the Worker's files and packages already in place, so the caches still describe
+  # them, and rebuilding them is a large part of startup.
+
+  typeScriptImplementedStructuredClone @207 :Bool
       $compatEnableFlag("typescript_implemented_structured_clone")
       $experimental;
   # When enabled, the global structuredClone() is the TypeScript implementation from the
   # per-isolate bootstrap, which converts its arguments in TypeScript and calls the native
-  # serializer. Requires the per-isolate-javascript-bootstrap autogate; without it the C++
-  # implementation remains.
+  # serializer.
 }

@@ -8,6 +8,7 @@ WORKERD_BINARY="$1"
 TEST_CONFIG="$2"
 EXPECTED_STDOUT="$3"
 EXPECTED_STDERR="$4"
+shift 4  # Any remaining arguments are passed to workerd.
 
 # Run the workerd test and capture stdout and stderr
 ACTUAL_STDOUT=$(mktemp)
@@ -16,10 +17,12 @@ FILTERED_STDOUT=$(mktemp)
 FILTERED_STDERR=$(mktemp)
 trap "rm -f $ACTUAL_STDOUT $ACTUAL_STDERR $FILTERED_STDOUT $FILTERED_STDERR" EXIT
 
-"$WORKERD_BINARY" test "$TEST_CONFIG" --experimental >"$ACTUAL_STDOUT" 2>"$ACTUAL_STDERR" --compat-date 2025-05-01
+"$WORKERD_BINARY" test "$TEST_CONFIG" --experimental >"$ACTUAL_STDOUT" 2>"$ACTUAL_STDERR" --compat-date 2025-05-01 "$@"
 
-# Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr
-grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
+# Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr, and the warning logged when V8 rejects the
+# per-isolate bootstrap's compile cache. Builds that generate the cache for other V8 flags
+# (--@workerd//build/config:compile_cache_v8_flags) log it on every run of this binary.
+grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]|per-isolate bootstrap compile cache" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
 
 # Compare with expected output (normalize line endings for cross-platform compatibility)
 echo "Comparing stdout..."

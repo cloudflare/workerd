@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
+load("@bazel_lib//lib:copy_to_bin.bzl", "copy_to_bin")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
@@ -26,7 +27,24 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# And ICU itself, whose headers workerd includes and V8 keeps to itself.
+alias(
+    name = "icu",
+    actual = "@com_googlesource_chromium_icu//:icu",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
 npm_link_all_packages(name = "node_modules")
+
+# Tools that locate the workspace root by searching upward for a lockfile (OpenNext, which
+# also tells Next.js where to trace dependencies from) take this as an input, so they find
+# the root in the output tree, which holds node_modules, without depending on the source tree.
+copy_to_bin(
+    name = "pnpm-lock",
+    srcs = ["pnpm-lock.yaml"],
+    visibility = ["//visibility:public"],
+)
 
 # Rust formatting and lint configuration for every crate in the repository, wherever it lives.
 exports_files([

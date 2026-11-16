@@ -1,6 +1,6 @@
 'use strict';
 
-// FileSystemWritableFileStream — the File System Access API's writable file
+// FileSystemWritableFileStream - the File System Access API's writable file
 // handle.
 //
 // The file semantics are done by a native context obtained from
@@ -35,6 +35,7 @@
 // abort() discards them. A stream that is never closed nor aborted leaves the
 // lock held until the context is collected.
 
+import type { DomExceptionModule } from '../dom-exception';
 import type {
   UnderlyingSink,
   WritableStream as WritableStreamType,
@@ -42,7 +43,6 @@ import type {
 } from '../webstreams/types';
 
 const {
-  DOMException: NativeDOMException,
   ObjectDefineProperties,
   PromiseReject,
   PromiseResolve,
@@ -51,6 +51,10 @@ const {
 } = primordials;
 
 const { createFileSystemWriteContext } = utils;
+
+const { DOMException } = require('dom-exception') as DomExceptionModule;
+
+const { kNullProtoObject, kEnumerable } = require('webstreams/common');
 
 const {
   WritableStream,
@@ -65,7 +69,7 @@ const {
 };
 
 // Gates the constructor. createWritable() is the only holder, so `new
-// FileSystemWritableFileStream()` from user code cannot produce an instance —
+// FileSystemWritableFileStream()` from user code cannot produce an instance -
 // matching `constructor() = delete` on the C++ class.
 const kConstruct = {};
 
@@ -84,7 +88,7 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
     // temporal dead zone until super() returns.
     const ctx = context as FileSystemWriteContext;
     const sink = {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       write(chunk: unknown): Promise<void> {
         return ctx.write(chunk as ArrayBuffer);
       },
@@ -139,12 +143,12 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
 // worker with a compatibility date before that flag's 2024-09-26 default sees a
 // tag here where the C++ implementation exposes none.
 ObjectDefineProperties(FileSystemWritableFileStream.prototype, {
-  __proto__: null,
-  write: { __proto__: null, enumerable: true },
-  seek: { __proto__: null, enumerable: true },
-  truncate: { __proto__: null, enumerable: true },
+  __proto__: kNullProtoObject,
+  write: kEnumerable,
+  seek: kEnumerable,
+  truncate: kEnumerable,
   [SymbolToStringTag]: {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     value: 'FileSystemWritableFileStream',
     writable: false,
     enumerable: false,
@@ -196,7 +200,7 @@ function createWritable(
     // A DOMException means the file could not be opened, which createWritable
     // reports by rejecting. Anything else is the receiver check failing, which
     // JSG performs before the method body runs and so throws.
-    if (err instanceof NativeDOMException) {
+    if (err instanceof DOMException) {
       return PromiseReject(err);
     }
     throw err;

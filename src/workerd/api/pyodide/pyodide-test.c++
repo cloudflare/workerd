@@ -84,54 +84,5 @@ KJ_TEST("getPythonSnapshotRelease") {
   }
 }
 
-KJ_TEST("computePyodideBundleIntegrity produces sha256 subresource-integrity strings") {
-  // Known-answer test: SHA-256 of the empty input.
-  KJ_EXPECT(pyodide::computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte>()) ==
-      "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
-
-  // SHA-256 of "abc".
-  auto abc = "abc"_kj.asBytes();
-  KJ_EXPECT(pyodide::computePyodideBundleIntegrity(abc) ==
-      "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=");
-}
-
-KJ_TEST("verifyPyodideBundleIntegrity accepts matching checksums") {
-  auto data = "hello pyodide"_kj.asBytes();
-  auto integrity = pyodide::computePyodideBundleIntegrity(data);
-
-  // Should not throw when the checksum matches.
-  pyodide::verifyPyodideBundleIntegrity("0.28.2"_kj, integrity, data);
-}
-
-KJ_TEST("verifyPyodideBundleIntegrity rejects a missing checksum for released bundles") {
-  auto data = "hello pyodide"_kj.asBytes();
-
-  // A non-dev bundle without a published checksum is an error.
-  KJ_EXPECT_THROW_MESSAGE("missing an integrity checksum",
-      pyodide::verifyPyodideBundleIntegrity("0.28.2"_kj, nullptr, data));
-  KJ_EXPECT_THROW_MESSAGE("missing an integrity checksum",
-      pyodide::verifyPyodideBundleIntegrity("0.28.2"_kj, ""_kj, data));
-}
-
-KJ_TEST("verifyPyodideBundleIntegrity skips the dev bundle") {
-  auto data = "hello pyodide"_kj.asBytes();
-  auto tampered = "hello pyodide!"_kj.asBytes();
-  auto integrity = pyodide::computePyodideBundleIntegrity(data);
-
-  // The "dev" bundle is built locally and has no published checksum, so verification is skipped
-  // even when the supplied integrity does not match, and an empty integrity is allowed.
-  pyodide::verifyPyodideBundleIntegrity("dev"_kj, integrity, tampered);
-  pyodide::verifyPyodideBundleIntegrity("dev"_kj, nullptr, tampered);
-}
-
-KJ_TEST("verifyPyodideBundleIntegrity rejects mismatching checksums") {
-  auto data = "hello pyodide"_kj.asBytes();
-  auto tampered = "hello pyodide!"_kj.asBytes();
-  auto integrity = pyodide::computePyodideBundleIntegrity(data);
-
-  KJ_EXPECT_THROW_MESSAGE("integrity check failed",
-      pyodide::verifyPyodideBundleIntegrity("0.28.2"_kj, integrity, tampered));
-}
-
 }  // namespace
 }  // namespace workerd::api

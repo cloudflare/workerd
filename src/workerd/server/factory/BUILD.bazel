@@ -50,7 +50,6 @@ wd_cc_library(
         "//src/workerd/server:container-client",
         "//src/workerd/server:facet-tree-index",
         "//src/workerd/server:fallback-service",
-        "//src/workerd/server:pyodide",
         "//src/workerd/server:workerd-api",
         "//src/workerd/server:workerd_capnp",
         "//src/workerd/server/server:bridge.rs@cxx",

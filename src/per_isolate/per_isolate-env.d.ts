@@ -12,6 +12,9 @@
  *
  * Results are cached: repeated require() calls return the same exports object.
  * Circular dependencies throw a fatal error.
+ *
+ * Embedder bootstrap scripts are named under their prefix, e.g.
+ * require('embedder/foo'), and only the embedder's scripts can require them.
  */
 declare function require(specifier: string): any;
 
@@ -68,9 +71,25 @@ declare const primordials: {
     ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
     : (...args: any[]) => any;
 
+  // fn.call(thisArg, ...args), immune to a patched Function.prototype.call.
+  // Cheaper than uncurryThis(fn) for a function called a few times, as
+  // a stream's source, sink and transformer callbacks are: uncurryThis
+  // binds a new function.
+  readonly FunctionPrototypeCall: (
+    fn: Function,
+    thisArg: unknown,
+    ...args: unknown[]
+  ) => any;
+
   // Uncurries the getter of `proto`'s own accessor `name`, typed as T; throws
   // if there is none.
   readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
+
+  // Uncurries the getter of a JSG readonly property `name` of `proto`, typed as
+  // T. Under compat dates without workers_api_getters_setters_on_prototype the
+  // property is an own data property of each instance instead, which the
+  // result then reads.
+  readonly captureJsgGetter: <T>(proto: object, name: string) => T;
 
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
@@ -93,6 +112,13 @@ declare const utils: {
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
+  // The key of the V8-private property `name`, which C++ reaches by that
+  // name (jsg::JsObject::getPrivate() and setPrivate()). V8-private
+  // properties are neither reflected by JavaScript nor inherited.
+  getPrivateSymbol(name: string): symbol;
+  // The constructor the TypeScript DOMException constructs its instances with
+  // (jsg::getBootstrapDomExceptionBase()).
+  DOMExceptionBase: new () => object;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
@@ -115,6 +141,106 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
+  // these only through events/event-target-internals, which documents them.
+  setListenerCountHook(
+    target: EventTarget,
+    type: string,
+    hook: (type: string, count: number) => void
+  ): void;
+  getEventHandlerAttribute(target: EventTarget, type: string): unknown;
+  setEventHandlerAttribute(
+    target: EventTarget,
+    type: string,
+    value: unknown
+  ): void;
+  dispatchEvent(
+    target: EventTarget,
+    event: Event,
+    report: boolean
+  ): { readonly exception: unknown } | undefined;
+  createTrustedEvent(type: string): Event;
+  createTrustedMessageEvent(
+    type: string,
+    data: unknown,
+    source: object | null,
+    lastEventId?: string,
+    origin?: string | null
+  ): MessageEvent;
+  createTrustedOpenEvent(): Event;
+  createTrustedErrorEvent(error: unknown): ErrorEvent;
+  // Structured-clones a MessagePort message (api/per-isolate-bootstrap.c++:
+  // CloneMessageData): serializes it, throwing on a SharedArrayBuffer, and
+  // returns the deserialized copy.
+  cloneMessageData(data: unknown): unknown;
+  // Calls fn as a reaction to an already-resolved promise, through V8's
+  // Promise::Then(), so scheduling runs no user code (no species lookup). A
+  // throw rejects the reaction's promise, reported as unhandled.
+  queueReaction(fn: () => void): void;
+  // The request-bound I/O handle (api/request-io.h), bound to the current
+  // request, or undefined outside of one.
+  createRequestIo(): RequestIo | undefined;
+  // The helpers of api/bootstrap-utils.h.
+  isFetcher(value: unknown): boolean;
+  // Parses an absolute URL with no base (ada, whatever the global URL is).
+  parseUrl(
+    input: string
+  ): { readonly href: string; readonly origin: string } | undefined;
+  // The ada members of api/url-bootstrap.h. `out` is a Uint32Array of 9:
+  // jsg::Url::Components' offsets into the href, then the scheme type.
+  // `attribute` is a UrlBootstrap::Attribute, 0 (href) to 9 (hash).
+  urlParse(
+    input: string,
+    base: string | undefined,
+    out: Uint32Array
+  ): string | undefined;
+  urlCanParse(input: string, base?: string): boolean;
+  // Undefined only if the href setter rejected the value.
+  urlUpdate(
+    href: string,
+    attribute: number,
+    value: string,
+    out: Uint32Array
+  ): string | undefined;
+  urlOrigin(href: string): string;
+  // The legacy (kj::Url) members of api/url-bootstrap.h. createLegacyUrl()
+  // throws the legacy parser's TypeErrors; tryCreateLegacyUrl() returns
+  // undefined instead.
+  createLegacyUrl(input: string, base: string | undefined): LegacyUrlHandle;
+  tryCreateLegacyUrl(
+    input: string,
+    base: string | undefined
+  ): LegacyUrlHandle | undefined;
+  // A handle with only an empty query: a URLSearchParams' own.
+  createLegacySearchParams(): LegacyUrlHandle;
+  // The members of api/urlpattern-bootstrap.h. An init is the nine members
+  // protocol to hash, then baseURL, each undefined if absent. A compiled
+  // pattern is hasRegExpGroups, then for each component protocol to hash
+  // its pattern string, RegExp (undefined unless its type is 0, a regexp),
+  // group names, UrlPatternBootstrap::ComponentType and exact value.
+  // urlPatternCompile() throws "Failed to construct URLPattern";
+  // urlPatternProcessInit() returns the eight components, or undefined if
+  // the init does not process. The legacy members throw the legacy
+  // parser's TypeErrors instead.
+  urlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  urlPatternProcessInit(init: UrlPatternInitList): string[] | undefined;
+  legacyUrlPatternCompile(
+    input: string | UrlPatternInitList,
+    base: string | undefined,
+    ignoreCase: boolean
+  ): unknown[];
+  legacyUrlPatternProcessInit(init: UrlPatternInitList): string[];
+  // The lowercased `type/subtype`, or undefined if not a MIME type.
+  mimeTypeEssence(input: string): string | undefined;
+  // Undefined for anything but a ReadableStream of either implementation.
+  readableStreamState(
+    value: unknown
+  ): 'locked' | 'disturbed' | 'readable' | undefined;
+  encodeUtf8(str: string): Uint8Array;
   // The structured clone of `value` (jsg::structuredClone), transferring the
   // objects in `transfer`, a dense array the caller built. The native
   // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
@@ -123,11 +249,77 @@ declare const utils: {
   structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
+// The I/O of a bootstrap API, bound to the request that created it
+// (api/request-io.h: RequestIo). Every method but isCurrent() throws, as the
+// runtime does for I/O objects used across requests, outside that request.
+declare interface RequestIo {
+  isCurrent(): boolean;
+  requireCurrent(): void;
+  fetch(fetcher: unknown, url: string, init?: RequestInit): Promise<Response>;
+  wait(milliseconds: number, signal: AbortSignal): Promise<void>;
+  logUncaughtException(error: unknown): void;
+}
+
 // An abort algorithm registration. Obtained only from
 // utils.addAbortAlgorithm(); it has no JS-reachable constructor.
 declare interface AbortAlgorithmHandle {
   // Unregisters the algorithm. Idempotent.
   remove(): void;
+}
+
+// A URLPatternInit as utils' URLPattern members take it: protocol, username,
+// password, hostname, port, pathname, search, hash and baseURL.
+declare type UrlPatternInitList = (string | undefined)[];
+
+// The legacy URL, backing a TypeScript URL and its searchParams on the legacy
+// path, or a URLSearchParams of its own. Obtained only from utils; it has no
+// JS-reachable constructor. See LegacyUrlHandle in src/workerd/api/url.h.
+//
+// Only setHref() reports a rejected value; the other setters leave the URL
+// unchanged on one. String arguments are converted to USVStrings natively.
+declare interface LegacyUrlHandle {
+  // Throws a TypeError for a URL that kj::Url cannot stringify.
+  getHref(): string;
+  setHref(value: string): boolean;
+  getOrigin(): string;
+  getProtocol(): string;
+  setProtocol(value: string): void;
+  getUsername(): string;
+  setUsername(value: string): void;
+  getPassword(): string;
+  setPassword(value: string): void;
+  getHost(): string;
+  setHost(value: string): void;
+  getHostname(): string;
+  setHostname(value: string): void;
+  getPort(): string;
+  setPort(value: string): void;
+  getPathname(): string;
+  setPathname(value: string): void;
+  getSearch(): string;
+  setSearch(value: string): void;
+  getHash(): string;
+  setHash(value: string): void;
+
+  // The query, as a URLSearchParams list.
+  size(): number;
+  append(name: string, value: string): void;
+  delete(name: string, value?: string): void;
+  get(name: string): string | null;
+  getAll(name: string): string[];
+  has(name: string, value?: string): boolean;
+  set(name: string, value: string): void;
+  sort(): void;
+  // Throw a RangeError for an index at or past size().
+  nameAt(index: number): string;
+  valueAt(index: number): string;
+  // URLSearchParams.toString().
+  serialize(): string;
+  // Replaces the query with `query` parsed as form data, after one leading
+  // '?'.
+  assignQueryString(query: string): void;
+  // Replaces the query; `pairs` alternates names and values.
+  assignQueryPairs(pairs: string[]): void;
 }
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only

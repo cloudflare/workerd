@@ -1922,6 +1922,12 @@ class StdioFile final: public File {
 
     // We ignore the offset here. All writes are assumed to be appends.
     if (type != VirtualFileSystem::Stdio::IN) {
+      // SECURITY: writeStdio() calls console.log, which can run user code that detaches,
+      // transfers or shrinks the ArrayBuffer behind `buffer`. Copy the bytes first so that
+      // the loop below never reads the caller's memory after JavaScript has run.
+      auto ownedBuffer = kj::heapArray(buffer);
+      buffer = ownedBuffer;
+
       size_t pos = 0;
 
       // Newline-based buffering

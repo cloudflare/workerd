@@ -31,7 +31,6 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -170,9 +169,7 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
   } else {
-    auto e =
-        JSG_KJ_EXCEPTION(FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
-    IoContext::current().abort(kj::mv(e));
+    IoContext::current().abort(IoContext::abortWithoutReasonException());
   }
 
   js.terminateExecutionNow();
@@ -206,9 +203,6 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
 }
 
 IsRetryableHandler ExportedHandler::isFetchRetryable(jsg::Lock& js) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    return IsRetryableHandler::NO;
-  }
   KJ_IF_SOME(f, fetch) {
     KJ_IF_SOME(handle, f.tryGetHandle(js.v8Isolate)) {
       return IsRetryableHandler(jsg::JsObject(handle).hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
@@ -360,8 +354,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
     // Make sure to cancel the request body stream since the native stream is no longer valid once
     // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
-    // haven't consumed the entire request body.
-    ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    // haven't consumed the entire request body. After a normal response the stream is already
+    // neutered, so skip building an exception that would be discarded.
+    if (!ownRequestBody->isNeutered()) {
+      ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    }
   });
   KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
@@ -504,35 +501,23 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
     auto body2 = kj::addRef(*ownRequestBody);
 
-    // HACK: If the client disconnects, the `response` reference is no longer valid. But our
-    //   promise resolves in JavaScript space, so won't be canceled. So we need to track
-    //   cancellation separately. We use a refcounted boolean.
-    // TODO(cleanup): Is there something less ugly we can do here?
-    auto canceled = kj::rc<bool>(false);
-
+    // The response is sent from within awaitJs()'s own continuation so that the promise returned
+    // by send(), which owns the response body stream or the accepted WebSocket, is handed to the
+    // KJ promise chain in the same microtask that created it. See awaitJs() for why. awaitJs()
+    // also skips the continuation if this request was canceled, such as when the client
+    // disconnected, in which case `response` would be a dangling reference.
     return ioContext
-        .awaitJs(lock,
-            promise.then(kj::implicitCast<jsg::Lock&>(lock),
-                ioContext.addFunctor(
-                    [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = canceled.addRef(), &headers, span = kj::mv(span)](
-                        jsg::Lock& js, IoContext& context, jsg::Ref<Response> innerResponse) mutable
-                    -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+        .awaitJs(lock, kj::mv(promise),
+            [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
+                jsg::Lock& js,
+                jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
-      if (*canceled) {
-        // Oops, the client disconnected before the response was ready to send. `response` is
-        // a dangling reference, let's not use it.
-        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
-      } else {
-        return context.addObject(kj::heap(
-            innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
-      }
-    })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { *canceled = true; }))
+      return innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
+    })
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
@@ -712,10 +697,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
       }
 
-      auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
-
       return context
-          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm, &incomingRequest,
+          .run([exportedHandler, timeout, retryCount, scheduledTime,
+                   weakRequest = incomingRequest.addWeak(),
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
@@ -724,7 +708,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // first timeout will be canceled.
         jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
-            [&context, &incomingRequest]() -> kj::Promise<WorkerInterface::AlarmResult> {
+            [weakContext = context.getWeakRef(),
+                weakRequest]() -> kj::Promise<WorkerInterface::AlarmResult> {
+          auto& context = KJ_REQUIRE_NONNULL(
+              weakContext->tryGet(), "IoContext destroyed before alarm timeout fired");
           // We don't want to delete the alarm since we have not successfully completed the alarm
           // execution.
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
@@ -737,7 +724,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
           e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
           e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-          incomingRequest.getMetrics().reportFailure(e);
+          KJ_REQUIRE_NONNULL(
+              weakRequest.tryGet(), "IncomingRequest destroyed before alarm timeout fired")
+              .getMetrics()
+              .reportFailure(e);
 
           // We don't want the handler to keep running after timeout.
           context.abort(kj::mv(e));
@@ -750,17 +740,23 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .outcome = EventOutcome::EXCEEDED_WALL_TIME};
         });
 
+        auto& alarm = KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(exportedHandler).alarm);
         return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
       })
-          .catch_([&context, &incomingRequest, deferredDelete = kj::mv(armResult.deferredDelete)](
-                      kj::Exception&& e) mutable {
+          .catch_(
+              [weakContext = context.getWeakRef(), weakRequest = incomingRequest.addWeak(),
+                  deferredDelete = kj::mv(armResult.deferredDelete)](kj::Exception&& e) mutable {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before alarm failure was handled");
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
 
+        auto& incomingRequest = KJ_REQUIRE_NONNULL(
+            weakRequest.tryGet(), "IncomingRequest destroyed before alarm failure was handled");
         incomingRequest.getMetrics().reportFailure(e);
 
         auto description = kj::str(e.getDescription());  // because e is moved before this is used
@@ -816,11 +812,16 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .outcome = outcome,
           .errorDescription = kj::str(description)};
       })
-          .then([&context, &incomingRequest](WorkerInterface::AlarmResult result)
+          .then([weakContext = context.getWeakRef(), weakRequest = incomingRequest.addWeak()](
+                    WorkerInterface::AlarmResult result)
                     -> kj::Promise<WorkerInterface::AlarmResult> {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before alarm output locks were awaited");
         return context.waitForOutputLocks().then([result = kj::mv(result)]() mutable {
           return kj::mv(result);
-        }, [&context, &incomingRequest](kj::Exception&& e) {
+        }, [weakContext = context.getWeakRef(), weakRequest](kj::Exception&& e) {
+          auto& context = KJ_REQUIRE_NONNULL(
+              weakContext->tryGet(), "IoContext destroyed before alarm output lock failure");
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
           kj::String actorId;
           KJ_SWITCH_ONEOF(actor.getId()) {
@@ -831,7 +832,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               actorId = kj::str(s);
             }
           }
-          incomingRequest.getMetrics().reportFailure(e);
+          KJ_REQUIRE_NONNULL(
+              weakRequest.tryGet(), "IncomingRequest destroyed before alarm output lock failure")
+              .getMetrics()
+              .reportFailure(e);
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
           auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({
@@ -1354,6 +1358,27 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   }
 }
 
+kj::Maybe<jsg::JsObject> ServiceWorkerGlobalScope::getSnapshotState(jsg::Lock& js) {
+  if (processValue == kj::none && bufferValue == kj::none) return kj::none;
+  auto state = js.objNoProto();
+  KJ_IF_SOME(p, processValue) {
+    state.set(js, "process"_kj, p.getHandle(js));
+  }
+  KJ_IF_SOME(b, bufferValue) {
+    state.set(js, "Buffer"_kj, b.getHandle(js));
+  }
+  return state;
+}
+
+void ServiceWorkerGlobalScope::restoreSnapshotState(jsg::Lock& js, jsg::JsObject state) {
+  if (state.has(js, "process"_kj)) {
+    processValue = jsg::JsRef(js, state.get(js, "process"_kj));
+  }
+  if (state.has(js, "Buffer"_kj)) {
+    bufferValue = jsg::JsRef(js, state.get(js, "Buffer"_kj));
+  }
+}
+
 void ServiceWorkerGlobalScope::setProcess(jsg::Lock& js, jsg::JsValue newProcess) {
   processValue = jsg::JsRef(js, newProcess);
 }
@@ -1366,7 +1391,9 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_IF_SOME(p, processValue) {
     return p.getHandle(js);
   }
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  // Handle process module redirection based on enable_nodejs_process_v2 flag. This reads
+  // the process object's own module rather than node:process, whose named exports include
+  // the stdio streams and so force them to be built.
   auto specifier = ([&]() -> kj::StringPtr {
     if (FeatureFlags::get(js).getEnableNodeJsProcessV2()) {
       return "node-internal:public_process"_kj;

@@ -55,7 +55,16 @@ pub enum Command {
     /// run the server
     #[command(
         long_about = "Serve requests based on a config.",
-        after_long_help = "Serves requests based on the configuration specified in <config-file>."
+        after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
+            Cluster mode (`Config.cluster`, with --experimental): instances that share an \
+            S3-compatible (s3://) or Google Cloud Storage (gs://) bucket serve Durable Objects \
+            together. For an s3:// bucket, each `cluster.bucketOptions` setting falls back to an \
+            environment variable: AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, \
+            AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
+            takes no settings: its tokens come from the service account key \
+            GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
+            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
+            --cluster-addr."
     )]
     Serve {
         #[command(flatten)]
@@ -140,10 +149,6 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    /// outputs the package lock file used by Pyodide
-    #[command(long_about = "Outputs the package lock file used by Pyodide.")]
-    PyodideLock,
-
     /// Make a Pyodide baseline memory snapshot
     MakePyodideBaselineSnapshot {
         #[arg(value_name = "python-version")]
@@ -152,7 +157,79 @@ pub enum Command {
         #[arg(value_name = "output-directory")]
         output_directory: String,
     },
+
+    /// publish an application to a cluster
+    #[command(
+        long_about = "Publishes an application as a deployment in a cluster bucket (experimental).",
+        after_long_help = DEPLOY_HELP,
+    )]
+    Deploy {
+        /// A wrangler project directory, a `wrangler.json` or `wrangler.jsonc` file, or a Cap'n
+        /// Proto config that contains only services. A Cap'n Proto config requires --name.
+        #[arg(value_name = "project", default_value = ".")]
+        project: String,
+
+        /// For a Cap'n Proto <project>, the constant that contains the config. This works like the
+        /// value for `serve`.
+        #[arg(value_name = "const-name")]
+        const_name: Option<String>,
+
+        #[command(flatten)]
+        deploy: DeployArgs,
+    },
 }
+
+const DEPLOY_HELP: &str = "\
+Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
+stored in that bucket. The catalog is the bucket record that selects the current version of \
+every deployment. This command uploads the deployment and updates the catalog.
+
+<project> can be:
+    - A wrangler project directory or a `wrangler.json` or `wrangler.jsonc` file. Translation \
+      works like `serve`. Esbuild bundles the project unless it sets \"no_bundle\".
+    - A Cap'n Proto config that contains only services. This form requires --name.
+
+--name names the deployment. For a wrangler project, it defaults to the config's `name`. The \
+wrangler worker becomes a service with the deployment's name. The deployment contains no \
+socket. Its Durable Objects use the disk service named `do-storage`.
+
+An instance is one workerd process in the cluster. Every instance that serves a wrangler \
+deployment with Durable Objects must define the `do-storage` service in its own config.
+
+For a wrangler project, each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here, \
+`<name>` is the deployment name. `<key>` is the class's storage key from the project's migrations. \
+The storage key defaults to the class name and stays the same after a rename. Publishing the \
+project under another name creates a separate application with empty Durable Objects. A Cap'n \
+Proto deployment's Durable Object `uniqueKey`s and every Workflow namespace key are used as \
+written.
+
+The command checks the deployment before uploading it. The check includes the other deployments \
+in the catalog. The command repeats this check when it updates the catalog. At startup, each \
+instance checks deployments in catalog order against its own config and accepted deployments. It \
+skips and logs a deployment that is unreadable or does not compose. Errors in a deployment's \
+services are logged with the deployment's name, and the broken services fail their requests. \
+References from the instance's config to unavailable deployment services fail requests too. None \
+of these errors stops the instance; only a failure to reach or read the catalog does. See \
+`ClusterConfig` in workerd.capnp for the complete rules.
+
+Publishing the version already selected by the catalog leaves the catalog unchanged. Publishing \
+an earlier version rolls the deployment back to that version. The command prints the deployment \
+version and catalog revision.
+
+Bucket credentials use the same environment variables as the instances. For an s3:// bucket:
+    - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, plus AWS_SESSION_TOKEN for temporary credentials; or
+    - AWS_CREDENTIALS_FILE.
+For a gs:// bucket:
+    - GOOGLE_APPLICATION_CREDENTIALS, a service account key; or
+    - the metadata server of the GCE VM or GKE pod the command runs on.
+
+See `bucket` and `bucketOptions` in workerd.capnp for credential details. For an s3:// bucket, \
+--endpoint uses AWS_ENDPOINT_URL when the flag is absent, and --region uses AWS_REGION, then \
+defaults to us-east-1. A gs:// bucket refuses --endpoint and --region.
+
+Instances read the catalog only at startup. Restart each instance to serve a published catalog \
+revision. See `ClusterConfig` in workerd.capnp.
+";
 
 const TEST_HELP: &str = "\
 Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
@@ -204,6 +281,10 @@ is timed after `bench` returns:
         b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
       }
     }
+Then the startup of each of those services' workers is timed by starting copies of it in new \
+isolates, as a cold start does, unless --no-startup is given. The phases of starting are cases \
+named startup:isolate, startup:script, startup:worker and startup:total, which <case-pattern> \
+selects as it does other cases.
 Results are written to stdout as a table, or as JSON with --format=json.
 ";
 
@@ -220,6 +301,8 @@ pub struct ConfigFileArgs {
     #[arg(short, long)]
     pub binary: bool,
 
+    /// A Cap'n Proto config (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, whose `main` is
+    /// bundled with esbuild as `wrangler` does.
     #[arg(value_name = "config-file")]
     pub config_file: String,
 }
@@ -329,11 +412,121 @@ pub struct ServeArgs {
     #[arg(long, value_name = "fd", value_parser = parse_control_fd)]
     pub control_fd: Option<u32>,
 
+    /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. The
+    /// port gives full access to every service in the process to holders of the cluster key, and
+    /// its traffic is not encrypted: only the cluster's instances should reach it, on a private
+    /// network (a VPC or Tailscale). A public IP is refused unless the config sets
+    /// `cluster.unsafePublicAddress`; a wildcard (0.0.0.0) listens on every interface, so
+    /// firewall the port.
+    #[arg(long = "cluster-addr", value_name = "addr")]
+    pub cluster_address: Option<String>,
+
+    /// Advertise <addr> to the cluster's other instances instead of the config's
+    /// `cluster.advertise` or the bound address; a port of 0 is the port bound. A public IP is
+    /// refused unless the config sets `cluster.unsafePublicAddress`.
+    #[arg(long = "cluster-advertise", value_name = "addr")]
+    pub cluster_advertise: Option<String>,
+
     /// Listen on the specified address for debug RPC connections. This exposes a privileged
     /// interface that allows access to all services in the process. For use by miniflare and local
     /// development only.
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DeployArgs {
+    /// Name the deployment. Use 1 to 64 ASCII letters, digits, hyphens, or underscores. The first
+    /// character must be a letter or digit. The name defaults to the wrangler config's `name`.
+    #[arg(long, value_name = "name")]
+    pub name: Option<String>,
+
+    /// Store the deployment in this cluster bucket: s3://<bucket>[/<prefix>] or
+    /// gs://<bucket>[/<prefix>]. This value matches `cluster.bucket` in each instance's config.
+    #[arg(long, value_name = "url", value_parser = parse_bucket)]
+    pub bucket: String,
+
+    /// Use this S3-compatible endpoint for an s3:// bucket. This value matches the instances'
+    /// `aws_endpoint` setting.
+    #[arg(long, value_name = "url", value_parser = parse_endpoint)]
+    pub endpoint: Option<String>,
+
+    /// Use this region for an s3:// bucket. This value matches the instances' `aws_region`
+    /// setting.
+    #[arg(long, value_name = "region")]
+    pub region: Option<String>,
+
+    /// For a Cap'n Proto <project>, search <dir> for non-relative imports. This works like the
+    /// option for `serve`.
+    #[arg(short = 'I', long = "import-path", value_name = "dir")]
+    pub import_paths: Vec<String>,
+
+    /// Read <project> as an encoded binary Cap'n Proto config. `workerd compile --config-only`
+    /// writes this format. Use `-` to read it from stdin.
+    #[arg(short, long)]
+    pub binary: bool,
+
+    /// Enable experimental features. Cluster mode requires this flag.
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+impl DeployArgs {
+    /// Build the bucket options used by the instances' `cluster.bucketOptions` setting. A gs://
+    /// bucket takes none, so it refuses `--endpoint` and `--region`.
+    pub fn bucket_options(&self) -> Result<Vec<String>, String> {
+        if self.bucket.starts_with("gs://") {
+            let set = [
+                ("--endpoint", self.endpoint.is_some()),
+                ("--region", self.region.is_some()),
+            ];
+            if let Some((flag, _)) = set.iter().find(|(_, set)| *set) {
+                return Err(format!(
+                    "{flag} is for an s3:// bucket. Remove it for the gs:// bucket."
+                ));
+            }
+        }
+        let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
+        let region = self.region.iter().map(|r| format!("aws_region={r}"));
+        Ok(endpoint.chain(region).collect())
+    }
+}
+
+/// Parse `--bucket` as `s3://<bucket>[/<prefix>]` or `gs://<bucket>[/<prefix>]`. The bucket
+/// client uses the same format for `cluster.bucket`.
+fn parse_bucket(param: &str) -> Result<String, &'static str> {
+    let rest = param
+        .strip_prefix("s3://")
+        .or_else(|| param.strip_prefix("gs://"))
+        .ok_or("expected s3://<bucket>[/<prefix>] or gs://<bucket>[/<prefix>]")?;
+    let (bucket, _) = rest.split_once('/').unwrap_or((rest, ""));
+    if bucket.is_empty() || bucket.contains(char::is_whitespace) {
+        return Err(
+            "expected a bucket name in s3://<bucket>[/<prefix>] or gs://<bucket>[/<prefix>]",
+        );
+    }
+    Ok(param.to_owned())
+}
+
+/// Parse `--endpoint` as an HTTP or HTTPS URL with a host and no path. The bucket client signs
+/// request paths that start with the bucket name.
+fn parse_endpoint(param: &str) -> Result<String, &'static str> {
+    const EXPECTED: &str =
+        "expected http://<host>[:<port>] or https://<host>[:<port>], with no path";
+    let rest = param
+        .strip_prefix("https://")
+        .or_else(|| param.strip_prefix("http://"))
+        .ok_or(EXPECTED)?;
+    let (authority, path) = rest
+        .find(['/', '?', '#'])
+        .map_or((rest, ""), |at| rest.split_at(at));
+    if authority.is_empty()
+        || authority.contains(|c: char| c.is_whitespace() || c == '@')
+        || !matches!(path, "" | "/")
+    {
+        return Err(EXPECTED);
+    }
+    Ok(param.to_owned())
 }
 
 #[derive(Args, Debug, Default)]
@@ -366,6 +559,12 @@ pub struct TestArgs {
     /// newest behavior.
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
+
+    /// Override the socket named <name> to bind to the address <addr> instead of the address
+    /// specified in the config file, as for `serve`. Lets a test listen on a port chosen when it
+    /// runs.
+    #[arg(short = 's', long = "socket-addr", value_name = "name>=<addr", value_parser = parse_override)]
+    pub socket_addr_overrides: Vec<Override>,
 
     #[arg(value_name = "filter", value_parser = parse_test_filter)]
     pub filter: Option<TestFilter>,
@@ -406,6 +605,10 @@ pub struct BenchArgs {
     /// Run tail workers, which are otherwise skipped since they add their cost to every request.
     #[arg(long)]
     pub trace: bool,
+
+    /// Don't time starting the services' workers in new isolates.
+    #[arg(long)]
+    pub no_startup: bool,
 
     #[arg(value_name = "filter", value_parser = parse_bench_filter)]
     pub filter: Option<BenchFilter>,
@@ -575,6 +778,7 @@ impl BenchArgs {
             json: self.format == BenchFormat::Json,
             output: self.output.clone(),
             trace: self.trace,
+            no_startup: self.no_startup,
         }
     }
 }

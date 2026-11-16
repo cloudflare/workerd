@@ -4,7 +4,6 @@
 
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import {
-  invalidateCaches,
   PythonWorkersInternalError,
   simpleRunPython,
 } from 'pyodide-internal:util';
@@ -19,12 +18,8 @@ function createTarFsInfo(): TarFSInfo {
   return {
     children: new Map(),
     mode: 0o777,
-    type: '5',
     modtime: 0,
     size: 0,
-    path: '',
-    name: '',
-    parts: [],
     reader: null,
   };
 }
@@ -77,12 +72,8 @@ class VirtualizedDir {
         child = {
           children: new Map(),
           mode: 0o777,
-          type: '5',
           modtime: 0,
           size: 0,
-          path: parts.slice(0, i + 1).join('/'),
-          name: part,
-          parts: [],
           reader: null,
         };
         dir.children!.set(part, child);
@@ -104,12 +95,8 @@ class VirtualizedDir {
     dir.children!.set(name, {
       children: undefined,
       mode: 0o755,
-      type: '0',
       modtime: 0,
       size,
-      path,
-      name,
-      parts: [],
       contentsOffset: 0,
       reader,
     });
@@ -151,7 +138,6 @@ export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
-  invalidateCaches(Module);
 }
 
 /**

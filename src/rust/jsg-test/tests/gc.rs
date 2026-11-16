@@ -11,7 +11,6 @@
 //! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
-use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -71,10 +70,13 @@ fn supports_gc_via_ref_drop() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let resource = jsg::Rc::new(SimpleResource {
-            name: "test".to_owned(),
-        });
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         std::mem::drop(resource);
         // In the Wrappable model, no wrapper means immediate cleanup when refcount hits 0
@@ -96,10 +98,13 @@ fn supports_gc_via_weak_callback() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let resource = jsg::Rc::new(SimpleResource {
-            name: "test".to_owned(),
-        });
-        let _wrapped = resource.clone().to_js(lock);
+        let resource = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = resource.clone(lock).to_js(lock)?;
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         std::mem::drop(resource);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -121,19 +126,28 @@ fn resource_with_traced_ref_field() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "child".to_owned(),
-        });
-        let optional_child = jsg::Rc::new(SimpleResource {
-            name: "optional_child".to_owned(),
-        });
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let optional_child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "optional_child".to_owned(),
+            },
+        );
 
-        let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: Some(optional_child.clone()),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child: child.clone(lock),
+                optional_child: Some(optional_child.clone(lock)),
+            },
+        );
 
-        let _wrapped = parent.clone().to_js(lock);
+        let _wrapped = parent.clone(lock).to_js(lock)?;
 
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -159,18 +173,24 @@ fn child_traced_ref_kept_alive_by_parent() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "child".to_owned(),
-        });
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
 
-        let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: None,
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child: child.clone(lock),
+                optional_child: None,
+            },
+        );
 
         // Wrap the parent so it has a JS object, then let the Local go out of scope
         // by not storing it. The wrapper is now only held weakly by cppgc.
-        let _ = parent.clone().to_js(lock);
+        let _ = parent.clone(lock).to_js(lock)?;
 
         // Child not collected because parent still holds an `Rc` (which holds a kj::Own)
         std::mem::drop(child);
@@ -197,25 +217,28 @@ fn weak_ref_upgrade() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "test".to_owned(),
-        });
-        let weak = strong.downgrade();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let weak = strong.downgrade(lock);
 
-        assert!(weak.is_alive());
-        let upgraded = weak.upgrade();
+        assert!(weak.is_alive(lock));
+        let upgraded = weak.upgrade(lock);
         assert!(upgraded.is_some());
-        assert!(weak.is_alive());
+        assert!(weak.is_alive(lock));
 
         std::mem::drop(upgraded);
-        assert!(weak.is_alive());
+        assert!(weak.is_alive(lock));
 
         std::mem::drop(strong);
         // No wrapper, so resource is destroyed immediately when last strong ref drops
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
-        assert!(!weak.is_alive());
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive(lock));
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -227,10 +250,13 @@ fn wrapped_resource_kept_alive_by_js() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "test".to_owned(),
-        });
-        let _wrapped = strong.clone().to_js(lock);
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = strong.clone(lock).to_js(lock)?;
         std::mem::drop(strong);
         // CppgcShim still holds kj::Own, keeping it alive
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -251,13 +277,16 @@ fn weak_ref_with_wrapped_resource() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "test".to_owned(),
-        });
-        let _wrapped = strong.clone().to_js(lock);
-        let weak = strong.downgrade();
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = strong.clone(lock).to_js(lock)?;
+        let weak = strong.downgrade(lock);
 
-        assert!(weak.upgrade().is_some());
+        assert!(weak.upgrade(lock).is_some());
         std::mem::drop(strong);
         // CppgcShim keeps it alive even after dropping the strong ref
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -279,16 +308,22 @@ fn traced_ref_in_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "child".to_owned(),
-        });
-        let _child_wrapped = child.clone().to_js(lock);
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let _child_wrapped = child.clone(lock).to_js(lock)?;
 
-        let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: None,
-        });
-        let _parent_wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child: child.clone(lock),
+                optional_child: None,
+            },
+        );
+        let _parent_wrapped = parent.clone(lock).to_js(lock)?;
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -315,15 +350,18 @@ fn traced_ref_in_gc() {
 #[test]
 fn weak_ref_get_returns_resource_data() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "hello".to_owned(),
-        });
-        let weak = strong.downgrade();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "hello".to_owned(),
+            },
+        );
+        let weak = strong.downgrade(lock);
 
         // get() should return a reference to the resource
-        let resource = weak.upgrade().expect("weak ref should be alive");
-        assert_eq!(resource.name, "hello");
+        let resource = weak.upgrade(lock).expect("weak ref should be alive");
+        assert_eq!(resource.get(lock).name, "hello");
         Ok(())
     });
 }
@@ -334,18 +372,21 @@ fn weak_ref_get_returns_none_after_drop() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "ephemeral".to_owned(),
-        });
-        let weak = strong.downgrade();
-        assert!(weak.upgrade().is_some());
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "ephemeral".to_owned(),
+            },
+        );
+        let weak = strong.downgrade(lock);
+        assert!(weak.upgrade(lock).is_some());
 
         std::mem::drop(strong);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
 
         // get() must return None without touching freed memory
-        assert!(weak.upgrade().is_none());
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -357,12 +398,12 @@ fn weak_ref_get_returns_none_after_drop() {
 #[test]
 fn weak_ref_default_is_dead() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let weak: jsg::Weak<SimpleResource> = jsg::Weak::default();
 
-        assert!(!weak.is_alive());
-        assert!(weak.upgrade().is_none());
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive(lock));
+        assert!(weak.upgrade(lock).is_none());
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -375,27 +416,30 @@ fn weak_ref_clone_shares_alive_marker() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "shared".to_owned(),
-        });
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "shared".to_owned(),
+            },
+        );
 
-        let weak1 = strong.downgrade();
-        let weak2 = weak1.clone();
-        let weak3 = weak2.clone();
+        let weak1 = strong.downgrade(lock);
+        let weak2 = weak1.clone(lock);
+        let weak3 = weak2.clone(lock);
 
-        assert!(weak1.is_alive());
-        assert!(weak2.is_alive());
-        assert!(weak3.is_alive());
+        assert!(weak1.is_alive(lock));
+        assert!(weak2.is_alive(lock));
+        assert!(weak3.is_alive(lock));
 
         std::mem::drop(strong);
 
         // All clones see death simultaneously
-        assert!(!weak1.is_alive());
-        assert!(!weak2.is_alive());
-        assert!(!weak3.is_alive());
-        assert!(weak1.upgrade().is_none());
-        assert!(weak2.upgrade().is_none());
+        assert!(!weak1.is_alive(lock));
+        assert!(!weak2.is_alive(lock));
+        assert!(!weak3.is_alive(lock));
+        assert!(weak1.upgrade(lock).is_none());
+        assert!(weak2.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -408,16 +452,19 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let strong = jsg::Rc::new(SimpleResource {
-            name: "persistent".to_owned(),
-        });
-        let _wrapped = strong.clone().to_js(lock);
-        let weak = strong.downgrade();
+        let strong = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "persistent".to_owned(),
+            },
+        );
+        let _wrapped = strong.clone(lock).to_js(lock)?;
+        let weak = strong.downgrade(lock);
 
         // Drop the original strong ref, but upgrade from weak creates a new one
         std::mem::drop(strong);
-        let upgraded = weak.upgrade().expect("should be alive via wrapper");
-        assert_eq!(upgraded.name, "persistent");
+        let upgraded = weak.upgrade(lock).expect("should be alive via wrapper");
+        assert_eq!(upgraded.get(lock).name, "persistent");
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
         // The upgraded `Rc` keeps the resource alive
@@ -458,18 +505,24 @@ fn weak_ref_trace_does_not_prevent_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let target = jsg::Rc::new(SimpleResource {
-            name: "target".to_owned(),
-        });
-        let _target_wrapped = target.clone().to_js(lock);
+        let target = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "target".to_owned(),
+            },
+        );
+        let _target_wrapped = target.clone(lock).to_js(lock)?;
 
-        let holder = jsg::Rc::new(WeakRefHolder {
-            weak: target.downgrade(),
-        });
-        let _holder_wrapped = holder.clone().to_js(lock);
+        let holder = jsg::Rc::new(
+            lock,
+            WeakRefHolder {
+                weak: target.downgrade(lock),
+            },
+        );
+        let _holder_wrapped = holder.clone(lock).to_js(lock)?;
 
         // WeakRef should be upgradable while the target is alive
-        assert!(holder.weak.upgrade().is_some());
+        assert!(holder.get(lock).weak.upgrade(lock).is_some());
 
         // Drop all Rust refs — both are only held by JS wrappers
         std::mem::drop(target);
@@ -499,20 +552,23 @@ fn ref_clone_keeps_resource_alive() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let original = jsg::Rc::new(SimpleResource {
-            name: "cloned".to_owned(),
-        });
-        let clone1 = original.clone();
-        let clone2 = original.clone();
+    harness.run_in_context(|lock, _ctx| {
+        let original = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "cloned".to_owned(),
+            },
+        );
+        let clone1 = original.clone(lock);
+        let clone2 = original.clone(lock);
 
         std::mem::drop(original);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(clone1.name, "cloned");
+        assert_eq!(clone1.get(lock).name, "cloned");
 
         std::mem::drop(clone1);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(clone2.name, "cloned");
+        assert_eq!(clone2.get(lock).name, "cloned");
 
         std::mem::drop(clone2);
         // Only now all refs are gone — resource is destroyed
@@ -527,13 +583,16 @@ fn multiple_ref_drops_only_last_triggers_destruction() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let original = jsg::Rc::new(SimpleResource {
-            name: "multi".to_owned(),
-        });
+    harness.run_in_context(|lock, _ctx| {
+        let original = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "multi".to_owned(),
+            },
+        );
 
         // Create several clones
-        let clones: Vec<_> = (0..5).map(|_| original.clone()).collect();
+        let clones: Vec<_> = (0..5).map(|_| original.clone(lock)).collect();
         std::mem::drop(original);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
@@ -550,22 +609,24 @@ fn multiple_ref_drops_only_last_triggers_destruction() {
     });
 }
 
-/// Tests that `Rc::deref()` returns the correct resource data.
+/// Tests that `Rc::get()` returns the correct resource data.
 #[test]
-fn ref_deref_returns_correct_resource_data() {
+fn ref_get_returns_correct_resource_data() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let r = jsg::Rc::new(SimpleResource {
-            name: "deref-test".to_owned(),
-        });
+    harness.run_in_context(|lock, _ctx| {
+        let r = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "get-test".to_owned(),
+            },
+        );
 
-        // Deref should return the resource with correct data
-        assert_eq!(r.name, "deref-test");
+        // `get` should return the resource with correct data
+        assert_eq!(r.get(lock).name, "get-test");
 
-        // Clone should also deref to the same data
-        #[expect(clippy::redundant_clone)]
-        let clone = r.clone();
-        assert_eq!(clone.name, "deref-test");
+        // A clone should reach the same data
+        let clone = r.clone(lock);
+        assert_eq!(clone.get(lock).name, "get-test");
         Ok(())
     });
 }
@@ -583,10 +644,13 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(SimpleResource {
-            name: "unwrap-me".to_owned(),
-        });
-        let wrapped = resource.clone().to_js(lock);
+        let resource = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "unwrap-me".to_owned(),
+            },
+        );
+        let wrapped = resource.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Get the JS value back and use FromJS to create a new strong Ref
@@ -594,14 +658,14 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
         let new_ref: jsg::Rc<SimpleResource> =
             <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, js_val)
                 .expect("FromJS should succeed for a wrapped resource");
-        assert_eq!(new_ref.name, "unwrap-me");
+        assert_eq!(new_ref.get(lock).name, "unwrap-me");
 
         // Drop the original Rc — the unwrapped ref should keep it alive
         std::mem::drop(resource);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
         // The unwrapped ref is still valid
-        assert_eq!(new_ref.name, "unwrap-me");
+        assert_eq!(new_ref.get(lock).name, "unwrap-me");
 
         // Dropping the unwrapped ref (with wrapper still alive) should not destroy
         std::mem::drop(new_ref);
@@ -649,15 +713,21 @@ fn wrap_multiple_instances_of_same_type() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let r1 = jsg::Rc::new(SimpleResource {
-            name: "first".to_owned(),
-        });
-        let r2 = jsg::Rc::new(SimpleResource {
-            name: "second".to_owned(),
-        });
+        let r1 = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "first".to_owned(),
+            },
+        );
+        let r2 = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "second".to_owned(),
+            },
+        );
 
-        let w1 = r1.to_js(lock);
-        let w2 = r2.to_js(lock);
+        let w1 = r1.to_js(lock)?;
+        let w2 = r2.to_js(lock)?;
         ctx.set_global(lock, "r1", w1);
         ctx.set_global(lock, "r2", w2);
 
@@ -686,13 +756,16 @@ fn wrap_multiple_instances_of_same_type() {
 fn wrap_same_resource_twice_returns_same_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(SimpleResource {
-            name: "singleton".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "singleton".to_owned(),
+            },
+        );
 
-        let w1 = resource.clone().to_js(lock);
+        let w1 = resource.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "w1", w1);
-        let w2 = resource.to_js(lock);
+        let w2 = resource.to_js(lock)?;
         ctx.set_global(lock, "w2", w2);
 
         // Both wraps should return the exact same JS object
@@ -711,10 +784,13 @@ fn wrap_same_resource_twice_returns_same_object() {
 fn resource_data_survives_gc_via_js_global() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(SimpleResource {
-            name: "survivor".to_owned(),
-        });
-        let wrapped = resource.to_js(lock);
+        let resource = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "survivor".to_owned(),
+            },
+        );
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Force GC — the global reference should keep it alive
@@ -738,14 +814,20 @@ fn parent_ref_keeps_child_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "child".to_owned(),
-        });
-        let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: None,
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child: child.clone(lock),
+                optional_child: None,
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
@@ -776,22 +858,25 @@ fn instance_drop_invalidates_all_weak_refs() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
-        let original = jsg::Rc::new(SimpleResource {
-            name: "shared-target".to_owned(),
-        });
-        let clone1 = original.clone();
-        let clone2 = original.clone();
+    harness.run_in_context(|lock, _ctx| {
+        let original = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "shared-target".to_owned(),
+            },
+        );
+        let clone1 = original.clone(lock);
+        let clone2 = original.clone(lock);
 
         // Create weak refs from different strong refs
-        let weak_from_original = original.downgrade();
-        let weak_from_clone1 = clone1.downgrade();
-        let weak_from_clone2 = clone2.downgrade();
+        let weak_from_original = original.downgrade(lock);
+        let weak_from_clone1 = clone1.downgrade(lock);
+        let weak_from_clone2 = clone2.downgrade(lock);
 
         // All alive
-        assert!(weak_from_original.is_alive());
-        assert!(weak_from_clone1.is_alive());
-        assert!(weak_from_clone2.is_alive());
+        assert!(weak_from_original.is_alive(lock));
+        assert!(weak_from_clone1.is_alive(lock));
+        assert!(weak_from_clone2.is_alive(lock));
 
         // Drop all strong refs — resource is destroyed
         std::mem::drop(original);
@@ -800,12 +885,12 @@ fn instance_drop_invalidates_all_weak_refs() {
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
 
         // ALL weak refs see death
-        assert!(!weak_from_original.is_alive());
-        assert!(!weak_from_clone1.is_alive());
-        assert!(!weak_from_clone2.is_alive());
-        assert!(weak_from_original.upgrade().is_none());
-        assert!(weak_from_clone1.upgrade().is_none());
-        assert!(weak_from_clone2.upgrade().is_none());
+        assert!(!weak_from_original.is_alive(lock));
+        assert!(!weak_from_clone1.is_alive(lock));
+        assert!(!weak_from_clone2.is_alive(lock));
+        assert!(weak_from_original.upgrade(lock).is_none());
+        assert!(weak_from_clone1.upgrade(lock).is_none());
+        assert!(weak_from_clone2.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -839,13 +924,19 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "nullable_child".to_owned(),
-        });
-        let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Some(child.clone()),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "nullable_child".to_owned(),
+            },
+        );
+        let parent = jsg::Rc::new(
+            lock,
+            NullableParent {
+                child: jsg::Nullable::Some(child.clone(lock)),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
@@ -875,10 +966,13 @@ fn nullable_ref_null_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Null,
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            NullableParent {
+                child: jsg::Nullable::Null,
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
@@ -896,46 +990,16 @@ fn nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
-#[test]
-fn nullable_ref_undefined_does_not_crash_during_gc() {
-    NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
-
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Undefined,
-        });
-        let wrapped = parent.clone().to_js(lock);
-        ctx.set_global(lock, "parent", wrapped);
-
-        std::mem::drop(parent);
-
-        // GC with Nullable::Undefined should not crash
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
-        Ok(())
-    });
-
-    harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 1);
-        Ok(())
-    });
-}
-
 // ---------------------------------------------------------------------------
-// Rc<NativeState> shared ownership — native object outlives Rc but is
+// Arc<NativeState> shared ownership — native object outlives the test's Arc but is
 // dropped when V8 GC collects the JS wrapper.
 // ---------------------------------------------------------------------------
 
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 struct NativeState {
-    value: u64,
+    value: u32,
 }
-
-impl jsg::Traced for NativeState {}
 
 impl Drop for NativeState {
     fn drop(&mut self) {
@@ -943,17 +1007,20 @@ impl Drop for NativeState {
     }
 }
 
+struct SharedNativeState(std::sync::Arc<NativeState>);
+
+jsg::jsg_traced!(SharedNativeState);
+
 #[jsg_resource]
 struct NativeOwnerResource {
-    state: std::rc::Rc<NativeState>,
+    state: SharedNativeState,
 }
 
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
-    fn get_value(&self) -> jsg::Number {
-        #[expect(clippy::cast_precision_loss)]
-        jsg::Number::new(self.state.value as f64)
+    fn get_value(&self) -> u32 {
+        self.state.0.value
     }
 }
 
@@ -978,29 +1045,35 @@ fn traced_ref_drop_respects_strong_flag() {
     let mut child_holder: Option<jsg::Rc<SimpleResource>> = None;
 
     harness.run_in_context(|lock, _ctx| {
-        let child = jsg::Rc::new(SimpleResource {
-            name: "traced_child".to_owned(),
-        });
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "traced_child".to_owned(),
+            },
+        );
 
         // strongRefcount = 1 (our ref).
-        assert_eq!(child.strong_refcount(), 1);
+        assert_eq!(child.strong_refcount(lock), 1);
 
-        let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: None,
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child: child.clone(lock),
+                optional_child: None,
+            },
+        );
 
         // strongRefcount = 2 (our ref + parent's ref).
-        assert_eq!(child.strong_refcount(), 2);
+        assert_eq!(child.strong_refcount(lock), 2);
 
         // Wrap the parent — child is reachable only through the parent's Ref.
-        let _wrapped = parent.clone().to_js(lock);
+        let _wrapped = parent.clone(lock).to_js(lock)?;
 
         // GC traces parent wrapper → visitRef on child → parent's ref
         // transitions strong→weak, removeStrongRef() called once.
         // strongRefcount = 1 (only our direct ref remains strong).
         crate::Harness::request_gc(lock);
-        assert_eq!(child.strong_refcount(), 1);
+        assert_eq!(child.strong_refcount(lock), 1);
 
         // Drop parent Rust ref. JS wrapper keeps parent alive.
         std::mem::drop(parent);
@@ -1024,7 +1097,7 @@ fn traced_ref_drop_respects_strong_flag() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(
-            child.strong_refcount(),
+            child.strong_refcount(lock),
             1,
             "strong refcount underflowed — \
             wrappable_remove_strong_ref passed strong=true for a traced (weak) ref"
@@ -1033,7 +1106,7 @@ fn traced_ref_drop_respects_strong_flag() {
     });
 }
 
-/// A Rust resource holds an `Rc<NativeState>`. After wrapping for JS and
+/// A Rust resource holds an `Arc<NativeState>`. After wrapping for JS and
 /// dropping the Rust `Ref`, the native state is kept alive by the `CppgcShim`.
 /// Minor (young-generation) GC must collect the wrapper and drop the native
 /// state — proving the `ResetRoot` / `detachLater` path works for Rust resources.
@@ -1042,14 +1115,14 @@ fn rc_native_object_dropped_on_minor_gc() {
     NATIVE_STATE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    let state = std::rc::Rc::new(NativeState { value: 99 });
-    let state_clone = state.clone();
+    let state = std::sync::Arc::new(NativeState { value: 99 });
+    let state_clone = SharedNativeState(std::sync::Arc::clone(&state));
 
     harness.run_in_context(|lock, _ctx| {
-        let resource = jsg::Rc::new(NativeOwnerResource { state: state_clone });
+        let resource = jsg::Rc::new(lock, NativeOwnerResource { state: state_clone });
 
         // Wrap for JS so CppgcShim takes ownership of the Wrappable.
-        let _wrapped = resource.clone().to_js(lock);
+        let _wrapped = resource.clone(lock).to_js(lock)?;
 
         // Drop the Rust Ref. CppgcShim still keeps the resource alive.
         std::mem::drop(resource);
@@ -1057,14 +1130,14 @@ fn rc_native_object_dropped_on_minor_gc() {
         Ok(())
     });
 
-    // Drop the external Rc clone. The resource's Rc inside the Wrappable
+    // Drop the external Arc clone. The resource's Arc inside the Wrappable
     // is the last one, but the Wrappable is alive (held by CppgcShim).
     std::mem::drop(state);
     assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 0);
 
     // Minor GC collects the young-generation wrapper via the ResetRoot path,
     // which detaches the CppgcShim → drops kj::Own<Wrappable> → drops the
-    // resource → drops Rc<NativeState> → NativeState is dropped.
+    // resource → drops Arc<NativeState> → NativeState is dropped.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_minor_gc(lock);
         assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 1);
@@ -1087,16 +1160,16 @@ fn rc_native_object_dropped_on_minor_gc() {
 
 static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// A resource that stores a `TracedGlobal<Value>` via `Cell` so the back-reference
+/// A resource that stores a `TracedGlobal<Value>` via `jsg::Cell` so the back-reference
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
-/// `Cell<Option<…>>` provides interior mutability through `&self`, matching
+/// `jsg::Cell<Option<…>>` provides interior mutability through `&self`, matching
 /// the access pattern of `Traced::trace(&self)`.
 #[jsg_resource]
 struct CyclicResource {
-    /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
+    /// The stored "callback". Uses `jsg::Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
-    callback: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    callback: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 impl Drop for CyclicResource {
@@ -1123,20 +1196,23 @@ fn global_value_back_ref_is_collected_by_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let resource = jsg::Rc::new(CyclicResource {
-            callback: std::cell::Cell::new(None),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            CyclicResource {
+                callback: jsg::Cell::new(None),
+            },
+        );
 
         // Wrap to produce the JS object, then immediately promote to a
         // TracedGlobal so we can store it back into the resource's own field.
         // `to_js` consumes the Rc clone but the original `resource` still
         // holds a strong ref, so the resource stays alive.
-        let wrapper_local = resource.clone().to_js(lock);
+        let wrapper_local = resource.clone(lock).to_js(lock)?;
         let wrapper_global = wrapper_local.to_traced_global(lock);
 
         // Install the back-reference: resource now holds a TracedGlobal pointing
         // to its own JS wrapper, closing the cycle.
-        resource.callback.set(Some(wrapper_global));
+        resource.get(lock).callback.set(Some(wrapper_global));
 
         // Drop the only Rust Rc. The cycle is now closed but the TracedGlobal
         // will be downgraded to a TracedReference by visit_traced_global, making
@@ -1179,10 +1255,10 @@ impl CellChild {}
 
 static CELL_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// Resource with a `Cell<jsg::Rc<T>>` field.
+/// Resource with a `jsg::Cell<jsg::Rc<T>>` field.
 #[jsg_resource]
 struct CellParent {
-    pub child: Cell<jsg::Rc<CellChild>>,
+    pub child: jsg::Cell<jsg::Rc<CellChild>>,
 }
 
 impl Drop for CellParent {
@@ -1194,10 +1270,10 @@ impl Drop for CellParent {
 #[jsg_resource]
 impl CellParent {}
 
-/// Resource with a `Cell<Option<jsg::Rc<T>>>` field.
+/// Resource with a `jsg::Cell<Option<jsg::Rc<T>>>` field.
 #[jsg_resource]
 struct CellOptionParent {
-    pub child: Cell<Option<jsg::Rc<CellChild>>>,
+    pub child: jsg::Cell<Option<jsg::Rc<CellChild>>>,
 }
 
 impl Drop for CellOptionParent {
@@ -1209,10 +1285,10 @@ impl Drop for CellOptionParent {
 #[jsg_resource]
 impl CellOptionParent {}
 
-/// Resource with a `Cell<jsg::Nullable<jsg::Rc<T>>>` field.
+/// Resource with a `jsg::Cell<jsg::Nullable<jsg::Rc<T>>>` field.
 #[jsg_resource]
 struct CellNullableParent {
-    pub child: Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
+    pub child: jsg::Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
 }
 
 impl Drop for CellNullableParent {
@@ -1224,21 +1300,6 @@ impl Drop for CellNullableParent {
 #[jsg_resource]
 impl CellNullableParent {}
 
-/// Resource using the fully-qualified `std::cell::Cell<jsg::Rc<T>>` syntax.
-#[jsg_resource]
-struct StdCellParent {
-    pub child: std::cell::Cell<jsg::Rc<CellChild>>,
-}
-
-impl Drop for StdCellParent {
-    fn drop(&mut self) {
-        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
-#[jsg_resource]
-impl StdCellParent {}
-
 /// `Cell<jsg::Rc<T>>` keeps the child alive through GC.
 #[test]
 fn cell_ref_keeps_child_alive_through_gc() {
@@ -1247,11 +1308,14 @@ fn cell_ref_keeps_child_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(CellChild);
-        let parent = jsg::Rc::new(CellParent {
-            child: Cell::new(child.clone()),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let child = jsg::Rc::new(lock, CellChild);
+        let parent = jsg::Rc::new(
+            lock,
+            CellParent {
+                child: jsg::Cell::new(child.clone(lock)),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs.
@@ -1281,11 +1345,14 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(CellChild);
-        let parent = jsg::Rc::new(CellOptionParent {
-            child: Cell::new(Some(child.clone())),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let child = jsg::Rc::new(lock, CellChild);
+        let parent = jsg::Rc::new(
+            lock,
+            CellOptionParent {
+                child: jsg::Cell::new(Some(child.clone(lock))),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -1312,10 +1379,13 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(CellOptionParent {
-            child: Cell::new(None),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            CellOptionParent {
+                child: jsg::Cell::new(None),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
@@ -1340,11 +1410,14 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(CellChild);
-        let parent = jsg::Rc::new(CellNullableParent {
-            child: Cell::new(jsg::Nullable::Some(child.clone())),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let child = jsg::Rc::new(lock, CellChild);
+        let parent = jsg::Rc::new(
+            lock,
+            CellNullableParent {
+                child: jsg::Cell::new(jsg::Nullable::Some(child.clone(lock))),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -1371,10 +1444,13 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(CellNullableParent {
-            child: Cell::new(jsg::Nullable::Null),
-        });
-        let wrapped = parent.clone().to_js(lock);
+        let parent = jsg::Rc::new(
+            lock,
+            CellNullableParent {
+                child: jsg::Cell::new(jsg::Nullable::Null),
+            },
+        );
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
@@ -1391,34 +1467,324 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// `std::cell::Cell<jsg::Rc<T>>` (fully-qualified path) keeps child alive through GC.
+static DROPPED_ELSEWHERE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A resource whose references are dropped without the isolate lock.
+#[jsg_resource]
+struct DroppedElsewhere;
+
+impl Drop for DroppedElsewhere {
+    fn drop(&mut self) {
+        DROPPED_ELSEWHERE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl DroppedElsewhere {}
+
+/// Without the isolate lock, dropping an `Rc` queues its references, which keep the resource
+/// alive until the next lock releases them.
 #[test]
-fn std_cell_ref_keeps_child_alive_through_gc() {
-    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
-    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+fn rc_dropped_without_the_lock_is_released_at_the_next_lock() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(CellChild);
-        let parent = jsg::Rc::new(StdCellParent {
-            child: std::cell::Cell::new(child.clone()),
-        });
-        let wrapped = parent.clone().to_js(lock);
-        ctx.set_global(lock, "parent", wrapped);
-
-        std::mem::drop(child);
-        std::mem::drop(parent);
-
-        crate::Harness::request_gc(lock);
-        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        assert_eq!(lock.refs_awaiting_lock(), 0);
+        crate::Harness::with_isolate_unlocked(lock, || drop(resource));
+        assert_eq!(lock.refs_awaiting_lock(), 1);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
-        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
-        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(lock.refs_awaiting_lock(), 0);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
+}
+
+/// The strong reference of an `Rc` dropped without the lock keeps the wrapper alive through GC
+/// until the next lock releases it.
+#[test]
+fn rc_dropped_without_the_lock_keeps_its_wrapper_alive_until_the_next_lock() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let _wrapper = resource.clone(lock).to_js(lock)?;
+        kept = Some(resource);
+        Ok(())
+    });
+    let kept = kept.expect("created in the context");
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::with_isolate_unlocked(lock, || drop(kept));
+        assert_eq!(lock.refs_awaiting_lock(), 1);
+        crate::Harness::request_gc(lock);
+        assert_eq!(
+            DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst),
+            0,
+            "the queued reference keeps the wrapper strong"
+        );
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        // Released by this lock, so nothing keeps the wrapper alive any more.
+        assert_eq!(lock.refs_awaiting_lock(), 0);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
+        crate::Harness::request_gc(lock);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Another thread may drop an `Rc` while this one holds the lock and clones and drops other
+/// `Rc`s of the same resource. The drop is queued, and touches none of the reference counts
+/// that this thread updates.
+#[test]
+fn rc_dropped_on_another_thread_is_released_at_the_next_lock() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let weak = resource.downgrade(lock);
+        let refs = (resource.clone(lock), weak.clone(lock));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let dropper = std::thread::spawn({
+            let barrier = std::sync::Arc::clone(&barrier);
+            move || {
+                barrier.wait();
+                drop(refs);
+            }
+        });
+        barrier.wait();
+        // Meanwhile this thread, which holds the lock, keeps updating the same counts.
+        for _ in 0..1000 {
+            drop(resource.clone(lock));
+            drop(weak.clone(lock));
+            drop(weak.upgrade(lock));
+        }
+        dropper.join().expect("the drop does not panic");
+        assert_eq!(lock.refs_awaiting_lock(), 2);
+        kept = Some(resource);
+        Ok(())
+    });
+
+    harness.run_in_context(move |lock, _ctx| {
+        assert_eq!(lock.refs_awaiting_lock(), 0);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
+        drop(kept);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Without the lock, dropping a `Weak` queues it too, whether or not its resource is alive. A
+/// default `Weak` has no resource, and is dropped at once.
+#[test]
+fn weak_dropped_without_the_lock_is_released_at_the_next_lock() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let live = resource.downgrade(lock);
+        let dead = resource.downgrade(lock);
+        drop(resource);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+        assert!(dead.upgrade(lock).is_none());
+        let default = jsg::Weak::<DroppedElsewhere>::default();
+        crate::Harness::with_isolate_unlocked(lock, || {
+            drop(live);
+            drop(dead);
+            drop(default);
+        });
+        assert_eq!(lock.refs_awaiting_lock(), 2);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(lock.refs_awaiting_lock(), 0);
+        Ok(())
+    });
+}
+
+/// A reference queued without the lock is released when the `Realm` is dropped, before the
+/// isolate is disposed, if no lock released it first.
+#[test]
+fn queued_rc_is_released_when_the_realm_is_dropped() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let _wrapper = resource.clone(lock).to_js(lock)?;
+        crate::Harness::with_isolate_unlocked(lock, || drop(resource));
+        assert_eq!(lock.refs_awaiting_lock(), 1);
+        Ok(())
+    });
+    drop(harness);
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+}
+
+/// An `Rc` or a `Weak` can outlive its isolate. Dropping it then releases it at once.
+#[test]
+fn rc_dropped_after_its_isolate_is_disposed() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let _wrapper = resource.clone(lock).to_js(lock)?;
+        kept = Some((resource.clone(lock), resource.downgrade(lock)));
+        Ok(())
+    });
+    drop(harness);
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
+    drop(kept);
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+}
+
+/// Dropping the `Realm` closes the state before the isolate's teardown detaches the wrappers and
+/// disposes the isolate. Another thread may drop an `Rc` or a `Weak` in that interval: its
+/// references are kept until the isolate is disposed, since releasing them could reset a live
+/// wrapper handle without the lock.
+#[test]
+fn rc_dropped_on_another_thread_after_the_realm_is_kept_until_dispose() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let _wrapper = resource.clone(lock).to_js(lock)?;
+        kept = Some((resource.downgrade(lock), resource));
+        Ok(())
+    });
+    harness.drop_realm_then_gc(move || {
+        std::thread::spawn(move || drop(kept))
+            .join()
+            .expect("the drop does not panic");
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
+    });
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+}
+
+/// The thread tearing the isolate down holds its lock, so a drop there releases the reference at
+/// once, and the resource it alone holds is dropped before the isolate is disposed.
+#[test]
+fn rc_dropped_under_the_lock_after_the_realm_is_released_at_once() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        kept = Some(jsg::Rc::new(lock, DroppedElsewhere));
+        Ok(())
+    });
+    harness.drop_realm_then_gc(move || {
+        drop(kept);
+        assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
+    });
+}
+
+/// Detaching the wrapper of a resource that is still strongly held, at teardown, makes the
+/// references it holds strong again, which records the isolate in the unwrapped resources they
+/// reach. Those are not wrapped, so teardown never clears it. Releasing the parent after the
+/// isolate is disposed then releases the child, which must not reach the disposed isolate.
+#[test]
+fn parent_with_unwrapped_child_released_after_dispose() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut kept = None;
+    harness.run_in_context(|lock, _ctx| {
+        let child = jsg::Rc::new(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let parent = jsg::Rc::new(
+            lock,
+            ParentResource {
+                child,
+                optional_child: None,
+            },
+        );
+        let _wrapper = parent.clone(lock).to_js(lock)?;
+        kept = Some(parent);
+        Ok(())
+    });
+    harness.drop_realm_then_gc(move || drop(kept));
+    assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+    assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+}
+
+/// A resource whose drop waits at a barrier, to stop the thread draining the queue.
+#[jsg_resource(custom_trace)]
+struct DisposeGate {
+    barrier: std::sync::Arc<std::sync::Barrier>,
+}
+
+impl jsg::Traced for DisposeGate {
+    fn trace(&self, _visitor: &mut jsg::v8::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl DisposeGate {}
+
+impl Drop for DisposeGate {
+    fn drop(&mut self) {
+        self.barrier.wait();
+    }
+}
+
+/// After the isolate is disposed, no lock serializes the reference counts. Another thread
+/// dropping references while the dispose hook releases the queued ones must not update the
+/// same counts at once: its references go through the queue too, and the resource is released
+/// once every reference is gone.
+#[test]
+fn rc_dropped_on_another_thread_while_the_disposed_queue_drains() {
+    DROPPED_ELSEWHERE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let mut refs = None;
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(lock, DroppedElsewhere);
+        let gate = jsg::Rc::new(
+            lock,
+            DisposeGate {
+                barrier: std::sync::Arc::clone(&barrier),
+            },
+        );
+        let queued: Vec<_> = (0..100_000).map(|_| resource.clone(lock)).collect();
+        let elsewhere: Vec<_> = (0..100_000).map(|_| resource.clone(lock)).collect();
+        refs = Some((resource, gate, queued, elsewhere));
+        Ok(())
+    });
+    let (resource, gate, queued, elsewhere) = refs.expect("created in the context");
+    let dropper = std::thread::spawn(move || {
+        // The dispose hook is releasing the gate, before the other queued references.
+        barrier.wait();
+        drop(elsewhere);
+    });
+    harness.drop_realm_then_gc(move || {
+        drop(gate);
+        drop(queued);
+    });
+    dropper.join().expect("the drop does not panic");
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 0);
+    drop(resource);
+    assert_eq!(DROPPED_ELSEWHERE_DROPS.load(Ordering::SeqCst), 1);
 }

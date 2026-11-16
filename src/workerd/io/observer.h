@@ -43,8 +43,8 @@ WD_STRONG_BOOL(CountSubrequest);
 // Whether an outgoing actor call's payload can be sent again unchanged, e.g. a fetch with a
 // rewindable body or an RPC call whose arguments hold no externals.
 WD_STRONG_BOOL(ActorCallPayloadReplayable);
-// Whether the handler or method an actor request is about to run was marked with retryable(),
-// with DURABLE_OBJECT_RETRIES_USERLAND enabled. See RequestObserver::claimRetryTokenBeforeUserCode().
+// Whether the handler or method an actor request is about to run was marked with retryable().
+// See RequestObserver::claimRetryTokenBeforeUserCode().
 WD_STRONG_BOOL(IsRetryableHandler);
 
 enum class ActorRetryCallType : uint8_t {
@@ -160,6 +160,10 @@ class RequestObserver: public kj::Refcounted {
   // exception, e.g. because it has been replaced with an HTTP error response or because it
   // occurred asynchronously.
   virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
+
+  // Reports the outcome of a Durable Object onHibernate handler run under this observer. The hook
+  // isn't delivered through a WorkerInterface, so no wrapper sees its result.
+  virtual void reportOnHibernateOutcome(EventOutcome outcome) {}
 
   static EventOutcome outcomeFromException(
       const kj::Exception& e, FailureSource source = FailureSource::OTHER);
@@ -339,6 +343,8 @@ class IsolateObserver: public kj::AtomicRefcounted {
 
   class LockTiming {
    public:
+    virtual ~LockTiming() noexcept(false) = default;
+
     // Called by `Isolate::takeAsyncLock()` when it is blocked by a different isolate lock on the
     // same thread.
     virtual void waitingForOtherIsolate(kj::StringPtr id) {}
@@ -353,8 +359,11 @@ class IsolateObserver: public kj::AtomicRefcounted {
     virtual void stop() {}
 
     virtual void locked() {}
-    virtual void gcPrologue() {}
-    virtual void gcEpilogue() {}
+
+    // Called just before a successfully taken lock is released, with the garbage collection V8
+    // performed on this thread while the lock was held: its total duration, including
+    // incremental marking steps, and the number of full (mark-compact) collections it finished.
+    virtual void reportGc(kj::Duration gcTime, uint fullGcCount) {}
   };
 
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
@@ -393,11 +402,8 @@ class IsolateObserver: public kj::AtomicRefcounted {
     void locked() {
       KJ_IF_SOME(l, lockTiming) l.get()->locked();
     }
-    void gcPrologue() {
-      KJ_IF_SOME(l, lockTiming) l.get()->gcPrologue();
-    }
-    void gcEpilogue() {
-      KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue();
+    void reportGc(kj::Duration gcTime, uint fullGcCount) {
+      KJ_IF_SOME(l, lockTiming) l.get()->reportGc(gcTime, fullGcCount);
     }
 
    private:
@@ -440,6 +446,10 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
   // Called when the actor's JavaScript class constructor has run to completion successfully.
   // Not called for actors that have no class, nor when the constructor throws.
   virtual void constructorCompleted() {}
+
+  // Called when an attempt to run the actor's onHibernate handler has finished. Not called when the
+  // actor has no handler.
+  virtual void onHibernateFinished(EventOutcome outcome) {}
 
   virtual void webSocketAccepted() {}
   virtual void webSocketClosed() {}

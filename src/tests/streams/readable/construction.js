@@ -125,6 +125,40 @@ export const argumentConversionOrder = {
   },
 };
 
+// A source, sink or strategy that is a Proxy sees only the reads of its
+// dictionary members, by name (parity): recognizing a native source or
+// sink reads a V8-private property, which reaches no trap.
+export const proxyArgumentsSeeOnlyMemberReads = {
+  test() {
+    const keys = [];
+    const trapped = () =>
+      new Proxy(
+        {},
+        {
+          get(target, key, receiver) {
+            keys.push(key);
+            return Reflect.get(target, key, receiver);
+          },
+          has(target, key) {
+            keys.push(key);
+            return Reflect.has(target, key);
+          },
+          getOwnPropertyDescriptor(target, key) {
+            keys.push(key);
+            return Reflect.getOwnPropertyDescriptor(target, key);
+          },
+        }
+      );
+    new ReadableStream(trapped(), trapped());
+    new WritableStream(trapped(), trapped());
+    new ReadableStream(new Proxy({ type: 'bytes' }, {}), trapped());
+    for (const key of keys) strictEqual(typeof key, 'string', String(key));
+    for (const name of ['start', 'pull', 'write', 'highWaterMark']) {
+      strictEqual(keys.includes(name), true, name);
+    }
+  },
+};
+
 // The strategy argument converts as a WebIDL dictionary in both (spec):
 // null means no strategy, a function's members are read, and every other
 // primitive throws TypeError (messages differ).
@@ -224,16 +258,17 @@ export const conversionErrorPrecedence = {
   },
 };
 
-// DIVERGENCE: autoAllocateChunkSize and expectedLength on a default
-// source, which uses neither. Both convert them on every source, as on a
-// byte source but with no zero check (spec): expectedLength as a uint64,
-// so 'abc' and -1 throw TypeError (messages differ; the readable-byte
-// suite's ledger #35), and autoAllocateChunkSize as a number whose
-// fraction truncates, so 0, 1.5 and 2 ** 31 - 1 are accepted. C++
-// converts autoAllocateChunkSize as an int: it accepts -1, 'abc', NaN and
-// Infinity, and throws from 2 ** 31. TypeScript converts it as the spec's
-// [EnforceRange] unsigned long long: it throws for those, and accepts up
-// to 2 ** 53 - 1.
+// DIVERGENCE: autoAllocateChunkSize on a default source, which does not
+// use it (its expectedLength becomes a body's Content-Length, as a byte
+// source's does; see integration-body.js). Both convert the two on every
+// source, as on a byte source but with no zero check (spec):
+// expectedLength as a uint64, so 'abc' and -1 throw TypeError (messages
+// differ; the readable-byte suite's ledger #35), and
+// autoAllocateChunkSize as a number whose fraction truncates, so 0, 1.5
+// and 2 ** 31 - 1 are accepted. C++ converts autoAllocateChunkSize as an
+// int: it accepts -1, 'abc', NaN and Infinity, and throws from 2 ** 31.
+// TypeScript converts it as the spec's [EnforceRange] unsigned long long:
+// it throws for those, and accepts up to 2 ** 53 - 1.
 export const byteMembersOnDefaultSource = {
   test() {
     const outOfRange = {

@@ -139,8 +139,14 @@ struct Namespace {
     inner: memory_cache::Namespace,
 }
 
-struct Binding {
+pub struct Binding {
     inner: memory_cache::Binding,
+}
+
+impl Binding {
+    pub fn into_inner(self) -> memory_cache::Binding {
+        self.inner
+    }
 }
 
 struct ReadDecision {

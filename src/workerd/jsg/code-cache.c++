@@ -5,6 +5,8 @@
 #include "code-cache.h"
 
 #include <openssl/sha.h>
+#include <v8-function.h>
+#include <v8-isolate.h>
 
 #include <kj/debug.h>
 #include <kj/hash.h>
@@ -15,10 +17,10 @@
 
 namespace workerd::jsg {
 
-CodeCacheKey CodeCacheKey::compute(Unit unit, kj::ArrayPtr<const char> utf8Source) {
+CodeCacheKey CodeCacheKey::compute(Unit unit, kj::ArrayPtr<const char> source) {
   CodeCacheKey key{.unit = unit};
   static_assert(sizeof(key.sourceSha256) == SHA256_DIGEST_LENGTH);
-  SHA256(utf8Source.asBytes().begin(), utf8Source.size(), key.sourceSha256.begin());
+  SHA256(source.asBytes().begin(), source.size(), key.sourceSha256.begin());
   return key;
 }
 
@@ -74,35 +76,13 @@ CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& ke
   return store->lookup(key, MayElect(deferring));
 }
 
-v8::MaybeLocal<v8::Module> IsolateCodeCache::compileModule(v8::Isolate* isolate,
-    const CodeCacheKey& key,
-    v8::Local<v8::String> source,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer) {
-  return compile<v8::Module>(isolate, key, source, origin, observer,
-      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
-    return v8::ScriptCompiler::CompileModule(isolate, compileSource, options);
-  });
-}
-
-v8::MaybeLocal<v8::UnboundScript> IsolateCodeCache::compileScript(v8::Isolate* isolate,
-    const CodeCacheKey& key,
-    v8::Local<v8::String> source,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer) {
-  return compile<v8::UnboundScript>(isolate, key, source, origin, observer,
-      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
-    return v8::ScriptCompiler::CompileUnboundScript(isolate, compileSource, options);
-  });
-}
-
-template <typename T, typename Compile>
+template <typename T>
 v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
     const CodeCacheKey& key,
     v8::Local<v8::String> source,
     const v8::ScriptOrigin& origin,
     const CompilationObserver& observer,
-    Compile&& compileWithOptions) {
+    CompileCallback<T> compileWithOptions) {
   // `lookup.hit` owns the cached bytes, which V8 reads without taking ownership, so it must
   // outlive `compileSource`.
   auto lookup = takeLookup(key);
@@ -150,6 +130,28 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
   return result;
 }
 
+template v8::MaybeLocal<v8::Module> IsolateCodeCache::compile<v8::Module>(v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::Module>);
+
+template v8::MaybeLocal<v8::UnboundScript> IsolateCodeCache::compile<v8::UnboundScript>(
+    v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::UnboundScript>);
+
+template v8::MaybeLocal<v8::Function> IsolateCodeCache::compile<v8::Function>(v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::Function>);
+
 void IsolateCodeCache::deferProduction() {
   // The window is per isolate, but each script opens its own, so a second window would mean a
   // second script, whose code would be produced or discarded with the first one's.
@@ -194,6 +196,9 @@ void IsolateCodeCache::produce(v8::Isolate* isolate,
     }
     KJ_CASE_ONEOF(script, v8::Global<v8::UnboundScript>) {
       data.reset(v8::ScriptCompiler::CreateCodeCache(script.Get(isolate)));
+    }
+    KJ_CASE_ONEOF(function, v8::Global<v8::Function>) {
+      data.reset(v8::ScriptCompiler::CreateCodeCacheForFunction(function.Get(isolate)));
     }
   }
   if (data == nullptr || data->length <= 0) {

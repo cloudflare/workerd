@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import { foo, bar, default as baz } from 'foo';
 import * as fooModule from 'foo';
-import { strictEqual } from 'node:assert';
+import { ok, strictEqual } from 'node:assert';
 
 export const test = {
   async test() {
@@ -32,5 +32,14 @@ export const test = {
         strictEqual(err.message, 'Invalid module specifier "../dep".');
       }
     }
+
+    const processNs = await import('node:process');
+    const { default: required } = await import('require-process');
+    strictEqual(required.bare, required.prefixed);
+    ok(
+      required.prefixed === processNs ||
+        required.prefixed === processNs.default,
+      'require("node:process") must resolve to the imported node:process'
+    );
   },
 };

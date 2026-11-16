@@ -10,6 +10,12 @@ const TYPES = {
   'one-byte': '\xff',
   'two-byte': '\u011f',
 };
+const INTO_TYPES = {
+  ...TYPES,
+  emoji: '\u{1F639}',
+  mixed: 'Hi \u{1F44B} \u043f\u0440\u0438 \u6f22\u5b57 caf\xe9! ',
+  'lone-surrogates': 'ab\ud800cd\udc00ef',
+};
 const LENGTHS = [32, 256, 1024, 8192];
 
 export default {
@@ -21,14 +27,20 @@ export default {
         b.run(`encode ${type} ${len}`, () => b.blackBox(encoder.encode(input)));
       }
     }
-    for (const [type, char] of Object.entries(TYPES)) {
+    for (const [type, char] of Object.entries(INTO_TYPES)) {
       for (const len of LENGTHS) {
-        const input = char.repeat(len);
-        // Enough space for any UTF-8 encoding of the input.
-        const buffer = new Uint8Array(len * 3);
-        b.run(`encodeInto ${type} ${len}`, () =>
-          b.blackBox(encoder.encodeInto(input, buffer))
-        );
+        const input = char.repeat(Math.ceil(len / char.length)).slice(0, len);
+        const needed = encoder.encode(input).length;
+        // Enough space for any UTF-8 encoding of the input, and half of what this one needs.
+        for (const [fit, size] of [
+          ['', len * 3],
+          [' half', needed >> 1],
+        ]) {
+          const buffer = new Uint8Array(size);
+          b.run(`encodeInto ${type} ${len}${fit}`, () =>
+            b.blackBox(encoder.encodeInto(input, buffer))
+          );
+        }
       }
     }
   },

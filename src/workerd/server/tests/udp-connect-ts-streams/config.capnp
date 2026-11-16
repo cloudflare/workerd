@@ -8,9 +8,6 @@ const config :Workerd.Config = (
   sockets = [
     ( name = "udp", address = "127.0.0.1:0", udp = (idleTimeoutMs = 1000), service = "main" ),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-  ],
 );
 
 const worker :Workerd.Worker = (

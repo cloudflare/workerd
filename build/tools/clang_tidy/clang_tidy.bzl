@@ -198,23 +198,9 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add("-Wno-pragma-once-outside-header")
         args.add("-Wno-unused")
 
-        # TODO(cleanup): These paths provide required includes, but if the toolchain was working
-        # properly we wouldn't need them in the first place...
-        # Linux includes
-        # Prefer the newest installed LLVM headers, but keep older fallbacks for developers on
-        # older distro/toolchain packages. Clang's include_next searches this list in order.
-        # As of may '26 llvm head 23, so 24 will be ok for quite a while.
-        for llvm_version in range(24, 18, -1):
-            args.add("-isystem/usr/lib/llvm-{}/include/c++/v1".format(llvm_version))
-        args.add("-isystem/usr/include")
-        args.add("-isystem/usr/include/x86_64-linux-gnu")
-
-        # Keep clang resource headers after glibc headers so include_next from the newest resource
-        # directory cannot skip into an older resource directory with the same include guard.
-        for llvm_version in range(24, 18, -1):
-            args.add("-isystem/usr/lib/llvm-{}/lib/clang/{}/include".format(llvm_version, llvm_version))
-
-        # macOS includes
+        # On Linux, the toolchain's flags locate its standard library, resource and sysroot
+        # headers, which the action takes as inputs. On macOS they come from Xcode, at these paths.
+        # TODO(cleanup): The macOS toolchain's flags should locate them too.
         args.add("-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1")
 
         # Xcode 26.4 bumps the Apple Clang version from 17 to 21, support both for now
@@ -224,7 +210,7 @@ def _clang_tidy_aspect_impl(target, ctx):
 
         inputs = depset(
             direct = [src],
-            transitive = [headers],
+            transitive = [headers, cc_toolchain.all_files],
         )
 
         ctx.actions.run(

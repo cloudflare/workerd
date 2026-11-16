@@ -13,6 +13,30 @@
 namespace workerd::api {
 namespace {
 
+KJ_TEST("Raw key equality returns false when an implementation does not support it") {
+  class SecretKey final: public CryptoKey::Impl {
+   public:
+    SecretKey(): Impl(true, CryptoKeyUsageSet::encrypt()) {}
+    using Impl::equals;
+
+    kj::StringPtr getAlgorithmName() const override {
+      return "test-secret";
+    }
+    CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock&) const override {
+      return CryptoKey::KeyAlgorithm{"test-secret"};
+    }
+    bool equals(const Impl& other) const override {
+      return this == &other;
+    }
+  };
+
+  SecretKey key;
+  const CryptoKey::Impl& impl = key;
+  auto bytes = kj::heapArray<kj::byte>(32);
+  KJ_EXPECT(impl.getType() == "secret");
+  KJ_EXPECT(!impl.equals(bytes));
+}
+
 KJ_TEST("Crypto error conversion") {
   ClearErrorOnReturn clearErrorOnReturn;
 

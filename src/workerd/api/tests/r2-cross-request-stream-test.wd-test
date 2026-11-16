@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-cross-request-stream-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-cross-request-stream-test.js" )
+        ],
+        bindings = [
+          # The puts under test fail before sending anything, so the bucket needs no backend.
+          ( name = "BUCKET", r2Bucket = "r2-cross-request-stream-test" ),
+          ( name = "STREAM_OWNER",
+            service = (name = "r2-cross-request-stream-test", entrypoint = "StreamOwner") ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      )
+    ),
+  ],
+);

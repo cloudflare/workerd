@@ -15,8 +15,4 @@ sh_test(
         "//samples:helloworld/worker.js",
         "//src/workerd/server:workerd",
     ],
-    # Requires curl, which may not be available under remote execution
-    tags = [
-        "no-remote-exec",
-    ],
 )

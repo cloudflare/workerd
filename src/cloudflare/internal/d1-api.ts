@@ -158,31 +158,29 @@ const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database extends wrappedBinding.WrappedBinding {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
-  protected readonly fetcher: Fetcher;
+  readonly #alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
+  readonly #fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {
     super(fetcher);
-    this.fetcher = fetcher;
-    this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
-      this.fetcher
+    this.#fetcher = fetcher;
+    this.#alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
+      this.#fetcher
     );
   }
 
   prepare(query: string): D1PreparedStatement {
-    return new D1PreparedStatement(this.alwaysPrimarySession, query);
+    return new D1PreparedStatement(this.#alwaysPrimarySession, query);
   }
 
   async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
-    return this.alwaysPrimarySession.batch(statements);
+    return this.#alwaysPrimarySession.batch(statements);
   }
 
   async exec(query: string): Promise<D1ExecResult> {
-    return this.alwaysPrimarySession.exec(query);
+    return this.#alwaysPrimarySession.exec(query);
   }
 
   withSession(
@@ -192,7 +190,7 @@ class D1Database extends wrappedBinding.WrappedBinding {
     if (constraintOrBookmark == null || constraintOrBookmark === '') {
       constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
-    return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
+    return new D1DatabaseSession(this.#fetcher, constraintOrBookmark);
   }
 
   /**
@@ -224,33 +222,33 @@ class D1Database extends wrappedBinding.WrappedBinding {
       throw new Error(`D1_ERROR: ${message}`);
     }
 
-    return await fetcherQuery(this.fetcher, request);
+    return await fetcherQuery(this.#fetcher, request);
   }
 
   /**
    * @deprecated
    */
   async dump(): Promise<ArrayBuffer> {
-    return this.alwaysPrimarySession.dump();
+    return this.#alwaysPrimarySession.dump();
   }
 }
 
 class D1DatabaseSession {
-  protected fetcher: Fetcher;
-  protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint | null;
+  readonly #fetcher: Fetcher;
+  #bookmarkOrConstraint: D1SessionBookmarkOrConstraint | null;
 
   constructor(
     fetcher: Fetcher,
     bookmarkOrConstraint: D1SessionBookmarkOrConstraint | null
   ) {
-    this.fetcher = fetcher;
+    this.#fetcher = fetcher;
     // We should neve have received an empty string as a bookmark or constraint, but just be defensive.
     // `null` values are special indicating not to send any bookmark or constraint to the D1 eyeball worker.
     if (bookmarkOrConstraint == null) {
-      this.bookmarkOrConstraint = null;
+      this.#bookmarkOrConstraint = null;
     } else {
-      this.bookmarkOrConstraint = bookmarkOrConstraint.trim();
-      if (!this.bookmarkOrConstraint) {
+      this.#bookmarkOrConstraint = bookmarkOrConstraint.trim();
+      if (!this.#bookmarkOrConstraint) {
         throw new Error('D1_SESSION_ERROR: invalid bookmark or constraint');
       }
     }
@@ -275,7 +273,7 @@ class D1DatabaseSession {
       currentBookmark === null ||
       currentBookmark.localeCompare(newBookmark) < 0
     ) {
-      this.bookmarkOrConstraint = newBookmark;
+      this.#bookmarkOrConstraint = newBookmark;
     }
     return this.getBookmark();
   }
@@ -336,7 +334,7 @@ class D1DatabaseSession {
   // Returns the latest bookmark we received from all responses processed so far.
   // It does not return constraints that might have be passed during the session creation.
   getBookmark(): D1SessionBookmark | null {
-    switch (this.bookmarkOrConstraint) {
+    switch (this.#bookmarkOrConstraint) {
       // First to any replica, and then anywhere that satisfies the bookmark.
       case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
         return null;
@@ -344,7 +342,7 @@ class D1DatabaseSession {
       case D1_SESSION_CONSTRAINT_FIRST_PRIMARY:
         return null;
       default:
-        return this.bookmarkOrConstraint;
+        return this.#bookmarkOrConstraint;
     }
   }
 
@@ -359,8 +357,8 @@ class D1DatabaseSession {
 
     // We send either a constraint, or a bookmark, and the eyeball worker will figure out
     // what to do based on the value. This simulates the same flow as the REST API would behave too.
-    if (this.bookmarkOrConstraint) {
-      h.set(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER, this.bookmarkOrConstraint);
+    if (this.#bookmarkOrConstraint) {
+      h.set(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER, this.#bookmarkOrConstraint);
     }
 
     if (!init) {
@@ -368,7 +366,7 @@ class D1DatabaseSession {
     } else {
       init.headers = h;
     }
-    return this.fetcher.fetch(input, init).then((resp) => {
+    return this.#fetcher.fetch(input, init).then((resp) => {
       const newBookmark = resp.headers.get(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER);
       if (newBookmark) {
         this._updateBookmark(newBookmark);
@@ -460,10 +458,10 @@ class D1DatabaseSession {
     errorPrefix: 'D1_ERROR' | 'D1_EXEC_ERROR' = 'D1_ERROR'
   ): Promise<D1RowsColumns[]> {
     try {
-      const queryParams: QueryRequest = this.bookmarkOrConstraint
-        ? { ...request, bookmark: this.bookmarkOrConstraint }
+      const queryParams: QueryRequest = this.#bookmarkOrConstraint
+        ? { ...request, bookmark: this.#bookmarkOrConstraint }
         : request;
-      const response = await fetcherQuery(this.fetcher, queryParams);
+      const response = await fetcherQuery(this.#fetcher, queryParams);
       if (response.bookmark) {
         this._updateBookmark(response.bookmark);
       }
@@ -593,9 +591,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 }
 
 class D1PreparedStatement {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly dbSession: D1DatabaseSession;
+  readonly #dbSession: D1DatabaseSession;
   readonly statement: string;
   readonly params: unknown[];
 
@@ -604,7 +600,7 @@ class D1PreparedStatement {
     statement: string,
     values?: unknown[]
   ) {
-    this.dbSession = dbSession;
+    this.#dbSession = dbSession;
     this.statement = statement;
     this.params = values || [];
   }
@@ -647,7 +643,7 @@ class D1PreparedStatement {
       );
     });
     return new D1PreparedStatement(
-      this.dbSession,
+      this.#dbSession,
       this.statement,
       transformedValues
     );
@@ -665,16 +661,16 @@ class D1PreparedStatement {
         'db.query.text': this.statement,
         'cloudflare.binding.type': 'D1',
         'cloudflare.d1.query.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
 
       const info = firstIfArray(
         d1BindingJsrpc
-          ? await this.dbSession._queryOrThrow(
+          ? await this.#dbSession._queryOrThrow(
               { queries: [{ sql: this.statement, params: this.params }] },
               span
             )
-          : await this.dbSession._sendOrThrow<Record<string, T>>(
+          : await this.#dbSession._sendOrThrow<Record<string, T>>(
               '/query',
               this.statement,
               this.params,
@@ -685,7 +681,7 @@ class D1PreparedStatement {
 
       span.setAttributes({
         'cloudflare.d1.response.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
       addD1MetaToSpan(span, info.meta);
 
@@ -719,16 +715,16 @@ class D1PreparedStatement {
         'db.query.text': this.statement,
         'cloudflare.binding.type': 'D1',
         'cloudflare.d1.query.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
 
       const result = firstIfArray(
         d1BindingJsrpc
-          ? await this.dbSession._queryOrThrow(
+          ? await this.#dbSession._queryOrThrow(
               { queries: [{ sql: this.statement, params: this.params }] },
               span
             )
-          : await this.dbSession._sendOrThrow<T>(
+          : await this.#dbSession._sendOrThrow<T>(
               '/execute',
               this.statement,
               this.params,
@@ -739,7 +735,7 @@ class D1PreparedStatement {
 
       span.setAttributes({
         'cloudflare.d1.response.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
       addD1MetaToSpan(span, result.meta);
       return d1BindingJsrpc ? toArrayOfObjects(result) : result;
@@ -754,16 +750,16 @@ class D1PreparedStatement {
         'db.query.text': this.statement,
         'cloudflare.binding.type': 'D1',
         'cloudflare.d1.query.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
 
       const result = firstIfArray(
         d1BindingJsrpc
-          ? await this.dbSession._queryOrThrow(
+          ? await this.#dbSession._queryOrThrow(
               { queries: [{ sql: this.statement, params: this.params }] },
               span
             )
-          : await this.dbSession._sendOrThrow<T[]>(
+          : await this.#dbSession._sendOrThrow<T[]>(
               '/query',
               this.statement,
               this.params,
@@ -774,7 +770,7 @@ class D1PreparedStatement {
 
       span.setAttributes({
         'cloudflare.d1.response.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
       addD1MetaToSpan(span, result.meta);
 
@@ -790,12 +786,12 @@ class D1PreparedStatement {
         'db.query.text': this.statement,
         'cloudflare.binding.type': 'D1',
         'cloudflare.d1.query.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
 
       if (d1BindingJsrpc) {
         const s = firstIfArray(
-          await this.dbSession._queryOrThrow(
+          await this.#dbSession._queryOrThrow(
             { queries: [{ sql: this.statement, params: this.params }] },
             span
           )
@@ -803,7 +799,7 @@ class D1PreparedStatement {
 
         span.setAttributes({
           'cloudflare.d1.response.bookmark':
-            this.dbSession.getBookmark() ?? undefined,
+            this.#dbSession.getBookmark() ?? undefined,
         });
         addD1MetaToSpan(span, s.meta);
 
@@ -814,7 +810,7 @@ class D1PreparedStatement {
       }
 
       const s = firstIfArray(
-        await this.dbSession._sendOrThrow<Record<string, unknown>>(
+        await this.#dbSession._sendOrThrow<Record<string, unknown>>(
           '/query',
           this.statement,
           this.params,
@@ -825,7 +821,7 @@ class D1PreparedStatement {
 
       span.setAttributes({
         'cloudflare.d1.response.bookmark':
-          this.dbSession.getBookmark() ?? undefined,
+          this.#dbSession.getBookmark() ?? undefined,
       });
       addD1MetaToSpan(span, s.meta);
 

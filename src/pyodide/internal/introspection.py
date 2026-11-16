@@ -1,3 +1,6 @@
+# The runtime imports this module from JavaScript under a name that includes a hash of this file
+# (`INTROSPECTION_MODULE` in python.ts).
+
 import signal
 import sys
 from inspect import isawaitable, isclass

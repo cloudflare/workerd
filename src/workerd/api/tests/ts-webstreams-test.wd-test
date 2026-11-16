@@ -7,9 +7,6 @@ const unitTests :Workerd.Config = (
     ( name = "ts-webstreams-test", worker = .worker ),
     ( name = "ts-webstreams-test-target", worker = .worker ),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-  ],
 );
 
 const worker :Workerd.Worker = (

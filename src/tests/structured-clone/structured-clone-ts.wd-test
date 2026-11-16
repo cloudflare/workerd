@@ -2,8 +2,7 @@ using Workerd = import "/workerd/workerd.capnp";
 using StructuredCloneModules = import "structured-clone-modules.capnp";
 
 # Runs the structuredClone suite against the TypeScript implementation, with
-# byte-for-byte the same modules as structured-clone-cpp.wd-test. The flag
-# needs the per-isolate bootstrap autogate.
+# byte-for-byte the same modules as structured-clone-cpp.wd-test.
 
 const unitTests :Workerd.Config = (
   services = [
@@ -16,8 +15,5 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-  ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
   ],
 );

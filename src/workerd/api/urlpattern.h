@@ -101,6 +101,9 @@ class URLPattern final: public jsg::Object {
 #undef V
     JSG_METHOD(test);
     JSG_METHOD(exec);
+
+    // Declared in types/defines/urlpattern.d.ts.
+    JSG_TS_OVERRIDE(type URLPattern = never);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

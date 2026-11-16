@@ -26,6 +26,7 @@ kj::Own<kj::AsyncInputStream> newMemoryInputStream(
 class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted {
  public:
   virtual void neuter(kj::Exception ex) = 0;
+  virtual bool isNeutered() const = 0;
 };
 
 class NeuterableIoStream: public kj::AsyncIoStream, public kj::Refcounted {

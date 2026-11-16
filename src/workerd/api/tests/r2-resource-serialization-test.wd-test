@@ -1,0 +1,46 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Native R2 resources cross an ordinary service binding independently of the named-method R2
+# binding transport. The platform Worker obtains them from its native HTTP R2 binding.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "user", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "platform", entrypoint = "ResourceSerializationEntrypoint")),
+        (name = "PLATFORM",
+         service = (name = "platform", entrypoint = "ResourceSerializationEntrypoint")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
+                            "fetcher_no_get_put_delete"],
+    )),
+    (name = "platform", worker = .platformWorker),
+  ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = "export { resourceSerializationTests } from './test.js';"),
+  (name = "test.js", esModule = embed "r2-resource-serialization-test.js"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+  (name = "r2-observed-binding.js",
+   esModule = embed "r2-binding-service/r2-observed-binding.js"),
+];
+
+# Exports no test handlers, so the test runner does not run the tests in the dependency modules.
+const platformWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker",
+     esModule = "import mock from './r2-test.js'; export { ResourceSerializationEntrypoint } from './test.js'; export default { fetch: mock.fetch };"),
+    (name = "test.js", esModule = embed "r2-resource-serialization-test.js"),
+    (name = "r2-test.js", esModule = embed "r2-test.js"),
+    (name = "r2-observed-binding.js",
+     esModule = embed "r2-binding-service/r2-observed-binding.js"),
+  ],
+  bindings = [
+    (name = "REAL_BUCKET", r2Bucket = "platform"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
+                        "r2_list_honor_include"],
+);

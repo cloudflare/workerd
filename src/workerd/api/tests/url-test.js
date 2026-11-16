@@ -376,7 +376,8 @@ export const urlSearchParamsInit3 = {
     // contents are ignored but can still be interpreted as
     // a dictionary.
     const search1 = new URLSearchParams('a=b');
-    search1[Symbol.iterator] = undefined;
+    // Not enumerable: WebIDL converts an enumerable Symbol key, which throws.
+    Object.defineProperty(search1, Symbol.iterator, { value: undefined });
     search1.y = 'z';
     const search2 = new URLSearchParams(search1);
     ok(!search2.has('a'));
@@ -400,7 +401,8 @@ export const urlSearchParamsInit5 = {
   test() {
     const formdata = new FormData();
     formdata.append('a', 'b');
-    formdata[Symbol.iterator] = undefined;
+    // Not enumerable: WebIDL converts an enumerable Symbol key, which throws.
+    Object.defineProperty(formdata, Symbol.iterator, { value: undefined });
     const search2 = new URLSearchParams(formdata);
     ok(!search2.has('a'));
   },

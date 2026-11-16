@@ -97,11 +97,12 @@ class NeuterableInputStreamImpl final: public NeuterableInputStream {
 
   void neuter(kj::Exception exception) override {
     if (inner.is<kj::AsyncInputStream*>()) {
-      inner = exception.clone();
-      if (!canceler.isEmpty()) {
-        canceler.cancel(kj::mv(exception));
-      }
+      canceler.cancel(inner.init<kj::Exception>(kj::mv(exception)));
     }
+  }
+
+  bool isNeutered() const override {
+    return inner.is<kj::Exception>();
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -144,10 +145,7 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
 
   void neuter(kj::Exception reason) override {
     if (inner.is<kj::AsyncIoStream*>()) {
-      inner = reason.clone();
-      if (!canceler.isEmpty()) {
-        canceler.cancel(kj::mv(reason));
-      }
+      canceler.cancel(inner.init<kj::Exception>(kj::mv(reason)));
     }
   }
 

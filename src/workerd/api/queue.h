@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/basics.h>
+#include <workerd/api/events.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
@@ -130,6 +131,9 @@ class WorkerQueue: public jsg::Object {
       const jsg::TypeHandler<SendBatchResponse>& responseHandler);
 
   jsg::Promise<Metrics> metrics(jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler);
+
+  // A binding transfers through a startup snapshot as its channel number.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
   JSG_RESOURCE_TYPE(WorkerQueue, CompatibilityFlags::Reader flags) {
     JSG_METHOD(metrics);

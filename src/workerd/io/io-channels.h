@@ -39,6 +39,10 @@ WD_STRONG_BOOL(IsActorRetry);
 // Whether the sender's enforce gate is enabled for this logical call.
 WD_STRONG_BOOL(ActorRetryGateEnabled);
 
+// Whether a request comes from the work of a Durable Object being handed off
+// (`SubrequestMetadata::fromHandoff`).
+WD_STRONG_BOOL(FromHandoff);
+
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
 class CacheClient {
@@ -200,6 +204,21 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the request. See
     // `WorkerEntrypoint::construct()`.
     Persistent fromPersistentStub = Persistent::NO;
+
+    // The draining cluster node that sent this request on to a peer, which may pass it on further.
+    // As that node is letting its Durable Objects go, the peers do not route the request back there
+    // on a route from before its handoff.
+    kj::Maybe<kj::String> forwardedBy;
+
+    // Whether the work of a Durable Object being handed off made this request, directly or through
+    // other Durable Objects' requests. A cluster node handing an object off admits such requests
+    // to it, and holds the others until the object has moved.
+    FromHandoff fromHandoff = FromHandoff::NO;
+
+    // The Durable Objects whose work made this request, directly or through other Durable Objects'
+    // requests, named as the server names them. A cluster node also admits a request to an object
+    // it hands off if one of these is an object it hands off.
+    kj::Array<kj::String> causedBy;
 
     // Address of the client as IP:port on whose behalf this request is being made.
     kj::Maybe<kj::String> clientAddress;

@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           "typescript_implemented_streams",
           "expose_draining_reader",
           "experimental",
+          "fetch_iterable_type_support",
           "enable_weak_ref",
         ],
         bindings = [
@@ -22,9 +23,6 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-  ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
   ],
   # For gc.js.
   v8Flags = ["--expose-gc"],

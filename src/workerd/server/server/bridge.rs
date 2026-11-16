@@ -12,9 +12,10 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers` and `rewriting_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
 )]
 
+pub use crate::actor::MovedHook;
 pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
@@ -25,12 +26,16 @@ pub use crate::channels::ServerHandle;
 pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
+pub use crate::cluster::Committer;
+pub use crate::cluster::ResultTask;
+pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
 pub use crate::entry::run_pending_command;
 pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 
@@ -164,6 +169,16 @@ pub mod ffi {
         root_key: String,
         /// A facet's number within its root actor's storage; none for a root actor.
         facet_id: KjMaybe<u32>,
+        /// The cluster replicates the actor's commits: each waits for `Committer::commit`.
+        replicated: bool,
+    }
+
+    /// What an alarm does when another instance owns its object: runs again later, a retry
+    /// that counts against no limit, or is done.
+    #[repr(u8)]
+    enum AlarmElsewhere {
+        Retry,
+        Done,
     }
 
     /// What a channel token is for (`IoChannelFactory::ChannelTokenUsage`): restoring a stub over
@@ -228,6 +243,16 @@ pub mod ffi {
         /// "release", "debug", or "sanitizer".
         build_mode: String,
         v8_version: String,
+    }
+
+    #[namespace = "workerd"]
+    unsafe extern "C++" {
+        include!("workerd/util/thread-scopes.h");
+
+        /// Whether the process runs `workerd bench`, which turns bench mode on before any worker
+        /// compiles.
+        #[cxx_name = "isBenchMode"]
+        fn is_bench_mode() -> bool;
     }
 
     #[namespace = "kj_rs_tokio"]
@@ -343,6 +368,17 @@ pub mod ffi {
             config_service: KjMaybe<u32>,
             dynamic_source: KjMaybe<KjOwn<DynamicSource>>,
         ) -> Result<KjOwn<CompiledWorker>>;
+        /// Times starting the config's worker `services[config_service]`, which `spec` compiled,
+        /// for `workerd bench`: compiles and destroys throwaway copies of it in new isolates, as
+        /// `params` (an encoded `BenchParams` message, bench.capnp, in words) ask. Returns the
+        /// startup `BenchReport.Group` of the timings, encoded, without its name. A copy that
+        /// fails to start fails the group; an error means it could not be run at all.
+        async fn factory_bench_startup(
+            factory: &WorkerFactory,
+            spec: &WorkerSpec,
+            config_service: u32,
+            params: &[u64],
+        ) -> Result<Vec<u64>>;
 
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.
@@ -370,6 +406,18 @@ pub mod ffi {
             metadata: KjOwn<RequestMetadata>,
             tails: Box<WorkerInterfaceList>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Runs an idle actor's captured hook and flushes its writes, without starting a request
+        /// through the container's retirement gate or counting the actor as active. `tails`
+        /// receive the hook's trace, as they would a request's on `class_name`. Only
+        /// `metadata`'s self token is used.
+        async fn worker_run_actor_on_hibernate(
+            worker: &CompiledWorker,
+            actor: &ActorHandle,
+            class_name: &str,
+            channels: Box<ChannelFactory>,
+            tails: Box<WorkerInterfaceList>,
+            metadata: KjOwn<RequestMetadata>,
+        ) -> Result<()>;
         /// `inner` with `keep` attached: dropped once `inner` has been.
         fn worker_interface_attach(
             inner: KjOwn<WorkerInterface>,
@@ -408,6 +456,8 @@ pub mod ffi {
         /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
         /// actor is shut down instead: its background work stops, and nothing is failed.
         fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
+        fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
         /// it on behalf of.
         type ActorLock;
@@ -423,6 +473,8 @@ pub mod ffi {
         ) -> Result<bool>;
         /// Resets the actor's SQLite database while its connection is open (`deleteAllActors`).
         fn actor_reset_storage(actor: &ActorHandle);
+        /// Closes the actor's database, if it has one; later use of it throws.
+        fn actor_close_storage(actor: &ActorHandle);
         /// The actor's hibernation manager, to hand to the actor that replaces it after eviction.
         fn actor_hibernation_manager(actor: &ActorHandle) -> KjMaybe<KjRc<HibernationManager>>;
         type HibernationManager;
@@ -455,6 +507,17 @@ pub mod ffi {
         ) -> Result<KjOwn<ActorStorage>>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
+        /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
+        /// is `name`, empty for none, unless one is scheduled no later.
+        fn actor_storage_set_alarm(
+            storage: &ActorStorage,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Result<()>;
+        /// What an alarm runs on when another instance owns its object: nothing, and then
+        /// `then`.
+        fn alarm_owned_elsewhere(then: AlarmElsewhere) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -480,10 +543,22 @@ pub mod ffi {
             parent_facet_id: KjMaybe<u32>,
             name: &str,
         ) -> Result<KjMaybe<u32>>;
+        /// Removes the root actor `root_key`'s databases, its facets', and their index.
+        fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
+        /// Shuts down the Docker client of root actor `actor`'s container, in the namespace
+        /// `unique_key`, and resolves once Docker has removed the container.
+        async fn factory_stop_container(
+            factory: &WorkerFactory,
+            unique_key: &str,
+            actor: &str,
+        ) -> Result<()>;
+        /// Gives `metadata` what made it when an actor's work makes it: the actor's
+        /// `ActorHooks::stamp_cause`.
+        fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);
 
         /// The source of a dynamic worker, as the worker that loads it supplies it; handed
         /// straight to `factory_new_worker`.
@@ -502,6 +577,20 @@ pub mod ffi {
         fn request_metadata_set_from_persistent_stub(
             metadata: Pin<&mut RequestMetadata>,
             persistent: bool,
+        );
+        /// The draining cluster node that sent the request on.
+        fn request_metadata_forwarded_by(metadata: &RequestMetadata) -> KjMaybe<String>;
+        /// Names this draining node as the one that sent the request on.
+        fn request_metadata_set_forwarded_by(metadata: Pin<&mut RequestMetadata>, node: &str);
+        /// Whether the work of an object being handed off made the request, as its maker said.
+        fn request_metadata_from_handoff(metadata: &RequestMetadata) -> bool;
+        /// The objects whose work made the request, as its maker said.
+        fn request_metadata_caused_by(metadata: &RequestMetadata) -> Vec<String>;
+        /// Sets what made the request, also for a peer it is sent to.
+        fn request_metadata_set_cause(
+            metadata: Pin<&mut RequestMetadata>,
+            from_handoff: bool,
+            caused_by: Vec<String>,
         );
         /// Makes stubs the request creates for the actor itself restorable: they encode the
         /// actor's namespace and id.
@@ -559,6 +648,15 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
+        /// An actor on a cluster peer, by `WorkerdDebugPort.getActor` over `session`, a peer
+        /// session from `new_rpc_client`. Pipelined: no round trip until its first event. It
+        /// keeps the session alive.
+        fn rpc_client_debug_actor(
+            session: &RpcClient,
+            service: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> KjOwn<RpcClient>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -567,6 +665,30 @@ pub mod ffi {
             cf_blob_json: KjMaybe<&str>,
         ) -> Result<CustomEventResult>;
         async fn rpc_client_on_disconnect(client: &RpcClient);
+        /// Starts an event on the peer's `WorkerdBootstrap`: HTTP, WebSockets and JS RPC all
+        /// cross as capnp. The client must outlive the returned interface.
+        fn rpc_client_start_request(
+            client: &RpcClient,
+            metadata: KjOwn<RequestMetadata>,
+        ) -> KjOwn<WorkerInterface>;
+        /// `inner`, calling `hook.moved()` on each of its events that fails with a `moved`
+        /// answer (`cluster::moved`).
+        fn worker_interface_watch_moved(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
+        /// marked as before or after delivery is marked as after it, and one that is a
+        /// disconnect calls `hook.lost()`.
+        fn worker_interface_watch_peer(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+
+        /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+        /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+        fn request_not_delivered_detail_id() -> u64;
+        fn actor_predecessor_rejected_detail_id() -> u64;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -575,7 +697,12 @@ pub mod ffi {
         // The listeners' shims (worker-factory-listen.c++).
 
         /// A copy of `headers` with `edits` and then `injected` applied in order.
-        fn edit_headers(
+        ///
+        /// # Safety
+        ///
+        /// The copy keeps a reference to the header table of `headers`, which the `KjOwn` does
+        /// not carry: the caller keeps that table alive for as long as the copy exists.
+        unsafe fn edit_headers(
             table: &HttpHeaderTable,
             headers: &HttpHeaders,
             edits: &[HeaderEdit],
@@ -671,6 +798,8 @@ pub mod ffi {
             params: &'a [u64],
         ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
+        fn add_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
+        fn add_skipped_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
         async unsafe fn accept<'a>(
@@ -685,6 +814,18 @@ pub mod ffi {
         /// `task_run` is the promise the task set holds.
         type SpawnedTask;
         async fn task_run(task: Box<SpawnedTask>) -> Result<()>;
+
+        /// The bytes of Pyodide bundle `version` (pyodide.rs): read from the disk cache in
+        /// `cache_dir`, else downloaded and written to the cache. Empty when there is no bundle
+        /// to be had; a bundle is never empty.
+        // TODO(cleanup): Return `KjMaybe<Vec<u8>>` rather than an empty `Vec` for no bundle, once
+        // the cxx fork's `KjMaybe` supports `Vec` (`check_type_kj_maybe` in
+        // src/rust/cxx/syntax/check.rs).
+        async unsafe fn pyodide_bundle_fetch<'a>(
+            cache_dir: KjMaybe<&'a str>,
+            version: &'a str,
+            integrity: &'a str,
+        ) -> Result<Vec<u8>>;
 
         /// The server, for the factory's callbacks: resolving channel tokens and debug-port
         /// requests to channels. A weak handle: the server owns the factory, and every call
@@ -820,6 +961,32 @@ pub mod ffi {
             self: &ActorNamespaceHandle,
             id: KjOwn<ActorIdHandle>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Whether the cluster replicates the namespace's actors.
+        fn replicated(self: &ActorNamespaceHandle) -> bool;
+        /// Called as SQLite opens one of the namespace's files: fails once this instance's
+        /// cluster lease has lapsed.
+        fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
+        /// A write SQLite made to one of the namespace's WAL files.
+        fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);
+        /// The database `file`, a root actor's or a facet's, was deleted with the facet's
+        /// descendants.
+        fn database_reset(self: &ActorNamespaceHandle, file: &str);
+        /// Indexes root actor `actor`'s alarm at `at_ms` (0: cleared) in the cluster: done once
+        /// a peer would find it.
+        fn alarm_set(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
+        /// Indexes the alarm at `at_ms` that root actor `actor` came with as it opened here,
+        /// unless one is indexed no later.
+        fn alarm_opened(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.
@@ -840,10 +1007,23 @@ pub mod ffi {
         fn abort_facet(self: &ActorHooks, name: &str, reason: &Exception);
         fn delete_facet(self: &ActorHooks, name: &str) -> Result<()>;
         fn clone_facet(self: &ActorHooks, src: &str, dst: &str) -> Result<()>;
+        /// Whether the cluster replicates the actor's storage.
+        fn replicated(self: &ActorHooks) -> bool;
         /// The actor's first request started.
         fn active(self: &ActorHooks);
         /// The actor's last request ended.
         fn inactive(self: &ActorHooks);
+        /// What makes the actor's commits durable, when the cluster replicates it.
+        fn committer(self: &ActorHooks) -> Result<Box<Committer>>;
+        /// Gives a request the actor's work makes what made it (`Cause`).
+        fn stamp_cause(self: &ActorHooks, metadata: Pin<&mut RequestMetadata>);
+
+        type Committer;
+        /// Makes the commits captured so far durable.
+        fn commit(self: &Committer) -> Box<ResultTask>;
+        /// A Rust future C++ awaits with `result_task_run`.
+        type ResultTask;
+        async fn result_task_run(task: Box<ResultTask>) -> Result<()>;
 
         /// The reason of an `actor_abort`. `raise` returns it as the `Err`, which C++ catches as
         /// the equivalent `kj::Exception`; `Ok` when there is none.
@@ -852,6 +1032,12 @@ pub mod ffi {
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
+
+        /// What a stub forgets when the instance it reached answers that the object moved
+        /// (`worker_interface_watch_moved`).
+        type MovedHook;
+        fn moved(self: &MovedHook);
+        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.
@@ -893,6 +1079,36 @@ pub fn rewriting_response<'a>(
     Ok(RewritingResponse {
         response,
         _inner: std::marker::PhantomData,
+    })
+}
+
+/// The headers `edit_headers` returns. Borrows the headers they were copied from, whose header
+/// table they share.
+pub struct EditedHeaders<'a> {
+    headers: kj_rs::KjOwn<ffi::HttpHeaders>,
+    _source: std::marker::PhantomData<&'a ffi::HttpHeaders>,
+}
+
+impl std::ops::Deref for EditedHeaders<'_> {
+    type Target = ffi::HttpHeaders;
+
+    fn deref(&self) -> &ffi::HttpHeaders {
+        &self.headers
+    }
+}
+
+/// See `ffi::edit_headers`.
+pub fn edit_headers<'a>(
+    table: &ffi::HttpHeaderTable,
+    headers: &'a ffi::HttpHeaders,
+    edits: &[ffi::HeaderEdit],
+    injected: &[ffi::HeaderEdit],
+) -> crate::Result<EditedHeaders<'a>> {
+    // SAFETY: the wrapper returned borrows `headers`, and their table outlives them.
+    let headers = unsafe { ffi::edit_headers(table, headers, edits, injected) }?;
+    Ok(EditedHeaders {
+        headers,
+        _source: std::marker::PhantomData,
     })
 }
 

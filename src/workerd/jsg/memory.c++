@@ -164,6 +164,34 @@ MemoryRetainerNode* MemoryTracker::pushNode(
   return n;
 }
 
+bool MemoryTracker::pushRetainer(const void* address,
+    const void* type,
+    kj::StringPtr name,
+    size_t size,
+    kj::StringPtr edgeName) {
+  if (address != nullptr) {
+    RetainerKey key{address, type};
+    KJ_IF_SOME(found, seenRetainers_.find(key)) {
+      addEdge(found, edgeName);
+      return false;
+    }
+    MemoryRetainerNode* n = pushNode(name, size, edgeName);
+    seenRetainers_.insert(key, n);
+  } else {
+    pushNode(name, size, edgeName);
+  }
+  return true;
+}
+
+void MemoryTracker::pushContainer(kj::StringPtr name, size_t size, kj::StringPtr edgeName) {
+  pushNode(name, size, edgeName);
+}
+
+void MemoryTracker::popNode() {
+  KJ_DASSERT(!nodeStack_.empty(), "popNode() without a node pushed");
+  if (!nodeStack_.empty()) nodeStack_.pop();
+}
+
 void MemoryTracker::decCurrentNodeSize(size_t size) {
   KJ_IF_SOME(currentNode, getCurrentNode(nodeStack_)) {
     currentNode.size_ -= size;

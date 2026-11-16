@@ -1,0 +1,62 @@
+name: 'Set up bazelflare'
+description: 'Configures Bazel for bazelflare remote execution, restoring what earlier jobs cached'
+inputs:
+  save_cache:
+    description: 'Whether the job saves the cache when its key is new'
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    # bazelflare serves every action from its own cache, but each external repository Bazel reads
+    # from it costs a few round trips, and Bazel loads many of them one after another before it
+    # analyzes anything; from a fresh output base, analysis takes about 4x as long without a disk
+    # cache holding them. The repository cache's downloads are those of the repositories that
+    # bazelflare can't hold, such as the Python toolchain. The output base's lockfile holds the
+    # results of the module extensions that MODULE.bazel.lock leaves out, which Bazel would
+    # otherwise evaluate again; crate_universe's fetches a Rust toolchain to do so. The bazelflare
+    # jobs share one cache, keyed on the files that define the repositories and the extensions'
+    # inputs. When those change, a job starts from the newest cache instead: its entries are
+    # content-addressed, so the stale ones are only unused, and the jobs drop those before saving
+    # (see _bazel.yml).
+    - name: Cache external repositories
+      if: inputs.save_cache == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/bazel-disk-cache
+          ~/bazel-repository-cache/content_addressable
+          ~/bazel-output-base/MODULE.bazel.lock
+        key: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', 'MODULE.bazel.lock', 'deps/**', 'build/deps/**', 'pnpm-lock.yaml') }}
+        restore-keys: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-
+    - name: Restore external repositories
+      if: inputs.save_cache != 'true'
+      uses: actions/cache/restore@v5
+      with:
+        # The same as the cache's.
+        path: |
+          ~/bazel-disk-cache
+          ~/bazel-repository-cache/content_addressable
+          ~/bazel-output-base/MODULE.bazel.lock
+        key: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', 'MODULE.bazel.lock', 'deps/**', 'build/deps/**', 'pnpm-lock.yaml') }}
+        restore-keys: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-
+    - name: Configure bazelflare
+      shell: bash
+      run: |
+        # .bazelrc holds the bazelflare config and imports .local/bazelrc, where the runner's own
+        # settings go, as a workstation's would, so that every Bazel command the job runs shares
+        # them: the output base, and the disk and repository caches that the cache holds. The job
+        # authenticates with its OIDC token (build/bazelflare/credential-helper),
+        # so it needs `id-token: write`. main's own builds (a push or a dispatch on main) use the
+        # trusted instance, whose cache only they write and every client reads; bazelflare checks
+        # the job's OIDC token for the same and refuses any other job there.
+        : "${ACTIONS_ID_TOKEN_REQUEST_URL:?bazelflare needs the job to have id-token: write}"
+        mkdir -p .local
+        {
+          echo "startup --output_base=$HOME/bazel-output-base"
+          echo "build:bazelflare --disk_cache=~/bazel-disk-cache"
+          echo "build:bazelflare --repository_cache=~/bazel-repository-cache"
+          if [[ $GITHUB_REF == refs/heads/main && $GITHUB_EVENT_NAME =~ ^(push|workflow_dispatch)$ ]]; then
+            echo "build:bazelflare --remote_instance_name=trusted"
+          fi
+        } > .local/bazelrc

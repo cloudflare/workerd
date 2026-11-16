@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cormick Holland <cormick@cloudflare.com>
+Date: Wed, 4 Nov 2026 00:10:59 +0000
+Subject: [PATCH] [snapshot] Keep functions created by v8::Function::New() in
+ the context snapshot
+
+v8::Function::New() creates a function template that is not cacheable
+and instantiates it once, in one context. Its callback data, and so the
+template, can be specific to that context: embedders commonly pass a
+wrapper object of their own as the data. The context serializer still
+sent the template and the function's SharedFunctionInfo to the startup
+object cache, so the startup serializer serialized the callback data:
+- A debug build aborted once it reached a JSFunction ("JSFunction should
+  be added through the context snapshot instead of the isolate
+  snapshot"), e.g. the constructor of a wrapper object's map.
+- An API wrapper object among the data lost its CppHeap pointer without
+  the embedder's SerializeAPIWrapperCallback or
+  SerializeInternalFieldsCallback being called, so a function restored
+  from the snapshot could not reach its native state.
+
+Keep such a template, and the SharedFunctionInfo of an API function
+created from it, in the context snapshot.
+---
+ src/snapshot/context-serializer.cc | 32 ++++++++++++++++++++++++++++--
+ src/snapshot/context-serializer.h  |  2 ++
+ 2 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/src/snapshot/context-serializer.cc b/src/snapshot/context-serializer.cc
+index 5c1996d0ea2..3c2605a3588 100644
+--- a/src/snapshot/context-serializer.cc
++++ b/src/snapshot/context-serializer.cc
+@@ -14,7 +14,9 @@
+ #include "src/objects/heap-object-field-inl.h"
+ #include "src/objects/js-objects.h"
+ #include "src/objects/objects-inl.h"
++#include "src/objects/shared-function-info-inl.h"
+ #include "src/objects/slots.h"
++#include "src/objects/templates-inl.h"
+ #include "src/snapshot/serializer-deserializer.h"
+ #include "src/snapshot/startup-serializer.h"
+ 
+@@ -149,8 +151,9 @@ void ContextSerializer::SerializeObjectImpl(Handle<HeapObject> obj,
+   // All the internalized strings that the context snapshot needs should be
+   // either in the root table or in the shared heap object cache.
+   DCHECK(!IsInternalizedString(*obj));
+-  // Function and object templates are not context specific.
+-  DCHECK(!IsTemplateInfo(*obj));
++  // Function and object templates are not context specific, except for the
++  // function templates that belong to a single function.
++  DCHECK_IMPLIES(IsTemplateInfo(*obj), IsSingleFunctionTemplate(*obj));
+ 
+   InstanceType instance_type = obj->map()->instance_type();
+   if (InstanceTypeChecker::IsFeedbackVector(instance_type)) {
+@@ -219,7 +222,32 @@ void ContextSerializer::SerializeObjectImpl(Handle<HeapObject> obj,
+   }
+ }
+ 
++// static
++bool ContextSerializer::IsSingleFunctionTemplate(Tagged<HeapObject> o) {
++  // v8::Function::New() creates a function template that is not cacheable and
++  // instantiates it once, in one context. Its callback data, and so the
++  // template, can be specific to that context: an embedder commonly passes a
++  // wrapper object of its own as the data. An object template's call handler
++  // is not cacheable either, but it is only reachable through its (cacheable)
++  // object template.
++  if (!IsFunctionTemplateInfo(o)) return false;
++  Tagged<FunctionTemplateInfo> info = Cast<FunctionTemplateInfo>(o);
++  return !info->is_cacheable() && !info->is_object_template_call_handler();
++}
++
+ bool ContextSerializer::ShouldBeInTheStartupObjectCache(Tagged<HeapObject> o) {
++  // A function created by v8::Function::New() belongs to the context it was
++  // created in, along with its template and SharedFunctionInfo: they go into
++  // the context snapshot, where the template's callback data is serialized
++  // with the embedder's callbacks like any other object of the context.
++  if (IsSingleFunctionTemplate(o)) return false;
++  if (IsSharedFunctionInfo(o)) {
++    Tagged<SharedFunctionInfo> shared = Cast<SharedFunctionInfo>(o);
++    if (shared->IsApiFunction() &&
++        IsSingleFunctionTemplate(shared->api_func_data())) {
++      return false;
++    }
++  }
+   // We can't allow scripts to be part of the context snapshot because they
+   // contain a unique ID, and deserializing several context snapshots containing
+   // script would cause dupes.
+diff --git a/src/snapshot/context-serializer.h b/src/snapshot/context-serializer.h
+index df1363a9d31..306f07cb877 100644
+--- a/src/snapshot/context-serializer.h
++++ b/src/snapshot/context-serializer.h
+@@ -32,6 +32,8 @@ class V8_EXPORT_PRIVATE ContextSerializer : public Serializer {
+  private:
+   void SerializeObjectImpl(Handle<HeapObject> o, SlotType slot_type) override;
+   bool ShouldBeInTheStartupObjectCache(Tagged<HeapObject> o);
++  // Whether `o` is the template of a function created by v8::Function::New().
++  static bool IsSingleFunctionTemplate(Tagged<HeapObject> o);
+   void CheckRehashability(Tagged<HeapObject> obj);
+ 
+   template <typename V8Type, typename UserSerializerWrapper,

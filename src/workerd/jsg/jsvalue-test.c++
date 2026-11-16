@@ -91,6 +91,50 @@ struct JsValueContext: public ContextGlobalObject {
     return obj.getPrototype(js);
   }
 
+  // kj::str() of `object` after giving it `name` and `message` as an error implemented in the
+  // per-isolate bootstrap holds them.
+  kj::String describeWithErrorSlots(Lock& js, JsObject object, JsValue name, JsValue message) {
+    object.setPrivate(js, ERROR_NAME_KEY, name);
+    object.setPrivate(js, ERROR_MESSAGE_KEY, message);
+    return kj::str(object);
+  }
+
+  // Checks that writeInto(), given a buffer of `size` elements and `flags`, copies as many of the
+  // string's characters as fit, then a terminator if NULL_TERMINATION is set; that it reports the
+  // characters as read and everything it wrote as written; and that it leaves the rest of the
+  // buffer, and a guard element just past it, untouched.
+  bool checkWriteIntoPrefix(Lock& js, JsString str, uint32_t size, uint32_t flags) {
+    auto options = static_cast<JsString::WriteFlags>(flags);
+    size_t terminator = (size > 0 && (options & JsString::NULL_TERMINATION)) ? 1 : 0;
+    size_t read = kj::min(size - terminator, static_cast<size_t>(str.length(js)));
+    size_t written = read + terminator;
+    auto contents = str.toArray<uint16_t>(js);
+
+    auto utf16 = kj::heapArray<uint16_t>(size + 1);
+    utf16.asPtr().fill(0xffff);
+    auto utf16Status = str.writeInto(js, utf16.first(size), options);
+    KJ_ASSERT(utf16Status.read == read);
+    KJ_ASSERT(utf16Status.written == written);
+    KJ_ASSERT(utf16.first(read) == contents.first(read));
+    if (terminator) {
+      KJ_ASSERT(utf16[read] == 0);
+    }
+    for (auto unit: utf16.slice(written)) KJ_ASSERT(unit == 0xffff);
+
+    auto latin1 = kj::heapArray<kj::byte>(size + 1);
+    latin1.asPtr().fill(0xff);
+    auto latin1Status = str.writeInto(js, latin1.first(size), options);
+    KJ_ASSERT(latin1Status.read == read);
+    KJ_ASSERT(latin1Status.written == written);
+    for (auto i: kj::zeroTo(read)) KJ_ASSERT(latin1[i] == kj::byte(contents[i]));
+    if (terminator) {
+      KJ_ASSERT(latin1[read] == 0);
+    }
+    for (auto byte: latin1.slice(written)) KJ_ASSERT(byte == 0xff);
+
+    return true;
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -108,6 +152,8 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
+    JSG_METHOD(describeWithErrorSlots);
+    JSG_METHOD(checkWriteIntoPrefix);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -152,6 +198,36 @@ KJ_TEST("simple") {
       "boolean", "true");
 }
 
+KJ_TEST("kj::str() describes an object by the error name and message it holds") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  e.expectEval("describeWithErrorSlots({}, 'AbortError', 'boom')", "string", "AbortError: boom");
+  e.expectEval("describeWithErrorSlots({}, 'AbortError', '')", "string", "AbortError");
+  e.expectEval("describeWithErrorSlots({}, '', 'boom')", "string", "boom");
+  // Not by its properties, which V8's ToDetailString() reads, or by a Proxy's traps.
+  e.expectEval("describeWithErrorSlots("
+               "Object.assign(new Error('other'), { name: 'Other' }), 'AbortError', 'boom')",
+      "string", "AbortError: boom");
+  e.expectEval("describeWithErrorSlots("
+               "new Proxy({}, { get() { throw new Error('ran'); } }), 'AbortError', 'boom')",
+      "string", "AbortError: boom");
+  // Unless both are strings, as V8 describes it.
+  e.expectEval("describeWithErrorSlots(new Error('other'), 'AbortError', undefined)", "string",
+      "Error: other");
+  e.expectEval("describeWithErrorSlots(new Error('other'), 42, 'boom')", "string", "Error: other");
+}
+
+KJ_TEST("JsString::writeInto() writes and reports only the prefix that fits") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  for (auto str: {"'h\\u00e9llo'"_kj, "'h\\u20acllo'"_kj}) {
+    for (auto size: {0, 1, 3, 5, 6, 8}) {
+      for (uint32_t flags: {JsString::NONE, JsString::NULL_TERMINATION}) {
+        e.expectEval(
+            kj::str("checkWriteIntoPrefix(", str, ", ", size, ", ", flags, ")"), "boolean", "true");
+      }
+    }
+  }
+}
+
 KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getPrototype") {
   // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-143: a deeply nested chain of
   // Proxy objects with no getPrototypeOf trap caused unbounded native recursion in
@@ -162,6 +238,72 @@ KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getProt
   e.expectEval(
       "let p = function(){}; for (let i = 0; i < 200000; i++) { p = new Proxy(p, {}); } try { checkProxyPrototype(p); 'no error'; } catch (e) { e.constructor.name + ': ' + e.message; }",
       "string", "RangeError: Maximum proxy chain length exceeded in getPrototype");
+}
+
+// Records the external string buffers the isolate asks for.
+class LoggingExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  LoggingExternalStringAllocator(
+      kj::Vector<kj::ArrayPtr<const char>>& allocated, kj::Vector<const void*>& freed)
+      : allocated(allocated),
+        freed(freed) {}
+
+  void* allocate(size_t size) override {
+    // It's a test so we don't mind using new and delete.
+    void* ptr = operator new(size);
+    allocated.add(kj::arrayPtr(static_cast<const char*>(ptr), size));
+    return ptr;
+  }
+  void deallocate(void* ptr) override {
+    freed.add(ptr);
+    operator delete(ptr);
+  }
+
+ private:
+  kj::Vector<kj::ArrayPtr<const char>>& allocated;
+  kj::Vector<const void*>& freed;
+};
+
+KJ_TEST("copyToExternalString copies into the isolate's allocator and frees with the string") {
+  kj::Vector<kj::ArrayPtr<const char>> allocated;
+  kj::Vector<const void*> freed;
+  static constexpr char TEXT[] = "copied text";
+  static constexpr uint16_t WIDE_TEXT[] = {u'w', u'i', u'd', u'e', 0x20ac};
+  auto text = kj::arrayPtr(TEXT, sizeof(TEXT) - 1);
+  auto wideText = kj::arrayPtr(WIDE_TEXT);
+  {
+    JsValueIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>(),
+        kj::heap<LoggingExternalStringAllocator>(allocated, freed));
+    isolate.runInLockScope([&](JsValueIsolate::Lock& js) {
+      auto oneByte = copyToExternalOneByteString(js, text);
+      auto* oneByteResource = oneByte->GetExternalOneByteStringResource();
+      KJ_ASSERT(oneByteResource != nullptr);
+      KJ_EXPECT(oneByteResource->data() != TEXT);
+      KJ_EXPECT(kj::arrayPtr(oneByteResource->data(), oneByteResource->length()) == text);
+
+      auto twoByte = copyToExternalTwoByteString(js, wideText);
+      auto* twoByteResource = twoByte->GetExternalStringResource();
+      KJ_ASSERT(twoByteResource != nullptr);
+      KJ_EXPECT(twoByteResource->data() != WIDE_TEXT);
+      KJ_EXPECT(kj::arrayPtr(twoByteResource->data(), twoByteResource->length()) == wideText);
+
+      KJ_ASSERT(allocated.size() == 2);
+      KJ_EXPECT(allocated[0].begin() == oneByteResource->data());
+      KJ_EXPECT(allocated[0].size() == text.size());
+      KJ_EXPECT(allocated[1].begin() == reinterpret_cast<const char*>(twoByteResource->data()));
+      KJ_EXPECT(allocated[1].size() == wideText.size() * sizeof(uint16_t));
+      KJ_EXPECT(freed.size() == 0);
+
+      // Copying nothing allocates nothing.
+      KJ_EXPECT(copyToExternalOneByteString(js, text.first(0))->Length() == 0);
+      KJ_EXPECT(allocated.size() == 2);
+    });
+  }
+  // Disposing of the isolate disposes of the strings, and with them their buffers.
+  KJ_ASSERT(freed.size() == 2);
+  KJ_EXPECT(freed[0] == allocated[0].begin() || freed[0] == allocated[1].begin());
+  KJ_EXPECT(freed[1] == allocated[0].begin() || freed[1] == allocated[1].begin());
+  KJ_EXPECT(freed[0] != freed[1]);
 }
 
 }  // namespace

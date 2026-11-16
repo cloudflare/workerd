@@ -762,4 +762,15 @@ jsg::Ref<JsRpcPromise> KvNamespace::deleteBulk(const v8::FunctionCallbackInfo<v8
   return method->call(args);
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> KvNamespace::snapshotClone() const {
+  KJ_IF_SOME(channel, subrequestChannel.tryGet<uint>()) {
+    auto headers = KJ_MAP(header, additionalHeaders) {
+      return AdditionalHeader{.name = kj::str(header.name), .value = kj::str(header.value)};
+    };
+    return ownAsWrappable(
+        kj::refcounted<KvNamespace>(kj::str(bindingName), kj::mv(headers), channel));
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api

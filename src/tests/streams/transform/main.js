@@ -124,6 +124,7 @@ export {
   transformExpectedLengthRejected,
   transformExpectedLengthCoercion,
   transformExpectedLengthRange,
+  transformForkContentLength,
 } from 'expected-length';
 
 // Echo handler for the expectedLength fetch-body tests (roundtrip.js,

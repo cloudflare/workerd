@@ -79,8 +79,9 @@ class SpanState: public kj::Refcounted {
   // Returns a snapshot of the span identity. The snapshot remains available after end().
   virtual kj::Maybe<tracing::SpanContext> getSpanContext() = 0;
 
-  // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
-  // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
+  // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has no
+  // observer. Remains valid after end(), so an ended span can still parent new spans. Used by
+  // Tracing methods to push onto the AsyncContextFrame.
   virtual workerd::SpanParent makeSpanParent() = 0;
 
   virtual void updateName(kj::ConstString operationName) = 0;
@@ -177,6 +178,8 @@ class Span: public jsg::Object {
  private:
   kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
+  workerd::SpanParent makeSpanParent();
+
   friend class ::workerd::api::Tracing;
 };
 
@@ -190,10 +193,13 @@ namespace workerd::api {
 // is what shows up in `.d.ts` output and in `typeof ctx.tracing` — historically this was
 // called `TracingModule` back when the API was only reachable via an ES module import;
 // that suffix is vestigial now that it's also a property on `ctx`.
-class Tracing: public jsg::Object {
+class Tracing final: public jsg::Object {
  public:
   Tracing() = default;
   Tracing(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   // Creates a new child span of the current user trace span, pushes it onto the
   // AsyncContextFrame as the active user span, invokes callback(span, ...args), and
@@ -235,11 +241,25 @@ class Tracing: public jsg::Object {
   jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Makes an existing span the active span while invoking callback(...args), then restores the
+  // previous active span. Returns the callback result as-is (a Promise is not awaited) and does not
+  // end the span. Inside the callback and its async continuations, getActiveSpan() returns `span`,
+  // and new user spans and built-in instrumentation (fetch, KV, etc.) are children of it.
+  //
+  // A span with no observer (a no-op span, or any span in an untraced request) has nothing for
+  // children to attach to, so the current user trace parent is left in place.
+  v8::Local<v8::Value> withActiveSpan(jsg::Lock& js,
+      jsg::Ref<user_tracing::Span> span,
+      v8::Local<v8::Function> callback,
+      jsg::Arguments<jsg::Value> args,
+      const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
+    JSG_METHOD(withActiveSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -249,6 +269,7 @@ class Tracing: public jsg::Object {
     // any[]): any` with a properly-typed generic form: the callback's first argument is
     // typed as `Span`, the callback's trailing args flow through to the varargs, and the
     // return value is preserved. Matches the shape documented in the user-tracing RFC.
+    // withActiveSpan() is typed the same way, except that its callback does not receive the span.
     JSG_TS_OVERRIDE({
       enterSpan<T, A extends unknown[]>(
         name: string,
@@ -262,6 +283,11 @@ class Tracing: public jsg::Object {
       ): T;
       startSpan(name: string): Span;
       getActiveSpan(): Span | undefined;
+      withActiveSpan<T, A extends unknown[]>(
+        span: Span,
+        callback: (...args: A) => T,
+        ...args: A
+      ): T;
     });
   }
 };

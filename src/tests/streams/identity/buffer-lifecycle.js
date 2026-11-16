@@ -225,3 +225,33 @@ export const lyingAboutLength = {
     await writer.close();
   },
 };
+
+// A reader may do as it likes with the buffer of a chunk it read: detaching
+// it changes nothing for the stream, the writes it came from, or a tee
+// branch reading the same bytes.
+export const readChunkDetachedByReader = {
+  async test() {
+    for (const teed of [false, true]) {
+      const { readable, writable } = new IdentityTransformStream();
+      const writer = writable.getWriter();
+      const writes = [1, 2, 3].map((n) => writer.write(new Uint8Array([n, n])));
+      const closed = writer.close();
+      const readers = (teed ? readable.tee() : [readable]).map((branch) =>
+        branch.getReader()
+      );
+      for (const reader of readers) {
+        const bytes = [];
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes.push(...value);
+          value.buffer.transfer();
+          strictEqual(value.byteLength, 0);
+        }
+        deepStrictEqual(bytes, [1, 1, 2, 2, 3, 3]);
+      }
+      await Promise.all(writes);
+      await closed;
+    }
+  },
+};

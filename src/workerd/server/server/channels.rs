@@ -111,6 +111,14 @@ pub trait ActorClass {
         actor: &ffi::ActorHandle,
     ) -> Result<KjOwn<WorkerInterface>>;
 
+    /// Runs the captured onHibernate handler with this class's I/O channels and tails, and the
+    /// self token in `metadata`.
+    fn run_on_hibernate<'a>(
+        &'a self,
+        metadata: KjOwn<RequestMetadata>,
+        actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>>;
+
     fn require_allows_transfer(&self) -> Result<()> {
         Ok(())
     }

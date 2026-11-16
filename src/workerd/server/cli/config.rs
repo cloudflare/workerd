@@ -94,6 +94,11 @@ impl Config {
         self.0
     }
 
+    /// The encoded config as bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bytes_from_words(&self.0)
+    }
+
     /// Writes the encoded config to stdout (`compile --config-only`).
     pub fn write_to_stdout(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();

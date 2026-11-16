@@ -5,7 +5,7 @@
 #pragma once
 
 // The C++ half of workerd's command line: the functions the Rust entry point (cli/lib.rs) calls
-// through the cxx bridges in cli/bridge.rs (the build's capabilities, the Pyodide lock) and
+// through the cxx bridges in cli/bridge.rs (the build's capabilities) and
 // server/bridge.rs (the process's logging, the bootstrap, the exit). Rust parses the command
 // line, produces the encoded config (config-compiler.h compiles schema files), owns the event loop
 // (kj_rs_tokio::Runtime) and runs the server (server/entry.rs); the bootstrap sets up the process
@@ -36,7 +36,6 @@ struct BuildInfo;
 ::rust::Slice<const uint8_t> release_version();
 bool perfetto_supported();
 bool fuzzilli_supported();
-::rust::String pyodide_lock();
 
 // See the bridge (server/bridge.rs).
 int32_t with_process_context(

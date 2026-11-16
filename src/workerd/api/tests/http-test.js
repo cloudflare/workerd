@@ -121,9 +121,16 @@ export const test = {
   async test(ctrl, env, ctx) {
     // Check URL with duplicate search param keys
     const url = new URL('http://user:pass@placeholder:8787/path?a=1&a=2&b=3');
-    assert.strictEqual(
-      util.inspect(url),
-      `URL {
+    // The members, whatever their order: the TypeScript URL lists them in
+    // WebIDL order, the C++ one origin first (src/tests/url/inspect.js).
+    const members = (inspected) =>
+      inspected
+        .split('\n')
+        .map((line) => line.replace(/,$/, ''))
+        .sort();
+    assert.deepStrictEqual(
+      members(util.inspect(url)),
+      members(`URL {
   origin: 'http://placeholder:8787',
   href: 'http://user:pass@placeholder:8787/path?a=1&a=2&b=3',
   protocol: 'http:',
@@ -136,7 +143,7 @@ export const test = {
   search: '?a=1&a=2&b=3',
   hash: '',
   searchParams: URLSearchParams(3) { 'a' => '1', 'a' => '2', 'b' => '3' }
-}`
+}`)
     );
 
     // Check FormData with lower depth
@@ -248,7 +255,7 @@ export const test = {
     assert.notStrictEqual(webSocket, null);
     // The server-side WebSocketPair socket's binaryType depends on the compat flag.
     const bt = new WebSocketPair()[0].binaryType;
-    const wsStr = `WebSocket {\n    readyState: 1,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}'\n  }`;
+    const wsStr = `WebSocket {\n    readyState: 1,\n    bufferedAmount: 0,\n    url: null,\n    protocol: '',\n    extensions: '',\n    binaryType: '${bt}'\n  }`;
     const messagePromise = new Promise((resolve) => {
       webSocket.addEventListener('message', (event) => {
         assert.strictEqual(

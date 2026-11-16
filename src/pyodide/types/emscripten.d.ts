@@ -10,7 +10,6 @@ interface ENV {
 interface PyodideConfig {
   env: ENV;
   jsglobals: typeof globalThis;
-  resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';
@@ -114,15 +113,6 @@ interface Module {
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;
-  setGetRandomValues(
-    func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
-  ): void;
-  setSetTimeout(
-    st: typeof setTimeout,
-    ct: typeof clearTimeout,
-    si: typeof setInterval,
-    ci: typeof clearInterval
-  ): void;
   getMemory(size: number): number;
   getMemoryPatched(
     Module: Module,

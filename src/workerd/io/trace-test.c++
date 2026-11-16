@@ -9,6 +9,8 @@
 #include <kj/compat/http.h>
 #include <kj/test.h>
 
+#include <algorithm>
+
 namespace workerd::tracing {
 namespace {
 
@@ -322,6 +324,23 @@ KJ_TEST("Read/Write AlarmEventInfo works") {
 
   AlarmEventInfo info3 = info.clone();
   KJ_ASSERT(info.scheduledTime == info3.scheduledTime);
+}
+
+KJ_TEST("Read/Write OnHibernateEventInfo works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Onset::Info>();
+
+  // A reason other than the first enumerant, which a missing field would also read as.
+  writeOnsetInfo(OnHibernateEventInfo(OnHibernateEventInfo::Reason::CODE_UPDATED), infoBuilder);
+
+  auto info = readOnsetInfo(infoBuilder.asReader());
+  auto& onHibernate = KJ_ASSERT_NONNULL(info.tryGet<OnHibernateEventInfo>());
+  KJ_ASSERT(onHibernate.reason == OnHibernateEventInfo::Reason::CODE_UPDATED);
+  KJ_ASSERT(kj::str(onHibernate.reason) == "codeUpdated"_kj);
+
+  auto clone = cloneEventInfo(info);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(clone.tryGet<OnHibernateEventInfo>()).reason ==
+      OnHibernateEventInfo::Reason::CODE_UPDATED);
 }
 
 KJ_TEST("Read/Write QueueEventInfo works") {
@@ -659,6 +678,34 @@ KJ_TEST("Read/Write Onset works") {
   KJ_ASSERT(preview3.id == "63bafce9179948688866bb22268eb1c6"_kj);
   KJ_ASSERT(preview3.slug == "feature-my-branch"_kj);
   KJ_ASSERT(preview3.name == "feature/my-branch"_kj);
+}
+
+KJ_TEST("Onset size counts what it owns") {
+  auto filled = [](size_t size) {
+    auto result = kj::heapString(size);
+    std::fill(result.begin(), result.end(), 'x');
+    return result;
+  };
+  auto url = filled(1000);
+  auto cfJson = filled(2000);
+  auto headerValue = filled(3000);
+  auto scriptName = filled(400);
+  auto attributeValue = filled(500);
+  size_t ownedStrings =
+      url.size() + cfJson.size() + headerValue.size() + scriptName.size() + attributeValue.size();
+
+  Onset onset(staticSpanId,
+      Onset::Info(FetchEventInfo(kj::HttpMethod::GET, kj::mv(url), kj::mv(cfJson),
+          kj::arr(FetchEventInfo::Header(kj::str("x"), kj::mv(headerValue))))),
+      {.scriptName = kj::mv(scriptName)},
+      kj::arr(Attribute("attr"_kjc, kj::ConstString(kj::mv(attributeValue)))));
+
+  KJ_EXPECT(onset.size() >= ownedStrings);
+  // Only the headers' and attributes' names and fixed-size parts add to the strings.
+  KJ_EXPECT(onset.size() < ownedStrings + 256);
+
+  Onset empty(staticSpanId, Onset::Info(CustomEventInfo()), {}, nullptr);
+  KJ_EXPECT(empty.size() == 0);
 }
 
 KJ_TEST("Read/Write Outcome works") {

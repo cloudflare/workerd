@@ -17,6 +17,9 @@ class TimersUtil final: public jsg::Object {
   TimersUtil() = default;
   TimersUtil(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);

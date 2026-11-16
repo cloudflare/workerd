@@ -133,3 +133,5 @@ export {
 } from 'gc-interplay';
 
 export { internalDictionariesIgnorePollution } from 'pollution';
+
+export { structuredCloneCompressionStreams } from 'transfer';

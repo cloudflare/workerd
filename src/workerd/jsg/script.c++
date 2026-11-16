@@ -1,5 +1,6 @@
 #include "script.h"
 
+#include <workerd/jsg/compilation.h>
 #include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/setup.h>
 
@@ -16,23 +17,18 @@ void NonModuleScript::run(jsg::Lock& js) const {
 }
 
 NonModuleScript NonModuleScript::compile(jsg::Lock& js, kj::StringPtr code, kj::StringPtr name) {
-  // Create a dummy script origin for it to appear in Sources panel.
-  auto isolate = js.v8Isolate;
   v8::ScriptOrigin origin(js.str(name));
-  v8::ScriptCompiler::Source source(js.str(code), origin);
-  return NonModuleScript(js, check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
+  return NonModuleScript(js,
+      check(compileScript(js, code, origin, ScriptCompilationMode::INTERNAL,
+          IsolateBase::from(js.v8Isolate).getObserver())));
 }
 
 NonModuleScript NonModuleScript::compileWorkerScript(
     jsg::Lock& js, kj::StringPtr code, kj::StringPtr name) {
-  KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-    auto key = codeCache.keyFor(CodeCacheKey::Unit::CLASSIC_SCRIPT, code);
-    v8::ScriptOrigin origin(js.str(name));
-    return NonModuleScript(js,
-        check(codeCache.compileScript(js.v8Isolate, key, js.str(code), origin,
-            IsolateBase::from(js.v8Isolate).getObserver())));
-  }
-  return compile(js, code, name);
+  v8::ScriptOrigin origin(js.str(name));
+  return NonModuleScript(js,
+      check(compileScript(js, code, origin, ScriptCompilationMode::WORKER,
+          IsolateBase::from(js.v8Isolate).getObserver())));
 }
 
 }  // namespace workerd::jsg

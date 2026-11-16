@@ -12,6 +12,9 @@
 namespace workerd::jsg {
 
 namespace {
+// Sets only a frame's wrapper or undefined. Rust JSG (src/rust/jsg/async_context.rs) relies on
+// this: it treats any embedder data but undefined as a frame, which agrees with current() only
+// while nothing else is ever set.
 inline void maybeSetV8ContinuationContext(
     v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> maybeFrame) {
   v8::Local<v8::Value> value;

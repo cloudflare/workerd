@@ -50,11 +50,6 @@ export default {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
   },
-  'not-restored-reasons/test-helper.js': {
-    comment:
-      'Test file /html/browsers/browsing-the-web/back-forward-cache/resources/rc-helper.js not found. Update wpt_test.bzl to handle this case.',
-    omittedTests: true,
-  },
   'observer-buffered-false.any.js': {
     comment: 'This is not yet implemented',
     disabledTests: [
@@ -84,6 +79,7 @@ export default {
       'disconnected callbacks must not be invoked',
       'disconnecting an unconnected observer is a no-op',
       'An observer disconnected after a mark must not have its callback invoked',
+      'Entries queued before disconnect() are not delivered after re-observing',
     ],
   },
   'po-entries-sort.any.js': {

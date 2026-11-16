@@ -827,7 +827,7 @@ KJ_TEST("A worker bundle module can shadow node:process") {
   // Regression test: unlike every other built-in (e.g. node:buffer, which *can* be
   // shadowed by a same-named bundle module -- see "Bundle shadows built-in" above),
   // "node:process" used to be unconditionally redirected to an internal
-  // node-internal:public_process/legacy_process module *before* the worker bundle
+  // node-internal:process_exports/legacy_process module *before* the worker bundle
   // ever had a chance to resolve it. This meant a worker bundle module registered
   // under "node:process" was silently unreachable. Verify that a worker bundle
   // module named "node:process" now takes priority over the internal redirect,
@@ -836,13 +836,13 @@ KJ_TEST("A worker bundle module can shadow node:process") {
     CompilationObserver compilationObserver;
     ModuleRegistry::Builder registryBuilder(BASE);
 
-    // Fake stand-ins for the real node-internal:public_process / legacy_process
+    // Fake stand-ins for the real node-internal:process_exports / legacy_process
     // modules. If the redirect were incorrectly taken instead of the shadowing
     // bundle module below, we'd observe one of these values instead.
     ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     auto publicSource = "export default 'internal-public-process';"_kjc;
     auto legacySource = "export default 'internal-legacy-process';"_kjc;
-    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:process_exports"_url, publicSource.asArray());
     internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
     registryBuilder.add(internalBuilder.finish());
 
@@ -880,13 +880,13 @@ KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
     CompilationObserver compilationObserver;
     ModuleRegistry::Builder registryBuilder(BASE);
 
-    // Fake stand-ins for the real node-internal:public_process / legacy_process
+    // Fake stand-ins for the real node-internal:process_exports / legacy_process
     // modules. If the redirect were incorrectly taken instead of the shadowing
     // bundle module below, we'd observe one of these values instead.
     ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     auto publicSource = "export default 'internal-public-process';"_kjc;
     auto legacySource = "export default 'internal-legacy-process';"_kjc;
-    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:process_exports"_url, publicSource.asArray());
     internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
     registryBuilder.add(internalBuilder.finish());
 
@@ -919,7 +919,7 @@ KJ_TEST("A worker bundle module can shadow node:process via dynamic import") {
 KJ_TEST("node:process falls back to the internal module when not shadowed") {
   // Companion to the test above: when no worker bundle module shadows
   // "node:process", resolution must still fall back to the internal
-  // node-internal:public_process / legacy_process module selected by the
+  // node-internal:process_exports / legacy_process module selected by the
   // enable_nodejs_process_v2 compat flag.
   PREAMBLE([&](Lock& js) {
     CompilationObserver compilationObserver;
@@ -928,7 +928,7 @@ KJ_TEST("node:process falls back to the internal module when not shadowed") {
     ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     auto publicSource = "export default 'internal-public-process';"_kjc;
     auto legacySource = "export default 'internal-legacy-process';"_kjc;
-    internalBuilder.addEsm("node-internal:public_process"_url, publicSource.asArray());
+    internalBuilder.addEsm("node-internal:process_exports"_url, publicSource.asArray());
     internalBuilder.addEsm("node-internal:legacy_process"_url, legacySource.asArray());
     registryBuilder.add(internalBuilder.finish());
 

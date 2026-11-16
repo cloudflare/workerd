@@ -12,6 +12,9 @@ class ModuleUtil final: public jsg::Object {
   ModuleUtil() = default;
   ModuleUtil(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::JsValue createRequire(jsg::Lock& js, kj::String specifier);
 
   // Returns true if the specifier is a known node.js built-in module specifier.

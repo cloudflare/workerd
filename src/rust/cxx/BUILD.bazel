@@ -1,5 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_macro")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_proc_macro.bzl", "PROC_MACRO_TARGET_COMPATIBLE_WITH")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 # The crates derived from upstream cxx (the runtime, the bridge parser and generators, and their
@@ -22,7 +23,7 @@ rust_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:foldhash",
+        "@crates_vendor//foldhash",
     ],
 )
 
@@ -44,9 +45,9 @@ rust_library(
     crate_root = "syntax/mod.rs",
     edition = "2024",
     deps = [
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -61,10 +62,10 @@ rust_library(
     edition = "2024",
     deps = [
         ":syntax",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//codespan-reporting",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -87,11 +88,8 @@ rust_binary(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:clap",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//clap",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -111,6 +109,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj",
+        "@simdutf",
     ],
 )
 
@@ -119,15 +118,14 @@ rust_proc_macro(
     srcs = glob(["macro/src/*.rs"]),
     edition = "2024",
     proc_macro_deps = [
-        "@crates_vendor//:rustversion",
+        "@crates_vendor//rustversion",
     ],
-    visibility = ["//src/rust/cxx/tests:__pkg__"],
+    target_compatible_with = PROC_MACRO_TARGET_COMPATIBLE_WITH,
     deps = [
-        ":gen",
         ":syntax",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -144,11 +142,7 @@ rust_library(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:cc",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//cc",
     ],
 )
 
@@ -167,10 +161,8 @@ rust_library(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:cc",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//syn",
     ],
 )
 

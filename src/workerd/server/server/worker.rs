@@ -10,12 +10,14 @@
 //! service exists the server resolves those into a [`LinkedChannels`] table and calls `link`.
 //! Until then the service starts no requests.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ptr;
 use std::rc::Rc;
 use std::rc::Weak;
 
+use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
@@ -54,10 +56,12 @@ use crate::channels::WorkerEntrypoint;
 use crate::channels::WorkerInterface;
 use crate::channels::WorkerInterfaceList;
 use crate::channels::WorkerStub;
+use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::config::Server;
 use crate::config::capnp_error;
+use crate::config::invalid_config_error;
 use crate::config::text;
 use crate::loader::WorkerLoaderNamespace;
 use crate::loader::dynamic_transfer_error;
@@ -113,6 +117,11 @@ pub struct WorkerService {
     /// The service's name in the config; none for a dynamic worker, which no token can name.
     service_name: Option<String>,
     worker: KjOwn<ffi::CompiledWorker>,
+    /// Under `workerd bench`, a config worker's index in the config's services and the spec it
+    /// was compiled from, from which throwaway copies are compiled to time startup. None
+    /// otherwise, since nothing else reads it and its bindings can be large, and for a dynamic
+    /// worker.
+    config_spec: Option<(u32, ffi::WorkerSpec)>,
     /// The default export's handlers, if the worker has a default export.
     default_handlers: Option<HashSet<String>>,
     /// Named exports with their handlers, in export order (loopback channels follow it).
@@ -133,6 +142,9 @@ pub struct WorkerService {
     /// The namespaces of the classes the config gives storage to, by class name, in config
     /// order. Cleared by `unlink`: each namespace's class refers back to this service.
     namespaces: RefCell<LinkedHashMap<String, Rc<ActorNamespace>>>,
+    /// Whether this worker rejects every request and actor construction because of config errors
+    /// attributed to its deployment.
+    broken: Cell<bool>,
 }
 
 impl WorkerService {
@@ -157,6 +169,9 @@ impl WorkerService {
                 .map_err(capnp_error)?;
         for error in std::mem::take(&mut bindings.errors) {
             report.service_error(name, error);
+        }
+        for (target, error) in std::mem::take(&mut bindings.reference_errors) {
+            report.service_reference_error(name, &target, error);
         }
 
         let access_blob_header = if !conf.has_access_blob_header() {
@@ -216,11 +231,13 @@ impl WorkerService {
         ffi::worker_set_ctx_exports(&compiled, &loopback.globals)?;
 
         let pending = pending_link(name, conf, bindings, loopback, report).map_err(capnp_error)?;
+        let config_spec = ffi::is_bench_mode().then_some((service_index, spec));
 
         let this = Rc::new(Self {
             factory,
             service_name: Some(name.to_owned()),
             worker: compiled,
+            config_spec,
             default_handlers,
             named_entrypoints,
             actor_classes: info.actor_classes,
@@ -230,6 +247,7 @@ impl WorkerService {
             pending: RefCell::new(Some(pending)),
             channels: RefCell::new(None),
             namespaces: RefCell::new(LinkedHashMap::new()),
+            broken: Cell::new(false),
         });
         this.init_namespaces(local_actor_configs);
         Ok(this)
@@ -315,6 +333,7 @@ impl WorkerService {
             factory,
             service_name: None,
             worker: compiled,
+            config_spec: None,
             default_handlers,
             named_entrypoints,
             actor_classes: info.actor_classes,
@@ -324,6 +343,7 @@ impl WorkerService {
             pending: RefCell::new(None),
             channels: RefCell::new(None),
             namespaces: RefCell::new(LinkedHashMap::new()),
+            broken: Cell::new(false),
         });
 
         let subrequest = loopback
@@ -409,7 +429,7 @@ fn pending_link(
     let access_binding = if conf.has_access_binding_service() {
         Some(Designator::from_reader(
             conf.get_access_binding_service()?,
-            "Worker accessBindingService".to_owned(),
+            format!("Worker \"{name}\"'s accessBindingService"),
             &mut errors,
         )?)
     } else {
@@ -462,6 +482,7 @@ impl WorkerService {
             });
             let namespace = ActorNamespace::new(
                 Rc::clone(&self.factory),
+                self.service_name.clone().unwrap_or_default(),
                 class_name.clone(),
                 config.clone(),
                 actor_class,
@@ -474,7 +495,8 @@ impl WorkerService {
     /// Creates the namespace backing one configured Workflow, keyed by `key`, its unique key.
     /// Its actors are `actor_class`, the engine's class with the Workflow's props bound, and its
     /// storage is in `storage_path`, the directory of the Workflow's `bindingService` worker.
-    /// `persistent_self_tokens` is the engine worker's.
+    /// `persistent_self_tokens` is the engine worker's. In cluster mode the namespace joins
+    /// `cluster` before its storage opens.
     pub fn init_workflow_namespace(
         &self,
         key: &str,
@@ -482,14 +504,19 @@ impl WorkerService {
         actor_class: Rc<dyn ActorClass>,
         storage_path: Option<&str>,
         persistent_self_tokens: Persistent,
+        cluster: Option<&Rc<ClusterNode>>,
     ) -> Result<Rc<ActorNamespace>> {
         let namespace = ActorNamespace::new(
             Rc::clone(&self.factory),
+            self.service_name.clone().unwrap_or_default(),
             key.to_owned(),
             config,
             actor_class,
             persistent_self_tokens,
         );
+        if let Some(cluster) = cluster {
+            namespace.set_cluster(Rc::clone(cluster));
+        }
         namespace.link(storage_path)?;
         self.namespaces
             .borrow_mut()
@@ -571,6 +598,19 @@ impl WorkerService {
         self.named_entrypoints.keys().map(String::as_str)
     }
 
+    /// Times starting this worker in new isolates, for `workerd bench`, as
+    /// `ffi::factory_bench_startup` does: `params` is an encoded `BenchParams` message, and the
+    /// result an encoded startup `BenchReport.Group`. Only for a config worker under
+    /// `workerd bench`, which keeps the spec to start copies from.
+    pub async fn bench_startup(&self, params: &[u64]) -> Result<Vec<u64>> {
+        let Some((service_index, spec)) = &self.config_spec else {
+            return Err(kj::failed!(
+                "startup is timed only for config workers under `workerd bench`"
+            ));
+        };
+        Ok(ffi::factory_bench_startup(self.factory.raw(), spec, *service_index, params).await?)
+    }
+
     /// The namespace of `class_name`, if the config gives the class storage.
     #[must_use]
     pub fn namespace(&self, class_name: &str) -> Option<Rc<ActorNamespace>> {
@@ -630,12 +670,17 @@ impl WorkerService {
     }
 
     /// The `ctx.exports` channel of an entrypoint: the template its props specialize.
-    pub fn loopback_entrypoint(self: &Rc<Self>, name: Option<&str>) -> Result<Rc<dyn Channel>> {
-        let exists = match name {
+    /// Whether the worker exports `name`, or a default handler for `None`.
+    #[must_use]
+    pub fn has_loopback_entrypoint(&self, name: Option<&str>) -> bool {
+        match name {
             Some(name) => self.named_entrypoints.contains_key(name),
             None => self.default_handlers.is_some(),
-        };
-        if !exists {
+        }
+    }
+
+    pub fn loopback_entrypoint(self: &Rc<Self>, name: Option<&str>) -> Result<Rc<dyn Channel>> {
+        if !self.has_loopback_entrypoint(name) {
             return Err(kj::failed!(
                 "getLoopbackEntrypoint() called for entrypoint that doesn't exist"
             ));
@@ -711,6 +756,14 @@ impl WorkerService {
         drop((namespaces, channels));
     }
 
+    /// Makes every request and actor construction fail because the config is invalid.
+    pub fn set_broken(&self) {
+        self.broken.set(true);
+        for namespace in self.namespaces.borrow().values() {
+            namespace.set_broken();
+        }
+    }
+
     fn channels(&self) -> Result<Rc<LinkedChannels>> {
         self.channels
             .borrow()
@@ -729,29 +782,18 @@ impl WorkerService {
         metadata: KjOwn<RequestMetadata>,
         is_tracer: bool,
     ) -> Result<KjOwn<WorkerInterface>> {
+        if self.broken.get() {
+            return Err(invalid_config_error());
+        }
         let channels = self.channels()?;
 
         // The test event is not traced; a test of span tracing can still tail a request the
         // test makes.
-        let mut tails = Vec::new();
-        if entrypoint != Some("test") {
-            for tail in &channels.tails {
-                if let Some(worker) = self.start_tail(tail, is_tracer)? {
-                    tails.push(Tail {
-                        streaming: false,
-                        worker: Some(worker),
-                    });
-                }
-            }
-            for tail in &channels.streaming_tails {
-                if let Some(worker) = self.start_tail(tail, is_tracer)? {
-                    tails.push(Tail {
-                        streaming: true,
-                        worker: Some(worker),
-                    });
-                }
-            }
-        }
+        let tails = if entrypoint == Some("test") {
+            Vec::new()
+        } else {
+            self.start_tails(&channels, is_tracer)?
+        };
 
         ffi::worker_start_request(
             &self.worker,
@@ -765,10 +807,26 @@ impl WorkerService {
         .map_err(Into::into)
     }
 
-    /// Starts a tail worker for one of this worker's requests. A tail that is an entrypoint of
-    /// this same worker is started as a tracer, and not at all when the request being tailed is
-    /// already a tracer's: a worker tailing itself must not recurse. Only the direct
-    /// self-reference is caught; a cycle through another worker is not.
+    /// Starts the worker's tails, buffered and streaming, for one of its events.
+    fn start_tails(&self, channels: &LinkedChannels, is_tracer: bool) -> Result<Vec<Tail>> {
+        let mut tails = Vec::new();
+        for (list, streaming) in [(&channels.tails, false), (&channels.streaming_tails, true)] {
+            for tail in list {
+                if let Some(worker) = self.start_tail(tail, is_tracer)? {
+                    tails.push(Tail {
+                        streaming,
+                        worker: Some(worker),
+                    });
+                }
+            }
+        }
+        Ok(tails)
+    }
+
+    /// Starts a tail worker for one of this worker's events: a request or an onHibernate handler.
+    /// A tail that is an entrypoint of this same worker is started as a tracer, and not at all
+    /// when the event being tailed is already a tracer's: a worker tailing itself must not
+    /// recurse. Only the direct self-reference is caught; a cycle through another worker is not.
     fn start_tail(
         &self,
         tail: &Rc<dyn Channel>,
@@ -776,6 +834,9 @@ impl WorkerService {
     ) -> Result<Option<KjOwn<WorkerInterface>>> {
         let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
         match tail.worker_entrypoint() {
+            // A tail worker that cannot handle requests is skipped rather than failing the
+            // request it tails.
+            Some(target) if target.worker.broken.get() => Ok(None),
             Some(target) if ptr::eq(target.worker, self) => {
                 if is_tracer {
                     return Ok(None);
@@ -883,6 +944,9 @@ struct ActorClassImpl {
 
 impl ActorClass for ActorClassImpl {
     fn new_actor(&self, request: NewActor<'_>) -> Result<KjOwn<ffi::ActorHandle>> {
+        if self.worker.broken.get() {
+            return Err(invalid_config_error());
+        }
         // A template used without props constructs the actor with empty props.
         let props = self.props.as_deref().map(ffi::frankenvalue_clone);
         ffi::worker_new_actor(
@@ -907,6 +971,26 @@ impl ActorClass for ActorClassImpl {
     ) -> Result<KjOwn<WorkerInterface>> {
         self.worker
             .start_request(Some(&self.class_name), None, Some(actor), metadata, false)
+    }
+
+    fn run_on_hibernate<'a>(
+        &'a self,
+        metadata: KjOwn<RequestMetadata>,
+        actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let channels = self.worker.channels()?;
+            let tails = self.worker.start_tails(&channels, false)?;
+            Ok(ffi::worker_run_actor_on_hibernate(
+                &self.worker.worker,
+                actor,
+                &self.class_name,
+                Box::new(ChannelFactory(channels)),
+                WorkerInterfaceList::new(tails),
+                metadata,
+            )
+            .await?)
+        })
     }
 
     fn require_allows_transfer(&self) -> Result<()> {

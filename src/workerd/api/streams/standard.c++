@@ -1408,9 +1408,8 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   // when no reason is provided, but the stored error should remain as the original reason.
   auto signalReason = [&]() -> jsg::JsValue {
     if (reason.isUndefined() && FeatureFlags::get(js).getPedanticWpt()) {
-      auto ex = js.domException(
+      return js.domException(
           kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
-      return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
     }
     return reason;
   }();
@@ -4602,7 +4601,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::J
     if (backpressure) {
       auto chunkRef = chunk.addRef(js);
       return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
-              JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref = JSG_THIS),(ref),(
+              JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref = JSG_THIS),(ref, chunkRef),(
                   jsg::Lock& js) mutable -> jsg::Promise<void> {
         KJ_IF_SOME(writable, ref->tryGetWritable(js)) {
           auto& writableController =

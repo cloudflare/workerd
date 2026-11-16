@@ -91,7 +91,10 @@ function isBigNumber(number: NumberType): boolean {
     name === 'unsigned long' ||
     name === 'long long' ||
     name === 'unsigned long long' ||
-    name === 'jsg::JsBigInt'
+    name === 'jsg::JsBigInt' ||
+    // Rust `i64` and `u64`
+    name === 'i64' ||
+    name === 'u64'
   );
 }
 

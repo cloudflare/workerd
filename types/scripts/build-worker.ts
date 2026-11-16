@@ -113,22 +113,6 @@ if (require.main === module)
     entryPoints: [getFilePath("types/src/worker/index.ts")],
     plugins: [
       {
-        name: "raw",
-        setup(build: PluginBuild): void {
-          build.onResolve({ filter: /^raw:/ }, (args: OnResolveArgs): {
-            namespace: string,
-            path: string
-          } => {
-            const resolved = path.resolve(args.resolveDir, args.path.slice(4));
-            return { namespace: "raw", path: resolved };
-          });
-          build.onLoad({ namespace: "raw", filter: /.*/ }, async (args: OnLoadArgs) => {
-            const contents = await readPath(args.path);
-            return { contents, loader: "text" };
-          });
-        },
-      },
-      {
         name: "virtual",
         setup(build: PluginBuild): void {
           build.onResolve({ filter: /^virtual:/ }, (args: OnResolveArgs) => {
@@ -145,6 +129,16 @@ if (require.main === module)
             if (args.path === "comments.json") {
               const comments = readComments();
               return { contents: JSON.stringify(comments), loader: "json" };
+            }
+            if (args.path === "defines") {
+              // Read relative to the working directory, which a Bazel sandbox
+              // populates with this action's inputs alone, not relative to the
+              // importer: esbuild follows the sandbox's symlink to the
+              // importer's real path in the output tree, whose types/defines
+              // also holds copies that earlier builds made of defines this
+              // build lacks.
+              const contents = await readPath(getFilePath("types/defines"));
+              return { contents, loader: "text" };
             }
           });
         },

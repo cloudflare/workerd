@@ -5,7 +5,6 @@
 #include "basics.h"
 
 #include "abort-bootstrap.h"
-#include "actor-state.h"
 #include "global-scope.h"
 
 #include <workerd/io/features.h>
@@ -102,6 +101,62 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
 }
 
+void EventTarget::forEachSnapshotListener(
+    jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb) {
+  for (auto& entry: typeMap) {
+    // The on<type> attribute trampoline (if activated for this type) occupies a regular
+    // listener slot under a synthesized identity. It is owned by the C++ attribute state and
+    // cannot be replayed through addEventListener(), so it is not transferred.
+    kj::Maybe<v8::Local<v8::Object>> trampolineIdentity;
+    KJ_IF_SOME(attribute, eventHandlerAttributes.find(entry.key)) {
+      KJ_IF_SOME(identity, attribute.listenerIdentity) {
+        trampolineIdentity = identity.getHandle(js);
+      }
+    }
+
+    for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
+      auto identity = handler->identity.getHandle(js);
+      KJ_IF_SOME(trampoline, trampolineIdentity) {
+        if (identity == trampoline) continue;
+      }
+      KJ_REQUIRE(handler->abortHandler == kj::none,
+          "startup snapshot: top-level addEventListener with a `signal` option is not supported",
+          entry.key);
+      auto callback = KJ_REQUIRE_NONNULL(handler->callback.tryGetHandle(js.v8Isolate),
+          "startup snapshot: a listener backed by a native function cannot be transferred",
+          entry.key);
+      auto receiver = KJ_ASSERT_NONNULL(handler->callback.tryGetReceiver(js.v8Isolate));
+      cb(SnapshotListener{
+        .type = entry.key,
+        .identity = identity,
+        .callback = callback,
+        .receiver = receiver,
+        .once = handler->once,
+        .passive = handler->passive,
+      });
+    }
+  }
+}
+
+void EventTarget::restoreSnapshotListener(jsg::Lock& js,
+    kj::StringPtr type,
+    v8::Local<v8::Object> identity,
+    HandlerFunction callback,
+    SnapshotListenerOptions options) {
+  auto& handlerSet = getOrCreate(type);
+  auto sizeBefore = handlerSet.handlers.size();
+  handlerSet.handlers.upsert(kj::heap<EventHandler>(EventHandler{
+                               .identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, identity),
+                               .callback = kj::mv(callback),
+                               .once = options.once,
+                               .passive = options.passive,
+                             }),
+      [&](auto&&...) {});
+  if (handlerSet.handlers.size() != sizeBefore) {
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
+  }
+}
+
 void EventTarget::addEventListener(jsg::Lock& js,
     kj::String type,
     kj::Maybe<jsg::Identified<Handler>> maybeHandler,
@@ -195,7 +250,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
       auto sizeBefore = handlerSet.handlers.size();
       handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
       if (handlerSet.handlers.size() != sizeBefore) {
-        listenerCountChanged(js, type, handlerSet.handlers.size());
+        notifyListenerCountChanged(js, type, handlerSet.handlers.size());
       }
     });
   }
@@ -221,10 +276,23 @@ void EventTarget::removeEventListener(jsg::Lock& js,
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
         if (handlerSet.handlers.eraseMatch(handler)) {
-          listenerCountChanged(js, type, handlerSet.handlers.size());
+          notifyListenerCountChanged(js, type, handlerSet.handlers.size());
         }
       }
     });
+  }
+}
+
+void EventTarget::notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  listenerCountChanged(js, type, count);
+  for (auto& entry: listenerCountHooks) {
+    if (entry.type == type) {
+      // The hook may replace itself, reallocating listenerCountHooks, so nothing here touches
+      // `entry` once the call has started.
+      auto hook = entry.hook.getHandle(js);
+      hook.call(js, js.undefined(), js.str(type), js.num(static_cast<double>(count)));
+      return;
+    }
   }
 }
 
@@ -244,7 +312,7 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
   auto sizeBefore = handlerSet.handlers.size();
   handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   if (handlerSet.handlers.size() != sizeBefore) {
-    listenerCountChanged(js, type, handlerSet.handlers.size());
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
   }
 }
 
@@ -542,7 +610,7 @@ class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
 
-  kj::Promise<void> abort(kj::ArrayPtr<kj::byte> reason) {
+  kj::Promise<void> abort(kj::ArrayPtr<const kj::byte> reason) {
     auto req = client.abortRequest(capnp::MessageSize{reason.size() / sizeof(capnp::word) + 8, 0});
     auto field = req.initReason();
     field.setV8Serialized(reason);
@@ -555,17 +623,55 @@ class AbortTriggerRpcClient final {
 
 namespace {
 
+// Data released by a jsg::Serializer. Its buffer's capacity can exceed data.size().
+struct SerializedBytes {
+  kj::Array<kj::byte> data;
+  size_t capacity;
+};
+
+size_t getOwnedBytes(const SerializedBytes& bytes) {
+  return bytes.capacity;
+}
+
+// An exception derived from a JavaScript value carries the value twice, stringified in its
+// description and serialized in a detail.
+size_t getOwnedBytes(const kj::Exception& exception) {
+  size_t size = exception.getDescription().size() + exception.getRemoteTrace().size();
+  for (auto& detail: exception.getDetails()) {
+    size += detail.value.size();
+  }
+  return size;
+}
+
+// One copy of an abort's payload, shared by its deliveries. Deliveries to an idle actor wait in its
+// queue for its next request (see DeleteQueue::scheduleAction()), so the copy counts as external
+// memory.
+template <typename T>
+class SharedAbortPayload final: public kj::AtomicRefcounted {
+ public:
+  SharedAbortPayload(jsg::Lock& js, T value)
+      : value(kj::mv(value)),
+        externalMemory(js.getExternalMemoryAdjustment(getOwnedBytes(this->value))) {}
+
+  const T value;
+
+ private:
+  jsg::ExternalMemoryAdjustment externalMemory;
+};
+
+using SerializedAbortReason = SharedAbortPayload<SerializedBytes>;
+
 kj::Promise<void> abortRpcClientTask(
-    IoContext& ioContext, AbortTriggerRpcClient& client, kj::Array<kj::byte> reason) {
+    IoContext& ioContext, AbortTriggerRpcClient& client, kj::Arc<SerializedAbortReason> reason) {
   KJ_IF_SOME(outputLocks, ioContext.waitForOutputLocksIfNecessary()) {
     co_await outputLocks;
   }
-  co_await client.abort(reason);
+  co_await client.abort(reason->value.data);
 }
 
 // Sends the serialized abort reason to one RPC clone as a task on the current IoContext,
 // which must be the context that owns the client.
-void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Array<kj::byte> reason) {
+void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Arc<SerializedAbortReason> reason) {
   auto& ioContext = IoContext::current();
   // Dereference the IoOwn here, while the owning context is known to be current; the task
   // keeps the client alive by holding the IoOwn as an attachment.
@@ -1053,24 +1159,30 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
 
   // 2. Native cancellations (canceler-wrapped promises and abort actions). Each registration
   //    runs in the IoContext that created it: synchronously if that context is the current
-  //    one, otherwise delivered on that context's next turn — or dropped, if that context is
+  //    one, otherwise deferred as addAbortAction() describes — or dropped, if that context is
   //    already gone (in which case everything it wanted to cancel died with it). Taking the
   //    vector up front makes this safe against re-entrant registration.
   //
   //    A deferred delivery does not take the action with it: it re-takes the cell's slot on
   //    arrival in the owning context, so that a consumer (and the references its action
-  //    captures) that went away in the meantime reliably turns the delivery into a no-op.
+  //    captures) that went away in the meantime reliably turns the delivery into a no-op. The
+  //    deferred deliveries share one copy of the exception.
   auto cells = kj::mv(nativeRegistrations);
+  kj::Maybe<kj::Arc<SharedAbortPayload<kj::Exception>>> deferredException;
   for (auto& cell: cells) {
     if (cell->executor.isCurrent()) {
       KJ_IF_SOME(action, take(cell->action)) {
         action(js, exception);
       }
     } else {
+      if (deferredException == kj::none) {
+        deferredException = kj::arc<SharedAbortPayload<kj::Exception>>(js, exception.clone());
+      }
       cell->executor.tryExecute(
-          [cell = cell.addRef(), ex = exception.clone()](jsg::Lock& js) mutable {
+          [cell = cell.addRef(), ex = KJ_ASSERT_NONNULL(deferredException).addRef()](
+              jsg::Lock& js) mutable {
         KJ_IF_SOME(action, take(cell->action)) {
-          action(js, ex);
+          action(js, ex->value);
         }
       });
     }
@@ -1080,24 +1192,25 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
   if (!rpcRegistrations.empty()) {
     auto regs = kj::mv(rpcRegistrations);
 
-    // Serialize the reason once; each clone gets its own copy of the bytes.
+    // Serialize the reason once, for all the clones to share.
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
       ser.write(js, r.getHandle(js));
     }
     auto released = ser.release();
+    auto serialized = kj::arc<SerializedAbortReason>(
+        js, SerializedBytes{.data = kj::mv(released.data), .capacity = released.dataCapacity});
 
     for (auto& reg: regs) {
-      auto bytes = kj::heapArray<kj::byte>(released.data);
       if (reg->executor.isCurrent()) {
         KJ_IF_SOME(client, take(reg->client)) {
-          sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+          sendAbortToRpc(kj::mv(client), serialized.addRef());
         }
       } else {
         reg->executor.tryExecute(
-            [reg = reg.addRef(), bytes = kj::mv(bytes)](jsg::Lock& js) mutable {
+            [reg = reg.addRef(), serialized = serialized.addRef()](jsg::Lock& js) mutable {
           KJ_IF_SOME(client, take(reg->client)) {
-            sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+            sendAbortToRpc(kj::mv(client), kj::mv(serialized));
           }
         });
       }
@@ -1279,19 +1392,22 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   }
 
   if (!isRpcReceiverContextCurrent()) {
-    // Only the request that deserialized this signal can arm the subscription — it owns the
+    // Only the context that deserialized this signal can arm the subscription — it owns the
     // underlying promise — but a signal retained across requests may see registrations from
     // other contexts. Ask the receiving context to arm on its next turn. The queued action
     // captures only a WeakRef, which is safe to destroy from any thread should that context
     // be torn down without draining its queue. If the context is already gone, the request
     // is dropped: no delivery is possible anymore, though the abort itself stays observable
     // through the pending-reason box (see docs/reference/detail/abort-signal.md).
-    KJ_IF_SOME(executor, rpcReceiverContext) {
-      executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
-        KJ_IF_SOME(self, weakSelf.tryGet()) {
-          self.subscribeToRpcAbort(js);
-        }
-      });
+    if (!rpcSubscriptionRequested) {
+      KJ_IF_SOME(executor, rpcReceiverContext) {
+        rpcSubscriptionRequested =
+            executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+          KJ_IF_SOME(self, weakSelf.tryAddRef(js)) {
+            self->subscribeToRpcAbort(js);
+          }
+        });
+      }
     }
     return;
   }
@@ -1338,6 +1454,9 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(identity);
     }
   }
+  for (auto& entry: listenerCountHooks) {
+    visitor.visit(entry.hook);
+  }
 }
 
 kj::Promise<void> Scheduler::wait(
@@ -1380,42 +1499,6 @@ kj::Promise<void> Scheduler::wait(
   return kj::mv(promise);
 }
 
-void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  JSG_REQUIRE(
-      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
-  IoContext& context = IoContext::current();
-  return context.getActor().map([&](Worker::Actor& actor) {
-    auto& lock = context.getCurrentLock();
-    auto persistent = actor.makeStorageForSwSyntax(lock);
-    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
-  });
-}
-
-CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
-    : Event(kj::mv(ownType), Event::Init(init)),
-      detail(kj::mv(init.detail)) {}
-
-jsg::Ref<CustomEvent> CustomEvent::constructor(
-    jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
-}
-
-jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
-  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.getHandle(js); });
-}
-
-CustomEvent::CustomEventInit::operator Event::Init() {
-  return {
-    .bubbles = this->bubbles.map([](auto& val) { return val; }),
-    .cancelable = this->cancelable.map([](auto& val) { return val; }),
-    .composed = this->composed.map([](auto& val) { return val; }),
-  };
-}
-
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
   return sizeof(EventHandler);
 }
@@ -1442,6 +1525,9 @@ void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
   tracker.trackFieldWithSize("eventHandlerAttributes",
       eventHandlerAttributes.size() * sizeof(decltype(eventHandlerAttributes)::Entry));
+  for (const auto& entry: listenerCountHooks) {
+    tracker.trackField("listenerCountHook", entry.hook);
+  }
 }
 
 }  // namespace workerd::api

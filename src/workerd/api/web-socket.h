@@ -21,7 +21,8 @@
 
 namespace workerd {
 class ActorObserver;
-}
+struct NonHibernatableWebSocketCount;
+}  // namespace workerd
 
 namespace workerd::api {
 
@@ -29,74 +30,6 @@ class Blob;
 
 template <typename T>
 struct DeferredProxy;
-
-class CloseEvent: public Event {
- public:
-  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
-  CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close", {}, Trusted::YES),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {})
-      : Event(kj::mv(type), kj::mv(init)),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-
-  struct Initializer {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<int> code;
-    jsg::Optional<jsg::USVString> reason;
-    jsg::Optional<bool> wasClean;
-
-    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
-    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
-  };
-  static jsg::Ref<CloseEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
-    Initializer init = kj::mv(initializer).orDefault({});
-    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
-        Event::Init{
-          .bubbles = init.bubbles,
-          .cancelable = init.cancelable,
-          .composed = init.composed,
-        });
-  }
-
-  int getCode() {
-    return code;
-  }
-  kj::StringPtr getReason() {
-    return reason;
-  }
-  bool getWasClean() {
-    return clean;
-  }
-
-  JSG_RESOURCE_TYPE(CloseEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
-
-    JSG_TS_ROOT();
-    // CloseEvent will be referenced from the `WebSocketEventMap` define
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  int code;
-  kj::String reason;
-  bool clean;
-};
 
 WD_STRONG_BOOL(AllowHalfOpen);
 
@@ -338,6 +271,13 @@ class WebSocket: public EventTarget {
 
   int getReadyState();
 
+  // Returns the number of bytes of application data (UTF-8 text and binary data) passed to send()
+  // that have not yet been written to the connection, per the WHATWG WebSockets standard. It
+  // doesn't include framing overhead, or data that has been written but is still buffered further
+  // along, such as by the operating system. Applications can poll it to avoid queuing more
+  // outgoing data than the connection can carry.
+  double getBufferedAmount();
+
   bool isAccepted();
   bool isReleased();
 
@@ -392,12 +332,14 @@ class WebSocket: public EventTarget {
     // prototype.
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(readyState, getReadyState);
+      JSG_READONLY_PROTOTYPE_PROPERTY(bufferedAmount, getBufferedAmount);
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
       JSG_PROTOTYPE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
+      JSG_READONLY_INSTANCE_PROPERTY(bufferedAmount, getBufferedAmount);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
@@ -440,8 +382,8 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocket::AcceptOptions,    \
-      api::WebSocketPair, api::WebSocketPair::PairIterator,                                        \
+  api::WebSocket, api::WebSocket::AcceptOptions, api::WebSocketPair,                               \
+      api::WebSocketPair::PairIterator,                                                            \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
@@ -487,6 +429,7 @@ class WebSocketAdapter {
   virtual void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) = 0;
   virtual kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) = 0;
   virtual int getReadyState() = 0;
+  virtual double getBufferedAmount() = 0;
   virtual kj::Maybe<kj::StringPtr> getUrl() = 0;
   virtual kj::Maybe<kj::StringPtr> getProtocol() = 0;
   virtual kj::Maybe<kj::StringPtr> getExtensions() = 0;
@@ -618,6 +561,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) override;
   kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) override;
   int getReadyState() override;
+  double getBufferedAmount() override;
   kj::Maybe<kj::StringPtr> getUrl() override;
   kj::Maybe<kj::StringPtr> getProtocol() override;
   kj::Maybe<kj::StringPtr> getExtensions() override;
@@ -758,6 +702,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
 
+    // Set when this WebSocket counts toward its actor's limit on non-hibernatable WebSockets. The
+    // destructor gives the count back.
+    kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> nonHibernatableWebSocketCount;
+
    private:
     // Cancels the operations started with wrapIo() when leaving the Accepted state.
     kj::Canceler canceler;
@@ -784,6 +732,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     // Have we detected that the peer has stopped accepting messages?
     bool outgoingAborted = false;
 
+    // Payload bytes passed to send() and not yet written. See WebSocket::getBufferedAmount(). As
+    // the standard requires, this never goes down for messages that are dropped rather than
+    // written, such as when the connection fails, so it keeps growing if the application keeps
+    // sending to a dead connection.
+    uint64_t bufferedAmount = 0;
+
     // Did dispatching a received message into JavaScript fail? See getDispatchFailed().
     //
     // TODO(someday): Instead of this flag, reject a promise that couple() joins with its pumps,
@@ -797,6 +751,8 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
     kj::WebSocket::Message message;
     size_t pendingAutoResponses = 0;
+    // See chargeOutgoing().
+    kj::Maybe<jsg::ExternalMemoryAdjustment> memory;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
 
@@ -883,6 +839,12 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   void tryReleaseNative(jsg::Lock& js);
 
+  // Returns an adjustment that counts a message queued by send() with a payload of `payloadBytes`
+  // as isolate external memory. The queue lives outside the V8 heap, so without this a peer that
+  // never reads, or a WebSocketPair end that is never returned in a Response, lets it grow without
+  // the isolate's memory limit seeing it.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> chargeOutgoing(size_t payloadBytes);
+
   // ---------------------------------------------------------------------------
   // Members retained by the legacy adapter while the EW-10817 refactor is incomplete.
   // ---------------------------------------------------------------------------
@@ -935,6 +897,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
   // If any error has occurred.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> error;
+
+  // The isolate's external memory, to which queued outgoing messages are charged.
+  kj::Maybe<kj::Arc<const jsg::ExternalMemoryTarget>> outgoingMemory;
 
   // Queue of messages to be sent. Wrapped in an IoOwn so the pump loop can safely access
   // the map without locking the isolate.

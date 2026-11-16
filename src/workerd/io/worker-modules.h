@@ -77,8 +77,16 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 
 // The compiled code of a Wasm module provided by another isolate, if that isolate compiled it
 // with the same compile options this one would use.
+//
+// A compiled module keeps the source URL it was compiled with. With wasm_source_url_support, that
+// URL must be the module's name in this isolate's bundle, which the other isolate can't know, so
+// the module is recompiled. If the other isolate had the flag, the module may carry that isolate's
+// module name, so an isolate without the flag recompiles too, to get V8's hash URL.
 inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
     const Worker::Script::WasmModule& content, const CompatibilityFlags::Reader& featureFlags) {
+  if (featureFlags.getWasmSourceUrlSupport() || content.compiledWithWasmSourceUrlSupport) {
+    return kj::none;
+  }
   KJ_IF_SOME(compiled, content.compiledModule) {
     if (content.compiledWithEsmIntegrationBuiltins ==
         featureFlags.getWasmEsmIntegrationBuiltins()) {
@@ -103,7 +111,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
         jsg::modules::ModuleRegistry::Builder::Options::NONE,
-    const api::node::ModuleSource* nodeModuleSource = nullptr) {
+    const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
@@ -125,7 +133,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   });
 
   // Add the module bundles that are built into the runtime.
-  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, nodeModuleSource);
+  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, moduleSource);
 
   bool hasPythonModules = false;
 
@@ -159,8 +167,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, jsg::copyToArc(content.body), flags, builder.newCodeCacheKey(content.body));
+          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags,
+              builder.newCodeCacheKey(content.body), content.compileHints);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -308,7 +316,8 @@ v8::Local<v8::ArrayBuffer> compileDataGlobal(
 template <typename JsgIsolate>
 v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
-    const jsg::CompilationObserver& observer) {
+    const jsg::CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl = kj::none) {
   // Wasm compilation requires code-generation permission. The scope restores
   // the prior setting on exit: this helper also runs lazily (e.g. for modules
   // served by the fallback service), potentially inside a window where eval is
@@ -321,7 +330,7 @@ v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& loc
   // compiles fast but runs slower.
   AllowV8BackgroundThreadsScope scope;
 
-  return jsg::compileWasmModule(lock, reader, observer);
+  return jsg::compileWasmModule(lock, reader, observer, sourceUrl);
 };
 
 template <typename JsgIsolate>
@@ -358,7 +367,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
         auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
         wasmModule = jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, compiled));
       } else {
-        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(
+            lock, content.body, observer, name.asArray());
       }
       auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
           js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));
@@ -531,6 +541,12 @@ void registerPythonCommonModules(jsg::Lock& lock,
   // Inject the Python stdlib packages that are extracted and embedded directly in the bundle.
   modules.addBuiltinModule("pyodide-internal:packages",
       api::pyodide::EmbeddedPackagesReader::fromBundle(lock, pyodideBundle),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
+  // Inject a reader over the bundle's Python stdlib zip.
+  modules.addBuiltinModule("pyodide-internal:python_stdlib",
+      api::pyodide::ReadOnlyBuffer::fromBundleDataModule(
+          lock, pyodideBundle, "pyodideRuntime-internal:python_stdlib.zip"),
       jsg::ModuleRegistry::Type::INTERNAL);
 
   // Inject disk cache module

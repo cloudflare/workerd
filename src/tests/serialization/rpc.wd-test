@@ -1,0 +1,66 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# A class implemented in the per-isolate bootstrap that is structured
+# cloneable (CloneableTestBox, under expose_serialization_test_class), sent
+# over RPC between workers with different flags: the client uses the C++
+# streams, one server the TypeScript streams, and another server lacks
+# expose_serialization_test_class, so it can't read one.
+# enhanced_error_serialization makes a thrown value reach the caller as
+# itself.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "client",
+      worker = (
+        modules = [(name = "worker", esModule = embed "client.js")],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "enhanced_error_serialization",
+        ],
+        bindings = [
+          (name = "SERVER_CPP_STREAMS", service = "server-cpp-streams"),
+          (name = "SERVER_TS_STREAMS", service = "server-ts-streams"),
+          (name = "SERVER_WITHOUT_TEST_CLASS", service = "server-without-test-class"),
+        ],
+      )
+    ),
+    ( name = "server-cpp-streams",
+      worker = (
+        modules = [(name = "worker", esModule = embed "server.js")],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "enhanced_error_serialization",
+        ],
+      )
+    ),
+    ( name = "server-ts-streams",
+      worker = (
+        modules = [(name = "worker", esModule = embed "server.js")],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "expose_serialization_test_class",
+          "enhanced_error_serialization",
+          "typescript_implemented_streams",
+        ],
+      )
+    ),
+    ( name = "server-without-test-class",
+      worker = (
+        modules = [(name = "worker", esModule = embed "server.js")],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "experimental",
+          "enhanced_error_serialization",
+        ],
+      )
+    ),
+  ],
+);

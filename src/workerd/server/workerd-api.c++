@@ -4,64 +4,26 @@
 
 #include "workerd-api.h"
 
-#include <workerd/api/actor-state.h>
-#include <workerd/api/actor.h>
-#include <workerd/api/analytics-engine.h>
-#include <workerd/api/base64.h>
-#include <workerd/api/cache.h>
-#include <workerd/api/capnp.h>
-#include <workerd/api/commonjs.h>
-#include <workerd/api/container.h>
+#include "workerd-api-isolate.h"
+
 #include <workerd/api/crypto/impl.h>
-#include <workerd/api/encoding.h>
-#include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
-#include <workerd/api/export-loopback.h>
-#include <workerd/api/filesystem.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/html-rewriter.h>
-#include <workerd/api/hyperdrive.h>
-#include <workerd/api/kv.h>
-#include <workerd/api/memory-cache.h>
-#include <workerd/api/modules.h>
-#include <workerd/api/node/node.h>
-#include <workerd/api/performance.h>
-#include <workerd/api/pyodide/pyodide.h>
-#include <workerd/api/pyodide/requirements.h>
-#include <workerd/api/queue.h>
-#include <workerd/api/r2.h>
-#include <workerd/api/scheduled.h>
-#include <workerd/api/snapshot.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/sql.h>
-#include <workerd/api/streams.h>
+#include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/streams/standard.h>
-#include <workerd/api/sync-kv.h>
-#include <workerd/api/trace.h>
-#include <workerd/api/tracing.h>
-#include <workerd/api/unsafe.h>
-#include <workerd/api/url-standard.h>
-#include <workerd/api/urlpattern-standard.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/worker-loader.h>
-#include <workerd/api/worker-rpc.h>
-#include <workerd/api/workers-module.h>
-#include <workerd/api/wrapped-binding.h>
-#include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
-#include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/fallback-service.h>
-#include <workerd/server/workerd-debug-port-client.h>
+#include <workerd/server/kv/kv_js.embed.h>
+#include <workerd/server/queues/queues_js.embed.h>
+#include <workerd/server/workflows/workflows_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -73,8 +35,8 @@
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -83,83 +45,24 @@ namespace workerd::server {
 using api::pyodide::PythonConfig;
 
 namespace {
-JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
-    // Declares the listing of host object types and structs that the jsg
-    // automatic type mapping will understand. Each of the various
-    // NNNN_ISOLATE_TYPES macros are defined in different header files
-    // (e.g. GLOBAL_SCOPE_ISOLATE_TYPES is defined in api/global-scope.h).
-    //
-    // Global scope types are defined first just by convention, the rest
-    // of the list is in alphabetical order for easier readability (the
-    // actual order of the items is unimportant), followed by additional
-    // types defined in worker.c++ or as part of jsg.
-    //
-    // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
-    // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
-    // time being), so it gets included in the TypeScript types.
-    EW_GLOBAL_SCOPE_ISOLATE_TYPES,
-
-    EW_ACTOR_ISOLATE_TYPES,
-    EW_ACTOR_STATE_ISOLATE_TYPES,
-    EW_ANALYTICS_ENGINE_ISOLATE_TYPES,
-    EW_BASE64_ISOLATE_TYPES,
-    EW_BASICS_ISOLATE_TYPES,
-    EW_BLOB_ISOLATE_TYPES,
-    EW_CACHE_ISOLATE_TYPES,
-    EW_CAPNP_TYPES,
-    EW_CONTAINER_ISOLATE_TYPES,
-    EW_CJS_ISOLATE_TYPES,
-    EW_CRYPTO_ISOLATE_TYPES,
-    EW_ENCODING_ISOLATE_TYPES,
-    EW_EVENTS_ISOLATE_TYPES,
-    EW_FORMDATA_ISOLATE_TYPES,
-    EW_HTML_REWRITER_ISOLATE_TYPES,
-    EW_HTTP_ISOLATE_TYPES,
-    EW_SOCKETS_ISOLATE_TYPES,
-    EW_KV_ISOLATE_TYPES,
-    EW_PYODIDE_ISOLATE_TYPES,
-    EW_QUEUE_ISOLATE_TYPES,
-    EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
-    EW_WORKER_RPC_ISOLATE_TYPES,
-    EW_SCHEDULED_ISOLATE_TYPES,
-    EW_STREAMS_ISOLATE_TYPES,
-    EW_TRACE_ISOLATE_TYPES,
-    EW_UNSAFE_ISOLATE_TYPES,
-    EW_MEMORY_CACHE_ISOLATE_TYPES,
-    EW_SNAPSHOT_ISOLATE_TYPES,
-    EW_URL_ISOLATE_TYPES,
-    EW_URL_STANDARD_ISOLATE_TYPES,
-    EW_URLPATTERN_ISOLATE_TYPES,
-    EW_URLPATTERN_STANDARD_ISOLATE_TYPES,
-    EW_WEB_FILESYSTEM_ISOLATE_TYPE,
-    EW_FILESYSTEM_ISOLATE_TYPES,
-    EW_WEBSOCKET_ISOLATE_TYPES,
-    EW_SQL_ISOLATE_TYPES,
-    EW_SYNC_KV_ISOLATE_TYPES,
-    EW_NODE_ISOLATE_TYPES,
-    EW_RTTI_ISOLATE_TYPES,
-    EW_HYPERDRIVE_ISOLATE_TYPES,
-    EW_EVENTSOURCE_ISOLATE_TYPES,
-    EW_WORKER_LOADER_ISOLATE_TYPES,
-    EW_MESSAGECHANNEL_ISOLATE_TYPES,
-    EW_WORKERS_MODULE_ISOLATE_TYPES,
-    EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
-    EW_PERFORMANCE_ISOLATE_TYPES,
-    EW_TRACING_ISOLATE_TYPES,
-    EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
-    EW_WRAPPED_BINDING_ISOLATE_TYPES,
-    workerd::api::EnvModule,
-
-    jsg::TypeWrapperExtension<PromiseWrapper>,
-    jsg::InjectConfiguration<CompatibilityFlags::Reader>,
-    Worker::Api::ErrorInterface);
-
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
+
+// The sources of the ES modules a config names with `Worker.Module.bundled`.
+kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
+  static const auto bundled = [] {
+    kj::HashMap<kj::StringPtr, kj::StringPtr> map;
+    map.insert("/workerd/kv.js"_kj, KV_JS);
+    map.insert("/workerd/cron.js"_kj, CRON_JS);
+    map.insert("/workerd/queues.js"_kj, QUEUES_JS);
+    map.insert("/workerd/workflows.js"_kj, WORKFLOWS_JS);
+    return map;
+  }();
+  return bundled.find(name).map([](auto& source) { return source; });
+}
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
@@ -296,7 +199,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Array<Worker::Api::InboundListener> inboundListeners,
-    kj::Maybe<jsg::SnapshotConfig> snapshotConfig)
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig,
+    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -306,7 +210,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           memoryCacheProvider,
           pythonConfig,
           kj::mv(snapshotConfig))),
-      inboundListeners(kj::mv(inboundListeners)) {}
+      inboundListeners(kj::mv(inboundListeners)),
+      embedderBootstrap(embedderBootstrap) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -318,15 +223,17 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners() const {
   return inboundListeners;
 }
+kj::Maybe<const EmbedderBootstrap&> WorkerdApi::getEmbedderBootstrap() const {
+  return embedderBootstrap;
+}
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
-  bool deferWeakRefDeletion =
-      util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP);
   jsg::NewContextOptions opts{
     .newModuleRegistry = options.newModuleRegistry,
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
-    .deferWeakRefDeletion = deferWeakRefDeletion,
+    .deferWeakRefDeletion = true,
+    .enableTemporal = getFeatureFlags().getTemporal(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));
@@ -362,6 +269,12 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
 const jsg::TypeHandler<api::BenchExportedHandler>& WorkerdApi::getBenchTypeHandler(
     jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::BenchExportedHandler>();
+}
+
+kj::Maybe<const jsg::TypeHandler<Worker::Api::EventListenerCallback>&> WorkerdApi::
+    tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+  static_assert(kj::isSameType<EventListenerCallback, api::EventTarget::HandlerFunction>());
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<EventListenerCallback>();
 }
 
 jsg::JsObject WorkerdApi::wrapExecutionContext(
@@ -511,6 +424,18 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
+      case config::Worker::Module::BUNDLED: {
+        auto name = conf.getBundled();
+        KJ_IF_SOME(source, findBundled(name)) {
+          return Worker::Script::EsModule{source};
+        }
+        auto message = kj::str("No bundled module named \"", name, "\".");
+        KJ_IF_SOME(e, errorReporter) {
+          e.addError(kj::mv(message));
+          return Worker::Script::TextModule{""};
+        }
+        KJ_FAIL_REQUIRE(message);
+      }
       case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
         KJ_FAIL_REQUIRE(
             "NOSENTRY Worker bundle specified Python requirement which is no longer supported");
@@ -545,6 +470,17 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     for (auto& module: source.modules) {
       auto path = kj::Path::parse(module.name);
+      // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
+      // is the default.
+      //
+      // A bundle ES module the zygote instantiated is registered around its baked instance
+      // instead of being compiled again (see the Script constructor in io/worker.c++).
+      if (module.content.is<Worker::Script::EsModule>()) {
+        KJ_IF_SOME(baked, modules->tryTakeSnapshotModule(lockParam, path)) {
+          modules->add(path, jsg::ModuleRegistry::ModuleInfo(lockParam, baked));
+          continue;
+        }
+      }
       auto maybeInfo = tryCompileLegacyModule(
           lockParam, module.name, module.content, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
@@ -573,6 +509,49 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 // placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
 WD_STRONG_BOOL(IsInternalBinding);
 
+// The object a binding compiles to is a description that each request resolves through its own
+// IoContext (a channel number, names, flags): creating it does no I/O, and it transfers through a
+// startup snapshot by its snapshotClone() (jsg::Wrappable) like any other live object. The
+// exceptions, whose kinds keep a Worker out of the pipeline:
+// * CRYPTO_KEY: a CryptoKey owns its key material in BoringSSL objects (an RSA key V8 handles
+//   too), which no snapshotClone() copies.
+// * MEMORY_CACHE: a MemoryCache holds a binding into the factory-wide shared cache, acquired
+//   from the provider at construction.
+// * WRAPPED: the binding is whatever JS an internal module returns, and the Hyperdrive wrapper
+//   registers a connect override on the zygote's global scope, which the restored Worker's
+//   fresh global scope would lack.
+// * LOOPBACK_*: only ever `ctx.exports` entries, built for the real Worker after the zygote has
+//   run; their classes do not transfer.
+bool WorkerdApi::isBindingTransferableThroughSnapshot(Global::Reader global) {
+  switch (global.which()) {
+    case Global::TEXT:
+    case Global::DATA:
+    case Global::JSON:
+    case Global::FETCHER:
+    case Global::KV_NAMESPACE:
+    case Global::R2_BUCKET:
+    case Global::QUEUE:
+    case Global::ANALYTICS_ENGINE:
+    case Global::HYPERDRIVE:
+    case Global::EPHEMERAL_ACTOR_NAMESPACE:
+    case Global::DURABLE_ACTOR_NAMESPACE:
+    case Global::ACTOR_CLASS:
+    case Global::UNSAFE_EVAL:
+    case Global::WORKER_LOADER:
+    case Global::WORKERD_DEBUG_PORT:
+      return true;
+    case Global::CRYPTO_KEY:
+    case Global::MEMORY_CACHE:
+    case Global::WRAPPED:
+    case Global::LOOPBACK_SERVICE_STUB:
+    case Global::LOOPBACK_EPHEMERAL_ACTOR_NAMESPACE:
+    case Global::LOOPBACK_DURABLE_ACTOR_NAMESPACE:
+    case Global::LOOPBACK_ACTOR_CLASS:
+      return false;
+  }
+  KJ_UNREACHABLE;
+}
+
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     Global::Reader global,
     CompatibilityFlags::Reader featureFlags,
@@ -580,6 +559,11 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   auto context = lock.v8Context();
+
+  KJ_REQUIRE(!jsg::IsolateBase::from(lock.v8Isolate).isPreparingSnapshot() ||
+          WorkerdApi::isBindingTransferableThroughSnapshot(global),
+      "a binding that cannot transfer through a startup snapshot reached the zygote",
+      global.getName());
 
   // When new binding types are created. If their value resolves to be a string
   // or a JSON stringified/stringifiable value, then it should be added to
@@ -651,13 +635,18 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       // A cache without an id is not shared.
       kj::Maybe<kj::StringPtr> cacheId;
       if (cache.getCacheId().size() > 0) cacheId = cache.getCacheId();
-      return lock.wrap(context,
-          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId,
-              {
-                .maxKeys = cache.getMaxKeys(),
-                .maxValueSize = cache.getMaxValueSize(),
-                .maxTotalValueSize = cache.getMaxTotalValueSize(),
-              })));
+      api::MemoryCacheLimits limits{
+        .maxKeys = cache.getMaxKeys(),
+        .maxValueSize = cache.getMaxValueSize(),
+        .maxTotalValueSize = cache.getMaxTotalValueSize(),
+      };
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_MEMORY_CACHE)) {
+        return jsg::check(
+            ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(api::memory_cache_new(
+                lock.v8Isolate, memoryCacheProvider.bindForRust(cacheId, limits))));
+      }
+      return lock.wrap(
+          context, lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId, limits)));
     }
 
     case Global::EPHEMERAL_ACTOR_NAMESPACE:
@@ -814,7 +803,8 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
     kj::Maybe<kj::String> maybeFallbackService,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    jsg::modules::ModuleRegistry::Builder::Options options) {
 
   return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(maybeSource, featureFlags,
       bundleBase,
@@ -1089,7 +1079,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
         return kj::none;
       }));
     }
-  }, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+  }, options | jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 }
 
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {

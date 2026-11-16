@@ -28,14 +28,16 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         cmd = """
         # Create a file with all the file paths to avoid Windows command line length limits
         echo "$(locations %s)" > paths.txt
-        $(execpath @python_3_13//:python3) \
+        $(PYTHON3) \
             $(location //src/workerd/server/tests/python/vendor_pkg_tests:generate_modules.py) \
             --level=%s \
             --template=$(location %s) \
             --out=$@ \
             @paths.txt
         """ % (vendored_srcs_target, level, test_template),
-        tools = ["@python_3_13//:python3"],
+        # The toolchain as a tool brings the interpreter's whole runtime, not just its binary.
+        toolchains = ["@rules_python//python:current_py_toolchain"],
+        tools = ["@rules_python//python:current_py_toolchain"],
     )
 
     # Create the py_wd_test

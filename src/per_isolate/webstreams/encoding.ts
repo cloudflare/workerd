@@ -1,11 +1,13 @@
 'use strict';
 
-// TextEncoderStream and TextDecoderStream — WHATWG Encoding Standard
-// stream wrappers, implemented purely in JS/TS over the captured
-// TextEncoder/TextDecoder primitives. These are standard category-3
+// TextEncoderStream and TextDecoderStream - WHATWG Encoding Standard
+// stream wrappers, implemented purely in JS/TS over the C++ codecs: the
+// captured TextDecoder, and utils.encodeUtf8, which encodes non-Latin-1
+// text with simdutf as the C++ TextEncoderStream does (TextEncoder.encode()
+// does only under an autogate). These are standard category-3
 // transforms (not elidable, not native-backed): the codec work
 // dominates, and the readable side yields values (strings for TDS,
-// Uint8Array for TES), not bytes — so they deliberately do NOT use
+// Uint8Array for TES), not bytes - so they deliberately do NOT use
 // the native-backed byte-stream path.
 //
 // The C++ stream wrappers these replace are legacy artifacts predating
@@ -16,32 +18,46 @@ import type {
   WritableStream as WritableStreamType,
 } from './types';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 
 const {
   ObjectDefineProperties,
+  ObjectFreeze,
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   SymbolToStringTag,
   TextDecoderEncodingGet,
   TextDecoder,
-  TextEncoder,
   TextDecoderFatalGet,
   TextDecoderIgnoreBOMGet,
-  TextEncoderEncode,
   TextDecoderDecode,
   TypeError,
   getProtoGetter,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
+const { encodeUtf8, isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } =
+  utils;
 
 const {
   TransformStream,
   TransformStreamDefaultController,
 } = require('webstreams/transform');
-const { isActualObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kEnumerable,
+  kNullProtoObject,
+  TransformerRecord,
+  toStringTagProperty,
+} = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
+
+// TextDecoderStream's options for every chunk's decode, made once.
+const kDecodeStreamOptions = ObjectFreeze({
+  __proto__: kNullProtoObject,
+  stream: true,
+}) as TextDecodeOptions;
 
 const transformControllerEnqueue = uncurryThis(
   TransformStreamDefaultController.prototype.enqueue
@@ -66,7 +82,7 @@ let assertIsTextDecoderStream: (self: TextDecoderStream) => void;
 //
 // Encodes strings to UTF-8. Stateful: a lone high surrogate at the end
 // of a chunk is held and paired with the next chunk's leading low
-// surrogate (spec §10.1.1 "encode and enqueue a chunk"). If the stream
+// surrogate (spec section 10.1.1 "encode and enqueue a chunk"). If the stream
 // closes with a pending high surrogate, it's replaced with U+FFFD.
 
 class TextEncoderStream {
@@ -81,54 +97,53 @@ class TextEncoderStream {
   }
 
   constructor() {
+    markUncloneable(this);
     const self = this;
-    const encoder = new TextEncoder();
-    this.#transform = new TransformStream({
-      __proto__: null,
-      transform(chunk: unknown, controller: object) {
-        // Spec: "encode and enqueue a chunk" ToString-coerces the input.
-        // Template literal = ToString exactly: user toString honored for
-        // objects, TypeError for symbols (String() would stringify them).
-        const str = typeof chunk === 'string' ? chunk : `${chunk}`;
-        const text = self.#pendingHighSurrogate + str;
-        const len = text.length;
-        if (len === 0) return;
+    const transform = (chunk: unknown, controller: object): void => {
+      // Spec: "encode and enqueue a chunk" ToString-coerces the input.
+      // Template literal = ToString exactly: user toString honored for
+      // objects, TypeError for symbols (String() would stringify them).
+      const str = typeof chunk === 'string' ? chunk : `${chunk}`;
+      const text = self.#pendingHighSurrogate + str;
+      const len = text.length;
+      if (len === 0) return;
 
-        // Check if the last code unit is a lone high surrogate
-        // (0xD800–0xDBFF). If so, hold it for the next chunk.
-        const last = StringPrototypeCharCodeAt(text, len - 1) as number;
-        if (last >= 0xd800 && last <= 0xdbff) {
-          self.#pendingHighSurrogate = StringPrototypeSlice(
-            text,
-            len - 1
-          ) as string;
-          const prefix = StringPrototypeSlice(text, 0, len - 1) as string;
-          if (prefix.length > 0) {
-            transformControllerEnqueue(
-              controller,
-              TextEncoderEncode(encoder, prefix)
-            );
-          }
-        } else {
-          self.#pendingHighSurrogate = '';
-          transformControllerEnqueue(
-            controller,
-            TextEncoderEncode(encoder, text)
-          );
+      // Check if the last code unit is a lone high surrogate
+      // (0xD800-0xDBFF). If so, hold it for the next chunk.
+      const last = StringPrototypeCharCodeAt(text, len - 1) as number;
+      if (last >= 0xd800 && last <= 0xdbff) {
+        self.#pendingHighSurrogate = StringPrototypeSlice(
+          text,
+          len - 1
+        ) as string;
+        const prefix = StringPrototypeSlice(text, 0, len - 1) as string;
+        if (prefix.length > 0) {
+          transformControllerEnqueue(controller, encodeUtf8(prefix));
         }
-      },
-      flush(controller: object) {
-        // A pending high surrogate at end-of-stream is replaced with
-        // U+FFFD (the replacement character).
-        if (self.#pendingHighSurrogate !== '') {
-          transformControllerEnqueue(
-            controller,
-            TextEncoderEncode(encoder, '\uFFFD')
-          );
-          self.#pendingHighSurrogate = '';
-        }
-      },
-    });
+      } else {
+        self.#pendingHighSurrogate = '';
+        transformControllerEnqueue(controller, encodeUtf8(text));
+      }
+    };
+    const flush = (controller: object): void => {
+      // A pending high surrogate at end-of-stream is replaced with
+      // U+FFFD (the replacement character).
+      if (self.#pendingHighSurrogate !== '') {
+        transformControllerEnqueue(controller, encodeUtf8('\uFFFD'));
+        self.#pendingHighSurrogate = '';
+      }
+    };
+    this.#transform = new TransformStream(
+      new TransformerRecord(
+        undefined, // cancel
+        undefined, // expectedLength
+        flush, // flush
+        undefined, // readableType
+        undefined, // start
+        transform, // transform
+        undefined // writableType
+      )
+    );
   }
 
   get encoding(): string {
@@ -177,41 +192,49 @@ class TextDecoderStream {
   }
 
   constructor(label: string = 'utf-8', options?: TextDecoderStreamOptions) {
+    markUncloneable(this);
     const decoder = new TextDecoder(label, options);
     this.#decoder = decoder;
 
-    this.#transform = new TransformStream({
-      __proto__: null,
-      transform(chunk: unknown, controller: object) {
-        // The writable accepts an AllowSharedBufferSource (Encoding
-        // Standard), so a bare SharedArrayBuffer decodes like an
-        // ArrayBuffer.
-        if (
-          !isArrayBufferView(chunk) &&
-          !isArrayBuffer(chunk) &&
-          !isSharedArrayBuffer(chunk)
-        ) {
-          throw new TypeError(
-            'TextDecoderStream: chunk must be a BufferSource'
-          );
-        }
-        const decoded = TextDecoderDecode(decoder, chunk as BufferSource, {
-          __proto__: null,
-          stream: true,
-        });
-        if (decoded.length > 0) {
-          transformControllerEnqueue(controller, decoded);
-        }
-      },
-      flush(controller: object) {
-        // Final decode: flushes any incomplete multi-byte sequences.
-        // In fatal mode this throws if the sequence is incomplete.
-        const decoded = TextDecoderDecode(decoder);
-        if (decoded.length > 0) {
-          transformControllerEnqueue(controller, decoded);
-        }
-      },
-    });
+    const transform = (chunk: unknown, controller: object): void => {
+      // The writable accepts an AllowSharedBufferSource (Encoding
+      // Standard), so a bare SharedArrayBuffer decodes like an
+      // ArrayBuffer.
+      if (
+        !isArrayBufferView(chunk) &&
+        !isArrayBuffer(chunk) &&
+        !isSharedArrayBuffer(chunk)
+      ) {
+        throw new TypeError('TextDecoderStream: chunk must be a BufferSource');
+      }
+      const decoded = TextDecoderDecode(
+        decoder,
+        chunk as BufferSource,
+        kDecodeStreamOptions
+      );
+      if (decoded.length > 0) {
+        transformControllerEnqueue(controller, decoded);
+      }
+    };
+    const flush = (controller: object): void => {
+      // Final decode: flushes any incomplete multi-byte sequences.
+      // In fatal mode this throws if the sequence is incomplete.
+      const decoded = TextDecoderDecode(decoder);
+      if (decoded.length > 0) {
+        transformControllerEnqueue(controller, decoded);
+      }
+    };
+    this.#transform = new TransformStream(
+      new TransformerRecord(
+        undefined, // cancel
+        undefined, // expectedLength
+        flush, // flush
+        undefined, // readableType
+        undefined, // start
+        transform, // transform
+        undefined // writableType
+      )
+    );
   }
 
   get encoding(): string {
@@ -245,7 +268,7 @@ class TextDecoderStream {
 }
 
 ObjectDefineProperties(TextEncoderStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   encoding: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
@@ -253,7 +276,7 @@ ObjectDefineProperties(TextEncoderStream.prototype, {
 });
 
 ObjectDefineProperties(TextDecoderStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   encoding: kEnumerable,
   fatal: kEnumerable,
   ignoreBOM: kEnumerable,

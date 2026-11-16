@@ -20,6 +20,7 @@ import {
 import {
   beforeRequest,
   clearSignals,
+  INTROSPECTION_MODULE,
   loadPyodide,
 } from 'pyodide-internal:python';
 import {
@@ -30,11 +31,9 @@ import {
 import {
   PythonUserError,
   PythonWorkersInternalError,
-  loadPythonMod,
   reportError,
 } from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
-import { default as introspectionSource } from 'pyodide-internal:introspection.py';
 import { createImportProxy } from 'pyodide-internal:serializeJsModule';
 export { createImportProxy };
 
@@ -546,7 +545,6 @@ function makeEntrypointClass(
 }
 
 type IntrospectionMod = {
-  __dict__: PyDict;
   collect_entrypoint_classes: (mod: PyModule) => PythonEntrypointClasses;
   wrapper_func: PyCallable;
 };
@@ -556,11 +554,9 @@ async function getIntrospectionMod(): Promise<IntrospectionMod> {
   if (introspectionModPromise === null) {
     introspectionModPromise = (async (): Promise<IntrospectionMod> => {
       const pyodide = await getPyodide();
-      return loadPythonMod(
-        pyodide,
-        'introspection',
-        introspectionSource
-      ) as IntrospectionMod;
+      return pyodide.pyimport(
+        INTROSPECTION_MODULE
+      ) as unknown as IntrospectionMod;
     })();
   }
 

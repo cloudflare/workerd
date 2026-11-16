@@ -339,6 +339,13 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface);
 kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
     kj::Own<WorkerInterface> worker, kj::Promise<void> revokeProm);
 
+// Like the above, but calls `makeRevokeProm` only when an event first opens a WebSocket or a
+// CONNECT tunnel, and at most once. Events that open neither never call it, so use this form when
+// setting up the revocation promise costs enough to be worth skipping on ordinary requests. The
+// promise it returns must reject if revocation was triggered before it was created.
+kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
+    kj::Own<WorkerInterface> worker, kj::Function<kj::Promise<void>()> makeRevokeProm);
+
 // Implementation of WorkerInterface on top of rpc::EventDispatcher. Since an EventDispatcher
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
 // can be delivered).

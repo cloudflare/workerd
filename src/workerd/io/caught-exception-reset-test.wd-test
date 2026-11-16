@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "caught-exception-reset-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "caught-exception-reset-test.js")
+        ],
+        bindings = [
+          (name = "SERVICE", service = "caught-exception-reset-test"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        # Self-tail, so that console.log() calls have a tracer and stringify their arguments
+        # for it.
+        tails = ["caught-exception-reset-test"],
+      )
+    ),
+  ],
+);

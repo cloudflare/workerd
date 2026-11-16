@@ -147,8 +147,7 @@ void fuzzilli_handler(workerd::jsg::Lock& js, workerd::jsg::Arguments<workerd::j
       case 6: {
         // Out-of-bounds access (2), likely only crashes in ASan builds.
         std::vector<int> vec(6);
-        //linter complains about this...
-        // NOLINTNEXTLINE(edgeworker-ban-memset)
+        // NOLINTNEXTLINE(*-ban-memset): the out-of-bounds write is the point.
         memset(vec.data(), 42, 0x100);
         break;
       }

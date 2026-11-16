@@ -55,8 +55,8 @@ pub struct UrlUtil;
 #[jsg_resource]
 impl UrlUtil {
     #[must_use]
-    pub fn new() -> jsg::Rc<Self> {
-        jsg::Rc::new(Self {})
+    pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {
+        jsg::Rc::new(lock, Self {})
     }
 
     /// # Errors

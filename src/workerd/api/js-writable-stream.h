@@ -31,8 +31,7 @@ namespace workerd::api {
 // WritableStream or a TypeScript implemented WritableStream (represented as a JS object). Every
 // method that touches the underlying stream switches on the backend. The TypeScript arms
 // dispatch through the webstreams/cpp_exports bootstrap module (see js-writable-stream.c++),
-// which exists only when the typescript_implemented_streams compat flag (plus the per-isolate
-// bootstrap autogate) is enabled.
+// which exists only when the typescript_implemented_streams compat flag is enabled.
 class JsWritableStream final {
  public:
   // The underlying stream: either the legacy C++ WritableStream or the TypeScript
@@ -322,13 +321,13 @@ struct JsReadableWritablePair {
 // TypeScript-implemented WritableStream can be backed directly by a C++ byte sink. Unlike
 // the readable side's pull conduit, no new backend machinery exists on the TS side: the
 // standard WritableStream machinery drives this object through the ordinary UnderlyingSink
-// hooks (write/close/abort), one operation at a time. The marker symbol exists for pipe
+// hooks (write/close/abort), one operation at a time. The private marker exists for pipe
 // dispatch and extraction; the one extension hook is pipeFrom(source, options), which the
 // TS pipeTo calls when BOTH pipe ends are native-backed so the pipe runs entirely at the
 // C++ layer.
 //
 // Instances are created only from C++ (there is no JavaScript constructor) and are handed
-// to the TypeScript WritableStream constructor carrying the native-sink marker symbol.
+// to the TypeScript WritableStream constructor carrying a V8-private native-sink marker.
 // The object is never exposed to user code, and it is suppressed from the generated
 // TypeScript types.
 class WritableStreamNativeSink final: public jsg::Object {
@@ -358,6 +357,21 @@ class WritableStreamNativeSink final: public jsg::Object {
   // I/O is somehow still in flight (the TS machinery serializes sink operations, so this
   // is defensive), the release is deferred to the write's settlement.
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+
+  // The flush extension hook, called by the TS controller when a flush marker reaches the
+  // head of its queue, so every write ahead of the marker has completed. In a Durable
+  // Object, returns a promise that resolves once the output locks then pending are
+  // released; the controller holds back everything queued behind the marker until then.
+  // This is the legacy Flush event's output-lock wait, except that the legacy event records
+  // its lock when the flush is called: waiting from the head also covers every lock that
+  // was pending at the call. Returns undefined outside an actor, where there is nothing to
+  // wait for.
+  //
+  // Callers act on the connection directly once the flush resolves (for example,
+  // Socket::startTls() detaches the stream and starts the handshake), so the flush must not
+  // resolve while an output lock is pending, and a write queued behind it must not reach
+  // the sink first.
+  jsg::Optional<jsg::Promise<void>> flush(jsg::Lock& js);
 
   // The native+native pipe fast path, called by the TS pipeTo dispatch when both ends
   // carry extraction markers, no prevent* option is set, both endpoints are in their
@@ -389,6 +403,7 @@ class WritableStreamNativeSink final: public jsg::Object {
     JSG_METHOD(write);
     JSG_METHOD(close);
     JSG_METHOD(abort);
+    JSG_METHOD(flush);
     JSG_METHOD(pipeFrom);
     JSG_METHOD(detach);
 

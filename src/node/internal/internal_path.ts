@@ -36,6 +36,7 @@ import {
 } from 'node-internal:constants';
 
 import { validateObject, validateString } from 'node-internal:validators';
+import { GlobMatcher } from 'node-internal:internal_glob_pattern';
 
 function isPathSeparator(code: number): boolean {
   return code === CHAR_FORWARD_SLASH || code === CHAR_BACKWARD_SLASH;
@@ -154,6 +155,34 @@ function _format(sep: string, pathObject: PathObject): string {
     return base;
   }
   return dir === pathObject.root ? `${dir}${base}` : `${dir}${sep}${base}`;
+}
+
+// Like Node.js's matchGlobPattern(), compiled patterns are cached.
+const kGlobPatternCacheLimit = 250;
+const globPatternCaches = {
+  posix: new Map<string, GlobMatcher>(),
+  win32: new Map<string, GlobMatcher>(),
+};
+
+function glob(
+  path: string,
+  pattern: string,
+  platform: 'posix' | 'win32'
+): boolean {
+  validateString(path, 'path');
+  validateString(pattern, 'pattern');
+
+  const cache = globPatternCaches[platform];
+  let matcher = cache.get(pattern);
+  if (matcher === undefined) {
+    matcher = new GlobMatcher(pattern, platform === 'win32');
+    cache.set(pattern, matcher);
+    if (cache.size >= kGlobPatternCacheLimit) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+  }
+  return matcher.match(path);
 }
 
 const win32 = {
@@ -1026,8 +1055,8 @@ const win32 = {
     return ret;
   },
 
-  matchesGlob(_path: string, _pattern: string): boolean {
-    throw new Error('path.win32.matchesGlob() is not implemented.');
+  matchesGlob(path: string, pattern: string): boolean {
+    return glob(path, pattern, 'win32');
   },
 
   sep: '\\',
@@ -1495,8 +1524,8 @@ const posix = {
     return ret;
   },
 
-  matchesGlob(_path: string, _pattern: string): boolean {
-    throw new Error('path.posix.matchesGlob() is not implemented.');
+  matchesGlob(path: string, pattern: string): boolean {
+    return glob(path, pattern, 'posix');
   },
 
   sep: '/',
