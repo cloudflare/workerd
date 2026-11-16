@@ -124,7 +124,11 @@ namespace workerd::util {
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
-  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
+  /* Counts the kj-heap copy of a Request or Response body built from a string, BufferSource,      \
+     Blob, FormData or URLSearchParams as the isolate's external memory, so that the isolate's     \
+     memory limit applies to it. See JsReadableStream::Buffer. */                                  \
+  V(BODY_BUFFER_MEMORY)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

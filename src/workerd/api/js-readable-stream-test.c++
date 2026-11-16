@@ -406,6 +406,84 @@ KJ_TEST("JsReadableStream tee carries the buffer and nullifies the original") {
   });
 }
 
+constexpr int64_t kLargeBodySize = 1024 * 1024;
+
+// The isolate's external memory, including adjustments not yet applied.
+int64_t getExternalMemory(jsg::Lock& js) {
+  js.getExternalMemoryTarget()->applyDeferredMemoryUpdate();
+  return js.v8Isolate->GetExternalMemory();
+}
+
+// External memory charged while the streams `makeStreams` returns are alive, and still charged
+// once they have been dropped and garbage-collected.
+struct BufferMemory {
+  int64_t held;
+  int64_t retained;
+};
+
+BufferMemory measureBufferMemory(
+    TestFixture& fixture, kj::FunctionParam<kj::Vector<JsReadableStream>(jsg::Lock&)> makeStreams) {
+  BufferMemory memory{};
+  int64_t before = 0;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    before = getExternalMemory(env.js);
+    auto streams = makeStreams(env.js);
+    memory.held = getExternalMemory(env.js) - before;
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    env.isolate->LowMemoryNotification();
+    memory.retained = getExternalMemory(env.js) - before;
+  });
+  return memory;
+}
+
+kj::Vector<JsReadableStream> makeLargeStringStreams(jsg::Lock& js) {
+  kj::Vector<JsReadableStream> streams;
+  JsReadableStream stream(js, kj::str(kj::repeat('x', static_cast<size_t>(kLargeBodySize))));
+  // Clones and tee branches share the one buffer.
+  streams.add(KJ_ASSERT_NONNULL(stream.tryClone(js)));
+  auto tee = stream.tee(js);
+  streams.add(kj::mv(tee.branch1));
+  streams.add(kj::mv(tee.branch2));
+  return streams;
+}
+
+KJ_TEST("JsReadableStream buffer is counted as external memory once, until it is dropped") {
+  for (bool typescript: {false, true}) {
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    flags.setTypeScriptImplementedStreams(typescript);
+    TestFixture fixture({.featureFlags = flags.asReader(),
+      .autogateKeys = kj::arr(util::AutogateKey::BODY_BUFFER_MEMORY)});
+    auto memory = measureBufferMemory(fixture, makeLargeStringStreams);
+    KJ_EXPECT(
+        memory.held >= kLargeBodySize && memory.held < 2 * kLargeBodySize, typescript, memory.held);
+    KJ_EXPECT(memory.retained < kLargeBodySize, typescript, memory.retained);
+  }
+}
+
+KJ_TEST("JsReadableStream counts its copy of a Blob body as external memory") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::BODY_BUFFER_MEMORY)});
+  kj::Maybe<jsg::Ref<Blob>> blob;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto data = jsg::JsUint8Array::create(env.js, static_cast<size_t>(kLargeBodySize));
+    blob = env.js.alloc<Blob>(env.js, jsg::JsBufferSource(data), kj::String());
+  });
+  auto memory = measureBufferMemory(fixture, [&](jsg::Lock& js) {
+    kj::Vector<JsReadableStream> streams;
+    streams.add(JsReadableStream(js, KJ_ASSERT_NONNULL(blob).addRef()));
+    return streams;
+  });
+  KJ_EXPECT(memory.held >= kLargeBodySize && memory.held < 2 * kLargeBodySize, memory.held);
+  KJ_EXPECT(memory.retained < kLargeBodySize, memory.retained);
+}
+
+KJ_TEST("JsReadableStream buffer is not counted as external memory with the gate off") {
+  TestFixture fixture({.ignoreAllAutogatesEnv = true});
+  auto memory = measureBufferMemory(fixture, makeLargeStringStreams);
+  KJ_EXPECT(memory.held < kLargeBodySize, memory.held);
+}
+
 KJ_TEST("JsReadableStream detach takes over the stream, leaving a disturbed husk") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {

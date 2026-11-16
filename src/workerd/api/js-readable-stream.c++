@@ -756,9 +756,13 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 // ownership of that heap buffer without changing its address, so view remains valid.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
+JsReadableStream::Buffer::Buffer(jsg::Lock& js, kj::Array<const kj::byte> data)
     : owned(kj::mv(data)),
-      view(owned) {}
+      view(owned) {
+  if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_MEMORY)) {
+    memory = js.getExternalMemoryAdjustment(owned.size());
+  }
+}
 #pragma clang diagnostic pop
 
 // Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
@@ -766,7 +770,7 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
 // kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
 // branches alike.
 JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
-    : Buffer(kj::heapArray(data->getData(js))) {}
+    : Buffer(js, kj::heapArray(data->getData(js))) {}
 
 namespace {
 
@@ -817,7 +821,7 @@ JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
       }) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data)))) {}
+    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(data)))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
     : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}

@@ -53,8 +53,12 @@ class JsReadableStream final {
   struct Buffer {
     kj::Array<const kj::byte> owned;
     kj::ArrayPtr<const kj::byte> view;
+    // Counts `owned` as the isolate's external memory, so that the isolate's memory limit applies
+    // to it, until the last reference to this Buffer goes. That may happen on the event loop
+    // without the isolate lock, which the adjustment handles by deferring the release.
+    kj::Maybe<jsg::ExternalMemoryAdjustment> memory;
 
-    explicit Buffer(kj::Array<const kj::byte> data);
+    Buffer(jsg::Lock& js, kj::Array<const kj::byte> data);
     Buffer(jsg::Lock& js, jsg::Ref<Blob> data);
   };
 
