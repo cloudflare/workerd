@@ -295,6 +295,129 @@ fn javascript_error_named_like_a_dom_exception_stays_a_class() {
     );
 }
 
+/// The expression of what `expr` throws.
+fn caught(expr: &str) -> String {
+    format!("(() => {{ try {{ {expr}; }} catch (e) {{ return e; }} }})()")
+}
+
+/// A `DOMException` that Rust JSG throws is read back as the `DOMException` it was thrown as,
+/// with its name, from an instance of either class alike.
+#[test]
+fn thrown_dom_exceptions_convert_back_to_their_name() {
+    let names = DOM_EXCEPTION_TYPES.iter().map(|&(name, _)| name).chain([
+        "SyntaxError",
+        "QuotaExceededError",
+        "IndexSizeError",
+        "CustomError",
+    ]);
+    for class in DOM_EXCEPTION_CLASSES {
+        run(&Harness::new(), class, |lock, ctx| {
+            for name in names.clone() {
+                let expr = caught(&format!("Errors.failDom('{name}', 'went wrong')"));
+                let value = ctx.eval_raw(lock, &expr).unwrap();
+                let err = <jsg::Error as jsg::FromJS>::from_js(lock, value).unwrap();
+                assert!(err.name.is_dom_exception(), "{name}, {class:?}");
+                assert_eq!(err.name.as_str(), name, "{class:?}");
+                assert_eq!(err.message, "went wrong", "{name}, {class:?}");
+            }
+            Ok(())
+        });
+    }
+
+    // Rethrown, each keeps its name and code.
+    for &(name, code) in DOM_EXCEPTION_TYPES {
+        assert_eq!(
+            describe(&format!(
+                "Errors.rethrow({})",
+                caught(&format!("Errors.fail('{name}', 'went wrong')"))
+            )),
+            format!("true DOMException {name}: went wrong ({code})"),
+        );
+    }
+    for (name, code) in [
+        ("SyntaxError", 12),
+        ("IndexSizeError", 1),
+        ("CustomError", 0),
+    ] {
+        assert_eq!(
+            describe(&format!(
+                "Errors.rethrow({})",
+                caught(&format!("Errors.failDom('{name}', 'm')"))
+            )),
+            format!("true DOMException {name}: m ({code})"),
+        );
+    }
+    // So does an instance of the bootstrap's class, rethrown as one.
+    for name in ["AbortError", "SyntaxError", "CustomError"] {
+        assert_eq!(
+            eval_with(
+                DomExceptionClass::Bootstrap,
+                &format!(
+                    "const e = {}; `${{e.name}}: ${{e.message}}`",
+                    caught(&format!(
+                        "Errors.rethrow({})",
+                        caught(&format!("Errors.failDom('{name}', 'm')"))
+                    ))
+                )
+            ),
+            format!("{name}: m"),
+        );
+    }
+}
+
+/// A `DOMException` that a script creates converts as one that Rust JSG throws does.
+#[test]
+fn script_created_dom_exceptions_convert() {
+    run(&Harness::new(), DomExceptionClass::Cpp, |lock, ctx| {
+        // The harness's global has no `DOMException` property.
+        ctx.eval_raw(
+            lock,
+            &format!(
+                "globalThis.DOMException = {}.constructor",
+                caught("Errors.fail('AbortError', '')")
+            ),
+        )
+        .unwrap();
+        let convert = |lock: &mut jsg::Lock<'_>, expr: &str| {
+            let value = ctx.eval_raw(lock, expr).unwrap();
+            <jsg::Error as jsg::FromJS>::from_js(lock, value)
+        };
+
+        for name in ["AbortError", "IndexSizeError", "CustomError"] {
+            let err = convert(lock, &format!("new DOMException('m', '{name}')")).unwrap();
+            assert!(err.name.is_dom_exception(), "{name}");
+            assert_eq!(err.name.as_str(), name);
+            assert_eq!(err.message, "m", "{name}");
+        }
+
+        // The name and message it was created with, not the properties that shadow them.
+        let err = convert(
+            lock,
+            "Object.defineProperties(new DOMException('m', 'DataError'), {
+               name: { value: 'TypeError' }, message: { value: 'overridden' },
+             })",
+        )
+        .unwrap();
+        assert_eq!(err.name.as_str(), "DataError");
+        assert!(err.name.is_dom_exception());
+        assert_eq!(err.message, "m");
+
+        // An instance of a subclass is a DOMException too.
+        let err = convert(
+            lock,
+            "new (class extends DOMException {})('m', 'NotFoundError')",
+        )
+        .unwrap();
+        assert_eq!(err.name.as_str(), "NotFoundError");
+        assert!(err.name.is_dom_exception());
+
+        // An object that only looks like one is not an error.
+        let err = convert(lock, "({ name: 'AbortError', message: 'm' })").unwrap_err();
+        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        Ok(())
+    });
+}
+
 /// With the bootstrap's `DOMException`, each way Rust JSG creates a `DOMException` creates an
 /// instance of the bootstrap's class, with the name and message it is given.
 #[test]

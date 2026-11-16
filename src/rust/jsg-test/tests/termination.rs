@@ -12,6 +12,7 @@
 
 use std::cell::Cell;
 
+use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -71,6 +72,19 @@ impl Terminator {
     fn terminate_then_create_dom_exception(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
         crate::Harness::terminate_and_deliver(lock);
         let result = lock.dom_exception("AbortError", "created while terminating");
+        assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+        result.map(drop)
+    }
+
+    /// Is terminated and then converts `value` to a `jsg::Error`, which fails.
+    #[jsg_method]
+    fn terminate_then_convert_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = <jsg::Error as jsg::FromJS>::from_js(lock, value);
         assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
         result.map(drop)
     }
@@ -286,6 +300,18 @@ fn failing_with_a_dom_error_while_terminating_keeps_the_termination() {
 #[test]
 fn creating_a_dom_exception_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenCreateDomException");
+}
+
+#[test]
+fn converting_an_error_while_terminating_keeps_the_termination() {
+    for value in ["new Error('e')", "({ name: 'AbortError', message: 'm' })"] {
+        termination_survives_call(
+            &crate::Harness::new(),
+            |lock| jsg::Rc::new(lock, Terminator),
+            &format!("terminateThenConvertError({value})"),
+            |_, _| {},
+        );
+    }
 }
 
 #[test]

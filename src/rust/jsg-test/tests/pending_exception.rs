@@ -161,6 +161,20 @@ impl Thrower {
         self.throw_then(lock, first, |lock| v8::Utf8Value::new(lock, &value))
     }
 
+    /// Converts `value` to a `jsg::Error`, which checks for a `DOMException` and reads a native
+    /// error's `name` and `message`.
+    #[jsg_method]
+    fn throw_then_convert_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            <jsg::Error as jsg::FromJS>::from_js(lock, value)
+        })
+    }
+
     /// Parses JSON (`JSON::Parse`).
     #[jsg_method]
     fn throw_then_json_parse<'s>(
@@ -186,8 +200,9 @@ impl Thrower {
 /// Evaluates `obj.{call}`, where `obj` is a `Thrower` and the call's first argument is
 /// `first`, a function that throws. Checks that the operation failed with a pending error, that
 /// JavaScript catches the exception `first` threw, and that no other JavaScript ran. Only the
-/// `Utf8Value` and JSON stringify cases pass JavaScript that would set `secondRan`; for the others, the pending
-/// error and the caught exception are what tell a guarded shim from one that isn't.
+/// `Utf8Value`, error conversion and JSON stringify cases pass JavaScript that would set
+/// `secondRan`; for the others, the pending error and the caught exception are what tell a guarded
+/// shim from one that isn't.
 fn exception_survives(call: &str) {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let thrower = jsg::Rc::new(
@@ -262,6 +277,19 @@ fn utf8_value_while_exception_pending_runs_nothing() {
     exception_survives(
         "throwThenUtf8Value(first, { toString() { globalThis.secondRan = true; return 'x'; } })",
     );
+}
+
+#[test]
+fn converting_an_error_while_exception_pending_fails() {
+    // A native error whose `name` getter would set `secondRan`, and values that aren't errors,
+    // which would otherwise fail with a TypeError without calling into V8.
+    for value in [
+        "Object.defineProperty(new Error('e'), 'name', { get() { secondRan = true; } })",
+        "({ name: 'AbortError', message: 'm' })",
+        "1",
+    ] {
+        exception_survives(&format!("throwThenConvertError(first, {value})"));
+    }
 }
 
 #[test]
