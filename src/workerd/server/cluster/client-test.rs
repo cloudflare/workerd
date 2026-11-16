@@ -99,11 +99,8 @@ fn error_codes_are_capped() {
     let long = format!("<Error><Code>{}</Code></Error>", "x".repeat(1000));
     let response = HttpResponse {
         status: 500,
-        etag: String::new(),
-        generation: String::new(),
-        date: String::new(),
-        metadata_flavor: String::new(),
         body: long.into_bytes(),
+        ..HttpResponse::default()
     };
     let sent = Sent {
         response,
@@ -501,5 +498,196 @@ fn a_guarded_write_refused_beside_another_copy_is_of_unknown_outcome() {
         }
         // A write that went once failed its guard.
         assert_eq!(put("refused").await.unwrap(), None);
+    });
+}
+
+/// The answer `status` with `headers` and `body`.
+fn answer(status: u16, headers: &[(&'static str, &str)], body: &str) -> Answer {
+    let headers = headers
+        .iter()
+        .map(|(name, value)| (*name, (*value).to_owned()));
+    Answer::Reply {
+        status,
+        headers: headers.collect(),
+        body: body.to_owned(),
+    }
+}
+
+/// An error answer with S3's `Code`.
+fn error(status: u16, code: &str) -> Answer {
+    answer(status, &[], &format!("<Error><Code>{code}</Code></Error>"))
+}
+
+/// A refusal's status and code.
+fn refusal<T>(result: Result<T>) -> (u16, String) {
+    match result {
+        Err(Error::Refused { status, code, .. }) => (status, code),
+        other => panic!("not refused: {:?}", other.err()),
+    }
+}
+
+/// The body of a read, read.
+async fn body(body: crate::bucket::Body) -> Result<String> {
+    let chunks: Vec<_> = body.collect().await;
+    let chunks = chunks.into_iter().collect::<Result<Vec<_>>>()?;
+    Ok(String::from_utf8(chunks.concat()).unwrap())
+}
+
+/// What the cluster test's fakes can't show of the calls R2 makes through
+/// `bucket`, whose versions are the header `version`: error answers, a body
+/// that stalls or is cut short, a completion sent again. Reads carry
+/// `accept-encoding: gzip` if `gzip`; every request is signed if
+/// `authorized`.
+async fn r2_calls(
+    bucket: &Bucket,
+    server: &Server,
+    queue: &Mutex<VecDeque<Answer>>,
+    version: (&'static str, &str),
+    (gzip, authorized): (bool, bool),
+) {
+    let push = |answers: Vec<Answer>| queue.lock().unwrap().extend(answers);
+    let mut sent = Vec::new();
+    // A HEAD's answer has no body, so no `Code`.
+    push(vec![
+        answer(404, &[], ""),
+        error(403, "AccessDenied"),
+        error(416, "InvalidRange"),
+    ]);
+    assert!(bucket.head("k").await.unwrap().is_none());
+    assert_eq!(refusal(bucket.head("k").await), (403, String::new()));
+    let past = Some(crate::bucket::Range::Suffix(0));
+    let past = refusal(bucket.read("k", past).await);
+    assert_eq!(past, (416, "InvalidRange".into()));
+    let reads = server.take();
+    assert_eq!(reads[2].header("range"), Some("bytes=-0"));
+    for request in &reads {
+        assert_eq!(request.header("accept-encoding").is_some(), gzip);
+    }
+    sent.extend(reads);
+
+    // The body streams: its first bytes arrive long before its end.
+    let versioned = || vec![(version.0, version.1.to_owned())];
+    push(vec![Answer::Dribble(versioned())]);
+    let (object, mut got) = bucket.read("k", None).await.unwrap().unwrap();
+    assert_eq!(object.size, 100_000);
+    let first = tokio::time::timeout(Duration::from_secs(5), got.next()).await;
+    assert_eq!(&first.unwrap().unwrap().unwrap()[..], b" ");
+    drop(got);
+    // A body cut short is an error at its end.
+    push(vec![Answer::Cut(versioned())]);
+    let (_, got) = bucket.read("k", None).await.unwrap().unwrap();
+    let Err(Error::Http(message)) = body(got).await else {
+        panic!("a short body was read");
+    };
+    assert!(message.starts_with("GET k: "), "{message}");
+    sent.extend(server.take());
+
+    // A completion that failed after its head went out; one sent again
+    // after a refusal that may have followed its success, and found the
+    // upload gone; an abort likewise, which is done.
+    push(vec![
+        answer(200, &[], "<Error><Code>InternalError</Code></Error>"),
+        error(503, "SlowDown"),
+        error(404, "NoSuchUpload"),
+        error(400, "InvalidPart"),
+        error(503, "SlowDown"),
+        error(404, "NoSuchUpload"),
+        error(404, "NoSuchUpload"),
+    ]);
+    let parts = [(1, "p1".to_owned())];
+    let complete = || bucket.complete("k", "u", &parts);
+    assert_eq!(refusal(complete().await), (200, "InternalError".into()));
+    let unknown = complete().await;
+    assert!(
+        matches!(unknown, Err(Error::OutcomeUnknown(_))),
+        "{unknown:?}"
+    );
+    assert_eq!(refusal(complete().await), (400, "InvalidPart".into()));
+    bucket.abort("k", "u").await.unwrap();
+    let gone = (404, "NoSuchUpload".to_owned());
+    assert_eq!(refusal(bucket.abort("k", "u").await), gone);
+    let completions = server.take();
+    assert_eq!(completions.len(), 7);
+    sent.extend(completions);
+    for request in sent {
+        let header = request.header("authorization");
+        assert_eq!(header.is_some(), authorized, "{} {header:?}", request.path);
+    }
+}
+
+#[test]
+fn an_s3_bucket_answers_r2s_calls() {
+    runtime().block_on(async {
+        let (server, queue) = fake().await;
+        let options = [
+            ("aws_endpoint", format!("http://{}", server.host)),
+            ("aws_access_key_id", "k".into()),
+            ("aws_secret_access_key", "s".into()),
+        ]
+        .map(|(name, value)| (name.to_owned(), value));
+        let (s3, prefix) = S3::new("s3://b", &options).unwrap();
+        let bucket = Bucket::new(s3, &prefix);
+        let version = ("etag", "\"e\"");
+        r2_calls(&bucket, &server, &queue, version, (false, true)).await;
+    });
+}
+
+#[test]
+fn a_cloud_storage_emulator_answers_r2s_calls() {
+    runtime().block_on(async {
+        let (server, queue) = fake().await;
+        let host = server.host.clone();
+        let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
+        let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
+        let bucket = Bucket::new(gcs, &prefix);
+        let version = ("x-goog-generation", "17");
+        r2_calls(&bucket, &server, &queue, version, (true, false)).await;
+    });
+}
+
+#[test]
+fn a_stalled_read_is_sent_again_but_multipart_calls_are_not() {
+    use crate::http::Repeat;
+    use crate::http::prompt;
+    runtime().block_on(async {
+        // The first copy of a read stalls, the second answers; any other
+        // request stalls.
+        let server = Server::serving(move |request, n| {
+            if n % 2 == 1 || !matches!(&request.method[..], "GET" | "HEAD") {
+                return Answer::Stall;
+            }
+            // A HEAD's answer goes without the body.
+            answer(200, &[("etag", "\"e\""), ("content-length", "5")], "hello")
+        })
+        .await;
+        let options = [
+            ("aws_endpoint", format!("http://{}", server.host)),
+            ("aws_access_key_id", "k".into()),
+            ("aws_secret_access_key", "s".into()),
+        ]
+        .map(|(name, value)| (name.to_owned(), value));
+        let bucket = Bucket::new(S3::new("s3://b", &options).unwrap().0, "");
+        let bound = Duration::from_millis(100);
+        let any = &[Repeat::Read, Repeat::Delete, Repeat::GuardedWrite];
+
+        let head = prompt(bound, any, bucket.head("k")).await.unwrap();
+        assert_eq!(head.unwrap().size, 5);
+        let (_, got) = prompt(bound, any, bucket.read("k", None))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body(got).await.unwrap(), "hello");
+        assert_eq!(server.take().len(), 4);
+
+        let patience = Duration::from_secs(1);
+        let none = crate::bucket::Headers::default();
+        let begin = prompt(bound, any, bucket.begin("k", &none, &[]));
+        assert!(tokio::time::timeout(patience, begin).await.is_err());
+        let part = prompt(bound, any, bucket.part("k", "u", 1, "x".into()));
+        let part = tokio::time::timeout(patience, part).await;
+        assert!(part.is_err(), "{part:?}");
+        let complete = prompt(bound, any, bucket.complete("k", "u", &[]));
+        assert!(tokio::time::timeout(patience, complete).await.is_err());
+        assert_eq!(server.take().len(), 3);
     });
 }

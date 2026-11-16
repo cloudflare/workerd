@@ -123,6 +123,7 @@ export default {
       }
       return kv(url, env.KV);
     }
+    if (url.pathname.startsWith('/r2/')) return r2(url, env.R2);
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
@@ -188,6 +189,59 @@ async function kv(url, ns) {
       const options = { prefix: q.prefix, cursor: q.cursor };
       if (q.limit) options.limit = Number(q.limit);
       return Response.json(await ns.list(options));
+    }
+  }
+  return Response.json({ error: 'no such path' }, { status: 404 });
+}
+
+// The R2 binding, by query parameters: /r2/put?key=K&size=N (N bytes, each
+// its index mod 251), /r2/get?key=K[&offset=O&length=L] (answers the bytes'
+// length and whether they are right), /r2/list?prefix=P, /r2/delete?key=K,
+// and a multipart upload's /r2/create?key=K, /r2/part?key=K&upload=U&n=N
+// &size=S and /r2/complete?key=K&upload=U&parts=JSON. Answers JSON.
+async function r2(url, bucket) {
+  const q = Object.fromEntries(url.searchParams);
+  const bytes = (size, from = 0) =>
+    Uint8Array.from({ length: size }, (_, i) => (from + i) % 251);
+  switch (url.pathname) {
+    case '/r2/put': {
+      const put = await bucket.put(q.key, bytes(Number(q.size)));
+      return Response.json({ etag: put.etag });
+    }
+    case '/r2/get': {
+      const range = q.length
+        ? { offset: Number(q.offset), length: Number(q.length) }
+        : undefined;
+      const got = await bucket.get(q.key, { range });
+      if (got === null) return Response.json(null);
+      const value = new Uint8Array(await got.arrayBuffer());
+      const want = bytes(value.length, Number(q.offset ?? 0));
+      const right = value.every((b, i) => b === want[i]);
+      return Response.json({ size: got.size, length: value.length, right });
+    }
+    case '/r2/list': {
+      const listed = await bucket.list({ prefix: q.prefix });
+      return Response.json(listed.objects.map((o) => o.key));
+    }
+    case '/r2/delete':
+      await bucket.delete(q.key);
+      return Response.json({});
+    case '/r2/create': {
+      const upload = await bucket.createMultipartUpload(q.key);
+      return Response.json({ upload: upload.uploadId });
+    }
+    case '/r2/part': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const size = Number(q.size);
+      const n = Number(q.n);
+      return Response.json(
+        await upload.uploadPart(n, bytes(size, (n - 1) * size))
+      );
+    }
+    case '/r2/complete': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const object = await upload.complete(JSON.parse(q.parts));
+      return Response.json({ size: object.size, etag: object.etag });
     }
   }
   return Response.json({ error: 'no such path' }, { status: 404 });

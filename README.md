@@ -112,11 +112,12 @@ For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
 config. `main` is bundled with esbuild, as Wrangler does. The supported fields
 are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `durable_objects`, `exports`, `migrations`, `no_bundle`, `$schema` and, with
-`--experimental`, `kv_namespaces`, `triggers.crons`, `queues`, `workflows`,
-`d1_databases` and `assets`; any other field is an error. With `assets`, `main`
-may be left out to serve files only, and then fields that need a Worker are an
-error. Each KV namespace and each D1 database is one Durable Object, so its
-throughput is that of one object.
+`--experimental`, `kv_namespaces`, `r2_buckets`, `triggers.crons`, `queues`,
+`workflows`, `d1_databases` and `assets`; any other field is an error. With
+`assets`, `main` may be left out to serve files only, and then fields that need
+a Worker are an error. Each KV namespace and each D1 database is one Durable
+Object, so its throughput is that of one object; each R2 object is an object in
+the store.
 
 A simple "Hello World!" config file might look like:
 
