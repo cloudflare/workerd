@@ -178,5 +178,6 @@ See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js).
 [src/bench/streams/](../src/bench/streams/AGENTS.md) runs the same benchmarks against the C++ and
 TypeScript streams implementations, to compare them.
 [src/bench/serialization/](../src/bench/serialization/structured-clone.js) measures
-`structuredClone()` of object graphs, class instances, arrays and strings.
+`structuredClone()` of object graphs, class instances, arrays and strings, and its options,
+against the C++ and TypeScript implementations, including the first calls in a new isolate.
 
