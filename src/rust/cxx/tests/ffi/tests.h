@@ -115,6 +115,13 @@ struct D {
   void c_take_trivial_mut_ref_method();
 };
 
+// Trivially relocatable, with a copy constructor that throws when `value` is zero.
+struct ThrowingCopy {
+  uint64_t value;
+  ThrowingCopy(const ThrowingCopy &other);
+  ThrowingCopy(ThrowingCopy &&) = default;
+};
+
 struct E {
   uint64_t e;
   std::string e_str;
@@ -259,6 +266,7 @@ void c_take_ref_rust_vec(const rust::Vec<uint8_t> &v);
 void c_take_ref_rust_vec_string(const rust::Vec<rust::String> &v);
 void c_take_ref_rust_vec_index(const rust::Vec<uint8_t> &v);
 void c_take_ref_rust_vec_copy(const rust::Vec<uint8_t> &v);
+void c_copy_assign_rust_vec(rust::Vec<ThrowingCopy> &dst, const rust::Vec<ThrowingCopy> &src);
 const SharedString &c_take_ref_shared_string(const SharedString &s);
 void c_take_callback(rust::Fn<size_t(rust::String)> callback);
 void c_take_callback_ref(rust::Fn<void(const rust::String &)> callback);

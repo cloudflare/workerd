@@ -618,7 +618,7 @@ Guide: [docs/startup-snapshot.md](../../../docs/startup-snapshot.md). Declaratio
 | Declaration on a resource type | Meaning |
 | --- | --- |
 | `static constexpr bool jsgSnapshotStateless = true;` | Any fresh instance is interchangeable: the snapshot records only the wrapper's tag, and the restored wrapper gets an instance from the type's `Lock&` (or default) constructor |
-| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles, `jsg::Ref` or IoContext); called in the zygote on the original and again per started worker on the stored copy |
+| `kj::Maybe<kj::Own<Wrappable>> snapshotClone() const override` | Deep, isolate-independent copy of the instance's C++ state (no V8 handles or IoContext, and no `jsg::Ref` except to a fresh, never-wrapped object the copy owns); called in the zygote on the original and again per started worker on the stored copy |
 | neither | Not transferable: a Worker whose top level leaves an instance reachable starts without a snapshot |
 
 Both run outside any IoContext and must not throw. `IsolateBase::isPreparingSnapshot()` and

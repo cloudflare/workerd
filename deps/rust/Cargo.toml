@@ -37,7 +37,6 @@ sha1 = { version = "0", default-features = false }
 bytes = { version = "1", default-features = false }
 capnp = "0.27"
 capnpc = "0.27"
-capnp-rpc = "0.27"
 clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"
@@ -123,5 +122,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Network
 # changes by re-stamping the watched files, so it needs nothing backend-specific.
 notify = "8"
 tracing = { version = "0", default-features = false, features = ["std"] }
-swc_common = "26"
-swc_ts_fast_strip = "59"
+swc_common = "27"
+swc_ts_fast_strip = "60"

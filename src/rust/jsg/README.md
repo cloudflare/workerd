@@ -210,9 +210,12 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is a resource's `Drop` impl, which has
-  `&mut self`: a reference it moves out of a field and keeps must be cloned or dropped there.
-  See [#7976](https://github.com/cloudflare/workerd/issues/7976).
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before the
+  `Drop` impl of a `#[jsg_resource]` type runs, every `jsg::Rc` and `jsg_cpp::Ref` it traces is
+  made strong and forgets its parent, so that `Drop` may move one out and keep it. A
+  `TracedGlobal` it moves out must be dropped there, and so must a reference that the `Drop`
+  impl of a field's type moves out; see `GcVisitor::detach_for_drop`. See
+  [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
   is ever collected. Use a `TracedGlobal`. The compiler rejects a `Global` field in a resource,
@@ -226,9 +229,12 @@ Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
 `callback: Cell<Option<TracedGlobal<Value>>>`, which don't compile. Fix:
 `pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
+Bad: a `Drop` impl that moves a `TracedGlobal` out of a field into a static. Fix: drop it in
+`Drop`, or keep the state in a resource that outlives the one being dropped.
+
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell. No test checks a
+std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that `Drop` moves out. No test checks a
 hand-written `impl Traced` that shares traced state some other way or reaches it through
 another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
 whose `trace` visits something; reviewers check those.
@@ -254,11 +260,14 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
 `ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
 fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
-`src/workerd/io`, and the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG, and
-`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
-through which Rust creates and reads DOMExceptions without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
+`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
+`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+their serializers are written against C++ JSG, and the deserializer finds classes implemented in
+JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
+in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
+depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
+which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
+JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -304,11 +313,14 @@ and `.h` file in `src/rust/jsg`. To check a shim file in another package, export
   `'static`, because they run after the current callback has returned.
 - Use a `Global` for a handle that Rust holds outside a resource, and a `TracedGlobal` for a
   resource field. Both can be dropped without the lock, and after the isolate is gone.
+- A method's `&self` lasts for the call: the wrapper the method was called on keeps the resource
+  alive only until the method returns. A method that keeps its resource takes
+  `this: jsg::Rc<Self>`.
 
 Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
-`global-*`, `traced-global-*`) and `src/workerd/io/io-context/compile-tests`
-(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
-`traced_global_lifetime.rs` and `gc.rs`.
+`global-*`, `traced-global-*`, `method-receiver-cannot-escape`) and
+`src/workerd/io/io-context/compile-tests` (`await-io-and-run-*`), and the drop tests in
+`src/rust/jsg-test/tests/global.rs`, `traced_global_lifetime.rs` and `gc.rs`.
 
 ### 5. State guarded by the isolate lock is `Send`
 
@@ -1134,13 +1146,18 @@ callback never throws a `DOMException`, since only a method that returns no `Res
 `jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
 of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default options: the bytes are
 the same, and each reads what the other writes, so the two can share stored data. Native errors
-are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
-objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
-serialized, and neither can instances of the runtime's classes implemented in JavaScript, which
-C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
-throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
-bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
-resolve, so data containing one can't be read back. Deserialization runs no JavaScript.
+are written as host objects when the `enhanced_error_serialization` flag is on, workerd API
+objects such as `Blob` and `Headers` through their C++ serializers, and a `DOMException`,
+whichever implementation made it, as C++ JSG writes it. Rust resources can't be serialized.
+Instances of the runtime's classes implemented in JavaScript, such as `QuotaExceededError`, are
+written through the per-isolate bootstrap's protocol for them, as C++ JSG writes them: the data
+that the class's `clone` function returns follows the value. Reading one makes the copy from the
+class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
+with the class's `deserialize` function once the whole value is read. That function is the only
+JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
+such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
+buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
+given only the bytes can resolve, so data containing one can't be read back.
 
 Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
 `SerializeOptions::version`, the version of V8's format to write rather than the latest, as

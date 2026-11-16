@@ -505,11 +505,9 @@ kj::Maybe<kj::Own<jsg::Wrappable>> DurableObject::snapshotClone() const {
 }
 
 kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectNamespace::snapshotClone() const {
-  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
-    KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
-      return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
-          channelNumber, kj::mv(factory), actorCallRetriesAllowed, persistent));
-    }
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
+        copy.channel, kj::mv(copy.idFactory), actorCallRetriesAllowed, persistent));
   }
   return kj::none;
 }

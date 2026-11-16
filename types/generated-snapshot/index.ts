@@ -15,60 +15,6 @@ and limitations under the License.
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 export declare var onmessage: never;
-/**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
-export declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  /**
-   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
-   */
-  readonly message: string;
-  /**
-   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
-   */
-  readonly name: string;
-  /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
-   */
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: number;
-  static readonly DOMSTRING_SIZE_ERR: number;
-  static readonly HIERARCHY_REQUEST_ERR: number;
-  static readonly WRONG_DOCUMENT_ERR: number;
-  static readonly INVALID_CHARACTER_ERR: number;
-  static readonly NO_DATA_ALLOWED_ERR: number;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
-  static readonly NOT_FOUND_ERR: number;
-  static readonly NOT_SUPPORTED_ERR: number;
-  static readonly INUSE_ATTRIBUTE_ERR: number;
-  static readonly INVALID_STATE_ERR: number;
-  static readonly SYNTAX_ERR: number;
-  static readonly INVALID_MODIFICATION_ERR: number;
-  static readonly NAMESPACE_ERR: number;
-  static readonly INVALID_ACCESS_ERR: number;
-  static readonly VALIDATION_ERR: number;
-  static readonly TYPE_MISMATCH_ERR: number;
-  static readonly SECURITY_ERR: number;
-  static readonly NETWORK_ERR: number;
-  static readonly ABORT_ERR: number;
-  static readonly URL_MISMATCH_ERR: number;
-  static readonly QUOTA_EXCEEDED_ERR: number;
-  static readonly TIMEOUT_ERR: number;
-  static readonly INVALID_NODE_TYPE_ERR: number;
-  static readonly DATA_CLONE_ERR: number;
-  get stack(): any;
-  set stack(value: any);
-}
 export type WorkerGlobalScopeEventMap = {
   fetch: FetchEvent;
   scheduled: ScheduledEvent;
@@ -3472,6 +3418,12 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
   readyState: number;
+  /**
+   * The **`WebSocket.bufferedAmount`** read-only property returns the number of bytes of data that have been queued using calls to send() but not yet transmitted to the network. This value resets to zero once all queued data has been sent. This value does not reset to zero when the connection is closed; if you keep calling send(), this will continue to climb.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/bufferedAmount)
+   */
+  bufferedAmount: number;
   /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
@@ -13221,6 +13173,49 @@ export type BrowserRunDevtools = {
 export type BrowserRunCloseSessionResult = {
   status: "closing" | "closed";
 };
+/** Library the script runs against. Omit it to receive a raw CDP client. */
+export type BrowserRunScriptLibrary = "playwright" | "puppeteer";
+/** Options for `script()`. */
+export type BrowserRunScriptOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds, not counting browser
+   * acquisition. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** How long the session stays open without activity after the run, in
+   * milliseconds. Between 10000 and 1200000.
+   * @default 60000
+   */
+  keepAlive?: number;
+  /** Use the experimental pool, whose browsers enable Chrome features before
+   * they reach stable Chrome.
+   * @default false
+   */
+  lab?: boolean;
+  /** Record the browser session. @default false */
+  recording?: boolean;
+};
+/** Options for `scriptInSession()`. */
+export type BrowserRunScriptSessionOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
+};
+/** JSON success body of `script()` and `scriptInSession()`. */
+export type BrowserRunScriptSuccessResponse = {
+  success: true;
+  /** The script's return value, or `null` when it returned nothing. */
+  result: unknown;
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13435,6 +13430,57 @@ export declare abstract class BrowserRun {
   getSession(sessionId: string): Promise<BrowserRunSession | null>;
   /** Close a browser session. */
   closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /**
+   * Run a script against a new browser session.
+   * @param code - Source of an async function. It receives the selected
+   * library's objects (Playwright `{ page, context, browser }`, Puppeteer
+   * `{ page, browser }`) or, without `library`, a CDP client.
+   * @param options - Library, timeout and session launch options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScriptSuccessResponse` JSON with `Content-Type: application/json`
+   * when the script returns a JSON-serializable value or nothing
+   * - The raw body and content type when the script returns binary or other
+   * non-JSON output
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - HTTP 408 when the script exceeds `timeout`
+   * - HTTP 422 when the script fails to compile or throws
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * - `cf-browser-target-id`: Page target the script ran on
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
+  /**
+   * Run a script against an existing browser session, such as one kept open by
+   * `script()`.
+   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
+   * header returned by `script()`.
+   * @param code - Source of an async function, as for `script()`.
+   * @param options - Library, timeout and page target options.
+   * @returns A `Response` with the same success bodies as `script()`.
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
+   * - HTTP 404 when the session or `targetId` does not exist
+   * - HTTP 410 when the session is already closed
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  scriptInSession(
+    sessionId: string,
+    code: string,
+    options?: BrowserRunScriptSessionOptions,
+  ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
 }
@@ -14758,6 +14804,60 @@ export declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
+/**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+export declare class DOMException extends Error {
+  constructor(message?: string, name?: string);
+  /**
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
+  readonly message: string;
+  /**
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
+  readonly name: string;
+  /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
+   */
+  readonly code: number;
+  static readonly INDEX_SIZE_ERR: number;
+  static readonly DOMSTRING_SIZE_ERR: number;
+  static readonly HIERARCHY_REQUEST_ERR: number;
+  static readonly WRONG_DOCUMENT_ERR: number;
+  static readonly INVALID_CHARACTER_ERR: number;
+  static readonly NO_DATA_ALLOWED_ERR: number;
+  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
+  static readonly NOT_FOUND_ERR: number;
+  static readonly NOT_SUPPORTED_ERR: number;
+  static readonly INUSE_ATTRIBUTE_ERR: number;
+  static readonly INVALID_STATE_ERR: number;
+  static readonly SYNTAX_ERR: number;
+  static readonly INVALID_MODIFICATION_ERR: number;
+  static readonly NAMESPACE_ERR: number;
+  static readonly INVALID_ACCESS_ERR: number;
+  static readonly VALIDATION_ERR: number;
+  static readonly TYPE_MISMATCH_ERR: number;
+  static readonly SECURITY_ERR: number;
+  static readonly NETWORK_ERR: number;
+  static readonly ABORT_ERR: number;
+  static readonly URL_MISMATCH_ERR: number;
+  static readonly QUOTA_EXCEEDED_ERR: number;
+  static readonly TIMEOUT_ERR: number;
+  static readonly INVALID_NODE_TYPE_ERR: number;
+  static readonly DATA_CLONE_ERR: number;
+  get stack(): any;
+  set stack(value: any);
+}
 /**
  * The returned data after sending an email
  */

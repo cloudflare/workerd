@@ -37,6 +37,16 @@ fn eval<'s>(
 fn assert_same(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, expr: &str) -> cxx::KjError {
     define_dom_exception(lock, ctx);
     let value = eval(lock, ctx, expr);
+    assert_same_value(lock, value, expr)
+}
+
+/// Converts `value`, which `expr` describes, with Rust JSG and C++ JSG, checks that the
+/// exceptions are the same, and returns Rust JSG's.
+pub(super) fn assert_same_value<'s>(
+    lock: &mut jsg::Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+    expr: &str,
+) -> cxx::KjError {
     let rust = lock.exception_to_kj(value).unwrap();
     let cpp = Harness::cpp_exception_to_kj(lock, value).unwrap();
     assert_eq!(rust.exception_type(), cpp.exception_type(), "{expr}");
@@ -79,6 +89,8 @@ const VALUES: &[&str] = &[
     "new Error('a\\0b')",
     "Object.assign(new Error('boom'), { name: 'A\\0B' })",
     "new DOMException('a\\0b', 'Data\\0Error')",
+    "Object.defineProperty(new DOMException('boom', 'DataError'), 'name', { value: 'Other' })",
+    "Object.defineProperty(new DOMException('boom', 'DataError'), 'message', { value: 'other' })",
     "undefined",
     "null",
     "1",
@@ -212,6 +224,52 @@ fn reads_properties_as_cpp_jsg_does() {
         let cpp_reads: String = ctx.eval(lock, "reads.join()").unwrap();
         assert_eq!(rust_reads, cpp_reads);
         assert_eq!(rust_reads, "overloaded,retryable,name,stack,message");
+        Ok(())
+    });
+}
+
+/// A `DOMException`'s name and message are read without running their getters, as C++ reads them.
+#[test]
+fn reads_a_dom_exception_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        define_dom_exception(lock, ctx);
+        let expr = "globalThis.reads = []; \
+                    ['name', 'stack', 'message'].reduce((e, key) => \
+                      Object.defineProperty(e, key, { \
+                        get() { reads.push(key); return key; }, \
+                      }), \
+                      new DOMException('boom', 'DataError'))";
+        let value = eval(lock, ctx, expr);
+        lock.exception_to_kj(value).unwrap();
+        let rust_reads: String = ctx.eval(lock, "reads.join()").unwrap();
+        eval(lock, ctx, "reads.length = 0");
+        Harness::cpp_exception_to_kj(lock, value).unwrap();
+        let cpp_reads: String = ctx.eval(lock, "reads.join()").unwrap();
+        assert_eq!(rust_reads, cpp_reads);
+        assert!(
+            !rust_reads.contains("name") && !rust_reads.contains("message"),
+            "{rust_reads}"
+        );
+        Ok(())
+    });
+}
+
+/// An error implemented in the per-isolate bootstrap, whose `name` and `message` are accessors, is
+/// described by the name and message it holds, as C++ describes it.
+#[test]
+fn describes_an_error_by_the_name_and_message_it_holds_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let cases = [
+            ("TypeError", "boom", "jsg.TypeError: boom"),
+            ("TypeError", "", "jsg.TypeError"),
+            ("AbortError", "boom", "jsg.Error: AbortError: boom"),
+        ];
+        for (name, message, expected) in cases {
+            let value = eval(lock, ctx, "new Error('other')");
+            Harness::set_error_slots(lock, value, name, message);
+            let exception = assert_same_value(lock, value, name);
+            assert_eq!(exception.description(), expected);
+        }
         Ok(())
     });
 }

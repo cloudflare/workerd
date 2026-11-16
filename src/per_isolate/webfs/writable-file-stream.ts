@@ -35,6 +35,7 @@
 // abort() discards them. A stream that is never closed nor aborted leaves the
 // lock held until the context is collected.
 
+import type { DomExceptionModule } from '../dom-exception';
 import type {
   UnderlyingSink,
   WritableStream as WritableStreamType,
@@ -42,7 +43,6 @@ import type {
 } from '../webstreams/types';
 
 const {
-  DOMException: NativeDOMException,
   ObjectDefineProperties,
   PromiseReject,
   PromiseResolve,
@@ -51,6 +51,8 @@ const {
 } = primordials;
 
 const { createFileSystemWriteContext } = utils;
+
+const { DOMException } = require('dom-exception') as DomExceptionModule;
 
 const { kNullProtoObject, kEnumerable } = require('webstreams/common');
 
@@ -198,7 +200,7 @@ function createWritable(
     // A DOMException means the file could not be opened, which createWritable
     // reports by rejecting. Anything else is the receiver check failing, which
     // JSG performs before the method body runs and so throws.
-    if (err instanceof NativeDOMException) {
+    if (err instanceof DOMException) {
       return PromiseReject(err);
     }
     throw err;

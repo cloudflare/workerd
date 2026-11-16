@@ -651,6 +651,13 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   // Copy string contents into a provided buffer (off-heap memory).
   //
+  // Only the first `written` elements of the buffer are written, and the rest is left as it was.
+  // With NULL_TERMINATION, the last of those elements is the terminator, so it needs room in the
+  // buffer like any other element.
+  //
+  // A caller that sizes the buffer from length() must still use `written`: in a V8 sandbox build,
+  // a corrupted string can report a different length here.
+  //
   // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
   // copies data out of V8's heap into your buffer. This makes it safe to use before calling
   // GC-triggering operations like Lock::allocBackingStore().
