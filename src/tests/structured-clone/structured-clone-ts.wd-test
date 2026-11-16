@@ -1,19 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
 using StructuredCloneModules = import "structured-clone-modules.capnp";
 
-# Runs the structuredClone suite against the TypeScript implementation, with
-# byte-for-byte the same modules as structured-clone-cpp.wd-test.
+# Runs the structuredClone suite against the TypeScript implementation
+# (src/per_isolate/structured-clone.ts, under the TS_STRUCTURED_CLONE
+# autogate), with byte-for-byte the same modules as
+# structured-clone-cpp.wd-test.
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "structured-clone-ts",
       worker = (
         modules = StructuredCloneModules.modules,
-        compatibilityFlags = [
-          "nodejs_compat",
-          "typescript_implemented_structured_clone",
-        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
       )
     ),
   ],
+  autogates = ["workerd-autogate-ts-structured-clone"],
 );

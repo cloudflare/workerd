@@ -1,8 +1,8 @@
 'use strict';
 
-// The global structuredClone(), installed by main.ts under the
-// `typescript_implemented_structured_clone` flag in place of the C++ JSG method
-// on ServiceWorkerGlobalScope.prototype.
+// The global structuredClone(), installed by main.ts on
+// ServiceWorkerGlobalScope.prototype under the TS_STRUCTURED_CLONE autogate, in
+// place of the C++ JSG method.
 //
 // This module is the WebIDL layer: the receiver check, the argument count, and
 // the conversion of the StructuredSerializeOptions dictionary. The clone itself

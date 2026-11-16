@@ -447,14 +447,12 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
-if (compatFlags['typescript_implemented_structured_clone']) {
+// The TypeScript structuredClone() replaces the C++ method, which
+// global-scope.h then leaves out. Installed where JSG_METHOD installs it, on
+// ServiceWorkerGlobalScope.prototype, with the same attributes (all three
+// true).
+if (autogates['ts-structured-clone']) {
   const { structuredClone } = require('structured-clone');
-
-  // JSG installs global methods on the global object's prototype,
-  // ServiceWorkerGlobalScope.prototype, so the replacement goes there with the
-  // attributes JSG_METHOD gives it (all three true). Shadowing it with an own
-  // property of globalThis would leave the C++ method reachable through the
-  // prototype.
   ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
     __proto__: null,
     structuredClone: {

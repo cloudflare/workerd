@@ -30,11 +30,10 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
-- Under `typescript_implemented_structured_clone`, `main.ts` replaces the
-  `structuredClone` method on ServiceWorkerGlobalScope.prototype with
-  `structured-clone.ts`, a WebIDL layer over the native
-  `utils.structuredClone()`; its parity suite and divergence ledger are in
-  `src/tests/structured-clone/`.
+- Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
+  TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
+  the native `utils.structuredClone()`), which replaces the C++ method; its
+  parity suite and divergence ledger are in `src/tests/structured-clone/`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which

@@ -2,9 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Distinguishes which structuredClone implementation this worker is running,
-// so tests can pin each side of a deliberate divergence exactly.
-export const usingTsImpl =
-  globalThis.Cloudflare.compatibilityFlags[
-    'typescript_implemented_structured_clone'
-  ];
+// Which structuredClone implementation this cell runs, so tests can pin each
+// side of a deliberate divergence exactly. The implementation is selected by
+// the TS_STRUCTURED_CLONE autogate, which user code cannot read, so each cell
+// says which one it is meant to run through its USING_TS_IMPL binding.
+import { env } from 'cloudflare:workers';
+
+export const usingTsImpl = env.USING_TS_IMPL === true;

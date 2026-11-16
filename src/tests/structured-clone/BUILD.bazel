@@ -3,16 +3,21 @@ load("//:build/wd_test.bzl", "wd_test")
 # The structuredClone suite runs the same test modules under two configs:
 # structured-clone-cpp against the C++ JSG method, structured-clone-ts against
 # the TypeScript implementation.
+#
+# The C++ cell disables the @all-autogates variant: enabling every autogate
+# enables TS_STRUCTURED_CLONE, which swaps in the TypeScript implementation
+# under a cell whose USING_TS_IMPL binding says C++. The TypeScript cell
+# enables TS_STRUCTURED_CLONE itself.
 
 structured_clone_suite_srcs = glob(["*.js"]) + ["structured-clone-modules.capnp"]
 
 wd_test(
     src = "structured-clone-cpp.wd-test",
     data = structured_clone_suite_srcs,
+    generate_all_autogates_variant = False,
 )
 
 wd_test(
     src = "structured-clone-ts.wd-test",
-    args = ["--experimental"],
     data = structured_clone_suite_srcs,
 )

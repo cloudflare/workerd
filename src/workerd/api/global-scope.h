@@ -963,7 +963,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(setInterval);
     JSG_METHOD(clearInterval);
     JSG_METHOD(queueMicrotask);
-    JSG_METHOD(structuredClone);
+    // Under the TS_STRUCTURED_CLONE autogate, the per-isolate bootstrap installs the TypeScript
+    // structuredClone() instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_STRUCTURED_CLONE)) {
+      JSG_METHOD(structuredClone);
+    }
     JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);

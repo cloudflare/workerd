@@ -6,14 +6,16 @@ implementations:
 - the C++ JSG method, `ServiceWorkerGlobalScope::structuredClone` in
   `src/workerd/api/global-scope.c++`;
 - the TypeScript one, `src/per_isolate/structured-clone.ts`. `main.ts` installs
-  it under the experimental `typescript_implemented_structured_clone` flag.
+  it under the `TS_STRUCTURED_CLONE` autogate, and `global-scope.h` then
+  leaves the C++ method out.
 
 The layout follows `src/tests/streams/AGENTS.md`:
 
 - `structured-clone-modules.capnp` lists the modules once.
 - `structured-clone-cpp.wd-test` and `structured-clone-ts.wd-test` run that list.
 - `main.js` re-exports every test by name.
-- `which-impl.js` exports `usingTsImpl`.
+- `which-impl.js` exports `usingTsImpl`, read from the cell's `USING_TS_IMPL`
+  binding, since user code cannot read the autogate.
 
 Both implementations clone with the same native serializer, `jsg::structuredClone`
 in `src/workerd/jsg/ser.c++`. The TypeScript one reaches it through
@@ -64,5 +66,7 @@ as parity:
 bazel test //src/tests/structured-clone/...
 ```
 
-Targets: `structured-clone-cpp@` and `structured-clone-ts@`, each with
-`@all-compat-flags` and `@all-autogates` variants.
+Targets: `structured-clone-cpp@` and `structured-clone-ts@`, each with an
+`@all-compat-flags` variant. Only the TypeScript cell has `@all-autogates`:
+enabling every autogate enables `TS_STRUCTURED_CLONE`, which would run the
+TypeScript implementation under the C++ cell.

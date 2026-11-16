@@ -1841,11 +1841,4 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
-
-  typeScriptImplementedStructuredClone @207 :Bool
-      $compatEnableFlag("typescript_implemented_structured_clone")
-      $experimental;
-  # When enabled, the global structuredClone() is the TypeScript implementation from the
-  # per-isolate bootstrap, which converts its arguments in TypeScript and calls the native
-  # serializer.
 }
