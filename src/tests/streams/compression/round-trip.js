@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Compress/decompress round trips across the three supported formats.
+// Compress/decompress round trips across the four supported formats.
 // Writes settle without read demand (eager codec push), so the sequential
 // write-then-read form is safe.
 
@@ -43,7 +43,7 @@ export async function pump(pair, chunks) {
 export const allFormatsRoundTrip = {
   async test() {
     const payload = 'The quick brown fox jumps over the lazy dog. '.repeat(50);
-    for (const format of ['gzip', 'deflate', 'deflate-raw']) {
+    for (const format of ['gzip', 'deflate', 'deflate-raw', 'brotli']) {
       const data = enc.encode(payload);
       const compressed = await pump(new CompressionStream(format), [data]);
       ok(
