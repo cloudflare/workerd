@@ -448,7 +448,6 @@ kj_test(
     src = "rtti-test.c++",
     deps = [
         ":rtti",
-        ":rtti_test_capnp",
         # TODO: move text encoding out
         "@capnp-cpp//src/capnp:capnpc",
     ],
@@ -462,24 +461,10 @@ kj_test(
     ],
 )
 
-wd_cc_capnp_library(
-    name = "resource_test_capnp",
-    srcs = ["resource-test.capnp"],
-    data = glob(["resource-test-*.js"]),
-    deps = [":modules_capnp"],
-)
-
-wd_cc_capnp_library(
-    name = "rtti_test_capnp",
-    srcs = ["rtti-test.capnp"],
-    deps = [":modules_capnp"],
-)
-
 kj_test(
     src = "resource-test.c++",
     deps = [
         ":jsg",
-        ":resource_test_capnp",
     ],
 )
 

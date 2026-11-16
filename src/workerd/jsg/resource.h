@@ -13,7 +13,6 @@
 #include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/meta.h>
-#include <workerd/jsg/modules.capnp.h>
 // JSG has very entrenched include cycles
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
@@ -1703,8 +1702,6 @@ struct ResourceTypeBuilder {
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
 
-  inline void registerJsBundle(Bundle::Reader bundle) { /* handled at the second stage */ }
-
  private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
@@ -1713,86 +1710,6 @@ struct ResourceTypeBuilder {
   v8::Local<v8::ObjectTemplate> prototype;
   v8::Local<v8::ObjectTemplate> inspectProperties;
   v8::Local<v8::Signature> signature;
-};
-
-// initializes javascript parts of a context
-template <typename TypeWrapper, typename Self>
-struct JsSetup {
-  KJ_DISALLOW_COPY_AND_MOVE(JsSetup);
-
-  JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
-
-  inline void registerJsBundle(Bundle::Reader bundle) {
-    ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
-  }
-
-  // the rest of the callbacks are empty
-
-  template <typename Type>
-  inline void registerInherit() {}
-
-  template <const char* name>
-  inline void registerInheritIntrinsic(v8::Intrinsic intrinsic) {}
-
-  template <typename Method, Method method>
-  inline void registerCallable() {}
-
-  template <const char* name, auto method>
-  inline void registerMethod() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerStaticMethod() {}
-
-  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerInstanceProperty() {}
-
-  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerPrototypeProperty() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyInstanceProperty() {}
-
-  template <typename T>
-  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {}
-
-  template <const char* name>
-  inline void registerPrivateSymbol() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyPrototypeProperty() {}
-
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
-  inline void registerLazyInstanceProperty() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerInspectProperty() {}
-
-  template <const char* name, typename T>
-  inline void registerStaticConstant(T value) {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerIterable() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerAsyncIterable() {}
-
-  template <typename Type, const char* name>
-  inline void registerNestedType() {}
-
-  inline void registerTypeScriptRoot() {}
-
-  template <const char* tsOverride>
-  inline void registerTypeScriptOverride() {}
-
-  template <const char* tsDefine>
-  inline void registerTypeScriptDefine() {}
-
- private:
-  jsg::Lock& js;
-  v8::Local<v8::Context> context;
 };
 
 class ModuleRegistryBase {
@@ -2018,10 +1935,7 @@ class ResourceWrapper {
       ptr->setSchemaLoader(loader);
     }
 
-    return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-      setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr));
-    });
+    return JsContext<T>(context, kj::mv(ptr));
   }
 
   kj::Maybe<T&> tryUnwrap(Lock& js,
@@ -2209,16 +2123,6 @@ class ResourceWrapper {
   // getTemplate() or ensureMembersRegistered()). False after a snapshot restore repopulates the
   // slots directly.
   bool membersRegistered = false;
-
-  void setupJavascript(jsg::Lock& js) {
-    JsSetup<TypeWrapper, T> setup(js, js.v8Context());
-
-    if constexpr (isDetected<GetConfiguration, T>()) {
-      T::template registerMembers<decltype(setup), T>(setup, configuration);
-    } else {
-      T::template registerMembers<decltype(setup), T>(setup);
-    }
-  }
 
   template <typename, typename, typename, typename>
   friend struct ConstructorCallback;
