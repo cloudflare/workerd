@@ -1454,9 +1454,15 @@ MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
   return conf.getModules()[0].isPythonModule() ? MainModuleIsPython::YES : MainModuleIsPython::NO;
 }
 
-// Compiles a config worker's compatibility flags into `arena`, as the worker's errors.
+MainModuleIsPython isPythonMainModule(config::AssetsService::Reader) {
+  return MainModuleIsPython::NO;
+}
+
+// Compiles the compatibility flags of a config worker, or of an assets service with no user
+// worker, into `arena`, as the worker's errors.
+template <typename Conf>
 CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
-    config::Worker::Reader conf,
+    Conf conf,
     capnp::MallocMessageBuilder& arena,
     ErrorReporter& errorReporter) {
   auto flags = arena.initRoot<CompatibilityFlags>();
@@ -1919,6 +1925,31 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
   auto words = capnp::messageToFlatArray(groupMessage);
   co_return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
       .as<kj_rs::RustCopy>();
+}
+
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& constFactory, uint32_t configService) {
+  auto& factory = constFactory.getImpl();
+  auto services = factory.config.getServices();
+  auto assets = services[configService].getAssets();
+  capnp::MallocMessageBuilder arena;
+  ErrorReporter errorReporter;
+  if (assets.hasUserWorker()) {
+    // The user worker reports errors in its flags itself.
+    auto name = assets.getUserWorker().getName();
+    for (auto service: services) {
+      if (service.getName() == name && service.isWorker()) {
+        return compileFlags(*factory.options, service.getWorker(), arena, errorReporter)
+            .getAssetsSecFetchModeNavigateHeaderPrefersAssetServing();
+      }
+    }
+    return false;
+  }
+  auto flags = compileFlags(*factory.options, assets, arena, errorReporter);
+  if (!errorReporter.errors.empty()) {
+    kj::throwFatalException(KJ_EXCEPTION(FAILED, kj::strArray(errorReporter.errors, "; ")));
+  }
+  return flags.getAssetsSecFetchModeNavigateHeaderPrefersAssetServing();
 }
 
 WorkerInfo worker_info(const CompiledWorker& worker) {

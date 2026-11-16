@@ -29,6 +29,7 @@ wd_rust_crate(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/assets-router",
         "//src/rust/cxx/kj-hyper",
         "//src/rust/cxx/kj-rs-io",
         "//src/rust/cxx/kj-rs-tokio",
