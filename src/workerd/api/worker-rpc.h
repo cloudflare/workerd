@@ -132,8 +132,9 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
   // `token` resolves, the token is pushed to the recipient's ExternalPusher and the capability
   // resolves to the result. If `token` rejects, for example because the channel's owner refused
   // to let the channel be transferred, the capability breaks with the same error, so the
-  // recipient sees the owner's error rather than a generic one. The push is tracked as a pending
-  // external, see releasePendingExternals().
+  // recipient sees the owner's error rather than a generic one. The capability owns the push, so
+  // it continues for as long as the recipient holds the capability, even if the sending request
+  // ends first. The push is also tracked as a pending external, see releasePendingExternals().
   rpc::JsValue::ExternalPusher::DelayedChannelToken::Client pushDelayedChannelToken(
       kj::Promise<kj::Array<byte>> token);
 

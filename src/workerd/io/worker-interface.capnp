@@ -787,8 +787,14 @@ struct JsValue {
     # resolves the earlier promise to the result.
 
     interface DelayedChannelToken {
-      # No methods. This can be unwrapped by the recipient to obtain the channel token passed to
+      # The recipient normally unwraps this to obtain the channel token passed to
       # `pushDelayedChannelToken()`.
+
+      getToken @0 () -> (token :Data);
+      # Returns the token. The recipient calls this when the capability does not unwrap to an
+      # object of its own, which happens when the capability reaches it by a path that does not
+      # lead back to the object it pushed. The token is no more trusted than one sent inline in
+      # `subrequestChannelToken`, since the recipient validates it the same way.
     }
 
     # TODO(soon):
