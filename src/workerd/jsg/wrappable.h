@@ -393,7 +393,8 @@ class Wrappable: public kj::Refcounted {
   // (stored in V8's CppHeap pointer table by attachWrapper) lies within `tagRange`. Returns
   // nullptr if the object was never wrapped or its tag is outside the range (i.e. a handle of
   // another type). Dispatch goes through the CppgcShim's owning reference, so the pointer
-  // returned is always the lifetime-correct one.
+  // returned is always the lifetime-correct one. `object` must be an API wrapper
+  // (`IsApiWrapper()`): Object::Unwrap reads its CppHeap pointer slot without checking.
   static Wrappable* unwrapFromShim(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 

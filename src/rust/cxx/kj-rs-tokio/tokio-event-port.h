@@ -8,8 +8,11 @@
 // Notes on the kj::EventPort contract (see kj/async.h):
 //  - wait()/poll() return true iff wake() latched. This is load-bearing: kj::Executor's
 //    executeAsync and kj::newPromiseAndCrossThreadFulfiller only get drained on `true`.
-//  - The kj::TimerImpl is advanced after every wait()/poll(). Timer precision is tokio's timer
-//    wheel (~1 ms), the same granularity KJ's own epoll-based port has.
+//  - The kj::TimerImpl is advanced after every wait()/poll(). A due timer fires without the
+//    thread sleeping. A pending one fires on tokio's timer wheel, which rounds the deadline up
+//    to the end of a 1 ms tick and sleeps whole ticks, so up to 2 ms late. (KJ's own port is
+//    less than 1 ms late on Linux, where epoll_wait() takes milliseconds, and close to exact on
+//    macOS, where kevent() takes nanoseconds.)
 //  - One TokioEventPort (and hence one runtime, one kj::EventLoop) per thread, matching KJ's
 //    one-loop-per-thread model. The port owns its EventLoop: the loop is constructed on the port
 //    and destroyed before any of the port's other members, so the port can always ask the loop

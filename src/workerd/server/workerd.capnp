@@ -647,10 +647,10 @@ struct Worker {
 
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
-      # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker, or
-      # `/workerd/workflows.js`, a Workflows engine (see each one's header for the config it
-      # takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is a
-      # Worker's source. Experimental.
+      # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
+      # `/workerd/workflows.js`, a Workflows engine, or `/workerd/d1.js`, D1 databases (see each
+      # one's header for the config it takes). Unlike built-in modules such as `node:` ones, user
+      # code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

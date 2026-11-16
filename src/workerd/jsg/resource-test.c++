@@ -4,8 +4,6 @@
 
 #include "jsg-test.h"
 
-#include <workerd/jsg/resource-test.capnp.h>
-
 namespace workerd::jsg::test {
 namespace {
 
@@ -725,27 +723,15 @@ KJ_TEST("Methods can take Lock& as first parameter") {
 
 // ========================================================================================
 
-struct JsBundleContext: public ContextGlobalObject {
-  JSG_RESOURCE_TYPE(JsBundleContext) {
-    JSG_CONTEXT_JS_BUNDLE(BUILTIN_BUNDLE);
-  }
+struct ModuleEvalContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(ModuleEvalContext) {}
 };
-JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
+JSG_DECLARE_ISOLATE_TYPE(ModuleEvalIsolate, ModuleEvalContext);
 
 KJ_TEST("expectEvalModule function works") {
-  Evaluator<JsBundleContext, JsBundleIsolate, decltype(nullptr), JsBundleIsolate_TypeWrapper> e(
-      v8System);
+  Evaluator<ModuleEvalContext, ModuleEvalIsolate, decltype(nullptr), ModuleEvalIsolate_TypeWrapper>
+      e(v8System);
   e.expectEvalModule("export function run() { return 123; }", "number", "123");
-}
-
-KJ_TEST("bundle installed works") {
-  Evaluator<JsBundleContext, JsBundleIsolate, decltype(nullptr), JsBundleIsolate_TypeWrapper> e(
-      v8System);
-  e.expectEvalModule(R"(
-    import * as b from "test:resource-test-builtin";
-    export function run() { return b.builtinFunction(); }
-  )",
-      "string", "THIS_IS_BUILTIN_FUNCTION");
 }
 
 // ========================================================================================

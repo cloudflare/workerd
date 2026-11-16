@@ -264,6 +264,8 @@ fn pick_includes_and_builtins(out: &mut OutFile, apis: &[Api]) {
             Type::KjDate(_) => {
                 out.include.kj_date = true;
             }
+            // rust/cxx.h declares kj::Exception and the helpers that pass one by value.
+            Type::KjException(_) => {}
         }
     }
 }
@@ -844,6 +846,9 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
         Some(Type::KjDate(_)) => {
             write!(out, "::kj_rs::repr::toNanos(");
         }
+        Some(Type::KjException(_)) => {
+            write!(out, "::rust::repr::releaseException(");
+        }
         _ => {}
     }
     match &efn.receiver {
@@ -860,7 +865,7 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
     match &efn.ret {
         Some(Type::RustBox(_)) => write!(out, ".into_raw()"),
         Some(Type::UniquePtr(_)) => write!(out, ".release()"),
-        Some(Type::KjDate(_)) => write!(out, ")"),
+        Some(Type::KjDate(_) | Type::KjException(_)) => write!(out, ")"),
         _ => {}
     }
     if indirect_return {
@@ -896,6 +901,9 @@ fn write_cxx_shim_arg(out: &mut OutFile, arg: &Var) {
         }
         Type::KjDate(_) => {
             write!(out, "::kj_rs::repr::fromNanos({})", arg.name.cxx);
+        }
+        Type::KjException(_) => {
+            write!(out, "::rust::repr::takeException({})", arg.name.cxx);
         }
         t if t == RustString => {
             out.builtin.unsafe_bitcopy = true;
@@ -1005,6 +1013,7 @@ fn write_rust_function_decl_impl(
             Type::Future(_) => {
                 write!(out, "::kj_rs::repr::RustFuture ");
             }
+            Type::KjException(_) => write!(out, "::kj::Exception *"),
             ret => write_type_space(out, ret),
         }
         write!(out, "*return$");
@@ -1127,6 +1136,7 @@ fn write_rust_function_shim_impl(
             Type::Future(_) => {
                 write!(out, "::kj_rs::repr::RustFuture");
             }
+            Type::KjException(_) => write!(out, "::kj::Exception *"),
             ret => write_type(out, ret),
         }
         writeln!(out, "> return$;");
@@ -1145,6 +1155,16 @@ fn write_rust_function_shim_impl(
     for arg in &sig.args {
         if needs_comma {
             write!(out, ", ");
+        }
+        if let Type::KjException(_) = &arg.ty {
+            out.include.utility = true;
+            write!(
+                out,
+                "::rust::repr::releaseException(::std::move({}))",
+                arg.name.cxx,
+            );
+            needs_comma = true;
+            continue;
         }
         if out.types.needs_indirect_abi(&arg.ty) {
             write!(out, "&");
@@ -1186,6 +1206,7 @@ fn write_rust_function_shim_impl(
         write!(out, "  return ");
         match ret {
             Type::Ref(_) => write!(out, "*return$.value"),
+            Type::KjException(_) => write!(out, "::rust::repr::takeException(return$.value)"),
             _ => {
                 out.include.utility = true;
                 write!(out, "::std::move(return$.value)");
@@ -1228,6 +1249,7 @@ fn write_indirect_return_type(out: &mut OutFile, ty: &Type) {
             out.include.cstdint = true;
             write!(out, "::std::int64_t");
         }
+        Type::KjException(_) => write!(out, "::kj::Exception *"),
         _ => write_type(out, ty),
     }
 }
@@ -1235,7 +1257,7 @@ fn write_indirect_return_type(out: &mut OutFile, ty: &Type) {
 fn write_indirect_return_type_space(out: &mut OutFile, ty: &Type) {
     write_indirect_return_type(out, ty);
     match ty {
-        Type::RustBox(_) | Type::UniquePtr(_) | Type::Ref(_) => {}
+        Type::RustBox(_) | Type::UniquePtr(_) | Type::Ref(_) | Type::KjException(_) => {}
         Type::Str(_) | Type::SliceRef(_) => write!(out, " "),
         _ => write_space_after_type(out, ty),
     }
@@ -1247,6 +1269,7 @@ fn write_extern_arg(out: &mut OutFile, arg: &Var) {
             write_type_space(out, &ty.inner);
             write!(out, "*");
         }
+        Type::KjException(_) => write!(out, "::kj::Exception *"),
         _ => write_type_space(out, &arg.ty),
     }
     if out.types.needs_indirect_abi(&arg.ty) {
@@ -1362,6 +1385,7 @@ fn write_type(out: &mut OutFile, ty: &Type) {
         }
         Type::Void(_) => write!(out, "void"),
         Type::KjDate(_) => write!(out, "::kj::Date"),
+        Type::KjException(_) => write!(out, "::kj::Exception"),
         Type::Future(ty) => {
             write!(out, "kj::Promise<");
             write_type(out, &ty.output);
@@ -1409,6 +1433,7 @@ fn write_space_after_type(out: &mut OutFile, ty: &Type) {
         | Type::Str(_)
         | Type::KjMaybe(_)
         | Type::KjDate(_)
+        | Type::KjException(_)
         | Type::CxxVector(_)
         | Type::RustVec(_)
         | Type::SliceRef(_)
