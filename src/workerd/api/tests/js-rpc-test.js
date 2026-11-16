@@ -1287,6 +1287,27 @@ export let disposal = {
       });
     }
 
+    // That dispose() method does not depend on what it is called on: it works taken off the
+    // object, as `DisposableStack.prototype.defer()` would call it, and through a proxy of the
+    // object.
+    {
+      let obj = await env.MyService.getAnObject(5);
+      const dispose = obj[Symbol.dispose];
+      dispose();
+      await assert.rejects(obj.counter.increment(2), {
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
+      });
+    }
+    {
+      let obj = await env.MyService.getAnObject(5);
+      new Proxy(obj, {})[Symbol.dispose]();
+      await assert.rejects(obj.counter.increment(2), {
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
+      });
+    }
+
     // Verify a capability passed as an RPC param receives the disposal callback.
     {
       let counter = new MyCounter(3);

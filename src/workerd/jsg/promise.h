@@ -241,11 +241,16 @@ class Promise {
     markedAsHandled = true;
   }
 
-  // Gives the JavaScript promise this becomes, when it is returned to JavaScript, `dispose` as its
-  // `[Symbol.dispose]()` method. Returning a `jsg::Promise` to JavaScript returns a promise derived
-  // from it, so a method can't set the property itself.
-  void setDispose(Lock& js, v8::Local<v8::Function> dispose) {
-    this->dispose = V8Ref<v8::Function>(js.v8Isolate, dispose);
+  // Gives the JavaScript promise this becomes, when it is returned to JavaScript, a
+  // `[Symbol.dispose]()` method that calls `dispose` with that promise and `state` as its two
+  // leading arguments, whatever it is called on (see newBoundFunction()). Returning a
+  // `jsg::Promise` to JavaScript returns a promise derived from it, so a method can't set the
+  // property itself, nor name the promise in the state it makes.
+  void setDispose(Lock& js, v8::FunctionCallback dispose, v8::Local<v8::Value> state) {
+    this->dispose = Dispose{
+      .callback = dispose,
+      .state = V8Ref<v8::Value>(js.v8Isolate, state),
+    };
   }
 
   // Attach a continuation function and error handler to be called when this promise
@@ -392,7 +397,7 @@ class Promise {
       tracker.trackField("promise", promise);
     }
     KJ_IF_SOME(d, dispose) {
-      tracker.trackField("dispose", d);
+      tracker.trackField("disposeState", d.state);
     }
   }
 
@@ -414,7 +419,16 @@ class Promise {
  private:
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
   bool markedAsHandled = false;
-  kj::Maybe<V8Ref<v8::Function>> dispose;
+
+  struct Dispose {
+    v8::FunctionCallback callback;
+    V8Ref<v8::Value> state;
+
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(state);
+    }
+  };
+  kj::Maybe<Dispose> dispose;
 
   v8::Local<v8::Promise> getInner(Lock& js) {
     return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
@@ -656,8 +670,9 @@ class PromiseWrapper {
     // Likewise, the method the C++ code gave the Promise for `[Symbol.dispose]` belongs on the
     // derived promise.
     KJ_IF_SOME(dispose, promise.dispose) {
+      v8::Local<v8::Value> boundArgs[] = {ret, dispose.state.getHandle(js)};
       check(ret->DefineOwnProperty(context, v8::Symbol::GetDispose(js.v8Isolate),
-          dispose.getHandle(js), v8::PropertyAttribute::DontEnum));
+          newBoundFunction(js, dispose.callback, boundArgs), v8::PropertyAttribute::DontEnum));
     }
 
     return ret;
