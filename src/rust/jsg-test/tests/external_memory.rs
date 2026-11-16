@@ -263,7 +263,10 @@ fn adjustment_made_without_the_lock_can_be_released_under_it_at_once() {
         let make_pending = || {
             let adjustment =
                 std::thread::scope(|scope| scope.spawn(|| target.adjustment(AMOUNT)).join());
-            assert_eq!(target.pending_update_for_test(), 1 << 30);
+            assert_eq!(
+                target.pending_update_for_test(),
+                i64::try_from(AMOUNT).unwrap()
+            );
             adjustment.unwrap()
         };
 
@@ -272,7 +275,7 @@ fn adjustment_made_without_the_lock_can_be_released_under_it_at_once() {
         assert_eq!(crate::Harness::external_memory(lock), base);
 
         let mut lowered = make_pending();
-        lowered.adjust(-(1 << 30)).unwrap();
+        lowered.adjust(-isize::try_from(AMOUNT).unwrap()).unwrap();
         assert_eq!(target.pending_update_for_test(), 0);
         assert_eq!(crate::Harness::external_memory(lock), base);
         drop(lowered);
@@ -324,22 +327,33 @@ fn decrease_under_the_lock_leaves_a_larger_pending_increase_pending() {
     });
 }
 
-// A pending decrease is netted in too: the decrease V8 gets is the sum of both.
+// A pending decrease is not netted in: V8's total stays zero or more without it, and the
+// decrease V8 gets stays within the bound checked for it. It reaches V8 at the next lock.
 #[test]
-fn decrease_under_the_lock_reports_a_pending_decrease_with_it() {
+fn decrease_under_the_lock_leaves_a_pending_decrease_pending() {
     let harness = crate::Harness::new();
+    let mut base = 0;
+    let mut target = None;
     harness.run_in_context(|lock, _ctx| {
-        let base = crate::Harness::external_memory(lock);
-        let target = lock.external_memory_target();
+        base = crate::Harness::external_memory(lock);
+        let t = lock.external_memory_target();
         let released = lock.external_memory_adjustment(300);
         let mut lowered = lock.external_memory_adjustment(200);
         assert_eq!(crate::Harness::external_memory(lock), base + 500);
 
         std::thread::scope(|scope| scope.spawn(|| drop(released)).join()).unwrap();
-        assert_eq!(target.pending_update_for_test(), -300);
+        assert_eq!(t.pending_update_for_test(), -300);
         assert_eq!(crate::Harness::external_memory(lock), base + 500);
 
         lowered.adjust(-200).unwrap();
+        assert_eq!(t.pending_update_for_test(), -300);
+        assert_eq!(crate::Harness::external_memory(lock), base + 300);
+        target = Some(t);
+        Ok(())
+    });
+
+    let target = target.unwrap();
+    harness.run_in_context(|lock, _ctx| {
         assert_eq!(target.pending_update_for_test(), 0);
         assert_eq!(crate::Harness::external_memory(lock), base);
         Ok(())
@@ -380,6 +394,52 @@ fn concurrent_adjustments_with_and_without_the_lock_balance_out() {
             // The lock holder drops what it is handed, under the lock, as it arrives.
             for adjustment in receiver {
                 drop(adjustment);
+            }
+        });
+        target = Some(t);
+        Ok(())
+    });
+
+    let target = target.unwrap();
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(target.pending_update_for_test(), 0);
+        assert_eq!(crate::Harness::external_memory(lock), base);
+        Ok(())
+    });
+}
+
+// Threads drop, without the lock, adjustments that V8 already counts, so the pending total goes
+// negative, while the thread holding the lock makes and lowers its own. V8's total must never
+// fall below zero, which V8 checks and aborts on, and once every adjustment is gone it is back
+// where it started.
+#[test]
+fn concurrent_releases_without_the_lock_while_the_lock_holder_lowers_its_own() {
+    const THREADS: usize = 4;
+    const PER_THREAD: usize = 50;
+    const AMOUNT: usize = 1 << 20;
+    let harness = crate::Harness::new();
+    let mut base = 0;
+    let mut target = None;
+    harness.run_in_context(|lock, _ctx| {
+        base = crate::Harness::external_memory(lock);
+        let t = lock.external_memory_target();
+        let batches: Vec<Vec<jsg::ExternalMemoryAdjustment>> = (0..THREADS)
+            .map(|_| {
+                (0..PER_THREAD)
+                    .map(|_| lock.external_memory_adjustment(AMOUNT))
+                    .collect()
+            })
+            .collect();
+        let total = i64::try_from(THREADS * PER_THREAD * AMOUNT).unwrap();
+        assert_eq!(crate::Harness::external_memory(lock), base + total);
+        std::thread::scope(|scope| {
+            for batch in batches {
+                scope.spawn(move || drop(batch));
+            }
+            for _ in 0..THREADS * PER_THREAD {
+                let mut mine = lock.external_memory_adjustment(AMOUNT);
+                mine.adjust(-1).unwrap();
+                drop(mine);
             }
         });
         target = Some(t);

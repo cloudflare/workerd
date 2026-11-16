@@ -677,10 +677,22 @@ KJ_TEST("External memory adjustment - decrease under the lock of a pending incre
       KJ_ASSERT(target->getPendingMemoryUpdateForTest() == AMOUNT);
     }
     KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+
+    // A pending decrease stays pending: V8's total stays zero or more without it.
+    {
+      auto lowered = target->getAdjustment(200);
+      kj::Maybe<ExternalMemoryAdjustment> released = target->getAdjustment(300);
+      {
+        kj::Thread thread([&]() { released = kj::none; });
+      }
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == -300);
+      lowered.adjust(-200);
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == -300);
+    }
   });
 }
 
-KJ_TEST("External memory adjustment - adjustNow() of another isolate's adjustment") {
+KJ_TEST("External memory adjustment - adjustNow() of a destroyed isolate's adjustment") {
   // The adjustment counts against an isolate that is gone, so adjustNow() under another
   // isolate's lock must not report it to that isolate: V8 would see 1 GiB leave a total that
   // never held it, and abort.
@@ -698,6 +710,31 @@ KJ_TEST("External memory adjustment - adjustNow() of another isolate's adjustmen
   isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
     adjustment.adjustNow(lock, -static_cast<ssize_t>(AMOUNT));
     KJ_ASSERT(adjustment.getAmount() == 0);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+  });
+}
+
+KJ_TEST("External memory adjustment - adjustNow() of a live isolate's adjustment under another's") {
+  // The adjustment counts against `owner`, so adjustNow() under `other`'s lock leaves the change
+  // pending for `owner`'s next lock instead of reporting it to `other`.
+  IsolateUuidIsolate owner(v8System, kj::heap<IsolateObserver>());
+  IsolateUuidIsolate other(v8System, kj::heap<IsolateObserver>());
+  kj::Arc<const ExternalMemoryTarget> target;
+  kj::Maybe<ExternalMemoryAdjustment> maybeAdjustment;
+  owner.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    target = lock.getExternalMemoryTarget();
+    maybeAdjustment = target->getAdjustment(1000);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+  });
+  auto& adjustment = KJ_ASSERT_NONNULL(maybeAdjustment);
+
+  other.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    adjustment.adjustNow(lock, -1000);
+    KJ_ASSERT(adjustment.getAmount() == 0);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == -1000);
+  });
+
+  owner.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
     KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
   });
 }

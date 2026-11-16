@@ -260,8 +260,8 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
 `ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
 fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
-`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
-`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
+`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
@@ -680,10 +680,10 @@ in C++ JSG.
 Both types are `Send` and `Sync`. An adjustment can be made, changed or dropped on any thread. A
 thread that has entered the isolate, as every thread holding its lock in workerd has, reports the
 change to V8 at once. Any other thread, or one that has entered another isolate, adds it to a
-pending total, which the next `IsolateBase::Lock` hands to V8. A decrease reported at once has the
-pending total netted into it: V8 gets the net decrease, or nothing if the pending total exceeds it,
-so that a decrease, often made in a destructor or a GC finalizer, never makes V8 start a GC. So an
-adjustment made on one thread can be changed or dropped on another. To make adjustments without the
+pending total, which the next `IsolateBase::Lock` hands to V8. So an adjustment made on one thread
+can be changed or dropped on another. A decrease reported at once has a pending rise netted into
+it: V8 gets the net decrease, or nothing if the pending rise exceeds it, so that a decrease, often
+made in a destructor or a GC finalizer, never makes V8 start a GC. To make adjustments without the
 lock, take the isolate's `jsg::ExternalMemoryTarget` under the lock
 (`lock.external_memory_target()`) and call `target.adjustment(amount)` later, on any thread. Both
 outlive the isolate: once it is destroyed, nothing reaches V8, and `target.is_isolate_alive()`

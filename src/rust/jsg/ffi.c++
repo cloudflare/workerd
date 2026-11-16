@@ -2111,6 +2111,13 @@ const ::workerd::jsg::ExternalMemoryAdjustment& unwrap(const ExternalMemoryAdjus
   return kj::downcast<const ExternalMemoryAdjustmentImpl>(adjustment).adjustment;
 }
 
+// C++ JSG passes an amount on as a ssize_t (an int64_t through IsolateBase), and set() passes
+// `amount - getAmount()`, so an amount above SSIZE_MAX would wrap to a fall below zero, which
+// throws. Capped, every operand is in range, and the amount still aborts as too large.
+size_t capAmount(size_t amount) {
+  return kj::min(amount, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+}
+
 }  // namespace
 
 kj::Arc<ExternalMemoryTarget> isolate_external_memory_target(Isolate* isolate) {
@@ -2122,12 +2129,13 @@ kj::Own<ExternalMemoryAdjustment> isolate_external_memory_adjustment(
   // The caller holds the lock and has entered the isolate, so maybeDeferAdjustment() reports the
   // amount to V8 at once.
   KJ_DASSERT(v8::Isolate::TryGetCurrent() == isolate);
-  return wrap(::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryAdjustment(amount));
+  return wrap(
+      ::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryAdjustment(capAmount(amount)));
 }
 
 kj::Own<ExternalMemoryAdjustment> external_memory_target_adjustment(
     ExternalMemoryTarget& target, size_t amount) {
-  return wrap(target.getAdjustment(amount));
+  return wrap(target.getAdjustment(capAmount(amount)));
 }
 
 bool external_memory_target_is_isolate_alive(ExternalMemoryTarget& target) {
@@ -2147,10 +2155,7 @@ void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::r
 }
 
 void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount) {
-  // C++ set() passes `amount - getAmount()` to adjust() as a ssize_t. Capped at SSIZE_MAX, both
-  // operands are in range, so the difference can't wrap; a capped amount still aborts as too large.
-  constexpr auto MAX = static_cast<size_t>(std::numeric_limits<ssize_t>::max());
-  unwrap(adjustment).set(kj::min(amount, MAX));
+  unwrap(adjustment).set(capAmount(amount));
 }
 
 }  // namespace workerd::rust::jsg

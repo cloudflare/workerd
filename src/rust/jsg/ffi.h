@@ -718,15 +718,15 @@ Local isolate_current_context_global(Isolate* isolate);
 void ignore_leak(size_t ptr);
 
 // ExternalMemory
-// The isolate's ExternalMemoryTarget and ExternalMemoryAdjustments of it, shared with C++ JSG: an
-// adjustment made without the isolate lock is added to the target's pending total, which
-// IsolateBase::applyDeferredActions() hands to V8 at the next lock, or a decrease made under the
-// lock nets into what it reports, and one made by a thread that has entered the isolate reaches V8
-// at once. An adjustment may be changed or destroyed on any thread.
+// The isolate's ExternalMemoryTarget and ExternalMemoryAdjustments of it, shared with C++ JSG.
+// An adjustment may be made, changed or destroyed on any thread. A change made by a thread that
+// has entered the isolate reaches V8 at once. Any other change is added to the target's pending
+// total, which IsolateBase::applyDeferredActions() hands to V8 at the next lock. A decrease that
+// reaches V8 at once has a pending rise netted into it.
 // An adjustment of 32 GiB or more aborts the process, as in C++ JSG.
 // external_memory_adjustment_adjust() throws, as C++ adjust() does, when it would lower an
-// adjustment below zero. None of the others throw: external_memory_adjustment_set() caps the
-// amount so that the difference C++ set() computes can't wrap to a fall.
+// adjustment below zero. None of the others throw: the shims that take an amount cap it at
+// SSIZE_MAX, so that it can't wrap to a fall in C++.
 
 // A jsg::ExternalMemoryAdjustment, which ffi.c++ holds in a subclass. kj::Own's disposal needs a
 // complete type and checks whether it is polymorphic, so the bridge's kj::Own glue needs only this

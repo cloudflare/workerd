@@ -57,8 +57,9 @@ pub struct ExternalMemoryAdjustment {
 }
 
 // SAFETY: a C++ `ExternalMemoryAdjustment` may be changed and destroyed on any thread: it reports
-// to V8 only from the thread that holds the isolate lock, and otherwise adds to the target's
-// atomic pending total. Its amount is only written through `&mut self`.
+// to V8 only from a thread that has entered the isolate (`v8::Isolate::TryGetCurrent()`), and
+// otherwise adds to the target's atomic pending total. Its amount is only written through
+// `&mut self`.
 #[expect(unsafe_code, reason = "C++ ExternalMemoryAdjustment is thread-safe")]
 unsafe impl Send for ExternalMemoryAdjustment {}
 // SAFETY: `&self` only reads the amount.

@@ -2691,7 +2691,7 @@ class ExternalMemoryTarget: public IsolateLiveness {
   void adjustNow(Lock& js, ssize_t amount) const;
 
   // Reports a decrease (`amount` < 0) to `target`, this target's isolate, whose lock the caller
-  // holds, with the pending total netted into it. Never passes V8 a rise.
+  // holds, with a pending rise netted into it. Never passes V8 a rise.
   void decreaseNow(v8::Isolate* target, int64_t amount) const;
 
   // Tracks changes to external memory that were applied from a thread that did not hold the
