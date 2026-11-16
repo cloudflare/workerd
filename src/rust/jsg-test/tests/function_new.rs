@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! `v8::Function::new` creates a JavaScript function from a Rust closure and the data it owns,
-//! like C++ JSG's `Lock::wrapReturningFunction()`.
+//! `v8::Function::new` creates a JavaScript function from a Rust closure and the data it owns.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -143,7 +142,7 @@ fn function_shape_matches_cpp_jsg() {
 #[test]
 fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
     crate::Harness::new().run_in_context(|lock, _ctx| {
-        // Functions that C++ JSG wraps also have an opaque wrapper as their data, holding a C++
+        // A function C++ makes can have an opaque wrapper as its data too, holding a C++
         // Wrappable that must not be read as a Rust one.
         assert!(!crate::Harness::cpp_wrapped_function_data_is_rust_wrappable(lock));
         Ok(())

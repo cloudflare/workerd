@@ -2402,8 +2402,7 @@ impl<T: Traced> GarbageCollected for FunctionData<T> {
 }
 
 impl Function {
-    /// Creates a JavaScript function that calls `f` with `data`, like C++ JSG's
-    /// `Lock::wrapReturningFunction()`.
+    /// Creates a JavaScript function that calls `f` with `data`.
     ///
     /// The function owns `data`: the garbage collector traces it through the function and drops
     /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
