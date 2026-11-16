@@ -66,6 +66,8 @@ hyper-util = { version = "0", default-features = false, features = ["client-lega
 libc = "0"
 # erfc() and lgamma() for histogram statistics; the std equivalents are unstable.
 libm = "0"
+# capnp-serde-json: finds the NUL byte that ends JsonCodec's input.
+memchr = "2"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
 hashlink = "0"
 # kj-rs-io: `fs` for fcntl (KJ's fd flags), `signal` for ignoring SIGPIPE once per process like
