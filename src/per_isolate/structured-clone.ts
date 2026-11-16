@@ -97,14 +97,14 @@ const { structuredClone } = {
   structuredClone(this: unknown, value: unknown, options?: unknown): unknown {
     // WebIDL: an operation of the global takes undefined or null as the
     // global itself.
-    if (this !== undefined && this !== null && this !== globalReceiver) {
+    if (this != null && this !== globalReceiver) {
       throw new TypeErrorCtor(ILLEGAL_INVOCATION);
     }
     if (arguments.length === 0) {
       throw new TypeErrorCtor(NO_VALUE);
     }
     let transfer: object[] | undefined;
-    if (options !== undefined && options !== null) {
+    if (options != null) {
       if (!isObject(options)) {
         throw new TypeErrorCtor(BAD_OPTIONS);
       }
