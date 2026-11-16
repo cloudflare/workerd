@@ -725,8 +725,8 @@ void ignore_leak(size_t ptr);
 // at once. An adjustment may be changed or destroyed on any thread.
 // An adjustment of 32 GiB or more aborts the process, as in C++ JSG.
 // external_memory_adjustment_adjust() throws, as C++ adjust() does, when it would lower an
-// adjustment below zero. None of the others throw: external_memory_adjustment_set() caps a rise so
-// that it can't wrap to a fall.
+// adjustment below zero. None of the others throw: external_memory_adjustment_set() caps the
+// amount so that the difference C++ set() computes can't wrap to a fall.
 
 // A jsg::ExternalMemoryAdjustment, which ffi.c++ holds in a subclass. kj::Own's disposal needs a
 // complete type and checks whether it is polymorphic, so the bridge's kj::Own glue needs only this

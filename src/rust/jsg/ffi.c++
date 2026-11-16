@@ -2147,18 +2147,10 @@ void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::r
 }
 
 void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount) {
-  auto& inner = unwrap(adjustment);
-  size_t current = inner.getAmount();
-  if (amount >= current) {
-    // jsg::ExternalMemoryAdjustment::set() passes the difference to adjust() as a ssize_t, which
-    // would wrap a rise above SSIZE_MAX to a fall below zero and throw. Capped, the rise still
-    // makes the adjustment 32 GiB or more, so it aborts as too large.
-    inner.adjust(static_cast<ssize_t>(
-        kj::min(amount - current, static_cast<size_t>(std::numeric_limits<ssize_t>::max()))));
-  } else {
-    // An adjustment is always below 32 GiB, so the fall fits in a ssize_t.
-    inner.adjust(-static_cast<ssize_t>(current - amount));
-  }
+  // C++ set() passes `amount - getAmount()` to adjust() as a ssize_t. Capped at SSIZE_MAX, both
+  // operands are in range, so the difference can't wrap; a capped amount still aborts as too large.
+  constexpr auto MAX = static_cast<size_t>(std::numeric_limits<ssize_t>::max());
+  unwrap(adjustment).set(kj::min(amount, MAX));
 }
 
 }  // namespace workerd::rust::jsg

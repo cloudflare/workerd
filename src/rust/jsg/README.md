@@ -683,8 +683,8 @@ change to V8 at once. Any other thread, or one that has entered another isolate,
 pending total, which the next `IsolateBase::Lock` hands to V8. A decrease reported at once has the
 pending total netted into it: V8 gets the net decrease, or nothing if the pending total exceeds it,
 so that a decrease, often made in a destructor or a GC finalizer, never makes V8 start a GC. So an
-adjustment made on one thread can be changed or dropped on another. To
-make adjustments without the lock, take the isolate's `jsg::ExternalMemoryTarget` under the lock
+adjustment made on one thread can be changed or dropped on another. To make adjustments without the
+lock, take the isolate's `jsg::ExternalMemoryTarget` under the lock
 (`lock.external_memory_target()`) and call `target.adjustment(amount)` later, on any thread. Both
 outlive the isolate: once it is destroyed, nothing reaches V8, and `target.is_isolate_alive()`
 returns false; the checks above still apply. C++'s `adjustNow()` and `setNow()` have no

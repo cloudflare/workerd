@@ -5,8 +5,8 @@
 //! Tests of `jsg::ExternalMemoryAdjustment` and `jsg::ExternalMemoryTarget`: what they report to
 //! V8, with and without the isolate lock, and after the isolate is gone.
 //!
-//! An adjustment of 32 GiB or more, and the rise that `set()` caps at `SSIZE_MAX`, abort the
-//! process, so no test here makes one.
+//! An adjustment of 32 GiB or more, including an amount that `set()` caps at `SSIZE_MAX`, aborts
+//! the process, so no test here makes one.
 
 use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
