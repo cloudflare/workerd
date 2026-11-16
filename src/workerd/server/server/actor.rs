@@ -47,7 +47,6 @@ use worker::PromisedInterface;
 use crate::Result;
 use crate::bindings::ActorConfig;
 use crate::bridge::ffi;
-use crate::channels::AbortReason;
 use crate::channels::ActorClass;
 use crate::channels::ActorHooks;
 use crate::channels::ActorIdHandle;
@@ -1603,7 +1602,10 @@ impl ActorContainer {
                     )
                 })
             });
-            ffi::actor_abort(actor, &AbortReason(actor_reason));
+            match actor_reason {
+                Some(reason) => ffi::actor_abort(actor, cxx::KjException::from(reason)),
+                None => ffi::actor_stop(actor),
+            }
         }
         for facet in self.facets.borrow().values() {
             facet.abort(reason.clone());
@@ -1868,7 +1870,7 @@ async fn retire_actor(
     if let Err(error) = &result
         && container.require_not_broken().is_ok()
     {
-        ffi::actor_abort(&actor, &AbortReason(Some(error.clone())));
+        ffi::actor_abort(&actor, cxx::KjException::from(error.clone()));
         container.broken(error);
     }
     // Close the old actor's storage before releasing requests to its successor.
@@ -2000,7 +2002,7 @@ impl Drop for ActorContainer {
         }
         let actor = self.actor.get_mut().take();
         if let Some(actor) = &actor {
-            ffi::actor_abort(actor, &AbortReason(None));
+            ffi::actor_stop(actor);
         }
         drop(self.release(actor.as_deref()));
     }
