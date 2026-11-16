@@ -186,6 +186,18 @@ fn connect(lock: &mut jsg::Lock) -> jsg::Result<KjOwn<ffi::InspectorSession>> {
 #[jsg_resource]
 pub struct InspectorModule;
 
+/// The module object holds no state, so a Worker whose top level imports `node-internal:inspector` can start from a
+/// startup snapshot.
+impl jsg::SnapshotTransfer for InspectorModule {
+    type Snapshot = ();
+
+    fn snapshot(&self) {}
+
+    fn restore((): &()) -> Self {
+        Self
+    }
+}
+
 #[jsg_resource(nested_types(Connection = InspectorConnection))]
 impl InspectorModule {
     pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {

@@ -121,8 +121,10 @@ all of these hold:
       V8's cleanup task pops each cell and the callback call throws instead of running. No
       JavaScript runs past step 2. Any such cell fails the zygote: those objects are C++-held
       state the snapshot does not carry, and their cleanups must not be dropped silently.
-   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`,
-      template handles drained from Rust JSG).
+   4. Isolate-level handles are reset (the opaque template, `workerEnvObj`, `workerExportsObj`).
+      The templates of Rust JSG resource types are first pinned at isolate level and recorded by
+      `TypeId` in `artifact.rustResourceTemplates` (`pinResourceTemplatesIntoSnapshot()`,
+      `src/rust/jsg/ffi.h`).
    5. `bakeConstructorTemplatesIntoSnapshot()`: every materialized JSG resource constructor
       template is pinned at isolate level and recorded, by position, in
       `artifact.constructorTemplateIndices`.
@@ -196,6 +198,7 @@ long as the isolate does. In order:
 | C++ callback addresses the blob refers to    | `registerExternalReference()` table                         | `externalReferences`              |
 | `env` with its bindings, main module namespace | context-level `AddData`, fixed indices                     | `blob` (indices in `snapshot.h`)  |
 | JSG resource constructor templates           | isolate-level `AddData`, by position                        | `constructorTemplateIndices`      |
+| Rust JSG resource templates                  | isolate-level `AddData`, by `TypeId`                        | `rustResourceTemplates`           |
 | Live JSG objects' native side                | tag only (stateless) or `snapshotClone()`; wrapper payload = slot index | `liveWrappables`      |
 | References between those objects             | slot indices, relinked after restore                        | `liveWrappables[].references`     |
 | Per-isolate bootstrap state                  | one pinned object                                           | `bootstrapStateIndex`             |
@@ -235,6 +238,14 @@ A type that holds a `jsg::Ref` to another transferred object whose identity Java
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
+
+A Rust JSG resource type implements `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`), which
+covers both: `snapshot()` and `restore()` stand for the two `snapshotClone()` calls, through an
+isolate-independent `Snapshot` value, and `snapshot_references()` and `snapshot_relink()` for
+their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
+into its new `Realm` (`restoreResourceTemplatesFromSnapshot()`) before anything is wrapped, so
+that its new wrappers of a type and the restored ones share a template. `relinkReferences()` runs
+with the new context entered, for the `Lock` of `snapshot_relink()`.
 
 A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
 registry's `import.meta.resolve`, for example) transfers if its functor provides
@@ -318,13 +329,14 @@ once.
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `dropUnreachableWrappables()` and `releaseSlotsWithChecks()` findings; FinalizationRegistry cleanups settled before the record, rejected after it |
+| `src/rust/jsg-test/tests/startup_snapshot.rs`                       | Rust resources: state, shared templates, relinked references, and a type without `SnapshotTransfer` |
 | `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator`, `Temporal` (with and without the flag), a frozen `Date.prototype`, deleted restore-time globals, and the `process`/`Buffer` globals |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot: `once`, `passive`, an object listener's `handleEvent`, a replaced global `addEventListener`; `signal` fallback |
 | `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
-| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, `node:diagnostics_channel`) across the snapshot |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `node:fs` and ineligible cases fall back |
+| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder` and ineligible cases fall back; `node:fs` transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

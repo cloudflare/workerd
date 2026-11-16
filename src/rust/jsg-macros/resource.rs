@@ -697,6 +697,24 @@ fn generate_gc_impl(
                     #(|| __JsgDropProbe::<#drop_detach_types>(::std::marker::PhantomData)
                         .needs_drop_detach())*
             }
+
+            fn snapshot_transfer(&self) -> ::std::option::Option<&dyn jsg::ErasedSnapshotTransfer> {
+                // As in `has_drop_impl`: the inherent method applies exactly when the resource
+                // implements `jsg::SnapshotTransfer`.
+                struct Probe<'a, T>(&'a T);
+                trait NoSnapshotTransfer<'a> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::None
+                    }
+                }
+                impl<'a, T> NoSnapshotTransfer<'a> for Probe<'a, T> {}
+                impl<'a, T: jsg::SnapshotTransfer> Probe<'a, T> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::Some(self.0)
+                    }
+                }
+                Probe(self).snapshot_transfer()
+            }
         }
     }
 }

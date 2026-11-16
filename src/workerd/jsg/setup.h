@@ -1535,6 +1535,8 @@ class Isolate: public IsolateBase {
           "wrapper markers",
           metadata.badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
+        // snapshotRelink() runs with the new context entered.
+        v8::Context::Scope contextScope(context.getHandle(v8Isolate));
         jsgIsolate.finishWrappableDeserializeMetadata(metadata);
       }
       // V8 leaves some properties out of a context built in a serializer-enabled isolate and

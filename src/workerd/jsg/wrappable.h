@@ -456,7 +456,7 @@ class Wrappable: public kj::Refcounted {
   // In a Worker started from a snapshot, once every restored wrapper is linked: one entry per
   // entry snapshotReferences() returned in the zygote, the restored instance behind that object's
   // wrapper, or nullptr when the snapshot carried no wrapper for it (keep what this instance has).
-  // Must not throw.
+  // Runs under the isolate lock with the new context entered. Must not throw.
   virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
 
   // Called by HeapTracer when V8 tells us that it found a reference to this object.

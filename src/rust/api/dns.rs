@@ -245,6 +245,18 @@ fn parse_presentation_naptr_record(record: &str) -> Result<NaptrRecord, DnsParse
 #[jsg_resource]
 pub struct DnsUtil;
 
+/// The module object holds no state, so a Worker whose top level imports `node-internal:dns` can start from a
+/// startup snapshot.
+impl jsg::SnapshotTransfer for DnsUtil {
+    type Snapshot = ();
+
+    fn snapshot(&self) {}
+
+    fn restore((): &()) -> Self {
+        Self
+    }
+}
+
 #[jsg_resource]
 impl DnsUtil {
     pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {

@@ -30,6 +30,7 @@ pub mod resource;
 pub mod rtti;
 mod scope;
 pub mod ser;
+mod snapshot;
 mod string;
 mod structs;
 mod tunnel;
@@ -97,6 +98,11 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use snapshot::ErasedSnapshotTransfer;
+pub use snapshot::RestoredReferences;
+pub use snapshot::SnapshotCopy;
+pub use snapshot::SnapshotReferences;
+pub use snapshot::SnapshotTransfer;
 pub use string::JsString;
 #[doc(hidden)]
 pub use structs::StructShape;
@@ -128,14 +134,19 @@ mod ffi {
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
-        /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
-        /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
-        /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
-        /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
-        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway). The handles
-        /// cached for struct types are reset, so the isolate must be locked, with no Rust `Lock`
-        /// in use.
-        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+        /// Drains the Realm's cached resource templates for the `PREPARE_SNAPSHOT` pipeline,
+        /// which pins each one into the snapshot and must dispose its handle before
+        /// `CreateBlob`. Each `handle` is a `v8::Global<v8::FunctionTemplate>`, recovered on
+        /// the C++ side with `global_from_ffi`; ownership transfers to the caller. The cache is
+        /// left empty. The handles cached for struct types are reset, so the isolate must be
+        /// locked, with no Rust `Lock` in use.
+        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ResourceTemplate>;
+
+        /// Fills the empty template cache of a Realm created for an isolate started from a
+        /// snapshot with the templates `realm_take_resource_templates` drained in the zygote, so
+        /// that the restored wrappers and the new ones of a resource type share its template.
+        /// Ownership of each handle transfers to the Realm.
+        fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ResourceTemplate>);
 
         /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
         /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
@@ -155,6 +166,14 @@ mod ffi {
         /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
         /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
+    }
+
+    /// A resource type's template, by the type's `TypeId`, which is stable within a binary,
+    /// as the producer and the consumer of a startup snapshot are.
+    struct ResourceTemplate {
+        type_id_lo: usize,
+        type_id_hi: usize,
+        handle: Global,
     }
 
     unsafe extern "C++" {
@@ -1632,6 +1651,14 @@ pub trait GarbageCollected: Traced {
     fn detach_before_drop(&self) -> bool {
         false
     }
+
+    /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
+    /// which makes a Worker whose top level leaves it reachable start without the snapshot.
+    /// `#[jsg_resource]` implements it.
+    #[doc(hidden)]
+    fn snapshot_transfer(&self) -> Option<&dyn ErasedSnapshotTransfer> {
+        None
+    }
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
@@ -1783,17 +1810,41 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     realm.state.drain_awaiting_lock(isolate);
 }
 
-/// See the bridge declaration: drains the cached resource-template persistent handles for
-/// the `PREPARE_SNAPSHOT` pipeline.
+/// See the bridge declaration.
 #[expect(
     unsafe_code,
     reason = "frees the struct shapes, which no Lock may be using"
 )]
-unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ffi::ResourceTemplate> {
     // The struct handles are reset here, under the isolate lock, rather than handed over.
     // SAFETY: the isolate is locked with no `Lock` in use (guaranteed by the C++ caller).
     unsafe { realm.structs.clear() };
-    realm.resources.take_template_handles()
+    realm
+        .resources
+        .take_templates()
+        .into_iter()
+        .map(|(type_id, handle)| {
+            let [type_id_lo, type_id_hi] = v8::split_type_id(type_id);
+            ffi::ResourceTemplate {
+                type_id_lo,
+                type_id_hi,
+                handle,
+            }
+        })
+        .collect()
+}
+
+/// See the bridge declaration.
+fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ffi::ResourceTemplate>) {
+    realm
+        .resources
+        .restore_templates(templates.into_iter().map(|t| {
+            let type_id = v8::join_type_id([t.type_id_lo, t.type_id_hi]);
+            (
+                type_id,
+                v8::Global::from_ffi_in(t.handle, Arc::clone(&realm.state)),
+            )
+        }));
 }
 
 /// Runs `body`, the body of the generated callback of a method or property that returns a

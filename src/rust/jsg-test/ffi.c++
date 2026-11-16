@@ -11,6 +11,7 @@
 #include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/jsg/snapshot.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
@@ -249,6 +250,78 @@ void TestHarness::run_in_context(
   });
 }
 
+::rust::String snapshot_round_trip(::rust::Slice<const uint8_t> flags,
+    size_t topLevelData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> topLevel,
+    size_t restoredData,
+    ::rust::Fn<void(size_t, Isolate*, EvalContext&)> restored) {
+  using ::workerd::jsg::IsolateBase;
+  return ::workerd::jsg::runInV8Stack([&](::workerd::jsg::V8StackScope&) -> ::rust::String {
+    kj::Own<::workerd::jsg::SnapshotArtifact> artifact;
+    {
+      // As Worker::Worker does in the zygote: the serializer callbacks are registered with the
+      // context, the top level runs, and the context handle and the Rust realm's templates are
+      // handed to createSnapshotBlob().
+      auto zygote = kj::heap<TestIsolate>(getV8System(), ::workerd::jsg::newIsolateGroup(), nullptr,
+          kj::heap<::workerd::jsg::IsolateObserver>(),
+          ::workerd::jsg::defaultExternalStringAllocator(), v8::Isolate::CreateParams{}, true,
+          ::workerd::jsg::SnapshotConfig(::workerd::jsg::MutableSnapshot{
+            .artifact = kj::atomicRefcounted<::workerd::jsg::SnapshotArtifact>()}));
+      kj::Maybe<kj::Exception> failure;
+      zygote->runInLockScope([&](TestIsolate::Lock& lock) {
+        auto realm = ::workerd::rust::jsg::realm_create(lock.v8Isolate, flags);
+        ::workerd::jsg::WrappablesSerializeMetadata metadata;
+        uint32_t badTagFieldsCount = 0;
+        auto& isolateBase = IsolateBase::from(lock.v8Isolate);
+        failure = kj::runCatchingExceptions([&] {
+          v8::Global<v8::Context> contextHandle;
+          lock.withinHandleScope([&] {
+            auto jsContext = lock.newContext<TestContext>();
+            auto context = jsContext.getHandle(lock);
+            v8::Context::Scope contextScope(context);
+            isolateBase.setSnapshotDefaultContext(context, &badTagFieldsCount, &metadata);
+            {
+              EvalContext evalContext(lock.v8Isolate, context);
+              topLevel(topLevelData, lock.v8Isolate, evalContext);
+            }
+            isolateBase.settleFinalizationRegistriesForSnapshot(lock);
+            isolateBase.removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
+            contextHandle = jsContext.extractContextGlobalForSnapshot();
+          });
+          auto rustTemplates =
+              ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
+          isolateBase.createSnapshotBlob(
+              kj::mv(contextHandle), kj::mv(rustTemplates), &badTagFieldsCount, &metadata);
+        });
+      });
+      KJ_IF_SOME(e, failure) {
+        return ::rust::String(e.getDescription().cStr());
+      }
+      artifact = zygote->extractSnapshotArtifact();
+    }
+
+    auto isolate = kj::heap<TestIsolate>(getV8System(), ::workerd::jsg::newIsolateGroup(), nullptr,
+        kj::heap<::workerd::jsg::IsolateObserver>(),
+        ::workerd::jsg::defaultExternalStringAllocator(), v8::Isolate::CreateParams{}, true,
+        ::workerd::jsg::SnapshotConfig(
+            ::workerd::jsg::FinalizedSnapshot{.artifact = artifact->addRef()}));
+    isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+      // As Worker::Isolate does: the realm takes the snapshot's templates before anything wraps
+      // a Rust resource.
+      auto realm = ::workerd::rust::jsg::realm_create(lock.v8Isolate, flags);
+      ::workerd::rust::jsg::restoreResourceTemplatesFromSnapshot(lock.v8Isolate);
+      lock.withinHandleScope([&] {
+        auto jsContext = lock.newContext<TestContext>();
+        auto context = jsContext.getHandle(lock);
+        v8::Context::Scope contextScope(context);
+        EvalContext evalContext(lock.v8Isolate, context);
+        restored(restoredData, lock.v8Isolate, evalContext);
+      });
+    });
+    return ::rust::String();
+  });
+}
+
 void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
     realm = kj::none;
@@ -259,9 +332,9 @@ void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callb
 
 void TestHarness::take_realm_templates() const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
-    for (auto& handle:
+    for (auto& entry:
         ::workerd::rust::jsg::realm_take_resource_templates(*KJ_ASSERT_NONNULL(realm))) {
-      ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)).Reset();
+      ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(entry.handle)).Reset();
     }
   });
 }

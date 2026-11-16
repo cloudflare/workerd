@@ -52,6 +52,18 @@ fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
 #[jsg_resource]
 pub struct UrlUtil;
 
+/// The module object holds no state, so a Worker whose top level imports `node-internal:url` can start from a
+/// startup snapshot.
+impl jsg::SnapshotTransfer for UrlUtil {
+    type Snapshot = ();
+
+    fn snapshot(&self) {}
+
+    fn restore((): &()) -> Self {
+        Self
+    }
+}
+
 #[jsg_resource]
 impl UrlUtil {
     #[must_use]

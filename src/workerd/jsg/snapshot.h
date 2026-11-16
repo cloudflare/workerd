@@ -43,6 +43,9 @@ class Wrappable;
 //   fixed at compile time and the producer and the consumer of a snapshot are the same binary,
 //   the same invariant `externalReferences` relies on.
 // * `kNoConstructorTemplate` marks slots that were empty when the snapshot was prepared.
+// * `rustResourceTemplates` are the templates of the Rust JSG resource types the zygote created,
+//   pinned at isolate level, each by its type's TypeId (stable within a binary, as above). See
+//   workerd::rust::jsg::pinResourceTemplatesIntoSnapshot().
 // * `liveWrappables` is the native side of the wrappers serialized into `blob`, indexed by the
 //   payload the API-wrapper serializer wrote for each of them. Each entry carries the
 //   CppHeapPointerTag the original's wrapper had and, for a stateful type, a snapshotClone() of
@@ -85,6 +88,15 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
 
   static constexpr size_t kNoConstructorTemplate = kj::maxValue;
   kj::Vector<size_t> constructorTemplateIndices;
+
+  struct RustResourceTemplate {
+    // The two halves of the resource type's TypeId.
+    size_t typeIdLo;
+    size_t typeIdHi;
+    // The isolate-level AddData index of its template.
+    size_t index;
+  };
+  kj::Vector<RustResourceTemplate> rustResourceTemplates;
 
   struct LiveWrappable {
     // A type recorded by its tag alone.

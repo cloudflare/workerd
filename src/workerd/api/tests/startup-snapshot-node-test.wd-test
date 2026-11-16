@@ -9,6 +9,7 @@ const compatibilityFlags :List(Text) = [
   "nodejs_compat",
   "typescript_implemented_streams",
   "experimental",
+  "unsafe_module",
 ];
 
 const caseModules :List(Workerd.Worker.Module) = [
@@ -24,10 +25,10 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = .compatibilityFlags,
         bindings = [
-          (name = "SELF", service = "runner"),
           (name = "als", service = "als"),
           (name = "als-default", service = "als-default"),
           (name = "diagnostics-channel", service = "diagnostics-channel"),
+          (name = "rust-modules", service = "rust-modules"),
         ],
       )
     ),
@@ -37,7 +38,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"als\""),
-          (name = "SELF", service = "als"),
         ],
       )
     ),
@@ -47,7 +47,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"als-default\""),
-          (name = "SELF", service = "als-default"),
         ],
       )
     ),
@@ -57,8 +56,15 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"diagnostics-channel\""),
-          (name = "SELF", service = "diagnostics-channel"),
         ],
+      )
+    ),
+    ( name = "rust-modules",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-node-rust-case-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
       )
     ),
   ],
