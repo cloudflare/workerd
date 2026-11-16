@@ -265,10 +265,11 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
-`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
-their serializers are written against C++ JSG, and the deserializer finds classes implemented in
-JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
+`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `writeNativeError`, `readNativeError`,
+`newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects,
+DOMExceptions and native errors serialize, since their serializers are written against C++ JSG
+and give each one format, and the deserializer finds classes implemented in JavaScript among the
+bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
 depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
 which Rust describes a value as `kj::str()` of a handle does, including an error implemented in

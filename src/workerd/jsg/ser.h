@@ -23,6 +23,11 @@ constexpr uint32_t JS_SERIALIZABLE_HAS_MESSAGE = 4;
 constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS =
     JS_SERIALIZABLE_HAS_STACK | JS_SERIALIZABLE_KEEP_STACK | JS_SERIALIZABLE_HAS_MESSAGE;
 
+// Whether readNativeError() restores the `stack` that was written with an error, as
+// Deserializer's `preserveStackInErrors` option says, or leaves the error with the stack captured
+// as it is created.
+WD_STRONG_BOOL(PreserveStack);
+
 // The names of the V8 private properties of the protocol by which classes implemented in
 // JavaScript are serialized (see Serializer). src/per_isolate/serialization.ts uses the same names.
 constexpr kj::StringPtr JS_SERIALIZE_MODE_KEY = "workerd:serializeMode"_kj;
@@ -291,6 +296,11 @@ class Serializer final: v8::ValueSerializer::Delegate {
   Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed);
   friend v8::Maybe<bool> writeApiObject(
       v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
+  friend v8::Maybe<bool> writeNativeError(
+      v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error);
+
+  // Writes the native error `error` as a host object (see writeNativeError()).
+  void writeNativeError(Lock& js, v8::Local<v8::Object> error);
 
   // Writes `object`, which is not a native error: as DOMException's serialization tag if it is an
   // instance of the bootstrap's DOMException, through its type's serializer if it is a
@@ -453,10 +463,17 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
  private:
   // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
-  struct Borrowed {};
-  Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed);
+  struct Borrowed {
+    bool preserveStackInErrors = true;
+  };
+  Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed borrowed);
   friend v8::MaybeLocal<v8::Object> readApiObject(
       v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+  friend v8::MaybeLocal<v8::Object> readNativeError(
+      v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
+
+  // Reads a native error that Serializer::writeNativeError() wrote, once its tag has been read.
+  v8::Local<v8::Object> readNativeError(Lock& js);
 
   // Reads the workerd API object that `tag` names through its type's deserializer.
   v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
@@ -527,9 +544,27 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 };
 
 // For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or
-// v8::ValueDeserializer with a delegate of their own but write workerd API objects in the same
-// format as Serializer and Deserializer. Each returns an empty result, leaving the exception
-// pending, if what it runs throws.
+// v8::ValueDeserializer with a delegate of their own but write native errors and workerd API
+// objects in the same format as Serializer and Deserializer, through the same code. Each returns
+// an empty result, leaving the exception pending, if what it runs throws.
+
+// The tag with which a native error written as a host object begins. Keep in sync with the
+// nativeError serialization tag defined in worker-interface.capnp.
+constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
+
+// Writes the native error `error` as Serializer's WriteHostObject() writes one when
+// Lock::isUsingEnhancedErrorSerialization() is true: SERIALIZATION_TAG_NATIVE_ERROR, its type, its
+// name if the type is not a known one, its message, and its other own properties as a plain
+// object. The values go through `ser`, and so through its delegate. Reading the properties can run
+// JavaScript.
+v8::Maybe<bool> writeNativeError(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error);
+
+// Reads a native error that writeNativeError() wrote, once its SERIALIZATION_TAG_NATIVE_ERROR has
+// been read, as Deserializer's ReadHostObject() does, restoring its `stack` as `preserveStack`
+// says. Runs no JavaScript beyond what reading values through `deser` runs.
+v8::MaybeLocal<v8::Object> readNativeError(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
 
 // Writes `object` as Serializer's WriteHostObject() writes an object that is neither a native
 // error nor an instance of a class implemented in JavaScript, which the caller writes itself
