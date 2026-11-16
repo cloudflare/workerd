@@ -1808,7 +1808,7 @@ async fn make_service(
     }
 }
 
-/// Channel tokens and debug-port requests, resolved into the graph.
+/// Channel tokens, debug-port requests and the REPL's Durable Objects, resolved into the graph.
 impl ServerHandle {
     pub(crate) fn resolve_entrypoint(
         &self,
@@ -1915,21 +1915,61 @@ impl ServerHandle {
         class_name: &str,
         actor_id: &str,
     ) -> Result<Box<SubrequestChannel>> {
-        let server = self.server()?;
-        let service = server.debug_service(service_name)?;
-        let worker = service
-            .as_worker()
-            .ok_or_else(|| kj::failed!("jsg.Error: Worker does not support Durable Objects"))?;
-        let namespace = worker.namespace(class_name).ok_or_else(|| {
-            kj::failed!(
-                "jsg.Error: Worker does not export a Durable Object class named \"{class_name}\""
-            )
-        })?;
+        let namespace = self.actor_namespace(service_name, class_name)?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
             Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
             None => namespace.channel_by_name(actor_id, false),
         }))
     }
+
+    /// The namespace of service `service_name`'s Durable Object class `class_name`, and the id of
+    /// its object `key` names.
+    pub(crate) fn resolve_actor_key(
+        &self,
+        service_name: &str,
+        class_name: &str,
+        key: ActorKey<'_>,
+    ) -> Result<(Rc<ActorNamespace>, KjOwn<ActorIdHandle>)> {
+        let namespace = self.actor_namespace(service_name, class_name)?;
+        let id = match (namespace.unique_key(), key) {
+            (Some(unique_key), ActorKey::Name(name)) => {
+                ffi::actor_id_from_durable_name(unique_key, name)
+            }
+            (Some(unique_key), ActorKey::Id(id)) => {
+                ffi::actor_id_from_durable_string(unique_key, id)?
+            }
+            (None, ActorKey::Name(name)) => ffi::actor_id_from_name(name),
+            (None, ActorKey::Id(_)) => {
+                return Err(kj::failed!(
+                    "jsg.TypeError: The objects of the ephemeral Durable Object class \
+                     \"{class_name}\" have names, not ids."
+                ));
+            }
+        };
+        Ok((namespace, id))
+    }
+
+    fn actor_namespace(&self, service_name: &str, class_name: &str) -> Result<Rc<ActorNamespace>> {
+        let server = self.server()?;
+        let service = server.debug_service(service_name)?;
+        let worker = service
+            .as_worker()
+            .ok_or_else(|| kj::failed!("jsg.Error: Worker does not support Durable Objects"))?;
+        worker.namespace(class_name).ok_or_else(|| {
+            kj::failed!(
+                "jsg.Error: Worker does not export a Durable Object class named \"{class_name}\""
+            )
+        })
+    }
+}
+
+/// How the REPL names a Durable Object.
+#[derive(Clone, Copy)]
+pub enum ActorKey<'a> {
+    /// The name `idFromName()` takes; an ephemeral object's name.
+    Name(&'a str),
+    /// A durable object's id, as `idFromString()` takes it.
+    Id(&'a str),
 }
 
 impl Server {

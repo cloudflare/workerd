@@ -1,0 +1,16 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# `workerd repl` as a user runs it, input piped in: what only the command line and the console
+# do. src/workerd/server/repl/repl-environment-test.c++ covers evaluation.
+js_test(
+    name = "repl-test",
+    data = [
+        ":repl-test.capnp",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "repl-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "REPL_CONFIG": "$(rootpath :repl-test.capnp)",
+    },
+)

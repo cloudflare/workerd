@@ -4,7 +4,8 @@
 
 // The listeners' shims: the Rust rewriter's edits applied to kj headers, a response whose
 // headers are edited on the way out, the `ConnectResponse` of a raw TCP socket, and a UDP flow as
-// a `DatagramChannel` for `connect()` events.
+// a `DatagramChannel` for `connect()` events. Also the in-process host's: headers rekeyed between
+// the host's header table and the factory's.
 
 #include "worker-factory-impl.h"
 
@@ -83,6 +84,67 @@ class NullConnectResponse final: public kj::HttpService::ConnectResponse {
   }
 };
 
+// A copy of `headers` keyed by `table`, which may not be the table `headers` were built with. A
+// `kj::HttpHeaderId` belongs to one table, and code on either side of a host channel may look a
+// header up by its id, which fails on headers keyed by another table.
+kj::HttpHeaders rekey(const kj::HttpHeaderTable& table, const kj::HttpHeaders& headers) {
+  kj::HttpHeaders rekeyed(table);
+  headers.forEach(
+      [&](kj::StringPtr name, kj::StringPtr value) { rekeyed.add(kj::str(name), kj::str(value)); });
+  return rekeyed;
+}
+
+const kj::HttpHeaderTable& hostHeaderTable(const WorkerFactory& factory) {
+  return KJ_REQUIRE_NONNULL(factory.getImpl().options->hostHeaderTable,
+      "the factory has no host header table to rekey headers into");
+}
+
+// A host's response, for a worker of the server: headers are rekeyed on the way out.
+class HostResponse final: public kj::HttpService::Response {
+ public:
+  HostResponse(kj::HttpService::Response& inner, const kj::HttpHeaderTable& table)
+      : inner(inner),
+        table(table) {}
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    return inner.send(statusCode, statusText, rekey(table, headers), expectedBodySize);
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    return inner.acceptWebSocket(rekey(table, headers));
+  }
+
+ private:
+  kj::HttpService::Response& inner;
+  const kj::HttpHeaderTable& table;
+};
+
+// A host's `connect()` response, for a worker of the server: headers are rekeyed on the way out.
+class HostConnectResponse final: public kj::HttpService::ConnectResponse {
+ public:
+  HostConnectResponse(kj::HttpService::ConnectResponse& inner, const kj::HttpHeaderTable& table)
+      : inner(inner),
+        table(table) {}
+
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    inner.accept(statusCode, statusText, rekey(table, headers));
+  }
+
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    return inner.reject(statusCode, statusText, rekey(table, headers), expectedBodySize);
+  }
+
+ private:
+  kj::HttpService::ConnectResponse& inner;
+  const kj::HttpHeaderTable& table;
+};
+
 // A Rust UDP flow as the DatagramChannel of a UdpConnectCustomEvent.
 class UdpFlowChannel final: public DatagramChannel {
  public:
@@ -129,6 +191,21 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
 
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response() {
   return kj::heap<NullConnectResponse>();
+}
+
+kj::Own<kj::HttpHeaders> host_request_headers(
+    const WorkerFactory& factory, const kj::HttpHeaders& headers) {
+  return kj::heap(rekey(factory_header_table(factory), headers));
+}
+
+kj::Own<kj::HttpService::Response> new_host_response(
+    const WorkerFactory& factory, kj::HttpService::Response& inner) {
+  return kj::heap<HostResponse>(inner, hostHeaderTable(factory));
+}
+
+kj::Own<kj::HttpService::ConnectResponse> new_host_connect_response(
+    const WorkerFactory& factory, kj::HttpService::ConnectResponse& inner) {
+  return kj::heap<HostConnectResponse>(inner, hostHeaderTable(factory));
 }
 
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors() {

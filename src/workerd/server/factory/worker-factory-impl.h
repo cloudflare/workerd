@@ -6,6 +6,7 @@
 
 // The private state behind worker-factory.h, shared by the factory's source files.
 
+#include "single-tenant-policy.h"
 #include "worker-factory.h"
 
 #include <workerd/api/bench.h>
@@ -139,33 +140,6 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
 
  private:
   void taskFailed(kj::Exception&& exception) override;
-};
-
-// The clock JavaScript sees: the calendar clock for `now()`, timers measured from a fresh
-// monotonic reading so that time spent in JavaScript since the last poll does not shorten them.
-class WorkerTimerChannel final: public TimerChannel {
- public:
-  WorkerTimerChannel(kj::Timer& timer, const kj::MonotonicClock& monotonicClock)
-      : timer(timer),
-        monotonicClock(monotonicClock) {}
-
-  void syncTime() override {}
-  kj::Date now(kj::Maybe<kj::Date>) override {
-    return kj::systemPreciseCalendarClock().now();
-  }
-  kj::Promise<void> atTime(kj::Date when) override {
-    return timer.atTime(monotonicClock.now() + (when - now(kj::none)));
-  }
-  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
-    return timer.afterDelay(t);
-  }
-  kj::TimePoint nowForLimitTimeout() override {
-    return monotonicClock.now();
-  }
-
- private:
-  kj::Timer& timer;
-  const kj::MonotonicClock& monotonicClock;
 };
 
 // Everything requests on a compiled worker share. Refcounted so that the I/O channel factory of a

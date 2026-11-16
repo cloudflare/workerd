@@ -36,6 +36,8 @@ namespace workerd::server {
 
 using api::pyodide::PythonConfig;
 
+class ReplControl;
+
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
  public:
@@ -74,6 +76,8 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
+  // The `workerd` global of `workerd repl` (server/repl/), which only the REPL's isolate has.
+  jsg::JsObject wrapReplControl(jsg::Lock& lock, jsg::Ref<ReplControl> ref) const;
   const jsg::IsolateObserver& getObserver() const override;
   void setIsolateObserver(IsolateObserver&) override;
 

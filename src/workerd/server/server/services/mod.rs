@@ -185,7 +185,7 @@ impl Dialer {
 
 /// `settings` reborrowed for a shorter lifetime, for a client that lives only for the call: the
 /// bridge struct is invariant in its lifetime, so it cannot shrink on its own.
-fn reborrow_settings<'s>(
+pub(crate) fn reborrow_settings<'s>(
     use_tls: bool,
     tls_starter: &'s mut Option<Pin<&mut kj::http::ffi::TlsStarterCallback>>,
 ) -> ConnectSettings<'s> {
