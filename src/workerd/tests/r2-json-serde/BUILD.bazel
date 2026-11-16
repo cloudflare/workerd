@@ -1,0 +1,30 @@
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# serde_json parser of the R2 binding's JSON, with the types capnpc-rust-serde-json generates
+# (//src/workerd/api:r2-api-serde-json), and the documents that :bench-r2-json decodes.
+wd_rust_crate(
+    name = "r2-json-serde",
+    testonly = True,
+    srcs = glob(["*.rs"]),
+    cxx_bridge_src = "ffi.rs",
+    deps = [
+        "//src/rust/capnp-serde-json",
+        "//src/workerd/api:r2-api-serde-json",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
+    ],
+)
+
+# capnp's JsonCodec against serde_json, decoding the R2 binding's JSON:
+#   bazel run --config=benchmark //src/workerd/tests/r2-json-serde:bench-r2-json
+wd_cc_benchmark(
+    name = "bench-r2-json",
+    srcs = ["bench-r2-json.c++"],
+    deps = [
+        ":r2-json-serde",
+        "//src/workerd/api:r2-api-serde-json",
+        "//src/workerd/api:r2-api_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
+)

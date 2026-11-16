@@ -38,6 +38,7 @@
 -isystembazel-bin/external/+git_repository+com_googlesource_chromium_icu/_virtual_includes/icu/third_party/icu/source/common
 -isystemexternal/zlib+
 -isystembazel-bin/src/rust/api/_virtual_includes/lib.rs@cxx
+-isystembazel-bin/src/rust/capnp-serde-json/tests/_virtual_includes/test_serde_json_ffi.rs@cxx
 -isystembazel-bin/src/rust/cxx-integration-test/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/cxx-integration/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/dns/_virtual_includes/lib.rs@cxx
