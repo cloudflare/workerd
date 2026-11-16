@@ -198,6 +198,36 @@ fn backing_store_of_another_isolate_panics_when_wrapped() {
     }
 }
 
+/// The lock of one isolate does not keep another's JavaScript from writing to its memory.
+#[test]
+fn backing_store_of_another_isolate_panics_when_borrowed_mutably() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut stores = Vec::new();
+    a.run_in_context(|lock, _ctx| {
+        let buffer = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
+        stores.push(buffer.backing_store(lock));
+        stores.push(v8::BackingStore::new_resizable(lock, 4, 8));
+        Ok(())
+    });
+    assert_eq!(stores.len(), 2);
+
+    for mut store in stores {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            b.run_in_context(move |lock, _ctx| {
+                // SAFETY: nothing else refers to the store's memory, and the borrow panics.
+                let _slice = unsafe { store.as_mut_slice(lock) };
+                Ok(())
+            });
+        }));
+        let payload = result.expect_err("borrowing a store of A in B must panic");
+        assert_eq!(
+            panic_message(&*payload),
+            "attempt to borrow a BackingStore in an isolate other than the one it belongs to"
+        );
+    }
+}
+
 #[test]
 fn new_backing_store_is_wrapped_in_its_isolate() {
     crate::Harness::new().run_in_context(|lock, ctx| {
