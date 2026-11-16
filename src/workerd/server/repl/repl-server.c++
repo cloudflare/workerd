@@ -235,7 +235,7 @@ kj::Promise<void> ReplConfigServer::replaceServer() {
   server = kj::mv(next.server);
   warnings = kj::mv(next.warnings);
   auto reason = kj::str("The server for ", source.path,
-      " was reloaded. Get a new Fetcher from its service() or socket().");
+      " was reloaded. Get a new one from its service(), socket() or durableObject().");
   previous->revoke(toRust(reason));
   co_await close_in_process_server(kj::mv(previous));
 }

@@ -292,9 +292,10 @@ undefined
 `await s.reload()` reads the config again, as `loadConfig()` read it, and starts a new server on
 it. Once that is serving, it takes the old server's place behind the handle, and the old server is
 closed as `close()` would close it: what it handed out fails with
-`Error: The server for <path> was reloaded.`, so ask the handle for new `Fetcher`s. Durable
-Objects and other state held in memory start afresh. If the config no longer loads, or the new
-server doesn't start, the promise rejects with the problems and the old server runs on.
+`Error: The server for <path> was reloaded.`, so ask the handle for new `Fetcher`s and Durable
+Object stubs. Durable Objects and other state held in memory start afresh. If the config no longer
+loads, or the new server doesn't start, the promise rejects with the problems and the old server
+runs on.
 
 A config loaded with `watch: true` reloads by itself whenever one of the files it was loaded from
 changes: the config, the files it imports and embeds, or for a `wrangler.json`, the Worker's
