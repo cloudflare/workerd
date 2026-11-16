@@ -25,7 +25,6 @@
 
 namespace workerd::jsg {
 
-class DOMString;
 class USVString;
 class Lock;
 template <typename T>
@@ -71,8 +70,7 @@ concept FastApiMethod = FastApiReturnParam<Ret> && (FastApiParam<Args> && ...);
 // Update this list whenever a new string type is added.
 // TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
 template <typename T>
-concept StringLike = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
-    kj::isSameType<DOMString, T>();
+concept StringLike = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>();
 
 // A method whose arguments all cross without touching V8, so no argument unwrap can GC. This is
 // what lets `fastCallback` skip its preamble and makes `FastOneByteString` safe to borrow.

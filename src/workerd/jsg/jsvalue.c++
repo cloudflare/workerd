@@ -374,12 +374,6 @@ jsg::USVString JsString::toUSVString(Lock& js) const {
   return jsg::USVString(kj::mv(buf));
 }
 
-jsg::DOMString JsString::toDOMString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
-  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return jsg::DOMString(kj::mv(buf));
-}
-
 int JsString::hashCode() const {
   return kj::hashCode(inner->GetIdentityHash());
 }

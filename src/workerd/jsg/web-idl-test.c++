@@ -28,7 +28,6 @@ static_assert(webidl::isNonCallbackInterfaceType<kj::Maybe<NumberBox>> == false)
 // Additional type category concept tests
 static_assert(webidl::StringType<kj::String>);
 static_assert(webidl::StringType<USVString>);
-static_assert(webidl::StringType<DOMString>);
 static_assert(!webidl::StringType<int>);
 
 static_assert(webidl::NumericType<int>);
@@ -70,7 +69,6 @@ static_assert(webidl::hasDuplicateTypes<bool, int, char, int> == true);
 static_assert(webidl::hasDuplicateTypes<bool, char, int, int> == true);
 
 static_assert(webidl::FlattenedTypeTraits<kj::String, USVString>::stringTypeCount == 2);
-static_assert(webidl::FlattenedTypeTraits<kj::String, DOMString>::stringTypeCount == 2);
 
 // =====================================================================================
 // ArgumentIndexes tests (meta.h)
