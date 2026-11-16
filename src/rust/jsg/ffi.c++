@@ -573,6 +573,30 @@ MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
 }
 
 // Local<Object>
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> keys) {
+  kj::Vector<std::string_view> names(keys.size());
+  for (auto key: keys) {
+    names.add(std::string_view(key.data(), key.size()));
+  }
+  auto tmpl = v8::DictionaryTemplate::New(
+      isolate, std::span<const std::string_view>(names.begin(), names.size()));
+  return to_ffi(v8::Global<v8::DictionaryTemplate>(isolate, tmpl));
+}
+
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<MaybeLocal> values) {
+  // V8 doesn't allow creating the object while an exception or a termination is pending (a debug
+  // check fails).
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
+  // The values are an array in the caller's stack frame, which has the layout of
+  // `v8::MaybeLocal` (asserted in ffi-inl.h), so they are passed on without being copied.
+  auto v8Values =
+      std::span(reinterpret_cast<v8::MaybeLocal<v8::Value>*>(values.data()), values.size());
+  auto object = global_as_ref_from_ffi<v8::DictionaryTemplate>(tmpl).Get(isolate)->NewInstance(
+      isolate->GetCurrentContext(), v8Values);
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(object));
+}
+
 MaybeLocal object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values) {
   KJ_REQUIRE(keys.size() == values.size());
@@ -601,6 +625,17 @@ bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   return v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
 }
 
+bool local_object_set_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name, Local value) {
+  if (exceptionPending(isolate)) return false;
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return v8_obj
+      ->Set(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate),
+          local_from_ffi<v8::Value>(kj::mv(value)))
+      .IsJust();
+}
+
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
   if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
@@ -623,6 +658,15 @@ MaybeLocal local_object_get_property_by_name(
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
+}
+
+MaybeLocal local_object_get_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return maybe_local_to_ffi(
+      v8_obj->Get(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate)));
 }
 
 bool local_object_get_own_property_names(

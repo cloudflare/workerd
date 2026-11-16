@@ -2747,8 +2747,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
       // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
       // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. Templates are recreated
-      // lazily on demand and a START_FROM_SNAPSHOT isolate starts with an empty cache.
+      // createSnapshotBlob() to reset like any other isolate handle. The handles the Realm caches
+      // for struct types are reset by the same call. Templates are recreated lazily on demand and
+      // a START_FROM_SNAPSHOT isolate starts with an empty cache.
       kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
       {
         auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);

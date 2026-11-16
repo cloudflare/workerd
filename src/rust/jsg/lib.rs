@@ -31,6 +31,7 @@ pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod structs;
 mod tunnel;
 mod typed_promise;
 pub mod v8;
@@ -97,6 +98,8 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+#[doc(hidden)]
+pub use structs::StructShape;
 pub use tunnel::TunneledException;
 pub use tunnel::try_unwrap_dom_exception;
 pub use typed_promise::Promise;
@@ -123,18 +126,16 @@ mod ffi {
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
-        #[expect(
-            clippy::unnecessary_box_returns,
-            reason = "cxx takes an opaque Rust type boxed"
-        )]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
         /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
         /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
         /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
         /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
-        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
-        fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway). The handles
+        /// cached for struct types are reset, so the isolate must be locked, with no Rust `Lock`
+        /// in use.
+        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
 
         /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
         /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
@@ -968,6 +969,13 @@ impl<'s> Lock<'s> {
         self.realm().state.awaiting_lock_count()
     }
 
+    /// The number of struct types whose handles the realm caches; see [`StructShape`]. For tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn struct_shapes_cached(&mut self) -> usize {
+        self.realm().structs.len()
+    }
+
     /// The number of [`Rc`]s and [`Weak`]s that were dropped without the isolate lock and whose
     /// references wait for the next lock to be released; see [`IsolateState`]. For tests.
     #[doc(hidden)]
@@ -1651,6 +1659,8 @@ pub struct Realm {
     /// identifies its isolate by it.
     state: Arc<IsolateState>,
     resources: resource::Resources,
+    /// The cached handles of the struct types converted in this realm.
+    structs: structs::StructShapes,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -1662,6 +1672,7 @@ impl Realm {
             isolate,
             state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
+            structs: structs::StructShapes::default(),
             feature_flags,
         }
     }
@@ -1696,6 +1707,8 @@ impl Drop for Realm {
         // Dropped before the state is closed, so that their handles are reset rather than
         // left to `Dispose`.
         drop(std::mem::take(&mut self.resources));
+        // SAFETY: as below, no `Lock` is in use.
+        unsafe { self.structs.clear() };
         // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
         // (guaranteed by the embedder; see the type's documentation).
         let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
@@ -1707,10 +1720,6 @@ impl Drop for Realm {
     }
 }
 
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "cxx takes an opaque Rust type boxed"
-)]
 #[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
@@ -1775,7 +1784,14 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for
 /// the `PREPARE_SNAPSHOT` pipeline.
-fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+#[expect(
+    unsafe_code,
+    reason = "frees the struct shapes, which no Lock may be using"
+)]
+unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+    // The struct handles are reset here, under the isolate lock, rather than handed over.
+    // SAFETY: the isolate is locked with no `Lock` in use (guaranteed by the C++ caller).
+    unsafe { realm.structs.clear() };
     realm.resources.take_template_handles()
 }
 
