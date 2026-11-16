@@ -554,8 +554,8 @@ async function withCluster(
     }
     await Promise.all(nodes.map((node) => node.start()));
 
-    // A node writes its lease record, with the address peers reach it at, in
-    // its first maintenance round.
+    // A node writes its lease record, with the address peers reach it at, as it
+    // joins the cluster, before it listens.
     const deadline = Date.now() + 10_000;
     let keys = [];
     while (Date.now() < deadline) {
