@@ -1172,6 +1172,64 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   return js.str(decoded.first(result.count));
 }
 
+namespace {
+
+// What queueMicrotask() enqueues, as the data of its microtask.
+struct QueuedMicrotask {
+  ServiceWorkerGlobalScope& globalScope;
+  jsg::Function<void()> task;
+  AsyncResource asyncTraceResource;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(task);
+  }
+};
+
+void runQueuedMicrotask(v8::Local<v8::Data> data) {
+  auto& js = jsg::Lock::current();
+  jsg::liftKjMicrotask(js.v8Isolate, data, [&]() {
+    // Taken out of its wrapper so that it, and the function it holds, are destroyed when the call
+    // returns rather than when the GC collects the wrapper.
+    auto microtask = jsg::unwrapOpaque<QueuedMicrotask>(js.v8Isolate, data.As<v8::Value>());
+    // Released after the callback rather than when the task is destroyed, to keep tracker calls
+    // out of GC.
+    KJ_DEFER(microtask.asyncTraceResource.release());
+    microtask.asyncTraceResource.settle(AsyncOutcome::OK);
+    AsyncTracker::CallbackScope asyncTraceScope(microtask.asyncTraceResource);
+    JSG_TRY(js) {
+      microtask.task(js);
+    }
+    JSG_CATCH(exception) {
+      // The reportError call itself can potentially throw errors. Let's catch
+      // and report them as well.
+      JSG_TRY(js) {
+        microtask.globalScope.reportError(js, jsg::JsValue(exception.getHandle(js)));
+      }
+      JSG_CATCH(exception) {
+        // An error was thrown by the 'error' event handler. That's unfortunate.
+        // Let's log the error and just continue. It won't be possible to actually
+        // catch or handle this error so logging is really the only way to notify
+        // folks about it.
+        auto val = jsg::JsValue(exception.getHandle(js));
+        // If the value is an object that has a stack property, log that so we get
+        // the stack trace if it is an exception.
+        KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
+          auto stack = obj.get(js, "stack"_kj);
+          if (!stack.isUndefined()) {
+            js.reportError(stack);
+            return;
+          }
+        } else {
+        }  // To squash the lint warning
+        // Otherwise just log the stringified value generically.
+        js.reportError(val);
+      };
+    };
+  });
+}
+
+}  // namespace
+
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
   // Nests inside the turn that runs it, rather than causing a turn.
   AsyncResource asyncTraceResource;
@@ -1181,54 +1239,16 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
     }
   }
 
-  // TODO(perf): Enqueue the task with the MicrotaskQueue::EnqueueMicrotask() overload that takes a
-  //   MicrotaskCallbackWithData and a v8::Data, instead of wrapping it in a new function. Every
-  //   v8::Function::New() call allocates a FunctionTemplateInfo in old space, so each call to
-  //   queueMicrotask() leaves objects behind that only a full GC frees.
-  auto fn = js.wrapSimpleFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA(
-          (this, fn = kj::mv(task), asyncTraceResource = kj::mv(asyncTraceResource)), (fn),
-          (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-            // Released after the callback rather than when the closure is collected, to keep
-            // tracker calls out of GC.
-            KJ_DEFER(asyncTraceResource.release());
-            asyncTraceResource.settle(AsyncOutcome::OK);
-            AsyncTracker::CallbackScope asyncTraceScope(asyncTraceResource);
-            JSG_TRY(js) {
-            // The function won't be called with any arguments, so we can
-            // safely ignore anything passed in to args.
-            fn(js);
-            }
-            JSG_CATCH(exception) {
-            // The reportError call itself can potentially throw errors. Let's catch
-            // and report them as well.
-            JSG_TRY(js) {
-            reportError(js, jsg::JsValue(exception.getHandle(js)));
-            }
-            JSG_CATCH(exception) {
-            // An error was thrown by the 'error' event handler. That's unfortunate.
-            // Let's log the error and just continue. It won't be possible to actually
-            // catch or handle this error so logging is really the only way to notify
-            // folks about it.
-            auto val = jsg::JsValue(exception.getHandle(js));
-            // If the value is an object that has a stack property, log that so we get
-            // the stack trace if it is an exception.
-            KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
-            auto stack = obj.get(js, "stack"_kj);
-            if (!stack.isUndefined()) {
-            js.reportError(stack);
-            return;
-            }
-            } else {
-            }  // To squash the lint warning
-            // Otherwise just log the stringified value generically.
-            js.reportError(val);
-            };
-            };
-          }),
-      jsg::Once::YES);
-
-  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, fn);
+  // The task is the microtask's data rather than that of a function made for it: every
+  // v8::Function::New() call allocates a FunctionTemplateInfo in old space that only a full GC
+  // frees.
+  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, &runQueuedMicrotask,
+      jsg::wrapOpaque(js.v8Context(),
+          QueuedMicrotask{
+            .globalScope = *this,
+            .task = kj::mv(task),
+            .asyncTraceResource = kj::mv(asyncTraceResource),
+          }));
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::structuredClone(

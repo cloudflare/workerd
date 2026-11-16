@@ -110,3 +110,39 @@ test('Inspector answers Runtime.getHeapUsage', async () => {
 
   await inspectorClient.close();
 });
+
+// A microtask queued from the DevTools console runs once the command returns, where the runtime
+// drains the microtask queue with no JavaScript context entered.
+test('Inspector runs a microtask queued by Runtime.evaluate', async () => {
+  const inspectorClient = await connectInspector(
+    await workerd.getListenInspectorPort()
+  );
+
+  // Runtime.enable reports the Worker's context, which Runtime.evaluate has to name.
+  const contexts = [];
+  inspectorClient.on('Runtime.executionContextCreated', ({ context }) => {
+    contexts.push(context);
+  });
+  await inspectorClient.Runtime.enable();
+  assert.strictEqual(contexts.length, 1, JSON.stringify(contexts));
+  const contextId = contexts[0].id;
+
+  const queued = await inspectorClient.Runtime.evaluate({
+    expression: 'queueMicrotask(() => { globalThis.microtaskRan = true; })',
+    contextId,
+  });
+  assert.strictEqual(
+    queued.exceptionDetails,
+    undefined,
+    JSON.stringify(queued)
+  );
+
+  const ran = await inspectorClient.Runtime.evaluate({
+    expression: 'globalThis.microtaskRan',
+    contextId,
+  });
+  assert.strictEqual(ran.result.value, true, JSON.stringify(ran));
+
+  await inspectorClient.Runtime.disable();
+  await inspectorClient.close();
+});
