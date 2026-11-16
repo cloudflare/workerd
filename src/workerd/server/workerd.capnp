@@ -114,9 +114,10 @@ struct Config {
   # digits, and trailing whitespace is ignored; any other value ends the process at startup. So
   # does a delay above 3600000 (an hour), set here or in the variable.
   #
-  # A cluster instance keeps its lease, its membership and its Durable Objects through the delay.
-  # `ClusterConfig.stopTimeoutMs` runs from the end of the delay, so the supervisor's grace period
-  # (Kubernetes' `terminationGracePeriodSeconds`) must cover the delay plus the stop timeout.
+  # A cluster instance keeps its lease, its membership and its Durable Objects through the delay,
+  # while `GET /ready` on its cluster port answers 503. `ClusterConfig.stopTimeoutMs` runs from the
+  # end of the delay, so the supervisor's grace period (Kubernetes' `terminationGracePeriodSeconds`)
+  # must cover the delay plus the stop timeout.
 }
 
 struct ClusterConfig {
@@ -339,6 +340,11 @@ struct ClusterConfig {
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
+  #
+  # `Config.shutdownDelayMs` puts a delay between SIGTERM and all of this, during which the instance
+  # serves as before and keeps its objects, but `GET /ready` answers 503: for load balancers that go
+  # on sending requests for a while, as a cloud load balancer in front of Kubernetes does. The
+  # supervisor's grace period must then cover the delay plus this timeout.
 
   unsafeTimeDivisor @7 :UInt32 = 1;
   # For tests: divides by this the times that a takeover and a stop wait out, which tests would

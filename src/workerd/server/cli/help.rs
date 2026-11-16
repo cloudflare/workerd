@@ -48,7 +48,7 @@ Cluster (experimental):
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
   SIGTERM, after any shutdown delay, an instance hands its objects to its
   peers and exits within stopTimeoutMs (8 s by default). GET /ready on
-  the cluster address answers OK once serving.
+  the cluster address answers OK once serving, until SIGTERM.
 "
     };
 }
@@ -63,7 +63,8 @@ Stopping:
   milliseconds first, for load balancers that go on sending connections
   for a while; a second SIGTERM drains at once. The supervisor's grace
   period must cover the delay and the drain, in a cluster the delay
-  plus stopTimeoutMs.
+  plus stopTimeoutMs. A cluster instance's GET /ready answers 503 from
+  the first SIGTERM on.
 "
     };
 }
