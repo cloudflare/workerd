@@ -59,8 +59,9 @@ at context creation, before any user code. C++ entry point:
   the declaration takes a form the class cannot emit, which a
   `<module>.public.d.ts` beside it then has: see "Per-isolate declarations"
   in `types/AGENTS.md` for overloads, `@internal`, interfaces merged with a
-  class, and hand-written declarations. The tsconfig sets `stripInternal`
-  for them.
+  class, and hand-written declarations, and "Porting an API to the
+  bootstrap" there for the steps that move an API's types from C++. The
+  tsconfig sets `stripInternal` for them.
 
 ## EMBEDDER SCRIPTS
 

@@ -11,7 +11,7 @@ Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (
 3. **Transforms** (ordered, in `src/index.ts`): iterators -> overrides/defines -> global scope extraction -> class-to-interface -> comments -> onmessage declaration; then second pass: import-resolve -> ambient. Importable variant runs separately.
 4. **Per-isolate declarations**: `src/per-isolate.ts` collects, when the worker is bundled, what `src/per_isolate/public-types.d.ts` publishes (see "Per-isolate declarations" below). They get the comments transform only, and follow the generated declarations.
 5. **Defines concatenation**: `defines/*.d.ts` appended after transforms (AI, D1, R2, RPC, Vectorize, etc.)
-6. **Build**: `scripts/build-types.ts` iterates compat-date entrypoints (oldest through experimental), type-checks output against TS libs
+6. **Build**: `scripts/build-types.ts` generates the latest compatibility date (2999-12-31) and experimental entrypoints, which `generated-snapshot/` holds, and type-checks them against TS libs. The worker in `src/worker/` generates types for any compatibility date and flags (`/<compat-date>(+<flag>)*`), but the snapshot holds only these two
 
 ### Explicit RTTI metadata
 
@@ -38,7 +38,7 @@ the same emitted name cannot supply overrides or defines for the selected type.
 | `src/transforms/`     | 11 post-processing TS transformer factories                                      |
 | `src/worker/`         | Workerd-hosted entry; imports RTTI binary + virtual modules                      |
 | `defines/`            | Hand-written `.d.ts` for APIs not expressible via C++ RTTI (~25 files)           |
-| `generated-snapshot/` | Checked-in `latest/` + `experimental/` output; CI diff-checked                   |
+| `generated-snapshot/` | Checked-in latest date (top level) + `experimental/` output; CI diff-checked     |
 | `scripts/`            | `build-types.ts` (full generation), `build-worker.ts` (worker bundle)            |
 | `test/`               | Vitest specs for generator, transforms, print; type-check tests in `test/types/` |
 
@@ -97,6 +97,56 @@ emits is what users get:
 - `#private` members, `@internal` members and comments other than JSDoc do
   not reach the output, from a hand-written declaration file either. JSDoc
   does, and the comments transform adds the standard MDN comments by name.
+
+### Porting an API to the bootstrap
+
+An API's types move with it, in the change that installs its TypeScript
+class (see `src/per_isolate/AGENTS.md` for the bootstrap's conventions):
+
+1. Declare the class's public surface as above, `export type` it from its
+   module, and list it in `src/per_isolate/public-types.d.ts` with the
+   dictionaries and other declarations its signatures name. A name's place in
+   the manifest is its place in the output.
+2. Remove the declarations RTTI generates for the C++ class: add
+   `JSG_TS_OVERRIDE(type Name = never);` to its `JSG_RESOURCE_TYPE` block, and
+   `JSG_STRUCT_TS_OVERRIDE(type Name = never);` after each `JSG_STRUCT` the
+   manifest now publishes, each with a comment naming the file that declares
+   it (see `src/workerd/api/urlpattern-standard.h`). The generator rejects a
+   name that both RTTI and the manifest declare.
+3. Delete the API's file in `defines/`, if it has one. The generator rejects
+   a name that both a define and the manifest declare.
+4. Run `just generate-types`. If the published types are unchanged, the
+   snapshot's declarations only move ahead of the defines, and
+   `git diff --histogram types/generated-snapshot` shows a move. Any other
+   changed line changes the published types: make each such change
+   deliberately, and say so in the commit message.
+5. Keep, or add, a type test in `test/types/` (see "Type tests" below) that
+   includes `self.Name`.
+
+The declaration must also hold across:
+
+- **Autogates.** The types do not vary by autogate, and a port usually sits
+  behind one, with the C++ class as the fallback. The declaration must then
+  be true of both classes. What only the TypeScript class provides stays
+  unpublished until the autogate is removed, as `QuotaExceededError` does
+  (`src/per_isolate/dom-exception.ts`).
+- **Compatibility dates.** RTTI generates the C++ class's declaration at each
+  Worker's compatibility date, from the members its `JSG_RESOURCE_TYPE`
+  block registers under that date's flags, and the global scope
+  (`src/workerd/api/global-scope.h`) may pick a different C++ class by
+  flag, as it does for `URL` and `URLPattern`. A per-isolate declaration is
+  the same at every date, and the snapshot shows only the latest date and
+  experimental. Where the C++ declaration varies, publish the latest date's
+  shape, and say beside it what older dates lack or ignore, as
+  `urlpattern.ts` does for `hasRegExpGroups` and `url.ts` for the `value`
+  argument of `delete()` and `has()`. A member that only an experimental
+  flag enables would appear at every date, so it stays unpublished.
+
+`self.Name` is declared by `ServiceWorkerGlobalScope`'s `Name: typeof Name`,
+which RTTI generates from the C++ class's nested type in the global scope.
+An API without one, because it has no C++ class or the port deletes it, has
+no `self.Name` until the port declares it some other way; the type test's
+`self.Name` check fails until it does.
 
 ### Naming conventions
 
