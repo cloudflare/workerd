@@ -58,6 +58,7 @@ mod resource_template;
 mod resource_this;
 mod rest_arguments;
 mod serialization;
+mod signature_callback;
 mod string;
 mod symbol;
 mod termination;

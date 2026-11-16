@@ -41,7 +41,7 @@ fn new_host(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Host> {
 }
 
 /// Runs a C++ constructor and returns the wrapper it made.
-fn new_cpp<'s>(
+pub(super) fn new_cpp<'s>(
     lock: &jsg::Lock<'s>,
     constructor: impl FnOnce(*mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal,
 ) -> v8::Local<'s, v8::Value> {

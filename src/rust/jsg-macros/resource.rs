@@ -469,7 +469,7 @@ pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
 /// registrations and the compile errors of those that are invalid.
 ///
 /// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
-/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// property: its callback expects the type's `v8::Signature`, which those are registered without. A
 /// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
 /// registration a second one of a kind is an error too; custom registration may choose between
 /// several by compatibility flag, and registering two of a kind at once panics when the template

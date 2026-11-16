@@ -1003,7 +1003,7 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
-// For an object already known to be a Rust resource wrapper, from the marker or a signature.
+// For an object already known to be a Rust resource wrapper, from the marker.
 // Anything else is an invariant violation and aborts.
 Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
   return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
@@ -1043,9 +1043,19 @@ const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value
 }
 
 const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
-  // V8 has checked the receiver against the method's Signature, so it is a wrapper made from a
-  // Rust resource template, and needs no marker check.
-  return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
+  // The receiver of a method registered with the type's Signature is a wrapper made from a Rust
+  // resource template, so this skips the marker check. A method callback registered without one
+  // gets any value, which is not found rather than aborting.
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  if (!v8Value->IsObject()) return nullptr;
+  auto object = v8Value.As<v8::Object>();
+  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
+  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
+  if (!object->IsApiWrapper()) return nullptr;
+  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShim(
+      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange);
+  if (wrappable == nullptr) return nullptr;
+  return &static_cast<Wrappable*>(wrappable)->trait_object;
 }
 
 // Uses V8's Array::Iterate(), which is faster than indexed access. Iterate() opens HandleScopes of
