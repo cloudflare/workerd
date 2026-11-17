@@ -680,8 +680,9 @@ type BrowserRunScriptOptions = {
   /** Record the browser session. @default false */
   recording?: boolean;
   /** Run the script on an alternate browser backend. Only the raw CDP client is
-   * supported, so `library` cannot be set, and `keepAlive`, `lab` and
-   * `recording` do not apply. No session is kept open afterwards.
+   * supported, and no session is kept open afterwards. Setting `library`,
+   * `keepAlive`, `lab` or `recording` with it returns an HTTP 400 error
+   * response.
    */
   browser?: 'kitesurf';
 };
