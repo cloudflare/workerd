@@ -494,6 +494,9 @@ jsg::Bundle::Reader retrievePyodideBundle(
 // `pyodideWasmModuleHolder`, if given, must outlive the registry. Pyodide's pyodide.asm.wasm is
 // then instantiated from it: once a Python isolate has stored a compilation there, later Python
 // isolates with the same Wasm compile setting reuse it instead of compiling again.
+//
+// `moduleSource`, if given, provides the storage V8 reads the compiled-in PYODIDE_BUNDLE sources
+// from; see jsg/module-source.h. The `pyodideBundle` sources are read where they are.
 template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
@@ -509,12 +512,13 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
     kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
-    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none,
+    const jsg::ModuleSource* moduleSource = nullptr) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  modules.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+  modules.addBuiltinBundle(PYODIDE_BUNDLE, kj::none, moduleSource);
 
   using namespace workerd::api::pyodide;
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));

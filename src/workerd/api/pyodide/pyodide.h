@@ -32,7 +32,9 @@ WD_STRONG_BOOL(SnapshotToDisk);
 
 class PyodideBundleManager {
  public:
-  void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
+  // `data` is read in place for the manager's lifetime, including by V8, through external strings
+  // over the bundle's module sources.
+  void setPyodideBundleData(kj::String version, kj::Array<const kj::byte> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
   // Returns the holder for the compiled pyodide.asm.wasm of bundle `version`, or kj::none if that
