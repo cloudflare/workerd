@@ -274,12 +274,17 @@ kj::Promise<HttpAnswer> http_call_response(kj::Own<HttpCall> call, ::rust::Str h
   call->request.body = nullptr;
   auto response = co_await kj::mv(call->request.response);
   ::rust::String value;
+  ::rust::Vec<::rust::String> headers;
   response.headers->forEach([&](kj::StringPtr n, kj::StringPtr v) {
     if (n == name) value = toRustString(v);
+    headers.push_back(toRustString(n));
+    headers.push_back(toRustString(v));
   });
   co_return HttpAnswer{
     .status = response.statusCode,
+    .status_text = toRustString(response.statusText),
     .header = kj::mv(value),
+    .headers = kj::mv(headers),
     .body = response.body.attach(kj::mv(call)),
   };
 }

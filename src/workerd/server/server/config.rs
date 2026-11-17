@@ -59,6 +59,8 @@ use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
+use crate::services::cache::CacheService;
+use crate::services::cache::ReadThrough;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -427,6 +429,8 @@ pub enum Service {
     Leaf(Rc<dyn Channel>),
     Disk(Rc<DiskDirectoryService>),
     Assets(Rc<Assets>),
+    Cache(Rc<CacheService>),
+    ReadThrough(Rc<ReadThrough>),
 }
 
 impl Service {
@@ -438,6 +442,8 @@ impl Service {
             Self::Leaf(channel) => Rc::clone(channel),
             Self::Disk(disk) => Rc::clone(disk) as Rc<dyn Channel>,
             Self::Assets(assets) => assets.channel(false),
+            Self::Cache(cache) => Rc::clone(cache) as Rc<dyn Channel>,
+            Self::ReadThrough(read_through) => Rc::clone(read_through) as Rc<dyn Channel>,
         }
     }
 
@@ -1516,11 +1522,7 @@ impl Server {
         for (name, worker) in server.workers() {
             tolerate_deployment(&server.report, name, server.link_worker(name, worker))?;
         }
-        for (name, service) in &server.services.0 {
-            if let Service::Assets(assets) = service {
-                assets.link(|d| lookup_service(&server.services.0, &server.report, Some(name), d));
-            }
-        }
+        server.link_services();
 
         // A deployment's service with errors fails every request.
         for (name, worker) in server.workers() {
@@ -1533,6 +1535,29 @@ impl Server {
     }
 
     /// Resolves everything `worker`'s config names into its channel table.
+    /// Links the services that name others: assets to their user Worker, and read-through
+    /// caches to their Worker and cache.
+    fn link_services(&self) {
+        let services = &self.services.0;
+        for (name, service) in services {
+            let lookup = |d: &_| lookup_service(services, &self.report, Some(name), d);
+            match service {
+                Service::Assets(assets) => assets.link(lookup),
+                Service::ReadThrough(read_through) => {
+                    let cache = read_through.cache_name();
+                    let Some(Service::Cache(cache)) = services.get(cache) else {
+                        let error =
+                            format!("Read-through cache \"{name}\" names no cache \"{cache}\".");
+                        self.report.service_error(name, error);
+                        continue;
+                    };
+                    read_through.link(lookup, cache);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn link_worker(self: &Rc<Self>, name: &str, worker: &Rc<WorkerService>) -> Result<()> {
         let Some(pending) = worker.take_pending_link() else {
             return Err(kj::failed!("service \"{name}\" was already linked"));
@@ -1835,6 +1860,11 @@ async fn make_service(
                     .map(Service::Assets),
             ))
         }
+        Ok(service::Which::ReadThrough(conf)) => {
+            let made = crate::services::cache::make_read_through(name, conf, factory);
+            let made = made.map(|r| Service::ReadThrough(Rc::new(r)));
+            Ok(invalid_on_error(name, report, made))
+        }
         // Made once the cluster, if any, is joined (`cluster_services`).
         Ok(service::Which::Bucket(_) | service::Which::Cache(_)) => {
             Ok(Service::Leaf(Rc::new(InvalidConfigChannel)))
@@ -2022,7 +2052,7 @@ fn cluster_services(
                 let made = crate::services::cache::make_cache_service(
                     &name, cache, path, factory, cluster,
                 );
-                let service = invalid_on_error(&name, report, made.map(Service::Leaf));
+                let service = invalid_on_error(&name, report, made.map(Service::Cache));
                 services.0.insert(name, service);
                 continue;
             }

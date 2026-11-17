@@ -102,6 +102,19 @@ struct Wrangler {
     #[serde(default)]
     no_bundle: bool,
     assets: Option<Assets>,
+    #[serde(default)]
+    cache: Cache,
+}
+
+/// Workers Caching. `cross_version_cache` is accepted and means nothing here: a served project
+/// has one version.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Cache {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(rename = "cross_version_cache")]
+    _cross_version_cache: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -431,10 +444,12 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
     let cache = u32::from(workers == 1 && matches!(target, Target::Serve { experimental: true }));
+    let read_through = u32::from(cache == 1 && wrangler.cache.enabled);
     let mut services = conf.reborrow().init_services(
         workers
             + do_storage
             + cache
+            + read_through
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
@@ -461,7 +476,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         set_durable_objects(worker, &classes, &name, serving);
     }
     if cache == 1 {
-        cache_service(&mut services, &name, &storage)?;
+        cache_services(&mut services, &name, &storage, &wrangler)?;
     }
     if do_storage == 1 {
         disk_service(
@@ -478,6 +493,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         socket.reborrow().init_http();
         let target = match &wrangler.assets {
             Some(_) => format!("{name}-assets"),
+            None if read_through == 1 => format!("{name}-read-through"),
             None => name.clone(),
         };
         socket.init_service().set_name(target);
@@ -744,25 +760,54 @@ fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     disk.set_writable(true);
 }
 
-/// The cache service `<name>-cache`, last in `services`, its entries under `storage`, as the Cache
-/// API backend of the Worker, `services[0]`.
-fn cache_service(
+/// The cache service `<name>-cache`, its entries under `storage`, as the Cache API backend of the
+/// Worker, `services[0]`; last in `services`, or with `cache.enabled` followed by the
+/// read-through cache in front of the Worker.
+fn cache_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     name: &str,
     storage: &Path,
+    wrangler: &Wrangler,
 ) -> Result<(), String> {
     let dir = storage.join("cache");
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let cache = format!("{name}-cache");
-    let last = services.len() - 1;
-    let mut service = services.reborrow().get(last);
+    let at = services.len() - 1 - u32::from(wrangler.cache.enabled);
+    let mut service = services.reborrow().get(at);
     service.set_name(&cache);
     service.init_cache().set_path(dir.to_string_lossy());
     let Ok(service::Which::Worker(Ok(worker))) = services.reborrow().get(0).which() else {
         unreachable!("services[0] is the Worker");
     };
     worker.init_cache_api_outbound().set_name(&cache);
+    if wrangler.cache.enabled {
+        read_through_service(services, name, wrangler.assets.is_some());
+    }
     Ok(())
+}
+
+/// The read-through cache `<name>-read-through`, last in `services`, in front of the Worker
+/// `name`, its entries in `<name>-cache`. With `assets`, the assets service, the last before the
+/// cache, sends to it what it sends to the Worker.
+fn read_through_service(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    name: &str,
+    assets: bool,
+) {
+    let read_through = format!("{name}-read-through");
+    let last = services.len() - 1;
+    let mut service = services.reborrow().get(last);
+    service.set_name(&read_through);
+    let mut conf = service.init_read_through();
+    conf.reborrow().init_worker().set_name(name);
+    conf.set_cache(format!("{name}-cache"));
+    if assets {
+        let Ok(service::Which::Assets(Ok(assets))) = services.reborrow().get(last - 2).which()
+        else {
+            unreachable!("the assets service is the last before the cache");
+        };
+        assets.init_user_worker().set_name(&read_through);
+    }
 }
 
 /// The Worker `name` of the bundled module `/workerd/<module>`, with `flags`, its Durable Objects

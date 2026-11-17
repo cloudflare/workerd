@@ -375,6 +375,9 @@ trait Store {
     /// Drops a record of `key` found expired or corrupt. Not a write: what any reader may do.
     async fn expire(&self, key: &str) -> Result<()>;
 
+    /// Removes the read-through entries `purge` matches.
+    async fn purge(&self, purge: &read_through::Purge) -> Result<()>;
+
     /// A message from cluster node `from`, a request that names it as `forwardedBy`.
     async fn message(
         &self,
@@ -432,6 +435,30 @@ impl Store for Directory {
     async fn expire(&self, key: &str) -> Result<()> {
         found(std::fs::remove_file(self.0.join(key))).map(drop)
     }
+
+    async fn purge(&self, purge: &read_through::Purge) -> Result<()> {
+        let io = |e: std::io::Error| io_kj_error(&e);
+        for entry in std::fs::read_dir(&self.0).map_err(io)? {
+            let path = entry.map_err(io)?.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if !name.is_some_and(|n| n.starts_with(read_through::PREFIX)) {
+                continue;
+            }
+            let Some(mut file) = found(File::open(&path))? else {
+                continue;
+            };
+            let head = read_head(&mut file)?;
+            let headers = head.as_deref().and_then(|head| {
+                let newline = head.iter().position(|&b| b == b'\n')?;
+                parse_head(&head[newline + 1..]).map(|(_, _, headers)| headers)
+            });
+            if headers.is_none_or(|headers| purge.matches(&headers)) {
+                drop(file);
+                found(std::fs::remove_file(&path))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 // =======================================================================================
@@ -453,7 +480,7 @@ pub fn make_cache_service(
     path_override: Option<&str>,
     factory: &Rc<Factory>,
     cluster: Option<&Rc<ClusterNode>>,
-) -> Result<Rc<dyn Channel>> {
+) -> Result<Rc<CacheService>> {
     if !factory.experimental() {
         return Err(kj::failed!(
             "Cache services are an experimental feature which may change or go away in the \
@@ -521,21 +548,9 @@ async fn load(store: &dyn Store, key: &str, now: u64) -> Result<Option<Entry>> {
     let Some(mut file) = store.get(key).await? else {
         return Ok(None);
     };
-    let mut head = Vec::new();
-    let mut chunk = [0; 4096];
-    let end = loop {
-        let read = file.read(&mut chunk).map_err(|e| io_kj_error(&e))?;
-        let from = head.len();
-        head.extend_from_slice(&chunk[..read]);
-        if let Some(end) = blank_line(&head, from) {
-            break Some(end);
-        }
-        if read == 0 || head.len() > MAX_HEAD {
-            break None;
-        }
-    };
+    let head = read_head(&mut file)?;
     let Some((end, (status, text, headers))) =
-        end.and_then(|end| Some((end, parse_record(&head[..end], now)?)))
+        head.and_then(|head| Some((head.len(), parse_record(&head, now)?)))
     else {
         drop(file);
         store.expire(key).await?;
@@ -552,6 +567,25 @@ async fn load(store: &dyn Store, key: &str, now: u64) -> Result<Option<Entry>> {
         start,
         size,
     }))
+}
+
+/// A record's head, without its blank line, read from the start of `file`; `None` if it has
+/// none within [`MAX_HEAD`].
+fn read_head(file: &mut File) -> Result<Option<Vec<u8>>> {
+    let mut head = Vec::new();
+    let mut chunk = [0; 4096];
+    loop {
+        let read = file.read(&mut chunk).map_err(|e| io_kj_error(&e))?;
+        let from = head.len();
+        head.extend_from_slice(&chunk[..read]);
+        if let Some(end) = blank_line(&head, from) {
+            head.truncate(end);
+            return Ok(Some(head));
+        }
+        if read == 0 || head.len() > MAX_HEAD {
+            return Ok(None);
+        }
+    }
 }
 
 /// Reads `body` to its end.
@@ -607,15 +641,27 @@ impl CacheRequest {
         request: HeadersRef<'_>,
         response: ServiceResponse<'_>,
     ) -> Result<()> {
-        let Some(mut entry) = load(&*self.cache.store, key, now_ms()).await? else {
+        let Some(entry) = load(&*self.cache.store, key, now_ms()).await? else {
             let mut miss = HeaderMap::new();
             miss.insert("cf-cache-status", HeaderValue::from_static("MISS"));
             return self
                 .send(response, 504, "Gateway Timeout", &miss, 0)
                 .map(drop);
         };
+        self.serve(entry, "HIT", request, response).await
+    }
+
+    /// Answers with `entry` as `request` asks: whole, by ranges, or a 304. `status` is its
+    /// `CF-Cache-Status`.
+    async fn serve(
+        &self,
+        mut entry: Entry,
+        status: &'static str,
+        request: HeadersRef<'_>,
+        response: ServiceResponse<'_>,
+    ) -> Result<()> {
         let (headers, size) = (&mut entry.headers, entry.size);
-        headers.insert("cf-cache-status", HeaderValue::from_static("HIT"));
+        headers.insert("cf-cache-status", HeaderValue::from_static(status));
         let asked = |name: &str| {
             request
                 .get_by_name(name)
@@ -824,6 +870,11 @@ impl Service for CacheRequest {
             Method::GET => self.get(&key, headers, response).await,
             Method::PUT => self.put(&key, headers, body, response).await,
             Method::PURGE => self.purge(&key, response).await,
+            Method::POST => {
+                let purge = read_through::Purge::parse(url)?;
+                self.cache.store.purge(&purge).await?;
+                self.answer(response, 200, "OK")
+            }
             _ => self.refuse(body, response, 405, "Method Not Allowed").await,
         }
     }
@@ -853,6 +904,12 @@ impl Interface for CacheRequest {
 
 #[path = "cache-cluster.rs"]
 mod clustered;
+
+#[path = "cache-read-through.rs"]
+mod read_through;
+
+pub use read_through::ReadThrough;
+pub use read_through::make_read_through;
 
 #[cfg(test)]
 #[path = "cache-test.rs"]

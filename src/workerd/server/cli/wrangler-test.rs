@@ -466,6 +466,53 @@ fn kv_namespaces_bind_the_kv_worker() {
 }
 
 #[test]
+fn cache_enabled_serves_the_worker_through_a_read_through_cache() {
+    let served = |assets: &str| {
+        let wrangler = format!(
+            r#"{{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "cache": {{ "enabled": true }} {assets} }}"#
+        );
+        let dir = project(&[
+            ("wrangler.jsonc", wrangler.as_str()),
+            ("index.js", ""),
+            ("public/a", ""),
+        ]);
+        let path = dir.join("wrangler.jsonc");
+        let process = Process::new(None, None, Vec::new());
+        let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+        let conf = message.get_root::<config::Reader>().unwrap();
+        let name =
+            |d: service_designator::Reader<'_>| d.get_name().unwrap().to_str().unwrap().to_owned();
+        let socket = name(conf.get_sockets().unwrap().get(0).get_service().unwrap());
+        let services = conf.get_services().unwrap();
+        let mut read_through = None;
+        let mut user_worker = None;
+        for s in services {
+            match s.which().unwrap() {
+                service::Which::ReadThrough(r) => {
+                    let r = r.unwrap();
+                    let cache = r.get_cache().unwrap().to_str().unwrap().to_owned();
+                    read_through = Some((name(r.get_worker().unwrap()), cache));
+                }
+                service::Which::Assets(a) => {
+                    user_worker = Some(name(a.unwrap().get_user_worker().unwrap()));
+                }
+                _ => {}
+            }
+        }
+        (socket, read_through, user_worker)
+    };
+    let worker = Some(("app".to_owned(), "app-cache".to_owned()));
+    assert_eq!(
+        served(""),
+        ("app-read-through".to_owned(), worker.clone(), None)
+    );
+    let assets = served(r#", "assets": { "directory": "public" }"#);
+    let user_worker = Some("app-read-through".to_owned());
+    assert_eq!(assets, ("app-assets".to_owned(), worker, user_worker));
+}
+
+#[test]
 fn caches_are_served_by_the_cache_service() {
     let dir = project(&[
         (

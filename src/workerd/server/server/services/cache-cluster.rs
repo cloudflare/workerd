@@ -374,6 +374,12 @@ impl Store for Clustered {
         Ok(())
     }
 
+    async fn purge(&self, _purge: &super::read_through::Purge) -> Result<()> {
+        Err(kj::failed!(
+            "cluster cache: a read-through purge is not implemented"
+        ))
+    }
+
     async fn message(
         &self,
         from: &str,

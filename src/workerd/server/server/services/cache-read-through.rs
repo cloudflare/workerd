@@ -1,0 +1,444 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+//! The `readThrough` service (`ReadThroughCache` in workerd.capnp): Cloudflare's Workers Caching
+//! in front of a Worker, its entries in a cache service's [`Store`] under keys of their own.
+//!
+//! A GET or HEAD is answered from a fresh entry of its path and query if there is one
+//! (`Cf-Cache-Status: HIT`). Else a GET runs the Worker, and misses of the same key wait for it,
+//! then look again. The Worker's response is stored and served from the record (`MISS`) if
+//! [`lifetime_of`] allows, else streamed as it comes (`BYPASS`). Other requests, upgrades and
+//! ones with `Authorization` go to the Worker untouched. A record keeps the response's
+//! `Cache-Tag` and its path for [`Purge`]; neither is served.
+//!
+//! Not yet: `Vary` (such responses are not stored), `stale-while-revalidate`, `stale-if-error`,
+//! `invalidate`, callers' `cf.cacheKey` and `cache: "no-store"`, a cache per entrypoint and
+//! version, streaming a miss while it is stored, and in a cluster, a purge and one Worker run per
+//! key across the nodes.
+
+use std::cell::OnceCell;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::io::Write;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::time::SystemTime;
+
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
+use http::header;
+use kj::http::ConnectResponse;
+use kj::http::ConnectSettings;
+use kj::http::HeadersRef;
+use kj::http::Method;
+use kj::http::Service;
+use kj::http::ServiceResponse;
+use kj::io::AsyncInputStream;
+use kj::io::AsyncIoStream;
+use kj_hyper::io_kj_error;
+use kj_rs::KjOwn;
+use tokio::sync::oneshot;
+use worker::AlarmResult;
+use worker::CustomEvent;
+use worker::CustomEventResult;
+use worker::CxxWorkerInterface;
+use worker::Interface;
+use worker::ScheduledResult;
+use workerd_capnp::read_through_cache;
+
+use super::Cache;
+use super::CacheRequest;
+use super::CacheService;
+use super::Entry;
+use super::MAX_ENTRY;
+use super::MAX_HEAD;
+use super::entry_name;
+use super::lifetime;
+use super::load;
+use super::now_ms;
+use super::record_head;
+use crate::Result;
+use crate::bindings::Designator;
+use crate::bridge::ffi;
+use crate::channels::Channel;
+use crate::channels::PendingToken;
+use crate::channels::RequestMetadata;
+use crate::channels::TokenUsage;
+use crate::channels::WorkerInterface;
+use crate::config::Factory;
+use crate::config::capnp_error;
+use crate::config::text;
+use crate::services::disk::header_value;
+use crate::services::disk::kj_headers;
+use crate::services::header_table;
+use crate::services::not_transferable;
+
+/// What every read-through key starts with, apart from the Cache API's.
+pub(super) const PREFIX: &str = "rt-";
+/// The header a record keeps its request's path and query in.
+const PATH: &str = "cf-cache-path";
+/// Headers a record keeps that are not served.
+const UNSERVED: [&str; 3] = ["cache-tag", PATH, "cloudflare-cdn-cache-control"];
+
+struct Inner {
+    worker: Designator,
+    cache: String,
+    linked: OnceCell<(Rc<dyn Channel>, Rc<Cache>)>,
+    /// The keys whose miss is running the Worker, and what waits for it.
+    fills: RefCell<HashMap<String, Vec<oneshot::Sender<()>>>>,
+}
+
+/// A `readThrough` service.
+pub struct ReadThrough(Rc<Inner>);
+
+pub fn make_read_through(
+    name: &str,
+    conf: capnp::Result<read_through_cache::Reader<'_>>,
+    factory: &Factory,
+) -> Result<ReadThrough> {
+    if !factory.experimental() {
+        return Err(kj::failed!(
+            "Read-through caches are an experimental feature which may change or go away in the \
+             future. You must run workerd with `--experimental` to use this feature."
+        ));
+    }
+    let conf = conf.map_err(capnp_error)?;
+    let mut errors = Vec::new();
+    let reader = conf.get_worker().map_err(capnp_error)?;
+    let context = format!("Read-through cache \"{name}\"'s worker");
+    let worker = Designator::from_reader(reader, context, &mut errors).map_err(capnp_error)?;
+    if let Some(error) = errors.into_iter().next() {
+        return Err(kj::failed!("{error}"));
+    }
+    Ok(ReadThrough(Rc::new(Inner {
+        worker,
+        cache: text(conf.get_cache())?,
+        linked: OnceCell::new(),
+        fills: RefCell::default(),
+    })))
+}
+
+impl ReadThrough {
+    /// The name of the cache service whose store holds the entries.
+    #[must_use]
+    pub fn cache_name(&self) -> &str {
+        &self.0.cache
+    }
+
+    /// Resolves the Worker and the cache service, once every service exists.
+    pub fn link(&self, lookup: impl FnOnce(&Designator) -> Rc<dyn Channel>, cache: &CacheService) {
+        let worker = lookup(&self.0.worker);
+        self.0.linked.get_or_init(|| (worker, Rc::clone(&cache.0)));
+    }
+}
+
+impl Channel for ReadThrough {
+    fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        let (worker, cache) = self
+            .0
+            .linked
+            .get()
+            .ok_or_else(|| kj::failed!("read-through cache: not linked"))?;
+        Ok(Request {
+            inner: Rc::clone(&self.0),
+            worker: Rc::clone(worker),
+            cache: Rc::clone(cache),
+            metadata: Some(metadata),
+            started: None,
+        }
+        .into_kj())
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(not_transferable("Read-through caches"))
+    }
+}
+
+/// What `ctx.cache.purge()` removes: entries with any of `tags` in their `Cache-Tag`, or whose
+/// path starts with any of `prefixes`, or every one.
+#[derive(Default)]
+pub(super) struct Purge {
+    tags: Vec<String>,
+    prefixes: Vec<String>,
+    everything: bool,
+}
+
+impl Purge {
+    /// From the query of `url`: `tag`, `prefix`, each repeated, and `everything`.
+    pub(super) fn parse(url: &[u8]) -> Result<Self> {
+        let url = std::str::from_utf8(url).map_err(|_| kj::failed!("purge URL is not UTF-8"))?;
+        let url = url::Url::parse(url).map_err(|e| kj::failed!("{e}: {url}"))?;
+        let mut purge = Self::default();
+        for (name, value) in url.query_pairs() {
+            match &*name {
+                "tag" => purge.tags.push(value.into_owned()),
+                "prefix" => purge.prefixes.push(value.into_owned()),
+                "everything" => purge.everything = true,
+                _ => {}
+            }
+        }
+        Ok(purge)
+    }
+
+    /// Whether a record whose headers are `headers` goes.
+    pub(super) fn matches(&self, headers: &HeaderMap) -> bool {
+        let text = |name| headers.get(name).and_then(|v| v.to_str().ok());
+        let path = text(PATH).unwrap_or_default();
+        self.everything
+            || text("cache-tag").unwrap_or_default().split(',').any(|t| {
+                self.tags
+                    .iter()
+                    .any(|tag| tag.eq_ignore_ascii_case(t.trim()))
+            })
+            || self.prefixes.iter().any(|p| path.starts_with(p.as_str()))
+    }
+}
+
+/// How long Workers Caching keeps a response: by `Cloudflare-CDN-Cache-Control`, else
+/// `CDN-Cache-Control`, else as the Cache API does; `None` if not at all. `headers` lose what
+/// [`lifetime`] drops.
+fn lifetime_of(status: u16, headers: &mut HeaderMap, now: u64) -> Option<u64> {
+    let never = matches!(status, 206 | 304 | 520..=526) || headers.contains_key(header::VARY);
+    let names = ["cloudflare-cdn-cache-control", "cdn-cache-control"];
+    let Some(cdn) = names.iter().find_map(|n| headers.get(*n)).cloned() else {
+        return lifetime(status, headers, false, now).filter(|&ttl| ttl > 0 && !never);
+    };
+    let own = headers.insert(header::CACHE_CONTROL, cdn);
+    let ttl = lifetime(status, headers, false, now);
+    match own {
+        Some(own) => headers.insert(header::CACHE_CONTROL, own),
+        None => headers.remove(header::CACHE_CONTROL),
+    };
+    ttl.filter(|&ttl| ttl > 0 && !never)
+}
+
+/// The miss of a key that runs the Worker: once it ends, what waits for it looks again.
+struct Fill<'a>(
+    &'a RefCell<HashMap<String, Vec<oneshot::Sender<()>>>>,
+    String,
+);
+
+impl Drop for Fill<'_> {
+    fn drop(&mut self) {
+        for waiter in self.0.borrow_mut().remove(&self.1).unwrap_or_default() {
+            let _ = waiter.send(());
+        }
+    }
+}
+
+struct Request {
+    inner: Rc<Inner>,
+    worker: Rc<dyn Channel>,
+    cache: Rc<Cache>,
+    /// The metadata to start the request on the Worker with, until it is.
+    metadata: Option<KjOwn<RequestMetadata>>,
+    started: Option<CxxWorkerInterface>,
+}
+
+impl Request {
+    fn worker(&mut self) -> Result<&mut CxxWorkerInterface> {
+        if let Some(metadata) = self.metadata.take() {
+            self.started = Some(CxxWorkerInterface::new(
+                self.worker.start_request(metadata)?,
+            ));
+        }
+        self.started
+            .as_mut()
+            .ok_or_else(|| kj::failed!("read-through cache: the Worker was asked already"))
+    }
+
+    /// Runs the Worker for a miss of `key`, `path`, and answers with what it says.
+    async fn fill(
+        &mut self,
+        fill: Fill<'_>,
+        key: &str,
+        path: &str,
+        url: &str,
+        request: HeadersRef<'_>,
+        response: ServiceResponse<'_>,
+    ) -> Result<()> {
+        let metadata = self
+            .metadata
+            .take()
+            .ok_or_else(|| kj::failed!("read-through cache: the Worker was asked already"))?;
+        let interface = self.worker.start_request(metadata)?;
+        let call = ffi::http_call(interface, Method::GET, url, request.as_ffi(), 0);
+        let mut answer = ffi::http_call_response(call, "").await?;
+        let mut headers = HeaderMap::new();
+        for pair in answer.headers.chunks(2) {
+            let name = HeaderName::from_bytes(pair[0].as_bytes());
+            if let (Ok(name), Ok(value)) = (name, HeaderValue::from_str(&pair[1])) {
+                headers.append(name, value);
+            }
+        }
+        let status = u16::try_from(answer.status).unwrap_or(500);
+        let now = now_ms();
+        let served = CacheRequest {
+            cache: Rc::clone(&self.cache),
+            key: None,
+            from: None,
+        };
+        let Some(ttl) = lifetime_of(status, &mut headers, now) else {
+            drop(fill);
+            for name in UNSERVED {
+                headers.remove(name);
+            }
+            headers.insert("cf-cache-status", HeaderValue::from_static("BYPASS"));
+            let length = headers
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok()?.parse().ok());
+            let kj = kj_headers(header_table(&self.cache.factory), &headers)?;
+            let text = &answer.status_text;
+            let mut out = response.send(status.into(), text, HeadersRef::from(&*kj), length)?;
+            let mut chunk = vec![0; 64 * 1024];
+            loop {
+                let read = answer.body.as_mut().try_read(&mut chunk, 1).await?;
+                if read == 0 {
+                    return Ok(());
+                }
+                out.write(&chunk[..read]).await?;
+            }
+        };
+        let (temp, mut draft) = self.cache.store.draft(key)?;
+        let mut stored = headers.clone();
+        stored.insert(PATH, header_value(path)?);
+        let head = record_head(
+            now.saturating_add(ttl),
+            status,
+            &answer.status_text,
+            &stored,
+        );
+        let io = |e: std::io::Error| io_kj_error(&e);
+        draft.write_all(&head).map_err(io)?;
+        let (mut size, mut chunk) = (0, vec![0; 64 * 1024]);
+        loop {
+            let read = answer.body.as_mut().try_read(&mut chunk, 1).await?;
+            if read == 0 {
+                break;
+            }
+            draft.write_all(&chunk[..read]).map_err(io)?;
+            size += read as u64;
+        }
+        let copy = temp.open()?;
+        if size <= MAX_ENTRY && head.len() <= MAX_HEAD {
+            self.cache.store.put(key, temp, draft).await?;
+        }
+        drop(fill);
+        for name in UNSERVED {
+            headers.remove(name);
+        }
+        let entry = Entry {
+            file: copy,
+            status,
+            text: answer.status_text,
+            headers,
+            start: head.len() as u64,
+            size,
+        };
+        served.serve(entry, "MISS", request, response).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for Request {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> Result<()> {
+        let bypass = !matches!(method, Method::GET | Method::HEAD)
+            || headers.get_by_name("Upgrade").is_some()
+            || headers.get_by_name("Authorization").is_some();
+        if bypass {
+            return self
+                .worker()?
+                .request(method, url, headers, body, response)
+                .await;
+        }
+        let raw = std::str::from_utf8(url).map_err(|_| kj::failed!("request URL is not UTF-8"))?;
+        let parsed = url::Url::parse(raw).map_err(|e| kj::failed!("{e}: {raw}"))?;
+        let path = match parsed.query() {
+            Some(query) => format!("{}?{query}", parsed.path()),
+            None => parsed.path().to_owned(),
+        };
+        let key = format!("{PREFIX}{}", entry_name(b"", path.as_bytes()));
+        let inner = Rc::clone(&self.inner);
+        loop {
+            if let Some(mut entry) = load(&*self.cache.store, &key, now_ms()).await? {
+                for name in UNSERVED {
+                    entry.headers.remove(name);
+                }
+                let served = CacheRequest {
+                    cache: Rc::clone(&self.cache),
+                    key: None,
+                    from: None,
+                };
+                return served.serve(entry, "HIT", headers, response).await;
+            }
+            if matches!(method, Method::HEAD) {
+                return self
+                    .worker()?
+                    .request(method, url, headers, body, response)
+                    .await;
+            }
+            let wait = {
+                let mut fills = inner.fills.borrow_mut();
+                if let Some(waiting) = fills.get_mut(&key) {
+                    let (waiter, done) = oneshot::channel();
+                    waiting.push(waiter);
+                    Some(done)
+                } else {
+                    fills.insert(key.clone(), Vec::new());
+                    None
+                }
+            };
+            let Some(done) = wait else {
+                break;
+            };
+            let _ = done.await;
+        }
+        let fill = Fill(&inner.fills, key.clone());
+        self.fill(fill, &key, &path, raw, headers, response).await
+    }
+
+    async fn connect<'a>(
+        &'a mut self,
+        host: &'a [u8],
+        headers: HeadersRef<'a>,
+        connection: Pin<&'a mut AsyncIoStream>,
+        response: ConnectResponse<'a>,
+        settings: ConnectSettings<'a>,
+    ) -> Result<()> {
+        self.worker()?
+            .connect(host, headers, connection, response, settings)
+            .await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Interface for Request {
+    async fn prewarm(&mut self, url: &str) -> Result<()> {
+        self.worker()?.prewarm(url).await
+    }
+
+    async fn run_scheduled(&mut self, time: &SystemTime, cron: &str) -> Result<ScheduledResult> {
+        self.worker()?.run_scheduled(time, cron).await
+    }
+
+    async fn run_alarm(&mut self, time: &SystemTime, retry_count: u32) -> Result<AlarmResult> {
+        self.worker()?.run_alarm(time, retry_count).await
+    }
+
+    async fn test(&mut self) -> Result<bool> {
+        self.worker()?.test().await
+    }
+
+    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+        self.worker()?.custom_event(event).await
+    }
+}

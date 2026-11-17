@@ -7,6 +7,16 @@ wd_test(
     data = ["cache-test.js"],
 )
 
+# A read-through cache, as Cloudflare's Workers Caching.
+wd_test(
+    src = "read-through-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "read-through-origin.js",
+        "read-through-test.js",
+    ],
+)
+
 # `workerd serve` of a wrangler.jsonc: caches persist across a restart.
 js_test(
     name = "cache-wrangler-test",

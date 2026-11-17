@@ -151,10 +151,12 @@ pub mod ffi {
     }
 
     /// A response to an `HttpCall`: its status, the value of the header asked for (empty if it
-    /// has none), and its body.
+    /// has none), every header as name then value, and its body.
     struct HttpAnswer {
         status: u32,
+        status_text: String,
         header: String,
+        headers: Vec<String>,
         body: KjOwn<AsyncInputStream>,
     }
 

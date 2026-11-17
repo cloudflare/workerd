@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "read-through-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "read-through-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "CACHED", service = "cached" ),
+          ( name = "ORIGIN", service = "origin" ),
+        ],
+      )
+    ),
+    # The Worker behind the cache, which counts its runs and purges.
+    ( name = "origin",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "read-through-origin.js" ) ],
+        compatibilityFlags = ["nodejs_compat"],
+        cacheApiOutbound = "TEST_TMPDIR",
+      )
+    ),
+    ( name = "cached", readThrough = ( worker = "origin", cache = "TEST_TMPDIR" ) ),
+    # The entries, in the directory the runner gives as -dTEST_TMPDIR.
+    ( name = "TEST_TMPDIR", cache = () ),
+  ],
+);

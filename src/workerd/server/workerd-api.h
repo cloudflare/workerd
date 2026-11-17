@@ -76,6 +76,7 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
   const jsg::IsolateObserver& getObserver() const override;
   void setIsolateObserver(IsolateObserver&) override;
+  jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
