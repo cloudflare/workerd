@@ -2981,6 +2981,24 @@ unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
     (data as *mut E, byte_length / size_of::<E>())
 }
 
+/// The elements of type `E` that the `ArrayBufferView` `view` covers, as a raw slice on an
+/// aligned dangling pointer when it covers none.
+///
+/// # Safety
+/// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
+#[inline]
+unsafe fn array_buffer_view_raw_slice<E>(view: &ffi::Local) -> *mut [E] {
+    // SAFETY: the caller guarantees the handle.
+    let (data, len) = unsafe { array_buffer_view_data::<E>(view) };
+    if len == 0 {
+        return std::ptr::slice_from_raw_parts_mut(NonNull::<E>::dangling().as_ptr(), 0);
+    }
+    // V8 aligns the backing stores it allocates for every element type, but not one created over
+    // external memory, and a misaligned slice is undefined behavior.
+    debug_assert!(data.is_aligned(), "misaligned ArrayBufferView elements");
+    std::ptr::slice_from_raw_parts_mut(data, len)
+}
+
 // `TypedArray`-specific implementations
 impl Local<'_, TypedArray> {
     /// Returns the number of elements in this `TypedArray`.
@@ -3110,14 +3128,9 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &[];
-                }
-                // SAFETY: `data` points to the `len` elements the view covers, which are
-                // valid until JS runs, which the lock borrow prevents.
-                unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+                // SAFETY: the elements are this view's, and the borrow of `lock` keeps JavaScript
+                // from running, so they stay in place and unchanged.
+                unsafe { &*self.as_raw_slice() }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -3146,14 +3159,27 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
+                // SAFETY: the caller guarantees exclusive access to this buffer region, and the
+                // borrow of `lock` keeps JavaScript from running.
+                unsafe { &mut *self.as_raw_slice() }
+            }
+
+            /// A raw pointer to the elements of this view, read from V8 in one call. It is
+            /// dangling, with no elements, for an empty or detached view and for one that does
+            /// not lie within its buffer.
+            ///
+            /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can
+            /// detach, resize or write to the buffer, and while the buffer is neither detached
+            /// nor resized. A `&mut` made from it must not overlap any other reference to the
+            /// same memory. Garbage collection may run: it neither moves nor frees an
+            /// off-heap backing store, and reading the view's buffer here moves an on-heap
+            /// typed array's elements off the heap. [`as_slice`](Self::as_slice) and
+            /// [`as_mut_slice`](Self::as_mut_slice) borrow the lock to keep JavaScript from
+            /// running.
+            #[inline]
+            pub fn as_raw_slice(&self) -> *mut [$elem] {
                 // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &mut [];
-                }
-                // SAFETY: caller guarantees exclusive access to this buffer region; `data`
-                // points to the `len` elements the view covers.
-                unsafe { std::slice::from_raw_parts_mut(data, len) }
+                unsafe { array_buffer_view_raw_slice::<$elem>(self.raw()) }
             }
 
             /// Returns an iterator over the elements.
