@@ -811,6 +811,53 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
 
 namespace {
 
+// Returns true if `point` encodes an Ed25519 point of small order (order 1, 2, 4 or 8), including
+// the non-canonical encodings of those points. The sign bit (the top bit of the last byte) is
+// ignored, so each entry stands for both signs of its x-coordinate. The list is the one libsodium
+// uses in ge25519_has_small_order().
+bool isSmallOrderEd25519Point(kj::ArrayPtr<const kj::byte> point) {
+  KJ_ASSERT(point.size() == ED25519_PUBLIC_KEY_LEN, point.size());
+  static constexpr kj::byte SMALL_ORDER_POINTS[][ED25519_PUBLIC_KEY_LEN] = {
+    // 0 (order 4)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00},
+    // 1 (order 1)
+    {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00},
+    // 2707385501144840649318225287225658788936804267575313519463743609750303402022 (order 8)
+    {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef, 0x98, 0xf0,
+      0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc,
+      0x05},
+    // 55188659117513257062467267217118295137698188065244968500265048394206261417927 (order 8)
+    {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10, 0x67, 0x0f,
+      0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03,
+      0x7a},
+    // p - 1 (order 2)
+    {0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x7f},
+    // p, a non-canonical 0 (order 4)
+    {0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x7f},
+    // p + 1, a non-canonical 1 (order 1)
+    {0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x7f},
+  };
+
+  for (auto& candidate: SMALL_ORDER_POINTS) {
+    auto last = ED25519_PUBLIC_KEY_LEN - 1;
+    if (point.first(last) == kj::arrayPtr(candidate).first(last) &&
+        (point[last] & 0x7f) == candidate[last]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Abstract base class for EDDSA and EDDH. The legacy NODE-ED25519 identifier for EDDSA has a
 // namedCurve field whereas the algorithms in the Secure Curves spec do not. We handle this by
 // keeping track of the algorithm identifier and returning an algorithm struct based on that.
@@ -900,8 +947,25 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     JSG_REQUIRE(getAlgorithmName() == "Ed25519" || getAlgorithmName() == "NODE-ED25519",
         DOMOperationError, "Not implemented for this algorithm", getAlgorithmName());
 
-    JSG_REQUIRE(signature.size() == ED25519_SIGNATURE_LEN, DOMOperationError, "Invalid ",
-        getAlgorithmName(), " signature length ", signature.size());
+    if (FeatureFlags::get(js).getWebCryptoEd25519SpecVerify()) {
+      if (signature.size() != ED25519_SIGNATURE_LEN) return false;
+
+      // BoringSSL rejects a non-canonical S but accepts a public key or an R of small order. With
+      // either, a signature can verify for messages its key never signed, so the spec requires
+      // verification to fail.
+      uint8_t publicKey[ED25519_PUBLIC_KEY_LEN]{};
+      size_t publicKeyLen = sizeof(publicKey);
+      JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), publicKey, &publicKeyLen),
+          InternalDOMOperationError, "Failed to retrieve public key",
+          internalDescribeOpensslErrors());
+      if (isSmallOrderEd25519Point(kj::arrayPtr(publicKey, publicKeyLen)) ||
+          isSmallOrderEd25519Point(signature.first(ED25519_PUBLIC_KEY_LEN))) {
+        return false;
+      }
+    } else {
+      JSG_REQUIRE(signature.size() == ED25519_SIGNATURE_LEN, DOMOperationError, "Invalid ",
+          getAlgorithmName(), " signature length ", signature.size());
+    }
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
