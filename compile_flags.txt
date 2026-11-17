@@ -12,7 +12,7 @@
 -Iexternal/perfetto+/include/perfetto/base/build_configs/bazel/
 -Iexternal/boringssl+/include
 -Iexternal/+http+ncrypto/include
--isystembazel-bin/external/sqlite3+
+-isystembazel-bin/external/+http+sqlite3
 -Isrc
 -Isrc/rust/cxx
 -isystembazel-bin/_virtual_includes/icudata-embed

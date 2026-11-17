@@ -403,7 +403,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "siht1UE/oFJOeWedSzE3AAUW3B8fmNy3eVRScib2JXg=",
+        "usagesDigest": "xrMQmrStrueR0w0uwmELEMgm68O+gE0GEzsLEEf8Fv8=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -431,10 +431,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "d7074a849975b8828b8d5811903fe44ca06182e87659ede6bd73c7ca30521a95",
-              "strip_prefix": "capnproto-capnproto-4eefccb/c++",
+              "sha256": "487e97008c1f2468c3da20812b19973b40b62e5d9b8132627723367e03d96d63",
+              "strip_prefix": "capnproto-capnproto-be8fbe7/c++",
               "type": "tgz",
-              "url": "https://github.com/capnproto/capnproto/tarball/4eefccbcf5ea704981a509005ce4f991cf93054f",
+              "url": "https://github.com/capnproto/capnproto/tarball/be8fbe7bc7ad6c5cc8106385a1919df7222b1e5e",
               "urls": [],
               "workspace_file_content": ""
             }
@@ -860,6 +860,44 @@
               "strip_prefix": "ruff-aarch64-unknown-linux-gnu",
               "type": "tgz",
               "url": "https://github.com/astral-sh/ruff/releases/download/0.12.1/ruff-aarch64-unknown-linux-gnu.tar.gz",
+              "urls": [],
+              "workspace_file_content": ""
+            }
+          },
+          "sqlite3": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "add_prefix": "",
+              "auth_patterns": {},
+              "build_file": "@@//:build/BUILD.sqlite3",
+              "build_file_content": "",
+              "canonical_id": "",
+              "files": {},
+              "integrity": "",
+              "netrc": "",
+              "patch_args": [],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_strip": 1,
+              "patch_tool": "",
+              "patches": [
+                "@@//:patches/sqlite/0001-row-counts-plain.patch",
+                "@@//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+                "@@//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+                "@@//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+                "@@//:patches/sqlite/0005-legacy-subquery-subtypes.patch",
+                "@@//:patches/sqlite/0006-cte-nesting-depth.patch"
+              ],
+              "remote_file_integrity": {},
+              "remote_file_urls": {},
+              "remote_module_file_integrity": "",
+              "remote_module_file_urls": [],
+              "remote_patch_strip": 0,
+              "remote_patches": {},
+              "sha256": "e5e6d096b07b0b7316b10d847afdd5b248b1c78724a4e21ac6c0f768d7619326",
+              "strip_prefix": "sqlite-sqlite-5752022",
+              "type": "tgz",
+              "url": "https://github.com/sqlite/sqlite/tarball/refs/tags/version-3.54.1",
               "urls": [],
               "workspace_file_content": ""
             }

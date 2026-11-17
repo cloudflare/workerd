@@ -38,7 +38,7 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 
 """
 
-GITHUB_TAR_URL_TEMPLATE = "https://github.com/{owner}/{repo}/tarball/{commit}"
+GITHUB_TAR_URL_TEMPLATE = "https://github.com/{owner}/{repo}/tarball/{ref}"
 
 GITHUB_RELEASE_FILE_URL_TEMPLATE = (
     "https://github.com/{owner}/{repo}/releases/download/v{version}/{file}"
@@ -291,7 +291,7 @@ def gen_github_tarball(repo):
     url = GITHUB_TAR_URL_TEMPLATE.format(
         owner=owner,
         repo=github_repo,
-        commit=commit,
+        ref=commit,
     )
 
     if "freeze_sha256" in repo:
@@ -324,6 +324,23 @@ def gen_github_tarball(repo):
 def github_last_release(repo):
     owner = repo["owner"]
     github_repo = repo["repo"]
+    if "tag_regex" in repo:
+        # tag_regex's groups capture the numbers of the version, most significant first.
+        tag_regex = re.compile(repo["tag_regex"])
+        if not tag_regex.groups:
+            raise UnsupportedException(
+                f"tag_regex must capture the numbers of the version: {repo['tag_regex']}"
+            )
+        api_url = f"https://api.github.com/repos/{owner}/{github_repo}/git/matching-refs/tags/"
+        refs = json.loads(github_urlopen(api_url).read())
+        tags = [ref["ref"].removeprefix("refs/tags/") for ref in refs]
+        matches = [match for tag in tags if (match := tag_regex.fullmatch(tag))]
+        if not matches:
+            raise AssetsException(f"No tag matches {repo['tag_regex']}")
+        newest = max(
+            matches, key=lambda match: [int(number) for number in match.groups()]
+        )
+        return github_release(repo, newest.string)
     api_url = f"https://api.github.com/repos/{owner}/{github_repo}/releases/latest"
     return json.loads(github_urlopen(api_url).read())
 
@@ -331,6 +348,9 @@ def github_last_release(repo):
 def github_release(repo, tag_name):
     owner = repo["owner"]
     github_repo = repo["repo"]
+    if "tag_regex" in repo:
+        # A tag that isn't published as a release has no release data to fetch.
+        return {"tag_name": tag_name}
     api_url = (
         f"https://api.github.com/repos/{owner}/{github_repo}/releases/tags/{tag_name}"
     )
@@ -365,7 +385,11 @@ def gen_github_release(repo):
         url = get_release_asset(repo, release)
     else:
         # Using Github-generated tarball
-        url = release["tarball_url"]
+        url = GITHUB_TAR_URL_TEMPLATE.format(
+            owner=repo["owner"],
+            repo=repo["repo"],
+            ref=f"refs/tags/{release['tag_name']}",
+        )
 
     type = "tgz"
     if url.endswith(".zip"):
