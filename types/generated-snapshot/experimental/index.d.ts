@@ -13547,21 +13547,30 @@ type BrowserRunScriptOptions = {
   lab?: boolean;
   /** Record the browser session. @default false */
   recording?: boolean;
+  /** Run the script on an alternate browser backend. Only the raw CDP client is
+   * supported, so `library` cannot be set, and `keepAlive`, `lab` and
+   * `recording` do not apply. No session is kept open afterwards.
+   */
+  browser?: "kitesurf";
 };
-/** Options for `scriptInSession()`. */
+/** Options for `script()` in an existing browser session. */
 type BrowserRunScriptSessionOptions = {
+  /** Session to run in, such as the `cf-browser-session-id` header returned by
+   * `script()`. The session keeps the launch options it was acquired with.
+   */
+  sessionId: string;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
   /** Library whose objects are passed to the script. Omit it for raw CDP. */
   library?: BrowserRunScriptLibrary;
   /** Maximum run time of the script in milliseconds. Between 1 and 120000.
    * @default 60000
    */
   timeout?: number;
-  /** Page target the script attaches to, such as the `cf-browser-target-id`
-   * header returned by `script()`. Defaults to the session's first page.
-   */
-  targetId?: string;
 };
-/** JSON success body of `script()` and `scriptInSession()`. */
+/** JSON success body of `script()`. */
 type BrowserRunScriptSuccessResponse = {
   success: true;
   /** The script's return value, or `null` when it returned nothing. */
@@ -13786,7 +13795,7 @@ declare abstract class BrowserRun {
    * @param code - Source of an async function. It receives the selected
    * library's objects (Playwright `{ page, context, browser }`, Puppeteer
    * `{ page, browser }`) or, without `library`, a CDP client.
-   * @param options - Library, timeout and session launch options.
+   * @param options - Library, timeout, session launch and backend options.
    * @returns A `Response` containing one of:
    *
    * **Success (HTTP 200):**
@@ -13796,26 +13805,28 @@ declare abstract class BrowserRun {
    * non-JSON output
    *
    * **Error:**
-   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 502, 503)
    * - HTTP 408 when the script exceeds `timeout`
    * - HTTP 422 when the script fails to compile or throws
+   * - HTTP 502 when the script fails on the `browser: 'kitesurf'` backend
    * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
    * throw before any request is made.
    *
-   * **Headers:**
-   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * **Headers** (not returned with `browser: 'kitesurf'`):
+   * - `cf-browser-session-id`: Session kept open for a later `script()` call
+   * with `sessionId`
    * - `cf-browser-target-id`: Page target the script ran on
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
   script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
   /**
    * Run a script against an existing browser session, such as one kept open by
-   * `script()`.
-   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
-   * header returned by `script()`.
-   * @param code - Source of an async function, as for `script()`.
-   * @param options - Library, timeout and page target options.
-   * @returns A `Response` with the same success bodies as `script()`.
+   * an earlier `script()` call.
+   * @param code - Source of an async function, as for a new session.
+   * @param options - The session to run in, plus page target, library and
+   * timeout options. Launch options such as `keepAlive` cannot be set, because
+   * the session keeps the ones it was acquired with.
+   * @returns A `Response` with the same success bodies as a new-session run.
    *
    * **Error:**
    * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
@@ -13827,10 +13838,9 @@ declare abstract class BrowserRun {
    * **Headers:**
    * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
    */
-  scriptInSession(
-    sessionId: string,
+  script(
     code: string,
-    options?: BrowserRunScriptSessionOptions,
+    options: BrowserRunScriptSessionOptions,
   ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
