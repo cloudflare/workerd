@@ -28,6 +28,7 @@ use super::editor::Line;
 #[cfg(unix)]
 use super::history::HistoryFile;
 use super::input::Scanner;
+use super::input::Unclosed;
 #[cfg(unix)]
 use super::interrupt::AbandonOnInterrupt;
 use super::session::Evaluated;
@@ -43,6 +44,7 @@ const HELP: &str = "\
 .help     Show this help
 .servers  List the loaded configs' servers (`workerd.servers`)
 .clear    Clear the screen (also Ctrl+L while editing)
+.break    Abandon the unfinished input being typed (also Ctrl+C while editing)
 .exit     Exit the REPL (also Ctrl+D)
 
 The `workerd` global loads configs and reaches their services:
@@ -105,6 +107,7 @@ pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>
         eprintln!("Error: reading input: {error}");
         console.failed = true;
     }
+    console.end_input();
     console.failed
 }
 
@@ -166,10 +169,7 @@ impl Console {
                         return Ok(());
                     }
                 }
-                Line::Canceled => {
-                    self.input.clear();
-                    self.scanner = Scanner::default();
-                }
+                Line::Canceled => self.abandon_input(),
                 Line::Ended => return Ok(()),
             }
         }
@@ -202,12 +202,16 @@ impl Console {
     }
 
     /// Adds `line` to the input, and runs the input once it is finished. A line that starts an
-    /// input with a `.` and a letter is a command.
+    /// input with a `.` and a letter is a command, and so is `.break` on a line of its own in an
+    /// unfinished input.
     fn line(&mut self, line: &str) -> Next {
-        if self.input.is_empty()
-            && let Some(command) = command(line)
-        {
-            return self.command(command);
+        if self.input.is_empty() {
+            if let Some(command) = command(line) {
+                return self.command(command);
+            }
+        } else if line.trim() == ".break" {
+            self.abandon_input();
+            return Next::Continue;
         }
         if !self.input.is_empty() {
             self.input.push('\n');
@@ -225,9 +229,28 @@ impl Console {
         self.evaluate(input)
     }
 
+    /// Drops the lines of the unfinished input.
+    fn abandon_input(&mut self) {
+        self.input.clear();
+        self.scanner = Scanner::default();
+    }
+
+    /// Reports the input left unfinished when the console's input ended, if any; it doesn't run.
+    fn end_input(&mut self) {
+        if let Some(Unclosed { what, line }) = self.scanner.unclosed() {
+            eprintln!(
+                "Error: The input ended inside the {what} opened on its line {line}, so it did \
+                 not run."
+            );
+            self.failed = true;
+        }
+    }
+
     fn command(&mut self, command: &str) -> Next {
         match command {
             ".help" => eprint!("{HELP}"),
+            // There is no unfinished input to abandon.
+            ".break" => {}
             ".servers" => return self.evaluate("workerd.servers".to_owned()),
             ".clear" => {
                 if io::stderr().is_terminal() {

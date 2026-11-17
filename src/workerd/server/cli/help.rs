@@ -391,7 +391,7 @@ config as for serve, is loaded into the global s before the first
 prompt; [const] names the constant of a .capnp config.
 
 The exit status is 1 if an input failed: it threw, the promise it
-awaited rejected, or it is no command.
+awaited rejected, it is no command, or it was left unfinished.
 
 On a terminal, the lines typed are saved in ~/.workerd_repl_history;
 WORKERD_REPL_HISTORY names another file, or, set to the empty string,

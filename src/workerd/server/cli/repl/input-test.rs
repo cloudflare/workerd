@@ -48,6 +48,33 @@ fn unfinished_inputs() {
     }
 }
 
+/// What keeps `input`, scanned a line at a time as the console does, unfinished.
+fn unclosed(input: &str) -> Option<Unclosed> {
+    let mut scanner = Scanner::default();
+    for line in input.split('\n') {
+        scanner.scan(&format!("{line}\n"));
+    }
+    scanner.unclosed()
+}
+
+#[test]
+fn unclosed_constructs() {
+    let at = |what, line| Some(Unclosed { what, line });
+    assert_eq!(unclosed("f(1)"), None);
+    assert_eq!(unclosed("f("), at("`(`", 1));
+    assert_eq!(unclosed("f(\n  [1,"), at("`[`", 2));
+    assert_eq!(unclosed("x = 1\n\nfunction f() {"), at("`{`", 3));
+    // The innermost construct still open: those inside it have closed.
+    assert_eq!(unclosed("f({\n  a: [1]\n}"), at("`(`", 1));
+    assert_eq!(unclosed("`multi\nline"), at("template literal", 1));
+    assert_eq!(unclosed("`a ${\n  b"), at("`${`", 1));
+    assert_eq!(unclosed("`a ${ {"), at("`{`", 1));
+    // A template literal goes on once its substitution closes.
+    assert_eq!(unclosed("x\n`a ${ b }\nc"), at("template literal", 2));
+    assert_eq!(unclosed("1 /* comment\nmore"), at("`/*` comment", 1));
+    assert_eq!(unclosed("1\n'continued \\"), at("string literal", 2));
+}
+
 #[test]
 fn regular_expression_literals() {
     // Brackets, quotes and comment openers in a regular expression are not code.

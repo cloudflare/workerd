@@ -131,6 +131,30 @@ test('--autogate refuses a name that is not an autogate', async () => {
   assert(stderr.includes('test-workerd'), stderr);
 });
 
+test('an input left unfinished when the input ends is reported', async () => {
+  const { code, results, stderr } = await repl(
+    [],
+    ['1', 'f(', "  'never closed'"]
+  );
+  assert.strictEqual(code, 1, stderr);
+  assert.deepStrictEqual(results, ['1']);
+  assert(
+    stderr.includes(
+      'Error: The input ended inside the `(` opened on its line 1, so it did not run.'
+    ),
+    stderr
+  );
+});
+
+test('.break abandons an unfinished input', async () => {
+  const { code, results, stderr } = await repl(
+    [],
+    ['.break', 'f(', "  'abandoned'", '.break', '1 + 1']
+  );
+  assert.strictEqual(code, 0, stderr);
+  assert.deepStrictEqual(results, ['2']);
+});
+
 // Starts `workerd repl --experimental ...args` for a test to give input to as it goes. With
 // `ignoringInterrupts`, the REPL starts with SIGINT ignored, as a shell without job control starts
 // a background job.

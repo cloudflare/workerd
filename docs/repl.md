@@ -81,10 +81,11 @@ every config it loads.
 Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 
 The REPL exits with status 1 if an input failed, or if the REPL itself did, and 0 otherwise. An
-input fails if it throws, if the promise it awaits rejects, or if it is a command the REPL doesn't
-know. The REPL prints the failure and goes on to the next input, so a script's later inputs still
-run. A config named on the command line that fails to load is an input that failed. An input that
-Ctrl+C stops awaiting hasn't failed.
+input fails if it throws, if the promise it awaits rejects, if it is a command the REPL doesn't
+know, or if it is still [unfinished](#typing-input) when the REPL's input ends. The REPL prints the
+failure and goes on to the next input, so a script's later inputs still run. A config named on the
+command line that fails to load is an input that failed. An input that Ctrl+C stops awaiting, or
+that `.break` abandons, hasn't failed.
 
 ## Typing input
 
@@ -106,6 +107,15 @@ left open at the end of any other line is a syntax error, as it is in JavaScript
 The REPL decides this without parsing JavaScript, so it can misjudge a `/` that could start either
 a regular expression or a division: it takes a `/` after `}` to start a regular expression, and
 one after `)` to divide.
+
+To abandon an unfinished input, type `.break` on a line of its own, or press Ctrl+C on a terminal.
+An input still unfinished when the REPL's input ends doesn't run: the REPL says which construct it
+leaves open, and on which of its lines that starts, and the input counts as failed (see
+[Command line](#command-line)):
+
+```
+Error: The input ended inside the `(` opened on its line 1, so it did not run.
+```
 
 Each result is printed with Node's `util.inspect()`. An exception prints as `Uncaught` followed by
 the error and its stack.
@@ -142,13 +152,16 @@ between inputs, and I/O objects such as a response body stay usable from one inp
 
 ## Commands
 
-A line that starts with `.` and a letter, at the start of an input, is a command:
+A line that starts with `.` and a letter, at the start of an input, is a command. In an
+unfinished input, only `.break`, on a line of its own, is a command; it is one even inside a
+template literal.
 
 | Command    | Effect                                                     |
 | ---------- | ---------------------------------------------------------- |
 | `.help`    | Shows the commands, keys and `workerd` API.                |
 | `.servers` | Prints the loaded configs' servers (`workerd.servers`).    |
 | `.clear`   | Clears the screen.                                         |
+| `.break`   | Abandons the unfinished input being typed.                 |
 | `.exit`    | Quits, closing every loaded server first (as Ctrl+D does). |
 
 ## Keys
