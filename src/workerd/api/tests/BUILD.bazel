@@ -957,6 +957,12 @@ wd_test(
 )
 
 wd_test(
+    src = "htmlrewriter-ts-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-ts-global-test.js"],
+)
+
+wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],

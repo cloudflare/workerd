@@ -31,7 +31,8 @@
 // const foo = require('./foo');
 // (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
 //
-const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
+const { ObjectDefineProperties, ObjectDefineProperty, ObjectGetPrototypeOf } =
+  primordials;
 
 // Loaded whatever the compatibility flags, as is every module that sets up a
 // cloneable class that every reader must be able to read (see
@@ -430,31 +431,62 @@ if (compatFlags['expose_serialization_test_class']) {
   });
 }
 
-// The TypeScript HTMLRewriter replaces the C++ one, which global-scope.h then
-// leaves out. Loaded after the streams globals above, whose streams it
-// produces and reads.
-if (autogates['ts-html-rewriter']) {
-  const { HTMLRewriter } = require('htmlrewriter/htmlrewriter');
-  // Installed as the MessageChannel classes above are, matching
-  // JSG_NESTED_TYPE.
-  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
-    HTMLRewriter: {
-      __proto__: null,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: HTMLRewriter,
-    },
-  });
-  if (compatFlags['spec_compliant_property_attributes']) {
-    ObjectDefineProperties(globalThis, {
-      HTMLRewriter: {
+// Defines `name` on `target` as an accessor that loads the value on the first
+// read and then becomes a data property holding it. An assignment before then
+// makes the data property an assignment to it would have, with the assigned
+// value.
+function defineLazyGlobal(
+  target: object,
+  name: string,
+  enumerable: boolean,
+  load: () => unknown
+): void {
+  ObjectDefineProperty(target, name, {
+    __proto__: null,
+    configurable: true,
+    enumerable,
+    get(): unknown {
+      const value = load();
+      ObjectDefineProperty(target, name, {
         __proto__: null,
         configurable: true,
-        enumerable: false,
+        enumerable,
         writable: true,
-        value: HTMLRewriter,
-      },
-    });
+        value,
+      });
+      return value;
+    },
+    set(this: unknown, value: unknown): void {
+      // An assignment to a writable data property changes it on `target`,
+      // but makes an own property, enumerable, on any other receiver.
+      ObjectDefineProperty(this as object, name, {
+        __proto__: null,
+        configurable: true,
+        enumerable: this === target ? enumerable : true,
+        writable: true,
+        value,
+      });
+    },
+  });
+}
+
+// The TypeScript HTMLRewriter replaces the C++ one, which global-scope.h then
+// leaves out. Most Workers never use it, so its module is loaded on the first
+// read of the global, after user code has run: the writer methods it captures
+// from the streams globals above are captured now.
+if (autogates['ts-html-rewriter']) {
+  require('htmlrewriter/writer');
+  const loadHTMLRewriter = (): unknown =>
+    require('htmlrewriter/htmlrewriter').HTMLRewriter;
+  // Installed as the MessageChannel classes above are, matching
+  // JSG_NESTED_TYPE.
+  defineLazyGlobal(
+    ObjectGetPrototypeOf(globalThis),
+    'HTMLRewriter',
+    true,
+    loadHTMLRewriter
+  );
+  if (compatFlags['spec_compliant_property_attributes']) {
+    defineLazyGlobal(globalThis, 'HTMLRewriter', false, loadHTMLRewriter);
   }
 }

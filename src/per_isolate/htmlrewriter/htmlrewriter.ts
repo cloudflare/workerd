@@ -28,6 +28,9 @@
 //   `token.constructor`, throw a TypeError when called.
 // - The messages of the TypeErrors for arguments of the wrong type follow
 //   JSG's but are not all the same.
+// - This module is loaded on the first read of the HTMLRewriter global,
+//   which until then, or until it is assigned, is an accessor rather than
+//   the data property JSG makes for a nested type (see main.ts).
 //
 // HOW IT FITS TOGETHER
 //
@@ -57,6 +60,7 @@
 
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { WebIdlHelpers } from '../webidl';
+import type { HtmlRewriterWriter } from './writer';
 
 const {
   Error,
@@ -83,7 +87,6 @@ const {
   TypeError,
   TypedArrayPrototypeGetByteLength,
   Uint8Array,
-  uncurryThis,
 } = primordials;
 
 // The prototype of internal records. A literal with `__proto__: null` makes
@@ -110,22 +113,9 @@ if (maybeNative === undefined) {
 }
 const native: HtmlRewriterUtils = maybeNative;
 
-// Whichever streams implementation main.ts installed before loading this
-// module; the identity pipe's ends are its streams. Not primordials, which
-// are captured before main.ts installs the TypeScript streams.
 type Writer = WritableStreamDefaultWriter<Uint8Array>;
-const WritableStreamGetWriter = uncurryThis(
-  globalThis.WritableStream.prototype.getWriter
-) as (stream: WritableStream<Uint8Array>) => Writer;
-const WriterWrite = uncurryThis(
-  globalThis.WritableStreamDefaultWriter.prototype.write
-) as (writer: Writer, chunk: Uint8Array) => Promise<void>;
-const WriterClose = uncurryThis(
-  globalThis.WritableStreamDefaultWriter.prototype.close
-) as (writer: Writer) => Promise<void>;
-const WriterAbort = uncurryThis(
-  globalThis.WritableStreamDefaultWriter.prototype.abort
-) as (writer: Writer, reason?: unknown) => Promise<void>;
+const { WritableStreamGetWriter, WriterWrite, WriterClose, WriterAbort } =
+  require('htmlrewriter/writer') as HtmlRewriterWriter;
 
 // JSG's messages, so that misuse reads the same as with the C++ classes.
 const kIllegalInvocation =
