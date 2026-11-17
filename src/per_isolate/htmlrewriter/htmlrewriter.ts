@@ -28,6 +28,10 @@
 //   `token.constructor`, throw a TypeError when called.
 // - The messages of the TypeErrors for arguments of the wrong type follow
 //   JSG's but are not all the same.
+// - The classes' prototypes lack the marker and the util.inspect() hook of
+//   a JSG resource type's (runtime-class.ts), so util.inspect() shows the
+//   tokens' accessors rather than their values
+//   (api/tests/htmlrewriter-inspect-test.js).
 // - This module is loaded on the first read of the HTMLRewriter global,
 //   which until then, or until it is assigned, is an accessor rather than
 //   the data property JSG makes for a nested type (see main.ts).

@@ -956,6 +956,20 @@ wd_test(
     data = ["htmlrewriter-esi-test.js"],
 )
 
+# Under both HTMLRewriter implementations, as htmlrewriter-esi-test is.
+wd_test(
+    src = "htmlrewriter-inspect-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-inspect-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "htmlrewriter-inspect-ts-rewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-inspect-test.js"],
+)
+
 wd_test(
     src = "htmlrewriter-ts-global-test.wd-test",
     args = ["--experimental"],

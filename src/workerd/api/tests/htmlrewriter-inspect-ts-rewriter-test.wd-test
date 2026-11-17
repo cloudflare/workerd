@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# htmlrewriter-inspect-test.js under the TypeScript HTMLRewriter (TS_HTML_REWRITER autogate).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-inspect",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-inspect-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [(name = "USING_TS_REWRITER", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-html-rewriter"],
+);
