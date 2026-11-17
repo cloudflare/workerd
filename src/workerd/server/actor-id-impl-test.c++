@@ -26,13 +26,13 @@ KJ_TEST("ActorIdImpl equals test") {
         bool expectedResult)
         : expectedResult(expectedResult) {
       kj::byte idParamCopier[SHA256_DIGEST_LENGTH] = {0};
-      memset(idParamCopier, leftFill, SHA256_DIGEST_LENGTH);
+      kj::arrayPtr(idParamCopier).fill(leftFill);
       if (leftString == nullptr) {
         actorLeft = ActorIdImpl(idParamCopier, kj::none);
       } else {
         actorLeft = ActorIdImpl(idParamCopier, kj::heapString(leftString));
       }
-      memset(idParamCopier, rightFill, SHA256_DIGEST_LENGTH);
+      kj::arrayPtr(idParamCopier).fill(rightFill);
       if (rightString == nullptr) {
         actorRight = ActorIdImpl(idParamCopier, kj::none);
       } else {

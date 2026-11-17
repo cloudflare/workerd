@@ -230,6 +230,12 @@ build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
+# Enable Rust pipelining so dependent crates can start building without needing to fully compile a
+# crate resulting in a shorter critical path. This should be a bit faster and reliable once
+# https://github.com/bazelbuild/rules_rust/issues/3977 is implemented. Appears to be unstable on
+# Windows, perhaps due to missing sandbox support.
+build:unix --@rules_rust//rust/settings:pipelined_compilation=True
+
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
@@ -278,6 +284,9 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# Keep kj's stack traces on backtrace(). Under ASan kj defaults to _Unwind_Backtrace(), which with
+# our statically linked LLVM libunwind is much slower; exception-heavy tests time out.
+build:asan --per_file_copt='external/.*capnp-cpp/src/kj/exception\.c\+\+@-DKJ_BACKTRACE_WITH_UNWINDER=0'
 # One toolchain per host, plus its cargo toolchain; resolution picks the one matching the
 # (host-parented) asan platform.
 build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64

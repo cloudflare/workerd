@@ -98,6 +98,11 @@ struct ResourceDescriptor;
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
+// Whether a collection found the Wrappable unreachable and is sweeping it (see
+// jsg::Wrappable::isCondemned()). Weak::is_alive and Weak::upgrade refuse such a Wrappable;
+// wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
+bool wrappable_is_condemned(const Wrappable& wrappable);
+bool wrappable_try_condemn(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
@@ -325,6 +330,16 @@ MaybeLocal local_function_call(
 // termination is pending, or if V8 could not create the function.
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
 
+// Struct shapes
+// Returns a `v8::Global<v8::DictionaryTemplate>` declaring `keys` as data properties, in order.
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> keys);
+// Returns a new object from the `v8::Global<v8::DictionaryTemplate>` `tmpl`, with `values[i]`
+// the value of its `i`th declared property. Runs no JavaScript. Returns none if an exception or
+// a termination is pending, leaving it pending. There must be as many values as declared
+// properties, and, like any storage of V8 handles, they must be on the stack.
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<MaybeLocal> values);
+
 // Local<Object>
 // Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
 // JavaScript: no setter on Object.prototype is called. Throws a KJ exception if a key is too
@@ -334,6 +349,9 @@ MaybeLocal object_new_with_data_properties(
 // Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
 // leaving the exception pending.
 bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
+// The same for a key held in a `v8::Global<v8::Name>`, such as a cached struct field name.
+bool local_object_set_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name, Local value);
 // Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
 // trap threw, leaving the exception pending.
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has);
@@ -343,6 +361,9 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 // The same for a `v8::Name` key.
 MaybeLocal local_object_get_property_by_name(
     Isolate* isolate, const Local& object, const Local& name);
+// The same for a key held in a `v8::Global<v8::Name>`, such as a cached struct field name.
+MaybeLocal local_object_get_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name);
 // Appends the names of the own enumerable string-keyed properties, converted to strings, to
 // `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
 // the exception pending.
@@ -445,6 +466,9 @@ size_t local_array_buffer_get_backing_store(const Local& buffer);
 size_t local_array_buffer_view_byte_offset(const Local& view);
 size_t local_array_buffer_view_byte_length(const Local& view);
 uint8_t* local_array_buffer_view_buffer_data(const Local& view);
+// Returns the address of the first byte the view covers and sets `byte_length` to how many it
+// covers, which is zero for a view that is detached or that does not lie within its buffer.
+uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
 size_t local_array_buffer_view_element_size(const Local& view);
 bool local_array_buffer_view_is_integer_type(const Local& view);
@@ -608,7 +632,8 @@ bool local_serialize(Isolate* isolate,
     kj::Maybe<uint32_t> version,
     ::rust::Vec<uint8_t>& result);
 // Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
-// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
+// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript
+// but the deserialize functions of classes implemented in JavaScript, once it has read the value.
 // Throws a KJ exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(
     Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors);
@@ -644,10 +669,15 @@ MaybeLocal dom_exception_create_from_bytes(
 // exception_create_from_bytes() reads it. Never fails.
 Local js_error_create_from_bytes(
     Isolate* isolate, JsErrorType error_type, ::rust::Slice<const uint8_t> message);
-// If `value` unwraps as a DOMException, as jsg::tryGetDOMExceptionNameAndMessage() unwraps it,
-// stores its name and message and returns true; otherwise returns false. Runs no JavaScript.
-bool dom_exception_try_unwrap(
-    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
+// Sets `isDomException` to whether `value` is a DOMException, as
+// jsg::tryGetDOMExceptionNameAndMessage() tells, and if it is, stores its name and message.
+// Returns false, calling nothing in V8, while an exception or a termination is pending. Runs no
+// JavaScript.
+bool dom_exception_try_unwrap(Isolate* isolate,
+    const Local& value,
+    bool& isDomException,
+    ::rust::String& name,
+    ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);

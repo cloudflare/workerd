@@ -166,7 +166,7 @@ constexpr uint32_t TUNNELED_EXCEPTION_SERIALIZATION_VERSION = 15;
 // The longest error type, stack trace or message that addJsExceptionMetadata() keeps, in bytes.
 constexpr size_t JS_EXCEPTION_METADATA_MAX_FIELD_SIZE = 4096;
 
-// Whether `description`, an object's description by v8::Value::ToDetailString(), starts with the
+// Whether `description`, an object's description by toDetailString() (jsg.h), starts with the
 // name of an error type whose description createTunneledException() keeps as it is, after "jsg."
 // (JS_ERROR_TYPES and DOMException). The description of any other value follows "jsg.Error: ".
 bool startsWithTunneledErrorType(kj::ArrayPtr<const char> description);

@@ -13,13 +13,7 @@ import { test } from 'node:test';
 assert(env.WORKERD_BINARY, 'WORKERD_BINARY must be set');
 assert(env.TEST_TMPDIR, 'TEST_TMPDIR must be set');
 
-const NMR_WORKER = `
-function equal(actual, expected) {
-  if (actual !== expected) {
-    throw new Error(\`Expected \${JSON.stringify(expected)}, got \${JSON.stringify(actual)}\`);
-  }
-}
-
+const REJECTS = `
 async function rejects(promise, expected) {
   try {
     await promise;
@@ -29,7 +23,16 @@ async function rejects(promise, expected) {
   }
   throw new Error(\`Expected rejection containing: \${expected}\`);
 }
+`;
 
+const NMR_WORKER = `
+function equal(actual, expected) {
+  if (actual !== expected) {
+    throw new Error(\`Expected \${JSON.stringify(expected)}, got \${JSON.stringify(actual)}\`);
+  }
+}
+
+${REJECTS}
 export const fallbackModules = {
   async test() {
     const esm = await import('./esm.js');
@@ -334,6 +337,115 @@ const unitTests :Workerd.Config = (
     assert.equal(requireRequest?.type, 'require');
     assert.equal(requireRequest?.rawSpecifier, './required.txt');
     assert.equal(requireRequest?.referrer, 'file:///bundle/common.cjs');
+  } finally {
+    await new Promise((resolve, reject) => {
+      fallback.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+const LEGACY_REDIRECT_WORKER = `
+${REJECTS}
+export const legacyRedirects = {
+  async test() {
+    // node:os is not a built-in at this compat date, so it goes to the fallback service.
+    await rejects(import('node:os'), 'No such module "node:os"');
+    await rejects(import('node:os'), 'No such module "node:os"');
+    await rejects(import('./self.js'), 'No such module "self.js"');
+    await rejects(import('./cycle-a.js'), 'No such module "cycle-a.js"');
+    await rejects(import('./cycle-a.js'), 'No such module "cycle-a.js"');
+    // The fallback service only sees the last segment of a node: specifier, so a relative
+    // redirect of node:grow yields /polyfills/node:grow, /polyfills/polyfills/node:grow, ...
+    await rejects(import('node:grow'), 'No such module "node:grow"');
+    await rejects(import('node:grow'), 'No such module "node:grow"');
+
+    const chained = await import('./chain.js');
+    if (chained.default !== 'chain end') {
+      throw new Error('Redirect chain returned the wrong value');
+    }
+  },
+};
+`;
+
+test('legacy module registry stops at fallback redirect cycles', async () => {
+  const requests = [];
+
+  const fallback = createServer((request, response) => {
+    const url = new URL(request.url, 'http://fallback.invalid');
+    const specifier = url.searchParams.get('specifier');
+    requests.push(specifier);
+
+    const redirects = {
+      'node:os': '/node:os',
+      'node:grow': 'polyfills/node:grow',
+      '/self.js': '/self.js',
+      '/cycle-a.js': '/cycle-b.js',
+      '/cycle-b.js': '/cycle-a.js',
+      '/chain.js': '/chain-mid.js',
+      '/chain-mid.js': '/chain-end.js',
+    };
+    if (specifier in redirects) {
+      response.writeHead(301, { location: redirects[specifier] });
+      response.end();
+    } else if (specifier === '/chain-end.js') {
+      sendJson(response, { esModule: "export default 'chain end';" });
+    } else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    fallback.once('error', reject);
+    fallback.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = fallback.address();
+    assert(address && typeof address !== 'string');
+    const directory = await mkdtemp(
+      join(env.TEST_TMPDIR, 'module-fallback-redirects-')
+    );
+    const configPath = join(directory, 'config.capnp');
+    await writeFile(join(directory, 'main.js'), LEGACY_REDIRECT_WORKER);
+    await writeFile(
+      configPath,
+      `using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "legacy",
+    worker = (
+      modules = [(name = "main.js", esModule = embed "main.js")],
+      compatibilityDate = "2025-06-01",
+      compatibilityFlags = ["nodejs_compat", "legacy_module_registry"],
+      moduleFallback = "127.0.0.1:${address.port}",
+    ),
+  )],
+);
+`
+    );
+
+    const result = await runWorkerd(configPath);
+    assert.equal(
+      result.code,
+      0,
+      `workerd exited with code=${result.code}, signal=${result.signal}:\n${result.output}`
+    );
+
+    // Each redirect is cached and a cycle stops before asking again, so every specifier reaches
+    // the fallback service once, and importing a specifier a second time does not reach it at
+    // all. The growing node:grow chain stops after 32 redirects, so it asks 33 times.
+    assert.deepEqual(requests, [
+      'node:os',
+      '/self.js',
+      '/cycle-a.js',
+      '/cycle-b.js',
+      ...Array(33).fill('node:grow'),
+      '/chain.js',
+      '/chain-mid.js',
+      '/chain-end.js',
+    ]);
   } finally {
     await new Promise((resolve, reject) => {
       fallback.close((error) => (error ? reject(error) : resolve()));

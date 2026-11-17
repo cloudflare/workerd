@@ -27,7 +27,7 @@ def wd_ts_bundle(
         lint = True,
         deps = [],
         js_deps = [],
-        gen_compile_cache = False,
+        gen_compile_cache = True,
         out_dir = ""):
     """Compiles typescript modules and generates api bundle with the result.
 
@@ -46,7 +46,7 @@ def wd_ts_bundle(
       internal_json_modules: list of json source files
       lint: enables/disables source linting
       deps: additional typescript dependencies
-      gen_compile_cache: generate compilation cache of every file and include into the bundle
+      gen_compile_cache: generate compilation cache of every file and include into the bundle (default True)
       js_deps: javascript dependencies
     """
     ts_config(

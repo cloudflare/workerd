@@ -5,7 +5,7 @@ wd_rust_crate(
     cxx_bridge_src = "ffi.rs",
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:serde",
-        "@crates_vendor//:serde_json",
+        "@crates_vendor//serde",
+        "@crates_vendor//serde_json",
     ],
 )

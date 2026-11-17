@@ -13,7 +13,7 @@ rust_library(
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
         "//src/rust/cxx/kj-rs-tokio",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//tokio",
     ],
 )
 

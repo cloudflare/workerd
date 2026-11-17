@@ -296,6 +296,14 @@ wpt_test(
     wpt_directory = "@wpt//:webidl@module",
 )
 
+# The TypeScript DOMException, against the same expectations.
+wpt_test(
+    name = "webidl-ts",
+    autogates = ["workerd-autogate-ts-dom-exception"],
+    config = "webidl-test.ts",
+    wpt_directory = "@wpt//:webidl@module",
+)
+
 wpt_test(
     name = "wasm/jsapi",
     size = "large",
@@ -349,4 +357,16 @@ wpt_test(
     # /html/webappapis/structured-clone/structured-clone-battery-of-tests.js
     extra_wpt_directories = ["@wpt//:html/webappapis/structured-clone@module"],
     wpt_directory = "@wpt//:html/webappapis/structured-clone@module",
+)
+
+wpt_test(
+    name = "xhr/formdata",
+    config = "xhr/formdata-test.ts",
+    wpt_directory = "@wpt//:xhr/formdata@module",
+)
+
+wpt_test(
+    name = "html/webappapis/system-state-and-capabilities/the-navigator-object",
+    config = "html/webappapis/system-state-and-capabilities/the-navigator-object-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/system-state-and-capabilities/the-navigator-object@module",
 )

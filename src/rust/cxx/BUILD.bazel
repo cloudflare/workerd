@@ -23,7 +23,7 @@ rust_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:foldhash",
+        "@crates_vendor//foldhash",
     ],
 )
 
@@ -45,9 +45,9 @@ rust_library(
     crate_root = "syntax/mod.rs",
     edition = "2024",
     deps = [
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -62,10 +62,10 @@ rust_library(
     edition = "2024",
     deps = [
         ":syntax",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//codespan-reporting",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -88,11 +88,8 @@ rust_binary(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:clap",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//clap",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -121,16 +118,14 @@ rust_proc_macro(
     srcs = glob(["macro/src/*.rs"]),
     edition = "2024",
     proc_macro_deps = [
-        "@crates_vendor//:rustversion",
+        "@crates_vendor//rustversion",
     ],
     target_compatible_with = PROC_MACRO_TARGET_COMPATIBLE_WITH,
-    visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
-        ":gen",
         ":syntax",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//quote",
+        "@crates_vendor//syn",
     ],
 )
 
@@ -147,11 +142,7 @@ rust_library(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:cc",
-        "@crates_vendor//:codespan-reporting",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//cc",
     ],
 )
 
@@ -170,10 +161,8 @@ rust_library(
     deps = [
         ":gen",
         ":syntax",
-        "@crates_vendor//:cc",
-        "@crates_vendor//:proc-macro2",
-        "@crates_vendor//:quote",
-        "@crates_vendor//:syn",
+        "@crates_vendor//proc-macro2",
+        "@crates_vendor//syn",
     ],
 )
 

@@ -11,11 +11,7 @@
 
 import { _createPyodideModule } from 'pyodideRuntime-internal:pyodide.asm';
 
-import {
-  setGetRandomValues,
-  setSetTimeout,
-  finishSetup,
-} from 'pyodide-internal:builtin_wrappers';
+import { finishSetup } from 'pyodide-internal:builtin_wrappers';
 
 import { getJsvErrorImport } from 'pyodide-internal:sentinel';
 
@@ -250,8 +246,6 @@ export async function instantiateEmscriptenModule(
 
   // Wait until we've executed all the preRun hooks before proceeding
   const emscriptenModule = await emscriptenSettings.readyPromise;
-  emscriptenModule.setGetRandomValues = setGetRandomValues;
-  emscriptenModule.setSetTimeout = setSetTimeout;
   finishSetup();
   return emscriptenModule;
 }

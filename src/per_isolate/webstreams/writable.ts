@@ -91,7 +91,11 @@ const kCloseMarker: symbol = Symbol('close');
 // workerd extension consumed only by the C++ bridge (cppExports below); it
 // resolves once every write queued ahead of it has completed, mirroring the
 // legacy WritableStreamInternalController's Flush write-event. Never
-// user-visible.
+// user-visible. When the marker reaches the head of the queue, a native
+// sink's flush hook (WritableStreamNativeSink::flush) may return a promise:
+// in a Durable Object, the output gate's wait. The marker stays at the head
+// until it settles, holding back everything queued behind it, as the legacy
+// Flush event does when it waits for its output lock.
 const kFlushMarker: symbol = Symbol('flush');
 
 // A sink write() rejection wrapped in this marker rejects the WRITE
@@ -503,9 +507,9 @@ class WritableStream<W = unknown> {
       );
     };
 
-    // Includes writes queued before the controller has started. A flush
-    // marker is only ever queued behind a write, so when this is false no
-    // flush is pending either.
+    // Includes writes queued before the controller has started. Ignores
+    // flush markers, which do no sink I/O; a native sink's flush can be
+    // pending with no write ahead of it (see kFlushMarker).
     writableStreamWriteQueuedOrInFlight = (stream) => {
       return (
         stream.#writeRequests.length > 0 ||
@@ -949,6 +953,14 @@ class WritableStreamDefaultController<
   #writeHook: Function | undefined;
   #closeHook: Function | undefined;
   #abortHook: Function | undefined;
+  // A native sink's flush member (see kFlushMarker), called on the sink by
+  // #callFlush. Never read from a user sink: flush is not an UnderlyingSink
+  // member.
+  #flushHook: Function | undefined;
+  // Set while the flush marker at the head of the queue waits on the flush
+  // hook's promise. Nothing queued behind the marker reaches the sink until
+  // the wait ends.
+  #flushPending = false;
   // The controller behind `signal`, created when `signal` is first read:
   // until then no code can hold the signal, listen to it, or read its
   // reason, so an abort only records that it happened. An AbortController
@@ -1031,15 +1043,19 @@ class WritableStreamDefaultController<
     // The flush extension (C++ bridge only; see kFlushMarker). Positional
     // semantics, mirroring the legacy controller's Flush write-event: the
     // returned promise settles once every write queued AHEAD of the marker
-    // has completed. Writes enqueued after the flush do not delay it.
+    // has completed and the sink's flush hook, if any, has finished waiting.
+    // Writes enqueued after the flush do not delay it.
     controllerFlush = <W>(
       controller: WritableStreamDefaultController<W>
     ): Promise<void> => {
       // An empty queue means nothing is in flight either: a write stays at
       // the queue head until it settles, and the caller
       // (writableStreamFlush) has already rejected the queued/in-flight
-      // close cases.
-      if (controller.#queue.length === 0) {
+      // close cases. A flush hook still runs, from the head of the queue.
+      if (
+        controller.#queue.length === 0 &&
+        controller.#flushHook === undefined
+      ) {
         return PromiseResolve();
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
@@ -1126,6 +1142,9 @@ class WritableStreamDefaultController<
     this.#writeHook = writeFn;
     this.#closeHook = closeFn;
     this.#abortHook = abortFn;
+    if (isNativeUnderlyingSink(underlyingSink)) {
+      this.#flushHook = (underlyingSink as { flush?: Function }).flush;
+    }
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -1188,6 +1207,7 @@ class WritableStreamDefaultController<
     this.#writeHook = undefined;
     this.#closeHook = undefined;
     this.#abortHook = undefined;
+    this.#flushHook = undefined;
     this.#sizeAlgorithm = undefined;
   }
 
@@ -1230,6 +1250,19 @@ class WritableStreamDefaultController<
     }
   }
 
+  // Unlike the others, returns undefined when there is nothing to wait for,
+  // so that such a flush completes in the same turn.
+  #callFlush(): Promise<void> | undefined {
+    const hook = this.#flushHook;
+    if (hook === undefined) return undefined;
+    try {
+      return FunctionPrototypeCall(hook, this.#underlyingSink) as
+        Promise<void> | undefined;
+    } catch (e) {
+      return PromiseReject(e);
+    }
+  }
+
   #advanceQueueIfNeeded(): void {
     if (!this.#started) return;
     const stream = this.#stream;
@@ -1240,6 +1273,7 @@ class WritableStreamDefaultController<
       writableStreamFinishErroringIfNeeded(stream);
       return;
     }
+    if (this.#flushPending) return;
     const head = this.#queue.peek();
     if (head === undefined) return;
     if (head.value === kCloseMarker) {
@@ -1253,9 +1287,42 @@ class WritableStreamDefaultController<
 
   #processFlush(): void {
     // Every write ahead of the marker has completed (queue processing is
-    // strictly serial); the marker itself involves no sink operation.
-    const entry = this.#queue.shift() as QueuedWrite<W>;
-    (entry.flushRequest as PromiseWithResolversType<void>).resolve();
+    // strictly serial).
+    const entry = this.#queue.peek() as QueuedWrite<W>;
+    const request = entry.flushRequest as PromiseWithResolversType<void>;
+    const wait = this.#callFlush();
+    if (wait === undefined) {
+      this.#completeFlush(request.resolve);
+      return;
+    }
+    // The marker stays at the head while the hook waits. An error, abort or
+    // detach meanwhile drops it with the queue, rejecting the request, and
+    // the wait's settlement is then ignored.
+    this.#flushPending = true;
+    PromisePrototypeThen(
+      wait,
+      () => {
+        this.#flushPending = false;
+        if (this.#queue.peek() === entry) {
+          this.#completeFlush(request.resolve);
+        }
+      },
+      (e: unknown) => {
+        this.#flushPending = false;
+        if (this.#queue.peek() === entry) {
+          this.#completeFlush(() => {
+            request.reject(e);
+          });
+        }
+      }
+    );
+  }
+
+  // Dequeues the flush marker at the head and settles its request before
+  // anything queued behind it can reach the sink.
+  #completeFlush(settle: () => void): void {
+    this.#queue.shift();
+    settle();
     // Consecutive markers (or a close queued behind the flush) continue
     // processing in the same turn.
     this.#advanceQueueIfNeeded();
@@ -1722,8 +1789,9 @@ function writableStreamClose<W>(stream: WritableStream<W>): Promise<void> {
 //   closed or closing -> reject TypeError "This WritableStream has been
 //     closed." (exact text);
 //   errored / erroring -> reject with the stored error;
-//   otherwise resolve once every write queued at call time has completed,
-//   rejecting if the stream errors first.
+//   otherwise resolve once every write queued at call time has completed
+//   and, for a native sink, the Durable Object output gate has opened (see
+//   kFlushMarker), rejecting if the stream errors or is aborted first.
 // Delta from legacy (flag-guarded): no "currently being piped to" rejection
 // -- the TS pipe holds an ordinary writer lock rather than a queue-level
 // pipe event, so a mid-pipe forceFlush simply parks behind the pipe's

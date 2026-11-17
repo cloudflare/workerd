@@ -46,7 +46,7 @@ export const allFormatsChunkedWrites = {
   async test() {
     const original = 'Testing all compression formats with chunked data!';
     const bytes = enc.encode(original);
-    for (const format of ['gzip', 'deflate', 'deflate-raw']) {
+    for (const format of ['gzip', 'deflate', 'deflate-raw', 'brotli']) {
       const inChunks = [];
       for (let i = 0; i < bytes.length; i += 5) {
         inChunks.push(bytes.slice(i, Math.min(i + 5, bytes.length)));

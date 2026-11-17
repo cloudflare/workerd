@@ -137,7 +137,16 @@ crate.from_cargo(
     manifests = ["//deps/rust:Cargo.toml"],
     supported_platform_triples = RUST_TARGET_TRIPLES,
 )
+
+# Skip the root alias package (@crates_vendor//:<crate>); depending on it forces analysis of every
+# crate. Reference crates as @crates_vendor//<crate> instead.
+crate.render_config(
+    incompatible_no_root_alias_targets = True,
+)
 use_repo(
     crate,
     "crates_vendor",
+    # Binaries are not aliased from the hub repo with incompatible_no_root_alias_targets, so
+    # capnpc-rust is referenced from its crate repo directly.
+    "crates_vendor__capnpc-0.27.0",
 )

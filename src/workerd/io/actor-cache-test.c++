@@ -497,6 +497,34 @@ KJ_TEST("ActorCache more deletes") {
   KJ_ASSERT(expectCached(test.get("foo")) == kj::none);
 }
 
+KJ_TEST("ActorCache getMultiple with word-aligned keys") {
+  // Regression test: the response keys were once viewed as StringPtrs, which require a
+  // NUL-terminated buffer. A key whose length is a multiple of 8 is followed immediately by
+  // the next blob in the message, so the requirement read past the key into unrelated bytes.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  const kj::StringPtr keyArray[] = {"12345678", "abcdefgh"};
+  auto promise = expectUncached(test.get(keyArray));
+
+  mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = [ "12345678", "abcdefgh" ]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {
+    stream
+        .call("values",
+            CAPNP(list = [ (key = "12345678", value = "one"), (key = "abcdefgh", value = "two") ]))
+        .expectReturns(CAPNP(), ws);
+    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+  }).expectCanceled();
+
+  auto results = promise.wait(ws);
+  KJ_ASSERT(results == kvs({{"12345678", "one"}, {"abcdefgh", "two"}}));
+
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("12345678"))) == "one");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("abcdefgh"))) == "two");
+}
+
 KJ_TEST("ActorCache more multi-puts") {
   ActorCacheTest test;
   auto& ws = test.ws;

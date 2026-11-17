@@ -967,6 +967,8 @@ struct Onset final {
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
+  // Estimates the memory that this onset owns on the heap, not counting itself.
+  size_t size() const;
 };
 
 // Helper functions to copy onset info to/from rpc reader
@@ -1381,6 +1383,11 @@ class SpanBuilder {
 // ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
+  // Returns a new kj::Rc reference to this observer.
+  [[nodiscard]] kj::Rc<SpanObserver> addRef() {
+    return addRefToThis();
+  }
+
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.

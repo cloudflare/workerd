@@ -150,14 +150,16 @@ export const valueGetterThrows = {
     strictEqual(err.message, 'r');
     strictEqual(err.retryable, true);
 
-    // A DOMException's detail string is empty, so it becomes a DataCloneError.
-    err = await readThrowing(
-      'getter',
-      new DOMException('m', 'AbortError')
-    ).catch((e) => e);
-    ok(err instanceof DOMException);
-    strictEqual(err.name, 'DataCloneError');
-    strictEqual(err.message, 'failed to serialize object');
+    // A DOMException becomes a DataCloneError, including one whose name
+    // JavaScript has read, which kj::str() of the C++ DOMException then shows.
+    const named = new DOMException('m', 'AbortError');
+    strictEqual(named.name, 'AbortError');
+    for (const exception of [new DOMException('m', 'AbortError'), named]) {
+      err = await readThrowing('getter', exception).catch((e) => e);
+      ok(err instanceof DOMException);
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.message, 'failed to serialize object');
+    }
   },
 };
 
@@ -580,6 +582,45 @@ export const fallbackResultReadAsReturned = {
       (err) => err === thrown
     );
     env.CACHE.delete('readAsReturned');
+  },
+};
+
+export const domExceptionValues = {
+  async test(ctrl, env) {
+    // A DOMException in a value is cached as one, with its name, message and stack.
+    const error = new DOMException('m', 'AbortError');
+    await env.CACHE.read('domException', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('domException', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'AbortError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.code, 20);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('domException');
+  },
+};
+
+export const quotaExceededErrorValues = {
+  async test(ctrl, env) {
+    // QuotaExceededError is defined only under the TS_DOM_EXCEPTION autogate.
+    const { QuotaExceededError } = globalThis;
+    if (QuotaExceededError === undefined) return;
+    // An instance of a class implemented in JavaScript is cached as one, with its data.
+    const error = new QuotaExceededError('m', { quota: 1, requested: 2 });
+    await env.CACHE.read('quotaExceededError', () => ({ value: { error } }));
+    const { error: cached } = await env.CACHE.read('quotaExceededError', () => {
+      throw new Error('should not be called');
+    });
+    ok(cached instanceof QuotaExceededError);
+    ok(cached instanceof DOMException);
+    strictEqual(cached.name, 'QuotaExceededError');
+    strictEqual(cached.message, 'm');
+    strictEqual(cached.quota, 1);
+    strictEqual(cached.requested, 2);
+    strictEqual(cached.stack, error.stack);
+    env.CACHE.delete('quotaExceededError');
   },
 };
 

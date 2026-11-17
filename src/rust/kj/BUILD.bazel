@@ -1,5 +1,6 @@
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
@@ -15,13 +16,21 @@ wd_rust_crate(
         ":ffi",
     ],
     proc_macro_deps = [
-        "@crates_vendor//:async-trait",
+        "@crates_vendor//async-trait",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:futures",
-        "@crates_vendor//:static_assertions",
+        "@crates_vendor//futures",
+        "@crates_vendor//static_assertions",
     ],
+)
+
+# Snippets that must not compile against kj; each annotates the errors it expects. See
+# build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    deps = [":kj"],
 )
 
 wd_cc_library(

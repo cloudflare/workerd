@@ -583,6 +583,7 @@ thread_local! {
 static OWNED_DROPPED: AtomicBool = AtomicBool::new(false);
 
 /// Sets `OWNED_DROPPED` when dropped, and counts its uses.
+#[jsg_macros::jsg_traced]
 struct DropFlag {
     uses: i32,
 }
