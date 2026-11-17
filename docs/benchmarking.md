@@ -5,6 +5,10 @@ We use a combination of micro and macro benchmarks for performance testing worke
 Benchmarks should be built using `--config=benchmark` configuration, which builds a release
 binary with additional debug info.
 
+On Linux, add `--config=cross-lto`, as the `just` recipes do: Rust then takes part in ThinLTO, so
+calls between crates and between Rust and C++ can be inlined. Without it only C++ is optimized at
+link time, which puts Rust at a disadvantage in a comparison with C++.
+
 To obtain most consistent results it is recommended to disable CPU frequency scaling
 (use "performance" governor https://wiki.debian.org/CpuFrequencyScaling)
 

@@ -244,9 +244,13 @@ build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebuginfo=1
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 
-# Adding -C lto=thin here would improve binary size significantly – disable it for now due to
-# compile errors and wrong code generation when bazel and rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
+
+# Cross-language LTO, an addition to thin-lto: Rust crates emit LLVM bitcode instead of machine
+# code, so lld's ThinLTO optimizes Rust and C++ together. For toolchains where lld links (Linux)
+# and can read rustc's bitcode: rustc's LLVM (`rustc -vV`) must share lld's major version and not
+# be newer. macOS and Windows link with the host's linker, which does not track rustc's LLVM.
+build:cross-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 # common sanitizers options
 build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
