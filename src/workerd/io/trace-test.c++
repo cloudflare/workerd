@@ -795,6 +795,29 @@ KJ_TEST("Onset size counts what it owns") {
   KJ_EXPECT(empty.size() == 0);
 }
 
+KJ_TEST("Onset size counts array attribute contents") {
+  auto filled = [](size_t size) {
+    auto result = kj::heapString(size);
+    std::fill(result.begin(), result.end(), 'x');
+    return result;
+  };
+  auto strings = kj::heapArray<kj::Maybe<kj::ConstString>>(3);
+  strings[0] = kj::ConstString(filled(1000));
+  strings[2] = kj::ConstString(filled(2000));
+  auto doubles = kj::heapArray<kj::Maybe<double>>(100);
+
+  auto onsetSize = [](kj::Array<Attribute> attributes) {
+    return Onset(staticSpanId, Onset::Info(CustomEventInfo()), {}, kj::mv(attributes)).size();
+  };
+  size_t emptyArrays = onsetSize(kj::arr(
+      Attribute("s"_kjc, AttributeStringArray()), Attribute("d"_kjc, AttributeDoubleArray())));
+  size_t filledArrays =
+      onsetSize(kj::arr(Attribute("s"_kjc, kj::mv(strings)), Attribute("d"_kjc, kj::mv(doubles))));
+
+  // Both string elements and every element slot are owned by the onset.
+  KJ_EXPECT(filledArrays >= emptyArrays + 3000 + 100 * sizeof(kj::Maybe<double>));
+}
+
 KJ_TEST("Read/Write Outcome works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
