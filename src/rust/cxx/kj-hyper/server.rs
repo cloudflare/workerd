@@ -101,10 +101,10 @@ use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::WebSocketCompression;
 use crate::ffi::WebSocketErrorHandler;
+use crate::ffi::method_allowed;
 use crate::ffi::new_body_stream;
 use crate::ffi::new_connect_response;
 use crate::ffi::new_server_response;
-use crate::ffi::parse_method;
 use crate::handshake::accept_key;
 use crate::io::Hangup;
 use crate::io::RustIo;
@@ -127,6 +127,9 @@ pub struct ServerSettings {
     /// Turns a WebSocket protocol error into the exception `receive()` fails with; kj's default
     /// when `None`.
     pub websocket_errors: Option<KjOwn<WebSocketErrorHandler>>,
+    /// Whether a request whose method is outside kj's list, but one `kj::HttpMethod::tryParse()`
+    /// accepts, reaches the handler (kj's `allowOtherMethods`); otherwise it gets kj's 501.
+    pub allow_other_methods: bool,
 }
 
 impl Default for ServerSettings {
@@ -135,6 +138,7 @@ impl Default for ServerSettings {
             header_timeout: Duration::from_secs(15),
             websocket_compression: WebSocketCompression::NONE,
             websocket_errors: None,
+            allow_other_methods: false,
         }
     }
 }
@@ -415,8 +419,8 @@ async fn handle(
             .connect(host.as_bytes(), HeadersRef::from(&*headers), connect)
             .await
     } else {
-        let mut method = Method::GET;
-        if !parse_method(parts.method.as_str().as_bytes(), &mut method) {
+        let name = parts.method.as_str().as_bytes();
+        if !method_allowed(name, conn.settings.allow_other_methods) {
             let _ = sender.send_error(
                 501,
                 b"Not Implemented",
@@ -428,14 +432,14 @@ async fn handle(
         let mut body = new_body_stream(Box::new(RustBody::new(body)));
         let mut response = new_server_response(
             Box::new(ServerResponse(Rc::clone(&sender))),
-            method,
+            name,
             &headers,
             conn.settings.websocket_compression,
             conn.settings.websocket_errors(),
         );
         conn.handler
             .request(
-                method,
+                parts.method,
                 url.as_bytes(),
                 HeadersRef::from(&*headers),
                 body.as_mut(),

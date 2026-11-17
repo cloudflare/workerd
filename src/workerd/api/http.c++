@@ -332,8 +332,35 @@ Request::CacheMode Request::getCacheMode() {
   return cacheMode;
 }
 
+namespace {
+
+// The method that new Request() and fetch() use for `name`: a method outside kj's list
+// (KJ_HTTP_FOR_EACH_METHOD) such as BLOCK, or, without upper_case_all_http_methods, a spelling of
+// a listed method other than the six names the Fetch spec uppercases, such as "patch". It's kept
+// exactly as written, or uppercased if `upperCase` is set, as upper_case_all_http_methods does for
+// listed names, so that it doesn't change when kj starts listing it. That needs the
+// OTHER_HTTP_METHODS autogate and a name that kj::HttpMethod::tryParse() accepts, and the method
+// must not be CONNECT, TRACE or TRACK, in any letter case, which the Fetch spec forbids. (TRACE as
+// listed, or in any spelling with upper_case_all_http_methods, is accepted before getting here, as
+// it always has been.)
+kj::Maybe<kj::HttpMethod> acceptOtherMethod(kj::StringPtr name, bool upperCase) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::OTHER_HTTP_METHODS)) return kj::none;
+  auto upper = toUpper(name);
+  if (upper == "CONNECT"_kj || upper == "TRACE"_kj || upper == "TRACK"_kj) return kj::none;
+  return kj::HttpMethod::tryParse(upperCase ? kj::StringPtr(upper) : name);
+}
+
+}  // namespace
+
 jsg::Ref<Request> Request::constructor(
     jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init) {
+  return constructorImpl(js, kj::mv(input), kj::mv(init), false);
+}
+
+jsg::Ref<Request> Request::constructorImpl(jsg::Lock& js,
+    Request::Info input,
+    jsg::Optional<Request::Initializer> init,
+    bool deserializing) {
   kj::String url;
   kj::HttpMethod method = kj::HttpMethod::GET;
   kj::Maybe<jsg::Ref<Headers>> headers;
@@ -430,28 +457,45 @@ jsg::Ref<Request> Request::constructor(
           // The Fetch spec forbids CONNECT, in any case.
           JSG_REQUIRE(
               toUpper(m) != "CONNECT", TypeError, kj::str("Invalid HTTP method string: ", m));
-          KJ_IF_SOME(code, tryParseHttpMethod(m)) {
+          kj::Maybe<kj::HttpMethod> deserialized;
+          if (deserializing) {
+            // Keep it as it is, without normalizing its case: see constructorImpl() in http.h.
+            deserialized = kj::HttpMethod::tryParse(m);
+          }
+          bool upperCaseAll = FeatureFlags::get(js).getUpperCaseAllHttpMethods();
+          KJ_IF_SOME(d, deserialized) {
+            method = d;
+          } else KJ_IF_SOME(code, tryParseHttpMethod(m)) {
             method = code;
           } else KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {
             method = code;
-            if (!FeatureFlags::get(js).getUpperCaseAllHttpMethods()) {
+            if (!upperCaseAll) {
               // This is actually the spec defined behavior. We're expected to only
               // upper case get, post, put, delete, head, and options per the spec.
               // Other methods, even if they would be recognized if they were uppercased,
-              // are supposed to be rejected.
+              // are not uppercased: acceptOtherMethod() keeps them as written when methods
+              // outside kj's list are enabled, and otherwise they're rejected. Keeping them
+              // means that adding a method to kj's list doesn't change how its other spellings
+              // behave.
               // Refs: https://fetch.spec.whatwg.org/#methods
-              switch (method) {
-                case kj::HttpMethod::GET:
-                case kj::HttpMethod::POST:
-                case kj::HttpMethod::PUT:
-                case kj::HttpMethod::DELETE:
-                case kj::HttpMethod::HEAD:
-                case kj::HttpMethod::OPTIONS:
+              switch (method.known()) {
+                case kj::HttpMethod::Known::GET:
+                case kj::HttpMethod::Known::POST:
+                case kj::HttpMethod::Known::PUT:
+                case kj::HttpMethod::Known::DELETE:
+                case kj::HttpMethod::Known::HEAD:
+                case kj::HttpMethod::Known::OPTIONS:
                   break;
                 default:
-                  JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+                  KJ_IF_SOME(other, acceptOtherMethod(m, upperCaseAll)) {
+                    method = other;
+                  } else {
+                    JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+                  }
               }
             }
+          } else KJ_IF_SOME(other, acceptOtherMethod(m, upperCaseAll)) {
+            method = other;
           } else {
             JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
           }
@@ -560,7 +604,7 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
-kj::StringPtr Request::getMethod() {
+kj::ArrayPtr<const char> Request::getMethod() {
   return kj::toCharSequence(method);
 }
 kj::StringPtr Request::getUrl() {
@@ -850,7 +894,7 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  return constructorImpl(js, kj::mv(url), kj::mv(init), true);
 }
 
 // =======================================================================================

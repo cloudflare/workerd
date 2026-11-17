@@ -76,18 +76,64 @@ impl Handler for Echo<'_> {
     }
 }
 
+/// Answers every request with an empty 200, keeping each request's method.
+struct Methods<'t> {
+    table: &'t HeaderTable,
+    seen: RefCell<Vec<Method>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl Handler for Methods<'_> {
+    async fn request<'a>(
+        &'a self,
+        method: Method,
+        _url: &'a [u8],
+        _headers: HeadersRef<'a>,
+        _body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> Result<()> {
+        self.seen.borrow_mut().push(method);
+        response.send(200, "OK", &Headers::new(self.table), Some(0))?;
+        Ok(())
+    }
+
+    async fn connect<'a>(
+        &'a self,
+        _host: &'a [u8],
+        _headers: HeadersRef<'a>,
+        _connect: Connect,
+    ) -> Result<()> {
+        unreachable!("no test sends a CONNECT")
+    }
+}
+
 /// Serves `request` and returns what the peer read until the server closed the connection.
 fn exchange(request: &[u8]) -> String {
     let table = table();
+    serve(request, &table, Rc::new(Echo(&table)))
+}
+
+/// [`exchange`], with the given handler.
+fn serve<'t>(request: &[u8], table: &'t HeaderTable, handler: Rc<dyn Handler + 't>) -> String {
+    serve_with(request, table, handler, ServerSettings::default())
+}
+
+/// [`serve`], with the given settings.
+fn serve_with<'t>(
+    request: &[u8],
+    table: &'t HeaderTable,
+    handler: Rc<dyn Handler + 't>,
+    settings: ServerSettings,
+) -> String {
     runtime().block_on(async {
         let (ours, mut peer) = duplex(1 << 16);
         let shutdown = Shutdown::new();
         let served = serve_connection(
             ours,
             Box::pin(pending()),
-            &table,
-            Rc::new(ServerSettings::default()),
-            Rc::new(Echo(&table)),
+            table,
+            Rc::new(settings),
+            handler,
             &shutdown,
         );
         let client = async {
@@ -129,13 +175,84 @@ fn a_failed_call_is_answered_with_a_bare_500_and_closes_the_connection() {
     );
 }
 
+/// Settings that let methods outside kj's list through.
+fn allowing_other_methods() -> ServerSettings {
+    ServerSettings {
+        allow_other_methods: true,
+        ..ServerSettings::default()
+    }
+}
+
 #[test]
-fn an_unknown_method_is_refused() {
-    let response = exchange(b"BREW /pot HTTP/1.1\r\nHost: example.com\r\n\r\n");
+fn a_method_kj_does_not_know_by_name_is_answered_with_501_by_default() {
+    let table = table();
+    let methods = Rc::new(Methods {
+        table: &table,
+        seen: RefCell::default(),
+    });
+    let request = b"BREW /pot HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    let response = serve(request, &table, methods.clone());
     assert!(
         response.starts_with("HTTP/1.1 501 Not Implemented\r\n"),
         "{response}"
     );
+    assert!(methods.seen.borrow().is_empty());
+}
+
+#[test]
+fn a_method_kj_does_not_know_by_name_reaches_the_handler_with_allow_other_methods() {
+    let table = table();
+    let methods = Rc::new(Methods {
+        table: &table,
+        seen: RefCell::default(),
+    });
+    let request = b"BREW /pot HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    let response = serve_with(request, &table, methods.clone(), allowing_other_methods());
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert_eq!(
+        *methods.seen.borrow(),
+        [Method::from_bytes(b"BREW").unwrap()]
+    );
+}
+
+#[test]
+fn another_spelling_of_a_method_kj_knows_is_a_method_of_its_own() {
+    let table = table();
+    let methods = Rc::new(Methods {
+        table: &table,
+        seen: RefCell::default(),
+    });
+    // Method names are case-sensitive: this is not GET.
+    let request = b"get /pot HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    let response = serve_with(request, &table, methods.clone(), allowing_other_methods());
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert_eq!(
+        *methods.seen.borrow(),
+        [Method::from_bytes(b"get").unwrap()]
+    );
+}
+
+#[test]
+fn a_method_name_kj_refuses_is_answered_with_501_and_never_reaches_the_handler() {
+    let table = table();
+    let methods = Rc::new(Methods {
+        table: &table,
+        seen: RefCell::default(),
+    });
+    // kj takes method names of up to 22 characters.
+    let name = "X".repeat(23);
+    let request = format!("{name} /pot HTTP/1.1\r\nHost: example.com\r\n\r\n");
+    let response = serve_with(
+        request.as_bytes(),
+        &table,
+        methods.clone(),
+        allowing_other_methods(),
+    );
+    assert!(
+        response.starts_with("HTTP/1.1 501 Not Implemented\r\n"),
+        "{response}"
+    );
+    assert!(methods.seen.borrow().is_empty());
 }
 
 #[test]

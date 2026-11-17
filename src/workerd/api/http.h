@@ -897,7 +897,7 @@ class Request final: public Body {
 
   jsg::Ref<Request> clone(jsg::Lock& js);
 
-  kj::StringPtr getMethod();
+  kj::ArrayPtr<const char> getMethod();
   kj::StringPtr getUrl();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
   kj::StringPtr getRedirect();
@@ -1065,6 +1065,15 @@ class Request final: public Body {
   }
 
  private:
+  // Implements constructor(). With `deserializing`, it rebuilds a serialized Request (from JS RPC,
+  // storage or structuredClone()) and keeps any method kj::HttpMethod::tryParse() accepts as it is,
+  // without the checks and case normalization of new Request(): the Request may have come from the
+  // network, or have been built by a Worker with a different version or configuration.
+  static jsg::Ref<Request> constructorImpl(jsg::Lock& js,
+      Request::Info input,
+      jsg::Optional<Request::Initializer> init,
+      bool deserializing);
+
   kj::HttpMethod method;
   kj::String url;
   Redirect redirect;

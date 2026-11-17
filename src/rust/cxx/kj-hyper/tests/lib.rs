@@ -32,7 +32,6 @@ mod ffi {
 
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
-        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpService = kj::http::ffi::HttpService;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
         type ConnectResponse = kj::http::ffi::ConnectResponse;
@@ -103,7 +102,7 @@ mod ffi {
         fn take_peer(self: &mut TestClient) -> KjOwn<AsyncIoStream>;
         async unsafe fn request<'a>(
             self: &'a TestClient,
-            method: HttpMethod,
+            method: &'a [u8],
             url: &'a [u8],
             headers: &'a HttpHeaders,
             request_body: Pin<&'a mut AsyncInputStream>,

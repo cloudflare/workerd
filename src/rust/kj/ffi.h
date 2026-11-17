@@ -146,11 +146,23 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_name(
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncIoStream = kj::AsyncIoStream;
 using ConnectResponse = kj::HttpService::ConnectResponse;
-using HttpMethod = kj::HttpMethod;
 using HttpService = kj::HttpService;
 using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
 using WebSocket = kj::WebSocket;
+
+// Methods cross the bridge as names, which can carry any method. C++ passes `method.name()` to
+// Rust; an OTHER method's name is stored inside the kj::HttpMethod, so that object must outlive
+// the Rust call that gets the name.
+//
+// Parses a method name from Rust for a request. Rust's http::Method accepts names that kj refuses
+// (one longer than kj::HttpMethod::MAX_NAME_SIZE), and CONNECT, which a request can't carry, so
+// this throws for those.
+inline kj::HttpMethod httpMethodFromRust(::rust::Slice<const kj::byte> name) {
+  auto method = kj::HttpMethod::parse(kj::from<kj_rs::Rust>(name).asChars());
+  KJ_REQUIRE(method != kj::HttpMethod::CONNECT, "use connect() for CONNECT requests");
+  return method;
+}
 
 inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,
     uint32_t statusCode,
@@ -181,11 +193,12 @@ inline kj::Own<AsyncOutputStream> connect_response_reject(ConnectResponse& respo
 }
 
 inline kj::Promise<void> request(HttpService& service,
-    HttpMethod method,
+    ::rust::Slice<const kj::byte> methodName,
     ::rust::Slice<const kj::byte> url,
     const HttpHeaders& headers,
     AsyncInputStream& request_body,
     HttpServiceResponse& response) {
+  auto method = httpMethodFromRust(methodName);
   auto strUrl = kj::str(kj::from<kj_rs::Rust>(url).asChars());
   co_await service.request(method, strUrl, headers, request_body, response);
 }

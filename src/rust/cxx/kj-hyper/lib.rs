@@ -53,6 +53,12 @@
 //! Rust objects behind kj interfaces (`RustIo`, `RustBody`) are `Rc`s whose operations own a
 //! share, so a `kj::Own` dropped mid-operation dangles nothing.
 //!
+//! # Methods
+//!
+//! With `ServerSettings::allow_other_methods` the server serves any method
+//! `kj::HttpMethod::tryParse()` accepts, as kj's `HttpServer` does with `allowOtherMethods`;
+//! otherwise only the methods kj knows by name.
+//!
 //! # Dropped kj settings
 //!
 //! No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no caller-supplied `EntropySource`
