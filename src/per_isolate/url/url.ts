@@ -24,6 +24,7 @@ import type { InternalArrayHelpers } from './internal-array';
 import type { BlobExports } from '../blob/blob';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
+import type { TypeCheckHelpers } from '../type-checks';
 
 const {
   BlobPrototypeSlice,
@@ -57,6 +58,7 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
+const { isObject } = require('type-checks') as TypeCheckHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
 
 // Whether `value` is a Blob (a File included) of the implementation the
@@ -110,12 +112,6 @@ const kInvalidHref =
 
 // ---------------------------------------------------------------------------
 // WebIDL conversions
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
 
 // ToString, which throws for a Symbol, then lone surrogates to U+FFFD.
 function toUSVString(value: unknown): string {

@@ -253,6 +253,9 @@ declare const utils: {
   // Whether a BufferSource's buffer is resizable or growable by user code
   // (JsBufferSource::isResizable()).
   isResizableBufferSource(value: ArrayBuffer | ArrayBufferView): boolean;
+  // A string's bytes as JSG makes a kj::String of it: WTF-8, a lone
+  // surrogate as its own three bytes.
+  encodeWtf8(value: string): Uint8Array;
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

@@ -24,6 +24,7 @@
 import type { InternalArrayHelpers } from '../url/internal-array';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
+import type { TypeCheckHelpers } from '../type-checks';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
@@ -42,7 +43,6 @@ const {
   PromiseResolve,
   RangeError,
   RegExpPrototypeExec,
-  StringPrototypeCharCodeAt,
   StringPrototypeIsWellFormed,
   StringPrototypeToLowerCase,
   TextDecoder,
@@ -61,6 +61,7 @@ const {
 const {
   blobSizeLimit,
   blobStream,
+  encodeWtf8,
   getPrivateSymbol,
   isArrayBuffer,
   isArrayBufferView,
@@ -74,6 +75,7 @@ const { markAsRuntimeClass, setNameAndLength } =
 const { markStandIn, markUncloneable } =
   require('serialization') as SerializationHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
+const { isObject } = require('type-checks') as TypeCheckHelpers;
 
 // Shared with api/blob-bridge.c++.
 const kBytes = getPrivateSymbol('workerd:Blob:bytes');
@@ -136,12 +138,6 @@ type Part = object | ArrayBuffer | ArrayBufferView | string;
 
 // ---------------------------------------------------------------------------
 // Conversions, as JSG converts the C++ constructors' and slice()'s arguments.
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
 
 // The bytes of a Blob of this implementation, or undefined.
 function bytesOf(value: unknown): Uint8Array | undefined {
@@ -354,65 +350,13 @@ function copy(bytes: Uint8Array): Uint8Array {
 // so a lone surrogate is written as its own three bytes, as no well-formed
 // UTF-8 sequence is.
 
-function isLeadSurrogate(unit: number): boolean {
-  return unit >= 0xd800 && unit <= 0xdbff;
-}
-
-function isTrailSurrogate(unit: number): boolean {
-  return unit >= 0xdc00 && unit <= 0xdfff;
-}
-
 // `string` as WTF-8.
 function encodeString(string: string): Uint8Array {
+  // TextEncoder is faster, and writes a well-formed string the same way.
   if (StringPrototypeIsWellFormed(string)) {
     return TextEncoderEncode(getEncoder(), string);
   }
-  const length = string.length;
-  let size = 0;
-  for (let i = 0; i < length; i++) {
-    const unit = StringPrototypeCharCodeAt(string, i) as number;
-    if (unit < 0x80) {
-      size += 1;
-    } else if (unit < 0x800) {
-      size += 2;
-    } else if (
-      isLeadSurrogate(unit) &&
-      i + 1 < length &&
-      isTrailSurrogate(StringPrototypeCharCodeAt(string, i + 1) as number)
-    ) {
-      size += 4;
-      i++;
-    } else {
-      size += 3;
-    }
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (let i = 0; i < length; i++) {
-    let unit = StringPrototypeCharCodeAt(string, i) as number;
-    if (unit < 0x80) {
-      bytes[at++] = unit;
-    } else if (unit < 0x800) {
-      bytes[at++] = 0xc0 | (unit >> 6);
-      bytes[at++] = 0x80 | (unit & 0x3f);
-    } else if (
-      isLeadSurrogate(unit) &&
-      i + 1 < length &&
-      isTrailSurrogate(StringPrototypeCharCodeAt(string, i + 1) as number)
-    ) {
-      const trail = StringPrototypeCharCodeAt(string, ++i) as number;
-      unit = 0x10000 + ((unit - 0xd800) << 10) + (trail - 0xdc00);
-      bytes[at++] = 0xf0 | (unit >> 18);
-      bytes[at++] = 0x80 | ((unit >> 12) & 0x3f);
-      bytes[at++] = 0x80 | ((unit >> 6) & 0x3f);
-      bytes[at++] = 0x80 | (unit & 0x3f);
-    } else {
-      bytes[at++] = 0xe0 | (unit >> 12);
-      bytes[at++] = 0x80 | ((unit >> 6) & 0x3f);
-      bytes[at++] = 0x80 | (unit & 0x3f);
-    }
-  }
-  return bytes;
+  return encodeWtf8(string);
 }
 
 // `string` as JavaScript sees a string C++ keeps as WTF-8 bytes: decoded,
@@ -608,13 +552,13 @@ const kFileMembers = {
 // ---------------------------------------------------------------------------
 // The rest gives the constructors the shape JSG gives the C++ ones.
 
-// Defines `members` on `ctor.prototype` before its `constructor`, where JSG
-// defines them, each method named and of length 0, as JSG's are. Under the
-// legacy layout, the accessors are left out: the attributes are the
-// instances' own.
+// Defines `members` on `ctor.prototype`, each method named and of length 0,
+// as JSG's are. Under the legacy layout, the accessors are left out: the
+// attributes are the instances' own. The prototype keeps the `constructor`
+// the function was made with, which is already as JSG's is (writable,
+// configurable, not enumerable), though first rather than after the members.
 function shapePrototype(ctor: object, members: object, names: string[]): void {
   const proto = (ctor as { prototype: object }).prototype;
-  delete (proto as { constructor?: unknown }).constructor;
   for (let i = 0; i < names.length; i++) {
     const name = names[i] as string;
     const descriptor = ObjectGetOwnPropertyDescriptor(
@@ -628,13 +572,6 @@ function shapePrototype(ctor: object, members: object, names: string[]): void {
     }
     ObjectDefineProperty(proto, name, descriptor);
   }
-  ObjectDefineProperty(proto, 'constructor', {
-    __proto__: null,
-    value: ctor,
-    writable: true,
-    enumerable: false,
-    configurable: true,
-  } as PropertyDescriptor);
   if (compatFlags['immutable_api_prototypes'] === true) {
     ObjectDefineProperty(ctor, 'prototype', {
       __proto__: null,

@@ -63,4 +63,6 @@ Where the TypeScript implementation differs from the C++. A row is pinned on
 both sides: in JavaScript with a `usingTsImpl` branch, in C++ with
 `JsBlob::isTsImplementation()`.
 
-There are none: the suite runs the same assertions against both.
+| # | Area | C++ | TypeScript | Test |
+| --- | --- | --- | --- | --- |
+| 1 | Order of the prototypes' own keys | `constructor` after the members (where there are any: not `File.prototype`'s under the legacy layout) | `constructor` first, as a function's prototype has it | `api-surface.js` |

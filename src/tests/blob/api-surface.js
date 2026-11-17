@@ -8,6 +8,7 @@ import {
   onPrototype,
   setToStringTag,
   specCompliantPropertyAttributes,
+  usingTsImpl,
 } from 'which-impl';
 
 // A descriptor's shape: 'data:<typeof value>' or 'acc<G><S>', then e, c, w.
@@ -97,6 +98,16 @@ export const prototypeShape = {
       ...tag,
       ...kMarks,
     });
+    // Ledger #1. Under the legacy layout, File.prototype has no members, so
+    // its constructor comes first in both.
+    strictEqual(
+      Reflect.ownKeys(Blob.prototype)[0] === 'constructor',
+      usingTsImpl
+    );
+    strictEqual(
+      Reflect.ownKeys(File.prototype)[0] === 'constructor',
+      usingTsImpl || !onPrototype
+    );
     for (const name of ['slice', 'arrayBuffer', 'bytes', 'text', 'stream']) {
       strictEqual(Blob.prototype[name].name, name);
       strictEqual(Blob.prototype[name].length, 0);

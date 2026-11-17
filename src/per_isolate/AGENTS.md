@@ -35,6 +35,7 @@ at context creation, before any user code. C++ entry point:
   `blob/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
+- Shared type checks (`isObject()`) come from `type-checks`, a leaf.
 - Modules get `DOMException` from `require('dom-exception')`, which
   `main.ts` loads first, not from the global or `primordials`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob

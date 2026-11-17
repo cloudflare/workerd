@@ -38,6 +38,39 @@ export const construction = {
   },
 };
 
+// Strings that are not well-formed are written as WTF-8 (a lone surrogate
+// as its own three bytes), unlike TextEncoder, which writes U+FFFD.
+export const strings = {
+  bench(b) {
+    for (const length of [64, 8192]) {
+      const wellFormed = 'x\u00e9\u4e2d'.repeat(length / 4);
+      const loneSurrogate = `${'x'.repeat(length - 1)}\ud800`;
+      b.run(`new Blob([well-formed ${length}]) x${COUNT}`, () => {
+        let blob;
+        for (let i = 0; i < COUNT; i++) blob = new Blob([wellFormed]);
+        b.blackBox(blob);
+      });
+      b.run(`new Blob([lone surrogate ${length}]) x${COUNT}`, () => {
+        let blob;
+        for (let i = 0; i < COUNT; i++) blob = new Blob([loneSurrogate]);
+        b.blackBox(blob);
+      });
+    }
+  },
+};
+
+export const reading = {
+  bench(b) {
+    for (const length of [64, 8192]) {
+      const blob = new Blob(['x\u00e9'.repeat(length / 3)]);
+      b.run(`text() ${length}`, async () => b.blackBox(await blob.text()));
+      b.run(`arrayBuffer() ${length}`, async () =>
+        b.blackBox(await blob.arrayBuffer())
+      );
+    }
+  },
+};
+
 export const slicing = {
   bench(b) {
     const blob = new Blob([kText], { type: 'a/b' });

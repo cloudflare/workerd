@@ -480,6 +480,20 @@ static void IsResizableBufferSource(const v8::FunctionCallbackInfo<v8::Value>& a
   });
 }
 
+// A string's bytes as JSG makes a kj::String of it (JsString::toString()): WTF-8, so a lone
+// surrogate is written as its own three bytes.
+static void EncodeWtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    JSG_REQUIRE(args[0]->IsString(), TypeError, "encodeWtf8() expects a string");
+    auto string = args[0].As<v8::String>();
+    auto bytes = jsg::JsUint8Array::create(js, string->Utf8Length(js.v8Isolate));
+    auto out = bytes.asArrayPtr().asChars();
+    string->WriteUtf8(js.v8Isolate, out.begin(), out.size(), v8::String::WriteFlags::kNone);
+    return v8::Local<v8::Value>(bytes);
+  });
+}
+
 static void RecordBlobUse(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -647,6 +661,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "blobStream",
     "recordBlobUse",
     "isResizableBufferSource",
+    "encodeWtf8",
     "DOMExceptionBase",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
@@ -694,6 +709,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, BlobStream),
     getMethod(js, RecordBlobUse),
     getMethod(js, IsResizableBufferSource),
+    getMethod(js, EncodeWtf8),
     v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
   };
 

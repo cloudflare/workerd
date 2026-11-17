@@ -121,6 +121,7 @@ import type {
   UnderlyingSourceDict,
 } from './common';
 import type { SerializationHelpers } from '../serialization';
+import type { TypeCheckHelpers } from '../type-checks';
 const {
   isActualObject,
   kNullProtoObject,
@@ -144,6 +145,11 @@ const {
 } = require('webstreams/common') as CommonHelpers;
 
 const { markUncloneable } = require('serialization') as SerializationHelpers;
+// The spec's "Type(x) is Object", which includes callables, for the iterator
+// protocol's object checks in from() (GetIterator and IteratorNext accept
+// function-valued iterators and results). Distinct from isActualObject,
+// which deliberately excludes functions for option-bag validation.
+const { isObject } = require('type-checks') as TypeCheckHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
@@ -188,16 +194,6 @@ function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
 }
 
 const kPrivateSymbol = Symbol('private');
-
-// The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
-// protocol's object checks in from() (GetIterator/IteratorNext accept function-valued
-// iterators and results). Distinct from isActualObject, which deliberately excludes
-// functions for option-bag validation.
-function isObjectLike(value: unknown) {
-  return (
-    value !== null && (typeof value === 'object' || typeof value === 'function')
-  );
-}
 
 function assertPrivateSymbol(symbol: symbol) {
   if (symbol !== kPrivateSymbol) {
@@ -3443,7 +3439,7 @@ function openIterator(
   method: IteratorMethod
 ): { iterator: object; next: BoundNext } {
   const iterator: unknown = FunctionPrototypeCall(method, iterable);
-  if (!isObjectLike(iterator)) {
+  if (!isObject(iterator)) {
     throw new TypeError('The iterator method must return an object');
   }
   const next = (iterator as { next?: unknown }).next;
@@ -3462,7 +3458,7 @@ function iteratorNext(iterator: object, next: BoundNext): object {
     throw new TypeError('The iterator next method is not a function');
   }
   const result = next(iterator);
-  if (!isObjectLike(result)) {
+  if (!isObject(result)) {
     throw new TypeError('The result of next() must be an object');
   }
   return result as object;
@@ -3556,7 +3552,7 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
       PromisePrototypeThen(
         promiseResolvedWith(returnResult),
         (iterResult: unknown) => {
-          if (!isObjectLike(iterResult)) {
+          if (!isObject(iterResult)) {
             throw new TypeError('The return method must return an object');
           }
         }
@@ -3571,7 +3567,7 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
 // continuation is reacted to directly (ledger #29).
 function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
   return closeIterator(iterator, reason, (result) =>
-    isObjectLike(result)
+    isObject(result)
       ? asyncFromSyncContinuation(iterator, result as object, false, () => {})
       : PromiseReject(new TypeError('The return method must return an object'))
   );
@@ -3581,7 +3577,7 @@ function readableStreamFromIterable<R>(
   asyncIterable: unknown
 ): ReadableStream<R> {
   // WebIDL async_sequence conversion.
-  if (!isObjectLike(asyncIterable)) {
+  if (!isObject(asyncIterable)) {
     throw new TypeError('The argument must be sync or async iterable');
   }
   const iterable = asyncIterable as object;
@@ -3606,7 +3602,7 @@ function readableStreamFromIterable<R>(
       return PromisePrototypeThen(
         promiseResolvedWith(nextResult),
         (iterResult: unknown) => {
-          if (!isObjectLike(iterResult)) {
+          if (!isObject(iterResult)) {
             throw new TypeError('The result of next() must be an object');
           }
           if ((iterResult as { done?: unknown }).done) {
