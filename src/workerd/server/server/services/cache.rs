@@ -166,6 +166,13 @@ fn expiry(record: &[u8]) -> Option<u64> {
     std::str::from_utf8(line).ok()?.trim_end().parse().ok()
 }
 
+/// Whether the record in `file` is fresh at `now`.
+fn fresh(file: &mut File, now: u64) -> Result<bool> {
+    let mut line = [0; 24];
+    let read = file.read(&mut line).map_err(|e| io_kj_error(&e))?;
+    Ok(expiry(&line[..read]).is_some_and(|e| e > now))
+}
+
 /// A `Range` header's inclusive ranges of a body of `size` bytes, as Miniflare's
 /// `shared/range.ts` parses it: none for the whole body, `None` if it is unsatisfiable.
 fn parse_ranges(header: &str, size: u64) -> Option<Vec<(u64, u64)>> {
@@ -416,9 +423,7 @@ impl Store for Directory {
         let Some(mut file) = found(File::open(&path))? else {
             return Ok(Some(false));
         };
-        let mut line = [0; 24];
-        let read = file.read(&mut line).map_err(|e| io_kj_error(&e))?;
-        let fresh = expiry(&line[..read]).is_some_and(|e| e > now);
+        let fresh = fresh(&mut file, now)?;
         drop(file);
         let deleted = found(std::fs::remove_file(path))?;
         Ok(Some(deleted.is_some() && fresh))

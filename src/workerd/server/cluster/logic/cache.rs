@@ -109,7 +109,7 @@ impl Timing {
 // `Cluster::maintain` renews (at most `renew_timeout_ms`), lists (at most
 // `list_timeout_ms`) and sleeps `interval_ms`, and a listing counts from its
 // start once it returns: a node whose bucket answers in time never goes
-// stale. At 10 s a node under load did, for 1.1 s, and lost every entry.
+// stale.
 const _: () = {
     let (t, l) = (Timing::DEFAULT, crate::lease::Timing::DEFAULT);
     let gap = 2 * l.list_timeout_ms + l.interval_ms + l.renew_timeout_ms;
@@ -214,6 +214,8 @@ pub struct Cache<V> {
     /// Until when copies this node gave out of each key may be served. Kept
     /// while inactive: those copies are still out.
     leases: HashMap<String, u64>,
+    /// Copies of entries homed elsewhere: served until `until`, then kept ten
+    /// leases more to revalidate by version.
     near: HashMap<String, Near<V>>,
     ops: BTreeMap<u64, (u64, Op)>,
     /// Acks of writes, held until the key's leases run out.
@@ -281,8 +283,8 @@ impl<V: Clone> Cache<V> {
         }
     }
 
-    /// Sends the acks whose leases ran out, and fails what has waited past
-    /// the timeout.
+    /// Sends the acks whose leases ran out, drops stale near copies, and
+    /// fails what has waited past the timeout.
     pub fn tick(&mut self, now: u64) {
         self.now = now;
         let (ready, held) = std::mem::take(&mut self.held)
@@ -291,6 +293,8 @@ impl<V: Clone> Cache<V> {
         self.held = held;
         self.sends.extend(ready.into_iter().map(|(_, send)| send));
         self.leases.retain(|_, until| *until > now);
+        let keep = 10 * self.timing.lease_ms;
+        self.near.retain(|_, near| near.until + keep > now);
         let timeout = self.timing.timeout_ms;
         let late: Vec<u64> = self
             .ops
@@ -327,6 +331,12 @@ impl<V: Clone> Cache<V> {
             }
             None => {}
         }
+    }
+
+    /// The entry of `key` this node holds as its home.
+    #[must_use]
+    pub fn held(&self, key: &str) -> Option<&V> {
+        self.home.get(key).map(|(value, _)| value)
     }
 
     /// Drops an entry or near copy, to make room.

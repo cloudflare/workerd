@@ -715,6 +715,25 @@ fn a_write_invalidates_every_near_copy() {
 }
 
 #[test]
+fn a_near_copy_goes_ten_leases_after_its_own() {
+    let mut sim = Sim::new(1, 3);
+    sim.quiet(QUIET);
+    let home = sim.nodes[0].cache.home_of("a").unwrap().to_owned();
+    let w = sim.nodes.iter().position(|n| n.id != home).unwrap();
+    assert_eq!(sim.op(w, Kind::Put(7), "a"), Done::Put(Some(true)));
+    assert_eq!(sim.op(w, Kind::Match, "a"), Done::Match(Some(7)));
+    // Past its lease it renews by version, without the value.
+    sim.quiet(2 * T.lease_ms);
+    let fetched = sim.remote_hits;
+    assert_eq!(sim.op(w, Kind::Match, "a"), Done::Match(Some(7)));
+    assert!(sim.nodes[w].cache.near.contains_key("a"));
+    sim.quiet(11 * T.lease_ms);
+    assert!(!sim.nodes[w].cache.near.contains_key("a"));
+    assert_eq!(sim.op(w, Kind::Match, "a"), Done::Match(Some(7)));
+    assert!(sim.remote_hits > fetched);
+}
+
+#[test]
 fn a_node_drops_what_its_view_moves_away() {
     let mut sim = Sim::new(2, 3);
     sim.quiet(40_000);

@@ -1292,10 +1292,11 @@ test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigne
 });
 
 // The Cache API through the Worker of cluster-test.wd-test's `cache` on
-// `node`: `method` on the entry of `key`, in the cache named `ns` if given.
-async function cacheCall(node, method, key, { body, ns } = {}) {
-  const query = ns === undefined ? '' : `?ns=${ns}`;
-  const res = await fetch(`http://127.0.0.1:${node.httpPort}/${key}${query}`, {
+// `node`: `method` on the entry of `key`, in the cache named `ns` if given,
+// for `ttl` seconds if given.
+async function cacheCall(node, method, key, { body, ns, ttl } = {}) {
+  const query = new URLSearchParams({ ...(ns && { ns }), ...(ttl && { ttl }) });
+  const res = await fetch(`http://127.0.0.1:${node.httpPort}/${key}?${query}`, {
     method,
     body,
     signal: AbortSignal.timeout(10_000),
@@ -1339,6 +1340,14 @@ test('cluster: the nodes share one Cache API cache', async () => {
         assert.strictEqual(await cacheMatch(b, key), null);
         assert.strictEqual(await cacheDelete(b, key), false);
       }
+
+      // An expired entry is none, at its home too: deleting it finds nothing.
+      await each((key) => cacheCall(a, 'PUT', key, { body: 'e', ttl: 1 }));
+      await sleep(1_500);
+      assert.deepStrictEqual(
+        await each((key) => cacheDelete(b, key)),
+        keys.map(() => false)
+      );
 
       await cachePut(a, 'named', 'one', 'one');
       assert.strictEqual(await cacheMatch(b, 'named'), null);

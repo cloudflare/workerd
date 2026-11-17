@@ -154,6 +154,23 @@ where
     Ok(answer.map_err(|_| kj::failed!("no answer in {MATCH_ANSWER:?}"))??)
 }
 
+/// Gives the protocol `msg` from `from`, first dropping the entry a match or
+/// delete asks for if it expired: a home neither serves nor counts one.
+fn deliver(cache: &mut Cache<Value>, from: &str, msg: Msg<Value>) {
+    if let Msg::Get { key, .. } | Msg::Delete { key, .. } = &msg
+        && cache
+            .held(key)
+            .is_some_and(|value| expired(value).unwrap_or(false))
+    {
+        cache.evict(key);
+    }
+    cache.receive(from, msg);
+}
+
+fn expired(value: &Value) -> Result<bool> {
+    Ok(!super::fresh(&mut value.open()?, super::now_ms())?)
+}
+
 fn op_of(msg: &Msg<Value>) -> u64 {
     match msg {
         Msg::Get { op, .. }
@@ -187,7 +204,7 @@ impl Shared {
                 }
                 for send in sends {
                     match send.msg {
-                        msg if send.to == me => cache.receive(me, msg),
+                        msg if send.to == me => deliver(&mut cache, me, msg),
                         msg @ (Msg::Got { .. } | Msg::Wrote { .. }) => replies.push((send.to, msg)),
                         msg => asks.push((send.to, msg)),
                     }
@@ -378,7 +395,7 @@ impl Store for Clustered {
             .asked
             .borrow_mut()
             .insert((from.to_owned(), op), waiter);
-        shared.step(|cache| cache.receive(from, msg));
+        shared.step(|cache| deliver(cache, from, msg));
         let reply = reply
             .await
             .map_err(|_| kj::disconnected!("cluster cache: no reply to {from}"))?;
