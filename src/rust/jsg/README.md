@@ -657,13 +657,9 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
 
 ### External memory
 
-A resource that keeps memory alive outside the V8 heap (a buffer, a codec's state, a native
-library's allocations) reports it to V8, so that the memory counts toward the isolate's use and V8
-collects garbage sooner when it is large. A `jsg::ExternalMemoryAdjustment` attributes an amount of
-memory to an isolate until it is dropped, and `adjust(delta)` and `set(amount)` change the amount.
-It is C++ JSG's `jsg::ExternalMemoryAdjustment`, shared with it, so Rust and C++ report to one
-total. Make one under the lock with `lock.external_memory_adjustment(amount)`, keep it in a field,
-and change it as the memory changes:
+A resource reports memory it owns outside the V8 heap through `jsg::ExternalMemoryAdjustment`,
+using the same accounting as C++ JSG. Create an adjustment under the isolate lock, keep it in a
+field, and use `set(total)` as the allocation size changes:
 
 ```rust
 #[jsg_resource]
@@ -677,31 +673,23 @@ let external_memory = lock.external_memory_adjustment(data.len());
 self.external_memory.borrow_mut().set(data.len());
 ```
 
-When V8 collects the resource, the adjustment is dropped and the memory released. `adjust`
-returns a `jsg::Result`: lowering an adjustment below zero fails with C++ `adjust()`'s exception,
-as an internal error, which a method passes on with `?` so that JavaScript catches it as it
-catches the error a C++ method throws then. An adjustment of 32 GiB or more aborts the process, as
-in C++ JSG.
+Keep one adjustment per resource for its significant native allocations, updated at construction,
+growth, and release. Each adjustment allocates an FFI wrapper and holds an atomic reference to the
+target; avoid creating one per string or small allocation, or updating it on every small change.
 
-Both types are `Send` and `Sync`. An adjustment can be made, changed or dropped on any thread. A
-thread that has entered the isolate, as every thread holding its lock in workerd has, reports the
-change to V8 at once. Any other thread, or one that has entered another isolate, adds it to a
-pending total, which the next `IsolateBase::Lock` hands to V8. So an adjustment made on one thread
-can be changed or dropped on another. A decrease reported at once has a pending rise netted into
-it: V8 gets the net decrease, or nothing if the pending rise exceeds it, so that a decrease, often
-made in a destructor or a GC finalizer, never makes V8 start a GC. To make adjustments without the
-lock, take the isolate's `jsg::ExternalMemoryTarget` under the lock
-(`lock.external_memory_target()`) and call `target.adjustment(amount)` later, on any thread. Both
-outlive the isolate: once it is destroyed, nothing reaches V8, and `target.is_isolate_alive()`
-returns false; the checks above still apply. C++'s `adjustNow()` and `setNow()` have no
-counterpart: they report at once without asking which isolate the thread has entered, and a thread
-holding the lock in workerd has entered the isolate, so `adjust` and `set` report at once there
-too.
+Adjustments are `Send` and `Sync` and can be updated or dropped on any thread. Dropping one removes
+its charge, including when V8 collects the resource. To create adjustments without the lock, first
+obtain an `ExternalMemoryTarget` with `lock.external_memory_target()`, then call
+`target.adjustment(amount)` on any thread. Both types can outlive the isolate; after its destruction,
+updates no longer reach V8.
 
-C++ JSG's `Lock::allocAccounted<T>(size, ...)` attaches an adjustment to a new resource; a Rust
-resource holds the adjustment as a field instead. Neither type reports anything to heap snapshots,
-as in C++: the memory belongs to the resource, which reports it in `visit_for_memory_info` if it
-reports it at all. See `external_memory.rs`.
+Use `adjust(delta)` when tracking changes rather than a total. Lowering an adjustment below zero
+returns an internal error and leaves the amount unchanged, matching C++. An amount or change of
+32 GiB or more aborts the process, including after isolate destruction.
+
+External memory accounting is separate from heap snapshots: a resource reports its allocations
+through `visit_for_memory_info`. See [`external_memory.rs`](external_memory.rs) for reporting and
+deferral details.
 
 ### Creating resources from C++
 

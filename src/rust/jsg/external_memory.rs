@@ -11,11 +11,10 @@
 //! any thread. A thread that has entered the isolate, as every thread holding its lock in workerd
 //! has, reports a change to V8 at once; any other thread, or one that has entered another isolate,
 //! adds it to a pending total that the isolate hands to V8 the next time an `IsolateBase::Lock`
-//! locks it. A decrease reported at once has the pending total netted into it, and V8 gets only a
-//! decrease from it, never a rise that could start a GC. So an adjustment made on one thread can be
-//! changed or dropped on another, under the lock or not. After the isolate is destroyed, nothing
-//! reaches V8.
-//! An [`ExternalMemoryTarget`] makes adjustments without the lock.
+//! locks it. A decrease reported at once nets a pending rise into it, leaving any remaining rise
+//! pending. Pending decreases stay deferred. This path never reports an increase to V8, which
+//! could start a GC during destruction or a GC finalizer. After the isolate is destroyed, nothing
+//! reaches V8. An [`ExternalMemoryTarget`] makes adjustments without the lock.
 
 use std::ffi::CStr;
 use std::fmt;
@@ -45,11 +44,15 @@ use crate::v8::ffi;
 /// let external_memory = lock.external_memory_adjustment(data.len());
 /// ```
 ///
-/// Like C++'s `adjust()` and `set()`, [`adjust`](Self::adjust) and [`set`](Self::set) decide
-/// whether to report at once or to defer by asking V8 which isolate the thread has entered. C++'s
-/// `adjustNow()` and `setNow()` report at once without asking, which takes a `jsg::Lock`; a thread
-/// holding the lock in workerd has entered the isolate, so `adjust` and `set` report at once there
-/// too, and Rust has no counterpart.
+/// Keep one adjustment per resource for its significant native allocations, updated at
+/// construction, growth, and release. Each adjustment allocates an FFI wrapper and holds an atomic
+/// reference to the target. Avoid creating one per string or small allocation, or updating it on
+/// every small change, since each update crosses the FFI boundary and can call into V8.
+///
+/// Prefer [`set`](Self::set) when the total allocation size is known; use [`adjust`](Self::adjust)
+/// to report a delta. Both can be called on any thread: they report to V8 when the thread has
+/// entered the owning isolate, as a thread holding its lock in workerd has, and otherwise defer
+/// the change. A decrease can offset a pending increase as described in the module documentation.
 ///
 /// An adjustment of 32 GiB or more, or a change of that much, aborts the process, as in C++ JSG.
 pub struct ExternalMemoryAdjustment {
@@ -77,9 +80,8 @@ impl ExternalMemoryAdjustment {
     ///
     /// # Errors
     ///
-    /// If `delta` would make the amount negative, the amount is left unchanged and C++
-    /// `adjust()`'s exception is returned, as an internal error: thrown to JavaScript, it is
-    /// what a C++ method that lowers an adjustment below zero throws.
+    /// If `delta` would make the amount negative, returns an internal error and leaves the amount
+    /// unchanged, matching C++. This indicates a bug in the resource's memory accounting.
     pub fn adjust(&mut self, delta: isize) -> crate::Result<()> {
         ffi::external_memory_adjustment_adjust(self.inner.as_mut(), delta)?;
         Ok(())
