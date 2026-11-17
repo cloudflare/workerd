@@ -487,7 +487,14 @@ bool ValueQueue::hasPartiallyFulfilledRead() {
   return false;
 }
 
-void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
+void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {
+  // NOLINTNEXTLINE(jsg-shared-visit): the queue is impl's only owner; others hold kj::Weak.
+  impl->visitForGc(visitor);
+}
+
+void ValueQueue::makePendingReadsStrong() {
+  impl->makePendingReadsStrong();
+}
 
 #pragma endregion ValueQueue
 
@@ -1313,7 +1320,14 @@ size_t ByteQueue::getConsumerCount() {
   return impl->getConsumerCount();
 }
 
-void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
+void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {
+  // NOLINTNEXTLINE(jsg-shared-visit): the queue is impl's only owner; others hold kj::Weak.
+  impl->visitForGc(visitor);
+}
+
+void ByteQueue::makePendingReadsStrong() {
+  impl->makePendingReadsStrong();
+}
 
 #pragma endregion ByteQueue
 
