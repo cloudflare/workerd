@@ -59,6 +59,7 @@ pub mod ffi {
         UNSUBSCRIBE,
         QUERY,
         BAN,
+        CONNECT,
     }
     unsafe extern "C++" {
         type HttpMethod;

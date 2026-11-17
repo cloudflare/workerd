@@ -21,6 +21,13 @@ struct MultiPropertyStruct {
     pub active: String,
 }
 
+/// Has a field with the name of the local that holds the struct's shape in generated code.
+#[jsg_struct]
+struct ShapeFieldStruct {
+    pub shape: String,
+    pub other: u32,
+}
+
 #[jsg_struct]
 struct NestedStruct {
     pub inner: String,
@@ -552,4 +559,119 @@ fn struct_vec_of_bytes_field_is_an_array() {
             Ok(())
         });
     }
+}
+
+/// A struct type's handles are cached in the realm on its first conversion and reused, with and
+/// without `fast_jsg_struct`: each conversion still makes a new object with the struct's fields
+/// in order, and each struct type has handles of its own.
+#[test]
+fn struct_conversions_reuse_the_realms_cached_handles() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, ctx| {
+            assert_eq!(lock.struct_shapes_cached(), 0);
+            let first = MultiPropertyStruct {
+                name: "Alice".to_owned(),
+                age: 25,
+                active: "yes".to_owned(),
+            }
+            .to_js(lock)?;
+            let second = MultiPropertyStruct {
+                name: "Bob".to_owned(),
+                age: 30,
+                active: "no".to_owned(),
+            }
+            .to_js(lock)?;
+            assert_eq!(lock.struct_shapes_cached(), 1);
+            ctx.set_global(lock, "first", first);
+            ctx.set_global(lock, "second", second);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    "first !== second && Object.keys(first).join() === 'name,age,active' &&
+                     Object.keys(second).join() === 'name,age,active' &&
+                     first.name === 'Alice' && first.age === 25 && first.active === 'yes' &&
+                     second.name === 'Bob' && second.age === 30 && second.active === 'no'",
+                )
+                .unwrap();
+            assert!(ok, "fast_jsg_struct = {fast}");
+
+            let back = MultiPropertyStruct::from_js(lock, second)?;
+            assert_eq!((back.name.as_str(), back.age), ("Bob", 30));
+            assert_eq!(lock.struct_shapes_cached(), 1);
+
+            let label = OptionalStruct {
+                label: Some("x".to_owned()),
+                count: None,
+            }
+            .to_js(lock)?;
+            assert_eq!(lock.struct_shapes_cached(), 2);
+            ctx.set_global(lock, "label", label);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    if fast {
+                        "Object.keys(label).join() === 'label,count' && label.label === 'x'"
+                    } else {
+                        "Object.keys(label).join() === 'label' && label.label === 'x'"
+                    },
+                )
+                .unwrap();
+            assert!(ok, "fast_jsg_struct = {fast}");
+            Ok(())
+        });
+    }
+}
+
+/// The startup snapshot pipeline resets the handles the realm caches before it creates the
+/// snapshot, which fails on a handle left behind. A later conversion caches them again.
+#[test]
+fn taking_the_realms_templates_resets_the_cached_struct_handles() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, _ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock)?;
+        assert_eq!(OptionalStruct::from_js(lock, value)?.count, Some(1));
+        assert_eq!(lock.struct_shapes_cached(), 1);
+        Ok(())
+    });
+    harness.take_realm_templates();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(lock.struct_shapes_cached(), 0);
+        let value = OptionalStruct {
+            label: Some("again".to_owned()),
+            count: None,
+        }
+        .to_js(lock)?;
+        assert_eq!(lock.struct_shapes_cached(), 1);
+        ctx.set_global(lock, "value", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Object.keys(value).join() === 'label,count' && value.label === 'again' &&
+                 value.count === undefined",
+            )
+            .unwrap();
+        assert!(ok);
+        Ok(())
+    });
+}
+
+/// A field may have any name, including those of the locals in the generated conversions.
+#[test]
+fn struct_fields_can_have_the_names_of_generated_locals() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = ShapeFieldStruct {
+            shape: "round".to_owned(),
+            other: 7,
+        }
+        .to_js(lock)?;
+        let back = ShapeFieldStruct::from_js(lock, value)?;
+        assert_eq!((back.shape.as_str(), back.other), ("round", 7));
+        Ok(())
+    });
 }

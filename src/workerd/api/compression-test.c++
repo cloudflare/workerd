@@ -33,8 +33,8 @@ kj::Array<kj::byte> drain(CodecStage& stage, size_t pieceSize) {
   return out.releaseAsArray();
 }
 
-kj::Array<kj::byte> gzipOf(kj::ArrayPtr<const kj::byte> data) {
-  CodecStage stage(CodecStage::Mode::COMPRESS, "gzip"_kj, CodecStage::Flags::NONE, noIsolate());
+kj::Array<kj::byte> compressOf(kj::StringPtr format, kj::ArrayPtr<const kj::byte> data) {
+  CodecStage stage(CodecStage::Mode::COMPRESS, format, CodecStage::Flags::NONE, noIsolate());
   stage.push(data);
   stage.end();
   return drain(stage, 4096);
@@ -43,7 +43,7 @@ kj::Array<kj::byte> gzipOf(kj::ArrayPtr<const kj::byte> data) {
 KJ_TEST("CodecStage output is pulled in production order across pump blocks") {
   // 1 MiB inflates in 64 pump iterations; pieces of 1000 bytes straddle every block boundary.
   auto data = pattern(1024 * 1024);
-  auto compressed = gzipOf(data);
+  auto compressed = compressOf("gzip"_kj, data);
   KJ_EXPECT(compressed.size() < data.size());
 
   CodecStage stage(CodecStage::Mode::DECOMPRESS, "gzip"_kj, CodecStage::Flags::STRICT, noIsolate());
@@ -98,7 +98,7 @@ KJ_TEST("CodecStage buffers the output of successive pushes and the flush tail i
 }
 
 KJ_TEST("CodecStage::clear drops the buffered output") {
-  auto compressed = gzipOf(pattern(100 * 1024));
+  auto compressed = compressOf("gzip"_kj, pattern(100 * 1024));
   CodecStage stage(CodecStage::Mode::DECOMPRESS, "gzip"_kj, CodecStage::Flags::NONE, noIsolate());
   stage.push(compressed);
   KJ_EXPECT(stage.available() == 100 * 1024);
@@ -106,6 +106,57 @@ KJ_TEST("CodecStage::clear drops the buffered output") {
   KJ_EXPECT(stage.empty());
   kj::byte buf[16]{};
   KJ_EXPECT(stage.pull(buf) == 0);
+}
+
+KJ_TEST("CodecStage brotli round trips across pump blocks and split input") {
+  auto data = pattern(1024 * 1024);
+  CodecStage compressor(
+      CodecStage::Mode::COMPRESS, "brotli"_kj, CodecStage::Flags::NONE, noIsolate());
+  for (size_t offset = 0; offset < data.size(); offset += 10000) {
+    compressor.push(data.slice(offset, kj::min(offset + 10000, data.size())));
+  }
+  compressor.end();
+  compressor.end();  // idempotent
+  auto compressed = drain(compressor, 4096);
+  KJ_EXPECT(compressed.size() < data.size());
+
+  // Flags::NONE still gets the strict checks for brotli; a well-formed stream passes them.
+  CodecStage decompressor(
+      CodecStage::Mode::DECOMPRESS, "brotli"_kj, CodecStage::Flags::NONE, noIsolate());
+  for (size_t offset = 0; offset < compressed.size(); offset += 333) {
+    decompressor.push(compressed.slice(offset, kj::min(offset + 333, compressed.size())));
+  }
+  decompressor.end();
+  auto restored = drain(decompressor, 64 * 1024);
+  KJ_EXPECT(restored.asPtr() == data.asPtr());
+}
+
+KJ_TEST("CodecStage brotli rejects corrupt, trailing and truncated input") {
+  auto compressed = compressOf("brotli"_kj, pattern(1000));
+
+  {
+    CodecStage stage(
+        CodecStage::Mode::DECOMPRESS, "brotli"_kj, CodecStage::Flags::NONE, noIsolate());
+    kj::byte garbage[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    KJ_EXPECT_THROW_MESSAGE("Decompression failed.", stage.push(garbage));
+  }
+  {
+    CodecStage stage(
+        CodecStage::Mode::DECOMPRESS, "brotli"_kj, CodecStage::Flags::NONE, noIsolate());
+    kj::Vector<kj::byte> trailing;
+    trailing.addAll(compressed);
+    trailing.add(0);
+    KJ_EXPECT_THROW_MESSAGE(
+        "Trailing bytes after end of compressed data", stage.push(trailing.asPtr()));
+    // The complete stream's output is still buffered ahead of the error.
+    KJ_EXPECT(stage.available() == 1000);
+  }
+  {
+    CodecStage stage(
+        CodecStage::Mode::DECOMPRESS, "brotli"_kj, CodecStage::Flags::NONE, noIsolate());
+    stage.push(compressed.first(compressed.size() - 1));
+    KJ_EXPECT_THROW_MESSAGE("incomplete data", stage.end());
+  }
 }
 
 }  // namespace

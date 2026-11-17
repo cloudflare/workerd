@@ -16,6 +16,16 @@ wd_rust_test(
 )
 
 wd_rust_test(
+    name = "cxx_string_test",
+    size = "small",
+    srcs = ["cxx_string.rs"],
+    edition = "2024",
+    deps = [
+        "//src/rust/cxx",
+    ],
+)
+
+wd_rust_test(
     name = "cxx_gen_test",
     size = "small",
     srcs = ["cxx_gen.rs"],

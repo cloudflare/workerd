@@ -529,6 +529,7 @@ struct SlotRef<T>(Arc<Mutex<Option<T>>>);
 ///
 /// It is an [`IoOwned`] for a value that is not `Send`. Unlike the span, the handle is `Send` and
 /// `Sync`, since it reaches the span only on the `IoContext`'s thread.
+#[jsg_macros::jsg_traced]
 pub struct IoOwnedSpan(IoOwned<ThreadBoundSpan>);
 
 impl IoOwnedSpan {
@@ -552,9 +553,6 @@ impl IoOwnedSpan {
         self.0.with(lock, |span| f(&mut span.0))
     }
 }
-
-// Holds no JavaScript handles.
-jsg::jsg_traced!(IoOwnedSpan);
 
 /// The span of an [`IoOwnedSpan`].
 struct ThreadBoundSpan(SpanBuilder);

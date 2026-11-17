@@ -1383,6 +1383,11 @@ class SpanBuilder {
 // ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
+  // Returns a new kj::Rc reference to this observer.
+  [[nodiscard]] kj::Rc<SpanObserver> addRef() {
+    return addRefToThis();
+  }
+
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.

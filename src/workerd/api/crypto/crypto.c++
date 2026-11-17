@@ -1540,6 +1540,8 @@ kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
   // seen here as the single code point it is.
   size_t prefix = pendingLead == kj::none ? 0 : 1;
   auto utf16 = kj::heapArray<char16_t>(prefix + str.length(js));
+  // Zeroed because V8 may not fill it; see JsString::writeInto().
+  utf16.asPtr().fill(0);
   auto dest =
       kj::arrayPtr(reinterpret_cast<uint16_t*>(utf16.begin() + prefix), utf16.size() - prefix);
   // Only the prefix that writeInto() reports as written is initialized; see

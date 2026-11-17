@@ -502,6 +502,15 @@ pub mod ffi {
             data: &Local,
         ) -> MaybeLocal;
 
+        // Struct shapes; see `structs.rs`.
+        pub unsafe fn dictionary_template_new(isolate: *mut Isolate, keys: &[&str]) -> Global;
+        // Leaves what is pending pending.
+        pub unsafe fn dictionary_template_new_instance(
+            isolate: *mut Isolate,
+            tmpl: &Global,
+            values: &mut [MaybeLocal],
+        ) -> MaybeLocal;
+
         // Local<Object>
         // Fallible: interning a key fails if it is longer than V8's string length limit or V8
         // fails to create the string, and there must be as many keys as values.
@@ -519,6 +528,13 @@ pub mod ffi {
             key: &str,
             value: Local,
         ) -> Result<bool>;
+        // Leaves what a setter or Proxy trap throws pending.
+        pub unsafe fn local_object_set_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
+            value: Local,
+        ) -> bool;
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
@@ -535,6 +551,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             object: &Local,
             name: &Local,
+        ) -> MaybeLocal;
+        // Leaves what a getter or Proxy trap throws pending.
+        pub unsafe fn local_object_get_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
         ) -> MaybeLocal;
         pub unsafe fn local_object_get_own_property_names(
             isolate: *mut Isolate,
@@ -635,6 +657,8 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
+        pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
+        pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
         pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
@@ -1038,10 +1062,11 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
-        // For the receiver of a method registered with a `v8::Signature`, which V8 has checked.
+        // Like `unwrap_resource_trait_object`, without the marker check, for the receiver of a
+        // method registered with a `v8::Signature`.
         pub unsafe fn unwrap_method_receiver(
             isolate: *mut Isolate,
-            value: Local, /* v8::LocalObject */
+            value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
 
         // Empty if an exception or a termination is pending; see `call_into_js()`.
@@ -1427,6 +1452,7 @@ impl String {
 pub struct Object;
 pub struct Function;
 pub struct FunctionTemplate;
+pub struct DictionaryTemplate;
 pub struct Array;
 pub struct TypedArray;
 pub struct Uint8Array;
@@ -2099,6 +2125,10 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn detach_before_drop(&self) -> bool {
+        T::needs_drop_detach()
+    }
+
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -3584,6 +3614,11 @@ impl<'s> Local<'s, String> {
     /// [`WriteFlags`] constants. Use [`WriteFlags::ReplaceInvalidUtf8`] to replace lone
     /// surrogates with U+FFFD; without it, they are written as WTF-8, not valid UTF-8.
     ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` is empty and `flags` includes [`WriteFlags::NullTerminate`]: the
+    /// terminator always needs a byte, and V8 aborts the process without one.
+    ///
     /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
         &self,
@@ -3591,7 +3626,12 @@ impl<'s> Local<'s, String> {
         buffer: &mut [u8],
         flags: WriteFlags,
     ) -> usize {
-        // SAFETY: Lock guarantees the isolate is locked; buffer is valid for `capacity` bytes.
+        assert!(
+            buffer.len() >= usize::from(flags.null_terminates()),
+            "buffer too small for the null terminator"
+        );
+        // SAFETY: Lock guarantees the isolate is locked; buffer is valid for `buffer.len()` bytes,
+        // and has room for a terminator if one is written.
         unsafe {
             ffi::local_string_write_utf8_v2(
                 lock.isolate().as_ffi(),
@@ -4891,7 +4931,7 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
         // The resource is alive until `drop_rc`.
         let resource = saved.as_gc_ref();
-        if resource.has_drop_impl() {
+        if resource.detach_before_drop() {
             GcVisitor::detach_for_drop(resource);
         }
         saved.drop_rc();
@@ -5333,19 +5373,17 @@ pub fn resolve_receiver<R: 'static>(
 }
 
 /// Like [`resolve_receiver`], for the receiver of a method registered with a
-/// `v8::Signature`.
+/// `v8::Signature`, which makes it a Rust resource wrapper, so it skips the marker check.
 ///
-/// # Safety
-///
-/// V8 must have checked `value` against the signature of a method of a resource type.
+/// Any other value gives `None`, so a method callback that safe code registers without a
+/// signature throws rather than aborting the process.
 #[doc(hidden)]
-pub unsafe fn resolve_method_receiver<R: 'static>(
+pub fn resolve_method_receiver<R: 'static>(
     lock: &mut Lock<'_>,
     value: Local<'_, Value>,
 ) -> Option<NonNull<R>> {
-    // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
-    // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
-    // keeps alive.
+    // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+    // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
     let ptr =
         unsafe { ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref() };
     ptr?.resolve::<R>()
@@ -5515,6 +5553,13 @@ impl WrappableRc {
     ) {
         // SAFETY: the KjRc keeps the Wrappable alive.
         tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
+    }
+
+    /// Condemns the underlying Wrappable if a collection found it unreachable and is sweeping it,
+    /// and returns whether it did (see `wrappable_try_condemn`).
+    pub(crate) fn try_condemn(&self) -> bool {
+        // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
+        unsafe { ffi::wrappable_try_condemn(self.as_pin_mut()) }
     }
 
     /// Increments the strong reference count on the underlying Wrappable.

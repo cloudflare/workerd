@@ -210,11 +210,17 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
   reached only through `&self`, so a cell is the only way to move a reference out of a field,
   and the std cells are `Traced` only for types that hold no GC references
-  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before the
-  `Drop` impl of a `#[jsg_resource]` type runs, every `jsg::Rc` and `jsg_cpp::Ref` it traces is
-  made strong and forgets its parent, so that `Drop` may move one out and keep it. A
-  `TracedGlobal` it moves out must be dropped there, and so must a reference that the `Drop`
-  impl of a field's type moves out; see `GcVisitor::detach_for_drop`. See
+  (`jsg::HoldsNoGcReferences`). The exception is `Drop`, which has `&mut self`. Before a
+  `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
+  (`Traced::needs_drop_detach`), every `jsg::Rc` and `jsg_cpp::Ref` it traces is made strong and
+  forgets its parent, so that a `Drop` impl may move one out and keep it. A hand-written
+  `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
+  does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
+  Wrappers such as `Option` and `Vec` pass it on, and a `#[jsg_resource]` says so when it
+  implements `Drop` itself. A `#[jsg_struct]`, a `#[jsg_oneof]` or a `#[jsg_resource]` held
+  inline in another resource doesn't look at its fields, which a recursive type would make loop
+  forever, so a `Drop` impl of a type it holds must not move a reference out there. A `TracedGlobal`
+  that `Drop` moves out must be dropped there; see `GcVisitor::detach_for_drop`. See
   [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
@@ -234,10 +240,10 @@ Bad: a `Drop` impl that moves a `TracedGlobal` out of a field into a static. Fix
 
 Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
 `gc-reference-in-std-cell-is-not-traced` compile test, for a `jsg::Rc` or a `TracedGlobal` in a
-std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that `Drop` moves out. No test checks a
-hand-written `impl Traced` that shares traced state some other way or reaches it through
-another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
-whose `trace` visits something; reviewers check those.
+std cell, and `tests/drop_moved_rc.rs`, for a `jsg::Rc` that the `Drop` of a resource or of a
+field's type moves out. No test checks a hand-written `impl Traced` that shares traced state some
+other way or reaches it through another kind of cell, a std cell included, or a hand-written
+`impl HoldsNoGcReferences` on a type whose `trace` visits something; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
@@ -616,7 +622,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced!`, unchecked, for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
@@ -1052,7 +1058,7 @@ error, as C++ JSG fails with a `KJ_ASSERT`.
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the object is created from a `v8::DictionaryTemplate` cached for the struct type, as C++ JSG creates it, so the fields are data properties, an absent optional field is `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
 A `#[jsg_method]`, property getter or wildcard property converts its return value with `ToJS::to_js_with_creator`, passing the resource's wrapper for an instance member and `None` for a static one, as C++ JSG's `wrap()` takes a `creator`. Only a value that stays pending, a `jsg::Promise`, uses it, and a container passes it on; a `ToJS` impl that holds such values should forward it too.
 

@@ -20,6 +20,7 @@
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/cron/cron_js.embed.h>
+#include <workerd/server/d1/d1_js.embed.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/server/queues/queues_js.embed.h>
@@ -59,6 +60,7 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/cron.js"_kj, CRON_JS);
     map.insert("/workerd/queues.js"_kj, QUEUES_JS);
     map.insert("/workerd/workflows.js"_kj, WORKFLOWS_JS);
+    map.insert("/workerd/d1.js"_kj, D1_JS);
     return map;
   }();
   return bundled.find(name).map([](auto& source) { return source; });

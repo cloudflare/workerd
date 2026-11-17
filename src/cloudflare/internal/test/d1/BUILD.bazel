@@ -1,6 +1,12 @@
 load("//:build/wd_test.bzl", "wd_test")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
+# The bundled D1 Worker runs these tests too.
+exports_files(
+    ["d1-api-test-common.js"],
+    visibility = ["//src/workerd/server/tests/d1:__pkg__"],
+)
+
 wd_test(
     src = "d1-api-test-jsrpc-contract.wd-test",
     args = ["--experimental"],

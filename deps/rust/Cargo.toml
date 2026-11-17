@@ -51,6 +51,8 @@ http-body = "1"
 httpdate = "1"
 percent-encoding = "2"
 url = "2"
+# The server's assets service: the `_headers`, `_redirects` and `.assetsignore` rules.
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
 # The server's CryptoKey bindings: hex key material.
 data-encoding = "2"
 # `workerd test`: the service and entrypoint filters.

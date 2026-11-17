@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Constructor format validation: exactly 'deflate', 'gzip', 'deflate-raw'.
+// Constructor format validation: exactly 'deflate', 'gzip', 'deflate-raw', 'brotli'.
 // Divergence for non-string (including missing) formats: TypeScript
 // ToString-coerces the argument and fails format validation, while the C++
 // jsg layer rejects non-strings at the type boundary before validation.
@@ -11,11 +11,12 @@ import { ok, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const formatMessage =
-  "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.";
+  "The compression format must be either 'deflate', 'deflate-raw', 'gzip' " +
+  "or 'brotli'.";
 
 export const validFormatsConstruct = {
   test() {
-    for (const format of ['deflate', 'gzip', 'deflate-raw']) {
+    for (const format of ['deflate', 'gzip', 'deflate-raw', 'brotli']) {
       ok(new CompressionStream(format));
       ok(new DecompressionStream(format));
     }

@@ -120,7 +120,7 @@ class ZlibStream final {
   // unrecognized codes.
   static kj::StringPtr errorCodeName(int code);
 
-  // Maps a Compression Streams spec format ("gzip" | "deflate" | "deflate-raw") to its
+  // Maps a Compression Streams spec zlib format ("gzip" | "deflate" | "deflate-raw") to its
   // windowBits value; kj::none for anything else.
   static kj::Maybe<int> windowBitsForWebFormat(kj::StringPtr format);
 
@@ -131,12 +131,52 @@ class ZlibStream final {
   bool ended = false;
 };
 
+// The brotli engine behind the web pair's "brotli" format: a brotli encoder or decoder
+// instance with the same buffer plumbing as ZlibStream. run() reports progress in zlib's
+// return-code vocabulary (Z_OK: progress made; Z_BUF_ERROR: no progress possible without more
+// input; Z_STREAM_END: finished; Z_DATA_ERROR: corrupt input or encoder failure), so
+// CodecStage drives both engines with one pump loop. The encoder uses kj-brotli's quality and
+// window, as the fetch Content-Encoding path does.
+class BrotliStream final {
+ public:
+  using Mode = ZlibStream::Mode;
+
+  // The allocator must outlive this object. Throws if the instance cannot be created.
+  BrotliStream(CompressionAllocator& allocator, Mode mode);
+  KJ_DISALLOW_COPY_AND_MOVE(BrotliStream);
+
+  // One step with the given zlib flush mode (Z_NO_FLUSH or Z_FINISH).
+  int run(int flush);
+
+  void setInput(kj::ArrayPtr<const kj::byte> input) {
+    this->input = kj::mv(input);
+  }
+  void setOutput(kj::ArrayPtr<kj::byte> output) {
+    this->output = kj::mv(output);
+  }
+  size_t availIn() const {
+    return input.size();
+  }
+  size_t availOut() const {
+    return output.size();
+  }
+
+ private:
+  kj::OneOf<kj::Own<BrotliEncoderStateStruct>, kj::Own<BrotliDecoderStateStruct>> state;
+  kj::ArrayPtr<const kj::byte> input;
+  kj::ArrayPtr<kj::byte> output;
+};
+
+// Throws the spec TypeError the web pair's constructors use if `format` is not a Compression
+// Streams spec format.
+void requireWebCompressionFormat(kj::StringPtr format);
+
 // The synchronous codec stage behind the web Compression Streams pairs (both the legacy C++
 // frontend in api/streams/compression.c++ and the TypeScript streams implementation's
 // frontend): the Compression Streams spec policy — spec-pinned TypeErrors and the
-// strict_compression_checks handling — over the shared ZlibStream core, plus the stage's own
-// output buffer. Frontends are orchestration shells around one of these; ALL asynchrony is
-// frontend-owned.
+// strict_compression_checks handling — over the shared ZlibStream core (or BrotliStream for
+// "brotli"), plus the stage's own output buffer. Frontends are orchestration shells around one
+// of these; ALL asynchrony is frontend-owned.
 //
 // PACING IS DELIBERATELY EAGER: push() runs the codec over the whole input chunk
 // synchronously, accumulating ALL produced output in the stage buffer. The spec runs the
@@ -156,8 +196,8 @@ class CodecStage final {
     STRICT,
   };
 
-  // `format` must be a valid web format ("gzip" | "deflate" | "deflate-raw"); the
-  // JS-visible format validation (with its spec-pinned TypeError) belongs to the frontends.
+  // `format` must be a valid web format; the JS-visible format validation
+  // (requireWebCompressionFormat()) belongs to the frontends.
   explicit CodecStage(Mode mode,
       kj::StringPtr format,
       Flags flags,
@@ -209,11 +249,26 @@ class CodecStage final {
     void enforceStrictChecks(int flush, const Result& result);
 
    private:
+    template <typename Func>
+    auto withEngine(Func&& func) {
+      KJ_SWITCH_ONEOF(engine) {
+        KJ_CASE_ONEOF(zlib, ZlibStream) {
+          return func(zlib);
+        }
+        KJ_CASE_ONEOF(brotli, BrotliStream) {
+          return func(brotli);
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+
     CompressionAllocator allocator;
-    ZlibStream stream;
+    kj::OneOf<ZlibStream, BrotliStream> engine;
+    Mode mode;
     kj::byte buffer[16384];
 
-    // For the eponymous compatibility flag
+    // For the eponymous compatibility flag; brotli always gets the strict checks, as it has no
+    // legacy behavior to preserve.
     Flags strictCompression;
   };
 
@@ -311,9 +366,9 @@ void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info
 // Codec mode plumbing and the brotli/zstd context families.
 //
 // These follow Node.js' structure (node:zlib is their consumer today) but live here
-// because they are compression machinery, not Node bindings: CompressionStream/
-// DecompressionStream are anticipated to grow brotli and zstd format support, at which
-// point they gain web frontends over the same contexts.
+// because they are compression machinery, not Node bindings. The web pair's "brotli" format
+// uses BrotliStream above rather than these contexts, which carry node's parameter and error
+// plumbing.
 
 using ZlibModeValue = uint8_t;
 enum class ZlibMode : ZlibModeValue {
