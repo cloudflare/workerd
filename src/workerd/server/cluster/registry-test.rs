@@ -416,7 +416,7 @@ impl FakeS3 {
         ]
         .map(|(name, value)| (name.to_owned(), value));
         let (s3, prefix) = crate::s3::S3::new("s3://b/", &options).unwrap();
-        (fake, Bucket::new(s3, &prefix))
+        (fake, Bucket::new(s3.backoff(BACKOFF), &prefix))
     }
 
     fn arm(&self, what: &str, fault: Fault) {
@@ -459,9 +459,15 @@ fn block_on_io<F: std::future::Future>(f: F) -> F::Output {
 const ROUND: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The bound on each request of a round (`http::prompt`): far longer than
-/// a request the fake answers takes, however slow the machine, so that only
-/// the requests it stalls are sent again.
-const ATTEMPT: std::time::Duration = std::time::Duration::from_secs(1);
+/// a request the fake answers over its in-memory connection takes, however
+/// slow the machine, so that only the requests it stalls are sent again.
+/// The times these tests wait out are a twentieth of what they would be
+/// otherwise, in the same proportions.
+const ATTEMPT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The first pause of the bucket client's 429/503 backoff, against
+/// `ATTEMPT` as 250 ms is against a 1 s bound.
+const BACKOFF: std::time::Duration = ATTEMPT.checked_div(4).unwrap();
 
 /// What a renewal sends twice (`Cluster::renew_round`).
 const RENEWAL: &[Repeat] = &[Repeat::Read, Repeat::GuardedWrite];
@@ -487,7 +493,7 @@ async fn bounded_renew_round(
 
 /// How long the renewals here wait before they write again to a record a
 /// write of theirs is in progress on.
-const CONTENDED_PAUSE: std::time::Duration = std::time::Duration::from_millis(200);
+const CONTENDED_PAUSE: std::time::Duration = std::time::Duration::from_millis(10);
 
 const PUT: &str = "PUT nodes/a.json";
 
@@ -610,15 +616,16 @@ fn a_listing_outlasts_a_stalled_list_or_read() {
 fn a_refused_write_backs_off_without_being_sent_again() {
     block_on_io(async {
         let (fake, a) = registered().await;
-        // Refused three times: sent at 0, 0.25 and 0.75 s, then answered at
-        // 1.75 s. Were the pauses part of a request's wait, the 1 s one
-        // would be cut short at 1 s, the write sent again then.
+        // Refused three times: sent at 0, 1 and 3 times `BACKOFF`, then
+        // answered at 7 times it. Were the pauses part of a request's
+        // wait, the third, as long as `ATTEMPT`, would be cut short at
+        // `ATTEMPT`, the write sent again then.
         for _ in 0..3 {
             fake.arm(PUT, Fault::Refuse(503));
         }
         let started = std::time::Instant::now();
         assert_eq!(renew_round(&a, 1_000, ROUND).await, Some(11_000));
-        assert!(started.elapsed() >= std::time::Duration::from_millis(1_750));
+        assert!(started.elapsed() >= 7 * BACKOFF);
         assert_eq!(fake.log(), [PUT; 4]);
     });
 }
@@ -629,7 +636,7 @@ fn a_renewal_outlasts_a_bucket_slow_to_answer_everything() {
         let (fake, a) = registered().await;
         // The default's proportions: every answer comes later than a
         // request's bound, and well within the round.
-        let t = cluster_logic::lease::Timing::divided(4).unwrap();
+        let t = cluster_logic::lease::Timing::divided(20).unwrap();
         let (attempt, round) = (t.renew_attempt_ms, t.renew_timeout_ms);
         fake.slow(std::time::Duration::from_millis(attempt + attempt / 3));
         let ms = std::time::Duration::from_millis;

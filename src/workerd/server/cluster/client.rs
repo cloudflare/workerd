@@ -79,6 +79,8 @@ pub struct Client<D> {
     bucket: String,
     /// This node's wall clock less the bucket's, at the last response.
     skew_ms: Cell<Option<i64>>,
+    /// The first pause of the 429/503 backoff (`BACKOFF`).
+    backoff: Duration,
 }
 
 impl<D> Client<D> {
@@ -89,6 +91,7 @@ impl<D> Client<D> {
             endpoint: endpoint.trim_end_matches('/').to_owned(),
             bucket: bucket.to_owned(),
             skew_ms: Cell::new(None),
+            backoff: BACKOFF,
         }
     }
 }
@@ -101,6 +104,15 @@ impl<D> Client<D> {
 
     pub fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    /// With the 429/503 backoff's first pause `pause` rather than
+    /// `BACKOFF`, the others in proportion: for tests that would otherwise
+    /// wait out seconds of it.
+    #[must_use]
+    pub const fn backoff(mut self, pause: Duration) -> Self {
+        self.backoff = pause;
+        self
     }
 }
 
@@ -259,7 +271,7 @@ impl<D: Dialect> Client<D> {
         } else {
             format!("{}{path}?{query}", self.endpoint)
         };
-        let mut pause = Duration::from_millis(250);
+        let mut pause = self.backoff;
         let mut reauthorized = false;
         let mut maybe_applied = false;
         loop {
@@ -288,7 +300,7 @@ impl<D: Dialect> Client<D> {
                 reauthorized = true;
                 continue;
             }
-            if !matches!(response.status, 429 | 503) || pause > Duration::from_secs(2) {
+            if !matches!(response.status, 429 | 503) || pause > self.backoff * MAX_BACKOFF {
                 return Ok(Sent {
                     response,
                     maybe_applied,
@@ -391,6 +403,12 @@ const fn settles(guarded: bool, response: &HttpResponse) -> bool {
         _ => true,
     }
 }
+
+/// The pause before a request the bucket refused with a 429 or 503 is sent
+/// again, doubled for each refusal after it, up to `MAX_BACKOFF` times
+/// this: 250 ms, 0.5, 1 and 2 s, after which a refusal is the answer.
+const BACKOFF: Duration = Duration::from_millis(250);
+const MAX_BACKOFF: u32 = 8;
 
 /// How long one bucket request may take. R2 answers in 0.1-1 s from the
 /// lab, with spikes of a few seconds.

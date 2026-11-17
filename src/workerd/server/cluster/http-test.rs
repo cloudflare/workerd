@@ -148,7 +148,7 @@ fn a_request_that_answers_late_is_not_abandoned() {
     runtime().block_on(async {
         let server = serving(|n| {
             if n == 1 {
-                after(300, reply(201, ""))
+                after(150, reply(201, ""))
             } else {
                 Answer::Stall
             }
@@ -158,7 +158,7 @@ fn a_request_that_answers_late_is_not_abandoned() {
         let empty = EMPTY;
         let call = get_call(&empty);
         let answer = prompt(
-            Duration::from_millis(100),
+            Duration::from_millis(50),
             ANY,
             attempt(&call, what, settles, || get(&http, &server)),
         );
@@ -174,10 +174,10 @@ fn a_request_that_answers_late_is_not_abandoned() {
 #[test]
 fn an_answer_that_does_not_settle_waits_for_the_other_copy() {
     runtime().block_on(async {
-        // Sent again at 0.5 s and refused at once; the first answers at
-        // 0.75 s.
+        // Sent again at 0.2 s and refused at once; the first answers at
+        // 0.3 s, within the 0.2 s more the refusal waits.
         let server = serving(|n| match n {
-            1 => after(750, reply(201, "")),
+            1 => after(300, reply(201, "")),
             _ => reply(412, ""),
         })
         .await;
@@ -185,7 +185,7 @@ fn an_answer_that_does_not_settle_waits_for_the_other_copy() {
         let empty = EMPTY;
         let call = get_call(&empty);
         let answer = prompt(
-            Duration::from_millis(500),
+            Duration::from_millis(200),
             ANY,
             attempt(&call, what, not_refused, || get(&http, &server)),
         );
@@ -232,8 +232,9 @@ fn a_request_is_sent_again_only_once() {
             ANY,
             attempt(&call, what, settles, || get(&http, &server)),
         );
-        // The caller's deadline ends it, as it ends a request sent once.
-        let deadline = tokio::time::timeout(Duration::from_secs(2), answer);
+        // The caller's deadline, five bounds, ends it, as it ends a request
+        // sent once.
+        let deadline = tokio::time::timeout(Duration::from_millis(250), answer);
         assert!(deadline.await.is_err());
         assert_eq!(server.requests(), 2);
     });
@@ -254,7 +255,7 @@ fn a_request_outside_prompt_waits_for_its_answer() {
         let empty = EMPTY;
         let call = get_call(&empty);
         let answer = tokio::time::timeout(
-            Duration::from_millis(500),
+            Duration::from_millis(150),
             attempt(&call, what, settles, || get(&http, &server)),
         );
         assert!(answer.await.is_err());
@@ -310,7 +311,7 @@ fn only_a_request_safe_to_send_twice_is_sent_again() {
                 repeat,
                 attempt(call, what, settles, || get(&http, &server)),
             );
-            let deadline = tokio::time::timeout(Duration::from_millis(500), answer);
+            let deadline = tokio::time::timeout(Duration::from_millis(150), answer);
             assert!(deadline.await.is_err());
             assert_eq!(server.requests(), 1, "{}", call.method);
         });

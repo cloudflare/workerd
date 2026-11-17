@@ -291,6 +291,10 @@ async fn end_to_end<D: Dialect>(
     }
 }
 
+/// The first pause of the 429/503 backoff in the end-to-end tests, which
+/// check what the retries answer and not when.
+const BACKOFF: Duration = Duration::from_millis(5);
+
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -311,7 +315,7 @@ fn an_s3_bucket_end_to_end() {
         ]
         .map(|(name, value)| (name.to_owned(), value));
         let (s3, prefix) = S3::new("s3://b", &options).unwrap();
-        let bucket = Bucket::new(s3, &prefix);
+        let bucket = Bucket::new(s3.backoff(BACKOFF), &prefix);
         let wire = (("etag", "\"e\""), "x-amz-meta-", true);
         retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<SigV4>(bucket, &server, &queue, wire).await;
@@ -325,7 +329,7 @@ fn an_anonymous_cloud_storage_emulator_end_to_end() {
         let host = server.host.clone();
         let env = move |name: &str| (name == "STORAGE_EMULATOR_HOST").then(|| host.clone());
         let (gcs, prefix) = Gcs::with_env("gs://b", &[], &env, None).unwrap();
-        let bucket = Bucket::new(gcs, &prefix);
+        let bucket = Bucket::new(gcs.backoff(BACKOFF), &prefix);
         let wire = (("x-goog-generation", "17"), "x-goog-meta-", false);
         retried(&bucket, &server, &queue, wire.0).await;
         end_to_end::<Google>(bucket, &server, &queue, wire).await;
@@ -393,7 +397,7 @@ fn a_stalled_cloud_storage_request_is_sent_again() {
         })
         .await;
         let bucket = cloud_storage(&server);
-        let bound = Duration::from_millis(100);
+        let bound = Duration::from_millis(50);
         let repeat = &[Repeat::Read, Repeat::GuardedWrite];
         let bearer = || "Bearer t1".to_owned();
 
@@ -415,7 +419,7 @@ fn a_stalled_cloud_storage_request_is_sent_again() {
 
         // An unguarded write goes once.
         let put = prompt(bound, repeat, bucket.put("k", Vec::new(), &[]));
-        let waited = tokio::time::timeout(Duration::from_secs(1), put).await;
+        let waited = tokio::time::timeout(4 * bound, put).await;
         assert!(waited.is_err(), "an unguarded write answered");
         assert_eq!(object_requests(&server), [(bearer(), None)]);
     });
@@ -445,7 +449,7 @@ fn a_copy_refused_its_token_is_sent_again_with_another() {
         })
         .await;
         let bucket = cloud_storage(&server);
-        let get = prompt(Duration::from_millis(100), &[Repeat::Read], bucket.get("k"));
+        let get = prompt(Duration::from_millis(50), &[Repeat::Read], bucket.get("k"));
         let got = tokio::time::timeout(Duration::from_secs(10), get).await;
         assert_eq!(got.unwrap().unwrap().map(|(_, v)| v.0), Some("17".into()));
         // The refusal ends the attempt, the stalled copy with it: the
@@ -487,7 +491,7 @@ fn a_guarded_write_refused_beside_another_copy_is_of_unknown_outcome() {
         let guard = || Guard::Match(Version("17".into()));
         let put = |key| {
             let put = bucket.put_if(key, Vec::new(), guard());
-            prompt(Duration::from_millis(100), &[Repeat::GuardedWrite], put)
+            prompt(Duration::from_millis(50), &[Repeat::GuardedWrite], put)
         };
         // The stalled copy may land yet, or have landed before the refusal,
         // which may then be of its own write.
