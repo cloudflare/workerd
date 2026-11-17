@@ -53,7 +53,7 @@ fn coerces_method_arguments() {
         assert!(ctx.eval::<bool>(lock, "strings.optional() === undefined").unwrap());
         assert!(ctx.eval::<bool>(lock, "strings.optional(null) === 'null'").unwrap());
         assert!(ctx.eval::<bool>(lock, "strings.optional(42) === '42'").unwrap());
-        assert!(ctx.eval::<bool>(lock, "try { strings.echo(); false } catch (e) { e instanceof TypeError && e.message.includes('string') }").unwrap());
+        assert!(ctx.eval::<bool>(lock, "try { strings.echo(); false } catch (e) { e instanceof TypeError && e.message.endsWith(\"parameter 1 is not of type 'String'.\") }").unwrap());
         Ok(())
     });
 }
@@ -74,8 +74,8 @@ fn preserves_utf16_and_exposes_string_operations() {
         let round_tripped: v8::Local<'_, v8::Value> = v8::Local::<v8::String>::from(string).into();
         assert_eq!(round_tripped, value);
         assert_eq!(v8::Local::<v8::Value>::from(JsString::from(handle)), value);
-        assert_eq!(JsString::class_name(), "string");
-        assert_eq!(JsString::type_name(), "string");
+        assert_eq!(JsString::class_name(), "String");
+        assert_eq!(JsString::type_name(), "String");
 
         let strings = jsg::Rc::new(lock, Strings);
 
