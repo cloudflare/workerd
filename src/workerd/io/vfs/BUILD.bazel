@@ -1,0 +1,11 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The in-memory virtual file system of a Worker: the Rust implementation of the
+# API declared in //src/workerd/io:worker-fs.h. It does not depend on V8 or on
+# the rest of workerd; everything it needs from the runtime comes through the
+# `VfsHost` trait.
+wd_rust_crate(
+    name = "vfs",
+    visibility = ["//visibility:public"],
+    deps = ["@crates_vendor//thiserror"],
+)
