@@ -947,7 +947,7 @@ impl NestedType {
 /// Hashes a [`TypeId`], whose `Hash` implementation writes a single `u64` that is already a
 /// high-quality hash, so this passes it through rather than hashing it again.
 #[derive(Default)]
-struct TypeIdHasher(u64);
+pub(crate) struct TypeIdHasher(u64);
 
 impl Hasher for TypeIdHasher {
     fn write_u64(&mut self, value: u64) {
