@@ -81,6 +81,7 @@ import {
 } from 'node-internal:validators';
 
 import { StringDecoder } from 'node-internal:internal_stringdecoder';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 const streamsNodejsV24Compat =
   Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat;
@@ -119,6 +120,7 @@ const kDataListening = 1 << 27;
 // TODO(benjamingr) it is likely slower to do it this way than with free functions
 function makeBitMapDescriptor(bit) {
   return {
+    __proto__: kNullProtoObject,
     enumerable: false,
     get() {
       return (this[kState] & bit) !== 0;

@@ -146,7 +146,10 @@ pub fn call_cpp(
 ///
 /// # Safety
 ///
-/// The shim instantiates `callCppForRef` with the class `T` stands for, or a subclass.
+/// The shim instantiates `callCppForRef` with exactly the class `T` stands for, not a subclass:
+/// the `CppRef` keeps the pointer it was made with, which [`Ref::get`] lends as `T`, and a base
+/// class may be at an offset in a subclass. The shim's function may return a `jsg::Ref` of a
+/// subclass, which `callCppForRef` converts to a `jsg::Ref` of the class.
 pub unsafe fn call_cpp_for_ref<T: CppResource>(
     lock: &mut jsg::Lock<'_>,
     shim: impl FnOnce(*mut v8::ffi::Isolate, &mut KjMaybe<KjOwn<CppRef>>) -> bool,
@@ -185,8 +188,8 @@ impl<T: CppResource> Ref<T> {
     /// returns a `jsg::Ref<T>`.
     ///
     /// # Safety
-    /// `inner` was made for an object of `lock`'s isolate, of the C++ class `T` stands for or of a
-    /// subclass, through a `jsg::Ref<Class>`.
+    /// `inner` was made for an object of `lock`'s isolate from a `jsg::Ref` of exactly the C++
+    /// class `T` stands for, though the object may be of a subclass (see [`call_cpp_for_ref`]).
     pub unsafe fn from_cpp(lock: &mut jsg::Lock<'_>, inner: KjOwn<CppRef>) -> Self {
         Self {
             // SAFETY: C++ JSG objects are used by whichever thread holds their isolate's lock, and

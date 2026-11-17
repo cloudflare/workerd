@@ -287,6 +287,28 @@ fn string_write_out_of_bounds_panics() {
     });
 }
 
+/// A terminator needs room in the buffer, as for `write` and `write_one_byte`.
+#[test]
+fn string_write_utf8_null_terminate_into_empty_buffer_panics() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hi");
+        for flags in [
+            WriteFlags::NullTerminate,
+            WriteFlags::NullTerminateAndReplaceInvalidUtf8,
+        ] {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.write_utf8(lock, &mut [], flags);
+            }));
+            assert!(
+                result.is_err(),
+                "write_utf8 into an empty buffer with {flags:?} must panic"
+            );
+        }
+        Ok(())
+    });
+}
+
 #[test]
 fn string_write_utf8_into_buffer() {
     let harness = crate::Harness::new();

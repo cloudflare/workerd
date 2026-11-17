@@ -28,7 +28,6 @@ use crate::CxxWorkerInterface;
 use crate::Interface;
 use crate::Result;
 use crate::ScheduledResult;
-use crate::ffi;
 use crate::ffi::bridge;
 
 enum State {
@@ -142,7 +141,7 @@ impl Interface for PromisedInterface {
                 // client with this error instead of reporting that the event was destroyed
                 // before it completed. If `failed()` itself throws, that exception is returned
                 // instead.
-                bridge::custom_event_failed(event, Box::new(ffi::Error::new(error.clone())))?;
+                bridge::custom_event_failed(event, cxx::KjException::from(error.clone()))?;
                 return Err(error);
             }
         };

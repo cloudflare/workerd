@@ -914,6 +914,14 @@ kj_test(
 )
 
 kj_test(
+    src = "string-sandbox-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "sockets-test.c++",
     deps = [
         "//src/workerd/io",

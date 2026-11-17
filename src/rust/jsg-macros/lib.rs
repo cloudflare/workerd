@@ -398,7 +398,7 @@ enum Callback {
 #[derive(Clone, Copy)]
 enum ReceiverCheck {
     /// The callback is registered with the type's `v8::Signature`, which V8 checks before
-    /// calling it.
+    /// calling it, so it skips the marker check.
     Signature,
     /// The callback has no signature, so the receiver can be any value.
     Marker,
@@ -630,10 +630,9 @@ fn invocation(
     receiver_check: ReceiverCheck,
     arg_exprs: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
-    // `resolve_method_receiver` is sound only for callbacks registered with a signature.
     let resolve = match receiver_check {
         ReceiverCheck::Signature => {
-            quote! { unsafe { jsg::v8::resolve_method_receiver::<Self>(lock, this) } }
+            quote! { jsg::v8::resolve_method_receiver::<Self>(lock, this) }
         }
         ReceiverCheck::Marker => {
             quote! { jsg::v8::resolve_receiver::<Self>(lock, this) }

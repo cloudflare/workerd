@@ -278,6 +278,7 @@ pub enum Type {
     Void(Span),
     KjMaybe(Box<Ty1>),
     KjDate(Span),
+    KjException(Span),
     SliceRef(Box<SliceRef>),
     Array(Box<Array>),
     Future(Box<Future>),

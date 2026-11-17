@@ -46,6 +46,7 @@ import type { FileHandle } from 'node-internal:internal_fs_promises';
 
 import { errorOrDestroy } from 'node-internal:streams_destroy';
 import { eos } from 'node-internal:streams_end_of_stream';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 import {
   ERR_INVALID_ARG_VALUE,
@@ -734,6 +735,8 @@ Object.setPrototypeOf(ReadStream.prototype, Readable.prototype);
 Object.setPrototypeOf(ReadStream, Readable);
 
 Object.defineProperty(ReadStream.prototype, 'autoClose', {
+  // @ts-expect-error TS2353 Required for __proto__
+  __proto__: kNullProtoObject,
   get(this: ReadStream): boolean {
     validateThisInternalField(this, kFs, 'ReadStream');
     return this._readableState?.autoDestroy || false;
@@ -754,6 +757,8 @@ ReadStream.prototype.close = function (
 };
 
 Object.defineProperty(ReadStream.prototype, 'pending', {
+  // @ts-expect-error TS2353 Required for __proto__
+  __proto__: kNullProtoObject,
   get(this: ReadStream): boolean {
     return this.fd === null;
   },
@@ -1109,6 +1114,8 @@ Object.setPrototypeOf(WriteStream.prototype, Writable.prototype);
 Object.setPrototypeOf(WriteStream, Writable);
 
 Object.defineProperty(WriteStream.prototype, 'autoClose', {
+  // @ts-expect-error TS2353 Required for __proto__
+  __proto__: kNullProtoObject,
   get(this: WriteStream): boolean {
     validateThisInternalField(this, kFs, 'WriteStream');
     return this._writableState?.autoDestroy || false;
@@ -1150,6 +1157,8 @@ WriteStream.prototype.close = function (
 WriteStream.prototype.destroySoon = WriteStream.prototype.end;
 
 Object.defineProperty(WriteStream.prototype, 'pending', {
+  // @ts-expect-error TS2353 Required for __proto__
+  __proto__: kNullProtoObject,
   get(this: WriteStream): boolean {
     return this.fd === null;
   },
