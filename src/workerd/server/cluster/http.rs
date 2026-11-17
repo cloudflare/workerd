@@ -384,6 +384,10 @@ impl tower_service::Service<Uri> for Connector {
             let host = uri.host().ok_or_else(invalid)?.to_owned();
             let https = uri.scheme_str() == Some("https");
             let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
+            #[cfg(test)]
+            if let Some(stream) = crate::fake_http::connect(&format!("{host}:{port}")) {
+                return Ok(TokioIo::new(Stream::Memory(stream)));
+            }
             let tcp = TcpStream::connect((host.as_str(), port)).await?;
             tcp.set_nodelay(true)?;
             if !https {
@@ -399,6 +403,9 @@ impl tower_service::Service<Uri> for Connector {
 enum Stream {
     Tcp(TcpStream),
     Tls(Box<TlsStream<TcpStream>>),
+    /// To a test's `fake_http::Server`.
+    #[cfg(test)]
+    Memory(tokio::io::DuplexStream),
 }
 
 impl Connection for Stream {
@@ -416,6 +423,8 @@ impl AsyncRead for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
@@ -429,6 +438,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
             Self::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
@@ -436,6 +447,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_flush(cx),
             Self::Tls(s) => Pin::new(s).poll_flush(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
@@ -443,6 +456,8 @@ impl AsyncWrite for Stream {
         match self.get_mut() {
             Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
             Self::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            #[cfg(test)]
+            Self::Memory(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }
