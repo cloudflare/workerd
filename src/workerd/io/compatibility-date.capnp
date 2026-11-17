@@ -1887,4 +1887,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-12-16");
   # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
   # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
+
+  webCryptoEd25519SpecVerify @211 :Bool
+      $compatEnableFlag("webcrypto_ed25519_spec_verify")
+      $compatDisableFlag("no_webcrypto_ed25519_spec_verify")
+      $compatEnableDate("2027-01-12");
+  # `crypto.subtle.verify()` with an Ed25519 key, including one imported under the legacy
+  # "NODE-ED25519" name, returns false, as the Web Crypto spec requires, when the signature is not
+  # 64 bytes long, or when the public key or the first half of the signature (R) encodes a point of
+  # small order. Without the flag, a wrong-length signature rejects with an `OperationError`, and
+  # small-order points are accepted, so one signature from a small-order public key can verify for
+  # several different messages.
 }

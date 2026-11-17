@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-ed25519-verify-spec-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-ed25519-verify-test.js")],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_ed25519_spec_verify"],
+        bindings = [(name = "SPEC_VERIFY", json = "true")],
+      )
+    ),
+    ( name = "crypto-ed25519-verify-legacy-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "crypto-ed25519-verify-test.js")],
+        compatibilityFlags = ["nodejs_compat", "no_webcrypto_ed25519_spec_verify"],
+        bindings = [(name = "SPEC_VERIFY", json = "false")],
+      )
+    ),
+  ],
+);
