@@ -941,6 +941,21 @@ wd_test(
     tags = ["no-asan"],
 )
 
+# Under both HTMLRewriter implementations. The C++ cell disables @all-autogates, which would swap
+# in the TypeScript HTMLRewriter under a cell whose USING_TS_REWRITER binding says C++.
+wd_test(
+    src = "htmlrewriter-esi-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-esi-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "htmlrewriter-esi-ts-rewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-esi-test.js"],
+)
+
 wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],

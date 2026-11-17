@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# htmlrewriter-esi-test.js under the TypeScript HTMLRewriter (TS_HTML_REWRITER autogate), with and without
+# html_rewriter_treats_esi_include_as_void_tag.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "htmlrewriter-esi",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-esi-test.js")],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "ESI_INCLUDE_IS_VOID", json = "false"),
+          (name = "USING_TS_REWRITER", json = "true"),
+        ],
+      )
+    ),
+    ( name = "htmlrewriter-esi-void",
+      worker = (
+        modules = [(name = "worker", esModule = embed "htmlrewriter-esi-test.js")],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "html_rewriter_treats_esi_include_as_void_tag",
+        ],
+        bindings = [
+          (name = "ESI_INCLUDE_IS_VOID", json = "true"),
+          (name = "USING_TS_REWRITER", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-html-rewriter"],
+);
