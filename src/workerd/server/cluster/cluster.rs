@@ -491,8 +491,8 @@ impl Cluster {
         !self.ownership.may_claim.get()
     }
 
-    /// The first renewal, before the node links its services: their
-    /// storage opens only under a lease.
+    /// The first renewal, before the node links its services, after a
+    /// check that the bucket keeps conditional writes.
     pub async fn join(&self) -> Result<()> {
         let probe = format!("nodes/{}.probe", self.node());
         check_conditional_writes(&self.bucket, &probe).await?;
@@ -500,12 +500,16 @@ impl Cluster {
     }
 
     /// Renews the lease once more as the node starts serving, so that its
-    /// first maintenance round finds the lease held. Linking, after `join`,
-    /// opens every namespace's storage, which on a slow disk takes most of
-    /// a lease. A lease that lapsed meanwhile is renewed, not fenced on:
-    /// the node has run no actor and claimed nothing a peer could take over.
+    /// first maintenance round finds the lease held; from then on its actors
+    /// run only while the lease holds (`actors_may_run`). Linking, after
+    /// `join`, opens every namespace's storage, which on a slow disk or a
+    /// loaded machine outlasts a lease. A lease that lapsed meanwhile is
+    /// renewed, not fenced on: the node has run no actor and claimed nothing
+    /// a peer could take over.
     pub async fn renew_to_serve(&self) -> Result<()> {
-        self.take_lease().await
+        self.take_lease().await?;
+        self.lease.borrow_mut().requires_live_lease = true;
+        Ok(())
     }
 
     async fn take_lease(&self) -> Result<()> {
@@ -514,10 +518,15 @@ impl Cluster {
         Ok(())
     }
 
-    /// Whether this node's lease holds now: an actor database opens only
-    /// while it does.
+    /// Whether this node's lease holds now.
     pub fn lease_holds(&self) -> bool {
         self.lease.borrow().holds(now_ms())
+    }
+
+    /// Whether this node's actors may run and open their databases now:
+    /// before it serves, always; then while its lease holds.
+    pub fn actors_may_run(&self) -> bool {
+        self.lease.borrow().allows_actors(now_ms())
     }
 }
 

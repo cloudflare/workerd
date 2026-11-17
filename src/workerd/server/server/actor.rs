@@ -300,13 +300,14 @@ impl ActorNamespace {
         }
     }
 
-    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
-    /// have been taken over: running its actors, even to read their databases, could act on stale
-    /// data.
+    /// Fails in a cluster once this instance serves and its lease has lapsed. A node stalled past
+    /// its lease may have been taken over: running its actors, even to read their databases, could
+    /// act on stale data. Before it serves, linking opens the namespace's storage under no lease
+    /// (`Cluster::actors_may_run`).
     fn require_lease(&self) -> Result<()> {
         if self
             .cluster()
-            .is_some_and(|node| !node.cluster.lease_holds())
+            .is_some_and(|node| !node.cluster.actors_may_run())
         {
             return Err(kj::failed!(
                 "this instance's cluster lease in the bucket has lapsed"
