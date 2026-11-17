@@ -663,7 +663,7 @@ fn written(key: &str, sent: &Sent, guarded: bool) -> Result<bool> {
             format!("PUT {key}: {status} to a retry"),
         )),
         409 | 412 if guarded => Ok(false),
-        _ => Err(failure("PUT", key, response)),
+        _ => Err(refused("PUT", key, response)),
     }
 }
 

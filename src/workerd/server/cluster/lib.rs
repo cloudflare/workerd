@@ -197,8 +197,67 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// MD5 (RFC 1321): S3's `ETag` of an object written in one request, and of
 /// each part of a multipart one.
-#[expect(clippy::many_single_char_names, reason = "the RFC's names")]
 pub fn md5(data: &[u8]) -> [u8; 16] {
+    let mut md5 = Md5::default();
+    md5.update(data);
+    md5.finish()
+}
+
+/// MD5 of bytes given in pieces.
+#[derive(Clone)]
+pub struct Md5 {
+    h: [u32; 4],
+    block: Vec<u8>,
+    len: u64,
+}
+
+impl Default for Md5 {
+    fn default() -> Self {
+        Self {
+            h: [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476],
+            block: Vec::with_capacity(64),
+            len: 0,
+        }
+    }
+}
+
+impl Md5 {
+    pub fn update(&mut self, mut data: &[u8]) {
+        self.len += data.len() as u64;
+        if !self.block.is_empty() {
+            let n = (64 - self.block.len()).min(data.len());
+            self.block.extend_from_slice(&data[..n]);
+            data = &data[n..];
+            if self.block.len() < 64 {
+                return;
+            }
+            let block = std::mem::take(&mut self.block);
+            compress(&mut self.h, &block);
+        }
+        let mut blocks = data.chunks_exact(64);
+        for block in &mut blocks {
+            compress(&mut self.h, block);
+        }
+        self.block.extend_from_slice(blocks.remainder());
+    }
+
+    pub fn finish(mut self) -> [u8; 16] {
+        let bits = self.len.wrapping_mul(8);
+        let pad = (119 - self.len % 64) % 64 + 1;
+        let mut tail = vec![0; pad as usize];
+        tail[0] = 0x80;
+        tail.extend(bits.to_le_bytes());
+        self.update(&tail);
+        let mut out = [0; 16];
+        for (out, h) in out.chunks_mut(4).zip(self.h) {
+            out.copy_from_slice(&h.to_le_bytes());
+        }
+        out
+    }
+}
+
+#[expect(clippy::many_single_char_names, reason = "the RFC's names")]
+fn compress(h: &mut [u32; 4], block: &[u8]) {
     const S: [u32; 16] = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
     #[rustfmt::skip]
     const K: [u32; 64] = [
@@ -214,43 +273,29 @@ pub fn md5(data: &[u8]) -> [u8; 16] {
         0xffef_f47d, 0x8584_5dd1, 0x6fa8_7e4f, 0xfe2c_e6e0, 0xa301_4314, 0x4e08_11a1,
         0xf753_7e82, 0xbd3a_f235, 0x2ad7_d2bb, 0xeb86_d391,
     ];
-    let mut message = data.to_vec();
-    message.push(0x80);
-    while message.len() % 64 != 56 {
-        message.push(0);
-    }
-    message.extend((data.len() as u64).wrapping_mul(8).to_le_bytes());
-    let mut h: [u32; 4] = [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
-    for block in message.chunks(64) {
-        let word = |g: usize| {
-            u32::from_le_bytes([
-                block[4 * g],
-                block[4 * g + 1],
-                block[4 * g + 2],
-                block[4 * g + 3],
-            ])
+    let word = |g: usize| {
+        u32::from_le_bytes([
+            block[4 * g],
+            block[4 * g + 1],
+            block[4 * g + 2],
+            block[4 * g + 3],
+        ])
+    };
+    let [mut a, mut b, mut c, mut d] = *h;
+    for (i, k) in K.iter().enumerate() {
+        let (f, g) = match i / 16 {
+            0 => ((b & c) | (!b & d), i),
+            1 => ((d & b) | (!d & c), (5 * i + 1) % 16),
+            2 => (b ^ c ^ d, (3 * i + 5) % 16),
+            _ => (c ^ (b | !d), (7 * i) % 16),
         };
-        let [mut a, mut b, mut c, mut d] = h;
-        for (i, k) in K.iter().enumerate() {
-            let (f, g) = match i / 16 {
-                0 => ((b & c) | (!b & d), i),
-                1 => ((d & b) | (!d & c), (5 * i + 1) % 16),
-                2 => (b ^ c ^ d, (3 * i + 5) % 16),
-                _ => (c ^ (b | !d), (7 * i) % 16),
-            };
-            let f = f.wrapping_add(a).wrapping_add(*k).wrapping_add(word(g));
-            (a, d, c) = (d, c, b);
-            b = b.wrapping_add(f.rotate_left(S[i / 16 * 4 + i % 4]));
-        }
-        for (h, v) in h.iter_mut().zip([a, b, c, d]) {
-            *h = h.wrapping_add(v);
-        }
+        let f = f.wrapping_add(a).wrapping_add(*k).wrapping_add(word(g));
+        (a, d, c) = (d, c, b);
+        b = b.wrapping_add(f.rotate_left(S[i / 16 * 4 + i % 4]));
     }
-    let mut out = [0; 16];
-    for (out, h) in out.chunks_mut(4).zip(h) {
-        out.copy_from_slice(&h.to_le_bytes());
+    for (h, v) in h.iter_mut().zip([a, b, c, d]) {
+        *h = h.wrapping_add(v);
     }
-    out
 }
 
 pub fn unhex(text: &str) -> Option<Vec<u8>> {

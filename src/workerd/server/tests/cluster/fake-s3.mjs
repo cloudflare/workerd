@@ -237,6 +237,15 @@ export class FakeS3Server {
         xml,
       });
     }
+    // S3's limit on user metadata, names and values.
+    const meta = this.#described(req).filter(([n]) => n.startsWith('x-amz-'));
+    const metaSize = meta.reduce(
+      (n, [name, v]) => n + Buffer.byteLength(name.slice(11) + v),
+      0
+    );
+    if (metaSize > 2048 && ['PUT', 'POST'].includes(req.method)) {
+      return fail(400, 'MetadataTooLarge', key);
+    }
     if (req.method === 'POST' && query.has('uploads')) {
       const id = randomUUID();
       this.#uploads.set(id, { key, headers: this.#described(req), parts: [] });

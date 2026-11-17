@@ -1081,9 +1081,9 @@ test('cluster: an R2 bucket is an object, seen from every node', async () => {
   await withCluster(2, r2Bucket);
 });
 
-// R2 through the bundled Worker on two nodes: each object is the bucket's
-// object of the same name, and a multipart upload spans the nodes.
-async function r2Bucket({ nodes, bucket }) {
+// R2 on two nodes: each object is the bucket's object of the same name, and
+// a multipart upload spans the nodes. `gcs` for a Cloud Storage bucket.
+async function r2Bucket({ nodes, bucket }, gcs = false) {
   const [a, b] = nodes.map((n) => n.httpPort);
   const q = (params) => new URLSearchParams(params);
   const r2 = async (port, path, params) => {
@@ -1097,6 +1097,17 @@ async function r2Bucket({ nodes, bucket }) {
   const small = await r2(b, 'get', { key: 'small' });
   assert.deepStrictEqual(small, { size: 1000, length: 1000, right: true });
   assert.deepStrictEqual(await stored(), ['services/r2/cluster-r2/small']);
+
+  // S3 keeps 2 KB of user metadata, R2 8 KB: a put over S3's is R2's
+  // MetadataTooLarge.
+  if (!gcs) {
+    await r2(a, 'put', { key: 'meta', size: '1', meta: '1500' });
+    const tooLarge = q({ key: 'meta', size: '1', meta: '3000' });
+    const refused = await fetchJson(a, `/r2/put?${tooLarge}`);
+    assert.strictEqual(refused.status, 400);
+    assert.match(refused.body.error, /\(10012\)/);
+    await r2(a, 'delete', { key: 'meta' });
+  }
 
   await r2(a, 'put', { key: 'big', size: '100000' });
   assert.strictEqual((await stored()).length, 2);
@@ -3107,7 +3118,7 @@ test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata s
       assert.strictEqual(big.body.value.length, 100000);
 
       // R2 objects, ranges and multipart, in Cloud Storage's dialect.
-      await r2Bucket({ nodes, bucket });
+      await r2Bucket({ nodes, bucket }, true);
 
       // Each node process takes two tokens at startup, for its deployments
       // and for its cluster, and replaces a token halfway through its

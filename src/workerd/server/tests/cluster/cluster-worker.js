@@ -194,8 +194,8 @@ async function kv(url, ns) {
   return Response.json({ error: 'no such path' }, { status: 404 });
 }
 
-// The R2 binding, by query parameters: /r2/put?key=K&size=N (N bytes, each
-// its index mod 251), /r2/get?key=K[&offset=O&length=L] (answers the bytes'
+// The R2 binding, by query parameters: /r2/put?key=K&size=N[&meta=M] (N
+// bytes, each its index mod 251, with M bytes of customMetadata), /r2/get?key=K[&offset=O&length=L] (answers the bytes'
 // length and whether they are right), /r2/list?prefix=P, /r2/delete?key=K,
 // and a multipart upload's /r2/create?key=K, /r2/part?key=K&upload=U&n=N
 // &size=S and /r2/complete?key=K&upload=U&parts=JSON. Answers JSON.
@@ -214,8 +214,15 @@ async function r2(url, bucket) {
     new Uint8Array(await crypto.subtle.digest('SHA-256', b)).join();
   switch (url.pathname) {
     case '/r2/put': {
-      const put = await bucket.put(q.key, bytes(Number(q.size)));
-      return Response.json({ etag: put.etag });
+      const customMetadata = { m: 'x'.repeat(Number(q.meta ?? 0)) };
+      try {
+        const put = await bucket.put(q.key, bytes(Number(q.size)), {
+          customMetadata,
+        });
+        return Response.json({ etag: put.etag });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 400 });
+      }
     }
     case '/r2/get': {
       const range = q.length

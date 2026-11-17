@@ -1,8 +1,0 @@
-load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
-
-# The R2 Worker, the bundled module `/workerd/r2.js` (Worker.Module.bundled).
-wd_cc_embed(
-    name = "r2-js",
-    src = "r2.js",
-    visibility = ["//src/workerd/server:__pkg__"],
-)

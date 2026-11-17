@@ -106,10 +106,11 @@ fn error_codes_are_capped() {
         response,
         maybe_applied: false,
     };
-    let Err(Error::Http(message)) = written("k", &sent, false) else {
+    let Err(error @ Error::Refused { .. }) = written("k", &sent, false) else {
         panic!("a 500 was accepted");
     };
-    assert_eq!(message, format!("PUT k: 500 {}", "x".repeat(100)));
+    let message = format!("bucket: PUT k: 500 {}", "x".repeat(100));
+    assert_eq!(error.to_string(), message);
 }
 
 // The real client against a fake bucket.
@@ -148,6 +149,7 @@ async fn call(bucket: &Bucket, call: Call) -> std::result::Result<String, String
     };
     outcome.map_err(|e| match e {
         Error::Http(message) => message,
+        Error::Refused { what, status, code } => format!("{what}: {status} {code}"),
         Error::OutcomeUnknown(message) => format!("unknown: {message}"),
         other => other.to_string(),
     })

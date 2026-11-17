@@ -30,6 +30,9 @@ fn md5_vectors() {
         ),
     ] {
         assert_eq!(hex(&md5(text.as_bytes())), digest, "{text}");
+        let mut pieces = crate::Md5::default();
+        text.as_bytes().chunks(7).for_each(|p| pieces.update(p));
+        assert_eq!(hex(&pieces.finish()), digest, "{text} in pieces");
     }
 }
 

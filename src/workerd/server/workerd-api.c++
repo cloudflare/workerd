@@ -24,7 +24,6 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/server/queues/queues_js.embed.h>
-#include <workerd/server/r2/r2_js.embed.h>
 #include <workerd/server/workflows/workflows_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
@@ -60,7 +59,6 @@ kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
     map.insert("/workerd/kv.js"_kj, KV_JS);
     map.insert("/workerd/cron.js"_kj, CRON_JS);
     map.insert("/workerd/queues.js"_kj, QUEUES_JS);
-    map.insert("/workerd/r2.js"_kj, R2_JS);
     map.insert("/workerd/workflows.js"_kj, WORKFLOWS_JS);
     map.insert("/workerd/d1.js"_kj, D1_JS);
     return map;
