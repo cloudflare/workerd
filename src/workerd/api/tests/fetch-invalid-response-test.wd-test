@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "legacy-error", worker = .legacyError),
+    (name = "type-error", worker = .typeError),
+    (name = "internet", network = (allow = ["private"])),
+  ],
+);
+
+const legacyError :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "fetch_invalid_response_legacy_error"],
+  modules = [
+    (name = "worker", esModule = embed "fetch-invalid-response-test.js"),
+  ],
+  bindings = [
+    (name = "EXPECTED_ERROR", text = "Error"),
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "INVALID_RESPONSE_SERVER_PORT", fromEnvironment = "INVALID_RESPONSE_SERVER_PORT"),
+  ],
+);
+
+const typeError :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "fetch_invalid_response_type_error"],
+  modules = [
+    (name = "worker", esModule = embed "fetch-invalid-response-test.js"),
+  ],
+  bindings = [
+    (name = "EXPECTED_ERROR", text = "TypeError"),
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "INVALID_RESPONSE_SERVER_PORT", fromEnvironment = "INVALID_RESPONSE_SERVER_PORT"),
+  ],
+);

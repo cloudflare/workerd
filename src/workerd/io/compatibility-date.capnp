@@ -1852,4 +1852,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # rules rather than by the KJ URL parser alone, which follows neither those nor RFC 3986. Relative
   # URLs still throw a SyntaxError, because a Worker has no base URL. Once the connection is open,
   # `protocol` and `extensions` are the empty string when the server selected none, not null.
+
+  fetchInvalidResponseTypeError @208 :Bool
+      $compatEnableFlag("fetch_invalid_response_type_error")
+      $compatDisableFlag("fetch_invalid_response_legacy_error");
+  # When a server's response head doesn't parse, for example because a header value contains a NUL
+  # byte or the status line is malformed, `fetch()` rejects with a TypeError, as the Fetch spec
+  # requires for a network error. Without the flag it rejects with an Error. The message is
+  # "Server returned invalid HTTP response: " followed by the reason either way.
 }

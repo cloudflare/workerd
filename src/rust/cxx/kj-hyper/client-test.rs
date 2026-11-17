@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicUsize;
 
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::io::DuplexStream;
 use tokio::io::duplex;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
@@ -32,17 +33,22 @@ async fn peer(mut io: impl AsyncRead + AsyncWrite + Unpin, response: &str) -> St
     String::from_utf8(request).unwrap()
 }
 
+/// A pool whose dialer hands out `io` once and fails on any later dial.
+fn dial_once(settings: ClientSettings, io: DuplexStream) -> ClientPool {
+    let dialed = Mutex::new(Some(io));
+    ClientPool::new(settings, Peer::Origin, move || {
+        let io = dialed.lock().unwrap().take();
+        let io = io.map(|io| Dialed::with_hangup(io, Box::pin(pending())));
+        async move { io.ok_or_else(|| io::Error::other("dialed twice")) }
+    })
+}
+
 #[test]
 fn a_fixed_client_dials_through_its_dialer_and_sends_the_url_as_given() {
     let table = HeaderTable::builtin();
     runtime().block_on(async {
         let (ours, theirs) = duplex(1 << 16);
-        let dialed = Mutex::new(Some(ours));
-        let pool = ClientPool::new(ClientSettings::default(), Peer::Origin, move || {
-            let io = dialed.lock().unwrap().take();
-            let io = io.map(|io| Dialed::with_hangup(io, Box::pin(pending())));
-            async move { io.ok_or_else(|| io::Error::other("dialed twice")) }
-        });
+        let pool = dial_once(ClientSettings::default(), ours);
         let client = pool.client(&table);
         let mut head = Head::empty();
         head.set(Builtin::Host, http::HeaderValue::from_static("example.com"));
@@ -72,21 +78,35 @@ fn a_fixed_client_dials_through_its_dialer_and_sends_the_url_as_given() {
 }
 
 #[test]
+fn a_response_head_that_does_not_parse_fails_as_kj_does() {
+    let table = HeaderTable::builtin();
+    runtime().block_on(async {
+        let (ours, theirs) = duplex(1 << 16);
+        let pool = dial_once(ClientSettings::default(), ours);
+        let client = pool.client(&table);
+        let server = tokio::spawn(peer(theirs, "HTTP/1.1 200 OK\r\nX-Reply: x\0x\r\n\r\n"));
+        let error = send(&client, http::Method::GET).await.unwrap_err();
+        server.await.unwrap();
+        assert_eq!(error.exception_type(), KjExceptionType::Failed);
+        assert!(
+            error.description().starts_with(INVALID_RESPONSE),
+            "{}",
+            error.description()
+        );
+    });
+}
+
+#[test]
 fn an_idle_connection_is_closed_after_the_idle_timeout() {
     let table = HeaderTable::builtin();
     runtime().block_on(async {
         let (ours, mut theirs) = duplex(1 << 16);
-        let dialed = Mutex::new(Some(ours));
         let idle_timeout = Duration::from_millis(100);
         let settings = ClientSettings {
             idle_timeout,
             ..ClientSettings::default()
         };
-        let pool = ClientPool::new(settings, Peer::Origin, move || {
-            let io = dialed.lock().unwrap().take();
-            let io = io.map(|io| Dialed::with_hangup(io, Box::pin(pending())));
-            async move { io.ok_or_else(|| io::Error::other("dialed twice")) }
-        });
+        let pool = dial_once(settings, ours);
         let client = pool.client(&table);
         let (uri, _) = client.target(b"/").unwrap();
         let request =
