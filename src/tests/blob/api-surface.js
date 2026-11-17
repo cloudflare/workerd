@@ -8,7 +8,6 @@ import {
   onPrototype,
   setToStringTag,
   specCompliantPropertyAttributes,
-  usingTsImpl,
 } from 'which-impl';
 
 // A descriptor's shape: 'data:<typeof value>' or 'acc<G><S>', then e, c, w.
@@ -64,18 +63,13 @@ export const constructorShape = {
     deepStrictEqual(shape(Blob), {
       length: 'data:number-c-',
       name: 'data:string-c-',
-      // Ledger #3.
-      prototype:
-        usingTsImpl || immutableApiPrototypes
-          ? 'data:object---'
-          : 'data:object--w',
+      prototype: immutableApiPrototypes ? 'data:object---' : 'data:object--w',
     });
     deepStrictEqual(
       [Blob.name, Blob.length, File.name, File.length],
       ['Blob', 0, 'File', 0]
     );
-    // Ledger #2.
-    strictEqual(Object.getPrototypeOf(File) === Blob, usingTsImpl);
+    strictEqual(Object.getPrototypeOf(File), Function.prototype);
     strictEqual(Object.getPrototypeOf(File.prototype), Blob.prototype);
   },
 };

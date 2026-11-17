@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { deepStrictEqual, strictEqual, throws } from 'node:assert';
-import { rejectResizable, usingTsImpl } from 'which-impl';
+import { rejectResizable } from 'which-impl';
 
 const notAnArray = {
   name: 'TypeError',
@@ -17,21 +17,15 @@ async function bytesOf(blob) {
 
 export const constructorRequiresNew = {
   test() {
-    // Ledger #1.
-    throws(
-      () => Blob([]),
-      usingTsImpl
-        ? {
-            name: 'TypeError',
-            message: "Class constructor Blob cannot be invoked without 'new'",
-          }
-        : {
-            name: 'TypeError',
-            message:
-              "Failed to construct 'Blob': Please use the 'new' operator, this object constructor cannot be called as a function.",
-          }
-    );
-    throws(() => File([], 'f'), TypeError);
+    for (const [name, construct] of [
+      ['Blob', () => Blob([])],
+      ['File', () => File([], 'f')],
+    ]) {
+      throws(construct, {
+        name: 'TypeError',
+        message: `Failed to construct '${name}': Please use the 'new' operator, this object constructor cannot be called as a function.`,
+      });
+    }
   },
 };
 

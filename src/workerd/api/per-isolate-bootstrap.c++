@@ -130,6 +130,8 @@ struct BootstrapState final: public jsg::BootstrapModules {
   // Functions found by tryGetBootstrapFunction(), by module specifier, then name.
   kj::HashMap<kj::String, kj::HashMap<kj::String, jsg::JsRef<jsg::JsFunction>>> functionCache;
   kj::HashSet<kj::String> loading;
+  // See tryGetBootstrapCache().
+  kj::HashMap<const void*, kj::Own<BootstrapCache>> caches;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
   jsg::JsRef<jsg::JsObject> utilsObj;
@@ -1220,6 +1222,20 @@ kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
         return func;
       }
     }
+  }
+  return kj::none;
+}
+
+kj::Maybe<BootstrapCache&> tryGetBootstrapCache(
+    jsg::Lock& js, const void* key, kj::FunctionParam<kj::Own<BootstrapCache>()> create) {
+  KJ_IF_SOME(state, tryGetBootstrapState(js.v8Context())) {
+    KJ_IF_SOME(cache, state.caches.find(key)) {
+      return *cache;
+    }
+    auto cache = create();
+    auto& result = *cache;
+    state.caches.insert(key, kj::mv(cache));
+    return result;
   }
   return kj::none;
 }

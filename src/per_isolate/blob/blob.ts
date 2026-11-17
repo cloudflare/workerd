@@ -1,10 +1,10 @@
 'use strict';
 
 // Blob and File (W3C File API), under the TS_BLOB autogate. They replace the
-// C++ classes in api/blob.h, whose observable behavior they keep, but where
-// src/tests/blob/AGENTS.md lists a difference; its suite runs against both
-// implementations, as does the C++ code that makes and reads a Blob through
-// api/blob-bridge.h.
+// C++ classes in api/blob.h, whose observable behavior they keep, down to
+// the bytes they write: src/tests/blob/ runs one suite against both
+// implementations, as api/blob-bootstrap-test.c++ does for the C++ code
+// that makes and reads a Blob through api/blob-bridge.h.
 //
 // An instance keeps its state under V8-private properties rather than
 // #private fields, because the C++ bridge makes instances without running
@@ -36,7 +36,6 @@ const {
   NumberIsFinite,
   NumberIsNaN,
   ObjectCreate,
-  ObjectDefineProperties,
   ObjectDefineProperty,
   ObjectGetOwnPropertyDescriptor,
   ObjectSetPrototypeOf,
@@ -103,10 +102,24 @@ const kConstructFile = "Failed to construct 'File'";
 
 const { now: DateNow } = Date;
 
-const encoder = new TextEncoder();
-// As the C++ Blob's text() decodes: replacing invalid sequences, and keeping
-// a byte order mark.
-const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+// Made on first use, since every isolate runs this module and most never
+// read a Blob.
+let encoder: TextEncoder | undefined;
+let decoder: TextDecoder | undefined;
+
+function getEncoder(): TextEncoder {
+  return (encoder ??= new TextEncoder());
+}
+
+// Decodes as the C++ Blob's text() does: replacing invalid sequences, and
+// keeping a byte order mark. Made after user code may have run, so the
+// options inherit nothing (such as a `fatal` on Object.prototype).
+function getDecoder(): TextDecoder {
+  return (decoder ??= new TextDecoder('utf-8', {
+    __proto__: null,
+    ignoreBOM: true,
+  } as TextDecoderOptions));
+}
 
 // Any code unit outside printable ASCII (DEL counts as printable here, as in
 // the C++).
@@ -352,7 +365,7 @@ function isTrailSurrogate(unit: number): boolean {
 // `string` as WTF-8.
 function encodeString(string: string): Uint8Array {
   if (StringPrototypeIsWellFormed(string)) {
-    return TextEncoderEncode(encoder, string);
+    return TextEncoderEncode(getEncoder(), string);
   }
   const length = string.length;
   let size = 0;
@@ -406,20 +419,36 @@ function encodeString(string: string): Uint8Array {
 // so that each lone surrogate's three bytes are three U+FFFDs.
 function fromWtf8(string: string): string {
   if (StringPrototypeIsWellFormed(string)) return string;
-  return TextDecoderDecode(decoder, encodeString(string)) as string;
+  return TextDecoderDecode(getDecoder(), encodeString(string)) as string;
 }
 
 // ---------------------------------------------------------------------------
 // Instances
 
-function instanceAttribute(value: unknown): PropertyDescriptor {
-  return {
-    __proto__: null,
-    value,
-    writable: false,
-    enumerable: true,
-    configurable: true,
-  } as PropertyDescriptor;
+// The descriptor of an attribute under the legacy layout, reused for every
+// one, so that initInstance() makes no descriptor objects. Its prototype is
+// null, so that defining with it reads nothing user code can patch.
+class AttributeDescriptor {
+  declare value: unknown;
+  declare writable: boolean;
+  declare enumerable: boolean;
+  declare configurable: boolean;
+  constructor() {
+    this.value = undefined;
+    this.writable = false;
+    this.enumerable = true;
+    this.configurable = true;
+  }
+}
+ObjectSetPrototypeOf(AttributeDescriptor.prototype, null);
+const kAttribute = new AttributeDescriptor();
+
+// Defines nothing user code can observe while it runs: `self` is an ordinary
+// object this module made.
+function defineAttribute(self: object, name: string, value: unknown): void {
+  kAttribute.value = value;
+  ObjectDefineProperty(self, name, kAttribute as PropertyDescriptor);
+  kAttribute.value = undefined;
 }
 
 // Gives `self` its state, its own properties under the legacy layout, in
@@ -440,17 +469,11 @@ function initInstance(
   }
   if (kInstanceProperties) {
     if (name !== undefined) {
-      ObjectDefineProperties(self, {
-        __proto__: null,
-        lastModified: instanceAttribute(lastModified),
-        name: instanceAttribute(fromWtf8(name)),
-      });
+      defineAttribute(self, 'lastModified', lastModified);
+      defineAttribute(self, 'name', fromWtf8(name));
     }
-    ObjectDefineProperties(self, {
-      __proto__: null,
-      type: instanceAttribute(type),
-      size: instanceAttribute(TypedArrayPrototypeGetByteLength(bytes)),
-    });
+    defineAttribute(self, 'type', type);
+    defineAttribute(self, 'size', TypedArrayPrototypeGetByteLength(bytes));
   }
   if (name === undefined) {
     markStandIn(self, kBlobSerializationTag);
@@ -459,25 +482,75 @@ function initInstance(
   }
 }
 
-class Blob {
-  constructor(blobParts?: unknown, options?: unknown) {
-    const parts = convertParts(blobParts, kConstructBlob);
-    const bag = requireOptions(options, kConstructBlob, 2);
-    const type = convertType(bag);
-    checkEndings(bag);
-    initInstance(this, combine(parts), type);
-  }
+// The constructors are functions rather than classes so that they have the
+// shape JSG gives the C++ ones: a function's `prototype` is writable, as a
+// JSG constructor's is unless immutable_api_prototypes makes it read-only,
+// and a function can throw JSG's error when called without `new`. Neither
+// inherits from anything (File's [[Prototype]] is Function.prototype, as in
+// C++), so neither calls anything user code can replace while constructing.
 
+const kCallWithNew =
+  ": Please use the 'new' operator, this object constructor cannot be " +
+  'called as a function.';
+
+function Blob(this: object, blobParts?: unknown, options?: unknown): void {
+  if (new.target === undefined) {
+    throw new TypeError(kConstructBlob + kCallWithNew);
+  }
+  const parts = convertParts(blobParts, kConstructBlob);
+  const bag = requireOptions(options, kConstructBlob, 2);
+  const type = convertType(bag);
+  checkEndings(bag);
+  initInstance(this, combine(parts), type);
+}
+
+function File(
+  this: object,
+  fileBits?: unknown,
+  fileName?: unknown,
+  options?: unknown
+): void {
+  if (new.target === undefined) {
+    throw new TypeError(kConstructFile + kCallWithNew);
+  }
+  const parts = convertParts(fileBits, kConstructFile);
+  if (fileName === undefined) {
+    throw new TypeError(
+      `${kConstructFile}: constructor parameter 2 is not of type 'string'.`
+    );
+  }
+  const name = toString(fileName);
+  const bag = requireOptions(options, kConstructFile, 3);
+  const type = convertType(bag);
+  let lastModified: number;
+  const lastModifiedArg: unknown =
+    bag === undefined
+      ? undefined
+      : (bag as { lastModified?: unknown }).lastModified;
+  if (lastModifiedArg === undefined) {
+    lastModified = DateNow();
+  } else {
+    lastModified = +(lastModifiedArg as number);
+    if (NumberIsNaN(lastModified)) lastModified = 0;
+  }
+  checkEndings(bag);
+  initInstance(this, combine(parts), type, name, lastModified);
+}
+
+// The prototypes' members, in JSG's order. Methods and accessors defined in
+// an object literal are enumerable, as JSG's are, and like a class's methods
+// are not constructors.
+const kBlobMembers = {
   get size(): number {
     return TypedArrayPrototypeGetByteLength(requireBytes(this)) as number;
-  }
+  },
 
   get type(): string {
     requireBytes(this);
     return (this as unknown as Slots)[kType] as string;
-  }
+  },
 
-  slice(start?: unknown, end?: unknown, contentType?: unknown): Blob {
+  slice(start?: unknown, end?: unknown, contentType?: unknown): object {
     const bytes = requireBytes(this);
     const startArg = start === undefined ? undefined : toInt(start);
     const endArg = end === undefined ? undefined : toInt(end);
@@ -490,10 +563,10 @@ class Blob {
     if (to < 0) to += size;
     from = from < 0 ? 0 : from > size ? size : from;
     to = to < from ? from : to > size ? size : to;
-    const blob = ObjectCreate(Blob.prototype) as Blob;
+    const blob = ObjectCreate(Blob.prototype) as object;
     initInstance(blob, subrange(bytes, from, to), type);
     return blob;
-  }
+  },
 
   arrayBuffer(): Promise<ArrayBuffer> {
     const bytes = requireBytes(this);
@@ -501,115 +574,86 @@ class Blob {
     return PromiseResolve(
       TypedArrayPrototypeGetBuffer(copy(bytes)) as ArrayBuffer
     );
-  }
+  },
 
   bytes(): Promise<Uint8Array> {
     const bytes = requireBytes(this);
     recordBlobUse(0);
     return PromiseResolve(copy(bytes));
-  }
+  },
 
   text(): Promise<string> {
     const bytes = requireBytes(this);
     recordBlobUse(1);
-    return PromiseResolve(TextDecoderDecode(decoder, bytes));
-  }
+    return PromiseResolve(TextDecoderDecode(getDecoder(), bytes));
+  },
 
   stream(): ReadableStream<Uint8Array> {
     const bytes = requireBytes(this);
     recordBlobUse(2);
     return blobStream(bytes);
-  }
-}
+  },
+};
 
-// Not `extends Blob`: a derived constructor's super() calls whatever File's
-// [[Prototype]] is then, which user code can replace. File initializes its
-// own instance, and inherits from Blob through the prototypes set below.
-class File {
-  constructor(fileBits?: unknown, fileName?: unknown, options?: unknown) {
-    const parts = convertParts(fileBits, kConstructFile);
-    if (fileName === undefined) {
-      throw new TypeError(
-        `${kConstructFile}: constructor parameter 2 is not of type 'string'.`
-      );
-    }
-    const name = toString(fileName);
-    const bag = requireOptions(options, kConstructFile, 3);
-    const type = convertType(bag);
-    let lastModified: number;
-    const lastModifiedArg: unknown =
-      bag === undefined
-        ? undefined
-        : (bag as { lastModified?: unknown }).lastModified;
-    if (lastModifiedArg === undefined) {
-      lastModified = DateNow();
-    } else {
-      lastModified = +(lastModifiedArg as number);
-      if (NumberIsNaN(lastModified)) lastModified = 0;
-    }
-    checkEndings(bag);
-    initInstance(this, combine(parts), type, name, lastModified);
-  }
-
+const kFileMembers = {
   get name(): string {
     return fromWtf8(requireFile(this)[kName] as string);
-  }
+  },
 
   get lastModified(): number {
     return requireFile(this)[kLastModified] as number;
-  }
-}
+  },
+};
 
 // ---------------------------------------------------------------------------
-// The rest gives the classes the shape JSG gives the C++ ones.
+// The rest gives the constructors the shape JSG gives the C++ ones.
 
-// Moves `constructor` after the members, where JSG defines it, and makes
-// the members enumerable, as JSG's are. Under the legacy layout, the
-// accessors are left out: the attributes are the instances' own.
-function shapePrototype(proto: object, accessors: readonly string[]): void {
-  const ctor = ObjectGetOwnPropertyDescriptor(
-    proto,
-    'constructor'
-  ) as PropertyDescriptor;
+// Defines `members` on `ctor.prototype` before its `constructor`, where JSG
+// defines them, each method named and of length 0, as JSG's are. Under the
+// legacy layout, the accessors are left out: the attributes are the
+// instances' own.
+function shapePrototype(ctor: object, members: object, names: string[]): void {
+  const proto = (ctor as { prototype: object }).prototype;
   delete (proto as { constructor?: unknown }).constructor;
-  for (let i = 0; i < accessors.length; i++) {
-    const name = accessors[i] as string;
-    if (kInstanceProperties) {
-      delete (proto as Record<string, unknown>)[name];
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i] as string;
+    const descriptor = ObjectGetOwnPropertyDescriptor(
+      members,
+      name
+    ) as PropertyDescriptor;
+    if (descriptor.get !== undefined) {
+      if (kInstanceProperties) continue;
     } else {
-      ObjectDefineProperty(proto, name, {
-        __proto__: null,
-        enumerable: true,
-      } as PropertyDescriptor);
+      setNameAndLength(descriptor.value, name, 0);
     }
+    ObjectDefineProperty(proto, name, descriptor);
   }
   ObjectDefineProperty(proto, 'constructor', {
     __proto__: null,
-    value: ctor.value,
+    value: ctor,
     writable: true,
     enumerable: false,
     configurable: true,
   } as PropertyDescriptor);
+  if (compatFlags['immutable_api_prototypes'] === true) {
+    ObjectDefineProperty(ctor, 'prototype', {
+      __proto__: null,
+      writable: false,
+    } as PropertyDescriptor);
+  }
 }
 
-const kBlobMethods = ['slice', 'arrayBuffer', 'bytes', 'text', 'stream'];
-for (let i = 0; i < kBlobMethods.length; i++) {
-  const name = kBlobMethods[i] as string;
-  ObjectDefineProperty(Blob.prototype, name, {
-    __proto__: null,
-    enumerable: true,
-  } as PropertyDescriptor);
-  setNameAndLength(
-    (ObjectGetOwnPropertyDescriptor(Blob.prototype, name) as PropertyDescriptor)
-      .value,
-    name,
-    0
-  );
-}
 ObjectSetPrototypeOf(File.prototype, Blob.prototype);
-ObjectSetPrototypeOf(File, Blob);
-shapePrototype(Blob.prototype, ['size', 'type']);
-shapePrototype(File.prototype, ['name', 'lastModified']);
+shapePrototype(Blob, kBlobMembers, [
+  'size',
+  'type',
+  'slice',
+  'arrayBuffer',
+  'bytes',
+  'text',
+  'stream',
+]);
+shapePrototype(File, kFileMembers, ['name', 'lastModified']);
 setNameAndLength(Blob, 'Blob', 0);
 setNameAndLength(File, 'File', 0);
 markAsRuntimeClass(Blob.prototype, 'Blob');

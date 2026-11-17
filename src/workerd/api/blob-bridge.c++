@@ -30,37 +30,98 @@ constexpr kj::StringPtr LAST_MODIFIED_KEY = "workerd:File:lastModified"_kj;
 constexpr kj::StringPtr TYPE_BYTES_KEY = "workerd:Blob:typeBytes"_kj;
 constexpr kj::StringPtr NAME_BYTES_KEY = "workerd:File:nameBytes"_kj;
 
-void setString(jsg::Lock& js,
-    jsg::JsObject object,
-    kj::StringPtr key,
-    kj::StringPtr bytesKey,
-    kj::StringPtr value) {
-  object.setPrivate(js, key, js.str(value));
-  if (!simdutf::validate_utf8(value.begin(), value.size())) {
-    object.setPrivate(js, bytesKey, jsg::JsUint8Array::create(js, value.asBytes()));
-  }
-}
-
-kj::String getString(
-    jsg::Lock& js, jsg::JsObject object, kj::StringPtr key, kj::StringPtr bytesKey) {
-  KJ_IF_SOME(bytes, object.getPrivate(js, bytesKey).tryCast<jsg::JsUint8Array>()) {
-    return kj::heapString(bytes.asArrayPtr().asChars());
-  }
-  return KJ_ASSERT_NONNULL(object.getPrivate(js, key).tryCast<jsg::JsString>()).toString(js);
-}
-
 // The bootstrap module whose exports describe how to make an instance (see blob/cpp_exports.ts).
 // It is loaded only under the TS_BLOB autogate.
 constexpr kj::StringPtr CPP_EXPORTS = "blob/cpp_exports"_kj;
 
-jsg::JsObject getCppExports(jsg::Lock& js) {
-  auto exports = KJ_REQUIRE_NONNULL(
-      tryGetBootstrapExport(js, CPP_EXPORTS), "the TypeScript Blob is not loaded");
-  return KJ_REQUIRE_NONNULL(exports.tryCast<jsg::JsObject>());
-}
+// What the bridge reads on every call, looked up once per context: the private keys, and the
+// exports of blob/cpp_exports.
+struct TsBlobState final: public BootstrapCache {
+  explicit TsBlobState(jsg::Lock& js, jsg::JsObject exports)
+      : bytes(key(js, BYTES_KEY)),
+        type(key(js, TYPE_KEY)),
+        name(key(js, NAME_KEY)),
+        lastModified(key(js, LAST_MODIFIED_KEY)),
+        typeBytes(key(js, TYPE_BYTES_KEY)),
+        nameBytes(key(js, NAME_BYTES_KEY)),
+        serializeMode(key(js, jsg::JS_SERIALIZE_MODE_KEY)),
+        blobPrototype(prototype(js, exports, "BlobPrototype"_kj)),
+        filePrototype(prototype(js, exports, "FilePrototype"_kj)),
+        instanceProperties(exports.get(js, "instanceProperties"_kj).isTrue()) {}
+
+  jsg::V8Ref<v8::Private> bytes;
+  jsg::V8Ref<v8::Private> type;
+  jsg::V8Ref<v8::Private> name;
+  jsg::V8Ref<v8::Private> lastModified;
+  jsg::V8Ref<v8::Private> typeBytes;
+  jsg::V8Ref<v8::Private> nameBytes;
+  jsg::V8Ref<v8::Private> serializeMode;
+  jsg::JsRef<jsg::JsObject> blobPrototype;
+  jsg::JsRef<jsg::JsObject> filePrototype;
+  bool instanceProperties;
+
+  static kj::Own<BootstrapCache> create(jsg::Lock& js) {
+    auto exports = KJ_REQUIRE_NONNULL(KJ_REQUIRE_NONNULL(
+        tryGetBootstrapExport(js, CPP_EXPORTS), "the TypeScript Blob is not loaded")
+                                          .tryCast<jsg::JsObject>());
+    return kj::heap<TsBlobState>(js, exports);
+  }
+
+ private:
+  static jsg::V8Ref<v8::Private> key(jsg::Lock& js, kj::StringPtr name) {
+    return js.v8Ref(v8::Private::ForApi(js.v8Isolate, js.strIntern(name)));
+  }
+
+  static jsg::JsRef<jsg::JsObject> prototype(
+      jsg::Lock& js, jsg::JsObject exports, kj::StringPtr name) {
+    return KJ_REQUIRE_NONNULL(exports.get(js, name).tryCast<jsg::JsObject>()).addRef(js);
+  }
+};
 
 bool tsBlobEnabled() {
   return util::Autogate::isEnabled(util::AutogateKey::TS_BLOB);
+}
+
+// None if the context has no bootstrap state, so none of the TypeScript Blob.
+kj::Maybe<TsBlobState&> tryGetTsState(jsg::Lock& js) {
+  static constexpr char KEY = 0;
+  return tryGetBootstrapCache(js, &KEY, [&]() {
+    return TsBlobState::create(js);
+  }).map([](BootstrapCache& cache) -> TsBlobState& { return kj::downcast<TsBlobState>(cache); });
+}
+
+TsBlobState& getTsState(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(tryGetTsState(js), "per-isolate bootstrap state not initialized");
+}
+
+jsg::JsValue getSlot(jsg::Lock& js, jsg::JsObject object, jsg::V8Ref<v8::Private>& key) {
+  return object.getPrivate(js, key.getHandle(js));
+}
+
+void setSlot(
+    jsg::Lock& js, jsg::JsObject object, jsg::V8Ref<v8::Private>& key, jsg::JsValue value) {
+  object.setPrivate(js, key.getHandle(js), value);
+}
+
+void setString(jsg::Lock& js,
+    jsg::JsObject object,
+    jsg::V8Ref<v8::Private>& key,
+    jsg::V8Ref<v8::Private>& bytesKey,
+    kj::StringPtr value) {
+  setSlot(js, object, key, js.str(value));
+  if (!simdutf::validate_utf8(value.begin(), value.size())) {
+    setSlot(js, object, bytesKey, jsg::JsUint8Array::create(js, value.asBytes()));
+  }
+}
+
+kj::String getString(jsg::Lock& js,
+    jsg::JsObject object,
+    jsg::V8Ref<v8::Private>& key,
+    jsg::V8Ref<v8::Private>& bytesKey) {
+  KJ_IF_SOME(bytes, getSlot(js, object, bytesKey).tryCast<jsg::JsUint8Array>()) {
+    return kj::heapString(bytes.asArrayPtr().asChars());
+  }
+  return KJ_ASSERT_NONNULL(getSlot(js, object, key).tryCast<jsg::JsString>()).toString(js);
 }
 
 // The TypeScript Blob or File `value` is, if it is one. Reads only private properties, so runs no
@@ -68,9 +129,11 @@ bool tsBlobEnabled() {
 kj::Maybe<jsg::JsObject> tryGetTsBlob(jsg::Lock& js, jsg::JsValue value) {
   if (!tsBlobEnabled()) return kj::none;
   KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
-    if (!v8::Local<v8::Value>(object)->IsProxy() &&
-        object.getPrivate(js, BYTES_KEY).isUint8Array()) {
-      return object;
+    if (v8::Local<v8::Value>(object)->IsProxy()) return kj::none;
+    KJ_IF_SOME(state, tryGetTsState(js)) {
+      if (getSlot(js, object, state.bytes).isUint8Array()) {
+        return object;
+      }
     }
   }
   return kj::none;
@@ -83,10 +146,9 @@ jsg::JsObject newTsInstance(jsg::Lock& js,
     jsg::JsUint8Array bytes,
     kj::StringPtr type,
     kj::Maybe<kj::Tuple<kj::StringPtr, double>> file) {
-  auto exports = getCppExports(js);
+  auto& state = getTsState(js);
   bool isFile = file != kj::none;
-  auto prototype = KJ_REQUIRE_NONNULL(
-      exports.get(js, isFile ? "FilePrototype"_kj : "BlobPrototype"_kj).tryCast<jsg::JsObject>());
+  auto prototype = (isFile ? state.filePrototype : state.blobPrototype).getHandle(js);
 
   auto context = js.v8Context();
   // v8::Object::New() given a prototype makes an object in dictionary mode, slow to use. One
@@ -95,19 +157,19 @@ jsg::JsObject newTsInstance(jsg::Lock& js,
   jsg::check(instance->SetPrototype(context, v8::Local<v8::Object>(prototype)));
 
   jsg::JsObject object(instance);
-  object.setPrivate(js, BYTES_KEY, bytes);
-  setString(js, object, TYPE_KEY, TYPE_BYTES_KEY, type);
+  setSlot(js, object, state.bytes, bytes);
+  setString(js, object, state.type, state.typeBytes, type);
   KJ_IF_SOME(f, file) {
-    setString(js, object, NAME_KEY, NAME_BYTES_KEY, kj::get<0>(f));
-    object.setPrivate(js, LAST_MODIFIED_KEY, js.num(kj::get<1>(f)));
+    setString(js, object, state.name, state.nameBytes, kj::get<0>(f));
+    setSlot(js, object, state.lastModified, js.num(kj::get<1>(f)));
   }
   // A Blob serializes as a C++ one does; a File, as in C++, does not serialize at all.
-  object.setPrivate(js, jsg::JS_SERIALIZE_MODE_KEY,
+  setSlot(js, object, state.serializeMode,
       js.num(isFile ? 0u : static_cast<uint>(rpc::SerializationTag::BLOB)));
 
   // Under the legacy layout, the attributes are also own read-only data properties of each
   // instance, in JSG's order: the subclass's first.
-  if (exports.get(js, "instanceProperties"_kj).isTrue()) {
+  if (state.instanceProperties) {
     auto define = [&](kj::StringPtr name, v8::Local<v8::Value> value) {
       jsg::check(instance->DefineOwnProperty(
           context, v8::Local<v8::String>(js.strIntern(name)), value, v8::ReadOnly));
@@ -124,7 +186,7 @@ jsg::JsObject newTsInstance(jsg::Lock& js,
 
 jsg::JsUint8Array getTsBytes(jsg::Lock& js, const jsg::JsRef<jsg::JsObject>& object) {
   return KJ_ASSERT_NONNULL(
-      object.getHandle(js).getPrivate(js, BYTES_KEY).tryCast<jsg::JsUint8Array>());
+      getSlot(js, object.getHandle(js), getTsState(js).bytes).tryCast<jsg::JsUint8Array>());
 }
 
 }  // namespace
@@ -166,7 +228,8 @@ kj::String JsBlob::getType(jsg::Lock& js) const {
       return kj::str(blob->getType());
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return getString(js, object.getHandle(js), TYPE_KEY, TYPE_BYTES_KEY);
+      auto& state = getTsState(js);
+      return getString(js, object.getHandle(js), state.type, state.typeBytes);
     }
   }
   KJ_UNREACHABLE;
@@ -181,7 +244,7 @@ kj::Maybe<JsFile> JsBlob::tryGetFile(jsg::Lock& js) {
       return kj::none;
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      if (object.getHandle(js).getPrivate(js, NAME_KEY).isString()) {
+      if (getSlot(js, object.getHandle(js), getTsState(js).name).isString()) {
         return JsFile(Impl(object.addRef(js)));
       }
       return kj::none;
@@ -292,7 +355,8 @@ kj::String JsFile::getName(jsg::Lock& js) const {
       return kj::str(kj::downcast<const File>(*blob).getName());
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return getString(js, object.getHandle(js), NAME_KEY, NAME_BYTES_KEY);
+      auto& state = getTsState(js);
+      return getString(js, object.getHandle(js), state.name, state.nameBytes);
     }
   }
   KJ_UNREACHABLE;
@@ -305,7 +369,7 @@ double JsFile::getLastModified(jsg::Lock& js) const {
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
       auto value = KJ_ASSERT_NONNULL(
-          object.getHandle(js).getPrivate(js, LAST_MODIFIED_KEY).tryCast<jsg::JsNumber>());
+          getSlot(js, object.getHandle(js), getTsState(js).lastModified).tryCast<jsg::JsNumber>());
       return KJ_ASSERT_NONNULL(value.value(js));
     }
   }
@@ -345,7 +409,7 @@ JsFile JsFile::fromBlob(jsg::Lock& js, JsBlob& blob, kj::String name) {
 
 kj::Maybe<JsFile> JsFile::tryUnwrapTsFile(jsg::Lock& js, jsg::JsValue value) {
   KJ_IF_SOME(object, tryGetTsBlob(js, value)) {
-    if (object.getPrivate(js, NAME_KEY).isString()) {
+    if (getSlot(js, object, getTsState(js).name).isString()) {
       return JsFile(Impl(object.addRef(js)));
     }
   }

@@ -59,12 +59,8 @@ what reading them creates, and what `JsBlob` and `JsFile`
 
 ## Ledger
 
-Where the TypeScript implementation differs from the C++, toward WebIDL.
-Each row is pinned on both sides: in JavaScript with a `usingTsImpl` branch, in C++ with
+Where the TypeScript implementation differs from the C++. A row is pinned on
+both sides: in JavaScript with a `usingTsImpl` branch, in C++ with
 `JsBlob::isTsImplementation()`.
 
-| # | Area | C++ | TypeScript | Test |
-| --- | --- | --- | --- | --- |
-| 1 | Calling without `new` | JSG's `TypeError` message | the language's | `construction.js` |
-| 2 | `File`'s `[[Prototype]]` | `Function.prototype` | `Blob`, as WebIDL says (so WPT's `idlharness.any.js` passes "File interface: existence and properties of interface object") | `api-surface.js` |
-| 3 | Constructors' `prototype` | writable | not writable | `api-surface.js` |
+There are none: the suite runs the same assertions against both.

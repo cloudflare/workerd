@@ -4,11 +4,6 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
-// The TypeScript File (the TS_BLOB autogate) inherits from Blob as WebIDL
-// says an interface object does; the C++ one does not
-// (src/tests/blob/AGENTS.md).
-const usingTsBlob = Object.getPrototypeOf(File) === Blob;
-
 const ENDINGS_EXPECTED_FAILURES = [
   'Valid "endings" value: "transparent"',
   'Valid "endings" value: "native"',
@@ -156,9 +151,7 @@ export default {
       'Blob interface: operation textStream()',
       'Blob interface: new Blob(["TEST"]) must inherit property "textStream()" with the proper type',
       'Blob interface: new File(["myFileBits"], "myFileName") must inherit property "textStream()" with the proper type',
-      ...(usingTsBlob
-        ? []
-        : ['File interface: existence and properties of interface object']),
+      'File interface: existence and properties of interface object',
       'File interface object length',
     ],
     omittedTests: [/^FileList /, /^FileReader /, /new FileReader\(\)/],

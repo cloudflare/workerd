@@ -1,0 +1,16 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The Blob benchmarks, against the C++ implementation and the TypeScript one
+# (TS_BLOB). Enabling every autogate enables TS_BLOB, so the C++ config has
+# no @all-autogates variant; the TypeScript config enables TS_BLOB itself.
+
+wd_bench(
+    src = "blob-cpp.wd-bench",
+    data = ["blob.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "blob-ts.wd-bench",
+    data = ["blob.js"],
+)

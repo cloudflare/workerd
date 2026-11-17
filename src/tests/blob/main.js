@@ -40,7 +40,11 @@ export {
   sliceConversionOrder,
 } from 'slicing';
 
-export { formDataKeepsItsFilesAlive, unreachableFormDataIsCollected } from 'gc';
+export {
+  formDataKeepsItsFilesAlive,
+  unreachableFormDataIsCollected,
+  formDataFileCyclesAreCollected,
+} from 'gc';
 
 export { text, copies, stream, pollution } from 'reading';
 

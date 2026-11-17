@@ -2,7 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A FormData keeps its File entries alive, and they are collected with it.
+// A FormData keeps its File entries alive, and they are collected with it,
+// even when a File refers back to the FormData: FormData::visitForGc()
+// traces the entries of either implementation.
 
 import { strictEqual } from 'node:assert';
 
@@ -52,6 +54,29 @@ export const unreachableFormDataIsCollected = {
         const form = new FormData();
         const file = new File([`${i}`], `${i}`);
         form.append('file', file);
+        registry.register(form, i);
+        registry.register(file, i);
+      }
+    })();
+    await collect(() => collected === 2 * kCount);
+    strictEqual(collected, 2 * kCount);
+  },
+};
+
+export const formDataFileCyclesAreCollected = {
+  async test() {
+    let collected = 0;
+    const registry = new FinalizationRegistry(() => {
+      collected++;
+    });
+    const kCount = 16;
+    (() => {
+      for (let i = 0; i < kCount; i++) {
+        const form = new FormData();
+        const file = new File([`${i}`], `${i}`);
+        form.append('file', file);
+        // The entry is the File itself, which now refers to the FormData.
+        file.form = form;
         registry.register(form, i);
         registry.register(file, i);
       }
