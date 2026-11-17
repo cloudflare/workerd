@@ -24,19 +24,42 @@ use crate::error::TranscodeError;
 
 #[cxx::bridge(namespace = "workerd::rust::i18n")]
 mod bridge {
-    /// The four encodings `i18n::transcode` supports. Mirrors the
-    /// transcodable subset of `workerd::api::node::Encoding`
-    /// (`src/workerd/api/node/i18n.h`). `src/workerd/api/node/i18n.c++` maps
-    /// into this type through a `fromImpl` overload that rejects the
-    /// non-transcodable `BASE64`, `BASE64URL`, and `HEX` variants before ever
-    /// calling into Rust.
+    /// The encodings of `node-internal:buffer`. This is a cxx *extern* enum:
+    /// the C++ `api::node::Encoding` (`src/workerd/api/node/encoding.h`) is
+    /// the single source of truth, and cxx generates static-asserts that the
+    /// variants below match it. `#[repr(u8)]` matches the C++ enum's `uint8_t`
+    /// underlying type.
+    ///
+    /// The paired `type Encoding;` declaration below marks this as an extern
+    /// enum. cxx references the C++ type by this bridge's namespace, so the
+    /// `encoding.h` shim aliases `api::node::Encoding` into
+    /// `workerd::rust::i18n`.
+    ///
+    /// Only the first four can be transcoded; see
+    /// [`Encoding::can_be_transcoded`](crate::ffi::Encoding::can_be_transcoded).
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     #[repr(u8)]
     enum Encoding {
+        #[cxx_name = "ASCII"]
         Ascii,
+        #[cxx_name = "LATIN1"]
         Latin1,
+        #[cxx_name = "UTF8"]
         Utf8,
+        #[cxx_name = "UTF16LE"]
         Utf16Le,
+        #[cxx_name = "BASE64"]
+        Base64,
+        #[cxx_name = "BASE64URL"]
+        Base64Url,
+        #[cxx_name = "HEX"]
+        Hex,
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/i18n/encoding.h");
+
+        type Encoding;
     }
 
     #[namespace = "workerd::rust::jsg"]
@@ -71,6 +94,10 @@ mod bridge {
     }
 
     extern "Rust" {
+        /// Whether `transcode` supports `encoding`, for
+        /// `workerd::api::node::i18n::canBeTranscoded`.
+        fn can_be_transcoded(encoding: Encoding) -> bool;
+
         /// Transcodes `source` from `from_encoding` to `to_encoding`, for
         /// `workerd::api::node::i18n::transcode`. Returns a `MaybeLocal`
         /// naming a `Uint8Array`, or an empty `MaybeLocal` with a JS exception
@@ -86,6 +113,10 @@ mod bridge {
             to_encoding: Encoding,
         ) -> MaybeLocal;
     }
+}
+
+fn can_be_transcoded(encoding: Encoding) -> bool {
+    encoding.can_be_transcoded()
 }
 
 /// # Safety
@@ -121,12 +152,10 @@ fn is_failure(error: sys::UErrorCode) -> bool {
 
 /// The ICU converter name for `encoding`.
 ///
-/// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
-/// than a real Rust enum, which needs a catch-all arm. An unknown encoding is
-/// unreachable there: `dispatch` rejects an unknown source encoding up front,
-/// the C++ `fromImpl` conversion rejects anything but the four transcodable
-/// encodings before Rust is entered, and a panic in Rust reaches C++ as a
-/// `kj::Exception`.
+/// The bridge `Encoding` is a `cxx` enum, and so a `u8` newtype rather than a
+/// real Rust enum, which needs a catch-all arm. Any other encoding is
+/// unreachable there: `dispatch` rejects both encodings up front unless they
+/// can be transcoded, and a panic in Rust reaches C++ as a `kj::Exception`.
 fn icu_name(encoding: Encoding) -> &'static CStr {
     match encoding {
         Encoding::Ascii => c"us-ascii",

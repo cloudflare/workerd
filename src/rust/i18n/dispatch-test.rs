@@ -157,15 +157,48 @@ fn unpaired_surrogate_utf16le_to_utf8() {
     assert_eq!(result, Err(TranscodeError::Utf8LengthMismatch));
 }
 
+/// Encodings `Transcoder::new` must reject: the non-transcodable variants and
+/// a value outside the enum.
+const INVALID_ENCODINGS: [Encoding; 4] = [
+    Encoding::Base64,
+    Encoding::Base64Url,
+    Encoding::Hex,
+    Encoding { repr: 7 },
+];
+
 #[test]
-fn out_of_range_source_encoding_is_rejected() {
-    let invalid = Encoding { repr: 4 };
-    for &to in &ENCODINGS {
-        assert_eq!(
-            Transcoder::new(b"Hi", invalid, to).err(),
-            Some(TranscodeError::InvalidEncoding),
-            "{to:?}"
-        );
+fn only_the_first_four_encodings_can_be_transcoded() {
+    for encoding in ENCODINGS {
+        assert!(encoding.can_be_transcoded(), "{encoding:?}");
+    }
+    for encoding in INVALID_ENCODINGS {
+        assert!(!encoding.can_be_transcoded(), "{encoding:?}");
+    }
+}
+
+#[test]
+fn invalid_source_encoding_is_rejected() {
+    for &from in &INVALID_ENCODINGS {
+        for &to in &ENCODINGS {
+            assert_eq!(
+                Transcoder::new(b"Hi", from, to).err(),
+                Some(TranscodeError::InvalidEncoding),
+                "{from:?} to {to:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_destination_encoding_is_rejected() {
+    for &from in &ENCODINGS {
+        for &to in &INVALID_ENCODINGS {
+            assert_eq!(
+                Transcoder::new(b"Hi", from, to).err(),
+                Some(TranscodeError::InvalidEncoding),
+                "{from:?} to {to:?}"
+            );
+        }
     }
 }
 

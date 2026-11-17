@@ -13,6 +13,18 @@ wd_cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Dependency-free header defining api::node::Encoding. Kept separate so it can be
+# shared with the Rust i18n crate as a cxx extern enum without creating a
+# dependency cycle (the crate must not depend on anything that depends on it). Do
+# not add deps to this target.
+wd_cc_library(
+    name = "encoding",
+    hdrs = [
+        "encoding.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 wd_cc_library(
     name = "exceptions",
     srcs = [
@@ -97,6 +109,7 @@ wd_cc_library(
         # need to be rebuilt if there are changes to io.
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        ":encoding",
         ":exceptions",
     ],
 )

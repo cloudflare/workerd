@@ -3,41 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/api/node/encoding.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/common.h>
 #include <kj/string.h>
 
-#include <cstdint>
-
 namespace workerd::api::node {
-
-using EncodingValue = uint8_t;
-
-enum Encoding : EncodingValue {
-  ASCII = 0,
-  LATIN1 = 1,
-  UTF8 = 2,
-  UTF16LE = 3,
-  BASE64 = 4,
-  BASE64URL = 5,
-  HEX = 6,
-};
 
 namespace i18n {
 
-// Used by BufferUtil::transcode.
-constexpr bool canBeTranscoded(Encoding encoding) noexcept {
-  switch (encoding) {
-    case Encoding::ASCII:
-    case Encoding::LATIN1:
-    case Encoding::UTF16LE:
-    case Encoding::UTF8:
-      return true;
-    default:
-      return false;
-  }
-}
+// Whether `transcode` supports `encoding`, as either source or destination. Used by
+// BufferUtil::transcode.
+bool canBeTranscoded(Encoding encoding);
 
 jsg::JsUint8Array transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);

@@ -6,9 +6,10 @@ Some `node-internal:` modules (`dns`, `inspector`, `url`) are implemented in Rus
 
 ## BUILD TARGETS
 
-- **`node-core`**: buffer, i18n. **No `//src/workerd/io` dep** — do not add one. Depends on the `i18n` Rust crate, `nbytes`, `simdutf`.
+- **`node-core`**: buffer, i18n (forwards `transcode` to the `i18n` Rust crate in `src/rust/i18n/`). **No `//src/workerd/io` dep** — do not add one. Depends on the `i18n` Rust crate, `nbytes`, `simdutf`.
 - **`node`**: async-hooks, crypto, diagnostics-channel, module, process, timers, util, zlib-util. Depends on `io`, `ncrypto`, `zstd`, `kj-brotli`. Depends on `node-core`.
 - **`exceptions`**: Standalone Node.js exception types; dep of `node-core`.
+- **`encoding`**: Dependency-free header with the `Encoding` enum, shared with the `i18n` Rust crate as a cxx extern enum. Do not add deps.
 
 ## MODULE REGISTRATION
 
