@@ -43,8 +43,9 @@ const {
   PromiseResolve,
   RangeError,
   RegExpPrototypeExec,
+  StringPrototypeCharCodeAt,
+  StringPrototypeIsWellFormed,
   StringPrototypeToLowerCase,
-  StringPrototypeToWellFormed,
   TextDecoder,
   TextDecoderDecode,
   TextEncoder,
@@ -282,7 +283,7 @@ function combine(parts: Part[]): Uint8Array {
     const part = parts[i] as Part;
     let bytes: Uint8Array;
     if (typeof part === 'string') {
-      bytes = TextEncoderEncode(encoder, part);
+      bytes = encodeString(part);
     } else if (isArrayBuffer(part) || isArrayBufferView(part)) {
       if (kRejectResizable && isResizableBufferSource(part)) {
         throw new TypeError(
@@ -336,6 +337,79 @@ function copy(bytes: Uint8Array): Uint8Array {
 }
 
 // ---------------------------------------------------------------------------
+// Strings, which become bytes as JSG makes a kj::String of them: as WTF-8,
+// so a lone surrogate is written as its own three bytes, as no well-formed
+// UTF-8 sequence is.
+
+function isLeadSurrogate(unit: number): boolean {
+  return unit >= 0xd800 && unit <= 0xdbff;
+}
+
+function isTrailSurrogate(unit: number): boolean {
+  return unit >= 0xdc00 && unit <= 0xdfff;
+}
+
+// `string` as WTF-8.
+function encodeString(string: string): Uint8Array {
+  if (StringPrototypeIsWellFormed(string)) {
+    return TextEncoderEncode(encoder, string);
+  }
+  const length = string.length;
+  let size = 0;
+  for (let i = 0; i < length; i++) {
+    const unit = StringPrototypeCharCodeAt(string, i) as number;
+    if (unit < 0x80) {
+      size += 1;
+    } else if (unit < 0x800) {
+      size += 2;
+    } else if (
+      isLeadSurrogate(unit) &&
+      i + 1 < length &&
+      isTrailSurrogate(StringPrototypeCharCodeAt(string, i + 1) as number)
+    ) {
+      size += 4;
+      i++;
+    } else {
+      size += 3;
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (let i = 0; i < length; i++) {
+    let unit = StringPrototypeCharCodeAt(string, i) as number;
+    if (unit < 0x80) {
+      bytes[at++] = unit;
+    } else if (unit < 0x800) {
+      bytes[at++] = 0xc0 | (unit >> 6);
+      bytes[at++] = 0x80 | (unit & 0x3f);
+    } else if (
+      isLeadSurrogate(unit) &&
+      i + 1 < length &&
+      isTrailSurrogate(StringPrototypeCharCodeAt(string, i + 1) as number)
+    ) {
+      const trail = StringPrototypeCharCodeAt(string, ++i) as number;
+      unit = 0x10000 + ((unit - 0xd800) << 10) + (trail - 0xdc00);
+      bytes[at++] = 0xf0 | (unit >> 18);
+      bytes[at++] = 0x80 | ((unit >> 12) & 0x3f);
+      bytes[at++] = 0x80 | ((unit >> 6) & 0x3f);
+      bytes[at++] = 0x80 | (unit & 0x3f);
+    } else {
+      bytes[at++] = 0xe0 | (unit >> 12);
+      bytes[at++] = 0x80 | ((unit >> 6) & 0x3f);
+      bytes[at++] = 0x80 | (unit & 0x3f);
+    }
+  }
+  return bytes;
+}
+
+// `string` as JavaScript sees a string C++ keeps as WTF-8 bytes: decoded,
+// so that each lone surrogate's three bytes are three U+FFFDs.
+function fromWtf8(string: string): string {
+  if (StringPrototypeIsWellFormed(string)) return string;
+  return TextDecoderDecode(decoder, encodeString(string)) as string;
+}
+
+// ---------------------------------------------------------------------------
 // Instances
 
 function instanceAttribute(value: unknown): PropertyDescriptor {
@@ -369,7 +443,7 @@ function initInstance(
       ObjectDefineProperties(self, {
         __proto__: null,
         lastModified: instanceAttribute(lastModified),
-        name: instanceAttribute(name),
+        name: instanceAttribute(fromWtf8(name)),
       });
     }
     ObjectDefineProperties(self, {
@@ -459,8 +533,7 @@ class File {
         `${kConstructFile}: constructor parameter 2 is not of type 'string'.`
       );
     }
-    // A USVString: a lone surrogate becomes U+FFFD.
-    const name = StringPrototypeToWellFormed(toString(fileName));
+    const name = toString(fileName);
     const bag = requireOptions(options, kConstructFile, 3);
     const type = convertType(bag);
     let lastModified: number;
@@ -479,7 +552,7 @@ class File {
   }
 
   get name(): string {
-    return requireFile(this)[kName] as string;
+    return fromWtf8(requireFile(this)[kName] as string);
   }
 
   get lastModified(): number {

@@ -35,8 +35,14 @@ what reading them creates, and what `JsBlob` and `JsFile`
 - **Checks:** once every part is converted, each in turn is checked: under
   `no_resizable_array_buffer_in_blob`, a BufferSource over a resizable
   ArrayBuffer or growable SharedArrayBuffer throws `TypeError`; then the
-  running total against the isolate's size limit, `RangeError`. Nothing is
-  copied until all pass.
+  running total against the isolate's size limit, `RangeError`. A string
+  part is encoded as it is checked; the parts are combined only once all
+  pass.
+- **Strings:** a string part, and a File's name, become bytes as JSG makes a
+  `kj::String`: WTF-8, so a lone surrogate is written as its own three bytes.
+  `name` reads those bytes decoded, each such surrogate as three U+FFFDs. A
+  type or name C++ gives as bytes that are not UTF-8 is kept as those bytes
+  for C++ to read back (`api/blob-bootstrap-test.c++`).
 - **`slice(start, end, type)`:** each converted as JSG converts an `int`
   (non-finite as 0, truncated, a `TypeError` outside int32), negative values
   counted from the end; always a new Blob, never a File.
@@ -62,6 +68,3 @@ Each row is pinned on both sides: in JavaScript with a `usingTsImpl` branch, in 
 | 1 | Calling without `new` | JSG's `TypeError` message | the language's | `construction.js` |
 | 2 | `File`'s `[[Prototype]]` | `Function.prototype` | `Blob`, as WebIDL says (so WPT's `idlharness.any.js` passes "File interface: existence and properties of interface object") | `api-surface.js` |
 | 3 | Constructors' `prototype` | writable | not writable | `api-surface.js` |
-| 4 | Lone surrogates in string parts | their WTF-8 bytes | U+FFFD's, as for a USVString (so WPT's `unicode.any.js` passes) | `construction.js` |
-| 5 | Lone surrogates in a File's name | kept as WTF-8 bytes, so `name` reads each as three U+FFFDs and a `FormData` body writes the bytes | U+FFFD, as for a USVString, in `name` and the body alike | `construction.js` |
-| 6 | A type that is not UTF-8, as a Blob made from a response's `Content-Type` can have | kept as bytes, which C++ that reads the type sees (a Blob body's `Content-Type`, for one) | kept as the string JavaScript sees of either, the bytes decoded with U+FFFD for each invalid sequence | `api/blob-bootstrap-test.c++` |

@@ -160,20 +160,20 @@ KJ_TEST("JsBlob and JsFile make instances as the constructors do") {
   }
 }
 
-KJ_TEST("A type that is not UTF-8") {
+KJ_TEST("A type or name that is not UTF-8 is kept as its bytes") {
+  // Each has the byte 0xff.
   runWithBootstrap([](jsg::Lock& js) {
-    // The C++ Blob keeps the bytes; the TypeScript one keeps a string, which the bytes, decoded,
-    // become (src/tests/blob/AGENTS.md, ledger #6). JavaScript sees the same string of either.
-    auto blob = JsBlob::createEmpty(js,
-        kj::str("a\xff"
-                "b"));
-    auto expected = JsBlob::isTsImplementation(js) ? "a\xef\xbf\xbd"
-                                                     "b"_kj
-                                                   : "a\xff"
-                                                     "b"_kj;
-    KJ_EXPECT(blob.getType(js) == expected, blob.getType(js));
-    KJ_EXPECT(
-        call(js, "(b) => b.type === 'a\\ufffdb'"_kj, kj::mv(blob).toJsValue(js)) == "true"_kj);
+    auto bytes = jsg::JsUint8Array::create(js, "xy"_kj.asBytes());
+    auto file =
+        JsFile::create(js, jsg::JsBufferSource(bytes), kj::str("n\377a"), kj::str("t\377x"), 5);
+    KJ_EXPECT(file.getType(js) == "t\377x"_kj);
+    KJ_EXPECT(file.getName(js) == "n\377a"_kj);
+    // Kept by a File made from it.
+    auto named = JsFile::fromBlob(js, file, kj::str("m"));
+    KJ_EXPECT(named.getType(js) == "t\377x"_kj);
+    // JavaScript sees the bytes decoded.
+    KJ_EXPECT(call(js, "(f) => f.type === 't\\ufffdx' && f.name === 'n\\ufffda'"_kj,
+                  kj::mv(file).toJsValue(js)) == "true"_kj);
   });
 }
 

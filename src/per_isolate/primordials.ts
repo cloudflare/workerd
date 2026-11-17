@@ -262,6 +262,7 @@ const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
 // Replaces each lone surrogate with U+FFFD: WebIDL's USVString conversion,
 // after ToString.
+const StringPrototypeIsWellFormed = uncurryThis(String.prototype.isWellFormed);
 const StringPrototypeToWellFormed = uncurryThis(String.prototype.toWellFormed);
 const StringPrototypeToLowerCase = uncurryThis(String.prototype.toLowerCase);
 
@@ -872,6 +873,7 @@ module.exports = ObjectFreeze({
   StringPrototypeSlice,
   StringPrototypeStartsWith,
   StringPrototypeIndexOf,
+  StringPrototypeIsWellFormed,
   StringPrototypeToWellFormed,
   StringPrototypeToLowerCase,
 

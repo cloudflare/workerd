@@ -195,28 +195,28 @@ export const typeNormalization = {
   },
 };
 
+// Strings become bytes as JSG makes a kj::String of them: as WTF-8, a lone
+// surrogate as its own three bytes, a pair as the code point it encodes.
 export const loneSurrogates = {
   async test() {
-    // Ledger #4.
     deepStrictEqual(
       await bytesOf(new Blob(['a\ud800b'])),
-      usingTsImpl ? [97, 0xef, 0xbf, 0xbd, 98] : [97, 0xed, 0xa0, 0x80, 98]
+      [97, 0xed, 0xa0, 0x80, 98]
     );
-    // Ledger #5.
+    deepStrictEqual(
+      await bytesOf(new Blob(['\udc00😀\ud800'])),
+      [0xed, 0xb0, 0x80, 0xf0, 0x9f, 0x98, 0x80, 0xed, 0xa0, 0x80]
+    );
+    // A File's name is kept the same way, and read as those bytes decoded.
     const file = new File([], 'a\ud800b');
-    strictEqual(file.name, usingTsImpl ? 'a\ufffdb' : 'a\ufffd\ufffd\ufffdb');
+    strictEqual(file.name, 'a���b');
     const form = new FormData();
     form.append('f', file);
     // Each byte as the code unit of the same value.
     const body = String.fromCharCode(
       ...new Uint8Array(await new Response(form).arrayBuffer())
     );
-    strictEqual(
-      body.includes(
-        usingTsImpl ? 'filename="a\xef\xbf\xbdb"' : 'filename="a\xed\xa0\x80b"'
-      ),
-      true
-    );
+    strictEqual(body.includes('filename="a\xed\xa0\x80b"'), true);
   },
 };
 

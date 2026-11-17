@@ -11,6 +11,8 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/util/autogate.h>
 
+#include <simdutf.h>
+
 namespace workerd::api {
 
 namespace {
@@ -21,6 +23,31 @@ constexpr kj::StringPtr BYTES_KEY = "workerd:Blob:bytes"_kj;
 constexpr kj::StringPtr TYPE_KEY = "workerd:Blob:type"_kj;
 constexpr kj::StringPtr NAME_KEY = "workerd:File:name"_kj;
 constexpr kj::StringPtr LAST_MODIFIED_KEY = "workerd:File:lastModified"_kj;
+
+// A type or name that C++ gives as bytes that are not UTF-8, which the string under TYPE_KEY or
+// NAME_KEY is decoded from, is also kept as those bytes, as the C++ Blob keeps it, so that C++
+// reads back the bytes it gave. Only C++ makes these: the TypeScript classes never do.
+constexpr kj::StringPtr TYPE_BYTES_KEY = "workerd:Blob:typeBytes"_kj;
+constexpr kj::StringPtr NAME_BYTES_KEY = "workerd:File:nameBytes"_kj;
+
+void setString(jsg::Lock& js,
+    jsg::JsObject object,
+    kj::StringPtr key,
+    kj::StringPtr bytesKey,
+    kj::StringPtr value) {
+  object.setPrivate(js, key, js.str(value));
+  if (!simdutf::validate_utf8(value.begin(), value.size())) {
+    object.setPrivate(js, bytesKey, jsg::JsUint8Array::create(js, value.asBytes()));
+  }
+}
+
+kj::String getString(
+    jsg::Lock& js, jsg::JsObject object, kj::StringPtr key, kj::StringPtr bytesKey) {
+  KJ_IF_SOME(bytes, object.getPrivate(js, bytesKey).tryCast<jsg::JsUint8Array>()) {
+    return kj::heapString(bytes.asArrayPtr().asChars());
+  }
+  return KJ_ASSERT_NONNULL(object.getPrivate(js, key).tryCast<jsg::JsString>()).toString(js);
+}
 
 // The bootstrap module whose exports describe how to make an instance (see blob/cpp_exports.ts).
 // It is loaded only under the TS_BLOB autogate.
@@ -69,9 +96,9 @@ jsg::JsObject newTsInstance(jsg::Lock& js,
 
   jsg::JsObject object(instance);
   object.setPrivate(js, BYTES_KEY, bytes);
-  object.setPrivate(js, TYPE_KEY, js.str(type));
+  setString(js, object, TYPE_KEY, TYPE_BYTES_KEY, type);
   KJ_IF_SOME(f, file) {
-    object.setPrivate(js, NAME_KEY, js.str(kj::get<0>(f)));
+    setString(js, object, NAME_KEY, NAME_BYTES_KEY, kj::get<0>(f));
     object.setPrivate(js, LAST_MODIFIED_KEY, js.num(kj::get<1>(f)));
   }
   // A Blob serializes as a C++ one does; a File, as in C++, does not serialize at all.
@@ -139,9 +166,7 @@ kj::String JsBlob::getType(jsg::Lock& js) const {
       return kj::str(blob->getType());
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return KJ_ASSERT_NONNULL(
-          object.getHandle(js).getPrivate(js, TYPE_KEY).tryCast<jsg::JsString>())
-          .toString(js);
+      return getString(js, object.getHandle(js), TYPE_KEY, TYPE_BYTES_KEY);
     }
   }
   KJ_UNREACHABLE;
@@ -267,9 +292,7 @@ kj::String JsFile::getName(jsg::Lock& js) const {
       return kj::str(kj::downcast<const File>(*blob).getName());
     }
     KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
-      return KJ_ASSERT_NONNULL(
-          object.getHandle(js).getPrivate(js, NAME_KEY).tryCast<jsg::JsString>())
-          .toString(js);
+      return getString(js, object.getHandle(js), NAME_KEY, NAME_BYTES_KEY);
     }
   }
   KJ_UNREACHABLE;

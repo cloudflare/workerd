@@ -238,13 +238,11 @@ export default {
   },
   'unicode.any.js': {
     comment:
-      'Strings in blobParts should be converted as USVString, replacing unpaired surrogates with U+FFFD, but the C++ Blob::BitsValue uses kj::String (blob.h) and they come back unreplaced',
-    expectedFailures: usingTsBlob
-      ? []
-      : [
-          'Test that unpaired surrogates are replaced by Blob constructor',
-          'Test that unpaired surrogates are replaced by File constructor',
-        ],
+      'Strings in blobParts should be converted as USVString, replacing unpaired surrogates with U+FFFD, but both implementations write them as WTF-8, as JSG makes a kj::String (blob.h, blob/blob.ts)',
+    expectedFailures: [
+      'Test that unpaired surrogates are replaced by Blob constructor',
+      'Test that unpaired surrogates are replaced by File constructor',
+    ],
   },
   'url/url-charset.window.js': {
     comment: 'Opens blob URLs with window.open()',
