@@ -2985,30 +2985,20 @@ impl<'s> Local<'s, ArrayBufferView> {
     }
 }
 
-/// Returns the first of the elements of type `E` that the `ArrayBufferView` `view` covers, and
-/// how many it covers.
+/// The elements of type `E` that the `ArrayBufferView` `view` covers, read from V8 in one call, as
+/// a raw slice on an aligned dangling pointer when it covers none.
 ///
 /// V8 reads a view's offset and length from the V8 heap and does not always check them against
 /// the buffer, so a view that does not lie within its buffer covers nothing here.
 ///
 /// # Safety
 /// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
-unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
-    let mut byte_length = 0;
-    // SAFETY: the caller guarantees the handle.
-    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) };
-    (data as *mut E, byte_length / size_of::<E>())
-}
-
-/// The elements of type `E` that the `ArrayBufferView` `view` covers, as a raw slice on an
-/// aligned dangling pointer when it covers none.
-///
-/// # Safety
-/// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
 #[inline]
 unsafe fn array_buffer_view_raw_slice<E>(view: &ffi::Local) -> *mut [E] {
+    let mut byte_length = 0;
     // SAFETY: the caller guarantees the handle.
-    let (data, len) = unsafe { array_buffer_view_data::<E>(view) };
+    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) } as *mut E;
+    let len = byte_length / size_of::<E>();
     if len == 0 {
         return std::ptr::slice_from_raw_parts_mut(NonNull::<E>::dangling().as_ptr(), 0);
     }
@@ -3688,27 +3678,39 @@ impl<'s> Local<'s, String> {
         }
     }
 
-    /// Writes UTF-8 into uninitialized storage and returns only the initialized bytes.
+    /// Writes the string as UTF-8 into uninitialized storage and returns the bytes written,
+    /// which include the null terminator when `flags` includes [`WriteFlags::NullTerminate`].
     /// Flags have the same meaning as in [`Self::write_utf8`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` is empty and `flags` includes [`WriteFlags::NullTerminate`], as
+    /// [`Self::write_utf8`] does.
     pub fn write_utf8_uninit<'b>(
         &self,
         lock: &mut crate::Lock,
         buffer: &'b mut [std::mem::MaybeUninit<u8>],
         flags: WriteFlags,
     ) -> &'b mut [u8] {
+        assert!(
+            buffer.len() >= usize::from(flags.null_terminates()),
+            "buffer too small for the null terminator"
+        );
         // SAFETY: the isolate is locked, the handle is a String, and `buffer` is writable for
-        // its full capacity. V8 initializes exactly the prefix it reports, whose length does
-        // not exceed that capacity; only that prefix becomes an initialized slice.
-        unsafe {
-            let written = ffi::local_string_write_utf8_v2(
+        // its full capacity, with room for a terminator if one is written.
+        let written = unsafe {
+            ffi::local_string_write_utf8_v2(
                 lock.isolate().as_ffi(),
                 self.raw(),
                 buffer.as_mut_ptr().cast(),
                 buffer.len(),
                 flags.bits(),
-            );
-            std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), written)
-        }
+            )
+        };
+        debug_assert!(written <= buffer.len());
+        // SAFETY: V8 initializes exactly the prefix it reports, whose length does not exceed the
+        // buffer's; only that prefix becomes an initialized slice.
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), written) }
     }
 
     // -------------------------------------------------------------------------

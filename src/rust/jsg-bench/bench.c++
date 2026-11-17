@@ -153,14 +153,14 @@ class Target final: public Object {
   uint32_t bytesLen(v8::Local<v8::Uint8Array> a) {
     return static_cast<uint32_t>(a->ByteLength());
   }
-  uint32_t bytesSliceLen(v8::Local<v8::Uint8Array> a) {
-    return static_cast<uint32_t>(a->ByteLength());
+  uint32_t bytesSliceLen(jsg::JsUint8Array a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
   }
-  uint32_t bufferSliceLen(v8::Local<v8::ArrayBuffer> a) {
-    return static_cast<uint32_t>(a->ByteLength());
+  uint32_t bufferSliceLen(jsg::JsArrayBuffer a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
   }
-  uint32_t viewSliceLen(v8::Local<v8::ArrayBufferView> a) {
-    return static_cast<uint32_t>(a->ByteLength());
+  uint32_t viewSliceLen(jsg::JsArrayBufferView a) {
+    return static_cast<uint32_t>(a.asArrayPtr().size());
   }
   uint32_t bytesCopy(v8::Local<v8::Uint8Array> a) {
     auto bytes = kj::heapArray(a->ByteLength() == 0

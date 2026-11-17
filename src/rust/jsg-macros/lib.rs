@@ -57,7 +57,6 @@ use utils::is_option_type;
 use utils::is_promise_type;
 use utils::is_rc_self;
 use utils::is_result_type;
-use utils::returns_primitive;
 use utils::snake_to_camel;
 use utils::this_param;
 use utils::typescript_options;
@@ -607,7 +606,7 @@ fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::
 
     if let Some(primitive) = utils::primitive_return(fn_sig) {
         let set = match primitive {
-            utils::PrimitiveReturn::Void => quote! { let _ = value; },
+            utils::PrimitiveReturn::Void => quote! { let () = value; },
             utils::PrimitiveReturn::Boolean => quote! { args.set_return_boolean(value); },
             utils::PrimitiveReturn::Number => quote! { args.set_return_number(f64::from(value)); },
         };
@@ -625,13 +624,11 @@ fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::
 
     // Like C++ JSG, an instance method or property passes its receiver as the `creator` of the
     // value it returns, which a promise keeps alive until it settles; a static one passes none.
-    // Reading the receiver takes two calls into V8, so a method returning a value that keeps no
-    // creator skips it.
     let creator = match receiver {
-        Receiver::SelfRef | Receiver::This if !returns_primitive(fn_sig) => {
+        Receiver::SelfRef | Receiver::This => {
             quote! { jsg::v8::Local::<jsg::v8::Object>::try_from(args.this()).ok() }
         }
-        Receiver::SelfRef | Receiver::This | Receiver::None => quote! { None },
+        Receiver::None => quote! { None },
     };
     let conversion = if is_result {
         quote! {

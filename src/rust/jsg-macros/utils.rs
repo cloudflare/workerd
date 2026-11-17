@@ -388,6 +388,8 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
 const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
+/// The numeric types in `FAST_API_RETURN_TYPES`, each of which converts to `f64` without loss.
+const NUMERIC_RETURN_TYPES: &[&str] = &["i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
@@ -424,19 +426,24 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     fast_return.then_some(args)
 }
 
-/// Whether `sig` returns, directly or in a `Result`, `()` or one of the types a fast callback
-/// returns, none of which keeps a `creator` (see `ToJS::to_js_with_creator`).
-pub fn returns_primitive(sig: &syn::Signature) -> bool {
-    primitive_return(sig).is_some()
-}
-
+/// How a callback sets a primitive return value in V8.
+#[derive(Debug, PartialEq, Eq)]
 pub enum PrimitiveReturn {
+    /// `()`: V8's default result, `undefined`, stays.
     Void,
+    /// `bool`: set with `set_return_boolean`.
     Boolean,
+    /// A type in `NUMERIC_RETURN_TYPES`: set with `set_return_number`.
     Number,
 }
 
+/// How a callback sets the result of `sig` in V8, if `sig` returns `()` or one of the types a
+/// fast callback returns, directly or in a `Result`. None of these keeps a `creator` (see
+/// `ToJS::to_js_with_creator`). An `async fn` returns a future, so it has no primitive result.
 pub fn primitive_return(sig: &syn::Signature) -> Option<PrimitiveReturn> {
+    if sig.asyncness.is_some() {
+        return None;
+    }
     let syn::ReturnType::Type(_, ty) = &sig.output else {
         return Some(PrimitiveReturn::Void);
     };
@@ -452,7 +459,7 @@ pub fn primitive_return(sig: &syn::Signature) -> Option<PrimitiveReturn> {
     match ty {
         syn::Type::Tuple(tuple) if tuple.elems.is_empty() => Some(PrimitiveReturn::Void),
         ty if is_named_type(ty, &["bool"]) => Some(PrimitiveReturn::Boolean),
-        ty if is_named_type(ty, FAST_API_RETURN_TYPES) => Some(PrimitiveReturn::Number),
+        ty if is_named_type(ty, NUMERIC_RETURN_TYPES) => Some(PrimitiveReturn::Number),
         _ => None,
     }
 }

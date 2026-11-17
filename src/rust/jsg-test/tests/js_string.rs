@@ -134,6 +134,16 @@ fn utf8_uninitialized_storage_exposes_only_written_bytes() {
 }
 
 #[test]
+#[should_panic(expected = "buffer too small for the null terminator")]
+fn utf8_uninitialized_storage_needs_room_for_a_terminator() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let string = v8::String::new_from_utf8(lock, b"a").unwrap();
+        string.write_utf8_uninit(lock, &mut [], v8::WriteFlags::NullTerminate);
+        Ok(())
+    });
+}
+
+#[test]
 fn to_string_replaces_lone_surrogates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {

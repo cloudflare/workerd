@@ -45,7 +45,7 @@ namespace workerd::rust::jsg {
 // not always check them against the buffer, so a view that does not lie within its buffer is
 // empty here, as it is for jsg::JsBufferSource.
 static kj::ArrayPtr<uint8_t> viewBytes(v8::Local<v8::ArrayBufferView> view) {
-  auto buffer = view->Buffer();
+  auto buffer = view->GetBuffer();
   auto byteOffset = view->ByteOffset();
   auto byteLength = view->ByteLength();
   auto bufferLength = buffer->ByteLength();
@@ -838,7 +838,8 @@ size_t local_array_buffer_view_byte_length(const Local& view) {
 }
 
 uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
-  return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
+  return static_cast<uint8_t*>(
+      local_as_ref_from_ffi<v8::ArrayBufferView>(view)->GetBuffer()->Data());
 }
 
 uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length) {
@@ -1183,7 +1184,7 @@ size_t local_typed_array_length(const Local& array) {
 
 uintptr_t local_typed_array_buffer_data(const Local& array) {
   return reinterpret_cast<uintptr_t>(
-      local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
+      local_as_ref_from_ffi<v8::TypedArray>(array)->GetBuffer()->Data());
 }
 
 size_t local_typed_array_byte_offset(const Local& array) {
