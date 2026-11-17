@@ -272,6 +272,9 @@ class Socket: public jsg::Object {
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
 
+  // The same for a UDP socket, whose value-mode readable reports EOF through `eof` instead.
+  void handleDatagramEof(jsg::Lock& js, kj::Promise<void> eof);
+
   // Resolves the `closed` promise when `disconnected` (from watchForDisconnect()) reports a
   // disconnect. This attaches jsg `.then()` continuations, so it must run in a JS-executing context:
   // directly in setupSocket(), or deferred to a microtask in deserialize() (which runs under a scope

@@ -432,12 +432,25 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
 // call and enqueues exactly what came back as one packet value. Uses
 // JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
 // ReadableStreamSource.
-JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
+// Value streams do not report EOF through onEof(), so `eof` is fulfilled here instead.
+JsReadableStream newDatagramReadableStream(
+    jsg::Lock& js, IoOwn<DatagramChannel> channel, kj::Own<kj::PromiseFulfiller<void>> eof) {
+  auto& context = IoContext::current();
   return JsReadableStream::fromPull(js,
-      [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
+      [channel = kj::mv(channel), eof = context.addObject(kj::refcountedWrapper(kj::mv(eof)))](
+          jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
     IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_receive"_kj);
-    return ioContext.awaitIo(js, channel->receive(),
+    auto received = channel->receive().then(
+        [signal = kj::addRef(*eof)](kj::Maybe<kj::Array<kj::byte>> datagram) mutable {
+      if (datagram == kj::none) {
+        signal->getWrapped().fulfill();
+      }
+
+      return kj::mv(datagram);
+    });
+
+    return ioContext.awaitIo(js, kj::mv(received),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
         auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
@@ -898,10 +911,11 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
 
-  JsReadableStream readable(newDatagramReadableStream(js, ioContext.addObject(channel.addRef())));
   // UDP sockets have no allowHalfOpen option: `closed` always resolves from read-EOF once the
   // flow ends, mirroring the allowHalfOpen == false behavior for TCP sockets below.
-  auto eofPromise = readable.onEof(js);
+  auto eof = kj::newPromiseAndFulfiller<void>();
+  JsReadableStream readable(
+      newDatagramReadableStream(js, ioContext.addObject(channel.addRef()), kj::mv(eof.fulfiller)));
 
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
@@ -917,7 +931,7 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
       SecureTransportKind::OFF, SocketProtocol::UDP, kj::none /* domain */,
       false /* isDefaultFetchPort */, kj::mv(openedPrPair));
 
-  result->handleReadableEof(js, kj::mv(eofPromise));
+  result->handleDatagramEof(js, kj::mv(eof.promise));
   // Ingress flows are already open. Outbound flows resolve only after routing and policy setup.
   result->handleProxyStatus(js, kj::mv(status));
   result->trackOpenedState(js);
@@ -1826,6 +1840,23 @@ void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
           JSG_VISITABLE_LAMBDA(
               (ref = JSG_THIS), (ref), (jsg::Lock& js) { return ref->maybeCloseWriteSide(js); }))
       .markAsHandled(js);
+}
+
+void Socket::handleDatagramEof(jsg::Lock& js, kj::Promise<void> eof) {
+  // The reference must be weak, as in wireClosedToDisconnect(): the IoContext holds the wait, and a
+  // strong reference would keep the Socket, and with it the flow, alive until the peer ends it.
+  // A rejection means the readable was dropped before EOF.
+  IoContext::current()
+      .awaitIo(js, kj::mv(eof))
+      .then(js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js) mutable -> jsg::Promise<void> {
+    KJ_IF_SOME(socket, self.tryAddRef(js)) {
+      return socket->maybeCloseWriteSide(js);
+    }
+
+    return js.resolvedPromise();
+  }, [](jsg::Lock& js, jsg::Value) {
+    return js.resolvedPromise();
+  }).markAsHandled(js);
 }
 
 jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
