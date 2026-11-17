@@ -218,17 +218,16 @@ function maxFlush(a: number, b: number): number {
 
 // Set up a list of 'special' buffers that can be written using .write()
 // from the .flush() code as a way of introducing flushing operations into the
-// write sequence.
+// write sequence. Each is allocated on its own rather than as a view of one
+// shared zero-length ArrayBuffer: a Worker's top level that keeps such a view
+// reachable starts without a startup snapshot (see serializeInternalFields() in
+// src/workerd/jsg/snapshot.c++), and every Worker that imports node:zlib keeps
+// these.
 const kFlushBuffers: (Buffer & { [kFlushFlag]: number })[] = [];
-{
-  const dummyArrayBuffer = new ArrayBuffer(0);
-  for (const flushFlag of kFlushFlagList) {
-    const buf = Buffer.from(dummyArrayBuffer) as Buffer & {
-      [kFlushFlag]: number;
-    };
-    buf[kFlushFlag] = flushFlag;
-    kFlushBuffers[flushFlag] = buf;
-  }
+for (const flushFlag of kFlushFlagList) {
+  const buf = Buffer.alloc(0) as Buffer & { [kFlushFlag]: number };
+  buf[kFlushFlag] = flushFlag;
+  kFlushBuffers[flushFlag] = buf;
 }
 
 function zlibOnError(
