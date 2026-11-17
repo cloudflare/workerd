@@ -8,7 +8,9 @@ namespace workerd::server {
 using kj::byte;
 using kj::uint;
 
-FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam): file(kj::mv(fileParam)) {
+FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam, SyncFacetIndex sync)
+    : file(kj::mv(fileParam)),
+      sync(sync) {
   // Read the file to populate the initial index
 
   auto fileBytes = file->readAllBytes();
@@ -21,7 +23,7 @@ FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam): file(kj::mv(f
   if (fileBytes.size() <= sizeof(MAGIC_NUMBER)) {
     // New file, initialize with magic number.
     file->write(0, kj::asBytes(MAGIC_NUMBER));
-    file->datasync();
+    if (sync) file->datasync();
     offset = sizeof(MAGIC_NUMBER);
     return;
   }
@@ -113,7 +115,7 @@ uint FacetTreeIndex::getId(uint parent, kj::StringPtr name) {
 
     // We don't want to return an entry that might disappear after a power failure, so sync it
     // now.
-    file->datasync();
+    if (sync) file->datasync();
 
     offset += entrySize;
 

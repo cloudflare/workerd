@@ -329,6 +329,7 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
     kj::Maybe<uint32_t> parentFacetId,
     ::rust::Str name);
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
+void actor_storage_clear_at(::rust::Str directory, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
 kj::Promise<void> factory_stop_container(

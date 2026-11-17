@@ -590,6 +590,7 @@ impl ActorNamespace {
                     ));
                 }
                 claim_directory(&directory)?;
+                clear_directory(&directory)?;
             }
             let _ = self.directory.set(directory);
         }
@@ -599,11 +600,6 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
-        if self.cluster().is_some() {
-            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
-            // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
-        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -657,6 +653,35 @@ impl ActorNamespace {
                 .await;
         }
     }
+}
+
+/// Empties a cluster namespace's `directory` but for its `.cluster` marker, as the process starts.
+/// What an earlier process left there goes unread: the bucket holds the objects, a takeover
+/// restores each from it, and peers adopt the earlier process's alarms from it. Those files were
+/// written with no syncs, so after a crash of the machine any of them may be torn, a facet index
+/// or the alarm scheduler's database included, and none can be trusted to clean up the rest. The
+/// files this process writes it reads only while the OS has kept them for it.
+fn clear_directory(directory: &str) -> Result<()> {
+    let entries = std::fs::read_dir(directory).map_err(|e| kj::failed!("{directory}: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| kj::failed!("{directory}: {e}"))?;
+        if entry.file_name() == ".cluster" {
+            continue;
+        }
+        let path = entry.path();
+        let removed = match entry.file_type() {
+            Ok(kind) if kind.is_dir() => std::fs::remove_dir_all(&path),
+            Ok(_) => std::fs::remove_file(&path),
+            Err(e) => Err(e),
+        };
+        match removed {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(kj::failed!("{}: {e}", path.display()));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Marks a namespace's `directory` as the cluster's. The cluster replaces an
@@ -2175,10 +2200,16 @@ impl cluster::Layout for Databases {
         Ok(path.into())
     }
 
-    fn clear(&self) -> cluster::Result<()> {
-        let storage = self.ns.storage().map_err(|e| layout_error(&e))?;
-        ffi::actor_storage_clear(storage, &self.root_key)
-            .map_err(|e| layout_error(&crate::Error::from(e)))
+    fn clear(&self) -> cluster::Result<cluster::Removal> {
+        // Storage in memory, with no directory, keeps no object's files.
+        let Some(directory) = self.ns.directory.get().cloned() else {
+            return Ok(Box::new(|| Ok(())));
+        };
+        let root_key = self.root_key.clone();
+        Ok(Box::new(move || {
+            ffi::actor_storage_clear_at(&directory, &root_key)
+                .map_err(|e| layout_error(&crate::Error::from(e)))
+        }))
     }
 }
 

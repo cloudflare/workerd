@@ -513,7 +513,8 @@ class FakeS3 {
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
 // the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
-// what a node adds to its environment.
+// what a node adds to its environment, and `prepare` fills a node's directory
+// before it starts.
 async function withCluster(
   numNodes,
   fn,
@@ -525,6 +526,7 @@ async function withCluster(
     before = async () => {},
     dialect = 's3',
     nodeEnv = () => ({}),
+    prepare = async () => {},
   } = {}
 ) {
   // Each test run gets its own bucket and disks, so state doesn't leak
@@ -538,6 +540,7 @@ async function withCluster(
     for (let i = 0; i < numNodes; i++) {
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
+      await prepare(localPath);
       nodes.push(
         new ClusterNode({
           binary: env.WORKERD_BINARY,
@@ -1417,6 +1420,68 @@ test("cluster: an alarm runs once on its object's owner", async () => {
     const res = await fetchJson(nodes[1].httpPort, '/alarms?name=alarm');
     assert.deepStrictEqual(res.body.fired, [set.body.nodeId]);
   });
+});
+
+test('cluster: a node starts over the torn files of an earlier process', async () => {
+  // A cluster writes its files with no syncs, so a crash of the machine can
+  // leave any of them torn: the next process starts without them. First the
+  // name of the object's files, its id.
+  let id;
+  await withCluster(1, async ({ nodes: [node] }) => {
+    ({ id } = (
+      await fetchJson(node.httpPort, '/alarms?name=over-garbage')
+    ).body);
+  });
+  const garbage = Buffer.concat([
+    Buffer.from('SQLite format 3\0'),
+    Buffer.alloc(8192, 0xa5),
+  ]);
+  const prepare = async (localPath) => {
+    for (const ns of ['counter-test-namespace', 'kv']) {
+      const dir = join(localPath, ns);
+      await mkdir(dir);
+      await writeFile(join(dir, '.cluster'), '');
+      await writeFile(join(dir, 'metadata.sqlite'), garbage);
+      await writeFile(join(dir, 'metadata.sqlite-wal'), 'not a WAL');
+    }
+    // The object's: a facet index a takeover cannot read, a facet's database
+    // it would not name, and the copies of an epoch.
+    const dir = join(localPath, 'counter-test-namespace');
+    await writeFile(join(dir, `${id}.sqlite`), garbage);
+    await writeFile(join(dir, `${id}.facets`), Buffer.alloc(100, 0xa5));
+    await writeFile(join(dir, `${id}.3.sqlite`), garbage);
+    await mkdir(join(dir, `${id}.sqlite.log`, 'e7'), { recursive: true });
+    await writeFile(join(dir, `${id}.sqlite.log`, 'e7', '1'), garbage);
+  };
+  await withCluster(
+    1,
+    async ({ nodes: [node] }) => {
+      // Only the marker is left, and the scheduler's new database.
+      for (const ns of ['counter-test-namespace', 'kv']) {
+        const entries = await readdir(join(node.localPath, ns));
+        const left = entries.filter(
+          (name) => name !== '.cluster' && !name.startsWith('metadata.sqlite')
+        );
+        assert.deepStrictEqual(left, [], ns);
+      }
+      const set = await fetchJson(
+        node.httpPort,
+        '/set-alarm?name=over-garbage&ms=200'
+      );
+      assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+      assert.strictEqual(set.body.id, id);
+      assert.strictEqual(await facetAdd(node.httpPort, 'over-garbage', 'a'), 1);
+      // The scheduler's new database holds the alarm, which runs.
+      const deadline = Date.now() + 10_000;
+      let res;
+      do {
+        await sleep(100);
+        res = await fetchJson(node.httpPort, '/alarms?name=over-garbage');
+      } while (res.body.fired?.length !== 1 && Date.now() < deadline);
+      assert.deepStrictEqual(res.body.fired, [node.nodeId]);
+    },
+    { prepare }
+  );
 });
 
 test("cluster: a killed owner's alarm runs once on a survivor", async () => {

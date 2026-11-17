@@ -334,10 +334,15 @@ fn upload_snapshot(store: &Bucket, to: Sequence) {
         .unwrap();
 }
 
+/// A share of no hold.
+fn share() -> crate::owner::Share {
+    std::sync::Arc::new(())
+}
+
 /// Restores the log's lanes into a spool, moving the root's to `out`.
 fn restore_db(store: &Bucket, out: &Path) -> crate::Result<Sequence> {
     let spool = crate::log::with_suffix(out, ".spool");
-    let (end, lanes) = runtime().block_on(restore(&log(store), 0, &spool))?;
+    let (end, lanes) = runtime().block_on(restore(&log(store), 0, &spool, &share()))?;
     for (lane, path) in lanes {
         if lane == DB {
             std::fs::rename(path, out)?;
@@ -751,11 +756,14 @@ impl Layout for Root {
         Ok(self.0.clone())
     }
 
-    fn clear(&self) -> crate::Result<()> {
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(crate::log::with_suffix(&self.0, suffix));
-        }
-        Ok(())
+    fn clear(&self) -> crate::Result<crate::owner::Removal> {
+        let path = self.0.clone();
+        Ok(Box::new(move || {
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(crate::log::with_suffix(&path, suffix));
+            }
+            Ok(())
+        }))
     }
 }
 
@@ -779,7 +787,7 @@ fn remove(path: &Path) {
 /// Every lane the log restores, with its rows.
 fn restored_lanes(store: &Bucket, name: &str) -> BTreeMap<String, (i64, i64, i64)> {
     let (_, lanes) = runtime()
-        .block_on(restore(&log(store), 0, &scratch(name)))
+        .block_on(restore(&log(store), 0, &scratch(name), &share()))
         .unwrap();
     let open = |path: PathBuf| rows(&Connection::open(path.to_str().unwrap()));
     lanes.into_iter().map(|(l, path)| (l, open(path))).collect()

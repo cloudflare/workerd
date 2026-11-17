@@ -174,7 +174,15 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
       sqliteDirectory(actors->replicated()
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
-      vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
+      // A cluster's databases need no syncs: an object's commits are durable once the bucket
+      // holds them, and a node reuses its files only within the process that wrote them, so no
+      // crash that a sync guards against leaves a file that is read again. The namespace's
+      // directory is emptied before this opens it (`clear_directory`, actor.rs), the alarm
+      // scheduler's database and facet indexes included. A sync is also where a failed writeback
+      // reports its I/O error: an object kept to resume from is synced as it goes idle
+      // (`Owners::evict`, cluster/owner.rs).
+      vfs(*sqliteDirectory,
+          {.sync = factory.getImpl().options->syncStorage && !actors->replicated()}),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
@@ -188,10 +196,16 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
             return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
           })) {}
 
+SyncFacetIndex ActorStorage::Impl::syncFacetIndex() const {
+  return SyncFacetIndex(!actors->replicated());
+}
+
 kj::Maybe<kj::Own<FacetTreeIndex>> ActorStorage::Impl::getFacetTreeIndexIfNotEmpty(
-    const kj::Directory& dir, kj::StringPtr rootKey) {
+    const kj::Directory& dir, kj::StringPtr rootKey, SyncFacetIndex sync) {
   return dir.tryOpenFile(kj::Path({kj::str(rootKey, ".facets")}), kj::WriteMode::MODIFY)
-      .map([](kj::Own<const kj::File>&& file) { return kj::heap<FacetTreeIndex>(kj::mv(file)); });
+      .map([sync](kj::Own<const kj::File>&& file) {
+    return kj::heap<FacetTreeIndex>(kj::mv(file), sync);
+  });
 }
 
 kj::Path ActorStorage::Impl::getSqlitePath(
@@ -213,8 +227,8 @@ void ActorStorage::Impl::deleteFacet(
 }
 
 void ActorStorage::Impl::deleteDescendantStorage(
-    const kj::Directory& dir, kj::StringPtr rootKey, uint parentId) {
-  KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty(dir, rootKey)) {
+    const kj::Directory& dir, kj::StringPtr rootKey, uint parentId, SyncFacetIndex sync) {
+  KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty(dir, rootKey, sync)) {
     index->forEachChild(
         parentId, [&](uint childId, kj::StringPtr) { deleteFacet(dir, rootKey, *index, childId); });
   } else {
@@ -251,8 +265,10 @@ void ActorStorage::Impl::cloneFacet(const kj::Directory& dir,
   }
   // A cluster captures a database's commits from its WAL's start, so the copy's WAL is folded
   // into it, out of the cluster's sight.
+  // This copy and the checkpoint stay on the event loop: cloning a facet is synchronous for the
+  // actor that asks. The checkpoint needs no sync, for the reasons the namespace's VFS needs none.
   if (actors->replicated()) {
-    SqliteDatabase::Vfs vfs(dir);
+    SqliteDatabase::Vfs vfs(dir, {.sync = false});
     SqliteDatabase(vfs, getSqlitePath(rootKey, dstId), kj::WriteMode::MODIFY)
         .run("PRAGMA wal_checkpoint(TRUNCATE);");
     dir.tryRemove(getSqlitePath(rootKey, dstId, "-wal"));
@@ -352,20 +368,31 @@ void actor_storage_delete_facet(const ActorStorage& storage,
   auto& dir = *KJ_UNWRAP_OR(impl.directory, return);
   auto key = kj::str(rootKey);
   // Without an index there can be no facet storage.
-  KJ_IF_SOME(index, impl.getFacetTreeIndexIfNotEmpty(dir, key)) {
+  KJ_IF_SOME(index, impl.getFacetTreeIndexIfNotEmpty(dir, key, impl.syncFacetIndex())) {
     impl.deleteFacet(dir, key, *index, index->getId(parentFacetId.orDefault(0), kj::str(name)));
   }
+}
+
+void ActorStorage::Impl::clearObject(const kj::Directory& dir, kj::StringPtr rootKey) {
+  // The index goes too, so syncing it would be wasted.
+  deleteDescendantStorage(dir, rootKey, 0, SyncFacetIndex::NO);
+  for (const auto& suffix: {""_kj, "-wal"_kj, "-shm"_kj}) {
+    dir.tryRemove(getSqlitePath(rootKey, 0, suffix));
+  }
+  dir.tryRemove(kj::Path({kj::str(rootKey, ".facets")}));
 }
 
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey) {
   auto& impl = storage.getImpl();
   auto& dir = *KJ_UNWRAP_OR(impl.directory, return);
-  auto key = kj::str(rootKey);
-  impl.deleteDescendantStorage(dir, key, 0);
-  for (const auto& suffix: {""_kj, "-wal"_kj, "-shm"_kj}) {
-    dir.tryRemove(impl.getSqlitePath(key, 0, suffix));
-  }
-  dir.tryRemove(kj::Path({kj::str(key, ".facets")}));
+  ActorStorage::Impl::clearObject(dir, kj::str(rootKey));
+}
+
+void actor_storage_clear_at(::rust::Str directory, ::rust::Str rootKey) {
+  auto fs = kj::newDiskFilesystem();
+  auto dir = fs->getRoot().openSubdir(
+      fs->getCurrentPath().evalNative(kj::str(directory)), kj::WriteMode::MODIFY);
+  ActorStorage::Impl::clearObject(*dir, kj::str(rootKey));
 }
 
 void actor_storage_clone_facet(const ActorStorage& storage,
@@ -377,7 +404,7 @@ void actor_storage_clone_facet(const ActorStorage& storage,
   auto& dir = *KJ_UNWRAP_OR(impl.directory, return);
   auto key = kj::str(rootKey);
   // Without an index there is no storage to delete or copy.
-  KJ_IF_SOME(index, impl.getFacetTreeIndexIfNotEmpty(dir, key)) {
+  KJ_IF_SOME(index, impl.getFacetTreeIndexIfNotEmpty(dir, key, impl.syncFacetIndex())) {
     uint parentId = parentFacetId.orDefault(0);
     // The destination's storage goes first, as deleting the facet would; then the copy. A source
     // without a database has no data, which the emptied destination matches.
@@ -395,7 +422,8 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
   // The index is read from disk for this one lookup; the server keeps the number it yields.
   auto file = dir.openFile(
       kj::Path({kj::str(rootKey, ".facets")}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-  return FacetTreeIndex(kj::mv(file)).getId(parentFacetId.orDefault(0), kj::str(name));
+  return FacetTreeIndex(kj::mv(file), storage.getImpl().syncFacetIndex())
+      .getId(parentFacetId.orDefault(0), kj::str(name));
 }
 
 // =======================================================================================
@@ -561,7 +589,8 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
                        SqliteDatabase& db) mutable {
       storage->actors->database_reset(toRust(storage->getSqlitePath(rootKey, selfId).toString()));
       db.run("PRAGMA journal_mode=WAL;");
-      storage->deleteDescendantStorage(*KJ_ASSERT_NONNULL(storage->directory), rootKey, selfId);
+      storage->deleteDescendantStorage(
+          *KJ_ASSERT_NONNULL(storage->directory), rootKey, selfId, storage->syncFacetIndex());
     });
     kj::Function<kj::Promise<void>(SpanParent)> commit = [](SpanParent) -> kj::Promise<void> {
       return kj::READY_NOW;
