@@ -556,6 +556,9 @@ pub mod ffi {
         ) -> Result<KjMaybe<u32>>;
         /// Removes the root actor `root_key`'s databases, its facets', and their index.
         fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
+        /// `actor_storage_clear` on the namespace directory at `directory`, which it opens
+        /// itself: callable from any thread.
+        fn actor_storage_clear_at(directory: &str, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.

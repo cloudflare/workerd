@@ -159,8 +159,15 @@ impl Cluster {
         // Named open here, but not open here. Evicted here with the bucket
         // holding the epoch: resume it (`take_over`); a stale owner that
         // writes on cannot acknowledge, since every acknowledgement rereads
-        // own.json. Otherwise, dropped after a failure or evicted before its
-        // upload completed: recover it at the next epoch.
+        // own.json. Otherwise, dropped after a failure, evicted before its
+        // upload completed or its files failed to sync: recover it at the
+        // next epoch. An eviction of the epoch still running decides which.
+        if let Claim::Owned(owned) = &claim
+            && owned.recover.is_none()
+            && !self.owners.holds(ns, actor)
+        {
+            self.owners.evicted(ns, actor, owned.epoch).await;
+        }
         if let Claim::Owned(owned) = &claim
             && owned.recover.is_none()
             && !self.owners.holds(ns, actor)
@@ -315,6 +322,12 @@ impl Cluster {
     /// Compact owned objects' logs in the bucket.
     pub async fn tier(&self) {
         self.owners.tier().await;
+    }
+
+    /// Counts an eviction of an object as running, for the claims here to
+    /// wait for, until the guard is dropped (`Owners::evicting`).
+    pub fn evicting(&self, ns: &str, actor: &str, epoch: u64) -> crate::Evicting {
+        self.owners.evicting(ns, actor, epoch)
     }
 
     /// Keep an object workerd evicted, uploading what the bucket lacks.
