@@ -118,7 +118,15 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   kj::Promise<void> makeAlarmTask(
       kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
-  kj::Promise<void> abandonAlarm(const ActorKey& actor, kj::Date scheduledTime);
+
+  // Tells the actor that the alarm at scheduledTime is abandoned, after `delay` if given, and then
+  // runs the alarm queued behind it, if any. Otherwise it deletes the abandoned alarm, or, if the
+  // actor couldn't be told, tells it again after a backoff.
+  kj::Promise<void> abandonAlarm(
+      const ActorKey& actor, kj::Date scheduledTime, kj::Maybe<kj::Duration> delay = kj::none);
+
+  // The delay before `alarm` is next retried, with jitter. Advances its backoff.
+  kj::Duration nextRetryDelay(ScheduledAlarm& alarm);
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 

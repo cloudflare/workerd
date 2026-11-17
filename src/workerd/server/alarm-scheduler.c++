@@ -248,10 +248,10 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
         // Notify the actor to clear its in-memory alarm state so getAlarm() reflects the
-        // deletion. We ignore the returned remaining time — the workerd-local alarm scheduler
-        // already has visibility into the actor's alarm state via its SQLite hooks.
+        // deletion. We ignore the returned alarm: the actor's SQLite hooks give this scheduler
+        // each alarm synchronously, so it already has the alarm.
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
-        // lost.
+        // lost, and tell the actor again later.
         entry.value.task = abandonAlarm(ownActor, scheduledTime);
         co_return;
       }
@@ -270,13 +270,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       }
       entry.value.previousRetryCountedAgainstLimit = alarmOutcome.retryCountsAgainstLimit;
 
-      entry.value.backoff = kj::min(AlarmScheduler::RETRY_BACKOFF_MAX, entry.value.backoff);
-      auto delay = (AlarmScheduler::RETRY_START_SECONDS << entry.value.backoff) * kj::SECONDS;
-
-      std::uniform_int_distribution<> distribution(0, maxJitterMsForDelay(delay));
-      delay += distribution(random) * kj::MILLISECONDS;
-
-      entry.value.backoff++;
+      auto delay = nextRetryDelay(entry.value);
       entry.value.retry++;
 
       entry.value.task = makeAlarmTask(delay, ownActor, scheduledTime);
@@ -294,14 +288,36 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
   }
 }
 
-kj::Promise<void> AlarmScheduler::abandonAlarm(const ActorKey& actor, kj::Date scheduledTime) {
+kj::Duration AlarmScheduler::nextRetryDelay(ScheduledAlarm& alarm) {
+  alarm.backoff = kj::min(AlarmScheduler::RETRY_BACKOFF_MAX, alarm.backoff);
+  auto delay = (AlarmScheduler::RETRY_START_SECONDS << alarm.backoff) * kj::SECONDS;
+
+  std::uniform_int_distribution<> distribution(0, maxJitterMsForDelay(delay));
+  delay += distribution(random) * kj::MILLISECONDS;
+
+  alarm.backoff++;
+  return delay;
+}
+
+kj::Promise<void> AlarmScheduler::abandonAlarm(
+    const ActorKey& actor, kj::Date scheduledTime, kj::Maybe<kj::Duration> delay) {
   auto ownActor = actor.clone();
+  KJ_IF_SOME(d, delay) {
+    co_await timer.afterDelay(d);
+    KJ_ASSERT_NONNULL(alarms.find(ownActor)).status = AlarmStatus::FINISHED;
+  }
+  bool notified = false;
   try {
-    co_await getActor(ownActor)->abandonAlarm(scheduledTime);
+    // evalNow() makes a synchronous failure wait for the event loop too, since the code below may
+    // replace the task that the caller is still assigning.
+    co_await kj::evalNow([&]() {
+      auto worker = getActor(ownActor);
+      return worker->abandonAlarm(scheduledTime).attach(kj::mv(worker));
+    });
+    notified = true;
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
     KJ_LOG(WARNING, "abandonAlarm notification failed, keeping alarm in scheduler", exception);
-    co_return;
   }
 
   KJ_IF_SOME(entry, alarms.findEntry(ownActor)) {
@@ -314,8 +330,15 @@ kj::Promise<void> AlarmScheduler::abandonAlarm(const ActorKey& actor, kj::Date s
     tasks.add(kj::mv(entry.value.task));
     KJ_IF_SOME(replacement, entry.value.queuedAlarm) {
       entry.value = scheduleAlarm(clock.now(), entry.value.actor, replacement);
-    } else {
+    } else if (notified) {
       deleteAlarm(ownActor);
+    } else {
+      // The actor may still have the alarm, which deleting it here would leave unscheduled. Running
+      // it again would run a handler that may have asked not to be retried, so we tell the actor
+      // again later instead. Until then, the alarm is WAITING, so that setting or deleting the
+      // actor's alarm replaces it at once: the actor then no longer has the abandoned alarm.
+      entry.value.status = AlarmStatus::WAITING;
+      entry.value.task = abandonAlarm(ownActor, scheduledTime, nextRetryDelay(entry.value));
     }
   }
 }

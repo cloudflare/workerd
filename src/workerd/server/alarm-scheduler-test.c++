@@ -274,7 +274,7 @@ KJ_TEST("AlarmScheduler abandons an alarm when ctx.abort() sets retryAlarm to fa
   KJ_EXPECT(scheduler.getAlarm(actor) == kj::none);
 }
 
-KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending") {
+KJ_TEST("AlarmScheduler keeps the actor's WorkerInterface until it is told the alarm is abandoned") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
   AdjustableClock clock;
@@ -284,48 +284,178 @@ KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending")
   SqliteDatabase::Vfs vfs(*dir);
   kj::Path path({"alarms"});
   auto scheduledTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
-  auto replacementTime = kj::UNIX_EPOCH + 2 * kj::HOURS;
   // This test actor was not created from a name.
   auto actor = ActorKey("terminal-actor"_kj, kj::none);
   auto pendingAbandon = kj::newPromiseAndFulfiller<kj::Maybe<kj::Date>>();
   auto abandonPromise = pendingAbandon.promise.fork();
   bool abandonStarted = false;
+  uint liveWorkers = 0;
 
-  {
+  auto getActor = [&](const ActorKey&) -> kj::Own<WorkerInterface> {
+    liveWorkers++;
+    return kj::heap<AlarmStubWorkerInterface>([]() {},
+        WorkerInterface::AlarmOutcome{
+          .retry = false,
+          .retryCountsAgainstLimit = true,
+          .outcome = EventOutcome::ABORTED,
+        },
+        [&abandonStarted, &abandonPromise]() {
+      abandonStarted = true;
+      return abandonPromise.addBranch();
+    }).attach(kj::defer([&liveWorkers]() { liveWorkers--; }));
+  };
+
+  AlarmScheduler scheduler(clock, timer, vfs, path.clone(), kj::mv(getActor));
+  scheduler.setAlarm(actor, scheduledTime);
+
+  clock.setTime(scheduledTime);
+  timer.advanceTo(kj::origin<kj::TimePoint>() + (scheduledTime - kj::UNIX_EPOCH));
+  for (uint i = 0; i < 100 && !abandonStarted; i++) {
+    waitScope.poll();
+  }
+  KJ_ASSERT(abandonStarted);
+
+  // The worker that ran the alarm is gone, but the one being told it is abandoned stays until the
+  // call returns.
+  waitScope.poll();
+  KJ_EXPECT(liveWorkers == 1);
+
+  pendingAbandon.fulfiller->fulfill(kj::none);
+  for (uint i = 0; i < 100 && scheduler.getAlarm(actor) != kj::none; i++) {
+    waitScope.poll();
+  }
+  KJ_EXPECT(scheduler.getAlarm(actor) == kj::none);
+  KJ_EXPECT(liveWorkers == 0);
+}
+
+KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending") {
+  for (bool abandonFails: {false, true}) {
+    KJ_CONTEXT(abandonFails);
+    kj::EventLoop loop;
+    kj::WaitScope waitScope(loop);
+    AdjustableClock clock;
+    kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+
+    auto dir = kj::newInMemoryDirectory(kj::nullClock());
+    SqliteDatabase::Vfs vfs(*dir);
+    kj::Path path({"alarms"});
+    auto scheduledTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
+    auto replacementTime = kj::UNIX_EPOCH + 2 * kj::HOURS;
+    // This test actor was not created from a name.
+    auto actor = ActorKey("terminal-actor"_kj, kj::none);
+    auto pendingAbandon = kj::newPromiseAndFulfiller<kj::Maybe<kj::Date>>();
+    auto abandonPromise = pendingAbandon.promise.fork();
+    bool abandonStarted = false;
+
+    {
+      auto getActor = [&](const ActorKey&) -> kj::Own<WorkerInterface> {
+        return kj::heap<AlarmStubWorkerInterface>([]() {},
+            WorkerInterface::AlarmOutcome{
+              .retry = false,
+              .retryCountsAgainstLimit = true,
+              .outcome = EventOutcome::ABORTED,
+            },
+            [&abandonStarted, &abandonPromise]() {
+          abandonStarted = true;
+          return abandonPromise.addBranch();
+        });
+      };
+
+      AlarmScheduler scheduler(clock, timer, vfs, path.clone(), kj::mv(getActor));
+      scheduler.setAlarm(actor, scheduledTime);
+
+      clock.setTime(scheduledTime);
+      timer.advanceTo(kj::origin<kj::TimePoint>() + (scheduledTime - kj::UNIX_EPOCH));
+      for (uint i = 0; i < 100 && !abandonStarted; i++) {
+        waitScope.poll();
+      }
+
+      KJ_EXPECT(abandonStarted);
+      scheduler.setAlarm(actor, replacementTime);
+      if (abandonFails) {
+        pendingAbandon.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "actor went away"));
+      } else {
+        pendingAbandon.fulfiller->fulfill(kj::none);
+      }
+
+      for (uint i = 0; i < 100 && scheduler.getAlarm(actor) != replacementTime; i++) {
+        waitScope.poll();
+      }
+      KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+    }
+
+    AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
+    KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+  }
+}
+
+KJ_TEST("AlarmScheduler tells the actor again that an alarm is abandoned if telling it fails") {
+  for (bool actorSetsAlarm: {false, true}) {
+    KJ_CONTEXT(actorSetsAlarm);
+    kj::EventLoop loop;
+    kj::WaitScope waitScope(loop);
+    AdjustableClock clock;
+    kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+    auto advanceTo = [&](kj::Date time) {
+      clock.setTime(time);
+      timer.advanceTo(kj::origin<kj::TimePoint>() + (time - kj::UNIX_EPOCH));
+      waitScope.poll();
+    };
+
+    auto dir = kj::newInMemoryDirectory(kj::nullClock());
+    SqliteDatabase::Vfs vfs(*dir);
+    kj::Path path({"alarms"});
+    auto scheduledTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
+    auto replacementTime = kj::UNIX_EPOCH + 2 * kj::HOURS;
+    // Allows for the jitter of the first retry.
+    auto afterRetryDelay = scheduledTime + 2 * AlarmScheduler::RETRY_START_SECONDS * kj::SECONDS;
+    // This test actor was not created from a name.
+    auto actor = ActorKey("terminal-actor"_kj, kj::none);
+
+    uint runs = 0;
+    uint abandonTries = 0;
     auto getActor = [&](const ActorKey&) -> kj::Own<WorkerInterface> {
-      return kj::heap<AlarmStubWorkerInterface>([]() {},
+      return kj::heap<AlarmStubWorkerInterface>([&runs]() { runs++; },
           WorkerInterface::AlarmOutcome{
             .retry = false,
             .retryCountsAgainstLimit = true,
             .outcome = EventOutcome::ABORTED,
           },
-          [&abandonStarted, &abandonPromise]() {
-        abandonStarted = true;
-        return abandonPromise.addBranch();
+          [&abandonTries]() -> kj::Promise<kj::Maybe<kj::Date>> {
+        if (abandonTries++ == 0) {
+          return KJ_EXCEPTION(DISCONNECTED, "actor went away");
+        }
+        return kj::Maybe<kj::Date>(kj::none);
       });
     };
 
     AlarmScheduler scheduler(clock, timer, vfs, path.clone(), kj::mv(getActor));
     scheduler.setAlarm(actor, scheduledTime);
 
-    clock.setTime(scheduledTime);
-    timer.advanceTo(kj::origin<kj::TimePoint>() + (scheduledTime - kj::UNIX_EPOCH));
-    for (uint i = 0; i < 100 && !abandonStarted; i++) {
-      waitScope.poll();
-    }
+    // The failure keeps the alarm, without running it again.
+    advanceTo(scheduledTime);
+    KJ_EXPECT(runs == 1);
+    KJ_EXPECT(abandonTries == 1);
+    KJ_EXPECT(scheduler.getAlarm(actor) == scheduledTime);
 
-    KJ_EXPECT(abandonStarted);
-    scheduler.setAlarm(actor, replacementTime);
-    pendingAbandon.fulfiller->fulfill(kj::none);
+    if (actorSetsAlarm) {
+      // The alarm the actor sets replaces the abandoned one without waiting for the retry, which it
+      // makes unnecessary.
+      scheduler.setAlarm(actor, replacementTime);
+      advanceTo(afterRetryDelay);
+      KJ_EXPECT(abandonTries == 1);
+      KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
 
-    for (uint i = 0; i < 100 && scheduler.getAlarm(actor) != replacementTime; i++) {
-      waitScope.poll();
+      advanceTo(replacementTime);
+      KJ_EXPECT(runs == 2);
+      KJ_EXPECT(abandonTries == 2);
+    } else {
+      advanceTo(afterRetryDelay);
+      KJ_EXPECT(runs == 1);
+      KJ_EXPECT(abandonTries == 2);
     }
-    KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+    KJ_EXPECT(scheduler.getAlarm(actor) == kj::none);
   }
-
-  AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
-  KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
 }
 
 }  // namespace
