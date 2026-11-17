@@ -750,10 +750,6 @@ bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, cons
 }
 
 // Local<Array>
-Local local_new_array(Isolate* isolate, size_t length) {
-  return to_ffi(v8::Array::New(isolate, length));
-}
-
 uint32_t local_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::Array>(array)->Length();
 }

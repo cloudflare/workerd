@@ -394,7 +394,6 @@ bool local_promise_resolver_resolve(Isolate* isolate, const Local& resolver, con
 bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, const Local& reason);
 
 // Local<Array>
-Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 // Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
 Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
