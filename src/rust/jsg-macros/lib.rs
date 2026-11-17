@@ -19,6 +19,7 @@
 //! | `#[jsg_iterable]`        | fn inside impl   | Make instances iterable (`[Symbol.iterator]()`)                |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
+//! | `#[jsg_traced]`          | struct           | Implement a no-op `Traced` for a struct of GC-free fields      |
 //!
 //! See [`jsg/README.md`](../jsg/README.md) for full usage documentation.
 
@@ -28,6 +29,7 @@ mod memory_info;
 mod oneof;
 mod resource;
 mod trace;
+mod traced;
 mod utils;
 mod wildcard;
 
@@ -115,28 +117,26 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
         all_optional &= present.is_some();
 
-        to_js_fields.push((field_name, field_name_str.clone(), present));
+        to_js_fields.push((field_name, field_name_str, present));
         // Like C++ JSG, an absent property reads as undefined.
+        let index = field_extractions.len();
         field_extractions.push(quote! {
-            let prop = obj.get(lock, #field_name_str)?;
+            let prop = __jsg_shape.get(lock, obj, #index)?;
             let #field_name = <#field_type as jsg::FromJS<'s>>::from_js(lock, prop)?;
         });
         field_names.push(field_name);
     }
 
-    // Like C++ JSG, null or undefined is an empty dictionary, which is an
-    // error if a field is required.
-    let empty = if all_optional {
-        quote! { return Ok(Self { #(#field_names: Default::default()),* }); }
-    } else {
-        quote! {
-            return Err(jsg::Error::new_type_error(format!(
-                "Cannot initialize {} with required members from an undefined or null value.",
-                #class_name,
-            )));
-        }
-    };
+    let empty = empty_struct_body(all_optional, &field_names, &class_name);
 
+    // The JavaScript names of the public fields, in order; field `i` of the struct's
+    // `jsg::StructShape` is the `i`th name. A struct without public fields has no shape. The
+    // local is named so that it can't be a field's name, since `from_js` binds each field's value
+    // to a local of the field's name.
+    let js_names = to_js_fields.iter().map(|(_, js_name, _)| js_name);
+    let get_shape = (!to_js_fields.is_empty()).then(|| {
+        quote! { let __jsg_shape = jsg::StructShape::of::<Self>(lock, &[#(#js_names),*]); }
+    });
     let to_js_body = to_js_fn_body(&to_js_fields);
 
     quote! {
@@ -164,6 +164,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 lock: &mut jsg::Lock<'s>,
                 creator: Option<jsg::v8::Local<'s, jsg::v8::Object>>,
             ) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
+                #get_shape
                 #to_js_body
             }
         }
@@ -184,6 +185,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                         format!("Expected object but got {}", value.type_of(lock))
                     ));
                 };
+                #get_shape
                 #(#field_extractions)*
                 Ok(Self { #(#field_names),* })
             }
@@ -203,6 +205,25 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         #traced_impl
     }
     .into()
+}
+
+/// The statement a `#[jsg_struct]`'s `FromJS::from_js` runs for null or undefined. Like C++ JSG,
+/// it is an empty dictionary, which is an error if a field is required.
+fn empty_struct_body(
+    all_optional: bool,
+    field_names: &[&syn::Ident],
+    class_name: &str,
+) -> proc_macro2::TokenStream {
+    if all_optional {
+        quote! { return Ok(Self { #(#field_names: Default::default()),* }); }
+    } else {
+        quote! {
+            return Err(jsg::Error::new_type_error(format!(
+                "Cannot initialize {} with required members from an undefined or null value.",
+                #class_name,
+            )));
+        }
+    }
 }
 
 /// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field, and, unless
@@ -241,50 +262,51 @@ fn struct_traced_impl(
 }
 
 /// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
-/// JavaScript name and the condition for its present state, if optional. Like C++ JSG's
+/// JavaScript name and the condition for its present state, if optional. Unless there are no
+/// fields, the body has the struct's `jsg::StructShape` as `__jsg_shape`. Like C++ JSG's
 /// `JSG_STRUCT`, it follows the `fast_jsg_struct` flag.
 fn to_js_fn_body(
     fields: &[(&syn::Ident, String, Option<proc_macro2::TokenStream>)],
 ) -> proc_macro2::TokenStream {
+    if fields.is_empty() {
+        return quote! {
+            let _ = (self, creator);
+            Ok(lock.new_object().into())
+        };
+    }
+    let count = fields.len();
     // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
-    let data_properties = fields.iter().map(|(field_name, js_name, _)| {
-        quote! {
-            properties.push((
-                #js_name,
-                jsg::ToJS::to_js_with_creator(this.#field_name, lock, creator)?,
-            ));
-        }
+    let values = fields.iter().map(|(field_name, _, _)| {
+        quote! { jsg::ToJS::to_js_with_creator(this.#field_name, lock, creator)? }
     });
     // Set() skips an absent optional field rather than setting it to undefined.
-    let field_sets = fields.iter().map(|(field_name, js_name, present)| {
-        let set = quote! {
-            let value = jsg::ToJS::to_js_with_creator(value, lock, creator)?;
-            obj.set(lock, #js_name, value)?;
-        };
-        if let Some(present) = present {
-            quote! {
-                if #present {
-                    let value = this.#field_name;
-                    #set
+    let field_sets = fields
+        .iter()
+        .enumerate()
+        .map(|(index, (field_name, _, present))| {
+            let set = quote! {
+                let value = jsg::ToJS::to_js_with_creator(value, lock, creator)?;
+                __jsg_shape.set(lock, obj, #index, value)?;
+            };
+            if let Some(present) = present {
+                quote! {
+                    if #present {
+                        let value = this.#field_name;
+                        #set
+                    }
                 }
+            } else {
+                quote! { { let value = this.#field_name; #set } }
             }
-        } else {
-            quote! { { let value = this.#field_name; #set } }
-        }
-    });
+        });
     quote! {
         let this = self;
-        // Unused by a struct without public fields.
-        let _ = creator;
-        if lock.feature_flags().get_fast_jsg_struct() {
-            // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
-            // no setter a script put on Object.prototype runs.
-            // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather
-            // than recreating its shape on every conversion.
-            #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
-            let mut properties = ::std::vec::Vec::new();
-            #(#data_properties)*
-            Ok(jsg::v8::Object::with_data_properties(lock, &properties)?.into())
+        if __jsg_shape.is_fast() {
+            // The object is created from the struct's cached DictionaryTemplate, as C++ JSG
+            // creates it, with the fields as data properties, so no setter a script put on
+            // Object.prototype runs.
+            let values: [jsg::v8::Local<'s, jsg::v8::Value>; #count] = [#(#values),*];
+            Ok(__jsg_shape.new_instance(lock, values)?.into())
         } else {
             // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
             // Object.prototype; what it throws is passed on.
@@ -1301,4 +1323,26 @@ fn iterable_callback_name(fn_name: &syn::Ident) -> syn::Ident {
 #[proc_macro_attribute]
 pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
     oneof::expand(&attr, item)
+}
+
+// =============================================================================
+// #[jsg_traced]
+// =============================================================================
+
+/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct of GC-free fields.
+///
+/// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
+/// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
+/// can't implement the marker, see `jsg::jsg_traced!`.
+///
+/// ```ignore
+/// #[jsg_traced]
+/// struct Fill {
+///     key: String,
+///     span: IoOwnedSpan,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_traced(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    traced::generate_traced_impl(item)
 }

@@ -502,6 +502,15 @@ pub mod ffi {
             data: &Local,
         ) -> MaybeLocal;
 
+        // Struct shapes; see `structs.rs`.
+        pub unsafe fn dictionary_template_new(isolate: *mut Isolate, keys: &[&str]) -> Global;
+        // Leaves what is pending pending.
+        pub unsafe fn dictionary_template_new_instance(
+            isolate: *mut Isolate,
+            tmpl: &Global,
+            values: &mut [MaybeLocal],
+        ) -> MaybeLocal;
+
         // Local<Object>
         // Fallible: interning a key fails if it is longer than V8's string length limit or V8
         // fails to create the string, and there must be as many keys as values.
@@ -519,6 +528,13 @@ pub mod ffi {
             key: &str,
             value: Local,
         ) -> Result<bool>;
+        // Leaves what a setter or Proxy trap throws pending.
+        pub unsafe fn local_object_set_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
+            value: Local,
+        ) -> bool;
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
@@ -535,6 +551,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             object: &Local,
             name: &Local,
+        ) -> MaybeLocal;
+        // Leaves what a getter or Proxy trap throws pending.
+        pub unsafe fn local_object_get_property_by_global_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Global,
         ) -> MaybeLocal;
         pub unsafe fn local_object_get_own_property_names(
             isolate: *mut Isolate,
@@ -635,6 +657,8 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
+        pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
+        pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
         pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
@@ -1428,6 +1452,7 @@ impl String {
 pub struct Object;
 pub struct Function;
 pub struct FunctionTemplate;
+pub struct DictionaryTemplate;
 pub struct Array;
 pub struct TypedArray;
 pub struct Uint8Array;
@@ -2100,6 +2125,10 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn detach_before_drop(&self) -> bool {
+        T::needs_drop_detach()
+    }
+
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -4902,7 +4931,7 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
         // The resource is alive until `drop_rc`.
         let resource = saved.as_gc_ref();
-        if resource.has_drop_impl() {
+        if resource.detach_before_drop() {
             GcVisitor::detach_for_drop(resource);
         }
         saved.drop_rc();
@@ -5524,6 +5553,13 @@ impl WrappableRc {
     ) {
         // SAFETY: the KjRc keeps the Wrappable alive.
         tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
+    }
+
+    /// Condemns the underlying Wrappable if a collection found it unreachable and is sweeping it,
+    /// and returns whether it did (see `wrappable_try_condemn`).
+    pub(crate) fn try_condemn(&self) -> bool {
+        // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
+        unsafe { ffi::wrappable_try_condemn(self.as_pin_mut()) }
     }
 
     /// Increments the strong reference count on the underlying Wrappable.

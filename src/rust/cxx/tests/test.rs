@@ -663,6 +663,24 @@ fn test_rust_vec_copy_assign_failure() {
 }
 
 #[test]
+fn test_smart_ptr_new_over_aligned() {
+    let is_aligned =
+        |ptr: *const ffi2::OverAligned| ptr.addr().is_multiple_of(align_of::<ffi2::OverAligned>());
+
+    let unique: Vec<_> = (0..16)
+        .map(|value| UniquePtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(unique.iter().all(|ptr| is_aligned(ptr.as_ptr())));
+    assert!(unique.iter().map(|ptr| ptr.value).eq(0..16));
+
+    let shared: Vec<_> = (0..16)
+        .map(|value| SharedPtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(shared.iter().all(|ptr| is_aligned(&raw const **ptr)));
+    assert!(shared.iter().map(|ptr| ptr.value).eq(0..16));
+}
+
+#[test]
 fn test_extern_opaque() {
     let mut e = ffi2::c_return_opaque_ptr();
     check!(ffi2::c_take_opaque_ref(e.as_ref().unwrap()));

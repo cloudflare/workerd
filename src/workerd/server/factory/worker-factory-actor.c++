@@ -796,7 +796,7 @@ void actor_close_storage(const ActorHandle& actor) {
 
 kj::Maybe<kj::Rc<HibernationManager>> actor_hibernation_manager(const ActorHandle& actor) {
   return actor.getActor().getHibernationManager().map(
-      [](HibernationManager& m) { return kj::Rc<HibernationManager>(m.addRef()); });
+      [](HibernationManager& m) { return m.toRc(); });
 }
 
 kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start) {

@@ -73,6 +73,10 @@ class TestHarness {
   // may use the harness afterwards.
   void drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const;
 
+  // Takes the realm's cached templates and resets them, under the isolate lock, as the
+  // PREPARE_SNAPSHOT pipeline does before CreateBlob().
+  void take_realm_templates() const;
+
  private:
   mutable kj::Own<TestIsolate> isolate;
   mutable v8::Locker locker;

@@ -80,9 +80,9 @@ use crate::v8::ffi::Wrappable;
 /// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
 /// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
 /// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
-/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A resource's own `Drop`
-/// impl may move an `Rc` out of a plain field (see
-/// [`crate::GarbageCollected::has_drop_impl`]). See `README.md` §Safety rules, rule 2, and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. A `Drop` impl of a
+/// resource or of a field's type may move an `Rc` out of a plain field (see
+/// [`crate::GarbageCollected::detach_before_drop`]). See `README.md` §Safety rules, rule 2, and
 /// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource. Taken by `Drop`.
@@ -439,17 +439,29 @@ pub struct Weak<R: Resource> {
 }
 
 impl<R: Resource> Weak<R> {
-    /// Returns `true` if the resource is still alive.
+    /// Returns `true` if the resource is still alive, i.e. if [`upgrade`](Self::upgrade) would
+    /// return `Some`.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
     #[inline]
     pub fn is_alive(&self, lock: &Lock<'_>) -> bool {
         self.assert_in_isolate_of(lock);
-        self.handle.strong_count() > 0
+        if self.handle.strong_count() == 0 {
+            return false;
+        }
+        self.wrappable.is_some_and(|wrappable| {
+            // SAFETY: the resource is alive, so its Wrappable is too (see `upgrade`).
+            !unsafe { v8::ffi::wrappable_is_condemned(wrappable.as_ref()) }
+        })
     }
 
     /// Upgrades to a strong `Rc<R>` if the resource is still alive.
+    ///
+    /// Returns `None` for a resource that a collection found unreachable and is sweeping, as
+    /// C++ `WeakRef::tryAddRef` does: its wrapper and the handles it traces are already dead,
+    /// though it is not dropped yet. Only code that runs during the sweep, such as the `Drop` of
+    /// another resource swept with it, can see one.
     ///
     /// # Panics
     /// Panics if `lock` belongs to an isolate other than the resource's.
@@ -464,6 +476,10 @@ impl<R: Resource> Weak<R> {
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
         let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        if wrappable.try_condemn() {
+            // The sweep still owns the Wrappable, so this drops only the references just taken.
+            return None;
+        }
         wrappable.add_strong_ref();
         Some(Rc::from_parts(handle, wrappable, state))
     }
@@ -931,7 +947,7 @@ impl NestedType {
 /// Hashes a [`TypeId`], whose `Hash` implementation writes a single `u64` that is already a
 /// high-quality hash, so this passes it through rather than hashing it again.
 #[derive(Default)]
-struct TypeIdHasher(u64);
+pub(crate) struct TypeIdHasher(u64);
 
 impl Hasher for TypeIdHasher {
     fn write_u64(&mut self, value: u64) {

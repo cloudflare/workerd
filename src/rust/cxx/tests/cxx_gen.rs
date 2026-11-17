@@ -88,6 +88,17 @@ const BRIDGE4: &str = r#"
     }
 "#;
 
+const BRIDGE5: &str = r"
+    #[cxx::bridge]
+    mod ffi {
+        struct Shared {
+            value: u64,
+        }
+
+        impl UniquePtr<Shared> {}
+    }
+";
+
 #[test]
 fn test_extern_c_function() {
     let opt = cxx_gen::Opt::default();
@@ -280,4 +291,17 @@ fn test_kj_exception_only_by_value() {
             "{bridge}: {messages:?}"
         );
     }
+}
+
+#[test]
+fn test_unique_ptr_new_allocates_with_alignment() {
+    let opt = cxx_gen::Opt::default();
+    let source = BRIDGE5.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let implementation = str::from_utf8(&generated.implementation).unwrap();
+    assert!(implementation.contains("new ::rust::MaybeUninit<::Shared>"));
+    // The class-scope `operator new` of `MaybeUninit` hides the aligned global one, so it
+    // passes the alignment on itself.
+    assert!(implementation.contains("if (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)"));
+    assert!(implementation.contains("::operator new(sz, ::std::align_val_t(alignof(T)))"));
 }

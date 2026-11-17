@@ -13,6 +13,8 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "main", esModule = embed "legacy-main.js"),
           (name = "legacy-nonstrict", esModule = embed "legacy-nonstrict.js"),
+          (name = "brotli", esModule = embed "brotli.js"),
+          (name = "round-trip", esModule = embed "round-trip.js"),
         ],
         compatibilityFlags = ["nodejs_compat"],
       )

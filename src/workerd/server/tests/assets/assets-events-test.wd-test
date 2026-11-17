@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# An assets service with a user Worker: the router passes JS RPC, scheduled and tail events to the
+# user Worker; the `AssetWorker` entrypoint serves files only.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "assets-events-test.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc", "service_binding_extra_handlers"],
+        bindings = [
+          (name = "ROUTER", service = "app-assets"),
+          (name = "ASSETS", service = (name = "app-assets", entrypoint = "AssetWorker")),
+          (name = "PRODUCER", service = "producer"),
+        ],
+      ),
+    ),
+    ( name = "app-assets",
+      assets = (
+        path = ".",
+        userWorker = (name = "app"),
+      ),
+    ),
+    ( name = "app",
+      worker = (
+        modules = [(name = "worker", esModule = embed "assets-events-app.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      ),
+    ),
+    ( name = "producer",
+      worker = (
+        modules = [(name = "worker", esModule = embed "assets-events-producer.js")],
+        compatibilityFlags = ["nodejs_compat"],
+        tails = ["app-assets"],
+      ),
+    ),
+  ],
+);

@@ -427,6 +427,9 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(m, initDict.method) {
+          // The Fetch spec forbids CONNECT, in any case.
+          JSG_REQUIRE(
+              toUpper(m) != "CONNECT", TypeError, kj::str("Invalid HTTP method string: ", m));
           KJ_IF_SOME(code, tryParseHttpMethod(m)) {
             method = code;
           } else KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {
@@ -2588,24 +2591,10 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
         KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
           // Token isn't available synchronously, so we have to send a promise.
-          auto paf = kj::newPromiseAndFulfiller<
-              rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-
-          // Arrange to send the token when it's ready.
-          ioctx.addTask(promise
-              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
-                     attachedChannel = kj::mv(channel)]
-                    (kj::Array<byte> token) mutable {
-            auto req = pusher.pushDelayedChannelTokenRequest(
-                capnp::MessageSize { 4 + token.size() / sizeof(capnp::word), 0 });
-            req.setToken(token);
-            fulfiller->fulfill(req.send().getCap());
-          }));
-
-          // Write the promise for now.
-          rpcHandler.write([promise = kj::mv(paf.promise)]
-                           (rpc::JsValue::External::Builder builder) mutable{
-            builder.setDelayedSubrequestChannelToken(kj::mv(promise));
+          rpcHandler.write(
+              [delayed = rpcHandler.pushDelayedChannelToken(promise.attach(kj::mv(channel)))](
+                  rpc::JsValue::External::Builder builder) mutable {
+            builder.setDelayedSubrequestChannelToken(kj::mv(delayed));
           });
         }
       }
