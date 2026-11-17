@@ -47,18 +47,33 @@ enum Mode {
     },
 }
 
+/// An open bracket or substitution, and the line of the input it opens on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Open {
-    Bracket,
-    /// A template literal's `${`, whose `}` returns to the template.
-    Substitution,
+    /// `(`, `[` or `{`.
+    Bracket { byte: u8, line: usize },
+    /// A template literal's `${`, whose `}` returns to the template, which starts on
+    /// `template_line`.
+    Substitution { line: usize, template_line: usize },
+}
+
+/// What keeps an input unfinished: the innermost construct it leaves open, such as "`(`" or
+/// "template literal", and the line of the input that construct starts on, 1 for the first.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Unclosed {
+    pub what: &'static str,
+    pub line: usize,
 }
 
 /// Scans input in pieces as it is typed, keeping the lexical state between them.
 #[derive(Clone, Debug)]
 pub struct Scanner {
     mode: Mode,
+    /// The line the string, template literal or block comment `mode` is in starts on.
+    mode_line: usize,
     open: Vec<Open>,
+    /// The line of the input being scanned, 1 for the first.
+    line: usize,
     /// The next byte is escaped by a backslash.
     escaped: bool,
     /// A `/` in code here starts a regular expression.
@@ -71,7 +86,9 @@ impl Default for Scanner {
     fn default() -> Self {
         Self {
             mode: Mode::Code,
+            mode_line: 1,
             open: Vec::new(),
+            line: 1,
             escaped: false,
             regex_allowed: true,
             after_dot: false,
@@ -100,11 +117,34 @@ impl Scanner {
     /// literal or a block comment is open, or a string literal whose line ends in a backslash. A
     /// line break ends any other string literal, as a syntax error the evaluation reports.
     pub fn is_unfinished(&self) -> bool {
-        !self.open.is_empty()
-            || matches!(
-                self.mode,
-                Mode::String(_) | Mode::Template | Mode::BlockComment
-            )
+        self.unclosed().is_some()
+    }
+
+    /// What keeps the input scanned so far unfinished, if it is ([`Self::is_unfinished`]).
+    pub fn unclosed(&self) -> Option<Unclosed> {
+        let literal = match self.mode {
+            Mode::String(_) => Some("string literal"),
+            Mode::Template => Some("template literal"),
+            Mode::BlockComment => Some("`/*` comment"),
+            Mode::Code | Mode::LineComment | Mode::Regex { .. } => None,
+        };
+        if let Some(what) = literal {
+            return Some(Unclosed {
+                what,
+                line: self.mode_line,
+            });
+        }
+        self.open.last().map(|open| match *open {
+            Open::Bracket { byte, line } => Unclosed {
+                what: match byte {
+                    b'(' => "`(`",
+                    b'[' => "`[`",
+                    _ => "`{`",
+                },
+                line,
+            },
+            Open::Substitution { line, .. } => Unclosed { what: "`${`", line },
+        })
     }
 
     /// Scans the next line of input, which ends with its line break. A token does not continue
@@ -165,7 +205,10 @@ impl Scanner {
                     } else if byte == b'`' {
                         self.end_literal();
                     } else if byte == b'$' && next == Some(b'{') {
-                        self.open.push(Open::Substitution);
+                        self.open.push(Open::Substitution {
+                            line: self.line,
+                            template_line: self.mode_line,
+                        });
                         self.mode = Mode::Code;
                         self.regex_allowed = true;
                         i += 1;
@@ -197,6 +240,10 @@ impl Scanner {
                     }
                 }
             }
+            // Only the byte at `i` can be a line break: what scanning consumes after it never is.
+            if byte == b'\n' {
+                self.line += 1;
+            }
             i += 1;
         }
     }
@@ -211,24 +258,27 @@ impl Scanner {
         // After most punctuation an expression starts; after a closing bracket a value ended.
         self.regex_allowed = !matches!(byte, b')' | b']' | b'.');
         match byte {
-            b'(' | b'[' | b'{' => self.open.push(Open::Bracket),
+            b'(' | b'[' | b'{' => self.open.push(Open::Bracket {
+                byte,
+                line: self.line,
+            }),
             b')' | b']' => {
-                if self.open.last() == Some(&Open::Bracket) {
+                if matches!(self.open.last(), Some(Open::Bracket { .. })) {
                     self.open.pop();
                 }
             }
             b'}' => match self.open.last() {
-                Some(Open::Bracket) => {
+                Some(Open::Bracket { .. }) => {
                     self.open.pop();
                 }
-                Some(Open::Substitution) => {
+                Some(&Open::Substitution { template_line, .. }) => {
                     self.open.pop();
-                    self.mode = Mode::Template;
+                    self.start_mode(Mode::Template, template_line);
                 }
                 None => {}
             },
-            b'\'' | b'"' => self.mode = Mode::String(byte),
-            b'`' => self.mode = Mode::Template,
+            b'\'' | b'"' => self.start_mode(Mode::String(byte), self.line),
+            b'`' => self.start_mode(Mode::Template, self.line),
             // `x++ / 2`: an operand an increment or decrement ends.
             b'+' | b'-' if next == Some(byte) => {
                 self.regex_allowed = false;
@@ -240,13 +290,19 @@ impl Scanner {
                 *i += 1;
             }
             b'/' if next == Some(b'*') => {
-                self.mode = Mode::BlockComment;
+                self.start_mode(Mode::BlockComment, self.line);
                 self.regex_allowed = regex_allowed;
                 *i += 1;
             }
             b'/' if regex_allowed => self.mode = Mode::Regex { in_class: false },
             _ => {}
         }
+    }
+
+    /// Enters a string, a template literal or a block comment that starts on `line`.
+    fn start_mode(&mut self, mode: Mode, line: usize) {
+        self.mode = mode;
+        self.mode_line = line;
     }
 
     /// A string, template or regular expression literal ended: a value, which a `/` divides.
