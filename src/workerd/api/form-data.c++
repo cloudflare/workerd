@@ -6,6 +6,7 @@
 
 #include "util.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
 
@@ -70,17 +71,18 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
     kj::StringPtr name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
-  auto fromBlob = [&](jsg::Ref<Blob> blob) {
+  bool specCompliant = FeatureFlags::get(js).getFormDataStandard();
+  auto fromBlob = [&](jsg::Ref<Blob> blob, double lastModified) {
     kj::String fn;
     KJ_IF_SOME(f, filename) {
       fn = kj::mv(f);
     } else {
-      fn = kj::str(name);
+      fn = kj::str(specCompliant ? "blob"_kj : name);
     }
     // The file is created with the same data as the blob (essentially as just
     // a view of the same blob) to avoid copying the data.
     return js.alloc<File>(
-        js, blob.addRef(), blob->getData(js), kj::mv(fn), kj::str(blob->getType()), dateNow());
+        js, blob.addRef(), blob->getData(js), kj::mv(fn), kj::str(blob->getType()), lastModified);
   };
 
   KJ_SWITCH_ONEOF(value) {
@@ -89,11 +91,12 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
         return kj::mv(file);
       } else {
         // Need to substitute filename.
-        return fromBlob(kj::mv(file));
+        auto lastModified = specCompliant ? file->getLastModified() : dateNow();
+        return fromBlob(kj::mv(file), lastModified);
       }
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      return fromBlob(kj::mv(blob));
+      return fromBlob(kj::mv(blob), dateNow());
     }
     KJ_CASE_ONEOF(string, kj::String) {
       return kj::mv(string);
@@ -364,7 +367,11 @@ FormData::EntryType FormData::clone(jsg::Lock& js, FormData::EntryType& value) {
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<FormData> FormData::constructor(jsg::Lock& js) {
+jsg::Ref<FormData> FormData::constructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto& js = jsg::Lock::from(args.GetIsolate());
+  JSG_REQUIRE(
+      args.Length() == 0 || args[0]->IsUndefined() || !FeatureFlags::get(js).getFormDataStandard(),
+      TypeError, "Failed to construct 'FormData': parameter 1 is not of type 'HTMLFormElement'.");
   return js.alloc<FormData>();
 }
 

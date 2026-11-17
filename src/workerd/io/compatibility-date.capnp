@@ -1873,4 +1873,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # it carries plaintext between the peer and the handler. A handler that returns, throws or
   # closes its socket before calling accept() fails the connection, and the peer's `opened`
   # rejects. Without the flag, such connections are refused before the handler runs.
+
+  formDataStandard @210 :Bool
+      $compatEnableFlag("formdata_standard")
+      $compatDisableFlag("formdata_legacy")
+      $compatEnableDate("2026-12-08");
+  # Makes FormData follow the XMLHttpRequest spec in three places:
+  #
+  # - `new FormData(form)` throws a TypeError for any argument other than `undefined`, since
+  #   Workers have no HTMLFormElement. Without the flag, arguments are ignored.
+  # - A Blob added with `append()` or `set()` without a filename becomes a File named "blob", which
+  #   is also the filename sent in a multipart body. Without the flag, it is named after the entry.
+  # - A File added with a new filename keeps its `lastModified`. Without the flag, it is set to the
+  #   current time.
 }
