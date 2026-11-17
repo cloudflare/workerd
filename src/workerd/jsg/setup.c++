@@ -795,8 +795,9 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
       getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
 
   KJ_REQUIRE(*badTagFieldsCount == 0,
-      "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
-      "workerd wrapper markers",
+      "PREPARE_SNAPSHOT: internal fields reachable from the context cannot be transferred through "
+      "the startup snapshot (aligned pointers that are not workerd wrapper markers, or typed "
+      "arrays over a zero-length ArrayBuffer)",
       *badTagFieldsCount);
 
   wrappablesMetadata->checkCallbackFindings();

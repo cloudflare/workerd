@@ -272,7 +272,10 @@ Two outcomes are possible for a Worker that qualifies:
   still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
   left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
   their callbacks as external references while a snapshot is prepared, so that the serializer
-  reports the continuation's opaque data instead of aborting on an unknown address), a
+  reports the continuation's opaque data instead of aborting on an unknown address), a typed
+  array that keeps its bytes off the V8 heap over a zero-length ArrayBuffer (`node:zlib`'s flush
+  buffers, `new Uint8Array(new ArrayBuffer(0))`: V8 serializes its empty backing store and on
+  restore copies zero bytes to a null pointer, which `serializeInternalFields()` reports), a
   restore-time global the top level
   redefined, a listener registered with a `signal` option, FinalizationRegistry cleanups that
   keep dooming new objects or that become due only once the zygote's objects are destroyed, ...
