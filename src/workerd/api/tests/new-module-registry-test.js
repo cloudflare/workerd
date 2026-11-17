@@ -294,6 +294,56 @@ export const nestedRequireDoesNotCrashSiblingTlaModule = {
   },
 };
 
+export const dynamicImportDefersLinkingCycle = {
+  async test() {
+    const entry = await import('link-cycle-entry');
+    const chunk = await entry.chunk;
+    strictEqual(chunk.b, 2);
+    strictEqual(await entry.again, chunk);
+    strictEqual(await import('link-cycle-chunk'), chunk);
+
+    const tlaEntry = await import('link-cycle-tla-entry');
+    strictEqual((await tlaEntry.chunk).b, 3);
+  },
+};
+
+export const deferredDynamicImportPropagatesEvaluationErrors = {
+  async test() {
+    for (const [name, message] of [
+      ['link-cycle-throw', 'deferred boom'],
+      ['link-cycle-tla-throw', 'deferred tla boom'],
+    ]) {
+      const entry = await import(`${name}-entry`);
+      let error;
+      await rejects(entry.chunk, (e) => {
+        strictEqual(e.message, message);
+        error = e;
+        return true;
+      });
+      await rejects(import(`${name}-chunk`), (e) => e === error);
+    }
+  },
+};
+
+export const deferredDynamicImportPropagatesLinkErrors = {
+  async test() {
+    const entry = await import('link-cycle-error-entry');
+    await rejects(entry.chunk, {
+      name: 'SyntaxError',
+      message: /does not provide an export named 'nope'/,
+    });
+  },
+};
+
+export const nestedRequireStillRejectsEvaluatingDependency = {
+  async test() {
+    await rejects(import('require-cycle-entry'), {
+      name: 'Error',
+      message: 'Failed to instantiate module: file:///bundle/require-cycle-esm',
+    });
+  },
+};
+
 export const noTopLevelIo = {
   async test() {
     await rejects(import('bad'), {
