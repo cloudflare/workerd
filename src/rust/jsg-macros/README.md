@@ -96,9 +96,12 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
-- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
-  as the creator for an instance method and `None` for a static one, as C++ JSG passes
-  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A return of `()`, `bool` or one of the numeric types a Fast API callback returns, directly or
+  as the `Ok` type of a `Result`, is set directly in V8: a `bool` with `set_return_boolean`, a
+  number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return
+  value converts with `jsg::ToJS::to_js_with_creator`. Instance methods pass the resource's
+  wrapper as the creator, and static methods pass `None`. A returned `jsg::Promise` keeps its
+  creator resource alive until it settles, as in C++ JSG.
 - A method, property or call handler that returns a promise (`jsg::Promise<T>` or
   `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
   conversion error included, when the isolate captures throws as rejections (the

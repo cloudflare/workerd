@@ -319,6 +319,8 @@ pub mod ffi {
         -> Local;
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
         pub unsafe fn local_array_buffer_data(buffer: &Local) -> *mut u8;
+        pub unsafe fn local_array_buffer_contents(buffer: &Local, byte_length: &mut usize)
+        -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
         // Local<ArrayBufferView>
@@ -768,6 +770,8 @@ pub mod ffi {
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+        pub unsafe fn fci_set_return_number(args: *mut FunctionCallbackInfo, value: f64);
+        pub unsafe fn fci_set_return_boolean(args: *mut FunctionCallbackInfo, value: bool);
         pub unsafe fn fci_get_data_wrappable(
             args: *mut FunctionCallbackInfo,
         ) -> KjMaybe<KjRc<Wrappable>>;
@@ -776,6 +780,8 @@ pub mod ffi {
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
         pub unsafe fn pci_get_this(info: *mut PropertyCallbackInfo) -> Local;
         pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
+        pub unsafe fn pci_set_return_number(info: *mut PropertyCallbackInfo, value: f64);
+        pub unsafe fn pci_set_return_boolean(info: *mut PropertyCallbackInfo, value: bool);
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
@@ -2721,12 +2727,9 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        if self.is_empty() {
-            return &[];
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid
-        // until JS runs, which the shared borrow of the lock prevents for 'b.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }
+        // SAFETY: the FFI returns this region's bytes, and the lock borrow prevents
+        // JavaScript from detaching, resizing or writing to the buffer for 'b.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice view into the `ArrayBuffer`'s backing store.
@@ -2751,22 +2754,38 @@ impl<'s> Local<'s, ArrayBuffer> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        if self.is_empty() {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; data() is non-null for
-        // non-empty buffers; byte_length() bytes are valid while the lock is borrowed.
-        unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+        // SAFETY: caller guarantees exclusive access; the lock borrow keeps the
+        // buffer in place while the slice is live.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the `ArrayBuffer` contents into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        if self.is_empty() {
-            return Vec::new();
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid,
-        // and no JS can run before the copy completes.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }.to_vec()
+        // SAFETY: the FFI returns this region's bytes, and no JavaScript runs
+        // before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the buffer's bytes, read from V8 in one call. It is dangling, with no
+    /// bytes, for an empty or detached buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees a buffer's backing store.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
+        let mut byte_length = 0;
+        // SAFETY: handle is valid within the current HandleScope.
+        let data = unsafe { ffi::local_array_buffer_contents(self.raw(), &mut byte_length) };
+        let ptr = if byte_length == 0 {
+            NonNull::<u8>::dangling().as_ptr()
+        } else {
+            data as *mut u8
+        };
+        std::ptr::slice_from_raw_parts_mut(ptr, byte_length)
     }
 
     /// Detaches this `ArrayBuffer`, setting its byte length to zero.
@@ -2903,14 +2922,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &[];
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers, which are valid until JS
-        // runs, which the lock borrow prevents.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+        // SAFETY: the bytes are this view's, and the borrow of `lock` keeps JavaScript from
+        // running, so they stay in place and unchanged.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice of the view's visible region.
@@ -2935,42 +2949,55 @@ impl<'s> Local<'s, ArrayBufferView> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; `data` points to the `len` bytes the
-        // view covers; the lock borrow keeps JS from running.
-        unsafe { std::slice::from_raw_parts_mut(data, len) }
+        // SAFETY: the caller guarantees exclusive access to this buffer region, and the borrow
+        // of `lock` keeps JavaScript from running.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
+        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with
+    /// no bytes, for an empty or detached view and for one that does not lie within its buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees an off-heap backing store, and reading the
+    /// view's buffer here moves an on-heap typed array's elements off the heap.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
         // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return Vec::new();
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers; no JS can run before the
-        // copy completes.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }.to_vec()
+        unsafe { array_buffer_view_raw_slice::<u8>(self.raw()) }
     }
 }
 
-/// Returns the first of the elements of type `E` that the `ArrayBufferView` `view` covers, and
-/// how many it covers.
+/// The elements of type `E` that the `ArrayBufferView` `view` covers, read from V8 in one call, as
+/// a raw slice on an aligned dangling pointer when it covers none.
 ///
 /// V8 reads a view's offset and length from the V8 heap and does not always check them against
 /// the buffer, so a view that does not lie within its buffer covers nothing here.
 ///
 /// # Safety
 /// `view` must be a valid handle to an `ArrayBufferView` within the current `HandleScope`.
-unsafe fn array_buffer_view_data<E>(view: &ffi::Local) -> (*mut E, usize) {
+#[inline]
+unsafe fn array_buffer_view_raw_slice<E>(view: &ffi::Local) -> *mut [E] {
     let mut byte_length = 0;
     // SAFETY: the caller guarantees the handle.
-    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) };
-    (data as *mut E, byte_length / size_of::<E>())
+    let data = unsafe { ffi::local_array_buffer_view_data(view, &mut byte_length) } as *mut E;
+    let len = byte_length / size_of::<E>();
+    if len == 0 {
+        return std::ptr::slice_from_raw_parts_mut(NonNull::<E>::dangling().as_ptr(), 0);
+    }
+    // V8 aligns the backing stores it allocates for every element type, but not one created over
+    // external memory, and a misaligned slice is undefined behavior.
+    debug_assert!(data.is_aligned(), "misaligned ArrayBufferView elements");
+    std::ptr::slice_from_raw_parts_mut(data, len)
 }
 
 // `TypedArray`-specific implementations
@@ -3102,14 +3129,9 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &[];
-                }
-                // SAFETY: `data` points to the `len` elements the view covers, which are
-                // valid until JS runs, which the lock borrow prevents.
-                unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+                // SAFETY: the elements are this view's, and the borrow of `lock` keeps JavaScript
+                // from running, so they stay in place and unchanged.
+                unsafe { &*self.as_raw_slice() }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -3138,14 +3160,27 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
+                // SAFETY: the caller guarantees exclusive access to this buffer region, and the
+                // borrow of `lock` keeps JavaScript from running.
+                unsafe { &mut *self.as_raw_slice() }
+            }
+
+            /// A raw pointer to the elements of this view, read from V8 in one call. It is
+            /// dangling, with no elements, for an empty or detached view and for one that does
+            /// not lie within its buffer.
+            ///
+            /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can
+            /// detach, resize or write to the buffer, and while the buffer is neither detached
+            /// nor resized. A `&mut` made from it must not overlap any other reference to the
+            /// same memory. Garbage collection may run: it neither moves nor frees an
+            /// off-heap backing store, and reading the view's buffer here moves an on-heap
+            /// typed array's elements off the heap. [`as_slice`](Self::as_slice) and
+            /// [`as_mut_slice`](Self::as_mut_slice) borrow the lock to keep JavaScript from
+            /// running.
+            #[inline]
+            pub fn as_raw_slice(&self) -> *mut [$elem] {
                 // SAFETY: handle is valid within the current HandleScope.
-                let (data, len) = unsafe { array_buffer_view_data::<$elem>(self.raw()) };
-                if len == 0 {
-                    return &mut [];
-                }
-                // SAFETY: caller guarantees exclusive access to this buffer region; `data`
-                // points to the `len` elements the view covers.
-                unsafe { std::slice::from_raw_parts_mut(data, len) }
+                unsafe { array_buffer_view_raw_slice::<$elem>(self.raw()) }
             }
 
             /// Returns an iterator over the elements.
@@ -3633,6 +3668,41 @@ impl<'s> Local<'s, String> {
                 flags.bits(),
             )
         }
+    }
+
+    /// Writes the string as UTF-8 into uninitialized storage and returns the bytes written,
+    /// which include the null terminator when `flags` includes [`WriteFlags::NullTerminate`].
+    /// Flags have the same meaning as in [`Self::write_utf8`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer` is empty and `flags` includes [`WriteFlags::NullTerminate`], as
+    /// [`Self::write_utf8`] does.
+    pub fn write_utf8_uninit<'b>(
+        &self,
+        lock: &mut crate::Lock,
+        buffer: &'b mut [std::mem::MaybeUninit<u8>],
+        flags: WriteFlags,
+    ) -> &'b mut [u8] {
+        assert!(
+            buffer.len() >= usize::from(flags.null_terminates()),
+            "buffer too small for the null terminator"
+        );
+        // SAFETY: the isolate is locked, the handle is a String, and `buffer` is writable for
+        // its full capacity, with room for a terminator if one is written.
+        let written = unsafe {
+            ffi::local_string_write_utf8_v2(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                flags.bits(),
+            )
+        };
+        debug_assert!(written <= buffer.len());
+        // SAFETY: V8 initializes exactly the prefix it reports, whose length does not exceed the
+        // buffer's; only that prefix becomes an initialized slice.
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), written) }
     }
 
     // -------------------------------------------------------------------------
@@ -4622,6 +4692,18 @@ impl<'cb> FunctionCallbackInfo<'cb> {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
     }
+
+    /// Sets a number result without allocating an intermediate local handle.
+    pub fn set_return_number(&mut self, value: f64) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::fci_set_return_number(self.0, value) }
+    }
+
+    /// Sets a boolean result without allocating an intermediate local handle.
+    pub fn set_return_boolean(&mut self, value: bool) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::fci_set_return_boolean(self.0, value) }
+    }
 }
 
 /// The arguments to a native data property getter, or to the getter of a wildcard property.
@@ -4657,6 +4739,18 @@ impl<'cb> PropertyCallbackInfo<'cb> {
         // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
         // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+
+    /// Sets a number result without allocating an intermediate local handle.
+    pub fn set_return_number(&mut self, value: f64) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::pci_set_return_number(self.0, value) }
+    }
+
+    /// Sets a boolean result without allocating an intermediate local handle.
+    pub fn set_return_boolean(&mut self, value: bool) {
+        // SAFETY: self.0 belongs to the running callback.
+        unsafe { ffi::pci_set_return_boolean(self.0, value) }
     }
 }
 
@@ -4742,6 +4836,12 @@ impl<'cb> PropertySetterCallbackInfo<'cb> {
 
     /// Setters return nothing.
     pub fn set_return_value(&mut self, _value: Local<'cb, Value>) {}
+
+    /// Setters return nothing.
+    pub fn set_return_number(&mut self, _value: f64) {}
+
+    /// Setters return nothing.
+    pub fn set_return_boolean(&mut self, _value: bool) {}
 }
 
 /// A fat pointer to a `dyn GarbageCollected` trait object, decomposed into its
