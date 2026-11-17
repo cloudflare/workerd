@@ -41,6 +41,11 @@ fn ranges() {
     let from = |offset, length| Range::From { offset, length };
     assert_eq!(from(2, Some(3)).header(), "bytes=2-4");
     assert_eq!(from(2, None).header(), "bytes=2-");
+    let end = u64::MAX - 1;
+    assert_eq!(
+        from(5, Some(u64::MAX - 4)).header(),
+        format!("bytes=5-{end}")
+    );
     assert_eq!(Range::Suffix(3).header(), "bytes=-3");
     for (range, of) in [
         (from(2, Some(3)), Some((2, 3))),

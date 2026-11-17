@@ -185,3 +185,34 @@ export const copyValues = {
     }
   },
 };
+
+// A listing whose reply would pass the binding's 1 MiB stops short, with a
+// cursor that resumes after its last key.
+export const largeListings = {
+  async test(ctrl, env) {
+    const customMetadata = { m: 'x'.repeat(6000) };
+    const keys = Array.from(
+      { length: 100 },
+      (_, i) => `l/${String(i).padStart(3, '0')}`
+    );
+    await Promise.all(
+      keys.map((k) => env.BUCKET.put(k, '', { customMetadata }))
+    );
+    const listed = [];
+    let cursor;
+    let pages = 0;
+    do {
+      const page = await env.BUCKET.list({
+        prefix: 'l/',
+        include: ['customMetadata'],
+        cursor,
+      });
+      listed.push(...page.objects.map((o) => o.key));
+      cursor = page.truncated ? page.cursor : undefined;
+      pages++;
+    } while (cursor);
+    assert.ok(pages > 1, `${pages} page`);
+    assert.deepStrictEqual(listed, keys.toSorted());
+    await env.BUCKET.delete(keys);
+  },
+};

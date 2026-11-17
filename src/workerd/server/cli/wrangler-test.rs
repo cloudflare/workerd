@@ -482,7 +482,7 @@ fn r2_buckets_bind_r2_bucket_services() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-r2-storage", "app-r2-a", "app-r2-B"]);
+    assert_eq!(names, ["app", "app-r2:storage", "app-r2-a", "app-r2-B"]);
     let service::Which::Bucket(bucket) = services.get(2).which().unwrap() else {
         panic!("not a bucket");
     };

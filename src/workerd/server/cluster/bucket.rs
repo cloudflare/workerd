@@ -18,8 +18,8 @@ pub use crate::http::Payload;
 pub struct Version(pub(crate) String);
 
 impl Version {
-    /// A version as a store answered it, carried by a caller (the `bucket`
-    /// service's `x-version`) and handed back to guard a write.
+    /// A version as a store answered it, carried by a caller and handed
+    /// back to guard a write.
     pub const fn new(version: String) -> Self {
         Self(version)
     }
@@ -143,7 +143,7 @@ impl Range {
         match self {
             Self::From { offset, length } => {
                 let end = length.map_or(String::new(), |n| {
-                    (offset + n).saturating_sub(1).to_string()
+                    offset.saturating_add(n).saturating_sub(1).to_string()
                 });
                 format!("bytes={offset}-{end}")
             }

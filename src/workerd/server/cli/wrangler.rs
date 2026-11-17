@@ -782,7 +782,8 @@ fn r2_services(
     wrangler: &Wrangler,
 ) -> Result<(), String> {
     fs::create_dir_all(storage).map_err(|e| format!("{}: {e}", storage.display()))?;
-    let disk = format!("{name}-r2-storage");
+    // `:` is in no bucket name, so no bucket's service is this.
+    let disk = format!("{name}-r2:storage");
     disk_service(services.reborrow().get(at), &disk, storage);
     for (i, bucket) in r2_names(wrangler).into_iter().enumerate() {
         let mut service = services.reborrow().get(at + 1 + i as u32);

@@ -29,7 +29,10 @@
 //!   part number have one etag, and either is accepted at completion;
 //! - aborting an upload the store doesn't know succeeds;
 //! - completing an upload with no parts writes an empty object without the
-//!   upload's metadata.
+//!   upload's metadata;
+//! - a part is held in memory, so one over `MAX_PART` bytes is refused;
+//! - the record is user metadata, which S3 caps at 2 KB, so on S3 a put
+//!   with more customMetadata than fits is refused as `MetadataTooLarge`.
 //!
 //! Limits and error messages follow Miniflare's R2 simulator. Not
 //! supported, as there: SSE-C keys (ignored), bucket administration,
@@ -82,6 +85,10 @@ const PARALLEL: usize = 16;
 const ENVELOPE: &str = "workerd-r2";
 /// Before the store's token in a list cursor.
 const CURSOR: &str = "t.";
+/// Before the key a list cursor starts after, when a reply stopped short.
+const AFTER: &str = "k.";
+/// The most a list reply's JSON takes; the binding refuses over 1 MiB.
+const MAX_REPLY: usize = 512 << 10;
 
 /// The content fields and the headers that store them.
 const FIELDS: [(&str, &str); 5] = [
@@ -719,22 +726,26 @@ impl R2<'_> {
         if !(1..=MAX_LIST).contains(&limit) {
             return Err(Code::InvalidMaxKeys.into());
         }
-        let cursor = some_str(req, "cursor");
-        let token = cursor.map(|c| c.strip_prefix(CURSOR));
-        // A cursor is the store's token; another lists nothing, as in
-        // Miniflare.
-        if token == Some(None) {
-            let empty = json!({ "objects": [], "truncated": false, "delimitedPrefixes": [] });
-            return Ok(meta(empty));
-        }
+        // A cursor is the store's token or the key a short reply stopped
+        // after; another lists nothing, as in Miniflare.
+        let start_after = some_str(req, "startAfter");
+        let (token, start_after) = match some_str(req, "cursor") {
+            None => (None, start_after),
+            Some(c) if c.starts_with(CURSOR) => (Some(&c[CURSOR.len()..]), start_after),
+            Some(c) if c.starts_with(AFTER) => (None, Some(&c[AFTER.len()..])),
+            Some(_) => {
+                let empty = json!({ "objects": [], "truncated": false, "delimitedPrefixes": [] });
+                return Ok(meta(empty));
+            }
+        };
         let include = req["include"].as_array().map_or(&[][..], Vec::as_slice);
         let include = (include.contains(&0.into()), include.contains(&1.into()));
         let page = self.0.bucket.page(
             some_str(req, "prefix").unwrap_or(""),
-            some_str(req, "startAfter"),
+            start_after,
             some_str(req, "delimiter"),
             limit as usize,
-            token.flatten(),
+            token,
         );
         let page = page.await?;
         // Metadata the listing doesn't carry is a HEAD of each object.
@@ -755,14 +766,32 @@ impl R2<'_> {
             Ok::<_, Fail>(item.json(None, include))
         });
         let objects: Vec<Answer<Value>> = objects.buffered(PARALLEL).collect().await;
-        let objects = objects.into_iter().collect::<Answer<Vec<_>>>()?;
+        let mut objects = objects.into_iter().collect::<Answer<Vec<_>>>()?;
+        let mut cursor = page.token.map(|token| format!("{CURSOR}{token}"));
+        let mut prefixes = page.prefixes;
+        // Fewer than `limit` when the reply would be too large, as R2 does.
+        let mut size = 0;
+        let fit = objects.iter().take_while(|o| {
+            size += o.to_string().len();
+            size <= MAX_REPLY
+        });
+        let fit = fit.count().max(1);
+        if fit < objects.len() {
+            objects.truncate(fit);
+            let last = objects[fit - 1]["name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            prefixes.retain(|p| *p < last);
+            cursor = Some(format!("{AFTER}{last}"));
+        }
         let mut listed = json!({
             "objects": objects,
-            "truncated": page.token.is_some(),
-            "delimitedPrefixes": page.prefixes,
+            "truncated": cursor.is_some(),
+            "delimitedPrefixes": prefixes,
         });
-        if let Some(token) = page.token {
-            listed["cursor"] = format!("{CURSOR}{token}").into();
+        if let Some(cursor) = cursor {
+            listed["cursor"] = cursor.into();
         }
         Ok(meta(listed))
     }
@@ -935,10 +964,11 @@ impl R2<'_> {
             }
             uploaded => uploaded?,
         };
-        let picked = chosen.iter().map(|&(n, etag)| {
-            let found = uploaded.iter().find(|(m, e, _)| *m == n && e == etag);
-            found.ok_or(Code::InvalidPart)
-        });
+        let uploaded: std::collections::HashMap<_, _> =
+            uploaded.iter().map(|p| ((p.0, &p.1[..]), p)).collect();
+        let picked = chosen
+            .iter()
+            .map(|&(n, etag)| uploaded.get(&(n, etag)).copied().ok_or(Code::InvalidPart));
         let mut picked = picked.collect::<std::result::Result<Vec<_>, _>>()?;
         let but_last = &picked[..picked.len().saturating_sub(1)];
         if but_last.iter().any(|(.., size)| *size < self.0.min_part) {
