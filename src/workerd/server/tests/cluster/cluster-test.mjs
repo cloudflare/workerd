@@ -1262,27 +1262,33 @@ async function clusterConnect(port, auth) {
   return data.toString().split('\r\n')[0];
 }
 
-// A cf-cluster-auth header for a CONNECT to `target`, as an instance with the
-// test config's key makes it.
-function clusterAuth(target, ms = Date.now(), nonce = randomBytes(16)) {
+// A cf-cluster-auth header for a CONNECT to instance `node` at `target`, as
+// an instance with the test config's key makes it.
+function clusterAuth(node, target, ms = Date.now(), nonce = randomBytes(16)) {
   const n = nonce.toString('hex');
   const mac = createHmac('sha256', 'test-cluster-shared-secret-of-32-bytes')
-    .update(`workerd cluster connect v1\n${target}\n${ms}\n${n}`)
+    .update(`workerd cluster connect v2\n${node}\n${target}\n${ms}\n${n}`)
     .digest('hex');
-  return `${ms}.${n}.${mac}`;
+  return `${node}.${ms}.${n}.${mac}`;
 }
 
+// A CONNECT for another instance is refused too: one to a dead owner's
+// address reaches whatever took its port since, which may be an instance of
+// another cluster with the same key but a bucket of its own.
 test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigned', async () => {
-  await withCluster(1, async ({ nodes }) => {
+  await withCluster(1, async ({ nodes, nodeKeys }) => {
     const port = nodes[0].clusterPort;
     const target = `127.0.0.1:${port}`;
-    const auth = clusterAuth(target);
+    const node = nodeKeys.get(nodes[0].nodeId);
+    const auth = clusterAuth(node, target);
     assert.match(await clusterConnect(port, auth), / 200 /);
     assert.match(await clusterConnect(port, auth), / 403 /, 'replayed');
-    const stale = clusterAuth(target, Date.now() - 60_000);
+    const stale = clusterAuth(node, target, Date.now() - 60_000);
     assert.match(await clusterConnect(port, stale), / 403 /, 'stale');
-    const elsewhere = clusterAuth(`127.0.0.1:${port + 1}`);
+    const elsewhere = clusterAuth(node, `127.0.0.1:${port + 1}`);
     assert.match(await clusterConnect(port, elsewhere), / 403 /, 'target');
+    const other = clusterAuth('0'.repeat(32), target);
+    assert.match(await clusterConnect(port, other), / 403 /, 'instance');
     assert.match(await clusterConnect(port), / 403 /, 'unsigned');
   });
 });
