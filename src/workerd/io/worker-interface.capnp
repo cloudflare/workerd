@@ -1107,9 +1107,11 @@ interface EventDispatcher @0xf20697475ec1752d {
 
   openUdp @15 (host :Text, received :DatagramStream) -> (send :DatagramStream)
       $Cxx.allowCancellation;
-  # Opens a connected outbound UDP session. Success means the egress session is ready, not
+  # Opens an outbound UDP session. Success means the egress session is ready, not
   # that the peer has acknowledged anything. `send` owns the session; dropping it cancels
   # incoming delivery and releases the socket. Each send() is one packet, including empty Data.
+  # The callee retains `received` until EOF, abort, or session teardown. Releasing it without
+  # end() or abort() fails the caller's pending receives.
 
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.

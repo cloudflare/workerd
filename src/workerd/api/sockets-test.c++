@@ -8,6 +8,7 @@
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
+#include <capnp/rpc-twoparty.h>
 #include <kj/test.h>
 
 #include <cerrno>
@@ -146,8 +147,11 @@ class UdpSendTestDispatcher final: public rpc::EventDispatcher::Server {
  public:
   explicit UdpSendTestDispatcher(rpc::DatagramStream::Client stream): stream(kj::mv(stream)) {}
 
+  rpc::DatagramStream::Client received = nullptr;
+
  private:
   kj::Promise<void> openUdp(OpenUdpContext context) override {
+    received = context.getParams().getReceived();
     context.getResults().setSend(stream);
     return kj::READY_NOW;
   }
@@ -155,14 +159,8 @@ class UdpSendTestDispatcher final: public rpc::EventDispatcher::Server {
   rpc::DatagramStream::Client stream;
 };
 
-KJ_TEST("Outbound UDP RPC send waits for transport completion and reports its error") {
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-  auto called = kj::newPromiseAndFulfiller<void>();
-  auto result = kj::newPromiseAndFulfiller<void>();
-  rpc::DatagramStream::Client stream =
-      kj::heap<DelayedUdpSendStream>(kj::mv(called.fulfiller), kj::mv(result.promise));
-  rpc::EventDispatcher::Client dispatcher = kj::heap<UdpSendTestDispatcher>(kj::mv(stream));
+kj::Own<DatagramChannel> openTestUdpChannel(
+    rpc::EventDispatcher::Client dispatcher, kj::WaitScope& waitScope) {
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   capnp::HttpOverCapnpFactory httpOverCapnpFactory(
@@ -174,12 +172,69 @@ KJ_TEST("Outbound UDP RPC send waits for transport completion and reports its er
       .sendRpc(httpOverCapnpFactory, byteStreamFactory, getUnsupportedFrankenvalueHandler(),
           kj::mv(dispatcher))
       .wait(waitScope);
-  auto channel = opened.promise.wait(waitScope);
+  return opened.promise.wait(waitScope);
+}
+
+KJ_TEST("Outbound UDP RPC send waits for transport completion and reports its error") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto called = kj::newPromiseAndFulfiller<void>();
+  auto result = kj::newPromiseAndFulfiller<void>();
+  rpc::DatagramStream::Client stream =
+      kj::heap<DelayedUdpSendStream>(kj::mv(called.fulfiller), kj::mv(result.promise));
+  rpc::EventDispatcher::Client dispatcher = kj::heap<UdpSendTestDispatcher>(kj::mv(stream));
+  auto channel = openTestUdpChannel(dispatcher, waitScope);
   auto sent = channel->send("packet"_kjb).eagerlyEvaluate(nullptr);
   called.promise.wait(waitScope);
   KJ_EXPECT(!sent.poll(waitScope));
   result.fulfiller->reject(KJ_EXCEPTION(FAILED, "test UDP transport rejected the payload"));
   KJ_EXPECT_THROW_MESSAGE("test UDP transport rejected the payload", sent.wait(waitScope));
+}
+
+KJ_TEST("Outbound UDP RPC receive observes reverse capability release and orderly EOF") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  for (bool orderlyEnd: {false, true}) {
+    auto server = kj::heap<UdpSendTestDispatcher>(nullptr);
+    auto& serverRef = *server;
+    rpc::EventDispatcher::Client dispatcher(kj::mv(server));
+    auto channel = openTestUdpChannel(dispatcher, waitScope);
+    auto received = channel->receive().eagerlyEvaluate(nullptr);
+    KJ_EXPECT(!received.poll(waitScope));
+    if (orderlyEnd) {
+      serverRef.received.endRequest().sendIgnoringResult().wait(waitScope);
+    }
+    serverRef.received = nullptr;
+    KJ_REQUIRE(received.poll(waitScope), "UDP receive did not observe reverse capability release");
+    if (orderlyEnd) {
+      KJ_EXPECT(received.wait(waitScope) == kj::none);
+      KJ_EXPECT(channel->receive().wait(waitScope) == kj::none);
+    } else {
+      KJ_EXPECT_THROW_MESSAGE("UDP RPC session disconnected", received.wait(waitScope));
+      KJ_EXPECT_THROW_MESSAGE("UDP RPC session disconnected", channel->receive().wait(waitScope));
+    }
+  }
+}
+
+KJ_TEST("Outbound UDP RPC transport loss rejects a pending receive without a send") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto pipe = kj::newTwoWayPipe();
+  auto server = kj::heap<capnp::TwoPartyClient>(*pipe.ends[1],
+      rpc::EventDispatcher::Client(kj::heap<UdpSendTestDispatcher>(nullptr)),
+      capnp::rpc::twoparty::Side::SERVER);
+  capnp::TwoPartyClient client(*pipe.ends[0]);
+  auto dispatcher = client.bootstrap().castAs<rpc::EventDispatcher>();
+  auto channel = openTestUdpChannel(dispatcher, waitScope);
+  auto received = channel->receive().eagerlyEvaluate(nullptr);
+  KJ_EXPECT(!received.poll(waitScope));
+  server = nullptr;
+  pipe.ends[1] = nullptr;
+  KJ_REQUIRE(received.poll(waitScope), "UDP receive did not observe RPC transport loss");
+  KJ_EXPECT_THROW_MESSAGE("UDP RPC session disconnected", received.wait(waitScope));
+  KJ_EXPECT_THROW_MESSAGE("UDP RPC session disconnected", channel->receive().wait(waitScope));
+  KJ_EXPECT_THROW_MESSAGE(
+      "UDP RPC session disconnected", channel->send("packet"_kjb).wait(waitScope));
 }
 
 bool socketHasProtocolProperty(CompatibilityFlags::Reader flags) {

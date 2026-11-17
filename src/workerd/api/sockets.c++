@@ -597,6 +597,13 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
     }
   }
 
+  // Releasing the reverse capability without EOF means the RPC session was lost.
+  void incomingDisconnected() {
+    if (!ended) {
+      disconnect(KJ_EXCEPTION(DISCONNECTED, "jsg.Error: UDP RPC session disconnected."));
+    }
+  }
+
   // Signals completion of the outgoing datagram stream.
   kj::Promise<void> endOutgoing() {
     return down.endRequest().sendIgnoringResult();
@@ -633,6 +640,12 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
 class IncomingRpcDatagramStream final: public rpc::DatagramStream::Server {
  public:
   IncomingRpcDatagramStream(kj::WeakRc<RpcDatagramChannel> channel): channel(kj::mv(channel)) {}
+
+  ~IncomingRpcDatagramStream() noexcept(false) {
+    KJ_IF_SOME(live, channel.upgrade()) {
+      live->incomingDisconnected();
+    }
+  }
 
  private:
   kj::Promise<void> send(SendContext context) override {
