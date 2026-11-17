@@ -31,6 +31,7 @@ pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod structs;
 mod tunnel;
 mod typed_promise;
 pub mod v8;
@@ -97,7 +98,10 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+#[doc(hidden)]
+pub use structs::StructShape;
 pub use tunnel::TunneledException;
+pub use tunnel::try_unwrap_dom_exception;
 pub use typed_promise::Promise;
 pub use typed_promise::PromiseArgument;
 pub use typed_promise::PromiseResolver;
@@ -122,18 +126,16 @@ mod ffi {
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
-        #[expect(
-            clippy::unnecessary_box_returns,
-            reason = "cxx takes an opaque Rust type boxed"
-        )]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
         /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
         /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
         /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
         /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
-        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
-        fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway). The handles
+        /// cached for struct types are reset, so the isolate must be locked, with no Rust `Lock`
+        /// in use.
+        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
 
         /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
         /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
@@ -967,6 +969,13 @@ impl<'s> Lock<'s> {
         self.realm().state.awaiting_lock_count()
     }
 
+    /// The number of struct types whose handles the realm caches; see [`StructShape`]. For tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn struct_shapes_cached(&mut self) -> usize {
+        self.realm().structs.len()
+    }
+
     /// The number of [`Rc`]s and [`Weak`]s that were dropped without the isolate lock and whose
     /// references wait for the next lock to be released; see [`IsolateState`]. For tests.
     #[doc(hidden)]
@@ -1274,20 +1283,20 @@ impl<'s> Lock<'s> {
             }
         }
 
-        let description =
-            if let Some((name, message)) = tunnel::try_unwrap_dom_exception(self, exception)? {
-                exception_type = cxx::KjExceptionType::Failed;
-                format!("jsg.DOMException({name}): {message}")
+        let dom_exception = tunnel::try_unwrap_dom_exception(self, exception)?;
+        let description = if let Some((name, message)) = &dom_exception {
+            exception_type = cxx::KjExceptionType::Failed;
+            format!("jsg.DOMException({name}): {message}")
+        } else {
+            let detail = exception.to_detail_string(self)?;
+            // C++ copies the description out of V8 as a C string.
+            let detail = up_to_nul(&detail);
+            if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
+                format!("jsg.{detail}")
             } else {
-                let detail = exception.to_detail_string(self)?;
-                // C++ copies the description out of V8 as a C string.
-                let detail = up_to_nul(&detail);
-                if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
-                    format!("jsg.{detail}")
-                } else {
-                    format!("jsg.Error: {detail}")
-                }
-            };
+                format!("jsg.Error: {detail}")
+            }
+        };
 
         let mut details = Vec::new();
         let options = ser::SerializeOptions {
@@ -1304,7 +1313,7 @@ impl<'s> Lock<'s> {
         if let Some(object) = object {
             details.push((
                 v8::ffi::js_exception_metadata_detail_id(),
-                exception_metadata(self, exception, object)?,
+                exception_metadata(self, exception, object, dom_exception)?,
             ));
         }
 
@@ -1315,39 +1324,55 @@ impl<'s> Lock<'s> {
 }
 
 /// The `name`, `stack` and `message` of `exception`, which is `object`, and whether it is a native
-/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes.
+/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes. The
+/// name and message of a `DOMException` are those `dom_exception` holds, which C++ takes as they
+/// are rather than reading the properties, so it runs no getter and copies them whole.
 fn exception_metadata<'s>(
     lock: &mut Lock<'s>,
     exception: v8::Local<'s, v8::Value>,
     object: v8::Local<'s, v8::Object>,
+    dom_exception: Option<(String, String)>,
 ) -> Result<Vec<u8>> {
     let mut builder = capnp::message::Builder::new_default();
     let mut metadata =
         builder.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
-    let name = object.get(lock, "name")?;
-    if name.is_string() {
-        let name = String::from_js(lock, name)?;
-        metadata.set_error_type(capped(&name));
+    let (dom_exception_name, dom_exception_message) = dom_exception.unzip();
+    if let Some(name) = &dom_exception_name {
+        metadata.set_error_type(truncated(name));
+    } else {
+        let name = object.get(lock, "name")?;
+        if name.is_string() {
+            let name = String::from_js(lock, name)?;
+            metadata.set_error_type(capped(&name));
+        }
     }
     let stack = object.get(lock, "stack")?;
     if stack.is_string() {
         let stack = String::from_js(lock, stack)?;
         metadata.set_stack_trace(capped(&stack));
     }
-    let message = object.get(lock, "message")?;
-    if message.is_string() {
-        let message = String::from_js(lock, message)?;
-        metadata.set_message(capped(&message));
+    if let Some(message) = &dom_exception_message {
+        metadata.set_message(truncated(message));
+    } else {
+        let message = object.get(lock, "message")?;
+        if message.is_string() {
+            let message = String::from_js(lock, message)?;
+            metadata.set_message(capped(&message));
+        }
     }
     metadata.set_is_native_error(exception.is_native_error());
     Ok(capnp::serialize::write_message_to_words(&builder))
 }
 
-/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to at most the
-/// length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last character boundary within
-/// it, as C++ cuts it.
+/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut as [`truncated`]
+/// cuts it.
 fn capped(text: &str) -> &str {
-    let text = up_to_nul(text);
+    truncated(up_to_nul(text))
+}
+
+/// `text` cut to at most the length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last
+/// character boundary within it, as C++ cuts it.
+fn truncated(text: &str) -> &str {
     let mut end = v8::ffi::js_exception_metadata_max_field_size();
     if end >= text.len() {
         return text;
@@ -1484,10 +1509,10 @@ pub enum Member {
     },
     Method {
         name: String,
-        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
-        /// receiver; don't use one in any other member.
+        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback skips the
+        /// marker check of its receiver.
         callback: RawFunctionCallback,
-        fast: Option<v8::ffi::FastApiDescriptor>,
+        fast: Option<fast_api::FastCallback>,
         length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
@@ -1522,7 +1547,7 @@ pub enum Member {
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
-        fast: Option<v8::ffi::FastApiDescriptor>,
+        fast: Option<fast_api::FastCallback>,
         length: u32,
     },
     StaticConstant {
@@ -1598,6 +1623,15 @@ pub trait GarbageCollected: Traced {
     /// Reports the resource's fields to a heap snapshot: the C++ `jsgGetMemoryInfo` of a
     /// resource. Reports nothing by default.
     fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
+
+    /// Whether the resource implements `Drop` itself or a field's type needs it (see
+    /// [`Traced::needs_drop_detach`]). If so, its references are made strong and forget their
+    /// parent before it is dropped, so that a `Drop` impl may move them out (see
+    /// `GcVisitor::detach_for_drop`). `#[jsg_resource]` implements it; a hand-written impl for a
+    /// type that needs it must override it to return `true`.
+    fn detach_before_drop(&self) -> bool {
+        false
+    }
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
@@ -1626,6 +1660,8 @@ pub struct Realm {
     /// identifies its isolate by it.
     state: Arc<IsolateState>,
     resources: resource::Resources,
+    /// The cached handles of the struct types converted in this realm.
+    structs: structs::StructShapes,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -1637,6 +1673,7 @@ impl Realm {
             isolate,
             state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
+            structs: structs::StructShapes::default(),
             feature_flags,
         }
     }
@@ -1671,6 +1708,8 @@ impl Drop for Realm {
         // Dropped before the state is closed, so that their handles are reset rather than
         // left to `Dispose`.
         drop(std::mem::take(&mut self.resources));
+        // SAFETY: as below, no `Lock` is in use.
+        unsafe { self.structs.clear() };
         // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
         // (guaranteed by the embedder; see the type's documentation).
         let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
@@ -1682,10 +1721,6 @@ impl Drop for Realm {
     }
 }
 
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "cxx takes an opaque Rust type boxed"
-)]
 #[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
@@ -1750,7 +1785,14 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for
 /// the `PREPARE_SNAPSHOT` pipeline.
-fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+#[expect(
+    unsafe_code,
+    reason = "frees the struct shapes, which no Lock may be using"
+)]
+unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+    // The struct handles are reset here, under the isolate lock, rather than handed over.
+    // SAFETY: the isolate is locked with no `Lock` in use (guaranteed by the C++ caller).
+    unsafe { realm.structs.clear() };
     realm.resources.take_template_handles()
 }
 

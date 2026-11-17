@@ -1,0 +1,12 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "assets-router",
+    test_deps = ["@crates_vendor//serde_json"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//regex",
+        "@crates_vendor//serde",
+        "@crates_vendor//url",
+    ],
+)

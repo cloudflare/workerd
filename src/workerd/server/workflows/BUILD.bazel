@@ -1,0 +1,9 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# The Workflows engine and binding, the bundled module `/workerd/workflows.js`
+# (Worker.Module.bundled).
+wd_cc_embed(
+    name = "workflows-js",
+    src = "workflows.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

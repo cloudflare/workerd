@@ -1023,6 +1023,12 @@ class Worker::Actor final: public kj::Refcounted {
     // to a replacement generation in another cart does. The adopting actor sets a new token.
     virtual void forgetOwningHolder() = 0;
     virtual kj::Own<HibernationManager> addRef() = 0;
+
+    // Returns a new kj::Rc reference to this manager.
+    kj::Rc<HibernationManager> toRc() {
+      return addRefToThis();
+    }
+
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
   };

@@ -50,6 +50,7 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) override;
   kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js) override;
   int getReadyState() override;
+  double getBufferedAmount() override;
   kj::Maybe<kj::StringPtr> getUrl() override;
   kj::Maybe<kj::StringPtr> getProtocol() override;
   kj::Maybe<kj::StringPtr> getExtensions() override;

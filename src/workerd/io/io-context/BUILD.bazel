@@ -20,6 +20,7 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
     link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = ["//src/rust/jsg"],
@@ -68,7 +69,7 @@ wd_rust_crate(
     deps = [
         ":io-context",
         "//src/rust/jsg",
-        "@crates_vendor//:futures",
+        "@crates_vendor//futures",
     ],
 )
 

@@ -1,0 +1,18 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+# `workerd serve` of a wrangler.jsonc's assets.
+js_test(
+    name = "assets-wrangler-test",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "assets-wrangler-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)
+
+# The events an assets service passes to its user Worker.
+wd_test(
+    src = "assets-events-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["assets-events-*.js"]),
+)

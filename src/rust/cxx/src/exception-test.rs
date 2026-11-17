@@ -315,3 +315,55 @@ fn test_std_error_vs_kj_error_conversion() {
     assert_eq!(std_exception.r#type(), kj_exception.r#type());
     assert_eq!(std_exception.details(), kj_exception.details());
 }
+
+#[test]
+fn test_kj_exception_from_kj_error_round_trip() {
+    let details = vec![
+        (1u64, b"first".to_vec()),
+        (2u64, Vec::new()),
+        (3u64, b"third".to_vec()),
+    ];
+    let error = KjError::new(
+        repr::KjExceptionType::Unimplemented,
+        "round trip".to_owned(),
+    )
+    .with_location("round_trip.rs".to_owned(), 700)
+    .with_details(details.clone());
+
+    let exception = KjException::from(error.clone());
+    assert_eq!(exception.r#type(), repr::KjExceptionType::Unimplemented);
+    assert_eq!(exception.what(), "round trip");
+    assert_eq!(exception.file(), c"round_trip.rs");
+    assert_eq!(exception.line(), 700);
+    assert_eq!(exception.details(), Some(details));
+
+    assert_eq!(KjError::from(exception), error);
+}
+
+#[test]
+fn test_kj_exception_from_kj_error_without_location() {
+    let error = KjError::new(repr::KjExceptionType::Failed, "no location".to_owned());
+    let line = line!() + 1;
+    let exception = KjException::from(error);
+    assert_eq!(exception.line(), i32::try_from(line).unwrap());
+    // kj::Exception drops everything up to the last `src/` directory from the file name.
+    assert_eq!(exception.file().to_str().unwrap(), "exception-test.rs");
+    assert!(
+        file!()
+            .replace('\\', "/")
+            .ends_with("/src/exception-test.rs")
+    );
+}
+
+#[test]
+fn test_kj_exception_raw_round_trip() {
+    let exception = KjException::from(
+        KjError::new(repr::KjExceptionType::Overloaded, "raw".to_owned())
+            .with_location("raw.rs".to_owned(), 1),
+    );
+    let raw = kj_exception_into_raw(exception);
+    // Safety: `raw` came from `kj_exception_into_raw` and nothing else owns it.
+    let exception = unsafe { kj_exception_from_raw(raw) };
+    assert_eq!(exception.what(), "raw");
+    assert_eq!(exception.r#type(), repr::KjExceptionType::Overloaded);
+}

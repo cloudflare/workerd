@@ -483,12 +483,17 @@ bool sharesCppgcShimForTest(
 
 Wrappable* Wrappable::unwrapFromShim(
     v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
-  // Read the CppgcShim out of V8's CppHeap pointer table, requiring the stored tag to fall within
-  // `tagRange`. If the object was never wrapped, or its tag is outside the range (a handle of
-  // another type), Unwrap returns nullptr.
-  auto* shim =
-      static_cast<CppgcShim*>(v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, tagRange));
+  // Unwrap with the full JSG range so Object::Unwrap never faults, then range-check the shim's own
+  // tag ourselves: a checked V8 build turns a narrow-range miss in Object::Unwrap into a fatal
+  // DCHECK. If the object was never wrapped, or its tag is outside the range (a handle of another
+  // type), this returns nullptr.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
   if (shim == nullptr) {
+    return nullptr;
+  }
+  auto tag = static_cast<uint16_t>(shim->tag);
+  if (tag < static_cast<uint16_t>(tagRange.first) || tag > static_cast<uint16_t>(tagRange.last)) {
     return nullptr;
   }
 
@@ -501,17 +506,10 @@ Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::
 
 Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
     v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
-  // Unwrap with the full JSG range so Object::Unwrap never faults, then range-check the shim's own
-  // tag ourselves. See the header for why the check can't be delegated to Object::Unwrap, and why
-  // an out-of-range tag here must abort.
-  auto* shim = static_cast<CppgcShim*>(
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
-  if (shim != nullptr) {
-    auto tag = static_cast<uint16_t>(shim->tag);
-    if (tag >= static_cast<uint16_t>(tagRange.first) &&
-        tag <= static_cast<uint16_t>(tagRange.last)) {
-      return &shim->resolve(object);
-    }
+  // See the header for why an out-of-range tag here must abort.
+  auto* wrappable = unwrapFromShim(isolate, object, tagRange);
+  if (wrappable != nullptr) {
+    return wrappable;
   }
 
   KJ_LOG(FATAL, "wrapper type mismatch: object's tag is outside the expected range");

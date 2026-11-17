@@ -61,7 +61,7 @@ use crate::services::unsupported;
 
 /// Whether `segment` names one entry of a directory: a single normal path component, so nothing
 /// a separator would split, no `.`, `..`, root or drive, and (on Windows) no stream of a file.
-fn is_entry_name(segment: &str) -> bool {
+pub(crate) fn is_entry_name(segment: &str) -> bool {
     let mut components = Path::new(segment).components();
     matches!(components.next(), Some(Component::Normal(name)) if name == segment)
         && components.next().is_none()
@@ -239,14 +239,14 @@ pub fn make_disk_directory_service(
 // =======================================================================================
 // Requests
 
-fn kj_headers<'t>(
+pub(crate) fn kj_headers<'t>(
     table: &'t HeaderTable,
     map: &http::HeaderMap,
 ) -> Result<kj_hyper::ffi::Borrowing<'t, kj::http::ffi::HttpHeaders>> {
     kj_hyper::HeaderBlock::new(map, &http::Extensions::new()).to_kj(table)
 }
 
-fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
+pub(crate) fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
     http::HeaderValue::from_str(value.as_ref())
         .map_err(|_| kj::failed!("invalid header value: {}", value.as_ref()))
 }
@@ -256,7 +256,7 @@ fn len_u64(len: usize) -> u64 {
 }
 
 /// Copies `length` bytes of the file from `start` into `out`.
-async fn copy_file(
+pub(crate) async fn copy_file(
     path: &Path,
     start: u64,
     length: u64,

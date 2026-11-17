@@ -252,11 +252,14 @@ impl<'s> IoContext<'s> {
     /// [`IoOwned::take`] has taken it. How the value is reached differs from C++; see
     /// [`IoOwned`].
     ///
-    /// `value` should hold no JavaScript handles: nothing traces it.
+    /// `value` must hold no JavaScript handles ([`jsg::HoldsNoGcReferences`]): nothing traces it.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
-    pub fn add_object<T: Send + 'static>(&self, value: T) -> jsg::Result<IoOwned<T>> {
+    pub fn add_object<T: jsg::HoldsNoGcReferences + 'static>(
+        &self,
+        value: T,
+    ) -> jsg::Result<IoOwned<T>> {
         let slot = Arc::new(Mutex::new(Some(value)));
         let object = bridge::io_context_add_object(
             self.id,
@@ -526,6 +529,7 @@ struct SlotRef<T>(Arc<Mutex<Option<T>>>);
 ///
 /// It is an [`IoOwned`] for a value that is not `Send`. Unlike the span, the handle is `Send` and
 /// `Sync`, since it reaches the span only on the `IoContext`'s thread.
+#[jsg_macros::jsg_traced]
 pub struct IoOwnedSpan(IoOwned<ThreadBoundSpan>);
 
 impl IoOwnedSpan {
@@ -550,9 +554,6 @@ impl IoOwnedSpan {
     }
 }
 
-// Holds no JavaScript handles.
-jsg::jsg_traced!(IoOwnedSpan);
-
 /// The span of an [`IoOwnedSpan`].
 struct ThreadBoundSpan(SpanBuilder);
 
@@ -570,6 +571,9 @@ struct ThreadBoundSpan(SpanBuilder);
 // own reference to the slot may be dropped on another thread, but if it is the last one, that
 // `SlotRef` has emptied the slot, and dropping `None` touches no span.
 unsafe impl Send for ThreadBoundSpan {}
+
+// A span holds no JavaScript handles.
+jsg::jsg_traced!(ThreadBoundSpan);
 
 impl<T> Drop for SlotRef<T> {
     fn drop(&mut self) {

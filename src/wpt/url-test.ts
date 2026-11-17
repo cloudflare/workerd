@@ -12,6 +12,11 @@ const usingTsUrl = !Object.hasOwn(
   'URL'
 );
 
+// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) brand-checks
+// its attributes, so its prototype is not a valid record for
+// URLSearchParams; the C++ one's are instance properties.
+const usingTsDomException = Error.isError(new DOMException());
+
 export default {
   'IdnaTestV2-removed.any.js': {},
   'IdnaTestV2.any.js': {
@@ -79,8 +84,10 @@ export default {
   },
   'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: ['URLSearchParams constructor, DOMException as argument'],
+    comment: 'The C++ DOMException.prototype converts to a record',
+    expectedFailures: usingTsDomException
+      ? []
+      : ['URLSearchParams constructor, DOMException as argument'],
   },
   'urlsearchparams-delete.any.js': {},
   'urlsearchparams-foreach.any.js': {},

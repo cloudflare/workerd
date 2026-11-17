@@ -470,6 +470,77 @@ const STACK_SWITCH_GC_HOTFIX_314_0_6: Patch[] = [
   }),
 ];
 
+/** Matches `<calleePath>(<arg>)` called with exactly this one string literal. */
+function isCallWithString(
+  node: AnyNode,
+  calleePath: string,
+  arg: string
+): node is CallExpression {
+  return (
+    isCallOf(node, calleePath) &&
+    node.arguments.length === 1 &&
+    node.arguments[0]?.type === 'Literal' &&
+    node.arguments[0].value === arg
+  );
+}
+
+// Applies https://github.com/pyodide/pyodide/pull/6534: API.finalizeBootstrap gets the Python
+// objects it needs through `_pyodide._base` instead of compiling and running Python source, and
+// skips `import _pyodide_core` when restoring a snapshot, which already has it in sys.modules.
+const FINALIZE_BOOTSTRAP_314_0_6: Patch[] = [
+  patch({
+    name: 'finalizeBootstrap: eval_code("{}") -> builtins.dict()',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallWithString(node, 'API._pyodide._base.eval_code', '{}'),
+    replace: () => expr('API._pyodide._base.builtins.dict()'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import importlib; importlib") -> import_module',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallWithString(
+        node,
+        'API.runPythonInternal',
+        'import importlib; importlib'
+      ),
+    replace: () => expr('API._pyodide._base.import_module("importlib")'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import __main__; __main__.__dict__") -> import_module',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallWithString(
+        node,
+        'API.runPythonInternal',
+        'import __main__; __main__.__dict__'
+      ),
+    replace: () =>
+      expr('API._pyodide._base.import_module("__main__").__dict__'),
+  }),
+  patch({
+    name: 'finalizeBootstrap: runPythonInternal("import builtins; builtins.__dict__") -> builtins.__dict__',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallWithString(
+        node,
+        'API.runPythonInternal',
+        'import builtins; builtins.__dict__'
+      ),
+    replace: () => expr('API._pyodide._base.builtins.__dict__'),
+  }),
+  patch({
+    // `API.finalizeBootstrap` is a `function` expression, so `arguments[0]` is its snapshotConfig
+    // parameter. `[0, ""]` stands for a successful run, so the error check that follows passes.
+    name: 'finalizeBootstrap: API.rawRun("import _pyodide_core") only when not restoring a snapshot',
+    expected: 1,
+    match: (node): node is CallExpression =>
+      isCallWithString(node, 'API.rawRun', 'import _pyodide_core'),
+    replace: () =>
+      expr('arguments[0] ? [0, ""] : API.rawRun("import _pyodide_core")'),
+  }),
+];
+
 // pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
 // When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
 // automatically.
@@ -518,7 +589,10 @@ function patchesForVersion(version: string): Patch[] {
   if (version === '0.26.0a2') {
     patches.push(...PATCHES_0_26_0A2);
   } else if (version === '314.0.6') {
-    patches.push(...STACK_SWITCH_GC_HOTFIX_314_0_6);
+    patches.push(
+      ...STACK_SWITCH_GC_HOTFIX_314_0_6,
+      ...FINALIZE_BOOTSTRAP_314_0_6
+    );
   }
   patches.push(
     ...(COMMONJS_VERSIONS.includes(version)
