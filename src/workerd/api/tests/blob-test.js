@@ -68,19 +68,6 @@ export const test1 = {
     strictEqual(file2.type, 'text/foo');
     strictEqual(file2.lastModified, 123);
 
-    try {
-      new Blob(['foo'], { endings: 'native' });
-      throw new Error("use of 'endings' should throw");
-    } catch (err) {
-      if (
-        !err.message.includes(
-          "The 'endings' field on 'Options' is not implemented."
-        )
-      ) {
-        throw err;
-      }
-    }
-
     // Test type normalization.
     strictEqual(new Blob([], { type: 'FoO/bAr' }).type, 'foo/bar');
     strictEqual(new Blob([], { type: 'FoO\u0019/bAr' }).type, '');
@@ -329,5 +316,69 @@ export const depthTest = {
 
     // Access the blob to ensure it's still valid
     console.log('Blob size:', blob.size);
+  },
+};
+
+export const endings = {
+  async test() {
+    const cases = [
+      ['LF', '\n'],
+      ['CR', '\r'],
+      ['CRLF', '\r\n'],
+      ['CRCR', '\r\r'],
+      ['LFCR', '\n\r'],
+      ['LFLF', '\n\n'],
+      ['CRCRLF', '\r\r\n'],
+      ['CRLFLF', '\r\n\n'],
+      ['CRLFCR', '\r\n\r'],
+      ['CRLFCRLF', '\r\n\r\n'],
+      ['LFCRLFCR', '\n\r\n\r'],
+    ];
+    // The native line ending is LF on every platform.
+    const toNative = (s) => s.replace(/\r\n|\r/g, '\n');
+
+    for (const Ctor of [Blob, File]) {
+      const make = (parts, options) =>
+        Ctor === File
+          ? new File(parts, 'f', options)
+          : new Blob(parts, options);
+
+      for (const [name, input] of cases) {
+        const text = `a${input}b`;
+        strictEqual(await make([text]).text(), text, `${name} unspecified`);
+        strictEqual(
+          await make([text], { endings: 'transparent' }).text(),
+          text,
+          `${name} transparent`
+        );
+        strictEqual(
+          await make([text], { endings: 'native' }).text(),
+          toNative(text),
+          `${name} native`
+        );
+      }
+
+      // Each string part is converted on its own.
+      strictEqual(
+        await make(['\r', '\n'], { endings: 'native' }).text(),
+        '\n\n'
+      );
+
+      // Multi-byte characters next to line endings survive the conversion.
+      strictEqual(
+        await make(['\u00e9\r\n\u{1F600}\r\u4e2d'], {
+          endings: 'native',
+        }).text(),
+        '\u00e9\n\u{1F600}\n\u4e2d'
+      );
+
+      // Buffer and Blob parts are never converted.
+      const bytes = new TextEncoder().encode('x\r\ny');
+      const inner = new Blob(['p\r\nq']);
+      const mixed = make([bytes, '1\r\n2', inner], { endings: 'native' });
+      strictEqual(await mixed.text(), 'x\r\ny1\n2p\r\nq');
+      strictEqual(mixed.size, 11);
+      strictEqual(await make([inner], { endings: 'native' }).text(), 'p\r\nq');
+    }
   },
 };

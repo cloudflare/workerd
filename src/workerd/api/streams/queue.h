@@ -7,6 +7,7 @@
 #include "common.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/consume.h>
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-weak-vector.h>
@@ -170,6 +171,9 @@ class QueueImpl final: public kj::PtrTarget {
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
     if (state.isActive()) {
+      // The controller has stopped visiting this queue, and settling one consumer's reads can
+      // run a GC before the next consumer's reads are taken out.
+      makePendingReadsStrong();
       // Keep pending BYOB handles alive through fan-out, but publish the terminal state first.
       auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
       state.template transitionTo<Closed>();
@@ -195,6 +199,8 @@ class QueueImpl final: public kj::PtrTarget {
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::JsValue reason) {
     if (state.isActive()) {
+      // See close().
+      makePendingReadsStrong();
       auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
       state.template transitionTo<Errored>(reason.addRef(js));
 #ifdef KJ_DEBUG
@@ -254,6 +260,23 @@ class QueueImpl final: public kj::PtrTarget {
       }
     }
     return false;
+  }
+
+  // Visits the consumers' pending reads, so a pending read stays alive while the controller that
+  // can settle it is reachable, as in the spec, where the controller holds its stream. Every
+  // stream holds its controller, so this also covers a reachable stream. The queue is the reads'
+  // only visitor, since a handle visited from two parents is strong or traced depending on which
+  // visited last. close(), error(), and a controller about to drop the queue call
+  // makePendingReadsStrong() before the queue stops being visited.
+  void visitForGc(jsg::GcVisitor& visitor) {
+    if (util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
+      allConsumers.forEach([&](auto& consumer) { consumer.visitPendingReads(visitor); });
+    }
+  }
+
+  // Makes the consumers' pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong() {
+    allConsumers.forEach([](auto& consumer) { consumer.makePendingReadsStrong(); });
   }
 
   // Specific queue implementations may provide additional state that is attached
@@ -393,7 +416,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // Settlement can release the reader and destroy this consumer.
-      auto requests = kj::mv(ready.readRequests);
+      auto requests = extractPendingReads(ready);
       state.template transitionTo<Closed>();
       for (auto& request: requests) {
         request->resolveAsDone(js);
@@ -553,12 +576,24 @@ class ConsumerImpl final: public kj::PtrTarget {
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       visitor.visit(errored.reason);
     }
-    // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
-    // potentially problematic if we do. Since the read requests are queued, if we
-    // GC visit it once, remove it from the queue, and GC happens to kick in before
-    // we access the resolver, then v8 could determine that the resolver or buffered
-    // entries are no longer reachable via tracing and free them before we can
-    // actually try to access the held resolver.
+    // The buffer isn't visited, because its entries can be shared with other consumers. The
+    // pending reads are visited by the queue; see QueueImpl::visitForGc().
+  }
+
+  // A read promise reaches the reader that made it, and through it the stream, so a pending read
+  // must be visited for a stream whose read never settles to be collected.
+  void visitPendingReads(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+      visitor.visitAll(ready.readRequests);
+    }
+  }
+
+  void makePendingReadsStrong() {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+      for (auto& request: ready.readRequests) {
+        request.makeStrong();
+      }
+    }
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -579,10 +614,10 @@ class ConsumerImpl final: public kj::PtrTarget {
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
     workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
-    // We use kj::Own<ReadRequest> because ByobRequest holds a reference to its associated
+    // Each ReadRequest is heap-allocated because ByobRequest holds a reference to its associated
     // ReadRequest. Using RingBuffer directly would invalidate those references when the buffer
     // grows. By heap-allocating each ReadRequest, we ensure reference stability.
-    workerd::RingBuffer<kj::Own<ReadRequest>, 8> readRequests;
+    workerd::RingBuffer<jsg::TracedOwn<ReadRequest>, 8> readRequests;
     size_t queueTotalSize = 0;
     // True if there is a pending draining read operation. Draining reads are mutually
     // exclusive with regular reads - read() will reject if this is true, and drainingRead()
@@ -625,8 +660,8 @@ class ConsumerImpl final: public kj::PtrTarget {
   // which does V8 allocations). Without this, GC could collect the ReadableStream that
   // owns this ConsumerImpl (through the ownership gap: QueueImpl only holds weak refs),
   // destroying the readRequests ring buffer while we're iterating it.
-  static kj::Vector<kj::Own<ReadRequest>> extractPendingReads(Ready& ready) {
-    kj::Vector<kj::Own<ReadRequest>> result(ready.readRequests.size());
+  static kj::Vector<jsg::TracedOwn<ReadRequest>> extractPendingReads(Ready& ready) {
+    kj::Vector<jsg::TracedOwn<ReadRequest>> result(ready.readRequests.size());
     while (!ready.readRequests.empty()) {
       result.add(kj::mv(ready.readRequests.front()));
       ready.readRequests.pop_front();
@@ -730,6 +765,10 @@ class ValueQueue final {
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value);
     void reject(jsg::Lock& js, jsg::JsValue value);
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(resolver);
+    }
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -845,6 +884,9 @@ class ValueQueue final {
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  // Makes pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong();
+
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -915,6 +957,10 @@ class ByteQueue final {
 
     kj::Own<ByobRequest> makeByobReadRequest(
         kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue);
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(resolver, pullInto.view);
+    }
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -1121,6 +1167,9 @@ class ByteQueue final {
   kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  // Makes pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong();
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
