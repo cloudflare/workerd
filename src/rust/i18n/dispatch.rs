@@ -43,8 +43,8 @@ const fn require_within_isolate_limit(
 
 impl Encoding {
     /// Whether [`Transcoder`] supports this encoding, as either source or
-    /// destination. C++ calls this as `i18n::canBeTranscoded`
-    /// (`src/workerd/api/node/i18n.h`).
+    /// destination. `BufferUtil::transcode`
+    /// (`src/workerd/api/node/buffer.c++`) calls this through the bridge.
     #[must_use]
     pub const fn can_be_transcoded(self) -> bool {
         matches!(

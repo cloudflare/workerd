@@ -95,11 +95,11 @@ mod bridge {
 
     extern "Rust" {
         /// Whether `transcode` supports `encoding`, for
-        /// `workerd::api::node::i18n::canBeTranscoded`.
+        /// `workerd::api::node::BufferUtil::transcode`.
         fn can_be_transcoded(encoding: Encoding) -> bool;
 
         /// Transcodes `source` from `from_encoding` to `to_encoding`, for
-        /// `workerd::api::node::i18n::transcode`. Returns a `MaybeLocal`
+        /// `workerd::api::node::BufferUtil::transcode`. Returns a `MaybeLocal`
         /// naming a `Uint8Array`, or an empty `MaybeLocal` with a JS exception
         /// already scheduled on `isolate` if transcoding fails.
         ///

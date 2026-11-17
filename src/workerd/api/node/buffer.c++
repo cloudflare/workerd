@@ -10,6 +10,10 @@
 #include "simdutf.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/rust/i18n/ffi.rs.h>
+#include <workerd/rust/jsg/ffi-inl.h>
+
+#include <kj-rs/convert.h>
 
 #include <kj/array.h>
 #include <kj/encoding.h>
@@ -822,10 +826,16 @@ jsg::JsUint8Array BufferUtil::transcode(jsg::Lock& js,
   auto fromEncoding = static_cast<Encoding>(rawFromEncoding);
   auto toEncoding = static_cast<Encoding>(rawToEncoding);
 
-  JSG_REQUIRE(i18n::canBeTranscoded(fromEncoding) && i18n::canBeTranscoded(toEncoding), Error,
+  // The bridge's `Encoding` is this `Encoding` (see `src/rust/i18n/encoding.h`).
+  namespace rust_i18n = ::workerd::rust::i18n;
+  JSG_REQUIRE(
+      rust_i18n::can_be_transcoded(fromEncoding) && rust_i18n::can_be_transcoded(toEncoding), Error,
       "Unable to transcode buffer due to unsupported encoding");
 
-  return i18n::transcode(js, source.asArrayPtr(), fromEncoding, toEncoding);
+  auto maybeLocal = rust_i18n::transcode(
+      js.v8Isolate, source.asArrayPtr().as<kj_rs::Rust>(), fromEncoding, toEncoding);
+  return jsg::JsUint8Array(
+      jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Uint8Array>(kj::mv(maybeLocal))));
 }
 
 }  // namespace workerd::api::node

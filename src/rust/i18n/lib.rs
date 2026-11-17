@@ -3,10 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The engine behind `node:buffer`'s `transcode()`, called from
-//! `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`)
-//! through the cxx bridge in [`ffi`]. [`dispatch`] picks the conversion for
-//! each encoding pair, sizes the destination, and checks the result; [`ffi`]
-//! wraps the ICU and simdutf functions that perform the conversions.
+//! `workerd::api::node::BufferUtil::transcode`
+//! (`src/workerd/api/node/buffer.c++`) through the cxx bridge in [`ffi`].
+//! [`dispatch`] picks the conversion for each encoding pair, sizes the
+//! destination, and checks the result; [`ffi`] wraps the ICU and simdutf
+//! functions that perform the conversions.
 
 use jsg::Lock;
 use jsg::v8;
