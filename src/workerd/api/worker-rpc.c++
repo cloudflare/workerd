@@ -115,6 +115,7 @@ RpcSerializerExternalHandler::Replayability classifyExternalReplayability(
     case External::DELAYED_ACTOR_CLASS_CHANNEL_TOKEN:
     case External::SOCKET:
     case External::DURABLE_OBJECT_SNAPSHOT:
+    case External::EMAIL_FWDR:
       return Replayability::INELIGIBLE;
   }
   // A discriminant outside the known range, e.g. from a newer schema.

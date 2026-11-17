@@ -15245,15 +15245,15 @@ export interface EmailMessage {
    * Envelope To attribute of the email message.
    */
   readonly to: string;
+  /**
+   * Stream of the email message content.
+   */
+  readonly raw: ReadableStream<Uint8Array>;
 }
 /**
  * An email message that is sent to a consumer Worker and can be rejected/forwarded.
  */
 export interface ForwardableEmailMessage extends EmailMessage {
-  /**
-   * Stream of the email message content.
-   */
-  readonly raw: ReadableStream<Uint8Array>;
   /**
    * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    */
