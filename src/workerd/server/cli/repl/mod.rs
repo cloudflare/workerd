@@ -82,7 +82,8 @@ pub fn run(verbose: bool, args: ReplArgs) -> workerd_server::Result<i32> {
                     format!("starting the console: {error}"),
                 )
             })?;
-        let code = match runtime.block_on(session::serve(session, received)) {
+        let serving = session::serve(session, received, args.input_timeout);
+        let code = match runtime.block_on(serving) {
             Ok(Ok(())) => {
                 // The session ended because the console did. A console that panicked failed.
                 let failed = console.join().unwrap_or(true);

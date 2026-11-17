@@ -64,13 +64,14 @@ A `<config-file>` is loaded into the global `s`, as
 REPL shows that input at its first prompt and prints its result. A config that fails to load is
 reported like any failed input, and the REPL carries on with `s` unset.
 
-| Option                 | Effect                                                                                                                                                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--experimental`       | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
-| `--compat-date=<date>` | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
-| `--compat-flag=<flag>` | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly.                                                      |
-| `--autogate=<name>`    | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
-| `--v8-flag=<flag>`     | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
+| Option                      | Effect                                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--experimental`            | Required. Also lets the compatibility flags and the loaded configs use experimental features, as it does for `workerd serve`, and turns on `service_binding_extra_handlers` (see [the server handle](#the-server-handle)). |
+| `--compat-date=<date>`      | The compatibility date of the REPL's JavaScript. Defaults to today. Any valid date is accepted, as for `workerd test`; `2999-12-31` gives every flag's behavior.                                                           |
+| `--compat-flag=<flag>`      | Enables a compatibility flag in the REPL's JavaScript. Repeat it for more. `nodejs_compat` is on unless a flag turns it, or `nodejs_compat_v2`, on or off explicitly.                                                      |
+| `--autogate=<name>`         | Enables an autogate, named as in `WORKERD_AUTOGATES` but in kebab-case, such as `compression-rs`. Repeat it for more. A name that is no autogate is an error.                                                              |
+| `--v8-flag=<flag>`          | Passes a flag to V8, such as `--v8-flag=--expose-gc`. Repeat it for more. A flag V8 does not know is an error.                                                                                                             |
+| `--input-timeout=<seconds>` | Stops awaiting an input once it has taken this many seconds, such as `30` or `0.5`; see [Interrupting](#interrupting).                                                                                                     |
 
 The compatibility settings apply to the JavaScript typed into the REPL. Each loaded config's
 Workers use their own settings from the config.
@@ -82,10 +83,10 @@ Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 
 The REPL exits with status 1 if an input failed, or if the REPL itself did, and 0 otherwise. An
 input fails if it throws, if the promise it awaits rejects, if it is a command the REPL doesn't
-know, or if it is still [unfinished](#typing-input) when the REPL's input ends. The REPL prints the
-failure and goes on to the next input, so a script's later inputs still run. A config named on the
-command line that fails to load is an input that failed. An input that Ctrl+C stops awaiting, or
-that `.break` abandons, hasn't failed.
+know, if it [times out](#interrupting), or if it is still [unfinished](#typing-input) when the
+REPL's input ends. The REPL prints the failure and goes on to the next input, so a script's later
+inputs still run. A config named on the command line that fails to load is an input that failed.
+An input that Ctrl+C stops awaiting, or that `.break` abandons, hasn't failed.
 
 ## Typing input
 
@@ -204,6 +205,10 @@ Ctrl+C at a terminal, and `kill -INT` from elsewhere, send the REPL SIGINT. One 
 no input runs ends the REPL, unless the terminal is editing a line, which takes Ctrl+C as a key.
 A REPL started with SIGINT ignored, as a shell without job control starts a background job,
 ignores it: SIGINT neither stops awaiting an input nor ends the REPL.
+
+With `--input-timeout=<seconds>`, the REPL stops awaiting an input once it has taken that long, as
+Ctrl+C does, and says `Timed out`. The input counts as failed. As for Ctrl+C, JavaScript that runs
+without awaiting runs on.
 
 ### History
 

@@ -123,7 +123,8 @@ struct Console {
     /// The lines of the unfinished input, and the scanner that has read them.
     input: String,
     scanner: Scanner,
-    /// An input failed: it threw, the session could not evaluate it, or it is no command.
+    /// An input failed: it threw, timed out, or was left unfinished, the session could not
+    /// evaluate it, or it is no command.
     failed: bool,
 }
 
@@ -294,6 +295,13 @@ impl Console {
                 eprintln!(
                     "Interrupted: no longer awaiting the input, whose promise may still settle."
                 );
+            }
+            Ok(Ok(Evaluated::TimedOut(timeout))) => {
+                eprintln!(
+                    "Error: Timed out after {timeout:?}: no longer awaiting the input, whose \
+                     promise may still settle."
+                );
+                self.failed = true;
             }
             Ok(Err(error)) => {
                 eprintln!("Error: {error}");

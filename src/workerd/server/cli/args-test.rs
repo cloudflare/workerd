@@ -404,6 +404,32 @@ fn repl_config_to_load() {
 }
 
 #[test]
+fn repl_input_timeout() {
+    let timeout = |args: &[&str]| {
+        let Command::Repl { repl } = parse(args).command else {
+            panic!("not repl: {args:?}");
+        };
+        repl.input_timeout
+    };
+    assert_eq!(timeout(&["repl", "--experimental"]), None);
+    assert_eq!(
+        timeout(&["repl", "--experimental", "--input-timeout=30"]),
+        Some(Duration::from_secs(30))
+    );
+    assert_eq!(
+        timeout(&["repl", "--experimental", "--input-timeout", "0.5"]),
+        Some(Duration::from_millis(500))
+    );
+    for seconds in ["0", "-1", "NaN", "inf", "soon"] {
+        let arg = format!("--input-timeout={seconds}");
+        assert!(
+            Main::try_parse_from(["workerd", "repl", "--experimental", &arg]).is_err(),
+            "{arg}"
+        );
+    }
+}
+
+#[test]
 fn repl_process_wide_settings() {
     let main = parse(&[
         "repl",

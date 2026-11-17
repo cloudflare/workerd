@@ -5,6 +5,8 @@
 //! they depended on (e.g. `--watch` and `--binary` must take effect before `<config-file>` is
 //! parsed).
 
+use std::time::Duration;
+
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -192,11 +194,11 @@ pub enum Command {
 const REPL_HELP: &str = "\
 Evaluates JavaScript in a Worker environment and prints each result. The `workerd` global loads \
 configs, as `serve` does, and calls their services and sockets; type .help in the REPL for more. \
-The exit status is 1 if an input failed: it threw, the promise it awaited rejected, it is no \
-command, or it was left unfinished. On a terminal, the lines typed are saved in \
-~/.workerd_repl_history; WORKERD_REPL_HISTORY names another file, or, set to the empty string, \
-turns saving off. This is a tool for developing workerd, and may change or go away in any \
-release.";
+The exit status is 1 if an input failed: it threw, the promise it awaited rejected, it timed \
+out (see --input-timeout), it is no command, or it was left unfinished. On a terminal, the \
+lines typed are saved in ~/.workerd_repl_history; WORKERD_REPL_HISTORY names another file, or, \
+set to the empty string, turns saving off. This is a tool for developing workerd, and may \
+change or go away in any release.";
 
 const DEPLOY_HELP: &str = "\
 Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
@@ -522,6 +524,12 @@ pub struct ReplArgs {
     #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
     pub v8_flags: Vec<String>,
 
+    /// Stop awaiting an input once it has taken this many seconds (such as `30` or `0.5`), as
+    /// Ctrl+C does, and count it as failed. JavaScript that runs without awaiting, such as a loop,
+    /// runs on.
+    #[arg(long, value_name = "seconds", value_parser = parse_seconds)]
+    pub input_timeout: Option<Duration>,
+
     /// Enable experimental features. The repl command requires this flag.
     #[arg(long)]
     pub experimental: bool,
@@ -545,6 +553,16 @@ impl DeployArgs {
         let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
         let region = self.region.iter().map(|r| format!("aws_region={r}"));
         Ok(endpoint.chain(region).collect())
+    }
+}
+
+/// Parse a positive number of seconds, such as `30` or `0.5`.
+fn parse_seconds(param: &str) -> Result<Duration, &'static str> {
+    let expected = "expected a positive number of seconds, such as 30 or 0.5";
+    let seconds: f64 = param.parse().map_err(|_| expected)?;
+    match Duration::try_from_secs_f64(seconds) {
+        Ok(duration) if !duration.is_zero() => Ok(duration),
+        _ => Err(expected),
     }
 }
 
