@@ -402,9 +402,15 @@ ReplEnvironment::Compiled ReplEnvironment::compile(
       return kj::mv(c);
     }
   }
-  // None compiles, so the first one's syntax error is thrown.
-  return {.script = jsg::NonModuleScript::compile(js, candidates[0].source, inputName),
-    .awaited = candidates[0].awaited};
+  // None compiles, so the syntax error of the first that isn't parenthesized is thrown.
+  auto& reported = [&]() -> const Candidate& {
+    for (auto& candidate: candidates) {
+      if (!candidate.parenthesized) return candidate;
+    }
+    return candidates[0];
+  }();
+  return {.script = jsg::NonModuleScript::compile(js, reported.source, inputName),
+    .awaited = reported.awaited};
 }
 
 kj::Promise<kj::Array<kj::String>> ReplEnvironment::propertyNames(kj::String base) {

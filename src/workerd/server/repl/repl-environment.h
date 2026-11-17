@@ -53,14 +53,18 @@ struct ReplEnvironmentOptions {
 class ReplEnvironment final: public ReplHost {
  public:
   // One way to compile an input. The REPL tries an input's candidates in order and evaluates the
-  // first that compiles; if none does, the first candidate's syntax error is the result. A
-  // candidate that isn't awaited and uses `await` as a name, as `await (x)` does in a script, is
-  // evaluated only if no later candidate compiles: an input that says `await` means to await.
+  // first that compiles; if none does, the syntax error of the first that isn't `parenthesized` is
+  // the result. A candidate that isn't awaited and uses `await` as a name, as `await (x)` does in a
+  // script, is evaluated only if no later candidate compiles: an input that says `await` means to
+  // await.
   struct Candidate {
     kj::String source;
     // The completion value is a promise the REPL awaits, rendering what it settles to: the input
     // was wrapped in an async function so that it could `await`.
     bool awaited;
+    // The input was put in parentheses, so that a `{` that starts it starts an object literal. A
+    // syntax error compiling it is the parentheses', not the input's own.
+    bool parenthesized = false;
   };
 
   // Makes the candidates of an input, as the console makes those of what is typed.

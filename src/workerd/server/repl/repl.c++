@@ -94,6 +94,7 @@ kj::Array<ReplEnvironment::Candidate> toCandidates(::rust::Vec<ReplCandidate> ca
     return ReplEnvironment::Candidate{
       .source = kj::str(kj::from<kj_rs::Rust>(candidate.source)),
       .awaited = candidate.awaited,
+      .parenthesized = candidate.parenthesized,
     };
   };
 }

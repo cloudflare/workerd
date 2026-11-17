@@ -38,12 +38,16 @@ pub mod ffi {
     }
 
     /// One way to compile an input: the input itself, or the input wrapped in an async function
-    /// so that it can `await` (input.rs).
+    /// so that it can `await`, or in parentheses so that a leading `{` starts an object literal
+    /// (input.rs).
     #[derive(Debug, PartialEq, Eq)]
     struct ReplCandidate {
         source: String,
         /// The completion value is a promise to await, and render what it settles to.
         awaited: bool,
+        /// The input is in parentheses it doesn't have, so a syntax error compiling it isn't the
+        /// input's own: if no candidate compiles, another's error is reported.
+        parenthesized: bool,
     }
 
     /// What became of an input.

@@ -158,6 +158,7 @@ fn candidates_wrap_inputs_that_await() {
         vec![ReplCandidate {
             source: "1 + 2".to_owned(),
             awaited: false,
+            parenthesized: false,
         }]
     );
     let wrapped = candidates("const x = await f() // done");
@@ -173,6 +174,48 @@ fn candidates_wrap_inputs_that_await() {
         "(async () => {      x = await f() // done\n})()"
     );
     assert!(wrapped[2].awaited);
+}
+
+#[test]
+fn candidates_parenthesize_a_leading_brace() {
+    let sources = |input| {
+        candidates(input)
+            .into_iter()
+            .map(|c| (c.source, c.awaited, c.parenthesized))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        sources("  { a: 1 } // c"),
+        [
+            ("(  { a: 1 } // c\n)".to_owned(), false, true),
+            ("  { a: 1 } // c".to_owned(), false, false),
+        ]
+    );
+    let awaiting = sources("{ a: await f() }");
+    assert_eq!(
+        awaiting[..2],
+        [
+            ("({ a: await f() }\n)".to_owned(), false, true),
+            (
+                "(async () => {return (({ a: await f() }\n)\n)})()".to_owned(),
+                true,
+                true
+            ),
+        ]
+    );
+    assert_eq!(awaiting.len(), 5);
+    assert!(
+        awaiting[2..]
+            .iter()
+            .all(|&(_, _, parenthesized)| !parenthesized)
+    );
+    // One that ends with `;`, or doesn't start with `{`, is left as it is, as in Node's REPL.
+    for input in ["{ a: 1 };", "{ f() }; ", "x = { a: 1 }", "({ a: 1 })"] {
+        assert!(
+            candidates(input).iter().all(|c| !c.parenthesized),
+            "{input:?}"
+        );
+    }
 }
 
 #[test]

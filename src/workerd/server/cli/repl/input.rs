@@ -324,21 +324,47 @@ fn is_word_byte(byte: u8) -> bool {
 /// See [`rewrite_declarations`] for what the wrappings do to declarations. The session passes over
 /// the input as it is when it uses `await` as a name, as `await (x)` does in a script
 /// (`ReplEnvironment::compile`).
+///
+/// An input that starts with `{` and doesn't end with `;` is first tried in parentheses, so that
+/// `{ a: 1 }` is an object literal rather than a block, as in Node's REPL. Without them it is a
+/// block, as one that the parentheses don't compile, such as `{ let x = 1; x }`, still is.
 pub fn candidates(input: &str) -> Vec<ReplCandidate> {
-    let mut candidates = vec![ReplCandidate {
+    let awaits = input.contains("await");
+    let mut candidates = Vec::new();
+    if input.trim_start().starts_with('{') && !input.trim_end().ends_with(';') {
+        // The line break keeps a line comment that ends the input from swallowing the parenthesis.
+        let parenthesized = format!("({input}\n)");
+        let returning = awaits.then(|| returning_last_statement(&parenthesized));
+        candidates.push(ReplCandidate {
+            source: parenthesized,
+            awaited: false,
+            parenthesized: true,
+        });
+        if let Some(source) = returning {
+            candidates.push(ReplCandidate {
+                source,
+                awaited: true,
+                parenthesized: true,
+            });
+        }
+    }
+    candidates.push(ReplCandidate {
         source: input.to_owned(),
         awaited: false,
-    }];
-    if input.contains("await") {
+        parenthesized: false,
+    });
+    if awaits {
         let rewritten = rewrite_declarations(input);
         candidates.push(ReplCandidate {
             source: returning_last_statement(&rewritten),
             awaited: true,
+            parenthesized: false,
         });
         // The line break keeps a line comment that ends the input from swallowing the wrapping.
         candidates.push(ReplCandidate {
             source: format!("(async () => {{{rewritten}\n}})()"),
             awaited: true,
+            parenthesized: false,
         });
     }
     candidates
