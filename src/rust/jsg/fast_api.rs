@@ -276,7 +276,7 @@ unsafe fn call_method<R: Resource, T: FastApiReturn>(
     let trait_ptr = unsafe { ffi::fast_api_unwrap_receiver(options, receiver) };
     let Some(resource) = trait_ptr.resolve::<R>() else {
         // SAFETY: as above.
-        return unsafe { throw(options, &Error::new_type_error("Illegal invocation")) };
+        return unsafe { throw(options, &Error::new_illegal_invocation()) };
     };
     // SAFETY: The receiver keeps the resource alive for the call. A fast callback cannot run
     // JavaScript, so nothing else can reach the resource while this borrow lives.

@@ -208,7 +208,7 @@ impl Signature {
             // TypeError rather than a panic.
             let resource = jsg::v8::resolve_receiver::<Self>(lock, this);
             let Some(resource) = resource else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                lock.throw_exception(&jsg::Error::new_illegal_invocation());
                 return jsg::Intercepted::Yes;
             };
             // V8 calls the interceptor only for string names (`kOnlyInterceptStrings`), whose
