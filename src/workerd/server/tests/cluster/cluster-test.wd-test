@@ -25,7 +25,7 @@ const gcs :Workerd.Config = (
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
     stopTimeoutMs = 10000,
-    unsafeTimeDivisor = 4,
+    unsafeTimeDivisor = 2,
   ),
 );
 
