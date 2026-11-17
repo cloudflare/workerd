@@ -414,22 +414,27 @@ impl Cluster {
                 }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
             }
-            let delay = match step {
+            let wait = match step {
                 Step::Fence(reason) => return reason,
                 Step::Retry(reason) => {
                     tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
-                    timing.retry_ms
+                    tokio::time::sleep(ms(timing.retry_ms)).await;
+                    continue;
                 }
-                Step::Renew => timing.interval_ms,
+                Step::Renew => tokio::time::sleep(ms(timing.interval_ms)),
             };
             // A stale listing only delays routing to a new peer: its
-            // failure is logged, never fatal.
-            match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
-                Err(_) => tracing::warn!("listing the cluster timed out"),
-            }
-            tokio::time::sleep(ms(delay)).await;
+            // failure is logged, never fatal. It runs during the wait for
+            // the next renewal, which a slow one delays only past that wait,
+            // and not after a failed renewal, whose retry it would delay.
+            let list = async {
+                match timeout(ms(timing.list_timeout_ms), self.list_round(&timing)).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => tracing::warn!("listing the cluster failed: {e}"),
+                    Err(_) => tracing::warn!("listing the cluster timed out"),
+                }
+            };
+            futures::join!(list, wait);
         }
     }
 
