@@ -4,7 +4,14 @@
 
 //! An HTTP/1.1 server on a loopback port for tests, hyper's, that answers
 //! each request as the test says and keeps what it received.
+//!
+//! The bucket's HTTP client (`crate::http`) reaches it over an in-memory
+//! connection instead (`connect`), with nothing in the kernel between
+//! client and server: what one end writes is ready for the other before the
+//! writer's task yields. Anything else that connects, such as a probe of a
+//! metadata server, connects over TCP.
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,7 +26,11 @@ use bytes::Bytes;
 use http_body::Body as _;
 use http_body::Frame;
 use hyper_util::rt::TokioIo;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
+use tokio::io::DuplexStream;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 
 /// A request as the server received it.
 #[derive(Clone, Debug)]
@@ -72,12 +83,51 @@ pub fn reply(status: u16, body: &str) -> Answer {
 
 type Handler = dyn Fn(&Request, usize) -> Answer + Send + Sync;
 
+/// Each server's host, with where to send the server's end of a new
+/// in-memory connection to it.
+static IN_MEMORY: Mutex<BTreeMap<String, mpsc::UnboundedSender<DuplexStream>>> =
+    Mutex::new(BTreeMap::new());
+
+/// How many bytes an in-memory connection holds in each direction before a
+/// write waits for the other end to read.
+const IN_MEMORY_BUFFER: usize = 64 << 10;
+
+/// A new in-memory connection to the server at `host`, `ip:port`, if one
+/// serves there.
+pub fn connect(host: &str) -> Option<DuplexStream> {
+    let accept = IN_MEMORY.lock().unwrap().get(host)?.clone();
+    let (client, server) = tokio::io::duplex(IN_MEMORY_BUFFER);
+    accept.send(server).ok()?;
+    Some(client)
+}
+
 pub struct Server {
     /// `127.0.0.1:<port>`.
     pub host: String,
     received: Arc<Mutex<Vec<Request>>>,
     connections: Arc<AtomicUsize>,
     abandoned: Arc<Abandoned>,
+}
+
+/// A server's entry in `IN_MEMORY`, removed when the server stops accepting
+/// connections: when its runtime ends, as its TCP listener closes, and not
+/// when its `Server` is dropped.
+struct Registered {
+    host: String,
+    accept: mpsc::UnboundedSender<DuplexStream>,
+}
+
+impl Drop for Registered {
+    fn drop(&mut self) {
+        let mut servers = IN_MEMORY.lock().unwrap();
+        // A later server on the same port replaced this one's entry.
+        if servers
+            .get(&self.host)
+            .is_some_and(|s| s.same_channel(&self.accept))
+        {
+            servers.remove(&self.host);
+        }
+    }
 }
 
 /// The numbers of the requests whose client stopped waiting for their
@@ -112,24 +162,37 @@ impl Server {
     pub async fn serving(
         handler: impl Fn(&Request, usize) -> Answer + Send + Sync + 'static,
     ) -> Self {
-        let handler: Arc<Handler> = Arc::new(handler);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let host = listener.local_addr().unwrap().to_string();
+        let (accept, mut accepted) = mpsc::unbounded_channel();
+        IN_MEMORY
+            .lock()
+            .unwrap()
+            .insert(host.clone(), accept.clone());
+        let registered = Registered {
+            host: host.clone(),
+            accept,
+        };
         let received = Arc::new(Mutex::new(Vec::new()));
         let connections = Arc::new(AtomicUsize::new(0));
         let abandoned = Arc::new(Abandoned::default());
-        let (log, accepted, dropped) = (received.clone(), connections.clone(), abandoned.clone());
+        let serve = Serve {
+            handler: Arc::new(handler),
+            log: received.clone(),
+            connections: connections.clone(),
+            abandoned: abandoned.clone(),
+        };
+        let tcp = serve.clone();
         tokio::spawn(async move {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
-                accepted.fetch_add(1, Ordering::SeqCst);
-                let (handler, log, dropped) = (handler.clone(), log.clone(), dropped.clone());
-                let service = hyper::service::service_fn(move |request| {
-                    answer(request, handler.clone(), log.clone(), dropped.clone())
-                });
-                let connection = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service);
-                tokio::spawn(connection);
+                tcp.connection(stream);
+            }
+        });
+        tokio::spawn(async move {
+            let _registered = registered;
+            while let Some(stream) = accepted.recv().await {
+                serve.connection(stream);
             }
         });
         Self {
@@ -169,6 +232,34 @@ impl Server {
 
     pub fn requests(&self) -> usize {
         self.received.lock().unwrap().len()
+    }
+}
+
+/// What serves each connection a server accepts.
+#[derive(Clone)]
+struct Serve {
+    handler: Arc<Handler>,
+    log: Arc<Mutex<Vec<Request>>>,
+    connections: Arc<AtomicUsize>,
+    abandoned: Arc<Abandoned>,
+}
+
+impl Serve {
+    fn connection(&self, stream: impl AsyncRead + AsyncWrite + Send + Unpin + 'static) {
+        self.connections.fetch_add(1, Ordering::SeqCst);
+        let serve = self.clone();
+        let service = hyper::service::service_fn(move |request| {
+            let Self {
+                handler,
+                log,
+                abandoned,
+                ..
+            } = serve.clone();
+            answer(request, handler, log, abandoned)
+        });
+        let connection = hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service);
+        tokio::spawn(connection);
     }
 }
 
