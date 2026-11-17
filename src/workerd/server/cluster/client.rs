@@ -711,11 +711,20 @@ fn listing_page(
     let xml = String::from_utf8_lossy(body);
     for contents in elements(&xml, "Contents") {
         let text = |name| elements(contents, name).next().map(unescape);
-        entries.extend(text("Key").map(|key| Entry {
-            key,
-            size: text("Size").and_then(|size| size.parse().ok()).unwrap_or(0),
-            etag: unquote(&text("ETag").unwrap_or_default()),
-            modified_ms: text("LastModified").and_then(|t| iso_ms(&t)).unwrap_or(0),
+        entries.extend(text("Key").map(|key| {
+            Entry {
+                key,
+                size: text("Size").and_then(|size| size.parse().ok()).unwrap_or(0),
+                etag: unquote(&text("ETag").unwrap_or_default()),
+                // Cloud Storage lists each object's generation; on S3 the
+                // `ETag` is the version.
+                version: Version(
+                    text("Generation")
+                        .or_else(|| text("ETag"))
+                        .unwrap_or_default(),
+                ),
+                modified_ms: text("LastModified").and_then(|t| iso_ms(&t)).unwrap_or(0),
+            }
         }));
     }
     for common in elements(&xml, "CommonPrefixes") {

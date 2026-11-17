@@ -64,7 +64,60 @@ fn a_smaller_least_part_and_parts_dropped() {
         bucket.complete("k", &upload, &parts).await.unwrap();
         let (body, _) = bucket.get("k").await.unwrap().unwrap();
         assert_eq!(body, b"abc");
+        // The object is its two parts' blobs, uncopied; the unused part's is
+        // gone. A range reads across them.
         let count = |d: &str| std::fs::read_dir(dir.join(d)).unwrap().count();
-        assert_eq!((count("blobs"), count("tmp")), (1, 0));
+        assert_eq!((count("blobs"), count("tmp")), (2, 0));
+        let range = Some(Range::From {
+            offset: 1,
+            length: Some(2),
+        });
+        let (_, body) = bucket.read("k", range).await.unwrap().unwrap();
+        let body: Vec<_> = body.collect().await;
+        let body: Vec<u8> = body
+            .into_iter()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+            .concat();
+        assert_eq!(body, b"bc");
+        // A rewrite drops them both.
+        bucket.put("k", b"x".to_vec(), &[]).await.unwrap();
+        assert_eq!(count("blobs"), 1);
     });
+}
+
+#[test]
+fn an_upload_id_begin_could_not_have_made_is_no_upload() {
+    block_on(async {
+        let dir = dir();
+        let bucket = local(&dir, MIN_PART);
+        let upload = bucket.begin("k", &Headers::default(), &[]).await.unwrap();
+        // A copy of the upload record outside `uploads/`, which a path
+        // built from the ID would reach.
+        let record = std::fs::read(dir.join("uploads").join(&upload)).unwrap();
+        std::fs::write(dir.join("outside"), record).unwrap();
+        let absolute = dir.join("outside").display().to_string();
+        for id in ["../outside", &absolute, &upload.to_uppercase()] {
+            let refused = bucket.parts("k", id).await;
+            assert!(
+                matches!(&refused, Err(Error::Refused { status: 404, code, .. }) if code == "NoSuchUpload"),
+                "{id}: {refused:?}"
+            );
+        }
+        assert!(bucket.parts("k", &upload).await.unwrap().is_empty());
+    });
+}
+
+#[test]
+fn a_directory_is_one_stores() {
+    let dir = dir();
+    let first = Local::open(&dir, MIN_PART).unwrap();
+    let second = Local::open(&dir, MIN_PART);
+    assert!(
+        matches!(second, Err(Error::Config(_))),
+        "{:?}",
+        second.err()
+    );
+    drop(first);
+    Local::open(&dir, MIN_PART).unwrap();
 }

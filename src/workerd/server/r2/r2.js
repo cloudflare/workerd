@@ -236,6 +236,11 @@ function parse(text) {
 function key(k) {
   if (typeof k !== 'string') throw new Fail('InvalidMetadata');
   if (utf8Bytes(k).byteLength > MAX_KEY) throw new Fail('InvalidObjectName');
+  // A `.` or `..` segment could climb out of the bucket's directory in a
+  // store or proxy that resolves them; the bucket service refuses it too.
+  if (k.split('/').some((s) => s === '.' || s === '..')) {
+    throw new Fail('InvalidObjectName');
+  }
   return k;
 }
 
@@ -411,9 +416,7 @@ async function describe(o, range, include = { http: true, custom: true }) {
     // The store's version names the bytes this key holds now; R2's is 32
     // hex digits.
     version: hex(
-      new Uint8Array(
-        await crypto.subtle.digest('MD5', utf8Bytes(o.version ?? o.etag))
-      )
+      new Uint8Array(await crypto.subtle.digest('MD5', utf8Bytes(o.version)))
     ),
     size: o.size,
     etag: o.etag,
@@ -575,6 +578,7 @@ async function list(bucket, req) {
     key: strip(e.key),
     size: e.size,
     etag: e.etag,
+    version: e.version,
     uploaded: e.modified,
   }));
   // Metadata the listing doesn't carry is a HEAD of each object.

@@ -37,12 +37,16 @@ export const bucketsKeysAndMetadata = {
     const got = await env.BUCKET.get('k');
     assert.deepStrictEqual(got.customMetadata, { a: '1', é: 'ü' });
     assert.strictEqual(await (await env.SAME.get('k')).text(), 'hello');
+    // A listing names the version a head does.
+    const listed = (await env.BUCKET.list({ prefix: 'k' })).objects[0];
+    assert.strictEqual(listed.version, put.version);
     assert.strictEqual(await env.OTHER.get('k'), null);
-    const odd = 'a/b c?d=e&f%20é/..';
+    const odd = 'a/b c?d=e&f%20é/..x';
     await env.BUCKET.put(odd, 'odd');
     assert.strictEqual(await (await env.BUCKET.get(odd)).text(), 'odd');
     const star = new Headers({ 'if-none-match': '*' });
     assert.strictEqual(await env.BUCKET.put(odd, 'x', { onlyIf: star }), null);
+    await assert.rejects(env.BUCKET.put('a/../b', 'x'), /\(10020\)/);
     await env.BUCKET.delete([odd, 'k']);
     assert.strictEqual(await env.BUCKET.head(odd), null);
   },

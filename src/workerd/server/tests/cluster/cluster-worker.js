@@ -229,7 +229,12 @@ async function r2(url, bucket) {
       return Response.json({ size: got.size, length: value.length, right });
     }
     case '/r2/list': {
+      // Keys, each listed with the version a head answers.
       const listed = await bucket.list({ prefix: q.prefix });
+      for (const o of listed.objects) {
+        const head = await bucket.head(o.key);
+        if (head.version !== o.version) return Response.json({ o, head });
+      }
       return Response.json(listed.objects.map((o) => o.key));
     }
     case '/r2/delete':

@@ -320,7 +320,7 @@ export const keys = {
       '/a/foo.txt',
       'k//b',
       '//',
-      'x/../y',
+      'x/..y',
       'q?a=b&c',
       'sp ace+é',
       '%',
@@ -350,6 +350,14 @@ export const keys = {
       slashed.objects.map((o) => o.key),
       ['//', '/a/foo.txt']
     );
+    // A `.` or `..` segment could leave the binding's directory in a store
+    // or proxy that resolves it.
+    for (const key of ['x/../y', 'a/..', 'a/./b', '../..']) {
+      for (const r of [await put(B, key, key), await B.fetch(url(key))]) {
+        assert.strictEqual(r.status, 400, key);
+        await r.text();
+      }
+    }
   },
 };
 

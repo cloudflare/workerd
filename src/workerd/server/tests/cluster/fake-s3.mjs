@@ -569,6 +569,7 @@ export class FakeS3Server {
             `<Contents><Key>${escape(name)}</Key>` +
             `<LastModified>${o.lastModified.toISOString()}</LastModified>` +
             `<ETag>${escape(o.etag)}</ETag><Size>${o.body.length}</Size>` +
+            (this.#gcs ? `<Generation>${o.generation}</Generation>` : '') +
             '</Contents>'
           );
         })

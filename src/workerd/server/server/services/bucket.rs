@@ -387,6 +387,16 @@ impl BucketRequest {
         let key = percent_decode_str(path.strip_prefix('/').unwrap_or(path))
             .decode_utf8()
             .map_err(|_| refuse(400, "InvalidArgument", "the key is not UTF-8"))?;
+        // A binding reaches only its own directory, even through a store or
+        // proxy that resolves dot segments. Empty segments stay: R2 keys may
+        // be `a//b`, and collapsing them cannot leave the directory.
+        if key.split('/').any(|s| s == "." || s == "..") {
+            return Err(refuse(
+                400,
+                "InvalidArgument",
+                "a key has a . or .. segment",
+            ));
+        }
         let query: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
             .into_owned()
             .collect();
@@ -556,9 +566,15 @@ impl BucketRequest {
         let (after, delimiter, token) = (some("start-after"), some("delimiter"), some("token"));
         let page = self.0.bucket.page(prefix, after, delimiter, max, token);
         let page = page.await?;
-        let objects = page.entries.iter().map(
-            |e| json!({ "key": e.key, "size": e.size, "etag": e.etag, "modified": e.modified_ms }),
-        );
+        let objects = page.entries.iter().map(|e| {
+            json!({
+                "key": e.key,
+                "size": e.size,
+                "etag": e.etag,
+                "version": e.version.as_str(),
+                "modified": e.modified_ms,
+            })
+        });
         let objects: Vec<_> = objects.collect();
         let listed = json!({ "objects": objects, "prefixes": page.prefixes, "token": page.token });
         Ok(Reply::Json(200, listed))

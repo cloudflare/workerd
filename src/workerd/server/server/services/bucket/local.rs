@@ -5,26 +5,32 @@
 //! The store of a `bucket` service without a cluster: a directory on local
 //! disk, with S3's semantics.
 //!
+//! For development and tests, not production: see the last paragraph.
+//!
 //! - `objects/<md5 of key>`: an object's key, size, `ETag`, version, time,
-//!   content headers, user metadata and blob, as JSON. Named by digest: a
+//!   content headers, user metadata and blobs, as JSON. Named by digest: a
 //!   key may be longer than a file name, and S3 holds `a` and `a/b` at
 //!   once, which a file tree cannot. All are read into an index when the
 //!   store opens, so a listing reads no files.
 //! - `uploads/<id>`: a multipart upload's key, headers, metadata and parts.
 //! - `blobs/<id>`: an object's or a part's bytes. A blob is never rewritten:
-//!   a write takes a new one and removes the old.
+//!   a write takes a new one and removes the old. A multipart object is its
+//!   parts' blobs in order, so completing one copies nothing.
 //!
 //! Every file is written to `tmp/` first and renamed in, so a reader never
 //! sees a partial one. A version is random, so a guard naming an object's
-//! version fails once it is rewritten, even with the same bytes. Disk I/O
-//! is synchronous, as in the `disk` service, so each call is atomic on the
-//! loop thread; one process serves a directory.
+//! version fails once it is rewritten, even with the same bytes.
+//!
+//! Disk I/O is synchronous, as in the `disk` service, so each call is atomic
+//! on the loop thread, and a large write holds the loop while it lands. One
+//! process holds a directory (`lock`). That suits `workerd serve` and tests;
+//! a production store is the cluster's bucket.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::io::Seek;
-use std::io::Write;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
@@ -58,7 +64,8 @@ const CHUNK: usize = 64 << 10;
 struct Meta {
     key: String,
     object: Object,
-    blob: String,
+    /// Its bytes: blobs and their sizes, in order.
+    blobs: Vec<(String, u64)>,
 }
 
 /// A part of an upload: its `ETag`, size and blob.
@@ -78,6 +85,9 @@ pub struct Local {
     index: RefCell<BTreeMap<String, Meta>>,
     /// The least size of a part but the last, at completion.
     min_part: u64,
+    /// Held while open: the index is this process's alone, so a second
+    /// store of the directory would serve stale objects and drop live blobs.
+    _lock: std::fs::File,
 }
 
 fn random() -> String {
@@ -117,7 +127,7 @@ impl Meta {
         json!({
             "key": self.key, "size": o.size, "etag": o.etag, "version": o.version.as_str(),
             "modified": o.modified_ms, "headers": headers_json(&o.headers),
-            "metadata": o.metadata, "blob": self.blob,
+            "metadata": o.metadata, "blobs": self.blobs,
         })
     }
 
@@ -133,7 +143,7 @@ impl Meta {
                 metadata: metadata_of(&json["metadata"]),
                 range: None,
             },
-            blob: text(json, "blob"),
+            blobs: serde_json::from_value(json["blobs"].clone()).ok()?,
         })
     }
 }
@@ -167,6 +177,15 @@ impl Local {
         for dir in ["objects", "uploads", "blobs", "tmp"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
+        let lock = std::fs::File::create(root.join("lock"))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                let held = "in use by another process; one workerd may use a local store at a time";
+                return Err(Error::Config(held.into()));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
         let mut index = BTreeMap::new();
         for file in std::fs::read_dir(root.join("objects"))? {
             let json = serde_json::from_slice(&std::fs::read(file?.path())?);
@@ -178,6 +197,7 @@ impl Local {
             root: root.to_owned(),
             index: RefCell::new(index),
             min_part,
+            _lock: lock,
         })
     }
 
@@ -204,16 +224,22 @@ impl Local {
         let _ = std::fs::remove_file(self.path("blobs", id));
     }
 
+    fn drop_blobs(&self, blobs: &[(String, u64)]) {
+        for (id, _) in blobs {
+            self.drop_blob(id);
+        }
+    }
+
     fn object_file(key: &str) -> String {
         hex(&md5(key.as_bytes()))
     }
 
-    /// Writes the blob `blob` at `key` if `guard` holds; otherwise drops it.
+    /// Writes `blobs` at `key` if `guard` holds; otherwise drops them.
     fn store(
         &self,
         key: &str,
         mut object: Object,
-        blob: String,
+        blobs: Vec<(String, u64)>,
         guard: Option<&Guard>,
     ) -> Result<Option<Object>> {
         let current = self.index.borrow().get(key).cloned();
@@ -223,7 +249,7 @@ impl Local {
             _ => false,
         };
         if !holds {
-            self.drop_blob(&blob);
+            self.drop_blobs(&blobs);
             return Ok(None);
         }
         object.version = Version::new(random());
@@ -231,7 +257,7 @@ impl Local {
         let meta = Meta {
             key: key.to_owned(),
             object: object.clone(),
-            blob,
+            blobs,
         };
         self.save(
             "objects",
@@ -240,14 +266,18 @@ impl Local {
         )?;
         self.index.borrow_mut().insert(key.to_owned(), meta);
         if let Some(old) = current {
-            self.drop_blob(&old.blob);
+            self.drop_blobs(&old.blobs);
         }
         Ok(Some(object))
     }
 
-    /// Upload `id` of `key`.
+    /// Upload `id` of `key`. An ID is user input (`resumeMultipartUpload`),
+    /// so one `begin` couldn't have made is refused before it is a path.
     fn upload(&self, key: &str, id: &str) -> Result<Upload> {
-        let json = std::fs::read(self.path("uploads", id)).ok();
+        let ours = id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        let json = ours
+            .then(|| std::fs::read(self.path("uploads", id)).ok())
+            .flatten();
         let json: Option<Json> = json.and_then(|j| serde_json::from_slice(&j).ok());
         let upload = json.as_ref().and_then(Upload::of).filter(|u| u.key == key);
         upload.ok_or_else(|| refused(format!("UPLOAD {key}"), 404, "NoSuchUpload"))
@@ -266,21 +296,23 @@ impl Local {
     }
 }
 
-/// The chunks of `length` bytes of `file`, from where it is.
-fn chunks(file: std::fs::File, length: u64) -> Body {
-    let read = move |(mut file, left): (std::fs::File, u64)| async move {
-        if left == 0 {
-            return None;
-        }
-        let n = usize::try_from(left).map_or(CHUNK, |n| n.min(CHUNK));
+/// The chunks of each file's bytes, from where it is, in turn.
+fn chunks(files: Vec<(std::fs::File, u64)>) -> Body {
+    let read = |mut files: VecDeque<_>| async move {
+        let (file, left): &mut (std::fs::File, u64) = files.front_mut()?;
+        let n = usize::try_from(*left).map_or(CHUNK, |n| n.min(CHUNK));
         let mut chunk = vec![0; n];
-        Some(match file.read_exact(&mut chunk) {
-            Ok(()) => (Ok(Bytes::from(chunk)), (file, left - n as u64)),
+        if let Err(e) = file.read_exact(&mut chunk) {
             // An error ends the body.
-            Err(e) => (Err(Error::Io(e)), (file, 0)),
-        })
+            return Some((Err(Error::Io(e)), VecDeque::new()));
+        }
+        *left -= n as u64;
+        if *left == 0 {
+            files.pop_front();
+        }
+        Some((Ok(Bytes::from(chunk)), files))
     };
-    futures::stream::unfold((file, length), read).boxed_local()
+    futures::stream::unfold(files.into_iter().collect(), read).boxed_local()
 }
 
 fn new_object(size: u64, etag: String, headers: &Headers, metadata: &[(String, String)]) -> Object {
@@ -301,16 +333,13 @@ impl Store for Local {
         let Some(meta) = self.index.borrow().get(key).cloned() else {
             return Ok(None);
         };
-        let blob = self.path("blobs", &meta.blob);
-        let body = match to {
-            Some(to) => {
-                // Not `fs::copy`: its `copy_file_range` doesn't link against
-                // the arm64 Linux sysroot.
-                std::fs::write(to, std::fs::read(blob)?)?;
-                Vec::new()
-            }
-            None => std::fs::read(blob)?,
-        };
+        let mut body = Vec::new();
+        for (id, _) in &meta.blobs {
+            body.extend(std::fs::read(self.path("blobs", id))?);
+        }
+        if let Some(to) = to {
+            std::fs::write(to, std::mem::take(&mut body))?;
+        }
         Ok(Some((body, meta.object.version)))
     }
 
@@ -341,7 +370,7 @@ impl Store for Local {
     async fn delete(&self, key: &str) -> Result<()> {
         if let Some(meta) = self.index.borrow_mut().remove(key) {
             let _ = std::fs::remove_file(self.path("objects", &Self::object_file(key)));
-            self.drop_blob(&meta.blob);
+            self.drop_blobs(&meta.blobs);
         }
         Ok(())
     }
@@ -352,7 +381,7 @@ impl Store for Local {
 
     async fn read(&self, key: &str, range: Option<Range>) -> Result<Option<(Object, Body)>> {
         let Some(Meta {
-            mut object, blob, ..
+            mut object, blobs, ..
         }) = self.index.borrow().get(key).cloned()
         else {
             return Ok(None);
@@ -364,11 +393,19 @@ impl Store for Local {
                 .ok_or_else(|| refused(format!("GET {key}"), 416, "InvalidRange"))?,
         };
         object.range = range.map(|_| (offset, length));
-        // Opened now, so a write that replaces the object meanwhile does not
-        // change what this read answers.
-        let mut file = std::fs::File::open(self.path("blobs", &blob))?;
-        file.seek(std::io::SeekFrom::Start(offset))?;
-        Ok(Some((object, chunks(file, length))))
+        // The blobs the range spans, opened now, so a write that replaces
+        // the object meanwhile does not change what this read answers.
+        let (mut files, mut at, end) = (Vec::new(), 0, offset + length);
+        for (id, size) in blobs {
+            let (from, to) = (offset.max(at), end.min(at + size));
+            if from < to {
+                let mut file = std::fs::File::open(self.path("blobs", &id))?;
+                file.seek(std::io::SeekFrom::Start(from - at))?;
+                files.push((file, to - from));
+            }
+            at += size;
+        }
+        Ok(Some((object, chunks(files))))
     }
 
     /// A token is the last key or common prefix of its page.
@@ -413,6 +450,7 @@ impl Store for Local {
                     key: key.clone(),
                     size: o.size,
                     etag: o.etag.clone(),
+                    version: o.version.clone(),
                     modified_ms: o.modified_ms,
                 });
                 last = Some(key.clone());
@@ -431,9 +469,9 @@ impl Store for Local {
     ) -> Result<Option<Written>> {
         let body = bytes(body)?;
         let etag = hex(&md5(&body));
-        let blob = self.put_blob(&body)?;
+        let blobs = vec![(self.put_blob(&body)?, body.len() as u64)];
         let object = new_object(body.len() as u64, etag, headers, metadata);
-        let stored = self.store(key, object, blob, guard.as_ref())?;
+        let stored = self.store(key, object, blobs, guard.as_ref())?;
         Ok(stored.map(|o| Written {
             version: Some(o.version),
             etag: o.etag,
@@ -495,21 +533,23 @@ impl Store for Local {
             }
             chosen.push((etag, *size, blob));
         }
-        // The parts' bytes, concatenated into a new blob.
-        let id = random();
-        let temp = self.path("tmp", &id);
-        let mut out = std::fs::File::create(&temp)?;
-        let mut digests = Vec::new();
-        for (etag, _, blob) in &chosen {
-            out.write_all(&std::fs::read(self.path("blobs", blob))?)?;
-            digests.extend(cluster::unhex(etag).unwrap_or_default());
-        }
-        drop(out);
-        std::fs::rename(&temp, self.path("blobs", &id))?;
-        let etag = format!("{}-{}", hex(&md5(&digests)), parts.len());
+        let digests = chosen
+            .iter()
+            .flat_map(|p| cluster::unhex(p.0).unwrap_or_default());
+        let etag = format!(
+            "{}-{}",
+            hex(&md5(&digests.collect::<Vec<_>>())),
+            parts.len()
+        );
         let size = chosen.iter().map(|p| p.1).sum();
+        let blobs = chosen.iter().map(|p| (p.2.clone(), p.1)).collect();
         let object = new_object(size, etag.clone(), &state.headers, &state.metadata);
-        let stored = self.store(key, object, id, None)?;
+        let stored = self.store(key, object, blobs, None)?;
+        // The object now holds the chosen parts' blobs; the rest go.
+        let mut state = state;
+        state
+            .parts
+            .retain(|n, _| !parts.iter().any(|(p, _)| p == n));
         self.forget(upload, &state);
         Ok(Written {
             version: stored.as_ref().map(|o| o.version.clone()),

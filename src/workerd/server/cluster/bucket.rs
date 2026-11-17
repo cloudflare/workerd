@@ -14,7 +14,7 @@ pub use crate::http::Payload;
 /// The identity of one stored version of an object: what a conditional
 /// write names to replace exactly that version: an S3 `ETag`, a Cloud
 /// Storage generation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Version(pub(crate) String);
 
 impl Version {
@@ -44,6 +44,8 @@ pub struct Entry {
     pub size: u64,
     /// As `Object::etag`.
     pub etag: String,
+    /// As `Object::version`: the version a `head` would answer.
+    pub version: Version,
     pub modified_ms: u64,
 }
 
@@ -645,10 +647,11 @@ pub mod memory {
         async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
             let objects = self.objects.borrow();
             let listed = objects.iter().filter(|(key, _)| key.starts_with(prefix));
-            let listed = listed.map(|(key, (body, _, modified_ms))| Entry {
+            let listed = listed.map(|(key, (body, version, modified_ms))| Entry {
                 key: key.clone(),
                 size: body.len() as u64,
                 etag: crate::hex(&crate::md5(body)),
+                version: version.clone(),
                 modified_ms: *modified_ms,
             });
             Ok(listed.collect())
