@@ -395,6 +395,18 @@ impl_error_constructors! {
     ReferenceError => new_reference_error,
 }
 
+impl Error {
+    /// The `TypeError` for a callback whose `this` is not a wrapper of its resource, with the
+    /// message that C++ JSG and V8's signature check throw (`kIllegalInvocation`).
+    pub fn new_illegal_invocation() -> Self {
+        Self::new_type_error(
+            "Illegal invocation: function called with incorrect `this` reference. See \
+             https://developers.cloudflare.com/workers/observability/errors/\
+             #illegal-invocation-errors for details.",
+        )
+    }
+}
+
 impl<'s> FromJS<'s> for Error {
     type ResultType = Self;
 
