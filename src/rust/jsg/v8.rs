@@ -251,7 +251,6 @@ pub mod ffi {
         pub unsafe fn local_new_object_with_null_prototype(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
-        pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;
         pub unsafe fn local_new_uint8_array(
             isolate: *mut Isolate,
             data: *const u8,
@@ -2404,13 +2403,6 @@ impl_local_cast!(BigInt64Array: TypedArray, ArrayBufferView, Object, Value; is_b
 impl_local_cast!(BigUint64Array: TypedArray, ArrayBufferView, Object, Value; is_biguint64_array);
 
 impl Array {
-    /// Creates a new JavaScript array with the given length.
-    pub fn new<'s>(lock: &mut crate::Lock<'s>, len: usize) -> Local<'s, Self> {
-        let isolate = lock.isolate();
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe { Local::from_ffi(ffi::local_new_array(isolate.as_ffi(), len)) }
-    }
-
     /// Creates a new JavaScript array of `elements`.
     ///
     /// Runs no JavaScript: unlike [`Local::<Array>::set`], it calls no setter that a script
