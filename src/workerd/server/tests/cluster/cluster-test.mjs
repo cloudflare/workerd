@@ -109,7 +109,7 @@ const SIGTERM_DRAINS = {
 
 // cluster-test.wd-test divides the times that takeovers and stops wait out by
 // this (`unsafeTimeDivisor`).
-const TIME_DIVISOR = 4;
+const TIME_DIVISOR = 2;
 // How long a node's lease lasts: a dead owner's DOs wait this long.
 const LEASE_MS = 20_000 / TIME_DIVISOR;
 // How long a stopping node accepts requests at least.
@@ -297,10 +297,12 @@ class ClusterNode {
     this.#httpPort = await portPromise;
   }
 
+  // Signals the node and resolves to how it exited. The process stays this
+  // node's until it exits, so a later stop, such as withCluster's SIGKILL
+  // after a test failed, reaches a node that is still draining.
   async stop({ signal = 'SIGTERM', timeoutMs = 10_000 } = {}) {
     if (this.#child === null) return null;
     const child = this.#child;
-    this.#child = null;
     child.kill(signal);
 
     const killTimer = setTimeout(() => {
@@ -313,10 +315,20 @@ class ClusterNode {
 
     const result = await this.#closed;
     clearTimeout(killTimer);
-    this.#httpPort = null;
-    this.#clusterPort = null;
+    if (this.#child === child) {
+      this.#child = null;
+      this.#httpPort = null;
+      this.#clusterPort = null;
+    }
     return result;
   }
+}
+
+// The status `GET /ready` on a node's cluster port answers, or `undefined`
+// once nothing listens there.
+async function ready(port) {
+  return (await fetch(`http://127.0.0.1:${port}/ready`).catch(() => null))
+    ?.status;
 }
 
 // Fetches `path` from the given node and parses the JSON response. When
@@ -577,9 +589,9 @@ async function withCluster(
     }
     await fn({ nodes, bucket, nodeKeys });
   } finally {
-    // Kill all nodes, some of which the test may have stopped already: a
-    // drain, which keeps accepting requests for seconds, is for the tests
-    // that check it to wait out.
+    // Kill all nodes, some of which the test may have stopped already, and
+    // any it left draining: a drain, which keeps accepting requests for
+    // seconds, is for the tests that check it to wait out.
     await Promise.all(
       nodes.map((node) =>
         node.stop({ signal: 'SIGKILL', timeoutMs: 5000 }).catch(() => {})
@@ -854,15 +866,15 @@ test(
       const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
       const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
 
-      // A slow request keeps the owner draining for longer than the peer has
-      // to claim the DO in, half the owner's lease.
+      // A slow request keeps the owner draining, and so holding its lease,
+      // until it is answered: within the 5 s that a drain lets requests in
+      // flight run for.
       const holding = fetchJson(
         owner.httpPort,
-        `/increment?name=hold&delay=${LEASE_MS / 2 + 1_000}`,
+        '/increment?name=hold&delay=4000',
         { timeoutMs: 20_000 }
-      );
+      ).then((response) => ({ ...response, at: Date.now() }));
       await sleep(250);
-      const drainedAt = Date.now();
       const exitPromise = owner.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
 
       // The owner hands the idle DO off as soon as it drains: the peer claims
@@ -875,8 +887,13 @@ test(
       assert.strictEqual(response.status, 200, JSON.stringify(response.body));
       assert.strictEqual(response.body.nodeId, peer.nodeId);
       assert.strictEqual(response.body.count, 2);
-      assert(Date.now() - drainedAt < LEASE_MS / 2);
-      await holding.catch(() => {});
+      const claimedAt = Date.now();
+      const held = await holding;
+      assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+      assert(
+        claimedAt < held.at,
+        `the peer claimed the DO ${claimedAt - held.at} ms after the owner's last request`
+      );
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
     });
   }
@@ -912,11 +929,12 @@ test(
       const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
       const drainMs = Date.now() - drainedAt;
       assert.deepStrictEqual(exit, { code: 0, signal: null });
-      // Not until the requests in flight are cancelled, 5 s in.
-      assert(drainMs < 4_000, `the drain took ${drainMs} ms`);
+      // Its grace period, and not until the requests in flight are
+      // cancelled, 5 s in.
+      assert(drainMs < 4_500, `the drain took ${drainMs} ms`);
       const { status, ms } = await evicted;
       assert.strictEqual(status, 500);
-      assert(ms < 4_000, `the eviction failed after ${ms} ms`);
+      assert(ms < 4_500, `the eviction failed after ${ms} ms`);
     });
   }
 );
@@ -1380,7 +1398,7 @@ for (const dialect of ['s3', 'gcs']) {
           },
         ]);
         await node.waitForStderr(resent, 5000);
-        // Until the stalled write has been answered, and a few rounds past it.
+        // Until the stalled write has been answered, and a round past it.
         await sleep(4000);
         assert.deepStrictEqual(await bucket.faultHits(), [1]);
         const since = node.stderr.slice(armed);
@@ -2029,6 +2047,46 @@ test(
 );
 
 test(
+  'cluster: nodes opening and handing off many DOs at once keep their leases',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes }) => {
+        // Opening this many DOs at once, and then taking them over, keeps a
+        // node's event loop busy for a second or more in a slow build.
+        const names = Array.from({ length: 64 }, (_, i) => `many-${i}`);
+        const send = (node) =>
+          Promise.all(
+            names.map((name) =>
+              fetchJson(node.httpPort, `/increment?name=${name}`, {
+                timeoutMs: 20_000,
+              }).catch((e) => ({ status: 0, body: { error: String(e) } }))
+            )
+          );
+        for (const response of await send(nodes[0])) {
+          assert.strictEqual(response.status, 200, JSON.stringify(response));
+          assert.strictEqual(response.body.nodeId, nodes[0].nodeId);
+        }
+        // Once node 0 drains, node 1 takes the DOs over.
+        const port = nodes[0].clusterPort;
+        const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 30_000 });
+        while ((await ready(port)) === 200) await sleep(20);
+        for (const response of await send(nodes[1])) {
+          assert.strictEqual(response.status, 200, JSON.stringify(response));
+          assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
+          assert.strictEqual(response.body.count, 2);
+        }
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        await sleep(1000);
+        assert.doesNotMatch(nodes[1].stderr, /leaving the cluster/);
+      },
+      { configName: 'shortStop' }
+    );
+  }
+);
+
+test(
   'cluster: requests to a DO of a stopping node wait for its handoff and follow it',
   SIGTERM_DRAINS,
   async () => {
@@ -2396,8 +2454,6 @@ test(
   'cluster: a rolling restart under load loses and replays no request',
   SIGTERM_DRAINS,
   async () => {
-    const ready = async (port) =>
-      (await fetch(`http://127.0.0.1:${port}/ready`).catch(() => null))?.status;
     await withCluster(3, async ({ nodes }) => {
       const names = Array.from({ length: 6 }, (_, i) => `rolled-${i}`);
       let serving = [0, 1, 2];

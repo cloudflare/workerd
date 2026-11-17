@@ -3,8 +3,8 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 # One suite, split by test name: cluster-test, and cluster-cron-test, whose
 # config runs a cron trigger. cluster-test runs in shards, each of which
 # should stay well under 60 s: each test starts a cluster of its own, which
-# takes a second under TSan, the takeovers wait out a dead owner's lease, a
-# quarter of the default in cluster-test.wd-test, and the drain tests wait
+# takes a second under TSan, the takeovers wait out a dead owner's lease,
+# half the default in cluster-test.wd-test, and the drain tests wait
 # out stop deadlines. Add takeovers to the simulations instead.
 [js_test(
     name = name,
@@ -36,6 +36,6 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
     shard_count = shards,
     tags = ["js-test"],
 ) for name, tests, config, shards in [
-    ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 5),
+    ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 8),
     ("cluster-cron-test", "^cluster: a cron", "cluster-cron.wd-test", 1),
 ]]
