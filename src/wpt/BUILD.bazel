@@ -358,3 +358,9 @@ wpt_test(
     extra_wpt_directories = ["@wpt//:html/webappapis/structured-clone@module"],
     wpt_directory = "@wpt//:html/webappapis/structured-clone@module",
 )
+
+wpt_test(
+    name = "xhr/formdata",
+    config = "xhr/formdata-test.ts",
+    wpt_directory = "@wpt//:xhr/formdata@module",
+)
