@@ -1923,13 +1923,43 @@ size_t workerInfoSize(const Onset::WorkerInfo& info) {
   return size;
 }
 
+size_t attributeValueSize(const Attribute::Value& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      return string.size();
+    }
+    KJ_CASE_ONEOF(_, bool) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(_, double) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(_, int64_t) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(array, AttributeStringArray) {
+      size_t size = array.size() * sizeof(array[0]);
+      for (auto& element: array) {
+        KJ_IF_SOME(string, element) {
+          size += string.size();
+        }
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF(array, AttributeBoolArray) {
+      return array.size() * sizeof(array[0]);
+    }
+    KJ_CASE_ONEOF(array, AttributeDoubleArray) {
+      return array.size() * sizeof(array[0]);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 size_t attributeSize(const Attribute& attribute) {
   size_t size = sizeof(attribute) + attribute.name.size();
   for (auto& value: attribute.value) {
-    size += sizeof(value);
-    KJ_IF_SOME(string, value.tryGet<kj::ConstString>()) {
-      size += string.size();
-    }
+    size += sizeof(value) + attributeValueSize(value);
   }
   return size;
 }
