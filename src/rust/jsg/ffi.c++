@@ -45,7 +45,7 @@ namespace workerd::rust::jsg {
 // not always check them against the buffer, so a view that does not lie within its buffer is
 // empty here, as it is for jsg::JsBufferSource.
 static kj::ArrayPtr<uint8_t> viewBytes(v8::Local<v8::ArrayBufferView> view) {
-  auto buffer = view->Buffer();
+  auto buffer = view->GetBuffer();
   auto byteOffset = view->ByteOffset();
   auto byteLength = view->ByteLength();
   auto bufferLength = buffer->ByteLength();
@@ -337,8 +337,11 @@ bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
 
 MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+  auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+  if (v8Value->IsString()) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8Value.As<v8::String>()));
+  }
+  return maybe_local_to_ffi(v8Value->ToString(isolate->GetCurrentContext()));
 }
 
 MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
@@ -573,6 +576,30 @@ MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
 }
 
 // Local<Object>
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> keys) {
+  kj::Vector<std::string_view> names(keys.size());
+  for (auto key: keys) {
+    names.add(std::string_view(key.data(), key.size()));
+  }
+  auto tmpl = v8::DictionaryTemplate::New(
+      isolate, std::span<const std::string_view>(names.begin(), names.size()));
+  return to_ffi(v8::Global<v8::DictionaryTemplate>(isolate, tmpl));
+}
+
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<MaybeLocal> values) {
+  // V8 doesn't allow creating the object while an exception or a termination is pending (a debug
+  // check fails).
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
+  // The values are an array in the caller's stack frame, which has the layout of
+  // `v8::MaybeLocal` (asserted in ffi-inl.h), so they are passed on without being copied.
+  auto v8Values =
+      std::span(reinterpret_cast<v8::MaybeLocal<v8::Value>*>(values.data()), values.size());
+  auto object = global_as_ref_from_ffi<v8::DictionaryTemplate>(tmpl).Get(isolate)->NewInstance(
+      isolate->GetCurrentContext(), v8Values);
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(object));
+}
+
 MaybeLocal object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values) {
   KJ_REQUIRE(keys.size() == values.size());
@@ -601,6 +628,17 @@ bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   return v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
 }
 
+bool local_object_set_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name, Local value) {
+  if (exceptionPending(isolate)) return false;
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return v8_obj
+      ->Set(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate),
+          local_from_ffi<v8::Value>(kj::mv(value)))
+      .IsJust();
+}
+
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
   if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
@@ -623,6 +661,15 @@ MaybeLocal local_object_get_property_by_name(
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
+}
+
+MaybeLocal local_object_get_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return maybe_local_to_ffi(
+      v8_obj->Get(context, global_as_ref_from_ffi<v8::Name>(name).Get(isolate)));
 }
 
 bool local_object_get_own_property_names(
@@ -706,10 +753,6 @@ bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, cons
 }
 
 // Local<Array>
-Local local_new_array(Isolate* isolate, size_t length) {
-  return to_ffi(v8::Array::New(isolate, length));
-}
-
 uint32_t local_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::Array>(array)->Length();
 }
@@ -770,6 +813,12 @@ uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
+  auto buf = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  byteLength = buf->ByteLength();
+  return byteLength == 0 ? 0 : reinterpret_cast<uintptr_t>(buf->Data());
+}
+
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
@@ -785,7 +834,8 @@ size_t local_array_buffer_view_byte_length(const Local& view) {
 }
 
 uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
-  return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
+  return static_cast<uint8_t*>(
+      local_as_ref_from_ffi<v8::ArrayBufferView>(view)->GetBuffer()->Data());
 }
 
 uintptr_t local_array_buffer_view_data(const Local& view, size_t& byte_length) {
@@ -1130,7 +1180,7 @@ size_t local_typed_array_length(const Local& array) {
 
 uintptr_t local_typed_array_buffer_data(const Local& array) {
   return reinterpret_cast<uintptr_t>(
-      local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
+      local_as_ref_from_ffi<v8::TypedArray>(array)->GetBuffer()->Data());
 }
 
 size_t local_typed_array_byte_offset(const Local& array) {
@@ -1197,6 +1247,16 @@ kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {
 
 void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
+}
+
+bool wrappable_is_condemned(const Wrappable& wrappable) {
+  return wrappable.isCondemned();
+}
+
+bool wrappable_try_condemn(Wrappable& wrappable) {
+  if (!wrappable.isCondemned()) return false;
+  wrappable.condemn();
+  return true;
 }
 
 void wrappable_remove_strong_ref(Wrappable& wrappable) {
@@ -1335,6 +1395,14 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
+void fci_set_return_number(FunctionCallbackInfo* args, double value) {
+  args->GetReturnValue().Set(value);
+}
+
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value) {
+  args->GetReturnValue().Set(value);
+}
+
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
@@ -1354,6 +1422,14 @@ Local pci_get_this(PropertyCallbackInfo* info) {
 
 void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
   info->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+void pci_set_return_number(PropertyCallbackInfo* info, double value) {
+  info->GetReturnValue().Set(value);
+}
+
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value) {
+  info->GetReturnValue().Set(value);
 }
 
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info) {

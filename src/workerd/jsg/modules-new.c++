@@ -653,14 +653,37 @@ class IsolateModuleRegistry final {
     // Note: Takes v8::Local<v8::Module> and const Module& directly rather than
     // Entry& for the same reason as require()'s evaluate lambda — the lookupCache
     // table may rehash during evaluate(), invalidating Entry& references.
-    static constexpr auto evaluate =
-        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
-            const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate) {
+    static constexpr auto evaluate = [](Lock& js, v8::Local<v8::Module> module,
+                                         const Module& moduleDef,
+                                         const CompilationObserver& observer,
+                                         const Module::Evaluator& maybeEvaluate) -> Promise<Value> {
+      // A module is still kEvaluating when it is reached from its own evaluation, as when a
+      // chain of dynamic imports in top-level code imports an ancestor back. V8 aborts the
+      // process if asked to evaluate it again, so resolve to its namespace now, as the original
+      // registry does. Its bindings are read later, once the evaluation in progress has unwound,
+      // since nested evaluation never drains the microtask queue.
+      if (module->GetStatus() == v8::Module::kEvaluating) {
+        return js.resolvedPromise(js.v8Ref(module->GetModuleNamespace()));
+      }
       return js
           .toPromise(
               check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
           .then(js, [module = js.v8Ref(module)](Lock& js, Value) mutable -> Promise<Value> {
         return js.resolvedPromise(js.v8Ref(module.getHandle(js)->GetModuleNamespace()));
+      });
+    };
+
+    // Retries a failed link after the current evaluation stack unwinds. Nested evaluation
+    // never drains the microtask queue. Capture only the module handle: nothing borrowed
+    // from the registry may outlive this call.
+    static constexpr auto evaluateDeferred = [](Lock& js, v8::Local<v8::Module> module) {
+      return js.resolvedPromise().then(
+          js, [module = js.v8Ref(module)](Lock& js) mutable -> Promise<Value> {
+        auto handle = module.getHandle(js);
+        auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
+        auto& entry = KJ_ASSERT_NONNULL(registry.lookup(js, handle));
+        return evaluate(
+            js, handle, entry.module, registry.getObserver(), registry.inner.getEvaluator());
       });
     };
 
@@ -732,8 +755,24 @@ class IsolateModuleRegistry final {
           return js.rejectedPromise<Value>(v8Module->GetException());
         }
 
-        auto evaluatePromise =
-            evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
+        bool deferEvaluation = false;
+        if (v8Module->GetStatus() == v8::Module::kUninstantiated && js.isEvaluatingModule()) {
+          // Linking can reach an evaluating dependency even when the target is not evaluating.
+          // Preserve inline evaluation for graphs that link now. Retry failed links once from
+          // a microtask; permanent link errors then reject the import with their own exception.
+          JSG_TRY(js) {
+            if (!moduleDef.instantiate(js, v8Module, getObserver())) {
+              throw JsExceptionThrown();
+            }
+          }
+          JSG_CATCH(exception KJ_UNUSED) {
+            // JSG_CATCH rethrows termination rather than deferring it.
+            deferEvaluation = true;
+          }
+        }
+        auto evaluatePromise = deferEvaluation
+            ? evaluateDeferred(js, v8Module)
+            : evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
         auto isWasm = moduleDef.isWasm();
 
         if (!sourcePhase) {

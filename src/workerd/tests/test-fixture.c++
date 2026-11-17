@@ -471,7 +471,7 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
-          [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
+          [](kj::Rc<Worker::Actor::HibernationManager>& m) { return m.addRef(); }),
       /*hibernationEventType=*/kj::none, /*container=*/kj::none,
       /*containerImages=*/jsg::Dict<kj::String>{}, /*facetManager=*/kj::none,
       /*version=*/kj::none, savedHolderToken,

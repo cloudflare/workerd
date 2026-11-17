@@ -2,15 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// The generic form of `jsg_traced!` gives `X<T>` a `trace` that visits nothing, so it covers
-// `X<T>` only where `T` holds no GC references. Otherwise a `TracedGlobal` or `jsg::Rc` inside
-// it would never be visited: it would stay strong, and a cycle through it would never be
+// The generic form of `jsg_traced_unchecked!` gives `X<T>` a `trace` that visits nothing, so it
+// covers `X<T>` only where `T` holds no GC references. Otherwise a `TracedGlobal` or `jsg::Rc`
+// inside it would never be visited: it would stay strong, and a cycle through it would never be
 // collected.
 use jsg::v8;
 use jsg_macros::jsg_resource;
 
 pub struct Slot<T>(T);
-jsg::jsg_traced!(<T> Slot<T>);
+jsg::jsg_traced_unchecked!(<T> Slot<T>);
 
 #[jsg_resource]
 struct Leaf;

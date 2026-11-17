@@ -121,7 +121,7 @@ standard-streams machinery changes nothing the suite pins).
 | `buffer-lifecycle.js` | consume-at-write: post-write mutation/detach invisible; detached/out-of-bounds typed-array and DataView views hash as empty; lying metadata getters never consulted |
 | `pipe-integration.js` | pipeTo from user streams; TransformStream chain; Response body |
 | `large-payload.js` | 1MB+ chunk digesting |
-| `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC |
+| `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC; a GC inside the close sink of a dropped stream is safe |
 | `reentrancy.js` | staged thenable-check matrix (ledger #3); write issued from a write continuation preserves accumulation order; options-bag getter re-entering the constructor is safe and its value is honored |
 | `backpressure.js` | desiredSize counts and recovers (parity); ready settled |
 | `legacy-shape.js` | unflagged era: `[object Object]`; digest as own instance property (no prototype accessor); bytesWritten stays a bigint prototype accessor; flow unchanged |

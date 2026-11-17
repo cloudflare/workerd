@@ -257,6 +257,15 @@ void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callb
   });
 }
 
+void TestHarness::take_realm_templates() const {
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    for (auto& handle:
+        ::workerd::rust::jsg::realm_take_resource_templates(*KJ_ASSERT_NONNULL(realm))) {
+      ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)).Reset();
+    }
+  });
+}
+
 void terminate_and_deliver(Isolate* isolate) {
   isolate->TerminateExecution();
   // The loop's stack check delivers the termination: V8 throws the termination exception and

@@ -15,18 +15,23 @@
 ///
 /// `Traced` requires `Send`, so a generic type implements it only where it is `Send`.
 ///
+/// For a concrete type the claim is not checked: `jsg_traced_unchecked!(Foo)` compiles even if
+/// `Foo` holds a `TracedGlobal`. It is for a type whose fields can't implement
+/// `HoldsNoGcReferences`, such as one from outside JSG. A struct whose fields all can uses
+/// `#[jsg_macros::jsg_traced]`, which checks them.
+///
 /// # Example
 ///
 /// ```ignore
-/// use jsg::jsg_traced;
+/// use jsg::jsg_traced_unchecked;
 ///
 /// struct Id(u64);
 /// struct Slot<T>(std::sync::Arc<T>);
-/// jsg_traced!(Id);
-/// jsg_traced!(<T> Slot<T>);
+/// jsg_traced_unchecked!(Id);
+/// jsg_traced_unchecked!(<T> Slot<T>);
 /// ```
 #[macro_export]
-macro_rules! jsg_traced {
+macro_rules! jsg_traced_unchecked {
     (<$($g:ident $(: $b:path)?),+ $(,)?> $t:ty) => {
         impl<$($g: $crate::HoldsNoGcReferences $(+ $b)?),+> $crate::Traced for $t
         where

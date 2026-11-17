@@ -221,8 +221,7 @@ async fn start(
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        control.listen_cluster(&listener)?;
-        start_cluster(&factory, node, listener);
+        start_cluster(&factory, node, listener, &mut control).await?;
     }
     for (name, port) in ports {
         control.listen(&name, port);
@@ -246,8 +245,19 @@ async fn start(
 }
 
 /// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for
-/// the life of the process; a lease the instance cannot keep ends it.
-fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio::net::TcpListener) {
+/// the life of the process; a lease the instance cannot keep ends it. The lease is renewed first,
+/// so that the first maintenance round finds it held however long startup took since `join`.
+async fn start_cluster(
+    factory: &Rc<Factory>,
+    node: &Rc<ClusterNode>,
+    listener: tokio::net::TcpListener,
+    control: &mut Control,
+) -> Result<()> {
+    node.cluster
+        .renew_to_serve()
+        .await
+        .map_err(|e| kj::failed!("renewing the cluster lease to serve: {e}"))?;
+    control.listen_cluster(&listener)?;
     factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move {
@@ -261,6 +271,7 @@ fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio:
     factory.spawn_detached(async move { cluster.tier_loop().await });
     let node = Rc::clone(node);
     factory.spawn_detached(async move { node.alarms_loop().await });
+    Ok(())
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).

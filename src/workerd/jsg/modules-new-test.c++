@@ -1866,6 +1866,28 @@ KJ_TEST("Recursive import works or fails as expected") {
 
 // ======================================================================================
 
+KJ_TEST("Dynamic import of a module that is still evaluating resolves to its namespace") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // foo is still evaluating when bar, which foo imports dynamically from its top-level code,
+    // dynamically imports foo back. V8 aborts the process if asked to evaluate foo again.
+    bundleBuilder.addEsmModule("foo", "export const bar = import('bar'); export default 1;"_kjc);
+    bundleBuilder.addEsmModule("bar", "export const foo = import('foo'); export default 2;"_kjc);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    auto val = ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
+    KJ_ASSERT(val.isNumber());
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (dynamic import)") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;
@@ -2103,6 +2125,39 @@ KJ_TEST("A throwing module evaluation does not leak the evaluation depth") {
       auto num = KJ_ASSERT_NONNULL(val.tryCast<JsNumber>());
       KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 1.0);
     }, [&](Value exception) { KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js))); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Dynamic imports retry linking after their dependency finishes evaluating") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+    bundleBuilder.addEsmModule("entry",
+        "export const a = 1;\n"
+        "export const p = Promise.all([import('chunk'), import('chunk')]).then(([a, b]) => {\n"
+        "  if (a !== b) throw new Error('different module instances');\n"
+        "  return a.b;\n"
+        "});\n"_kjc,
+        Module::Flags::MAIN);
+    bundleBuilder.addEsmModule(
+        "chunk", "import { a } from 'entry';\nawait 0;\nexport const b = a + 1;\n"_kjc);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    JSG_TRY(js) {
+      // The depth-0 drain must finish both the retried link and its top-level await.
+      auto p = ModuleRegistry::resolve(js, "file:///entry", "p"_kjc);
+      auto promise = KJ_ASSERT_NONNULL(p.tryCast<JsPromise>());
+      KJ_ASSERT(promise.state() == PromiseState::FULFILLED, kj::str(promise.result()));
+      auto num = KJ_ASSERT_NONNULL(promise.result().tryCast<JsNumber>());
+      KJ_ASSERT(KJ_ASSERT_NONNULL(num.value(js)) == 2.0);
+    }
+    JSG_CATCH(exception) {
+      KJ_FAIL_ASSERT("resolve threw", kj::str(exception.getHandle(js)));
+    }
   });
 }
 

@@ -127,6 +127,38 @@ const unitTests :Workerd.Config = (
           (name = "circular-b", commonJsModule = "module.exports = require('circular-c')"),
           (name = "circular-c", esModule = "import b from 'circular-b'; export default b;"),
 
+          # A new graph cannot link while its static dependency is still evaluating.
+          # Both imports must retry after entry finishes and share one module instance.
+          (name = "link-cycle-entry",
+           esModule = "export const a = 1;\nexport const chunk = import('link-cycle-chunk');\nexport const again = import('link-cycle-chunk');\n"),
+          (name = "link-cycle-chunk",
+           esModule = "import { a } from 'link-cycle-entry';\nexport const b = a + 1;\n"),
+          (name = "link-cycle-tla-entry",
+           esModule = "export const a = 1;\nexport const chunk = import('link-cycle-tla-chunk');\n"),
+          (name = "link-cycle-tla-chunk",
+           esModule = "import { a } from 'link-cycle-tla-entry';\nawait 0;\nexport const b = a + 2;\n"),
+
+          # The retried work may fail during evaluation, after an await, or during linking.
+          (name = "link-cycle-throw-entry",
+           esModule = "export const chunk = import('link-cycle-throw-chunk');\nchunk.catch(() => {});\n"),
+          (name = "link-cycle-throw-chunk",
+           esModule = "import 'link-cycle-throw-entry';\nthrow new Error('deferred boom');\n"),
+          (name = "link-cycle-tla-throw-entry",
+           esModule = "export const chunk = import('link-cycle-tla-throw-chunk');\nchunk.catch(() => {});\n"),
+          (name = "link-cycle-tla-throw-chunk",
+           esModule = "import 'link-cycle-tla-throw-entry';\nawait 0;\nthrow new Error('deferred tla boom');\n"),
+          (name = "link-cycle-error-entry",
+           esModule = "export const chunk = import('link-cycle-error-chunk');\nchunk.catch(() => {});\n"),
+          (name = "link-cycle-error-chunk",
+           esModule = "import { nope } from 'link-cycle-error-entry';\nexport const b = nope;\n"),
+
+          # Synchronous require cannot defer the same graph and must still reject it.
+          (name = "require-cycle-entry",
+           esModule = "import 'require-cycle-cjs';\nexport default 1;\n"),
+          (name = "require-cycle-cjs", commonJsModule = "require('require-cycle-esm');"),
+          (name = "require-cycle-esm",
+           esModule = "import 'require-cycle-entry';\nexport default 1;\n"),
+
           # An ESM that statically imports an unparseable specifier, to exercise
           # the static-import "Invalid module specifier" path.
           (name = "static-invalid-spec", esModule = "import 'https://'; export default 1;"),
