@@ -50,8 +50,9 @@ test('a config named on the command line is loaded into `s`', async () => {
   assert.strictEqual(code, 0, stderr);
   assert(stdout.startsWith('ReplServer {'), stdout);
   assert.strictEqual(results.at(-1), "'hello'", stdout);
-  // The load is shown as the input it is.
-  assert(stderr.includes('> s = await workerd.loadConfig('), stderr);
+  // Without a terminal, the REPL shows no banner or prompts, so stderr holds only what went
+  // wrong, and nothing did.
+  assert.strictEqual(stderr, '');
 });
 
 test('the command line can name the config constant', async () => {

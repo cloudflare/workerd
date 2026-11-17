@@ -6,8 +6,9 @@
 //! is finished, and has the session evaluate it. On a terminal (Unix only) it edits lines with
 //! [`Editor`], whose history starts with the history file's and is saved to it
 //! ([`HistoryFile`]); otherwise it reads lines as they come, which is how a test drives it.
-//! Prompts and the console's own messages go to stderr and results to stdout, so that stdout
-//! holds only what the inputs produced.
+//! Results go to stdout, so that stdout holds only what the inputs produced, and the console's own
+//! messages to stderr. So do its banner and prompts, but only when stdin is a terminal, where
+//! someone types: a script that pipes input in sees only what went wrong on stderr.
 
 use std::io;
 use std::io::BufRead;
@@ -83,17 +84,23 @@ fn is_interactive() -> bool {
 
 /// Runs the console until the input ends or `.exit`, sending `requests` to the session; the
 /// session ends when the console drops them. `first_input`, if any, runs before the first prompt,
-/// shown as if typed at it. Whether an input failed, or reading the input did.
+/// shown as if typed at it when prompting. Whether an input failed, or reading the input did.
 pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>) -> bool {
-    eprintln!("{BANNER}");
+    let prompting = io::stdin().is_terminal();
+    if prompting {
+        eprintln!("{BANNER}");
+    }
     let mut console = Console {
         requests,
         input: String::new(),
         scanner: Scanner::default(),
         failed: false,
+        prompting,
     };
     if let Some(input) = first_input {
-        eprintln!("{PROMPT}{input}");
+        if prompting {
+            eprintln!("{PROMPT}{input}");
+        }
         if console.evaluate(input) == Next::Exit {
             return console.failed;
         }
@@ -126,6 +133,8 @@ struct Console {
     /// An input failed: it threw, timed out, or was left unfinished, the session could not
     /// evaluate it, or it is no command.
     failed: bool,
+    /// Show the banner and prompts: stdin is a terminal.
+    prompting: bool,
 }
 
 impl Console {
@@ -186,11 +195,15 @@ impl Console {
         let stdin = io::stdin();
         let mut line = Vec::new();
         loop {
-            prompt(self.prompt());
+            if self.prompting {
+                prompt(self.prompt());
+            }
             line.clear();
             if stdin.lock().read_until(b'\n', &mut line)? == 0 {
-                // End the prompt's line, for the shell's next prompt.
-                eprintln!();
+                if self.prompting {
+                    // End the prompt's line, for the shell's next prompt.
+                    eprintln!();
+                }
                 return Ok(());
             }
             let text = String::from_utf8_lossy(&line);
