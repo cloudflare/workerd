@@ -1886,4 +1886,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-12-16");
   # Enables delivery of UDP flows to the Worker's connect() handler and exposes the global
   # Datagram constructor and Socket.prototype.protocol. The protocol reports "tcp" or "udp".
+
+  formDataStandard @211 :Bool
+      $compatEnableFlag("formdata_standard")
+      $compatDisableFlag("formdata_legacy")
+      $compatEnableDate("2026-12-08");
+  # Makes FormData follow the XMLHttpRequest spec in three places:
+  #
+  # - `new FormData(form)` throws a TypeError for any argument other than `undefined`, since
+  #   Workers have no HTMLFormElement. Without the flag, arguments are ignored.
+  # - A Blob added with `append()` or `set()` without a filename becomes a File named "blob", which
+  #   is also the filename sent in a multipart body. Without the flag, it is named after the entry.
+  # - A File added with a new filename keeps its `lastModified`. Without the flag, it is set to the
+  #   current time.
 }
