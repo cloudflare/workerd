@@ -63,6 +63,9 @@ void HeapTracer::clearWrappers() {
   while (!unwrapped.empty()) {
     unbind(unwrapped.front());
   }
+  // Entries still queued here have just been detached above. Release them now, while the isolate
+  // is still locked.
+  detachLater.clear();
   clearFreelistedShims();
 }
 
@@ -440,7 +443,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
   // if the wrappable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
-  detachLater.add(&wrappable);
+  detachLater.add(kj::addRef(wrappable));
 }
 
 void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {

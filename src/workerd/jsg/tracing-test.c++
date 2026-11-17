@@ -112,6 +112,51 @@ class ValueBox: public jsg::Object {
   }
 };
 
+class NestedGcLeaf: public jsg::Object {
+  // Counts its own destruction.
+
+ public:
+  ~NestedGcLeaf() noexcept(false) {
+    ++destroyedCount;
+  }
+
+  static jsg::Ref<NestedGcLeaf> constructor(jsg::Lock& js) {
+    return js.alloc<NestedGcLeaf>();
+  }
+
+  static inline uint destroyedCount = 0;
+
+  JSG_RESOURCE_TYPE(NestedGcLeaf) {}
+};
+
+class NestedGcTrigger: public jsg::Object {
+  // Holds a value, and on destruction releases it and runs a minor GC. When a minor GC collects
+  // this object's wrapper, the destructor runs inside that GC's epilogue, so the GC it starts is
+  // nested in the epilogue.
+
+ public:
+  NestedGcTrigger(jsg::Value inner): inner(kj::mv(inner)) {}
+
+  ~NestedGcTrigger() noexcept(false) {
+    inner = kj::none;
+    v8::Isolate::GetCurrent()->RequestGarbageCollectionForTesting(
+        v8::Isolate::kMinorGarbageCollection, v8::StackState::kNoHeapPointers);
+  }
+
+  static jsg::Ref<NestedGcTrigger> constructor(jsg::Lock& js, jsg::Value inner) {
+    return js.alloc<NestedGcTrigger>(kj::mv(inner));
+  }
+
+  kj::Maybe<jsg::Value> inner;
+
+  JSG_RESOURCE_TYPE(NestedGcTrigger) {}
+
+ private:
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(inner);
+  }
+};
+
 struct TraceTestContext: public Object, public ContextGlobal {
   kj::Maybe<jsg::Ref<NumberBox>> strongRef;
   // A strong reference to a NumberBox which may be get and set.
@@ -140,6 +185,10 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
+  uint getNestedGcLeavesDestroyed() {
+    return NestedGcLeaf::destroyedCount;
+  }
+
   void assert_(bool condition, jsg::Optional<kj::String> message) {
     JSG_ASSERT(condition, Error, message.orDefault(nullptr));
   }
@@ -149,8 +198,11 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(NumberBoxHolder);
     JSG_NESTED_TYPE(GcDetector);
     JSG_NESTED_TYPE(ValueBox);
+    JSG_NESTED_TYPE(NestedGcLeaf);
+    JSG_NESTED_TYPE(NestedGcTrigger);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
+    JSG_METHOD(getNestedGcLeavesDestroyed);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -162,7 +214,9 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBoxHolder,
     GcDetector,
     GcDetectorBox,
-    ValueBox);
+    ValueBox,
+    NestedGcLeaf,
+    NestedGcTrigger);
 
 KJ_TEST("GC collects objects when expected") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
@@ -266,6 +320,26 @@ KJ_TEST("GC collects objects when expected") {
     assert(b.siblingCollected, "minor GC did not collect jsg::Value");
   )",
       "undefined", "undefined");
+}
+
+KJ_TEST("minor GC nested in the GC epilogue detaches the wrappers it collects") {
+  // The outer minor GC collects the trigger's wrapper. Detaching it in the epilogue destroys the
+  // trigger, which releases the array of leaves and runs a nested minor GC that collects the
+  // leaves' wrappers. V8 skips the nested GC's epilogue, so the outer epilogue must also detach
+  // the leaves, whose ResetRoot() calls arrive while it is already detaching. There are enough
+  // leaves to make the pending list reallocate.
+  NestedGcLeaf::destroyedCount = 0;
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  e.expectEval(R"(
+    // Without the IIFE, a hidden reference to the trigger may be left on the stack.
+    (() => {
+      new NestedGcTrigger(Array.from({length: 1000}, () => new NestedGcLeaf()));
+    })();
+    gc({type: "minor"});
+    getNestedGcLeavesDestroyed()
+  )",
+      "number", "1000");
 }
 
 KJ_TEST("TracedReference usage does not lead to crashes") {
