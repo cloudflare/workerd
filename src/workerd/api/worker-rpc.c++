@@ -61,34 +61,14 @@ capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler:
   return result;
 }
 
-namespace {
-
-kj::Promise<void> pushDelayedChannelTokenWhenReady(kj::Promise<kj::Array<byte>> token,
-    rpc::JsValue::ExternalPusher::Client pusher,
-    kj::Own<kj::PromiseFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>>
-        fulfiller) {
-  KJ_TRY {
-    auto bytes = co_await token;
-    auto req = pusher.pushDelayedChannelTokenRequest(
-        capnp::MessageSize{4 + bytes.size() / sizeof(capnp::word), 0});
-    req.setToken(bytes);
-    fulfiller->fulfill(req.send().getCap());
-  }
-  KJ_CATCH(exception) {
-    fulfiller->reject(exception.clone());
-    kj::throwFatalException(kj::mv(exception));
-  }
-}
-
-}  // namespace
-
 rpc::JsValue::ExternalPusher::DelayedChannelToken::Client RpcSerializerExternalHandler::
     pushDelayedChannelToken(kj::Promise<kj::Array<byte>> token) {
-  auto paf =
-      kj::newPromiseAndFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-  pendingExternals.add(
-      pushDelayedChannelTokenWhenReady(kj::mv(token), getExternalPusher(), kj::mv(paf.fulfiller)));
-  return kj::mv(paf.promise);
+  // The capability owns the push, so a returned stub stays usable after the sending request ends.
+  // The pending event keeps hang detection from canceling the request while the token is produced.
+  auto cap = sendDelayedChannelToken(
+      getExternalPusher(), token.attach(IoContext::current().registerPendingEvent()));
+  pendingExternals.add(cap.whenResolved());
+  return cap;
 }
 
 namespace {
