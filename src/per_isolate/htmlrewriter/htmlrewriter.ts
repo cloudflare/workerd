@@ -61,6 +61,8 @@ import type { WebIdlHelpers } from '../webidl';
 const {
   Error,
   FunctionPrototypeCall,
+  HeadersGet,
+  IteratorPrototype,
   ObjectDefineProperties,
   ObjectDefineProperty,
   ObjectFreeze,
@@ -70,13 +72,17 @@ const {
   PromisePrototypeThen,
   PromiseReject,
   PromiseResolve,
+  ResponseBodyGet,
+  ResponseCtor,
+  ResponseHeadersGet,
+  ResponsePrototype,
+  ResponseTypeGet,
   Symbol,
   SymbolIterator,
   SymbolToStringTag,
   TypeError,
   TypedArrayPrototypeGetByteLength,
   Uint8Array,
-  captureJsgGetter,
   uncurryThis,
 } = primordials;
 
@@ -105,7 +111,8 @@ if (maybeNative === undefined) {
 const native: HtmlRewriterUtils = maybeNative;
 
 // Whichever streams implementation main.ts installed before loading this
-// module; the identity pipe's ends are its streams.
+// module; the identity pipe's ends are its streams. Not primordials, which
+// are captured before main.ts installs the TypeScript streams.
 type Writer = WritableStreamDefaultWriter<Uint8Array>;
 const WritableStreamGetWriter = uncurryThis(
   globalThis.WritableStream.prototype.getWriter
@@ -119,30 +126,6 @@ const WriterClose = uncurryThis(
 const WriterAbort = uncurryThis(
   globalThis.WritableStreamDefaultWriter.prototype.abort
 ) as (writer: Writer, reason?: unknown) => Promise<void>;
-
-const ResponseCtor = globalThis.Response;
-const ResponseProto = ResponseCtor.prototype;
-const ResponseTypeGet = captureJsgGetter<(response: Response) => string>(
-  ResponseProto,
-  'type'
-);
-const ResponseHeadersGet = captureJsgGetter<(response: Response) => Headers>(
-  ResponseProto,
-  'headers'
-);
-const ResponseBodyGet = captureJsgGetter<
-  (response: Response) => ReadableStream | null
->(ResponseProto, 'body');
-const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
-  headers: Headers,
-  name: string
-) => string | null;
-
-// %IteratorPrototype%, which the attributes iterator inherits from, as the
-// C++ one does through JSG_INHERIT_INTRINSIC.
-const IteratorPrototype: object = ObjectGetPrototypeOf(
-  ObjectGetPrototypeOf(function* () {}.prototype)
-);
 
 // JSG's messages, so that misuse reads the same as with the C++ classes.
 const kIllegalInvocation =
@@ -208,7 +191,7 @@ function argumentError(
 function isResponse(value: unknown): value is Response {
   if (!isObject(value)) return false;
   for (let proto = ObjectGetPrototypeOf(value); proto !== null;) {
-    if (proto === ResponseProto) return true;
+    if (proto === ResponsePrototype) return true;
     proto = ObjectGetPrototypeOf(proto);
   }
   return false;
@@ -824,6 +807,8 @@ class AttributesIterator {
     return iteratorState(this) as this;
   }
 }
+
+// %IteratorPrototype%, as the C++ one inherits through JSG_INHERIT_INTRINSIC.
 ObjectSetPrototypeOf(AttributesIterator.prototype, IteratorPrototype);
 
 const kElementProperties = ObjectFreeze({

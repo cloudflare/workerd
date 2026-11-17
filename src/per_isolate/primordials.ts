@@ -690,6 +690,24 @@ const TextDecoderIgnoreBOMGet = captureJsgGetter<
   (decoder: TextDecoder) => boolean
 >(TextDecoderCtor.prototype, 'ignoreBOM');
 
+const ResponseCtor = globalThis.Response;
+const ResponsePrototype = ResponseCtor.prototype;
+const ResponseTypeGet = captureJsgGetter<(response: Response) => string>(
+  ResponsePrototype,
+  'type'
+);
+const ResponseHeadersGet = captureJsgGetter<(response: Response) => Headers>(
+  ResponsePrototype,
+  'headers'
+);
+const ResponseBodyGet = captureJsgGetter<
+  (response: Response) => ReadableStream | null
+>(ResponsePrototype, 'body');
+const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
+  headers: Headers,
+  name: string
+) => string | null;
+
 // Freeze the exports object to prevent accidental mutation by bootstrap scripts.
 // Uses the captured ObjectFreeze, not the potentially-polluted global.
 module.exports = ObjectFreeze({
@@ -893,6 +911,14 @@ module.exports = ObjectFreeze({
   TextDecoderIgnoreBOMGet,
   TextEncoderEncode,
   TextDecoderDecode,
+
+  // Response/Headers
+  ResponseCtor,
+  ResponsePrototype,
+  ResponseTypeGet,
+  ResponseHeadersGet,
+  ResponseBodyGet,
+  HeadersGet,
 
   // Safe types - use normal method syntax, resistant to prototype pollution
   SafeMap,
