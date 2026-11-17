@@ -111,6 +111,11 @@ class UtilModule final: public jsg::Object {
 
   jsg::JsString getConstructorName(jsg::Lock& js, jsg::JsObject value);
 
+  // Makes serializing `value`, an instance of a class implemented in src/node, throw
+  // DataCloneError, as the per-isolate bootstrap's markUncloneable() does. Without the mark,
+  // structuredClone() copies such an instance as a plain object of its own properties.
+  void markUncloneable(jsg::Lock& js, jsg::JsObject value);
+
   struct CallSiteEntry {
     kj::String functionName;
     kj::String scriptName;
@@ -147,6 +152,7 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(getProxyDetails);
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
+    JSG_METHOD(markUncloneable);
     JSG_METHOD(getCallSites);
 
     JSG_NESTED_TYPE(Performance);
