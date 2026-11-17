@@ -6136,10 +6136,10 @@ export const transcodeFromUTF16OddByteInputTest = {
   },
 };
 
-// Pins down the substitution behaviour of the ICU-backed pairs, which the
-// C++ and Rust implementations must agree on. workerd's ICU data aliases
-// 'us-ascii' and 'iso8859-1' to windows-1252, so for these pairs (unlike
-// Node.js, and unlike 'latin1' -> 'utf16le') both encodings are windows-1252.
+// Pins down the substitution behaviour of the ICU-backed pairs. workerd's ICU
+// data aliases 'us-ascii' and 'iso8859-1' to windows-1252, so for these pairs
+// (unlike Node.js, and unlike 'latin1' -> 'utf16le') both encodings are
+// windows-1252.
 export const transcodeSubstitutionTest = {
   test() {
     const bytes = (buf) => [...buf];
