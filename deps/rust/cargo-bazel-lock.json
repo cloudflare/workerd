@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "eb9ab79751c275672f5b39535545a7891464446ef52bbffe2e1e34e60eb284e5",
+  "checksum": "a70ae414c0d5e65f409a4db2b6eb2acdb15cda96f3fa9804b7174ffa2915c6fd",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -1010,7 +1010,7 @@
       ],
       "version": "1.13.1"
     },
-    "bumpalo 3.20.3": {
+    "bumpalo 3.20.4": {
       "common_attrs": {
         "crate_features": [
           "allocator-api2",
@@ -1035,8 +1035,8 @@
       "package_url": "https://github.com/fitzgen/bumpalo",
       "repository": {
         "Http": {
-          "sha256": "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649",
-          "url": "https://static.crates.io/crates/bumpalo/3.20.3/download"
+          "sha256": "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db",
+          "url": "https://static.crates.io/crates/bumpalo/3.20.4/download"
         }
       },
       "targets": [
@@ -1047,7 +1047,7 @@
           }
         }
       ],
-      "version": "3.20.3"
+      "version": "3.20.4"
     },
     "bytes 1.12.1": {
       "common_attrs": {
@@ -2908,7 +2908,7 @@
             "target": "lolhtml"
           },
           {
-            "id": "nix 0.31.3",
+            "id": "nix 0.32.0",
             "target": "nix"
           },
           {
@@ -7225,7 +7225,7 @@
       ],
       "version": "1.0.6"
     },
-    "nix 0.31.3": {
+    "nix 0.32.0": {
       "build_script_attrs": {
         "deps": [
           {
@@ -7270,8 +7270,8 @@
       "package_url": "https://github.com/nix-rust/nix",
       "repository": {
         "Http": {
-          "sha256": "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d",
-          "url": "https://static.crates.io/crates/nix/0.31.3/download"
+          "sha256": "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc",
+          "url": "https://static.crates.io/crates/nix/0.32.0/download"
         }
       },
       "targets": [
@@ -7288,7 +7288,7 @@
           }
         }
       ],
-      "version": "0.31.3"
+      "version": "0.32.0"
     },
     "notify 8.2.2": {
       "common_attrs": {
@@ -7310,7 +7310,7 @@
               "target": "log"
             },
             {
-              "id": "notify-types 2.3.0",
+              "id": "notify-types 2.3.1",
               "target": "notify_types"
             },
             {
@@ -7399,7 +7399,7 @@
       ],
       "version": "8.2.2"
     },
-    "notify-types 2.3.0": {
+    "notify-types 2.3.1": {
       "common_attrs": {
         "deps": [
           {
@@ -7420,8 +7420,8 @@
       "package_url": "https://github.com/notify-rs/notify.git",
       "repository": {
         "Http": {
-          "sha256": "8c491a384baf9fec20df565cdb8138a12809d4c7439763b566eb8114c5d59979",
-          "url": "https://static.crates.io/crates/notify-types/2.3.0/download"
+          "sha256": "cbd044e85df3d939d8e32a1c35a3b737c7d0a4eeb7acd737bd207644e00f4e5f",
+          "url": "https://static.crates.io/crates/notify-types/2.3.1/download"
         }
       },
       "targets": [
@@ -7432,7 +7432,7 @@
           }
         }
       ],
-      "version": "2.3.0"
+      "version": "2.3.1"
     },
     "num-bigint 0.4.8": {
       "common_attrs": {
@@ -11399,7 +11399,7 @@
             "target": "allocator_api2"
           },
           {
-            "id": "bumpalo 3.20.3",
+            "id": "bumpalo 3.20.4",
             "target": "bumpalo"
           },
           {
@@ -11762,7 +11762,7 @@
       ],
       "version": "30.0.2"
     },
-    "swc_ecma_codegen 33.0.0": {
+    "swc_ecma_codegen 33.0.2": {
       "common_attrs": {
         "deps": [
           {
@@ -11818,7 +11818,7 @@
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_utils 36.1.0",
+            "id": "swc_ecma_utils 36.1.1",
             "target": "swc_ecma_utils"
           },
           {
@@ -11843,8 +11843,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "4bb171b30bb7f179894e985085be5561cfef4b035a58d4ea51a2310570d4d9bc",
-          "url": "https://static.crates.io/crates/swc_ecma_codegen/33.0.0/download"
+          "sha256": "9a43ff5dc87e695cfa251e346df018b62d47a7db87e487c6254df4e28509ede7",
+          "url": "https://static.crates.io/crates/swc_ecma_codegen/33.0.2/download"
         }
       },
       "targets": [
@@ -11855,7 +11855,7 @@
           }
         }
       ],
-      "version": "33.0.0"
+      "version": "33.0.2"
     },
     "swc_ecma_codegen_macros 2.0.2": {
       "common_attrs": {
@@ -12022,7 +12022,7 @@
       ],
       "version": "47.0.2"
     },
-    "swc_ecma_transforms_base 51.0.2": {
+    "swc_ecma_transforms_base 51.0.3": {
       "common_attrs": {
         "deps": [
           {
@@ -12070,7 +12070,7 @@
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_utils 36.1.0",
+            "id": "swc_ecma_utils 36.1.1",
             "target": "swc_ecma_utils"
           },
           {
@@ -12093,8 +12093,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "0a3086e42c44eb333f3d6d37a39abb1d168b32ffbf6e6f4413388b6af25e41b5",
-          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/51.0.2/download"
+          "sha256": "68c154a1557d8c32aac0891321b273b7f4c313a55ad7cc97f7b3114da9cb6b77",
+          "url": "https://static.crates.io/crates/swc_ecma_transforms_base/51.0.3/download"
         }
       },
       "targets": [
@@ -12105,7 +12105,7 @@
           }
         }
       ],
-      "version": "51.0.2"
+      "version": "51.0.3"
     },
     "swc_ecma_transforms_react 57.0.2": {
       "common_attrs": {
@@ -12168,11 +12168,11 @@
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.2",
+            "id": "swc_ecma_transforms_base 51.0.3",
             "target": "swc_ecma_transforms_base"
           },
           {
-            "id": "swc_ecma_utils 36.1.0",
+            "id": "swc_ecma_utils 36.1.1",
             "target": "swc_ecma_utils"
           },
           {
@@ -12239,7 +12239,7 @@
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.2",
+            "id": "swc_ecma_transforms_base 51.0.3",
             "target": "swc_ecma_transforms_base"
           },
           {
@@ -12247,7 +12247,7 @@
             "target": "swc_ecma_transforms_react"
           },
           {
-            "id": "swc_ecma_utils 36.1.0",
+            "id": "swc_ecma_utils 36.1.1",
             "target": "swc_ecma_utils"
           },
           {
@@ -12280,7 +12280,7 @@
       ],
       "version": "57.0.3"
     },
-    "swc_ecma_utils 36.1.0": {
+    "swc_ecma_utils 36.1.1": {
       "common_attrs": {
         "deps": [
           {
@@ -12343,8 +12343,8 @@
       "package_url": "https://github.com/swc-project/swc.git",
       "repository": {
         "Http": {
-          "sha256": "b59b32185a6e5dabfc087ab27fbab048f64dfd73e8290aa339a4aaffcb8fb439",
-          "url": "https://static.crates.io/crates/swc_ecma_utils/36.1.0/download"
+          "sha256": "c5e753a61f04b7ac33f6c6a896cff766e45e28d5dff1f656e8158a153bdee0c3",
+          "url": "https://static.crates.io/crates/swc_ecma_utils/36.1.1/download"
         }
       },
       "targets": [
@@ -12355,7 +12355,7 @@
           }
         }
       ],
-      "version": "36.1.0"
+      "version": "36.1.1"
     },
     "swc_ecma_visit 30.0.0": {
       "common_attrs": {
@@ -12599,7 +12599,7 @@
             "target": "swc_ecma_ast"
           },
           {
-            "id": "swc_ecma_codegen 33.0.0",
+            "id": "swc_ecma_codegen 33.0.2",
             "target": "swc_ecma_codegen"
           },
           {
@@ -12607,7 +12607,7 @@
             "target": "swc_ecma_parser"
           },
           {
-            "id": "swc_ecma_transforms_base 51.0.2",
+            "id": "swc_ecma_transforms_base 51.0.3",
             "target": "swc_ecma_transforms_base"
           },
           {
@@ -14425,7 +14425,7 @@
       "common_attrs": {
         "deps": [
           {
-            "id": "bumpalo 3.20.3",
+            "id": "bumpalo 3.20.4",
             "target": "bumpalo"
           },
           {
@@ -15870,7 +15870,7 @@
     "libm 0.2.16",
     "libz-rs-sys 0.6.8",
     "lol_html_c_api 1.4.0",
-    "nix 0.31.3",
+    "nix 0.32.0",
     "notify 8.2.2",
     "percent-encoding 2.3.2",
     "pico-args 0.5.0",

@@ -14,13 +14,13 @@ bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.5.2")
+bazel_dep(name = "aspect_rules_js", version = "3.6.1")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.7.2")
+bazel_dep(name = "bazel_lib", version = "3.8.0")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
@@ -98,10 +98,10 @@ bazel_dep(name = "rules_multirun", version = "0.14.0")
 bazel_dep(name = "rules_nodejs", version = "6.7.7")
 
 # rules_oci
-bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_oci", version = "2.3.5")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.4.6")
+bazel_dep(name = "rules_python", version = "2.5.1")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.75.0")
@@ -116,7 +116,7 @@ single_version_override(
 )
 
 # rules_shell
-bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "rules_shell", version = "0.10.0")
 
 # rust_nightly
 RUST_NIGHTLY_VERSION = "nightly/2026-07-16"
