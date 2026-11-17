@@ -119,7 +119,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   streamsJavaScriptControllers @6 :Bool
       $compatEnableFlag("streams_enable_constructors")
       $compatEnableDate("2022-11-30")
-      $compatDisableFlag("streams_disable_constructors");
+      $compatDisableFlag("streams_disable_constructors")
+      $impliedByAfterDate(name = "outboundUdpSockets", date = "2000-01-01");
   # Controls the availability of the work in progress new ReadableStream() and
   # new WritableStream() constructors backed by JavaScript underlying sources
   # and sinks.
@@ -1847,4 +1848,5 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of
   # Uint8Array, with one chunk per packet. Also selects this chunk type for UDP ingress.
+  # The opt-in enables JavaScript stream constructors on older compatibility dates.
 }

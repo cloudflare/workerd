@@ -4,7 +4,8 @@ const config :Workerd.Config = (
   services = [
     (name = "main", worker = (
       modules = [(name = "index.mjs", esModule = embed "index.mjs")],
-      compatibilityDate = "2026-09-01",
+      # The UDP opt-in must supply its stream dependency even on the oldest compatibility date.
+      compatibilityDate = "2000-01-01",
       compatibilityFlags = ["outbound_udp_sockets"],
       globalOutbound = "network",
       bindings = [(name = "OBJECT", durableObjectNamespace = (className = "Sender"))],

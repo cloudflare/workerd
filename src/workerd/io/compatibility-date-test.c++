@@ -121,6 +121,9 @@ KJ_TEST("compatibility flag parsing") {
   };
 
   expectCompileCompatibilityFlags("2021-05-17", {}, "()");
+  expectCompileCompatibilityFlags("2000-01-01", {"outbound_udp_sockets"_kj},
+      "(streamsJavaScriptControllers = true, outboundUdpSockets = true)", {},
+      CompatibilityDateValidation::FUTURE_FOR_TEST, false, true);
 
   expectCompileCompatibilityFlags("2021-11-02", {}, "(formDataParserSupportsFiles = false)");
   expectCompileCompatibilityFlags("2021-11-03", {}, "(formDataParserSupportsFiles = true)");
@@ -681,6 +684,7 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     "enableCtxExports"_kj,                         // 2025-11-17 (Monday)
 
     // Non-conformant dates via impliedByAfterDate
+    "streamsJavaScriptControllers"_kj,   // 2000-01-01 (Saturday), UDP opt-in on all dates
     "pythonWorkers"_kj,                  // 2000-01-01 (Saturday) via impliedByAfterDate
     "nodeJsCompatV2"_kj,                 // 2024-09-23 (Monday) via impliedByAfterDate
     "nodeJsZlib"_kj,                     // 2024-09-23 (Monday) via impliedByAfterDate
