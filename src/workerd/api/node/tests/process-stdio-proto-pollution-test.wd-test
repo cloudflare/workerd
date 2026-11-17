@@ -1,0 +1,56 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "process-stdio-proto-get",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "get")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "process-stdio-proto-set",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "set")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "process-stdio-proto-value",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "value")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "process-stdio-proto-writable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "writable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "process-stdio-proto-enumerable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "enumerable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "process-stdio-proto-configurable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "configurable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "process-stdio-proto-pollution-test.js"),
+];
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2",
+];

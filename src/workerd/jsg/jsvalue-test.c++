@@ -99,6 +99,42 @@ struct JsValueContext: public ContextGlobalObject {
     return kj::str(object);
   }
 
+  // Checks that writeInto(), given a buffer of `size` elements and `flags`, copies as many of the
+  // string's characters as fit, then a terminator if NULL_TERMINATION is set; that it reports the
+  // characters as read and everything it wrote as written; and that it leaves the rest of the
+  // buffer, and a guard element just past it, untouched.
+  bool checkWriteIntoPrefix(Lock& js, JsString str, uint32_t size, uint32_t flags) {
+    auto options = static_cast<JsString::WriteFlags>(flags);
+    size_t terminator = (size > 0 && (options & JsString::NULL_TERMINATION)) ? 1 : 0;
+    size_t read = kj::min(size - terminator, static_cast<size_t>(str.length(js)));
+    size_t written = read + terminator;
+    auto contents = str.toArray<uint16_t>(js);
+
+    auto utf16 = kj::heapArray<uint16_t>(size + 1);
+    utf16.asPtr().fill(0xffff);
+    auto utf16Status = str.writeInto(js, utf16.first(size), options);
+    KJ_ASSERT(utf16Status.read == read);
+    KJ_ASSERT(utf16Status.written == written);
+    KJ_ASSERT(utf16.first(read) == contents.first(read));
+    if (terminator) {
+      KJ_ASSERT(utf16[read] == 0);
+    }
+    for (auto unit: utf16.slice(written)) KJ_ASSERT(unit == 0xffff);
+
+    auto latin1 = kj::heapArray<kj::byte>(size + 1);
+    latin1.asPtr().fill(0xff);
+    auto latin1Status = str.writeInto(js, latin1.first(size), options);
+    KJ_ASSERT(latin1Status.read == read);
+    KJ_ASSERT(latin1Status.written == written);
+    for (auto i: kj::zeroTo(read)) KJ_ASSERT(latin1[i] == kj::byte(contents[i]));
+    if (terminator) {
+      KJ_ASSERT(latin1[read] == 0);
+    }
+    for (auto byte: latin1.slice(written)) KJ_ASSERT(byte == 0xff);
+
+    return true;
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -117,6 +153,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
     JSG_METHOD(describeWithErrorSlots);
+    JSG_METHOD(checkWriteIntoPrefix);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -177,6 +214,18 @@ KJ_TEST("kj::str() describes an object by the error name and message it holds") 
   e.expectEval("describeWithErrorSlots(new Error('other'), 'AbortError', undefined)", "string",
       "Error: other");
   e.expectEval("describeWithErrorSlots(new Error('other'), 42, 'boom')", "string", "Error: other");
+}
+
+KJ_TEST("JsString::writeInto() writes and reports only the prefix that fits") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  for (auto str: {"'h\\u00e9llo'"_kj, "'h\\u20acllo'"_kj}) {
+    for (auto size: {0, 1, 3, 5, 6, 8}) {
+      for (uint32_t flags: {JsString::NONE, JsString::NULL_TERMINATION}) {
+        e.expectEval(
+            kj::str("checkWriteIntoPrefix(", str, ", ", size, ", ", flags, ")"), "boolean", "true");
+      }
+    }
+  }
 }
 
 KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getPrototype") {

@@ -56,6 +56,10 @@ int HibernatableWebSocketAdapter::getReadyState() {
   unimplemented();
 }
 
+double HibernatableWebSocketAdapter::getBufferedAmount() {
+  unimplemented();
+}
+
 kj::Maybe<kj::StringPtr> HibernatableWebSocketAdapter::getUrl() {
   unimplemented();
 }

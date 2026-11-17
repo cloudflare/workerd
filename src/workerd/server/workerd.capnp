@@ -449,6 +449,9 @@ struct Service {
 
     bucket @6 :ClusterBucket;
     # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
+
+    assets @7 :AssetsService;
+    # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -466,6 +469,37 @@ struct ClusterBucket {
 
   path @0 :Text;
   # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
+}
+
+struct AssetsService {
+  # Static assets, as Cloudflare serves a Worker's `assets` (wrangler's `assets` config): each
+  # request goes to the user Worker or to a file of the directory, as `run_worker_first` and the
+  # files ask. Files are looked up as each request arrives, so a change to the directory is seen
+  # at once. A directory is never an asset, nor is a file `.assetsignore` ignores, which by
+  # default are `_headers`, `_redirects` and `.assetsignore` themselves. Experimental: requires
+  # `--experimental`.
+  #
+  # A designator with no entrypoint names the router; one with the entrypoint `AssetWorker`
+  # serves files only, and is what a Worker's assets binding names.
+
+  path @0 :Text;
+  # The directory. Relative paths are interpreted relative to the current directory, as a
+  # `disk` service's are.
+
+  config @1 :Text;
+  # JSON, every field optional: `html_handling`, `not_found_handling`, `base_path` and
+  # `run_worker_first`, as in wrangler's `assets`; `headers`, `redirects` and `ignore`, the text
+  # of the directory's `_headers`, `_redirects` and `.assetsignore`; `debug`, for Miniflare, which
+  # logs and removes the header it adds to a navigation that `not_found_handling` answered.
+
+  userWorker @2 :ServiceDesignator;
+  # The user Worker, if any. Events other than HTTP requests go to it, and its compatibility flags
+  # select assets behavior, as they do on Cloudflare.
+
+  compatibilityDate @3 :Text;
+  compatibilityFlags @4 :List(Text);
+  # Without a user Worker, the compatibility date and flags that select assets behavior, compiled
+  # as a Worker's are.
 }
 
 struct ServiceDesignator {
@@ -613,10 +647,10 @@ struct Worker {
 
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
-      # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker, or
-      # `/workerd/workflows.js`, a Workflows engine (see each one's header for the config it
-      # takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is a
-      # Worker's source. Experimental.
+      # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
+      # `/workerd/workflows.js`, a Workflows engine, or `/workerd/d1.js`, D1 databases (see each
+      # one's header for the config it takes). Unlike built-in modules such as `node:` ones, user
+      # code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

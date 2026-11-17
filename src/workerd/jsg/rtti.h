@@ -703,30 +703,21 @@ struct MemberCounter {
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() { /* not a member */ }
 
-  inline void registerJsBundle(Bundle::Reader bundle) {
-    modules += bundle.getModules().size();
-  }
-
   size_t members = 0;
-  size_t modules = 0;
 };
 
 template <typename Self, typename Configuration>
 struct MembersBuilder {
   Structure::Builder structure;
   capnp::List<Member>::Builder members;
-  capnp::List<Module>::Builder modules;
   Builder<Configuration>& rtti;
   uint memberIndex = 0;
-  uint moduleIndex = 0;
 
   MembersBuilder(Structure::Builder structure,
       capnp::List<Member>::Builder members,
-      capnp::List<Module>::Builder modules,
       Builder<Configuration>& rtti)
       : structure(structure),
         members(members),
-        modules(modules),
         rtti(rtti) {}
 
   template <typename Type>
@@ -939,14 +930,6 @@ struct MembersBuilder {
     structure.setTsDefine(tsDefine);
   }
 
-  inline void registerJsBundle(Bundle::Reader bundle) {
-    for (auto module: bundle.getModules()) {
-      auto m = modules[moduleIndex++];
-      m.setSpecifier(module.getName());
-      m.setTsDeclarations(module.getTsDeclaration());
-    }
-  }
-
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
     // Nothing to do in this case.
@@ -988,9 +971,7 @@ struct BuildRtti<Configuration, T> {
     }
 
     auto members = builder.initMembers(membersCount);
-    auto modules = counter.modules > 0 ? builder.initBuiltinModules(counter.modules)
-                                       : capnp::List<Module>::Builder();
-    MembersBuilder<T, Configuration> membersBuilder(builder, members, modules, rtti);
+    MembersBuilder<T, Configuration> membersBuilder(builder, members, rtti);
     if constexpr (isDetected<GetConfiguration, T>()) {
       T::template registerMembers<decltype(membersBuilder), T>(membersBuilder, rtti.config);
     } else {

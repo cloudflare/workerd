@@ -227,11 +227,11 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 
     pendingWrite.channels = kj::mv(state.channels);
 
+    // NOLINTBEGIN(custom-dtor-throw-during-unwind): continuations, not run by the destructor.
     pendingWrite.writePromise =
         kj::joinPromisesFailFast(state.tokenPromises.releaseAsArray())
             .then([key = key.clone(), weakHandler = state.handler.addWeak()](
                       kj::Array<kj::Array<byte>> tokens) {
-      // NOLINTBEGIN(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
       auto& handler = KJ_REQUIRE_NONNULL(
           weakHandler.tryGet(), "StoredExternalHandler destroyed before externals were written");
 
@@ -254,8 +254,6 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 
       // If that was the last pending write, fulfill the on-empty fulfiller.
       handler.fulfillIfEmpty();
-
-      // NOLINTEND(custom-dtor-throw-during-unwind)
     }).eagerlyEvaluate([weakHandler = state.handler.addWeak()](kj::Exception&& e) {
       // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
       auto& handler = KJ_REQUIRE_NONNULL(
@@ -265,6 +263,7 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
         handler.onEmptyFulfiller = kj::none;
       }
     });
+    // NOLINTEND(custom-dtor-throw-during-unwind)
 
     state.handler.pendingWrites.upsert(key.clone(), kj::mv(pendingWrite),
         [](auto& existing, auto&& replacement) { existing = kj::mv(replacement); });

@@ -35,15 +35,13 @@ kj::Arc<PeerFilter> filter(
 // Does `f` allow the given numeric IP (v4 if it has no ':', else v6), port 1?
 bool allowsIp(const PeerFilter& f, kj::StringPtr ip) {
   if (ip.findFirst(':') != kj::none) {
-    struct sockaddr_in6 sin6;
-    memset(&sin6, 0, sizeof(sin6));
+    struct sockaddr_in6 sin6 {};
     sin6.sin6_family = AF_INET6;
     sin6.sin6_port = htons(1);
     KJ_ASSERT(inet_pton(AF_INET6, ip.cStr(), &sin6.sin6_addr) == 1, ip);
     return f.allows(reinterpret_cast<struct sockaddr*>(&sin6), sizeof(sin6));
   } else {
-    struct sockaddr_in sin;
-    memset(&sin, 0, sizeof(sin));
+    struct sockaddr_in sin {};
     sin.sin_family = AF_INET;
     sin.sin_port = htons(1);
     KJ_ASSERT(inet_pton(AF_INET, ip.cStr(), &sin.sin_addr) == 1, ip);
@@ -99,8 +97,7 @@ KJ_TEST("PeerFilter: shares are atomic -- taking and dropping them on two thread
 #if !_WIN32
 // Builds a sockaddr_un for `path` (abstract if `abstractLeadingNul`) and returns the verdict.
 bool allowsUnix(const PeerFilter& f, kj::StringPtr path, bool abstractLeadingNul = false) {
-  struct sockaddr_un su;
-  memset(&su, 0, sizeof(su));
+  struct sockaddr_un su {};
   su.sun_family = AF_UNIX;
   size_t off = 0;
   if (abstractLeadingNul) {

@@ -87,15 +87,21 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
 // Isolates on different threads may call getOrCompile() concurrently. Isolates that find the
 // slot for their setting empty at the same time each compile, and the holder keeps the first
 // result.
+//
+// An embedder may subclass the holder and override getOrCompile() to keep the compiled code
+// elsewhere, e.g. in a process-wide store shared with other modules. An override must keep the
+// contract above: it may be called concurrently from any thread, and it returns a module compiled
+// with the calling isolate's setting.
 class CompiledWasmModuleHolder {
  public:
   CompiledWasmModuleHolder() = default;
+  virtual ~CompiledWasmModuleHolder() noexcept(false) = default;
   KJ_DISALLOW_COPY_AND_MOVE(CompiledWasmModuleHolder);
 
   // Returns a module object for `wireBytes` in the current isolate, compiling them only if no
   // module compiled with this isolate's setting is held yet. Every call on one holder must pass
   // the same bytes.
-  v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
+  virtual v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> wireBytes,
       const CompilationObserver& observer) const;
 
@@ -645,6 +651,20 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       ResolveOption option = ResolveOption::DEFAULT,
       ResolveMethod method = ResolveMethod::IMPORT,
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
+    kj::Vector<kj::String> visited;
+    return resolveImpl(js, specifier, referrer, option, method, rawSpecifier, visited);
+  }
+
+ private:
+  static constexpr size_t kMaxFallbackServiceRedirects = 32;
+
+  kj::Maybe<ModuleInfo&> resolveImpl(jsg::Lock& js,
+      const kj::Path& specifier,
+      kj::Maybe<const kj::Path&> referrer,
+      ResolveOption option,
+      ResolveMethod method,
+      kj::Maybe<kj::StringPtr> rawSpecifier,
+      kj::Vector<kj::String>& visited) {
     using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
@@ -674,12 +694,23 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // If the module is not found and we have a module fallback service configured,
     // let's try that as a means of looking it up.
     auto str = specifier.toString(true);
+    // visited holds the specifiers this resolution has already looked up through the fallback
+    // service. Reaching one of them again means fallback service redirects form a cycle (possibly
+    // a specifier redirecting to itself), so the module cannot resolve. A redirect chain can also
+    // grow without repeating, for example when a relative redirect resolves one directory deeper
+    // on every hop, so its length is bounded too.
+    if (visited.size() > kMaxFallbackServiceRedirects ||
+        visited.asPtr().findFirst(str) != kj::none) {
+      return kj::none;
+    }
+    visited.add(kj::str(str));
     KJ_IF_SOME(found, fallbackServiceRedirects.find(str)) {
       // The fallback service has already given us a redirect response for this specifier.
       // let's use it to try to resolve. Make sure we're using DEFAULT resolution so BUNDLE-typed
       // modules from the fallback service can be used.
       option = ResolveOption::DEFAULT;
-      return resolve(js, specifier.parent().eval(found), referrer, option, method, rawSpecifier);
+      return resolveImpl(
+          js, specifier.parent().eval(found), referrer, option, method, rawSpecifier, visited);
     }
     KJ_IF_SOME(info,
         tryResolveFromFallbackService(js, specifier, referrer, observer, method, rawSpecifier)) {
@@ -707,7 +738,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // Make sure we're using DEFAULT resolution so BUNDLE-typed modules from the fallback
           // service can be used.
           option = ResolveOption::DEFAULT;
-          return resolve(js, specifier.parent().eval(s), referrer, option, method, rawSpecifier);
+          return resolveImpl(
+              js, specifier.parent().eval(s), referrer, option, method, rawSpecifier, visited);
         }
       }
     }
@@ -715,6 +747,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     return kj::none;
   }
 
+ public:
   kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
     for (const kj::Own<Entry>& entry: entries) {
       // Unfortunately we cannot use entries.find(...) in here because the module info can

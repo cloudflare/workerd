@@ -8,7 +8,7 @@ import statistics
 from pathlib import Path
 
 # The Rust binding that each C++ binding is compared with.
-COUNTERPARTS = {"Cpp": "Rust", "CppFast": "RustFast", "CppStructFast": "Rust"}
+COUNTERPARTS = {"Cpp": "Rust", "CppFast": "RustFast", "CppStructFast": "RustStructFast"}
 # Google Benchmark appends this to the names of cases that measure process CPU time.
 PROCESS_TIME_SUFFIX = "/process_time"
 

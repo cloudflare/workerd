@@ -240,6 +240,12 @@ impl TokioPort {
     }
 
     pub(crate) fn wait_timeout_ns(&self, timeout_ns: u64) -> bool {
+        if timeout_ns == 0 {
+            // A KJ timer is already due. Tokio rounds every sleep deadline up to the end of its
+            // 1 ms timer-wheel tick, so even a zero-length sleep would last until the next tick.
+            // Pump ready work without parking instead.
+            return self.poll();
+        }
         self.wait_impl(Some(Duration::from_nanos(timeout_ns)))
     }
 

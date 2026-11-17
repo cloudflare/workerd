@@ -1792,6 +1792,83 @@ Onset Onset::clone() const {
       KJ_MAP(attr, attributes) { return attr.clone(); });
 }
 
+namespace {
+size_t stringSize(const kj::Maybe<kj::String>& string) {
+  return string.map([](const kj::String& value) { return value.size(); }).orDefault(0);
+}
+
+size_t eventInfoSize(const EventInfo& info) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+      size_t size = fetch.url.size() + fetch.cfJson.size();
+      for (auto& header: fetch.headers) {
+        size += sizeof(header) + header.name.size() + header.value.size();
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+      return jsrpc.methodName.size();
+    }
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+      return scheduled.cron.size();
+    }
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
+      return queue.queueName.size();
+    }
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
+      return email.mailFrom.size() + email.rcptTo.size();
+    }
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
+      size_t size = 0;
+      for (auto& item: trace.traces) {
+        size += sizeof(item) + stringSize(item.scriptName);
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      return 0;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+size_t workerInfoSize(const Onset::WorkerInfo& info) {
+  size_t size = stringSize(info.scriptName) + stringSize(info.dispatchNamespace) +
+      stringSize(info.scriptId) + stringSize(info.entrypoint) + stringSize(info.durableObjectId);
+  KJ_IF_SOME(version, info.scriptVersion) {
+    size += version->totalSize().wordCount * sizeof(capnp::word);
+  }
+  KJ_IF_SOME(preview, info.preview) {
+    size += preview.id.size() + preview.slug.size() + preview.name.size();
+  }
+  KJ_IF_SOME(tags, info.scriptTags) {
+    for (auto& tag: tags) {
+      size += sizeof(tag) + tag.size();
+    }
+  }
+  return size;
+}
+
+size_t attributeSize(const Attribute& attribute) {
+  size_t size = sizeof(attribute) + attribute.name.size();
+  for (auto& value: attribute.value) {
+    size += sizeof(value);
+    KJ_IF_SOME(string, value.tryGet<kj::ConstString>()) {
+      size += string.size();
+    }
+  }
+  return size;
+}
+}  // namespace
+
+size_t Onset::size() const {
+  size_t size = eventInfoSize(info) + workerInfoSize(workerInfo);
+  for (auto& attribute: attributes) {
+    size += attributeSize(attribute);
+  }
+  return size;
+}
+
 Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
     : outcome(outcome),
       cpuTime(cpuTime),

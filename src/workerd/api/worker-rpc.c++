@@ -63,6 +63,36 @@ capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler:
 
 namespace {
 
+kj::Promise<void> pushDelayedChannelTokenWhenReady(kj::Promise<kj::Array<byte>> token,
+    rpc::JsValue::ExternalPusher::Client pusher,
+    kj::Own<kj::PromiseFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>>
+        fulfiller) {
+  KJ_TRY {
+    auto bytes = co_await token;
+    auto req = pusher.pushDelayedChannelTokenRequest(
+        capnp::MessageSize{4 + bytes.size() / sizeof(capnp::word), 0});
+    req.setToken(bytes);
+    fulfiller->fulfill(req.send().getCap());
+  }
+  KJ_CATCH(exception) {
+    fulfiller->reject(exception.clone());
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+}  // namespace
+
+rpc::JsValue::ExternalPusher::DelayedChannelToken::Client RpcSerializerExternalHandler::
+    pushDelayedChannelToken(kj::Promise<kj::Array<byte>> token) {
+  auto paf =
+      kj::newPromiseAndFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
+  pendingExternals.add(
+      pushDelayedChannelTokenWhenReady(kj::mv(token), getExternalPusher(), kj::mv(paf.fulfiller)));
+  return kj::mv(paf.promise);
+}
+
+namespace {
+
 // Whether one external-table entry could be sent again unchanged on a later attempt. No current
 // kind can: streams, sockets, and signals are consumed by the first attempt; RPC targets and
 // channel tokens are bound to the first attempt's destination session. The switch is exhaustive so
@@ -1193,6 +1223,23 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallA
   }
 }
 
+// Settles like `call`, except that it rejects as soon as one of `pendingExternals` does, with its
+// error, and resolves only after they have all been delivered. An argument whose external could
+// not be delivered, such as a stub whose channel's owner refused to issue a token for it, is
+// unusable on the other side, so the caller gets the reason instead of the call's result. The
+// call is canceled in that case.
+kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> awaitCallAndPendingExternals(
+    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> call,
+    kj::Array<kj::Promise<void>> pendingExternals) {
+  auto delivered = kj::joinPromisesFailFast(kj::mv(pendingExternals)).fork();
+  auto response = co_await call.exclusiveJoin(delivered.addBranch().then(
+      []() -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
+    return kj::NEVER_DONE;
+  }));
+  co_await delivered.addBranch();
+  co_return kj::mv(response);
+}
+
 // Core implementation of making an RPC call, reusable for many cases below.
 JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     jsg::Ref<JsRpcClientProvider> parent,
@@ -1280,6 +1327,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       kj::Array<const byte> serializedData;
       size_t serializedDataCapacity = 0;
       auto serializerReplayability = RpcSerializerExternalHandler::Replayability::REPLAYABLE;
+      kj::Array<kj::Promise<void>> pendingExternals;
       KJ_IF_SOME(args, maybeArgs) {
         // If we have arguments, serialize them.
         // Note that we may fail to serialize some element, in which case this will throw back to
@@ -1309,6 +1357,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           serializedData = kj::mv(serialized.data);
           serializedDataCapacity = serialized.dataCapacity;
           serializerReplayability = externalHandler.getReplayability();
+          pendingExternals = externalHandler.releasePendingExternals();
         }
       } else {
         // This is a property access.
@@ -1328,6 +1377,12 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(resolveOneCall().client), callPlan,
           jsRpcCallSpan, actorTargetRetryability, DeferActorRpcFailure(retriesEnabled));
       auto resultPromise = kj::mv(dispatch.promise);
+      if (pendingExternals.size() > 0) {
+        // Pending externals make the call ineligible for replay (see JsRpcCallPlan), so this
+        // wraps the only attempt.
+        resultPromise =
+            awaitCallAndPendingExternals(kj::mv(resultPromise), kj::mv(pendingExternals));
+      }
 
       // A follow-up call through this result's pending pipeline still targets the actor, but cannot
       // create a fresh attempt without replaying the call that produced the pipeline.
@@ -1883,24 +1938,13 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
           }
           KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
             // Token isn't available synchronously, so we have to send a promise.
-            auto paf = kj::newPromiseAndFulfiller<
-                rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-
-            // Arrange to send the token when it's ready.
-            ioctx.addTask(
-                promise.then([pusher = externalHandler.getExternalPusher(),
-                                 fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
-              auto req = pusher.pushDelayedChannelTokenRequest(
-                  capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
-              req.setToken(token);
-              fulfiller->fulfill(req.send().getCap());
-            }));
-
-            externalHandler.write([cap = kj::mv(cap), promise = kj::mv(paf.promise)](
-                                      rpc::JsValue::External::Builder builder) mutable {
+            externalHandler.write(
+                [cap = kj::mv(cap),
+                    delayed = externalHandler.pushDelayedChannelToken(kj::mv(promise))](
+                    rpc::JsValue::External::Builder builder) mutable {
               auto target = builder.initRpcTarget();
               target.setCap(kj::mv(cap));
-              target.setDelayedChannelToken(kj::mv(promise));
+              target.setDelayedChannelToken(kj::mv(delayed));
             });
           }
         }
@@ -2963,6 +3007,12 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   buildJsValueExternals(builder, externalHandler);
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
+
+  // There is no call left to fail when a returned external can't be delivered. The recipient gets
+  // the error when it uses the external, and the IoContext reports it as an uncaught exception.
+  for (auto& pending: externalHandler.releasePendingExternals()) {
+    IoContext::current().addTask(kj::mv(pending));
+  }
 
   return js.withinHandleScope([&]() -> MakeCallPipeline::Result {
     jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {

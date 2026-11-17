@@ -12,11 +12,12 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers`, `rewriting_response` and `image_filter_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
 )]
 
+pub use assets_router::mitigations::should_block_image_response;
+
 pub use crate::actor::MovedHook;
-pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
 pub use crate::channels::ActorNamespaceHandle;
@@ -380,6 +381,14 @@ pub mod ffi {
             params: &[u64],
         ) -> Result<Vec<u64>>;
 
+        /// Whether the config's assets service `services[config_service]` prefers serving an
+        /// asset to a navigation (`assetsSecFetchModeNavigateHeaderPrefersAssetServing`), under
+        /// its user worker's compatibility flags, or, with none, its own.
+        fn factory_assets_navigation_prefers_asset_serving(
+            factory: &WorkerFactory,
+            config_service: u32,
+        ) -> Result<bool>;
+
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.
         type CompiledWorker;
@@ -453,9 +462,11 @@ pub mod ffi {
         /// Resolves when the actor breaks (an uncaught error, an eviction request, a storage
         /// failure); the error is the reason.
         async fn actor_broken(broken: KjOwn<ActorBroken>) -> Result<()>;
-        /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
-        /// actor is shut down instead: its background work stops, and nothing is failed.
-        fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        /// Aborts the actor with `reason`; every in-flight request fails.
+        fn actor_abort(actor: &ActorHandle, reason: KjException);
+        /// Shuts the actor down without a reason: its background work stops, and nothing is
+        /// failed.
+        fn actor_stop(actor: &ActorHandle);
         fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
         fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
@@ -608,10 +619,9 @@ pub mod ffi {
         #[namespace = "kj"]
         type Exception;
         fn exception_throw(exception: &Exception) -> Result<()>;
-        /// The error `error` holds, the way KJ prints an exception (`kj::str`): `file:line: type:
-        /// description`, the location being the bridge's if the error was made in Rust. Without
-        /// a stack trace, which a `KjError` does not carry.
-        fn exception_text(error: &AbortReason) -> String;
+        /// `error` the way KJ prints an exception (`kj::str`): `file:line: type: description`.
+        /// Without a stack trace, which a `KjError` does not carry.
+        fn exception_text(error: KjException) -> String;
 
         /// A JS value that can cross the RPC boundary: the props of an entrypoint, an actor
         /// class or a dynamic worker's env.
@@ -697,7 +707,12 @@ pub mod ffi {
         // The listeners' shims (worker-factory-listen.c++).
 
         /// A copy of `headers` with `edits` and then `injected` applied in order.
-        fn edit_headers(
+        ///
+        /// # Safety
+        ///
+        /// The copy keeps a reference to the header table of `headers`, which the `KjOwn` does
+        /// not carry: the caller keeps that table alive for as long as the copy exists.
+        unsafe fn edit_headers(
             table: &HttpHeaderTable,
             headers: &HttpHeaders,
             edits: &[HeaderEdit],
@@ -710,6 +725,15 @@ pub mod ffi {
             table: &HttpHeaderTable,
             edits: &[HeaderEdit],
         ) -> Result<KjOwn<HttpServiceResponse>>;
+        /// A response that sends the user Worker's answer to a request for a remote image only
+        /// if `should_block_image_response` lets it through, else a 403 whose body
+        /// `image_filter_finish` writes. Borrows `inner` for its life.
+        unsafe fn new_image_filter_response<'a>(
+            inner: Pin<&'a mut HttpServiceResponse>,
+        ) -> KjOwn<HttpServiceResponse>;
+        async unsafe fn image_filter_finish<'a>(
+            response: Pin<&'a mut HttpServiceResponse>,
+        ) -> Result<()>;
         /// The `ConnectResponse` of a raw TCP socket's `connect()`: accepting does nothing,
         /// rejecting discards the body.
         fn new_null_connect_response() -> KjOwn<ConnectResponse>;
@@ -1020,11 +1044,6 @@ pub mod ffi {
         type ResultTask;
         async fn result_task_run(task: Box<ResultTask>) -> Result<()>;
 
-        /// The reason of an `actor_abort`. `raise` returns it as the `Err`, which C++ catches as
-        /// the equivalent `kj::Exception`; `Ok` when there is none.
-        type AbortReason;
-        fn raise(self: &AbortReason) -> Result<()>;
-
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
 
@@ -1037,6 +1056,9 @@ pub mod ffi {
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.
         type UdpFlow;
+        /// Whether the user Worker's answer to a request for a remote image is blocked.
+        fn should_block_image_response(status: u16, content_type: &[u8]) -> bool;
+
         /// The next datagram, or `ended`. One call at a time.
         async unsafe fn receive<'a>(self: &'a UdpFlow) -> Result<UdpDatagram>;
         async unsafe fn send<'a>(self: &'a UdpFlow, datagram: &'a [u8]) -> Result<()>;
@@ -1072,6 +1094,63 @@ pub fn rewriting_response<'a>(
     // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
     let response = unsafe { ffi::new_rewriting_response(inner, table, edits) }?;
     Ok(RewritingResponse {
+        response,
+        _inner: std::marker::PhantomData,
+    })
+}
+
+/// The headers `edit_headers` returns. Borrows the headers they were copied from, whose header
+/// table they share.
+pub struct EditedHeaders<'a> {
+    headers: kj_rs::KjOwn<ffi::HttpHeaders>,
+    _source: std::marker::PhantomData<&'a ffi::HttpHeaders>,
+}
+
+impl std::ops::Deref for EditedHeaders<'_> {
+    type Target = ffi::HttpHeaders;
+
+    fn deref(&self) -> &ffi::HttpHeaders {
+        &self.headers
+    }
+}
+
+/// See `ffi::edit_headers`.
+pub fn edit_headers<'a>(
+    table: &ffi::HttpHeaderTable,
+    headers: &'a ffi::HttpHeaders,
+    edits: &[ffi::HeaderEdit],
+    injected: &[ffi::HeaderEdit],
+) -> crate::Result<EditedHeaders<'a>> {
+    // SAFETY: the wrapper returned borrows `headers`, and their table outlives them.
+    let headers = unsafe { ffi::edit_headers(table, headers, edits, injected) }?;
+    Ok(EditedHeaders {
+        headers,
+        _source: std::marker::PhantomData,
+    })
+}
+
+/// See `ffi::new_image_filter_response`.
+pub struct ImageFilterResponse<'a>(RewritingResponse<'a>);
+
+impl ImageFilterResponse<'_> {
+    pub fn as_mut(&mut self) -> std::pin::Pin<&mut ffi::HttpServiceResponse> {
+        self.0.as_mut()
+    }
+
+    /// Writes the body of the 403, if the response was blocked.
+    pub async fn finish(&mut self) -> crate::Result<()> {
+        // SAFETY: the response outlives the future, which borrows it.
+        Ok(unsafe { ffi::image_filter_finish(self.as_mut()) }.await?)
+    }
+}
+
+/// See `ffi::new_image_filter_response`.
+pub fn image_filter_response(
+    inner: std::pin::Pin<&mut ffi::HttpServiceResponse>,
+) -> ImageFilterResponse<'_> {
+    // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    let response = unsafe { ffi::new_image_filter_response(inner) };
+    ImageFilterResponse(RewritingResponse {
         response,
         _inner: std::marker::PhantomData,
     })

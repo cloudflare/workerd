@@ -57,7 +57,6 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
-struct AbortReason;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -216,6 +215,8 @@ class CompiledWorker final {
   mutable kj::Own<Impl> impl;
 };
 
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& factory, uint32_t configService);
 WorkerInfo worker_info(const CompiledWorker& worker);
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals);
 void worker_unlink(const CompiledWorker& worker);
@@ -273,7 +274,8 @@ class ActorHandle final {
 
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
-void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+void actor_abort(const ActorHandle& actor, kj::Exception reason);
+void actor_stop(const ActorHandle& actor);
 bool actor_has_on_hibernate_handler(const ActorHandle& actor);
 bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
@@ -352,7 +354,7 @@ void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     bool persistent);
 
 void exception_throw(const kj::Exception& exception);
-::rust::String exception_text(const AbortReason& error);
+::rust::String exception_text(kj::Exception error);
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json);
 kj::Own<Frankenvalue> frankenvalue_clone(const Frankenvalue& value);
@@ -454,6 +456,8 @@ kj::Own<kj::HttpHeaders> edit_headers(const kj::HttpHeaderTable& table,
 kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Response& inner,
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits);
+kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
+kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(

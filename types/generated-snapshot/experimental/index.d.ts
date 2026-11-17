@@ -1163,6 +1163,7 @@ declare class Blob {
 }
 interface BlobOptions {
   type?: string;
+  endings?: "transparent" | "native";
 }
 /**
  * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
@@ -1191,6 +1192,7 @@ declare class File extends Blob {
 interface FileOptions {
   type?: string;
   lastModified?: number;
+  endings?: "transparent" | "native";
 }
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
@@ -3302,7 +3304,7 @@ declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3313,7 +3315,7 @@ declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3570,6 +3572,12 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
   readyState: number;
+  /**
+   * The **`WebSocket.bufferedAmount`** read-only property returns the number of bytes of data that have been queued using calls to send() but not yet transmitted to the network. This value resets to zero once all queued data has been sent. This value does not reset to zero when the connection is closed; if you keep calling send(), this will continue to climb.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/bufferedAmount)
+   */
+  bufferedAmount: number;
   /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *

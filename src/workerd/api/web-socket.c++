@@ -153,6 +153,10 @@ int WebSocket::getReadyState() {
   return impl->getReadyState();
 }
 
+double WebSocket::getBufferedAmount() {
+  return impl->getBufferedAmount();
+}
+
 kj::Maybe<kj::StringPtr> WebSocket::getUrl() {
   return impl->getUrl();
 }
@@ -269,7 +273,7 @@ void WebSocket::setPeer(jsg::WeakRef<WebSocket> peer) {
 }
 
 void WebSocket::visitForGc(jsg::GcVisitor& visitor) {
-  impl->visitForGc(visitor);
+  visitor.visit(impl);
 }
 
 void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -974,7 +978,12 @@ void LegacyWebSocketAdapter::startReadLoop(
 void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.closedOutgoing, TypeError, "Can't call WebSocket send() after close().");
+  auto payloadBytes = message.is<kj::String>() ? message.get<kj::String>().size()
+                                               : message.get<kj::Array<byte>>().size();
   if (native.outgoingAborted || native.state.is<Released>()) {
+    // The standard counts data that send() discards in bufferedAmount, too.
+    native.bufferedAmount += payloadBytes;
+
     // Per the spec, we should silently ignore send()s that happen after the connection is closed.
     // NOTE: The spec claims send() should also silently ignore messages sent after a close message
     //   has been sent or received cleanly. We ignore this advice:
@@ -988,6 +997,7 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
   } else if (awaitingHibernatableError()) {
     // Ready for the hibernatable error event state, after encountering an error, the websocket
     // isn't able to send outbound messages; let's release it.
+    native.bufferedAmount += payloadBytes;
     tryReleaseNative(js);
     return;
   }
@@ -996,8 +1006,7 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
       "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
 
-  auto memory = chargeOutgoing(message.is<kj::String>() ? message.get<kj::String>().size()
-                                                        : message.get<kj::Array<byte>>().size());
+  auto memory = chargeOutgoing(payloadBytes);
   auto maybeOutputLock = IoContext::current().waitForOutputLocksIfNecessary();
   auto msg = [&]() -> kj::WebSocket::Message {
     KJ_SWITCH_ONEOF(message) {
@@ -1023,6 +1032,7 @@ void LegacyWebSocketAdapter::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::
 
   outgoingMessages->insert(GatedMessage{
     kj::mv(maybeOutputLock), kj::mv(msg), getPendingAutoResponseCount(), kj::mv(memory)});
+  native.bufferedAmount += payloadBytes;
 
   ensurePumping(js);
 }
@@ -1119,6 +1129,10 @@ int LegacyWebSocketAdapter::getReadyState() {
     return WebSocket::READY_STATE_CONNECTING;
   }
   return WebSocket::READY_STATE_OPEN;
+}
+
+double LegacyWebSocketAdapter::getBufferedAmount() {
+  return static_cast<double>(farNative->bufferedAmount);
 }
 
 bool LegacyWebSocketAdapter::isAccepted() {
@@ -1441,10 +1455,12 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
       KJ_SWITCH_ONEOF(gatedMessage.message) {
         KJ_CASE_ONEOF(text, kj::String) {
           co_await ws->send(text);
+          native.bufferedAmount -= text.size();
           break;
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           co_await ws->send(data);
+          native.bufferedAmount -= data.size();
           break;
         }
         KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
