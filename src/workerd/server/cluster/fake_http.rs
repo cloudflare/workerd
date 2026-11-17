@@ -59,6 +59,12 @@ pub enum Answer {
     Stall,
     /// The answer, this long after the request arrived.
     After(Duration, Box<Self>),
+    /// The answer, once the server has received another request after
+    /// this one.
+    WithNext(Box<Self>),
+    /// The answer, once the server has answered the request after this
+    /// one.
+    AfterNextAnswered(Box<Self>),
     /// The head of a 200 answer with these headers, then a byte of its body
     /// every 20 ms.
     Dribble(Vec<(&'static str, String)>),
@@ -82,6 +88,10 @@ pub fn reply(status: u16, body: &str) -> Answer {
 }
 
 type Handler = dyn Fn(&Request, usize) -> Answer + Send + Sync;
+
+/// How long a test waits for what the server should see promptly before it
+/// fails: far longer than any stall of a busy machine.
+pub const WATCHDOG: Duration = Duration::from_secs(10);
 
 /// Each server's host, with where to send the server's end of a new
 /// in-memory connection to it.
@@ -107,6 +117,7 @@ pub struct Server {
     received: Arc<Mutex<Vec<Request>>>,
     connections: Arc<AtomicUsize>,
     abandoned: Arc<Abandoned>,
+    progress: Arc<Progress>,
 }
 
 /// A server's entry in `IN_MEMORY`, removed when the server stops accepting
@@ -126,6 +137,37 @@ impl Drop for Registered {
             .is_some_and(|s| s.same_channel(&self.accept))
         {
             servers.remove(&self.host);
+        }
+    }
+}
+
+/// The requests a server has received and answered, numbered from 1 in the
+/// order they arrived, and a signal for each change.
+#[derive(Default)]
+struct Progress {
+    counts: Mutex<Counts>,
+    changed: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct Counts {
+    received: usize,
+    answered: std::collections::BTreeSet<usize>,
+}
+
+impl Progress {
+    fn update(&self, f: impl FnOnce(&mut Counts)) {
+        f(&mut self.counts.lock().unwrap());
+        self.changed.notify_waiters();
+    }
+
+    async fn until(&self, done: impl Fn(&Counts) -> bool) {
+        loop {
+            let changed = self.changed.notified();
+            if done(&self.counts.lock().unwrap()) {
+                return;
+            }
+            changed.await;
         }
     }
 }
@@ -176,11 +218,13 @@ impl Server {
         let received = Arc::new(Mutex::new(Vec::new()));
         let connections = Arc::new(AtomicUsize::new(0));
         let abandoned = Arc::new(Abandoned::default());
+        let progress = Arc::new(Progress::default());
         let serve = Serve {
             handler: Arc::new(handler),
             log: received.clone(),
             connections: connections.clone(),
             abandoned: abandoned.clone(),
+            progress: progress.clone(),
         };
         let tcp = serve.clone();
         tokio::spawn(async move {
@@ -200,6 +244,7 @@ impl Server {
             received,
             connections,
             abandoned,
+            progress,
         }
     }
 
@@ -233,6 +278,30 @@ impl Server {
     pub fn requests(&self) -> usize {
         self.received.lock().unwrap().len()
     }
+
+    /// Runs `call` until the server has received `n` more requests than
+    /// it had, and for `window` after: how many more it received by then,
+    /// and what `call` returned if it ended. A test that a call sends no
+    /// more than `n` requests starts its short window only once they have
+    /// arrived, however busy the machine. Panics after `WATCHDOG`.
+    pub async fn requests_during<F: Future>(
+        &self,
+        n: usize,
+        window: Duration,
+        call: F,
+    ) -> (usize, Option<F::Output>) {
+        let start = self.progress.counts.lock().unwrap().received;
+        let received = || self.progress.counts.lock().unwrap().received - start;
+        let mut call = std::pin::pin!(call);
+        let arrived = std::pin::pin!(self.progress.until(|c| c.received >= start + n));
+        let first = futures::future::select(call.as_mut(), arrived);
+        let first = tokio::time::timeout(WATCHDOG, first).await;
+        if let futures::future::Either::Left((output, _)) = first.expect("the requests came") {
+            return (received(), Some(output));
+        }
+        let output = tokio::time::timeout(window, call).await.ok();
+        (received(), output)
+    }
 }
 
 /// What serves each connection a server accepts.
@@ -242,21 +311,14 @@ struct Serve {
     log: Arc<Mutex<Vec<Request>>>,
     connections: Arc<AtomicUsize>,
     abandoned: Arc<Abandoned>,
+    progress: Arc<Progress>,
 }
 
 impl Serve {
     fn connection(&self, stream: impl AsyncRead + AsyncWrite + Send + Unpin + 'static) {
         self.connections.fetch_add(1, Ordering::SeqCst);
         let serve = self.clone();
-        let service = hyper::service::service_fn(move |request| {
-            let Self {
-                handler,
-                log,
-                abandoned,
-                ..
-            } = serve.clone();
-            answer(request, handler, log, abandoned)
-        });
+        let service = hyper::service::service_fn(move |request| answer(request, serve.clone()));
         let connection = hyper::server::conn::http1::Builder::new()
             .serve_connection(TokioIo::new(stream), service);
         tokio::spawn(connection);
@@ -265,10 +327,15 @@ impl Serve {
 
 async fn answer(
     request: http::Request<hyper::body::Incoming>,
-    handler: Arc<Handler>,
-    log: Arc<Mutex<Vec<Request>>>,
-    abandoned: Arc<Abandoned>,
+    serve: Serve,
 ) -> Result<http::Response<Body>, &'static str> {
+    let Serve {
+        handler,
+        log,
+        abandoned,
+        progress,
+        ..
+    } = serve;
     let (head, mut incoming) = request.into_parts();
     let mut body = Vec::new();
     while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut incoming).poll_frame(cx)).await
@@ -289,6 +356,11 @@ async fn answer(
         log.push(request.clone());
         log.len()
     };
+    let mut number = 0;
+    progress.update(|c| {
+        c.received += 1;
+        number = c.received;
+    });
     let mut unanswered = Unanswered {
         n,
         abandoned,
@@ -299,6 +371,16 @@ async fn answer(
         break match answer {
             Answer::After(after, then) => {
                 tokio::time::sleep(after).await;
+                answer = *then;
+                continue;
+            }
+            Answer::WithNext(then) => {
+                progress.until(|c| c.received > number).await;
+                answer = *then;
+                continue;
+            }
+            Answer::AfterNextAnswered(then) => {
+                progress.until(|c| c.answered.contains(&(number + 1))).await;
                 answer = *then;
                 continue;
             }
@@ -334,6 +416,9 @@ async fn answer(
         };
     };
     unanswered.answered = true;
+    progress.update(|c| {
+        c.answered.insert(number);
+    });
     response
 }
 
