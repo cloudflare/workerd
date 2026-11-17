@@ -157,7 +157,7 @@ kj::String durableObjectsConfig(kj::StringPtr storageDir) {
 
 // The candidates the REPL makes of an input that mentions `await`: the input as it is, then an
 // async function returning its value, then an async function's statements (cli/repl/input.rs,
-// without its rewriting of declarations).
+// without its rewriting of declarations or its parentheses around a leading `{`).
 struct TestCandidateSource final: public ReplEnvironment::CandidateSource {
   kj::Array<ReplEnvironment::Candidate> candidates(kj::StringPtr input) override {
     auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);
@@ -367,6 +367,22 @@ KJ_TEST("REPL tries candidates in order and awaits the awaited ones") {
   KJ_EXPECT(
       fixture.evalAwait("await new Promise(resolve => setTimeout(() => resolve('later'), 1))") ==
       "'later'");
+}
+
+KJ_TEST("REPL reports the syntax error of an input, not of its parentheses") {
+  Fixture fixture;
+  auto evaluate = [&](kj::StringPtr input) {
+    auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(2);
+    candidates.add(ReplEnvironment::Candidate{
+      .source = kj::str("(", input, "\n)"), .awaited = false, .parenthesized = true});
+    candidates.add(ReplEnvironment::Candidate{.source = kj::str(input), .awaited = false});
+    return fixture.environment.evaluate(candidates.finish()).wait(fixture.io.waitScope).text;
+  };
+  // The parentheses make an object literal of what would be a block.
+  KJ_EXPECT(evaluate("{ a: 1, b: 2 }") == "{ a: 1, b: 2 }");
+  KJ_EXPECT(evaluate("{ let x = 1; x }") == "1");
+  // In parentheses, this is "Unexpected identifier 'x'".
+  KJ_EXPECT(evaluate("{ let x = ; }") == "Uncaught SyntaxError: Unexpected token ';'");
 }
 
 KJ_TEST("REPL awaits an input that a script would read as using a name `await`") {

@@ -162,6 +162,20 @@ test('--input-timeout stops awaiting an input that takes longer', async () => {
   );
 });
 
+test('an input that starts with `{` is an object literal if it can be', async () => {
+  const { code, results, stderr } = await repl(
+    [],
+    [
+      '{ a: 1, b: 2 }',
+      '{ a: await Promise.resolve(1) }',
+      '{ let x = 1; x }',
+      '{ a: 1 };',
+    ]
+  );
+  assert.strictEqual(code, 0, stderr);
+  assert.deepStrictEqual(results, ['{ a: 1, b: 2 }', '{ a: 1 }', '1', '1']);
+});
+
 test('.break abandons an unfinished input', async () => {
   const { code, results, stderr } = await repl(
     [],

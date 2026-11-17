@@ -118,6 +118,10 @@ leaves open, and on which of its lines that starts, and the input counts as fail
 Error: The input ended inside the `(` opened on its line 1, so it did not run.
 ```
 
+As in Node's REPL, an input that starts with `{` and doesn't end with `;` is an object literal if
+it can be one, rather than a block: `{ a: 1, b: 2 }` prints `{ a: 1, b: 2 }`. One that can't, such
+as `{ let x = 1; x }`, is a block, and prints `1`.
+
 Each result is printed with Node's `util.inspect()`. An exception prints as `Uncaught` followed by
 the error and its stack.
 
