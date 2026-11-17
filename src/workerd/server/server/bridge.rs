@@ -982,8 +982,8 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerInterface>>;
         /// Whether the cluster replicates the namespace's actors.
         fn replicated(self: &ActorNamespaceHandle) -> bool;
-        /// Called as SQLite opens one of the namespace's files: fails once this instance's
-        /// cluster lease has lapsed.
+        /// Called as SQLite opens one of the namespace's files: fails once this instance serves
+        /// and its cluster lease has lapsed.
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
         /// A write SQLite made to one of the namespace's WAL files.
         fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);

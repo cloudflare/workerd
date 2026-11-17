@@ -18,8 +18,8 @@ namespace workerd::server {
 namespace {
 
 // The directory a clustered namespace's SQLite opens its files through. Opening fails once this
-// instance's cluster lease has lapsed, and writes to a WAL are reported to the cluster, which cuts
-// commits from them. It has no fd, so SQLite uses the KJ VFS, on every platform.
+// instance serves and its cluster lease has lapsed, and writes to a WAL are reported to the
+// cluster, which cuts commits from them. It has no fd, so SQLite uses the KJ VFS, on every platform.
 class ClusterDirectory final: public kj::Directory {
  public:
   ClusterDirectory(kj::Own<const kj::Directory> inner, const ActorNamespaceHandle& actors)

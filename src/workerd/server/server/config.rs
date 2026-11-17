@@ -1476,7 +1476,6 @@ impl Server {
             _ => None,
         };
         if let Some(cluster) = &cluster {
-            // Actor databases open only under a lease.
             cluster
                 .cluster
                 .join()

@@ -60,6 +60,20 @@ fn renews_and_holds_until_the_safety_margin() {
 }
 
 #[test]
+fn actors_need_the_lease_only_once_the_instance_serves() {
+    for t in timings() {
+        let mut lease = Lease::new(t);
+        assert_eq!(lease.renewed(0, Ok(t.lease_ms)), Step::Renew);
+        // Startup outlasted the lease: storage still opens.
+        assert!(!lease.holds(t.lease_ms) && lease.allows_actors(t.lease_ms));
+        lease.requires_live_lease = true;
+        assert!(!lease.allows_actors(t.lease_ms));
+        assert_eq!(lease.renewed(t.lease_ms, Ok(2 * t.lease_ms)), Step::Renew);
+        assert!(lease.allows_actors(t.lease_ms));
+    }
+}
+
+#[test]
 fn a_failed_renewal_retries_until_the_lease_nearly_lapses() {
     for t in timings() {
         let mut lease = Lease::new(t);
