@@ -9,6 +9,8 @@
 
 #include <nbytes.h>
 
+#include <kj/compat/brotli.h>
+
 namespace workerd::api {
 
 CompressionAllocator::CompressionAllocator(
@@ -176,6 +178,87 @@ kj::Maybe<int> ZlibStream::windowBitsForWebFormat(kj::StringPtr format) {
 }
 
 // =======================================================================================
+// BrotliStream
+
+BrotliStream::BrotliStream(CompressionAllocator& allocator, Mode mode) {
+  switch (mode) {
+    case Mode::COMPRESS: {
+      auto instance = BrotliEncoderCreateInstance(
+          CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+      JSG_REQUIRE(instance != nullptr, Error, "Failed to initialize compression context."_kj);
+      auto encoder = kj::disposeWith<BrotliEncoderDestroyInstance>(instance);
+      KJ_ASSERT(BrotliEncoderSetParameter(
+          encoder.get(), BROTLI_PARAM_QUALITY, kj::KJ_BROTLI_DEFAULT_QUALITY));
+      KJ_ASSERT(BrotliEncoderSetParameter(
+          encoder.get(), BROTLI_PARAM_LGWIN, kj::_::KJ_BROTLI_DEFAULT_WBITS));
+      state = kj::mv(encoder);
+      break;
+    }
+    case Mode::DECOMPRESS: {
+      auto instance = BrotliDecoderCreateInstance(
+          CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+      JSG_REQUIRE(instance != nullptr, Error, "Failed to initialize compression context."_kj);
+      state = kj::disposeWith<BrotliDecoderDestroyInstance>(instance);
+      break;
+    }
+  }
+}
+
+int BrotliStream::run(int flush) {
+  size_t inSize = input.size();
+  const uint8_t* nextIn = input.begin();
+  size_t outSize = output.size();
+  uint8_t* nextOut = output.begin();
+  KJ_DEFER({
+    input = kj::arrayPtr(nextIn, inSize);
+    output = kj::arrayPtr(nextOut, outSize);
+  });
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(encoder, kj::Own<BrotliEncoderStateStruct>) {
+      if (BrotliEncoderIsFinished(encoder.get())) return Z_STREAM_END;
+      auto op = flush == Z_FINISH ? BROTLI_OPERATION_FINISH : BROTLI_OPERATION_PROCESS;
+      if (!BrotliEncoderCompressStream(
+              encoder.get(), op, &inSize, &nextIn, &outSize, &nextOut, nullptr)) {
+        return Z_DATA_ERROR;
+      }
+      if (BrotliEncoderIsFinished(encoder.get())) return Z_STREAM_END;
+      // Without FINISH the encoder may hold input back in its window; once all input is
+      // consumed and no output is pending, nothing more happens until the next push.
+      if (op == BROTLI_OPERATION_PROCESS && inSize == 0 &&
+          !BrotliEncoderHasMoreOutput(encoder.get())) {
+        return Z_BUF_ERROR;
+      }
+      return Z_OK;
+    }
+    KJ_CASE_ONEOF(decoder, kj::Own<BrotliDecoderStateStruct>) {
+      if (BrotliDecoderIsFinished(decoder.get())) return Z_STREAM_END;
+      switch (BrotliDecoderDecompressStream(
+          decoder.get(), &inSize, &nextIn, &outSize, &nextOut, nullptr)) {
+        case BROTLI_DECODER_RESULT_SUCCESS:
+          return Z_STREAM_END;
+        case BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT:
+          return Z_OK;
+        case BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT:
+          return Z_BUF_ERROR;
+        case BROTLI_DECODER_RESULT_ERROR:
+          return Z_DATA_ERROR;
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+// =======================================================================================
+// Web format validation
+
+void requireWebCompressionFormat(kj::StringPtr format) {
+  JSG_REQUIRE(format == "brotli"_kj || ZlibStream::windowBitsForWebFormat(format) != kj::none,
+      TypeError,
+      "The compression format must be either 'deflate', 'deflate-raw', 'gzip' or 'brotli'.");
+}
+
+// =======================================================================================
 // CodecStage
 
 CodecStage::Context::Context(Mode mode,
@@ -183,23 +266,36 @@ CodecStage::Context::Context(Mode mode,
     Flags flags,
     kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
     : allocator(kj::mv(externalMemoryTarget)),
-      stream(allocator),
-      strictCompression(flags) {
-  auto windowBits = KJ_ASSERT_NONNULL(ZlibStream::windowBitsForWebFormat(format));
-  JSG_REQUIRE(stream.init(mode, ZlibStream::Options{.windowBits = windowBits}) == kj::none, Error,
-      "Failed to initialize compression context."_kj);
+      mode(mode),
+      strictCompression(format == "brotli"_kj ? Flags::STRICT : flags) {
+  if (format == "brotli"_kj) {
+    engine.init<BrotliStream>(allocator, mode);
+  } else {
+    auto windowBits = KJ_ASSERT_NONNULL(ZlibStream::windowBitsForWebFormat(format));
+    auto& zlib = engine.init<ZlibStream>(allocator);
+    JSG_REQUIRE(zlib.init(mode, ZlibStream::Options{.windowBits = windowBits}) == kj::none, Error,
+        "Failed to initialize compression context."_kj);
+  }
 }
 
 void CodecStage::Context::setInput(const void* in, size_t size) {
-  stream.setInput(kj::arrayPtr(reinterpret_cast<const kj::byte*>(in), size));
+  withEngine([&](auto& stream) {
+    stream.setInput(kj::arrayPtr(reinterpret_cast<const kj::byte*>(in), size));
+  });
 }
 
 CodecStage::Context::Result CodecStage::Context::pumpOnce(int flush) {
-  stream.setOutput(kj::arrayPtr(buffer, sizeof(buffer)));
+  struct Step {
+    int result;
+    size_t availOut;
+  };
+  auto [result, availOut] = withEngine([&](auto& stream) {
+    stream.setOutput(kj::arrayPtr(buffer, sizeof(buffer)));
+    int result = stream.run(flush);
+    return Step{result, stream.availOut()};
+  });
 
-  int result = stream.run(flush);
-
-  switch (stream.getMode()) {
+  switch (mode) {
     case Mode::COMPRESS:
       JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
           "Compression failed.");
@@ -213,20 +309,21 @@ CodecStage::Context::Result CodecStage::Context::pumpOnce(int flush) {
   return Result{
     .success = result == Z_OK,
     .result = result,
-    .buffer = kj::arrayPtr(buffer, sizeof(buffer) - stream.availOut()),
+    .buffer = kj::arrayPtr(buffer, sizeof(buffer) - availOut),
   };
 }
 
 void CodecStage::Context::enforceStrictChecks(int flush, const Result& result) {
-  if (stream.getMode() != Mode::DECOMPRESS || strictCompression != Flags::STRICT) {
+  if (mode != Mode::DECOMPRESS || strictCompression != Flags::STRICT) {
     return;
   }
+  auto availIn = withEngine([](auto& stream) { return stream.availIn(); });
   // The spec requires that a TypeError is produced if there is trailing data after the end
   // of the compression stream. Called AFTER the caller has buffered the iteration's output:
   // the final valid bytes (produced by the very pump step that observed the trailing junk)
   // are still delivered to any read that consumes them before the error lands, which is the
   // WPT-pinned observable order.
-  JSG_REQUIRE(!(result.result == Z_STREAM_END && stream.availIn() > 0), TypeError,
+  JSG_REQUIRE(!(result.result == Z_STREAM_END && availIn > 0), TypeError,
       "Trailing bytes after end of compressed data");
   // Same applies to closing a stream before the complete decompressed data is available.
   JSG_REQUIRE(!(flush == Z_FINISH && result.result == Z_BUF_ERROR && result.buffer.size() == 0),
@@ -363,8 +460,7 @@ void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info
     auto mode = modeStr.toString(js);
     auto format = formatStr.toString(js);
 
-    JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-        "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+    requireWebCompressionFormat(format);
     CodecStage::Mode codecMode;
     CodecStage::Flags codecFlags = CodecStage::Flags::NONE;
     if (mode == "compress") {

@@ -278,8 +278,7 @@ struct Structure {
   callable @11 :FunctionType;
   # If this type is callable as a function, the signature of said function. Otherwise, null.
 
-  builtinModules @12 :List(Module);
-  # List of all builtin modules provided by the context.
+  obsolete12 @12 :List(Module);
 
   tsName @17 :Text;
   # Explicit declaration name; empty means derive it from fullyQualifiedName.

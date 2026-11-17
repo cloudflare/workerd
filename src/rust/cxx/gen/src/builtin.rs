@@ -256,10 +256,21 @@ pub fn write(out: &mut OutFile) {
         out.next_section();
         writeln!(out, "template <typename T, typename = void *>");
         writeln!(out, "struct operator_new {{");
+        writeln!(out, "  void *operator()(::std::size_t sz) {{");
+        // Aligned allocation is C++17; older standards keep the plain `operator new`.
+        writeln!(out, "#ifdef __cpp_aligned_new");
         writeln!(
             out,
-            "  void *operator()(::std::size_t sz) {{ return ::operator new(sz); }}",
+            "    if (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {{",
         );
+        writeln!(
+            out,
+            "      return ::operator new(sz, ::std::align_val_t(alignof(T)));",
+        );
+        writeln!(out, "    }}");
+        writeln!(out, "#endif");
+        writeln!(out, "    return ::operator new(sz);");
+        writeln!(out, "  }}");
         writeln!(out, "}};");
         out.next_section();
         writeln!(out, "template <typename T>");

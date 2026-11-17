@@ -52,6 +52,8 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     size_t prefix = (holder->pending == kj::none) ? 0 : 1;
     size_t end = prefix + length;
     auto buf = kj::heapArray<char16_t>(end);
+    // Zeroed because V8 may not fill it; see JsString::writeInto().
+    buf.asPtr().fill(0);
     str->Write(js.v8Isolate, 0, length, reinterpret_cast<uint16_t*>(buf.begin() + prefix));
 
     KJ_IF_SOME(lead, holder->pending) {

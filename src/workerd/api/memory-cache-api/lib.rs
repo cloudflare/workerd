@@ -20,6 +20,7 @@ use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 use memory_cache::CacheError;
 use memory_cache::ReadDecision;
 use memory_cache::ReadKind;
@@ -269,9 +270,8 @@ fn millis_since_epoch(time: SystemTime) -> f64 {
 }
 
 /// The data of a reaction that needs none.
+#[jsg_traced]
 pub(crate) struct NoData;
-
-jsg::jsg_traced!(NoData);
 
 /// A promise that follows `promise` through a reaction that passes on what it settles with, as
 /// C++ JSG follows a promise when it converts it, so that it settles after as many microtasks.

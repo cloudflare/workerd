@@ -71,6 +71,11 @@ mod ffi {
             callback: unsafe fn(usize /* callback */),
         );
 
+        /// Takes the realm's cached templates and resets them, as the snapshot pipeline does.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn take_realm_templates(self: &TestHarness);
+
         pub unsafe fn eval(
             self: &EvalContext,
             code: &str,
@@ -602,6 +607,13 @@ impl Harness {
         if let Some(payload) = call.panic {
             std::panic::resume_unwind(payload);
         }
+    }
+
+    /// Takes the realm's cached templates and resets their handles, under the isolate lock, as
+    /// the startup snapshot pipeline does before it creates the snapshot.
+    pub fn take_realm_templates(&self) {
+        // SAFETY: the harness is valid, and no Rust `Lock` is in use outside a callback.
+        unsafe { self.0.take_realm_templates() };
     }
 
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
