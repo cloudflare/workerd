@@ -850,7 +850,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
     JSG_STRUCT(transfer);
-    JSG_STRUCT_TS_OVERRIDE(StructuredSerializeOptions);
+    // Declared in types/defines/structured-clone.d.ts.
+    JSG_STRUCT_TS_OVERRIDE(type StructuredSerializeOptions = never);
   };
 
   jsg::JsValue structuredClone(
@@ -964,7 +965,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(clearInterval);
     JSG_METHOD(queueMicrotask);
     // Under the TS_STRUCTURED_CLONE autogate, the per-isolate bootstrap installs the TypeScript
-    // structuredClone() instead.
+    // structuredClone() instead. Its types come from types/defines/structured-clone.d.ts, not from
+    // this method (the JSG_TS_OVERRIDE below omits it), so they do not depend on whether this
+    // method is registered.
     if (!util::Autogate::isEnabled(util::AutogateKey::TS_STRUCTURED_CLONE)) {
       JSG_METHOD(structuredClone);
     }
@@ -1273,6 +1276,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
+    // structuredClone() is declared in types/defines/structured-clone.d.ts.
     JSG_TS_OVERRIDE({
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
@@ -1280,7 +1284,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval(callback: (...args: any[]) => void, msDelay?: number): number;
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
-      structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      structuredClone: never;
       queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;

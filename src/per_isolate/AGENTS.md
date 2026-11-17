@@ -33,7 +33,8 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
   TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
   the native `utils.structuredClone()`), which replaces the C++ method; its
-  parity suite and divergence ledger are in `src/tests/structured-clone/`.
+  parity suite and divergence ledger are in `src/tests/structured-clone/`, and
+  its types in `types/defines/structured-clone.d.ts`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which
