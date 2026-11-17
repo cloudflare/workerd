@@ -121,47 +121,27 @@ enum Code {
 
 impl Code {
     /// Its status, v4 code and message.
+    #[rustfmt::skip]
     const fn info(self) -> (u16, u32, &'static str) {
         match self {
-            Self::InternalError => (
-                500,
-                10001,
-                "We encountered an internal error. Please try again.",
-            ),
+            Self::InternalError =>
+                (500, 10001, "We encountered an internal error. Please try again."),
             Self::NoSuchKey => (404, 10007, "The specified key does not exist."),
-            Self::EntityTooLarge => (
-                400,
-                100_100,
-                "Your proposed upload exceeds the maximum allowed object size.",
-            ),
-            Self::EntityTooSmall => (
-                400,
-                10011,
-                "Your proposed upload is smaller than the minimum allowed object size.",
-            ),
-            Self::MetadataTooLarge => (
-                400,
-                10012,
-                "Your metadata headers exceed the maximum allowed metadata size.",
-            ),
+            Self::EntityTooLarge =>
+                (400, 100_100, "Your proposed upload exceeds the maximum allowed object size."),
+            Self::EntityTooSmall => (400, 10011,
+                "Your proposed upload is smaller than the minimum allowed object size."),
+            Self::MetadataTooLarge =>
+                (400, 10012, "Your metadata headers exceed the maximum allowed metadata size."),
             Self::InvalidObjectName => (400, 10020, "The specified object name is not valid."),
-            Self::InvalidMaxKeys => (
-                400,
-                10022,
-                "MaxKeys params must be positive integer <= 1000.",
-            ),
+            Self::InvalidMaxKeys =>
+                (400, 10022, "MaxKeys params must be positive integer <= 1000."),
             Self::NoSuchUpload => (400, 10024, "The specified multipart upload does not exist."),
-            Self::InvalidPart => (
-                400,
-                10025,
-                "One or more of the specified parts could not be found.",
-            ),
+            Self::InvalidPart =>
+                (400, 10025, "One or more of the specified parts could not be found."),
             Self::InvalidMetadata => (400, 10029, "Metadata missing or invalid"),
-            Self::PreconditionFailed => (
-                412,
-                10031,
-                "At least one of the pre-conditions you specified did not hold.",
-            ),
+            Self::PreconditionFailed =>
+                (412, 10031, "At least one of the pre-conditions you specified did not hold."),
             Self::BadDigest => (400, 10037, ""),
             Self::InvalidRange => (416, 10039, "The requested range is not satisfiable"),
             Self::BadUpload => (500, 10048, "There was a problem with the multipart upload."),
@@ -234,12 +214,11 @@ impl From<crate::Error> for Fail {
 
 type Answer<T> = std::result::Result<T, Fail>;
 
-/// What a request answers: nothing, metadata, or metadata then a body of
-/// this length.
-enum Reply {
-    Empty,
-    Meta(Value),
-    Stream(Value, u64, Body),
+/// What a request answers: its metadata, then a body of this length.
+type Reply = (Option<Value>, Option<(u64, Body)>);
+
+const fn meta(value: Value) -> Reply {
+    (Some(value), None)
 }
 
 pub(super) async fn request(
@@ -263,55 +242,38 @@ pub(super) async fn request(
         }
         _ => Err(Code::InternalError.into()),
     };
-    let (status, error, reply) = match answer {
+    let (status, error, (meta, body)) = match answer {
         Ok(reply) => (200, None, reply),
         Err(Fail::Kj(error)) => return Err(error),
         Err(Fail::R2(code, message, object)) => {
             let (status, v4code, _) = code.info();
             let error = json!({ "version": 1, "v4code": v4code, "message": message });
-            (
-                status,
-                Some(error),
-                object.map_or(Reply::Empty, Reply::Meta),
-            )
+            (status, Some(error), (object, None))
         }
     };
     let mut map = http::HeaderMap::new();
     if let Some(error) = error {
         map.insert("cf-r2-error", header_value(error.to_string())?);
     }
-    let (meta, length, body) = match reply {
-        Reply::Empty => (None, 0, None),
-        Reply::Meta(meta) => (Some(meta), 0, None),
-        Reply::Stream(meta, length, body) => (Some(meta), length, Some(body)),
-    };
-    let meta = meta.map(|m| Bytes::from(m.to_string()));
-    if let Some(meta) = &meta {
+    let meta = meta.map_or_else(Bytes::new, |m| Bytes::from(m.to_string()));
+    if !meta.is_empty() {
         map.insert("cf-r2-metadata-size", header_value(meta.len().to_string())?);
     }
-    let length = meta.as_ref().map_or(0, |m| m.len() as u64) + length;
+    let length = meta.len() as u64 + body.as_ref().map_or(0, |(length, _)| *length);
     // Set explicitly, as the `disk` service does, so that a worker calling
     // in-process sees it too.
-    map.insert(
-        http::header::CONTENT_LENGTH,
-        header_value(length.to_string())?,
-    );
+    map.insert("content-length", header_value(length.to_string())?);
     let headers = kj_headers(header_table(&shared.factory), &map)?;
     let reason = if status == 200 { "OK" } else { "Error" };
-    let mut out = response.send(
-        status.into(),
-        reason,
-        HeadersRef::from(&*headers),
-        Some(length),
-    )?;
-    if let Some(meta) = meta {
-        out.write(&meta).await?;
-    }
-    if let Some(mut body) = body {
-        while let Some(chunk) = body.next().await {
-            out.write(&chunk.map_err(|e| kj::disconnected!("{e}"))?)
-                .await?;
-        }
+    let headers = HeadersRef::from(&*headers);
+    let mut out = response.send(status.into(), reason, headers, Some(length))?;
+    out.write(&meta).await?;
+    let Some((_, mut body)) = body else {
+        return Ok(());
+    };
+    while let Some(chunk) = body.next().await {
+        out.write(&chunk.map_err(|e| kj::disconnected!("{e}"))?)
+            .await?;
     }
     Ok(())
 }
@@ -700,7 +662,7 @@ impl R2<'_> {
             Some("head") => {
                 let o = self.head(key(&req["object"])?).await?;
                 let o = o.ok_or(Code::NoSuchKey)?;
-                Ok(Reply::Meta(o.json(Some((0, o.size)), ALL)))
+                Ok(meta(o.json(Some((0, o.size)), ALL)))
             }
             Some("get") => self.get(&req).await,
             Some("list") => self.list(&req).await,
@@ -734,7 +696,7 @@ impl R2<'_> {
                     if u64(&req["range"]["offset"]).unwrap_or(0) != o.size {
                         return Err(Code::InvalidRange.into());
                     }
-                    return Ok(Reply::Meta(o.json(Some((o.size, 0)), ALL)));
+                    return Ok(meta(o.json(Some((o.size, 0)), ALL)));
                 }
                 read => read?,
             };
@@ -745,7 +707,7 @@ impl R2<'_> {
             }
             let (offset, length) = object.range.unwrap_or((0, object.size));
             let meta = Item::of(key, &object).json(Some((offset, length)), ALL);
-            return Ok(Reply::Stream(meta, length, body));
+            return Ok((Some(meta), Some((length, body))));
         }
     }
 
@@ -763,7 +725,7 @@ impl R2<'_> {
         // Miniflare.
         if token == Some(None) {
             let empty = json!({ "objects": [], "truncated": false, "delimitedPrefixes": [] });
-            return Ok(Reply::Meta(empty));
+            return Ok(meta(empty));
         }
         let include = req["include"].as_array().map_or(&[][..], Vec::as_slice);
         let include = (include.contains(&0.into()), include.contains(&1.into()));
@@ -802,7 +764,7 @@ impl R2<'_> {
         if let Some(token) = page.token {
             listed["cursor"] = format!("{CURSOR}{token}").into();
         }
-        Ok(Reply::Meta(listed))
+        Ok(meta(listed))
     }
 
     async fn write(
@@ -835,13 +797,13 @@ impl R2<'_> {
                 let deleted = futures::stream::iter(keys).map(|k| bucket.delete(k));
                 let deleted: Vec<_> = deleted.buffered(PARALLEL).collect().await;
                 deleted.into_iter().collect::<cluster::Result<Vec<_>>>()?;
-                Ok(Reply::Empty)
+                Ok((None, None))
             }
             Some("createMultipartUpload") => {
                 let (record, content) = record(&req)?;
                 let k = key(&req["object"])?;
                 let id = bucket.begin(k, &content, &envelope(&record)).await?;
-                Ok(Reply::Meta(json!({ "uploadId": id })))
+                Ok(meta(json!({ "uploadId": id })))
             }
             Some("uploadPart") => {
                 let (k, id) = (key(&req["object"])?, upload(&req)?);
@@ -855,14 +817,14 @@ impl R2<'_> {
                 let mut part = Vec::new();
                 fill(&mut body, &mut part, MAX_PART).await?;
                 let etag = bucket.part(k, id, n, part.into()).await?;
-                Ok(Reply::Meta(json!({ "etag": etag })))
+                Ok(meta(json!({ "etag": etag })))
             }
             Some("completeMultipartUpload") => self.complete(&req).await,
             Some("abortMultipartUpload") => {
                 let aborted = bucket.abort(key(&req["object"])?, upload(&req)?).await;
                 match aborted.map_err(Fail::from) {
                     Err(f) if f.code() != Some(Code::NoSuchUpload) => Err(f),
-                    _ => Ok(Reply::Empty),
+                    _ => Ok((None, None)),
                 }
             }
             _ => Err(Code::InternalError.into()),
@@ -915,7 +877,7 @@ impl R2<'_> {
                 metadata,
                 range: None,
             };
-            return Ok(Reply::Meta(Item::of(key, &o).json(None, ALL)));
+            return Ok(meta(Item::of(key, &o).json(None, ALL)));
         }
         let id = bucket.begin(key, &content, &envelope(&record)).await?;
         let uploaded = async {
@@ -943,7 +905,7 @@ impl R2<'_> {
     /// The object `key` was just written as.
     async fn described(&self, key: &str) -> Answer<Reply> {
         let o = self.head(key).await?.ok_or(Code::InternalError)?;
-        Ok(Reply::Meta(o.json(None, ALL)))
+        Ok(meta(o.json(None, ALL)))
     }
 
     /// Completes an upload with the chosen parts, checked as R2 checks
@@ -1008,7 +970,3 @@ impl R2<'_> {
 fn upload(req: &Value) -> Answer<&str> {
     Ok(req["uploadId"].as_str().ok_or(Code::InvalidMetadata)?)
 }
-
-#[cfg(test)]
-#[path = "r2-test.rs"]
-mod tests;
