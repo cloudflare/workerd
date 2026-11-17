@@ -46,6 +46,14 @@ pub mod ffi {
         awaited: bool,
     }
 
+    /// What became of an input.
+    struct ReplEvaluation {
+        /// The text to print: the rendered result, or `Uncaught ...`.
+        text: String,
+        /// The input threw, or the promise it awaited rejected: `text` renders the exception.
+        threw: bool,
+    }
+
     #[namespace = "kj_rs_tokio"]
     unsafe extern "C++" {
         include!("kj-rs-tokio/tokio-event-port.h");
@@ -65,12 +73,12 @@ pub mod ffi {
             options: &ReplOptions,
         ) -> Result<KjOwn<ReplSession>>;
 
-        /// Evaluates the first of `candidates` that compiles: the text to print, the rendered
-        /// result or `Uncaught ...`. An error means the session itself failed.
+        /// Evaluates the first of `candidates` that compiles. An error means the session itself
+        /// failed.
         async unsafe fn repl_evaluate<'a>(
             session: Pin<&'a mut ReplSession>,
             candidates: Vec<ReplCandidate>,
-        ) -> Result<String>;
+        ) -> Result<ReplEvaluation>;
 
         /// The property names of the value of `base`, an identifier chain, or of the global object
         /// if `base` is empty: the names tab completion offers.
@@ -116,7 +124,7 @@ pub mod ffi {
 pub async fn evaluate(
     session: Pin<&mut ffi::ReplSession>,
     candidates: Vec<ffi::ReplCandidate>,
-) -> Result<String, cxx::KjError> {
+) -> Result<ffi::ReplEvaluation, cxx::KjError> {
     // SAFETY: the returned future borrows the session for its duration.
     unsafe { ffi::repl_evaluate(session, candidates) }
         .await

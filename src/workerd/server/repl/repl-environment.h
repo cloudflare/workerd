@@ -80,11 +80,19 @@ class ReplEnvironment final: public ReplHost {
   ~ReplEnvironment() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ReplEnvironment);
 
-  // Evaluates one input, resolving to the text to print: the rendered result, or "Uncaught "
-  // followed by the rendered exception. A promise result is rendered as a promise unless the
-  // candidate is `awaited`; the event loop runs while one is awaited. Rejects only if the
-  // environment itself fails.
-  kj::Promise<kj::String> evaluate(kj::Array<Candidate> candidates);
+  // What became of an input.
+  struct Evaluation {
+    // The text to print: the rendered result, or "Uncaught " followed by the rendered exception.
+    kj::String text;
+    // The input threw, or the promise of an `awaited` candidate rejected, so `text` renders an
+    // exception.
+    bool threw;
+  };
+
+  // Evaluates one input. A promise result is rendered as a promise unless the candidate is
+  // `awaited`; the event loop runs while one is awaited. Rejects only if the environment itself
+  // fails.
+  kj::Promise<Evaluation> evaluate(kj::Array<Candidate> candidates);
 
   // The string-named properties, own and inherited, of the value of `base` (an identifier chain
   // such as `a.b.c`), or of the global object if `base` is empty, for tab completion. Evaluating
@@ -207,8 +215,8 @@ class ReplEnvironment final: public ReplHost {
     jsg::JsRef<jsg::JsPromise> result;
     kj::Promise<void> settled;
   };
-  // Runs the compiled input: the rendered result, or the awaited one.
-  kj::OneOf<kj::String, Awaiting> run(
+  // Runs the compiled input: what became of it, or the awaited result.
+  kj::OneOf<Evaluation, Awaiting> run(
       jsg::Lock& js, IoContext& context, kj::ArrayPtr<const Candidate> candidates);
 
   // Records `value` as the last result (`name` is "_") or exception ("_error").
