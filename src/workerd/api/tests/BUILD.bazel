@@ -1470,6 +1470,16 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-standard-url-test.wd-test",
+    data = [
+        "websocket-standard-url-server.js",
+        "websocket-standard-url-test.js",
+    ],
+    # One service tests the behaviour without websocket_standard_url_and_extensions.
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],

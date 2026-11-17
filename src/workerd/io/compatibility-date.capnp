@@ -1841,4 +1841,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  websocketStandardUrlAndExtensions @207 :Bool
+      $compatEnableFlag("websocket_standard_url_and_extensions")
+      $compatDisableFlag("websocket_legacy_url_and_extensions");
+  # Makes the WebSocket constructor and attributes follow the WHATWG WebSockets spec. The URL is
+  # parsed with the WHATWG URL parser, `http:` and `https:` URLs are accepted and mapped to `ws:` and
+  # `wss:`, and `url` returns the parsed URL serialized, not the string passed in. The URL the
+  # connection requests is built from that serialization, so its path is normalized by the WHATWG
+  # rules rather than by the KJ URL parser alone, which follows neither those nor RFC 3986. Relative
+  # URLs still throw a SyntaxError, because a Worker has no base URL. Once the connection is open,
+  # `protocol` and `extensions` are the empty string when the server selected none, not null.
 }
