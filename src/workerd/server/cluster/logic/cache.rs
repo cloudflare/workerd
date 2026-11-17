@@ -2,18 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The cluster's Cache API store: which node serves an entry, and when a
+//! The cluster's Cache API store: which node holds an entry, and when a
 //! write is done. No bucket operations beyond the leases nodes already hold.
 //!
 //! A key's home is the node rendezvous hashing ranks first in a node's view.
-//! A node serves a key only while it is active (`Timing`) and the key's home
-//! in its own view, and drops what it holds of a key once its view moves the
-//! key away. Matches and writes go to the home. So at most one node serves a
-//! key at a time: an active node registered longer ago than any fresh view
-//! may be stale, so two active nodes list each other, and rendezvous ranks
-//! one above the other in both views.
+//! A node holds a key's entry, which matches and writes go to, only while it
+//! is active (`Timing`) and the key's home in its own view, and drops it once
+//! its view moves the key away. So at most one node holds a key's entry at a
+//! time: an active node registered longer ago than any fresh view may be
+//! stale, so two active nodes list each other, and rendezvous ranks one above
+//! the other in both views.
 //!
-//! A hit leases the value for `lease_ms` from when the asker sent the request,
+//! Other nodes serve a key only from near copies, each within its lease. A
+//! hit leases the value for `lease_ms` from when the asker sent the request,
 //! by its own clock. The asker serves a near copy that long, then renews it
 //! with a request that names the version it holds, which the home answers
 //! without the value if unchanged. The home acks a write only once the leases
@@ -26,7 +27,7 @@
 //! only `lease_wait_ms` after it stopped.
 //!
 //! A delete whose target is not active goes on down the ranking. An active
-//! node that answers the key is not its own proves nobody serves it. A put to
+//! node that answers the key is not its own proves no node holds it. A put to
 //! a home that is not active is not stored.
 //!
 //! The executor sets `fresh` and `active` by `Timing`, treats a node missing
