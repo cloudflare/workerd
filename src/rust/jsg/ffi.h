@@ -98,6 +98,11 @@ struct ResourceDescriptor;
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
+// Whether a collection found the Wrappable unreachable and is sweeping it (see
+// jsg::Wrappable::isCondemned()). Weak::is_alive and Weak::upgrade refuse such a Wrappable;
+// wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
+bool wrappable_is_condemned(const Wrappable& wrappable);
+bool wrappable_try_condemn(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);

@@ -635,6 +635,8 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
+        pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
+        pub unsafe fn wrappable_try_condemn(wrappable: Pin<&mut Wrappable>) -> bool;
         pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
@@ -5524,6 +5526,13 @@ impl WrappableRc {
     ) {
         // SAFETY: the KjRc keeps the Wrappable alive.
         tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
+    }
+
+    /// Condemns the underlying Wrappable if a collection found it unreachable and is sweeping it,
+    /// and returns whether it did (see `wrappable_try_condemn`).
+    pub(crate) fn try_condemn(&self) -> bool {
+        // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
+        unsafe { ffi::wrappable_try_condemn(self.as_pin_mut()) }
     }
 
     /// Increments the strong reference count on the underlying Wrappable.
