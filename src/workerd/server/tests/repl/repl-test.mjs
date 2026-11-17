@@ -12,6 +12,12 @@ import assert from 'node:assert';
 assert(env.WORKERD_BINARY !== undefined, 'Set WORKERD_BINARY.');
 assert(env.REPL_CONFIG !== undefined, 'Set REPL_CONFIG.');
 
+// A build can make the compile caches for another binary's V8 flags
+// (//build/config:compile_cache_v8_flags), and workerd then logs this warning as it starts. It
+// isn't the REPL's output, so it's dropped from stderr.
+const COMPILE_CACHE_WARNING =
+  /^.*per-isolate bootstrap compile cache failed its compatibility check.*\n/gm;
+
 // Runs `workerd repl --experimental ...args` with `lines` as its input; its exit status, what it
 // wrote to stdout, where the results go, as text and as lines, and what it wrote to stderr. A
 // result can take several lines, as an object or an exception's stack does.
@@ -30,14 +36,15 @@ function repl(args, lines) {
     child.stdout.on('data', (data) => (stdout += data));
     child.stderr.on('data', (data) => (stderr += data));
     child.on('error', reject);
-    child.on('close', (code) =>
+    child.on('close', (code) => {
+      stderr = stderr.replace(COMPILE_CACHE_WARNING, '');
       resolve({
         code,
         stdout,
         results: stdout.split('\n').slice(0, -1),
         stderr,
-      })
-    );
+      });
+    });
     child.stdin.end(lines.map((line) => `${line}\n`).join(''));
   });
 }
@@ -50,8 +57,9 @@ test('a config named on the command line is loaded into `s`', async () => {
   assert.strictEqual(code, 0, stderr);
   assert(stdout.startsWith('ReplServer {'), stdout);
   assert.strictEqual(results.at(-1), "'hello'", stdout);
-  // The load is shown as the input it is.
-  assert(stderr.includes('> s = await workerd.loadConfig('), stderr);
+  // Without a terminal, the REPL shows no banner or prompts, so stderr holds only what went
+  // wrong, and nothing did.
+  assert.strictEqual(stderr, '');
 });
 
 test('the command line can name the config constant', async () => {

@@ -61,8 +61,8 @@ workerd repl --experimental [options] [<config-file> [<const-name>]]
 
 A `<config-file>` is loaded into the global `s`, as
 `s = await workerd.loadConfig('<config-file>', { constName: '<const-name>' })` would load it. The
-REPL shows that input at its first prompt and prints its result. A config that fails to load is
-reported like any failed input, and the REPL carries on with `s` unset.
+REPL prints its result, and when it shows prompts, shows that input at the first. A config that
+fails to load is reported like any failed input, and the REPL carries on with `s` unset.
 
 | Option                      | Effect                                                                                                                                                                                                                     |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -221,13 +221,15 @@ the session. A line that repeats the one before it, or is empty, isn't saved.
 ### Without a terminal
 
 Elsewhere, such as when input is piped in or on Windows, the REPL reads plain lines and saves no
-history. Prompts and the REPL's own messages go to stderr and results to stdout, so a script can
-drive it:
+history. Results go to stdout, and the REPL's own messages to stderr. When stdin is a terminal,
+the banner and prompts go to stderr too. When it isn't, the REPL shows neither, so stderr holds
+only what went wrong and what JavaScript writes there, such as with `console.error()`. A script can
+drive it so, and tell from its [exit status](#command-line) whether an input failed:
 
 ```sh
 printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
     "await (await s.service('main').fetch('http://x/')).text()" |
-  workerd repl --experimental 2>/dev/null
+  workerd repl --experimental
 ```
 
 ## Loading configs
