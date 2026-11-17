@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "internet", network = (allow = ["private"])),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "websocket-close-after-error-test.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+  bindings = [
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "RSV_SERVER_PORT", fromEnvironment = "RSV_SERVER_PORT"),
+  ]
+);
