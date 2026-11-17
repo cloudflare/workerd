@@ -371,8 +371,10 @@ class WebSocket: public EventTarget {
   // in each `WebSocket` constructor below); a follow-up commit introduces a
   // `HibernatableWebSocketAdapter` swapped in at `acceptAsHibernatable()` and on revival.
   //
-  // The adapter's handles become strong when it is moved out or released, so swapping it is safe
-  // after a trace; see `jsg::TracedOwn`.
+  // With the gc-complete-tracing autogate enabled, the adapter's handles become strong when it is
+  // moved out or released, so swapping it is safe after a trace; see `jsg::TracedOwn`. With the
+  // gate disabled, swapping it after a trace leaves the old adapter's handles traced with nothing
+  // visiting them, so don't swap it until the gate is removed.
   jsg::TracedOwn<WebSocketAdapter> impl;
 };
 
