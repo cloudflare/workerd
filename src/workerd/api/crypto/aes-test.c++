@@ -156,7 +156,7 @@ KJ_TEST("AES-CTR key wrap") {
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
         return subtle->exportKey(js, kj::str("raw"), *unwrapped);
-      }).then(js, [&](jsg::Lock& js, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
+      }).then(js, [&](jsg::Lock& js, api::SubtleCrypto::ExportedKeyData roundTrippedKeyMaterial) {
         auto& buf = roundTrippedKeyMaterial.get<jsg::JsRef<jsg::JsArrayBuffer>>();
         KJ_ASSERT(buf.getHandle(js).asArrayPtr() == KEY_DATA);
         completed = true;

@@ -1841,4 +1841,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  nodeJsCompatJwkExport @207 :Bool
+      $compatEnableFlag("nodejs_compat_jwk_export")
+      $compatDisableFlag("no_nodejs_compat_jwk_export")
+      $compatEnableDate("2026-12-01");
+  # Node.js KeyObject JWK exports omit key_ops and ext, and include alg only for AKP keys.
+  # Without this flag, native secret keys include ext, native Ed25519 keys include alg, and
+  # KeyObject.from(CryptoKey) exports preserve the CryptoKey's populated JWK metadata.
+  # Absent JWK members are omitted with or without this flag.
 }

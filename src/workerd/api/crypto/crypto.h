@@ -556,6 +556,151 @@ class SubtleCrypto final: public jsg::Object {
   using ImportKeyData = kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, JsonWebKey>;
   using ExportKeyData = kj::OneOf<jsg::JsRef<jsg::JsArrayBuffer>, JsonWebKey>;
 
+  // Export views use distinct dictionary templates so absent JWK members are not own properties.
+  struct WebCryptoJwkViews {
+    struct RsaPublic: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, n, e);
+    };
+    struct RsaPrivate: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, d, n, e, p, q, dp, dq, qi);
+    };
+    struct EcPublic: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, ext, crv, x, y);
+    };
+    struct EcPrivate: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, ext, crv, x, y, d);
+    };
+    struct EdPublic: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, crv, x);
+    };
+    struct EdPrivate: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, crv, x, d);
+    };
+    struct XPublic: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, ext, crv, x);
+    };
+    struct XPrivate: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, ext, crv, x, d);
+    };
+    struct AkpPublic: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, pub);
+    };
+    struct AkpPrivate: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, pub, priv);
+    };
+    struct Oct: JsonWebKey {
+      JSG_STRUCT(kty, key_ops, alg, ext, k);
+    };
+  };
+
+  struct NodeJwkViews {
+    struct RsaPublic: JsonWebKey {
+      JSG_STRUCT(kty, n, e);
+    };
+    struct RsaPrivate: JsonWebKey {
+      JSG_STRUCT(kty, d, n, e, p, q, dp, dq, qi);
+    };
+    struct EcPublic: JsonWebKey {
+      JSG_STRUCT(kty, crv, x, y);
+    };
+    struct EcPrivate: JsonWebKey {
+      JSG_STRUCT(kty, crv, x, y, d);
+    };
+    struct OkpPublic: JsonWebKey {
+      JSG_STRUCT(kty, crv, x);
+    };
+    struct OkpPrivate: JsonWebKey {
+      JSG_STRUCT(kty, crv, x, d);
+    };
+    using EdPublic = OkpPublic;
+    using EdPrivate = OkpPrivate;
+    using XPublic = OkpPublic;
+    using XPrivate = OkpPrivate;
+    struct AkpPublic: JsonWebKey {
+      JSG_STRUCT(kty, alg, pub);
+    };
+    struct AkpPrivate: JsonWebKey {
+      JSG_STRUCT(kty, alg, pub, priv);
+    };
+    struct Oct: JsonWebKey {
+      JSG_STRUCT(kty, k);
+    };
+  };
+
+  struct NodeJwkMetadataViews: NodeJwkViews {
+    struct EdPublic: JsonWebKey {
+      JSG_STRUCT(kty, alg, crv, x);
+    };
+    struct EdPrivate: JsonWebKey {
+      JSG_STRUCT(kty, alg, crv, x, d);
+    };
+    struct Oct: JsonWebKey {
+      JSG_STRUCT(kty, ext, k);
+    };
+  };
+
+  template <typename Views>
+  struct JwkExport {
+    using JsgRttiDelegate = JsonWebKey;
+
+    JsonWebKey value;
+
+    static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        kj::Maybe<v8::Local<v8::Object>> creator,
+        JwkExport exported) {
+      if constexpr (kj::isSameType<Views, NodeJwkViews>()) {
+        if (!FeatureFlags::get(js).getNodeJsCompatJwkExport()) {
+          if (exported.value.key_ops != kj::none) {
+            return JwkExport<WebCryptoJwkViews>::jsgWrap(
+                typeWrapper, js, context, creator, {kj::mv(exported.value)});
+          }
+          return JwkExport<NodeJwkMetadataViews>::jsgWrap(
+              typeWrapper, js, context, creator, {kj::mv(exported.value)});
+        }
+      }
+      auto& jwk = exported.value;
+      auto wrap = [&](auto value) { return typeWrapper.wrap(js, context, creator, kj::mv(value)); };
+      if (jwk.kty == "RSA") {
+        return jwk.d == kj::none ? wrap(typename Views::RsaPublic{kj::mv(jwk)})
+                                 : wrap(typename Views::RsaPrivate{kj::mv(jwk)});
+      }
+      if (jwk.kty == "EC") {
+        return jwk.d == kj::none ? wrap(typename Views::EcPublic{kj::mv(jwk)})
+                                 : wrap(typename Views::EcPrivate{kj::mv(jwk)});
+      }
+      if (jwk.kty == "OKP") {
+        if (jwk.alg != kj::none) {
+          return jwk.d == kj::none ? wrap(typename Views::EdPublic{kj::mv(jwk)})
+                                   : wrap(typename Views::EdPrivate{kj::mv(jwk)});
+        }
+        return jwk.d == kj::none ? wrap(typename Views::XPublic{kj::mv(jwk)})
+                                 : wrap(typename Views::XPrivate{kj::mv(jwk)});
+      }
+      if (jwk.kty == "AKP") {
+        return jwk.priv == kj::none ? wrap(typename Views::AkpPublic{kj::mv(jwk)})
+                                    : wrap(typename Views::AkpPrivate{kj::mv(jwk)});
+      }
+      KJ_ASSERT(jwk.kty == "oct", jwk.kty);
+      return wrap(typename Views::Oct{kj::mv(jwk)});
+    }
+
+    static kj::Maybe<JwkExport> jsgTryUnwrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        v8::Local<v8::Value> handle,
+        kj::Maybe<v8::Local<v8::Object>> parentObject) {
+      return typeWrapper
+          .tryUnwrap(js, context, handle, static_cast<JsonWebKey*>(nullptr), parentObject)
+          .map([](JsonWebKey value) { return JwkExport{kj::mv(value)}; });
+    }
+  };
+
+  using ExportedJsonWebKey = JwkExport<WebCryptoJwkViews>;
+  using NodeExportedJsonWebKey = JwkExport<NodeJwkViews>;
+  using ExportedKeyData = kj::OneOf<jsg::JsRef<jsg::JsArrayBuffer>, ExportedJsonWebKey>;
+
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> encrypt(jsg::Lock& js,
       kj::OneOf<kj::String, EncryptAlgorithm> algorithm,
       const CryptoKey& key,
@@ -614,7 +759,7 @@ class SubtleCrypto final: public jsg::Object {
       bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);
 
-  jsg::Promise<ExportKeyData> exportKey(jsg::Lock& js, kj::String format, const CryptoKey& key);
+  jsg::Promise<ExportedKeyData> exportKey(jsg::Lock& js, kj::String format, const CryptoKey& key);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> wrapKey(jsg::Lock& js,
       kj::String format,
@@ -1066,7 +1211,7 @@ class Crypto final: public jsg::Object {
   jsg::Ref<SubtleCrypto> subtle;
 };
 
-#define EW_CRYPTO_ISOLATE_TYPES                                                                    \
+#define EW_CRYPTO_RTTI_TYPES                                                                       \
   api::Crypto, api::SubtleCrypto, api::CryptoKey, api::CryptoKeyPair,                              \
       api::SubtleCrypto::JsonWebKey, api::SubtleCrypto::JsonWebKey::RsaOtherPrimesInfo,            \
       api::SubtleCrypto::EncapsulatedBits, api::SubtleCrypto::EncapsulatedKey,                     \
@@ -1078,6 +1223,25 @@ class Crypto final: public jsg::Object {
       api::CryptoKey::EllipticKeyAlgorithm, api::CryptoKey::ArbitraryKeyAlgorithm,                 \
       api::CryptoKey::AsymmetricKeyDetails, api::DigestStream, api::DigestStream::Options,         \
       api::DigestContextHandle
+// Export views are output-only; their public RTTI is JsonWebKey via JsgRttiDelegate.
+#define EW_CRYPTO_ISOLATE_TYPES                                                                    \
+  EW_CRYPTO_RTTI_TYPES, api::SubtleCrypto::WebCryptoJwkViews::RsaPublic,                           \
+      api::SubtleCrypto::WebCryptoJwkViews::RsaPrivate,                                            \
+      api::SubtleCrypto::WebCryptoJwkViews::EcPublic,                                              \
+      api::SubtleCrypto::WebCryptoJwkViews::EcPrivate,                                             \
+      api::SubtleCrypto::WebCryptoJwkViews::EdPublic,                                              \
+      api::SubtleCrypto::WebCryptoJwkViews::EdPrivate,                                             \
+      api::SubtleCrypto::WebCryptoJwkViews::XPublic,                                               \
+      api::SubtleCrypto::WebCryptoJwkViews::XPrivate,                                              \
+      api::SubtleCrypto::WebCryptoJwkViews::AkpPublic,                                             \
+      api::SubtleCrypto::WebCryptoJwkViews::AkpPrivate, api::SubtleCrypto::WebCryptoJwkViews::Oct, \
+      api::SubtleCrypto::NodeJwkViews::RsaPublic, api::SubtleCrypto::NodeJwkViews::RsaPrivate,     \
+      api::SubtleCrypto::NodeJwkViews::EcPublic, api::SubtleCrypto::NodeJwkViews::EcPrivate,       \
+      api::SubtleCrypto::NodeJwkViews::OkpPublic, api::SubtleCrypto::NodeJwkViews::OkpPrivate,     \
+      api::SubtleCrypto::NodeJwkViews::AkpPublic, api::SubtleCrypto::NodeJwkViews::AkpPrivate,     \
+      api::SubtleCrypto::NodeJwkViews::Oct, api::SubtleCrypto::NodeJwkMetadataViews::EdPublic,     \
+      api::SubtleCrypto::NodeJwkMetadataViews::EdPrivate,                                          \
+      api::SubtleCrypto::NodeJwkMetadataViews::Oct
 
 }  // namespace workerd::api
 
