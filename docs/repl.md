@@ -236,6 +236,8 @@ printf '%s\n' "s = await workerd.loadConfig('config.capnp')" \
   workerd repl --experimental
 ```
 
+[Scripts and agents](#scripts-and-agents) says more about driving the REPL from a program.
+
 ## Loading configs
 
 `await workerd.loadConfig(path, { constName, watch })` loads a config and starts serving it. It resolves
@@ -381,6 +383,110 @@ so it can load configs too. Only the rendering crosses between environments, not
 has been called. `close()` closes the environment's servers and ends its JavaScript; the
 evaluations in progress fail with `Error: The environment was closed.` Quitting the REPL closes
 every environment still open.
+
+## Scripts and agents
+
+A program, such as a coding agent, can drive the REPL through its stdin, a script at a time or in
+a long-running session. Either way, the REPL reads plain lines, as it does
+[without a terminal](#without-a-terminal), and these rules apply:
+
+- Pass `--compat-date`, so that what the REPL's JavaScript can do doesn't change with the day it
+  runs.
+- A line that leaves no bracket, template literal or `/* */` comment open ends the input, and the
+  input runs before the REPL reads the next line. A statement continued on the next line runs
+  without that line, which then runs as an input of its own. That can fail, as a line starting
+  with `.` does (it is taken as a command) or one starting with `else`, or it can quietly mean
+  something else: after `t = 1`, a line `+ 2` prints `2` and leaves `t` at 1, and the line after
+  a braceless `if (a)` runs whatever `a` is. Put each statement on one line, or keep a bracket
+  open across its lines.
+- Without a terminal the REPL doesn't echo the inputs, so stdout holds the results, one per input,
+  in order. The loaded Workers' `console.log()` writes there too, as does the REPL's.
+- Results print as `util.inspect()` prints them. A string is quoted, and cut after 10000
+  characters; an array shows its first 100 items; and an object or array nested more than two
+  levels deep shows as `[Object]` or `[Array]`. To see a value in full, print it instead:
+  `console.log(text)`, or `console.log(JSON.stringify(value))`.
+- An exception prints on stdout, as `Uncaught` followed by the error. The REPL's own errors go to
+  stderr, such as `Error: Timed out after 30s: ...` and `Unknown command: ...`, along with
+  `console.error()` and `console.warn()`, unhandled rejections, and the reports of reloads.
+- `--input-timeout` stops awaiting a promise that never settles. It doesn't stop JavaScript that
+  runs without awaiting, such as `for (;;) {}`, nor the wait for the REPL's `waitUntil()` tasks
+  once its input ends. Limit the whole run as well, such as with GNU `timeout(1)` (`gtimeout` on
+  macOS with Homebrew's coreutils), or kill the REPL.
+- Once its input ends, the REPL [closes its servers](#closing), waits for its `waitUntil()` tasks,
+  and exits. A timer still pending then never fires; await what needs to finish.
+- `import()` can't load files from disk. To run a file's code, load a config with a Worker that
+  has it, and call the Worker through `service()`.
+
+### A script at a time
+
+Pipe the inputs in, as in [Without a terminal](#without-a-terminal). A quoted heredoc keeps the
+shell from expanding `$` and backticks in the JavaScript:
+
+```sh
+timeout 60 workerd repl --experimental --compat-date=2025-01-01 --input-timeout=10 \
+  config.capnp <<'EOF'
+r = await s.service('main').fetch('http://example.com/'); r.status
+await r.text()
+EOF
+```
+
+The REPL loads `config.capnp` into `s` and prints the server handle, then runs the inputs. Every
+input runs, even after one fails, and the [exit status](#command-line) is 1 if any failed.
+
+### A session
+
+To keep state from one command to the next, such as a loaded server or a Durable Object held in
+memory, start the REPL in the background, reading from a FIFO:
+
+```sh
+dir=$(mktemp -d) && mkfifo "$dir/in" && touch "$dir/out" "$dir/err"
+# Holds the FIFO open for writing, so that the REPL's input doesn't end between sends.
+nohup sleep 86400 > "$dir/in" 2> /dev/null & echo $! > "$dir/holder.pid"
+nohup workerd repl --experimental --compat-date=2025-01-01 --input-timeout=30 config.capnp \
+  < "$dir/in" > "$dir/out" 2> "$dir/err" & echo $! > "$dir/repl.pid"
+echo "$dir"
+```
+
+Then send it inputs with a script such as this one, `repl-send <dir> <input>`, which waits for the
+input to finish and prints what it wrote to stdout and to stderr:
+
+```sh
+#!/bin/sh
+dir=$1
+marker="'@@done-$$'"
+out=$(wc -c < "$dir/out")
+err=$(wc -c < "$dir/err")
+# The REPL reads a line only once the input before it has run, so the .break abandons the input
+# only if it is unfinished. The marker is an input of its own, and its result ends this one's
+# output.
+printf '%s\n.break\n%s\n' "$2" "$marker" > "$dir/in"
+tries=0
+until tail -c +$((out + 1)) "$dir/out" | grep -qxF "$marker"; do
+  tries=$((tries + 1))
+  if [ "$tries" -gt 600 ] || ! kill -0 "$(cat "$dir/repl.pid")" 2> /dev/null; then
+    echo "repl-send: no result after 60 s, or the REPL exited" >&2
+    break
+  fi
+  sleep 0.1
+done
+tail -c +$((out + 1)) "$dir/out" | grep -vxF "$marker"
+tail -c +$((err + 1)) "$dir/err" >&2
+```
+
+Without the `.break`, an unfinished input, such as `f(`, would take the marker in as one of its
+lines and wait for more, and so would every later send. With it, the input is abandoned, and
+prints nothing at all: every input that runs prints at least `undefined`, or an error.
+
+A session has no exit status for each input, so tell a failure from its output: `Uncaught` on
+stdout, or `Error:` or `Unknown command` on stderr. What a timer or a Worker prints after its
+input has finished shows up in a later send's output.
+
+To end the session, end the REPL's input: `kill "$(cat "$dir/holder.pid")"`. The REPL closes its
+servers and exits. If it doesn't, because JavaScript runs without awaiting or a `waitUntil()` task
+never settles, kill it: `kill "$(cat "$dir/repl.pid")"`. `kill -INT` stops awaiting an input, as
+Ctrl+C does, but ends the REPL if no input is awaiting, and does nothing if the REPL was started
+with SIGINT ignored (see [Interrupting](#interrupting)). `--input-timeout` stops awaiting without
+the signal.
 
 ## Limitations
 
