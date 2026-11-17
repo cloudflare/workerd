@@ -1129,7 +1129,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(IdentityTransformStream);
     }
     // Under the TS_HTML_REWRITER autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
-    // installs the TypeScript HTMLRewriter instead.
+    // installs the TypeScript HTMLRewriter instead. HTMLRewriter's declarations are in
+    // types/defines/htmlrewriter.d.ts, but the global scope's HTMLRewriter member comes from this
+    // nested type, which the type generation sees with every autogate off;
+    // types/test/types/htmlrewriter.ts fails without it.
     if (!util::Autogate::isEnabled(util::AutogateKey::TS_HTML_REWRITER)) {
       JSG_NESTED_TYPE(HTMLRewriter);
     }
