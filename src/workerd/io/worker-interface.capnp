@@ -337,15 +337,7 @@ struct Trace @0x8e8d911203762d34 {
   struct SpanLink {
     context @0 :SpanContext;
     attributes @1 :List(Attribute);
-    origin @2 :Origin;
-    traceState @3 :Text;
-    droppedAttributesCount @4 :UInt32;
-
-    enum Origin {
-      unknown @0;
-      local @1;
-      remote @2;
-    }
+    droppedAttributesCount @2 :UInt32;
   }
 
   struct SpanLinks {

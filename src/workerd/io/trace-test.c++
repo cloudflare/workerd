@@ -647,25 +647,14 @@ KJ_TEST("SpanLink context parsing preserves all ID bits and permits zero IDs") {
   }
 }
 
-KJ_TEST("SpanLink tracestate validation and normalization") {
-  // The Rust crate's tests cover TraceState's validation; these check the bridge.
-  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate(" \ta=one , ,1tenant@vendor=two\t,")) ==
-      "a=one,1tenant@vendor=two");
-  for (const auto& invalid: {""_kj, " , \t"_kj, "A=1"_kj, "a=one=two"_kj}) {
-    KJ_EXPECT(SpanLink::parseTracestate(invalid) == kj::none, invalid);
-  }
-}
-
 KJ_TEST("SpanLinks tail events round-trip and clone metadata, order, and duplicates") {
   auto target = KJ_ASSERT_NONNULL(SpanLink::parseContext(
       "fedcba98765432100123456789abcdef", "f123456789abcdef", TraceFlags(0xfe)));
-  SpanLink remote(SpanContext::clone(target),
-      kj::arr(Attribute("message"_kjc, kj::ConstString("original"_kjc))), SpanLink::Origin::REMOTE,
-      kj::ConstString("vendor=state"_kjc), 7);
-  auto duplicate = remote.clone();
-  SpanLink local(SpanContext::clone(target), {}, SpanLink::Origin::LOCAL);
-  SpanLink unknown(SpanContext::clone(target), {}, SpanLink::Origin::UNKNOWN);
-  SpanLinks links(kj::arr(kj::mv(remote), kj::mv(local), kj::mv(unknown), kj::mv(duplicate)));
+  SpanLink first(SpanContext::clone(target),
+      kj::arr(Attribute("message"_kjc, kj::ConstString("original"_kjc))), 7);
+  auto duplicate = first.clone();
+  SpanLink plain(SpanContext::clone(target), {});
+  SpanLinks links(kj::arr(kj::mv(first), kj::mv(plain), kj::mv(duplicate)));
   auto size = links.size();
   auto receiver = SpanContext(TraceId(1, 2), SpanId(3), TraceFlags(1));
   TailEvent event(SpanContext::clone(receiver), TraceId(4, 5), kj::UNIX_EPOCH, 6, kj::mv(links));
@@ -676,17 +665,15 @@ KJ_TEST("SpanLinks tail events round-trip and clone metadata, order, and duplica
     KJ_EXPECT(copy.spanContext == receiver);
     KJ_EXPECT(copy.sequence == 6);
     auto& result = copy.event.get<SpanLinks>();
-    KJ_ASSERT(result.links.size() == 4);
+    KJ_ASSERT(result.links.size() == 3);
     KJ_EXPECT(result.size() == size);
     KJ_EXPECT(result.links[0].context == target);
-    KJ_EXPECT(result.links[0].origin == SpanLink::Origin::REMOTE);
-    KJ_EXPECT(result.links[1].origin == SpanLink::Origin::LOCAL);
-    KJ_EXPECT(result.links[2].origin == SpanLink::Origin::UNKNOWN);
-    KJ_EXPECT(result.links[2].traceState == kj::none);
-    KJ_EXPECT(result.links[3].context == target);
-    KJ_EXPECT(KJ_ASSERT_NONNULL(result.links[3].traceState) == "vendor=state");
-    KJ_EXPECT(result.links[3].droppedAttributesCount == 7);
-    KJ_EXPECT(result.links[3].attributes[0].value[0].get<kj::ConstString>() == "original");
+    KJ_EXPECT(result.links[1].context == target);
+    KJ_EXPECT(result.links[1].attributes.size() == 0);
+    KJ_EXPECT(result.links[1].droppedAttributesCount == 0);
+    KJ_EXPECT(result.links[2].context == target);
+    KJ_EXPECT(result.links[2].droppedAttributesCount == 7);
+    KJ_EXPECT(result.links[2].attributes[0].value[0].get<kj::ConstString>() == "original");
   }
 }
 

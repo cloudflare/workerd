@@ -140,29 +140,11 @@ kj::Maybe<tracing::SpanLink> toSpanLink(jsg::Lock& js,
       }
     }
   }
-  kj::Maybe<kj::ConstString> traceState;
-  KJ_IF_SOME(value, inputContext.traceState) {
-    auto handle = value.getHandle(js);
-    if (handle->IsString()) {
-      KJ_IF_SOME(parsed, tracing::SpanLink::parseTracestate(jsg::JsValue(handle).toString(js))) {
-        traceState = kj::ConstString(kj::mv(parsed));
-      }
-    }
-  }
   if ((context.getTraceId() == nullptr || context.getSpanId() == tracing::SpanId::nullId) &&
-      attributes.empty() && traceState == kj::none)
+      attributes.empty())
     return kj::none;
 
-  auto origin = tracing::SpanLink::Origin::UNKNOWN;
-  KJ_IF_SOME(remote, inputContext.isRemote) {
-    auto handle = remote.getHandle(js);
-    if (handle->IsBoolean()) {
-      origin = handle.As<v8::Boolean>()->Value() ? tracing::SpanLink::Origin::REMOTE
-                                                 : tracing::SpanLink::Origin::LOCAL;
-    }
-  }
-  return tracing::SpanLink(kj::mv(context), attributes.releaseAsArray(), origin, kj::mv(traceState),
-      droppedAttributesCount);
+  return tracing::SpanLink(kj::mv(context), attributes.releaseAsArray(), droppedAttributesCount);
 }
 
 }  // namespace

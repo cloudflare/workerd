@@ -4560,12 +4560,8 @@ interface Tracing {
   ): T;
   Span: typeof Span;
 }
-interface TracingSpanLinkContext extends TracingSpanContext {
-  isRemote?: boolean;
-  traceState?: string;
-}
 interface TracingSpanLink {
-  context: TracingSpanLinkContext;
+  context: TracingSpanContext;
   attributes?: Record<string, boolean | number | string | undefined>;
   droppedAttributesCount?: number;
 }
@@ -17824,9 +17820,6 @@ declare namespace TailStream {
       readonly traceId: string;
       readonly spanId: string;
       readonly traceFlags: number;
-      /** Absent when the target's origin is unknown. */
-      readonly isRemote?: boolean;
-      readonly traceState?: string;
     };
     readonly attributes: readonly Attribute[];
     /** Attributes dropped before this link was recorded. */

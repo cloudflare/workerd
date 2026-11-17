@@ -2,12 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <workerd/io/trace-state/lib.rs.h>
 #include <workerd/io/trace.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
-
-#include <kj-rs/convert.h>
 
 #include <capnp/message.h>
 #include <capnp/schema.h>
@@ -1473,26 +1470,15 @@ kj::String SpanClose::toString() const {
   return kj::str("SpanClose: ", outcome);
 }
 
-SpanLink::SpanLink(SpanContext context,
-    CustomInfo attributes,
-    Origin origin,
-    kj::Maybe<kj::ConstString> traceState,
-    uint32_t droppedAttributesCount)
+SpanLink::SpanLink(SpanContext context, CustomInfo attributes, uint32_t droppedAttributesCount)
     : context(kj::mv(context)),
       attributes(kj::mv(attributes)),
-      origin(origin),
-      traceState(kj::mv(traceState)),
       droppedAttributesCount(droppedAttributesCount) {}
 
 SpanLink::SpanLink(rpc::Trace::SpanLink::Reader reader)
     : context(SpanContext::fromCapnp(reader.getContext())),
       attributes(KJ_MAP(attr, reader.getAttributes()) { return Attribute(attr); }),
-      origin(reader.getOrigin()),
-      droppedAttributesCount(reader.getDroppedAttributesCount()) {
-  if (reader.hasTraceState()) {
-    traceState = kj::ConstString(kj::str(reader.getTraceState()));
-  }
-}
+      droppedAttributesCount(reader.getDroppedAttributesCount()) {}
 
 kj::Maybe<SpanContext> SpanLink::parseContext(
     kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags) {
@@ -1503,34 +1489,20 @@ kj::Maybe<SpanContext> SpanLink::parseContext(
   return SpanContext(TraceId(low, high), SpanId(id), traceFlags);
 }
 
-kj::Maybe<kj::String> SpanLink::parseTracestate(kj::StringPtr value) {
-  auto parsed = trace_state::parse_tracestate(value.asBytes().as<kj_rs::Rust>());
-  if (parsed.empty()) return kj::none;
-  return kj::str(parsed);
-}
-
 void SpanLink::copyTo(rpc::Trace::SpanLink::Builder builder) const {
   context.toCapnp(builder.initContext());
   auto attrs = builder.initAttributes(attributes.size());
   for (size_t i = 0; i < attributes.size(); ++i) attributes[i].copyTo(attrs[i]);
-  builder.setOrigin(origin);
-  KJ_IF_SOME(value, traceState) {
-    builder.setTraceState(value.asPtr());
-  }
   builder.setDroppedAttributesCount(droppedAttributesCount);
 }
 
 SpanLink SpanLink::clone() const {
   return SpanLink(SpanContext::clone(context), KJ_MAP(attr, attributes) { return attr.clone(); },
-      origin, traceState.map([](const auto& value) { return value.clone(); }),
       droppedAttributesCount);
 }
 
 size_t SpanLink::size() const {
   size_t result = sizeof(SpanLink);
-  KJ_IF_SOME(value, traceState) {
-    result += value.size();
-  }
   for (auto& attr: attributes) {
     result += sizeof(Attribute) + attr.name.size();
     for (auto& value: attr.value) {

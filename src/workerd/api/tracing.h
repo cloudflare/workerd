@@ -63,16 +63,15 @@ struct TracingSpanContext {
   JSG_STRUCT(traceId, spanId, traceFlags);
 };
 
+// The input form of a link's TracingSpanContext. Its fields are optional during conversion so
+// malformed links can be ignored individually. The public type requires them; toSpanLink()
+// validates them.
 struct TracingSpanLinkContext {
-  // Optional during conversion so malformed links can be ignored individually.
-  // The public type requires these fields; toSpanLink() validates them.
   jsg::Optional<jsg::Value> traceId;
   jsg::Optional<jsg::Value> spanId;
   jsg::Optional<jsg::Value> traceFlags;
-  jsg::Optional<jsg::Value> isRemote;
-  jsg::Optional<jsg::Value> traceState;
 
-  JSG_STRUCT(traceId, spanId, traceFlags, isRemote, traceState);
+  JSG_STRUCT(traceId, spanId, traceFlags);
 };
 
 struct TracingSpanLink {
@@ -198,12 +197,8 @@ class Span: public jsg::Object {
     JSG_METHOD(addLink);
     JSG_METHOD(addLinks);
     JSG_TS_DEFINE(
-      interface TracingSpanLinkContext extends TracingSpanContext {
-        isRemote?: boolean;
-        traceState?: string;
-      }
       interface TracingSpanLink {
-        context: TracingSpanLinkContext;
+        context: TracingSpanContext;
         attributes?: Record<string, boolean | number | string | undefined>;
         droppedAttributesCount?: number;
       }

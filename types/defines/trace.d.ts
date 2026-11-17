@@ -162,9 +162,6 @@ interface SpanLink {
     readonly traceId: string;
     readonly spanId: string;
     readonly traceFlags: number;
-    /** Absent when the target's origin is unknown. */
-    readonly isRemote?: boolean;
-    readonly traceState?: string;
   };
   readonly attributes: readonly Attribute[];
   /** Attributes dropped before this link was recorded. */

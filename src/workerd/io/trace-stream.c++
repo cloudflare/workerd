@@ -57,7 +57,6 @@ namespace {
   V(INFO, "info")                                                                                  \
   V(INTERNALERROR, "internalError")                                                                \
   V(INVOCATIONID, "invocationId")                                                                  \
-  V(ISREMOTE, "isRemote")                                                                          \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
   V(LEVEL, "level")                                                                                \
@@ -94,7 +93,6 @@ namespace {
   V(SPANOPEN, "spanOpen")                                                                          \
   V(SPANUPDATE, "spanUpdate")                                                                      \
   V(SPANLINKS, "spanLinks")                                                                        \
-  V(TRACESTATE, "traceState")                                                                      \
   V(STACK, "stack")                                                                                \
   V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
@@ -553,12 +551,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanLinks& links, StringCache& cache) {
     }
     KJ_IF_SOME(flags, link.context.getTraceFlags()) {
       context.set(js, TRACEFLAGS_STR, js.num(flags));
-    }
-    if (link.origin != SpanLink::Origin::UNKNOWN) {
-      context.set(js, ISREMOTE_STR, js.boolean(link.origin == SpanLink::Origin::REMOTE));
-    }
-    KJ_IF_SOME(state, link.traceState) {
-      context.set(js, TRACESTATE_STR, js.str(state));
     }
     value.set(js, CONTEXT_STR, kj::mv(context));
     value.set(js, ATTRIBUTES_STR,

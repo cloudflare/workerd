@@ -49,13 +49,8 @@ interface TracingSpanContext {
   traceFlags: number;
 }
 
-interface TracingSpanLinkContext extends TracingSpanContext {
-  isRemote?: boolean;
-  traceState?: string;
-}
-
 interface TracingSpanLink {
-  context: TracingSpanLinkContext;
+  context: TracingSpanContext;
   attributes?: SpanAttributes;
   // OTel Link compatibility; recording computes this from sanitized attributes.
   droppedAttributesCount?: number;
@@ -153,10 +148,4 @@ export default tracing;
 // Re-export `Span` as a named type export for callers that prefer `import type { Span }`
 // over `InstanceType<typeof tracing.Span>`. The runtime module does not have a named
 // `Span` export - this is purely a type-level convenience.
-export type {
-  Exception,
-  Span,
-  TracingSpanContext,
-  TracingSpanLinkContext,
-  TracingSpanLink,
-};
+export type { Exception, Span, TracingSpanContext, TracingSpanLink };

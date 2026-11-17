@@ -4,18 +4,11 @@
 
 import assert from 'node:assert/strict';
 
-const remote = {
+const linked = {
   traceId: 'fedcba98765432100123456789abcdef',
   spanId: 'f123456789abcdef',
   traceFlags: 0xfe,
-  isRemote: true,
-  traceState: 'vendor=state',
 };
-// 33 list members, over 512 characters.
-const longTraceState = Array.from(
-  { length: 33 },
-  (_, i) => `k${i}=${'v'.repeat(20)}`
-).join(',');
 const zero = {
   traceId: '00000000000000000000000000000000',
   spanId: '0000000000000000',
@@ -37,7 +30,7 @@ export const links = {
       const receiver = tracing.startSpan('receiver');
       const before = receiver.spanContext();
       const input = {
-        context: { ...remote },
+        context: { ...linked },
         attributes: {
           message: 'original',
           number: 42,
@@ -53,8 +46,8 @@ export const links = {
       assert.equal(
         receiver.addLinks([
           { context: targetContext },
-          { context: remote },
-          { context: remote },
+          { context: linked },
+          { context: linked },
         ]),
         receiver
       );
@@ -75,12 +68,12 @@ export const links = {
 
     // Invocation end() is owned by the runtime, so it does not stop link recording.
     invocation.addLink({
-      context: remote,
+      context: linked,
       attributes: { case: 'invocation-before-end' },
     });
     invocation.end();
     invocation.addLink({
-      context: remote,
+      context: linked,
       attributes: { case: 'invocation-after-end' },
     });
     assert.deepEqual(invocation.spanContext(), invocationContext);
@@ -88,12 +81,12 @@ export const links = {
     tracing.enterSpan('counts', (span) => {
       span.addLinks(
         Array.from({ length: 129 }, (_, index) => ({
-          context: remote,
+          context: linked,
           attributes: { index },
         }))
       );
       span.addLink({
-        context: remote,
+        context: linked,
         attributes: Object.fromEntries(
           Array.from({ length: 129 }, (_, i) => [`key${i}`, i])
         ),
@@ -107,16 +100,16 @@ export const links = {
         { context: 7 },
         {
           context: {
-            ...remote,
-            traceId: remote.traceId.toUpperCase(),
+            ...linked,
+            traceId: linked.traceId.toUpperCase(),
             spanId: 'F123456789ABCdef',
           },
         },
-        { context: { ...remote, spanId: '123' } },
-        { context: { ...remote, traceFlags: '1' } },
+        { context: { ...linked, spanId: '123' } },
+        { context: { ...linked, traceFlags: '1' } },
         {
           context: {
-            ...remote,
+            ...linked,
             traceId: {
               toString() {
                 throw new Error('coerced ID');
@@ -125,15 +118,14 @@ export const links = {
           },
         },
         ...[256, -1, NaN, Infinity, 0.5].map((traceFlags) => ({
-          context: { ...remote, traceFlags },
+          context: { ...linked, traceFlags },
         })),
         { context: zero },
-        { context: { ...zero, traceState: 'invalid' } },
+        // OpenTelemetry's optional isRemote and traceState are not supported; they are ignored.
+        { context: { ...zero, isRemote: true, traceState: 'vendor=state' } },
         { context: zero, attributes: { meaningful: true } },
-        { context: { ...zero, traceState: 'a=state' } },
-        { context: { ...zero, traceState: longTraceState } },
-        { context: { ...remote, traceState: 'A=1', isRemote: false } },
-        { context: remote, droppedAttributesCount: 2 ** 40 },
+        { context: { ...linked, isRemote: true, traceState: 'vendor=state' } },
+        { context: linked, droppedAttributesCount: 2 ** 40 },
       ]);
     });
 
@@ -149,10 +141,10 @@ export const links = {
       }
 
       assert.equal(
-        span.addLinks(Array.from({ length: 512 }, () => ({ context: remote }))),
+        span.addLinks(Array.from({ length: 512 }, () => ({ context: linked }))),
         span
       );
-      assert.equal(span.addLinks([{ context: remote }]), span);
+      assert.equal(span.addLinks([{ context: linked }]), span);
     });
 
     tracing.enterSpan('sanitization', (span) => {
@@ -189,7 +181,7 @@ export const links = {
       });
       assert.equal(
         span.addLink({
-          context: remote,
+          context: linked,
           attributes,
           get droppedAttributesCount() {
             throw new Error('read supplied dropped-attribute count');
@@ -213,13 +205,13 @@ export const links = {
         }),
         [],
       ]) {
-        span.addLink({ context: remote, attributes });
+        span.addLink({ context: linked, attributes });
       }
-      span.addLink({ context: remote, attributes: [1, 'two', false] });
+      span.addLink({ context: linked, attributes: [1, 'two', false] });
       assert.equal(
         span.addLinks([
-          { context: remote, droppedAttributesCount: 1n },
-          { context: remote, attributes: { after: true } },
+          { context: linked, droppedAttributesCount: 1n },
+          { context: linked, attributes: { after: true } },
         ]),
         span
       );
@@ -231,9 +223,9 @@ export const links = {
       assert.throws(
         () =>
           span.addLinks([
-            { context: remote, attributes: { before: true } },
+            { context: linked, attributes: { before: true } },
             {
-              context: remote,
+              context: linked,
               attributes: {
                 get value() {
                   throw error;
@@ -243,31 +235,31 @@ export const links = {
             {
               get context() {
                 reachedSibling = true;
-                return remote;
+                return linked;
               },
             },
           ]),
         (thrown) => thrown === error
       );
       assert.equal(reachedSibling, false);
-      span.addLink({ context: remote, attributes: { after: true } });
+      span.addLink({ context: linked, attributes: { after: true } });
     });
 
     tracing.enterSpan('budget', (span) => {
-      span.addLink({ context: remote, attributes: { kept: 'before' } });
+      span.addLink({ context: linked, attributes: { kept: 'before' } });
       span.addLink({
-        context: remote,
+        context: linked,
         attributes: { within: 'x'.repeat(40 * 1024) },
       });
       span.addLink({
-        context: remote,
+        context: linked,
         attributes: { cumulative: 'x'.repeat(40 * 1024) },
       });
       span.addLink({
-        context: remote,
+        context: linked,
         attributes: { oversized: 'x'.repeat(96 * 1024) },
       });
-      span.addLink({ context: remote, attributes: { kept: 'after' } });
+      span.addLink({ context: linked, attributes: { kept: 'after' } });
     });
 
     // Input getters can end the receiver while the link is being converted.
@@ -276,7 +268,7 @@ export const links = {
       {
         get context() {
           ended.end();
-          return remote;
+          return linked;
         },
       },
     ]);
