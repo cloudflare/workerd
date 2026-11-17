@@ -617,8 +617,7 @@ fn bundled_services(
     watch: Watch,
 ) -> Result<(), String> {
     if !wrangler.kv_namespaces.is_empty() {
-        let kv = ("kv.js", "SHARD", "KVNamespace");
-        blob_services(services, at, &format!("{name}-kv"), &storage.join("kv"), kv)?;
+        kv_services(services, at, &format!("{name}-kv"), &storage.join("kv"))?;
         at += 3;
     }
     if !wrangler.r2_buckets.is_empty() {
@@ -722,14 +721,12 @@ fn d1_services(
     Ok(())
 }
 
-/// The KV Worker `name` at `services[at]`, the bundled `module` whose Durable Object
-/// class is the binding `binding`, then its disks under `dir`: its objects', and `BLOBS`.
-fn blob_services(
+/// The KV Worker `name` at `services[at]`, then its disks under `dir`.
+fn kv_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     at: u32,
     name: &str,
     dir: &Path,
-    (module, binding, class): (&str, &str, &str),
 ) -> Result<(), String> {
     let blobs = dir.join("blobs");
     fs::create_dir_all(&blobs).map_err(|e| format!("{}: {e}", blobs.display()))?;
@@ -744,7 +741,14 @@ fn blob_services(
         &blobs,
     );
     let service = services.reborrow().get(at);
-    let bindings = bundled_worker(service, name, module, &[], Some((binding, class)), 2);
+    let bindings = bundled_worker(
+        service,
+        name,
+        "kv.js",
+        &[],
+        Some(("SHARD", "KVNamespace")),
+        2,
+    );
     let mut blobs = bindings.get(1);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(format!("{name}-blobs"));

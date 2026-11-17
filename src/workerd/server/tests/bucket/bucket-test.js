@@ -56,6 +56,7 @@ export const ranges = {
       ['bytes=8-', '89', 'bytes 8-9/10'],
       ['bytes=-3', '789', 'bytes 7-9/10'],
       ['bytes=5-100', '56789', 'bytes 5-9/10'],
+      ['bytes=5-18446744073709551615', '56789', 'bytes 5-9/10'],
     ]) {
       const r = await get(range);
       assert.strictEqual(r.status, 206, range);

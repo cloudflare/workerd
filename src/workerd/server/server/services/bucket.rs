@@ -284,7 +284,8 @@ fn range(header: &str) -> Answer<Range> {
         }),
         (first, last) => {
             let (first, last) = (number(first)?, number(last)?);
-            let length = (last + 1).checked_sub(first).filter(|&n| n > 0);
+            // A last byte past any size means to the end, as for any other.
+            let length = last.saturating_add(1).checked_sub(first).filter(|&n| n > 0);
             Ok(Range::From {
                 offset: first,
                 length: Some(length.ok_or_else(invalid)?),
