@@ -1379,16 +1379,18 @@ test('cluster: the nodes share one Cache API cache', async () => {
       }
 
       // Killed, b's record stays live for its lease, but its entries miss at
-      // once on a: the session to it is refused.
+      // once on a: the session to it is refused. Windows retries a refused
+      // connect for 2 s, so there a match's 2 s answer deadline bounds it.
       await each((key) => cachePut(a, key, `c-${key}`));
       await b.stop({ signal: 'SIGKILL' });
       await sleep(200);
-      const got = [];
-      for (const key of keys) {
+      const bound = process.platform === 'win32' ? 4_000 : 1_000;
+      const got = await each(async (key) => {
         const start = Date.now();
-        got.push(await cacheMatch(a, key));
-        assert(Date.now() - start < 1_000, `${Date.now() - start} ms`);
-      }
+        const value = await cacheMatch(a, key);
+        assert(Date.now() - start < bound, `${Date.now() - start} ms`);
+        return value;
+      });
       const hits = got.filter((value, i) => value === `c-${keys[i]}`);
       assert.strictEqual(
         hits.length + got.filter((v) => v === null).length,
