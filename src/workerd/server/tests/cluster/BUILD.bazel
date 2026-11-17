@@ -34,10 +34,11 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
         "BROKEN_DEPLOYMENTS_CONFIG": "$(rootpath :cluster-broken-deployments.wd-test)",
     },
     shard_count = shards,
-    # Each shard starts several V8 processes and its own bucket server. Reserve enough CPU for
-    # their lease-renewal loops while other tests and compiles are running.
+    # Each shard starts several V8 processes and SQLite stores with short leases. Keep local
+    # builds and tests from starving startup and renewal; remote executors isolate the shards.
     tags = [
         "cpu:4",
+        "exclusive-if-local",
         "js-test",
     ],
 ) for name, tests, config, shards in [
