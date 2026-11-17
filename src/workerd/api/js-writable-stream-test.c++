@@ -647,6 +647,37 @@ TestFixture makeTsStreamsActorFixture(kj::StringPtr actorName) {
   });
 }
 
+KJ_TEST("JsWritableStream fromWrite runs the close hook once every write has completed") {
+  for (bool tsStreams: {false, true}) {
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setTypeScriptImplementedStreams(tsStreams);
+    TestFixture testFixture({.featureFlags = flags.asReader()});
+    kj::Vector<kj::String> calls;
+
+    testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto stream = JsWritableStream::fromWrite(js, [&calls](jsg::Lock& js, jsg::JsValue chunk) {
+        // Completes on a later turn, so a close hook that does not wait for it runs first.
+        return IoContext::current().awaitIo(js,
+            kj::evalLater(
+                [&calls, text = chunk.toString(js)]() mutable { calls.add(kj::mv(text)); }));
+      }, kj::Function<jsg::Promise<void>(jsg::Lock&)>([&calls](jsg::Lock& js) {
+        calls.add(kj::str("close"));
+        return js.resolvedPromise();
+      }));
+
+      stream.writeForTest(js, js.str("a"_kj)).markAsHandled(js);
+      stream.writeForTest(js, js.str("b"_kj)).markAsHandled(js);
+      auto closed = stream.forceClose(js);
+      return env.context.awaitJs(js, kj::mv(closed)).attach(kj::mv(stream));
+    });
+
+    KJ_EXPECT(kj::strArray(calls, ",") == "a,b,close", kj::strArray(calls, ","), tsStreams);
+  }
+}
+
 // A ReadableStreamSource serving fixed content with a known length (for pipe tests).
 class ContentSource final: public ReadableStreamSource {
  public:

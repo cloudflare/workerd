@@ -21,6 +21,11 @@ class DatagramChannel {
   // One send is exactly one packet, including an empty array. Caller keeps bytes alive
   // until completion. Success is local acceptance, never acknowledgement by the peer.
   virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
+  // Tells the peer that no more datagrams will be sent. receive() continues and the transport
+  // stays open until close(). Channels whose peer has no such signal ignore it.
+  virtual kj::Promise<void> end() {
+    return kj::READY_NOW;
+  }
 };
 
 }  // namespace workerd

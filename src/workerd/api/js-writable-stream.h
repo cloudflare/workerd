@@ -92,8 +92,11 @@ class JsWritableStream final {
   // typescript_implemented_streams, `write` is wrapped as a real JS function and the
   // TypeScript stream is constructed over a plain (non-native-marked) underlying sink;
   // otherwise this builds the legacy C++ WritableStream directly.
-  static JsWritableStream fromWrite(
-      jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write);
+  //
+  // `close`, if given, runs once when the stream closes, after every write has completed.
+  static JsWritableStream fromWrite(jsg::Lock& js,
+      kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write,
+      kj::Maybe<kj::Function<jsg::Promise<void>(jsg::Lock&)>> close = kj::none);
 
   // Returns a new JsWritableStream sharing this one's underlying stream. Both instances observe
   // the same underlying stream state (e.g. the stream closing through one is visible through the

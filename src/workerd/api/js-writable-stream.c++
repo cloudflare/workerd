@@ -310,12 +310,16 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
       ioContext, kj::mv(sink), kj::mv(observer), maybeHighWaterMark, kj::mv(maybeClosureWaitable)));
 }
 
-JsWritableStream JsWritableStream::fromWrite(
-    jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write) {
+JsWritableStream JsWritableStream::fromWrite(jsg::Lock& js,
+    kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write,
+    kj::Maybe<kj::Function<jsg::Promise<void>(jsg::Lock&)>> close) {
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     UnderlyingSink underlyingSink;
     underlyingSink.write = [write = kj::mv(write)](jsg::Lock& js, jsg::JsValue chunk,
                                UnderlyingSink::Controller) mutable { return write(js, chunk); };
+    KJ_IF_SOME(c, close) {
+      underlyingSink.close = [close = kj::mv(c)](jsg::Lock& js) mutable { return close(js); };
+    }
     return JsWritableStream(WritableStream::constructor(js, kj::mv(underlyingSink), kj::none));
   }
 
@@ -330,6 +334,16 @@ JsWritableStream JsWritableStream::fromWrite(
 
   auto sinkObj = js.obj();
   sinkObj.set(js, "write"_kj, jsg::JsValue(tsWrite));
+
+  KJ_IF_SOME(c, close) {
+    auto tsClose = js.wrapPromiseReturningFunction(js.v8Context(),
+        [close = kj::mv(c)](jsg::Lock& js,
+            const v8::FunctionCallbackInfo<v8::Value>&) mutable -> jsg::Promise<jsg::Value> {
+      return close(js).then(
+          js, [](jsg::Lock& js) { return js.v8Ref<v8::Value>(js.v8Undefined()); });
+    });
+    sinkObj.set(js, "close"_kj, jsg::JsValue(tsClose));
+  }
 
   auto constructor = webstreams::getCppExport(js, "WritableStream");
   return JsWritableStream(js, constructor.newInstance(js, jsg::JsValue(sinkObj)).addRef(js));

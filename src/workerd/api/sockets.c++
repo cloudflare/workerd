@@ -516,6 +516,9 @@ class PromisedDatagramChannel final: public DatagramChannel {
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> bytes) override {
     return canceler.wrap(sendImpl(bytes));
   }
+  kj::Promise<void> end() override {
+    return canceler.wrap(endImpl());
+  }
 
   void close() override {
     canceler.cancel("UDP socket closed");
@@ -530,6 +533,10 @@ class PromisedDatagramChannel final: public DatagramChannel {
   kj::Promise<void> sendImpl(kj::ArrayPtr<const kj::byte> bytes) {
     auto connected = co_await channel.addBranch();
     co_await connected->send(bytes);
+  }
+  kj::Promise<void> endImpl() {
+    auto connected = co_await channel.addBranch();
+    co_await connected->end();
   }
 
   kj::ForkedPromise<kj::Rc<DatagramChannel>> channel;
@@ -582,6 +589,14 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
     auto req = down.sendRequest(capnp::MessageSize{8 + datagram.size() / sizeof(capnp::word), 0});
     req.setDatagram(datagram);
     return req.send();
+  }
+
+  // Ends the outgoing datagram stream. Incoming datagrams keep arriving.
+  kj::Promise<void> end() override {
+    KJ_IF_SOME(exception, failure) {
+      return exception.clone();
+    }
+    return endOutgoing();
   }
 
   // Delivers one incoming RPC datagram with consumption backpressure.

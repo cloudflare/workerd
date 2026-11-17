@@ -223,6 +223,39 @@ KJ_TEST("Outbound UDP RPC receive observes reverse capability release and orderl
   }
 }
 
+class EndRecordingUdpStream final: public rpc::DatagramStream::Server {
+ public:
+  explicit EndRecordingUdpStream(bool& ended): ended(ended) {}
+
+ private:
+  kj::Promise<void> end(EndContext context) override {
+    ended = true;
+    return kj::READY_NOW;
+  }
+
+  bool& ended;
+};
+
+KJ_TEST("Outbound UDP RPC end() ends only the outgoing direction") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  bool ended = false;
+  rpc::DatagramStream::Client stream = kj::heap<EndRecordingUdpStream>(ended);
+  auto server = kj::heap<UdpSendTestDispatcher>(kj::mv(stream));
+  auto& serverRef = *server;
+  rpc::EventDispatcher::Client dispatcher(kj::mv(server));
+  auto channel = openTestUdpChannel(dispatcher, waitScope);
+
+  channel->end().wait(waitScope);
+  KJ_EXPECT(ended);
+
+  auto received = channel->receive().eagerlyEvaluate(nullptr);
+  auto reply = serverRef.received.sendRequest();
+  reply.setDatagram("reply"_kjb);
+  reply.send().wait(waitScope);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(received.wait(waitScope)).asPtr() == "reply"_kjb);
+}
+
 KJ_TEST("Outbound UDP RPC transport loss rejects a pending receive without a send") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
