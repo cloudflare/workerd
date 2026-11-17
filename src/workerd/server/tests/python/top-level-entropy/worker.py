@@ -1,5 +1,5 @@
 import os
-from random import choice, randbytes, random
+from random import choice, randbytes, random, seed
 
 from _cloudflare.allow_entropy import (
     allow_bad_entropy_calls,
@@ -31,17 +31,38 @@ def assert_top_level_entropy_denied_random(call):
 # 1. Without environment variable set, top-level entropy should be denied
 assert_top_level_entropy_denied(lambda: os.urandom(1))
 
-# 3. A finite entropy budget applies to random and os.urandom calls
-with allow_bad_entropy_calls(2):
+# 2. A finite entropy budget applies to random and os.urandom calls
+with allow_bad_entropy_calls(3):
+    assert 0 <= random() < 1
     assert len(os.urandom(1)) == 1
     assert len(os.urandom(1)) == 1
-    # After 2 calls, the budget should be exhausted
+    # After 3 calls, the budget should be exhausted
     assert_top_level_entropy_denied(lambda: os.urandom(1))
 
-# 4. After the context manager exits, the budget should be reset
+# 3. Native entropy used by seed(None) should not be charged twice
+with allow_bad_entropy_calls(10):  # seed(None) calls 10 getentropy() calls
+    seed(None)
+    assert_top_level_entropy_denied_random(lambda: random())
+
+# 4. An explicit seed should consume one allowance itself
+with allow_bad_entropy_calls(1):
+    seed(42)
+    assert_top_level_entropy_denied_random(lambda: random())
+
+# 5. A random call should consume an allowance even if it raises
+with allow_bad_entropy_calls(1):
+    try:
+        choice([])
+    except IndexError:
+        pass
+    else:
+        raise AssertionError("empty random choice unexpectedly succeeded")
+    assert_top_level_entropy_denied_random(lambda: random())
+
+# 6. After the context manager exits, the budget should be reset
 assert_top_level_entropy_denied(lambda: os.urandom(1))
 
-# 5. When the context manager exits without exhausting the budget, it should raise an exception
+# 7. When the context manager exits without exhausting the budget, it should raise an exception
 try:
     with allow_bad_entropy_calls(1):
         pass
@@ -50,10 +71,11 @@ except RuntimeError:
 else:
     raise AssertionError("leftover entropy budget unexpectedly succeeded")
 
-# 6. Calling random functions should fail as well, but with different error type
+# 8. Calling random functions should fail as well, but with different error type
 assert_top_level_entropy_denied_random(lambda: random())
 assert_top_level_entropy_denied_random(lambda: randbytes(1))
 assert_top_level_entropy_denied_random(lambda: choice([1, 2, 3]))
+assert_top_level_entropy_denied(lambda: os.urandom(1))
 
 
 class Default(WorkerEntrypoint):
