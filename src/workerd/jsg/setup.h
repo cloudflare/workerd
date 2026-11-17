@@ -525,6 +525,8 @@ class IsolateBase {
     // Machine code from Wasm compilation, all tiers.
     uint64_t wasmCodeCount = 0;
     uint64_t wasmCodeBytes = 0;
+    // Times the garbage collector moved a block of machine code, JavaScript or Wasm.
+    uint64_t machineCodeMoveCount = 0;
   };
   CodeStatistics getCodeStatistics() const;
 
@@ -1065,6 +1067,7 @@ class IsolateBase {
     std::atomic<uint64_t> jitCodeBytes{0};
     std::atomic<uint64_t> wasmCodeCount{0};
     std::atomic<uint64_t> wasmCodeBytes{0};
+    std::atomic<uint64_t> machineCodeMoveCount{0};
   };
   AtomicCodeStatistics codeStatistics;
 
@@ -1103,6 +1106,7 @@ class IsolateBase {
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
   void recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size);
+  void recordCodeMoved(kj::Maybe<v8::JitCodeEvent::CodeType> type);
 
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
   friend class V8System;
