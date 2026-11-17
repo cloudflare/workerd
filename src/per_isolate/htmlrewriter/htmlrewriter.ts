@@ -55,6 +55,9 @@
 // that it never writes without saying so, so the streams are kept until the
 // rewrite ends.
 
+import type { RuntimeClassHelpers } from '../runtime-class';
+import type { WebIdlHelpers } from '../webidl';
+
 const {
   Error,
   FunctionPrototypeCall,
@@ -76,6 +79,12 @@ const {
   captureJsgGetter,
   uncurryThis,
 } = primordials;
+
+// The prototype of internal records. A literal with `__proto__: null` makes
+// a dictionary-mode object, which is slower to read.
+const { kNullProtoObject } = require('webstreams/common');
+const { setNameAndLength } = require('runtime-class') as RuntimeClassHelpers;
+const { isObject } = require('webidl') as WebIdlHelpers;
 
 const {
   isPromise,
@@ -160,11 +169,6 @@ const kDocumentEnd = 6;
 const kEndTag = 7;
 const kStream = 8;
 
-// The prototype of the module's constant records. A literal with
-// `__proto__: null` would make a dictionary-mode object, which is slower
-// to read, and the token constructors read their property descriptors.
-const kNullProtoObject: object = ObjectFreeze({ __proto__: null });
-
 // Lets the module construct the token classes, whose constructors are
 // otherwise illegal.
 const kConstruct: unique symbol = Symbol('kConstruct') as never;
@@ -199,12 +203,6 @@ function argumentError(
   );
 }
 
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
-
 // Whether `value` inherits from Response.prototype; its getters then check
 // that it is one.
 function isResponse(value: unknown): value is Response {
@@ -224,7 +222,7 @@ function readHandlers<K extends string>(
   dictionary: string,
   names: readonly K[]
 ): { object: object; handlers: Record<K, Handler | undefined> } {
-  const handlers = { __proto__: null } as unknown as Record<
+  const handlers = { __proto__: kNullProtoObject } as unknown as Record<
     K,
     Handler | undefined
   >;
@@ -299,7 +297,7 @@ function awaitable(result: unknown): Promise<unknown> | undefined {
 // ReplacerStreamSink is pumped to.
 function pump(stream: ReadableStream, sink: HtmlSinkHandle): Promise<void> {
   return pumpTo(stream, {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     write: (chunk: ArrayBuffer): undefined => {
       sink.write(new Uint8Array(chunk));
       return undefined;
@@ -343,7 +341,7 @@ class Rewrite {
     for (let i = 0; i < elements.length; i++) {
       const set = elements[i] as ElementHandlerSet;
       elementFlags[i] = {
-        __proto__: null,
+        __proto__: kNullProtoObject,
         selector: set.selector,
         element: set.element !== undefined,
         comments: set.comments !== undefined,
@@ -354,7 +352,7 @@ class Rewrite {
     for (let i = 0; i < documents.length; i++) {
       const set = documents[i] as DocumentHandlerSet;
       documentFlags[i] = {
-        __proto__: null,
+        __proto__: kNullProtoObject,
         doctype: set.doctype !== undefined,
         comments: set.comments !== undefined,
         text: set.text !== undefined,
@@ -387,7 +385,7 @@ class Rewrite {
     this.#writer = WritableStreamGetWriter(writable);
     markPromiseHandled(
       pumpTo(body, {
-        __proto__: null,
+        __proto__: kNullProtoObject,
         write: (chunk: ArrayBuffer): Promise<void> =>
           this.#run(
             this.#call(() => this.handle.writeAsync(new Uint8Array(chunk)))
@@ -562,7 +560,7 @@ class HTMLRewriter {
     );
     const parsed = native.parseSelector(selectorString);
     this.#elements[this.#elements.length] = {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       selector: parsed,
       object,
       element: read.element,
@@ -581,7 +579,7 @@ class HTMLRewriter {
       ['doctype', 'comments', 'text', 'end'] as const
     );
     this.#documents[this.#documents.length] = {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       object,
       doctype: read.doctype,
       comments: read.comments,
@@ -1165,14 +1163,6 @@ function accessor(
 // ---------------------------------------------------------------------------
 // The rest makes the classes look as JSG's do.
 
-function setNameAndLength(fn: unknown, name: string, length: number): void {
-  ObjectDefineProperties(fn, {
-    __proto__: null,
-    name: { __proto__: null, value: name },
-    length: { __proto__: null, value: length },
-  });
-}
-
 const kSetToStringTag = compatFlags['set_tostring_tag'] === true;
 
 // JSG methods are enumerable, and lengths count no arguments unless
@@ -1197,7 +1187,7 @@ function jsgShape(
   }
   if (kSetToStringTag) {
     ObjectDefineProperty(proto, SymbolToStringTag, {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       value: name,
       writable: true,
       enumerable: false,
