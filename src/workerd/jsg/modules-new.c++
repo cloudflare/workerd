@@ -653,9 +653,18 @@ class IsolateModuleRegistry final {
     // Note: Takes v8::Local<v8::Module> and const Module& directly rather than
     // Entry& for the same reason as require()'s evaluate lambda — the lookupCache
     // table may rehash during evaluate(), invalidating Entry& references.
-    static constexpr auto evaluate =
-        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
-            const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate) {
+    static constexpr auto evaluate = [](Lock& js, v8::Local<v8::Module> module,
+                                         const Module& moduleDef,
+                                         const CompilationObserver& observer,
+                                         const Module::Evaluator& maybeEvaluate) -> Promise<Value> {
+      // A module is still kEvaluating when it is reached from its own evaluation, as when a
+      // chain of dynamic imports in top-level code imports an ancestor back. V8 aborts the
+      // process if asked to evaluate it again, so resolve to its namespace now, as the original
+      // registry does. Its bindings are read later, once the evaluation in progress has unwound,
+      // since nested evaluation never drains the microtask queue.
+      if (module->GetStatus() == v8::Module::kEvaluating) {
+        return js.resolvedPromise(js.v8Ref(module->GetModuleNamespace()));
+      }
       return js
           .toPromise(
               check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
