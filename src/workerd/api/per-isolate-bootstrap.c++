@@ -1038,13 +1038,15 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 }
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
-void bootstrapFromScripts(jsg::Lock& js,
-    BootstrapState* state,
-    CompatibilityFlags::Reader flags,
-    kj::Maybe<jsg::JsObject> htmlRewriterUtils) {
+void bootstrapFromScripts(
+    jsg::Lock& js, BootstrapState* state, const Worker::Api& api, TsHtmlRewriter tsHtmlRewriter) {
   // Build the compat flags and autogates objects.
-  state->compatFlagsObj = buildCompatFlagsObject(js, flags);
+  state->compatFlagsObj = buildCompatFlagsObject(js, api.getFeatureFlags());
   state->autogatesObj = buildAutogatesObject(js);
+  kj::Maybe<jsg::JsObject> htmlRewriterUtils;
+  if (tsHtmlRewriter) {
+    htmlRewriterUtils = api.newHtmlRewriterUtils(js);
+  }
   state->utilsObj = createUtilsObject(js, htmlRewriterUtils);
 
   state->requireFn = newRequireFunction(js, requireCallback);
@@ -1108,12 +1110,11 @@ kj::Maybe<jsg::Module::Reader> EmbedderBootstrap::tryGetScript(kj::StringPtr spe
   return kj::none;
 }
 
-void runPerIsolateBootstrap(jsg::Lock& js,
-    CompatibilityFlags::Reader flags,
-    kj::Maybe<const EmbedderBootstrap&> embedder,
-    const jsg::ModuleSource* moduleSource,
-    kj::Maybe<jsg::JsObject> htmlRewriterUtils) {
+void runPerIsolateBootstrap(jsg::Lock& js, const Worker::Api& api, TsHtmlRewriter tsHtmlRewriter) {
   auto context = js.v8Context();
+  auto flags = api.getFeatureFlags();
+  auto embedder = api.getEmbedderBootstrap();
+  auto moduleSource = api.getModuleSource();
 
   // Get (or lazily build) the process-wide script lookup table.
   auto& scripts = getScriptTable();
@@ -1137,7 +1138,7 @@ void runPerIsolateBootstrap(jsg::Lock& js,
       restoreBootstrapState(js, allocateBootstrapState(js, scripts, embedder, moduleSource), bag);
     } else {
       bootstrapFromScripts(
-          js, allocateBootstrapState(js, scripts, embedder, moduleSource), flags, htmlRewriterUtils);
+          js, allocateBootstrapState(js, scripts, embedder, moduleSource), api, tsHtmlRewriter);
     }
 
     if (!flags.getJsWeakRef()) {

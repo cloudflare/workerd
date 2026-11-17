@@ -672,9 +672,10 @@ class Worker::Api {
   // The native half of the TypeScript HTMLRewriter, which the per-isolate bootstrap reaches as
   // `utils.htmlRewriter` under the TS_HTML_REWRITER autogate: the HtmlRewriterUtils class of the
   // Rust crate in api/html-rewriter/, whose static methods are its entry points. The crate depends
-  // on this layer, so the embedder provides it. Called in the context being bootstrapped, and only
-  // with the autogate enabled. It is a function made from a template rather than an object with
-  // native state, so that a startup snapshot can carry it.
+  // on this layer, so the embedder provides it. Called by runPerIsolateBootstrap(), in a context
+  // bootstrapped from the scripts rather than from a startup snapshot, and only with the autogate
+  // enabled. It is a function made from a template rather than an object with native state, so
+  // that a startup snapshot can carry it.
   virtual kj::Maybe<jsg::JsObject> newHtmlRewriterUtils(jsg::Lock& js) const {
     return kj::none;
   }
