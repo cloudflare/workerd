@@ -4,6 +4,18 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript EventSource (the TS_EVENT_SOURCE autogate) matches the C++
+// one's shape, but its functions are not native.
+const usingTsEventSource = !(
+  EventSource as unknown as { from: () => void }
+).from
+  .toString()
+  .includes('[native code]');
+const kFailsWithCppEventSource = usingTsEventSource ? [] : true;
+
+const kListenerThis =
+  "Inside an EventSource listener, `this` is not the EventSource, so the test's this.close() throws";
+
 export default {
   'dedicated-worker/eventsource-close.js': {
     comment: 'Uses postMessage which is not available in workerd',
@@ -43,8 +55,8 @@ export default {
     omittedTests: true,
   },
   'event-data.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
+    comment: 'The C++ EventSource drops an event whose data is empty',
+    expectedFailures: kFailsWithCppEventSource,
   },
   'eventsource-close.window.js': {
     comment: 'Window-specific tests are not supported',
@@ -54,11 +66,7 @@ export default {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
   },
-  'eventsource-constructor-empty-url.any.js': {
-    comment:
-      'workerd throws SyntaxError for empty URL instead of resolving to self.location',
-    expectedFailures: ['EventSource constructor with an empty url.'],
-  },
+  'eventsource-constructor-empty-url.any.js': {},
   'eventsource-constructor-non-same-origin.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
@@ -69,7 +77,8 @@ export default {
   },
   'eventsource-constructor-url-bogus.any.js': {},
   'eventsource-cross-origin-redirect-origin.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment:
+      'fetch() sends no Origin header, so the cross-origin cors.py handler fails with a 500',
     expectedFailures: [
       'MessageEvent.origin is the origin of the final URL after a cross-origin redirect',
     ],
@@ -78,26 +87,14 @@ export default {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
   },
-  'eventsource-eventtarget.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'eventsource-onmessage-trusted.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'eventsource-onmessage.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'eventsource-eventtarget.any.js': {},
+  'eventsource-onmessage-trusted.any.js': {},
+  'eventsource-onmessage.any.js': {},
   'eventsource-onopen.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
-  'eventsource-prototype.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'eventsource-prototype.any.js': {},
   'eventsource-reconnect.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
@@ -106,50 +103,34 @@ export default {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
   },
-  'eventsource-url.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-bom-2.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'eventsource-url.any.js': {},
+  'format-bom-2.any.js': {},
   'format-bom-split.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
+    comment:
+      'The C++ EventSource does not strip a byte order mark split across chunks',
+    expectedFailures: kFailsWithCppEventSource,
   },
-  'format-bom-utf-16.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-bom.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-comments.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-bom-utf-16.any.js': {},
+  'format-bom.any.js': {},
+  'format-comments.any.js': {},
   'format-data-before-final-empty-line.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
+    comment:
+      'The C++ EventSource sets lastEventId from an event that is never dispatched',
+    expectedFailures: kFailsWithCppEventSource,
   },
   'format-field-data.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
+    comment: 'The C++ EventSource drops an event whose data is empty',
+    expectedFailures: kFailsWithCppEventSource,
   },
   'format-field-event-empty.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
+    comment: `${kListenerThis}, and with the C++ EventSource the file hangs`,
+    disabledTests: true,
   },
   'format-field-event.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
-  'format-field-id-2.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-field-id-2.any.js': {},
   'format-field-id-3.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
@@ -158,73 +139,40 @@ export default {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,
   },
-  'format-field-id-redirect.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-field-id.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-field-parsing.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-field-id-redirect.any.js': {},
+  'format-field-id.any.js': {},
+  'format-field-parsing.any.js': {},
   'format-field-retry-bogus-2.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
   'format-field-retry-bogus.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
-  'format-field-retry-empty.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-field-retry-empty.any.js': {},
   'format-field-retry.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
-  'format-field-unknown.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-leading-space.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-field-unknown.any.js': {},
+  'format-leading-space.any.js': {},
   'format-mime-bogus.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
-  'format-mime-trailing-semicolon.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-mime-valid-bogus.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-newlines.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-null-character.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
-  'format-utf-8.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
-    expectedFailures: true,
-  },
+  'format-mime-trailing-semicolon.any.js': {},
+  'format-mime-valid-bogus.any.js': {},
+  'format-newlines.any.js': {},
+  'format-null-character.any.js': {},
+  'format-utf-8.any.js': {},
   'request-accept.any.js': {
-    comment: 'EventSource does not support relative URLs in workerd',
+    comment: kListenerThis,
     expectedFailures: true,
   },
   'request-cache-control.any.js': {
-    comment: 'Test times out due to relative URL handling',
-    omittedTests: true,
+    comment: `${kListenerThis}, so the second subtest never starts and the file hangs`,
+    disabledTests: true,
   },
   'request-credentials.window.js': {
     comment: 'Window-specific tests are not supported',
