@@ -2035,6 +2035,27 @@ test(
   }
 );
 
+test('cluster: a node opening many DOs at once keeps its lease', async () => {
+  await withCluster(1, async ({ nodes: [node] }) => {
+    // Opening this many at once keeps the node's event loop busy for seconds
+    // in a slow build: its lease is renewed meanwhile.
+    const names = Array.from({ length: 64 }, (_, i) => `many-${i}`);
+    const responses = await Promise.all(
+      names.map((name) =>
+        fetchJson(node.httpPort, `/increment?name=${name}`, {
+          timeoutMs: 20_000,
+        }).catch((e) => ({ status: 0, body: { error: String(e) } }))
+      )
+    );
+    for (const response of responses) {
+      assert.strictEqual(response.status, 200, JSON.stringify(response));
+    }
+    // A renewal round past the burst.
+    await sleep(1000);
+    assert.doesNotMatch(node.stderr, /leaving the cluster/);
+  });
+});
+
 test(
   'cluster: requests to a DO of a stopping node wait for its handoff and follow it',
   SIGTERM_DRAINS,
