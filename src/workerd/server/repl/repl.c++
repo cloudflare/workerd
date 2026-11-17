@@ -198,12 +198,15 @@ kj::Own<ReplSession> repl_session_new(
   return kj::heap<ReplSession>(kj::heap<ReplSession::Impl>(loop, options));
 }
 
-kj::Promise<::rust::String> repl_evaluate(
+kj::Promise<ReplEvaluation> repl_evaluate(
     ReplSession& session, ::rust::Vec<ReplCandidate> candidates) {
-  auto result =
+  auto evaluation =
       co_await session.getImpl().getEnvironment().evaluate(toCandidates(kj::mv(candidates)));
-  // Rendered from JavaScript strings, which convert to valid UTF-8.
-  co_return result.as<kj_rs::RustUncheckedUtf8>();
+  co_return ReplEvaluation{
+    // Rendered from JavaScript strings, which convert to valid UTF-8.
+    .text = evaluation.text.as<kj_rs::RustUncheckedUtf8>(),
+    .threw = evaluation.threw,
+  };
 }
 
 kj::Promise<::rust::Vec<::rust::String>> repl_property_names(

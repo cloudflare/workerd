@@ -254,7 +254,7 @@ struct Fixture final: public ReplConfigLoader {
   kj::String eval(kj::StringPtr input) {
     auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(1);
     candidates.add(ReplEnvironment::Candidate{.source = kj::str(input), .awaited = false});
-    return environment.evaluate(candidates.finish()).wait(io.waitScope);
+    return environment.evaluate(candidates.finish()).wait(io.waitScope).text;
   }
 
   // Evaluates `expression`, which may await, and renders what it settles to.
@@ -262,12 +262,12 @@ struct Fixture final: public ReplConfigLoader {
     auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(1);
     candidates.add(ReplEnvironment::Candidate{
       .source = kj::str("(async () => (", expression, "\n))()"), .awaited = true});
-    return environment.evaluate(candidates.finish()).wait(io.waitScope);
+    return environment.evaluate(candidates.finish()).wait(io.waitScope).text;
   }
 
   // Evaluates `input` as the REPL does an input that mentions `await` (TestCandidateSource).
   kj::String evalCandidates(kj::StringPtr input) {
-    return environment.evaluate(candidateSource.candidates(input)).wait(io.waitScope);
+    return environment.evaluate(candidateSource.candidates(input)).wait(io.waitScope).text;
   }
 
   kj::Array<kj::String> propertyNames(kj::StringPtr base) {
@@ -331,6 +331,23 @@ KJ_TEST("REPL keeps the last result in `_` and the last exception in `_error`") 
   KJ_EXPECT(fixture.eval("_error") == "2");
 }
 
+KJ_TEST("REPL says whether an input threw") {
+  Fixture fixture;
+  auto threw = [&](kj::StringPtr source, bool awaited) {
+    auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(1);
+    candidates.add(ReplEnvironment::Candidate{.source = kj::str(source), .awaited = awaited});
+    return fixture.environment.evaluate(candidates.finish()).wait(fixture.io.waitScope).threw;
+  };
+  KJ_EXPECT(!threw("1 + 1", false));
+  KJ_EXPECT(threw("null.x", false));
+  KJ_EXPECT(threw("1 +", false));
+  KJ_EXPECT(!threw("Promise.resolve(1)", true));
+  KJ_EXPECT(threw("Promise.reject(new Error('no'))", true));
+  // A result that renders as "Uncaught ..." is a result.
+  KJ_EXPECT(fixture.eval("class Uncaught {}; new Uncaught()") == "Uncaught {}");
+  KJ_EXPECT(!threw("new Uncaught()", false));
+}
+
 KJ_TEST("REPL tries candidates in order and awaits the awaited ones") {
   Fixture fixture;
   auto candidates = kj::heapArrayBuilder<ReplEnvironment::Candidate>(3);
@@ -339,7 +356,8 @@ KJ_TEST("REPL tries candidates in order and awaits the awaited ones") {
   candidates.add(ReplEnvironment::Candidate{
     .source = kj::str("(async () => (await Promise.resolve(42)\n))()"), .awaited = true});
   candidates.add(ReplEnvironment::Candidate{.source = kj::str("'not reached'"), .awaited = false});
-  KJ_EXPECT(fixture.environment.evaluate(candidates.finish()).wait(fixture.io.waitScope) == "42");
+  KJ_EXPECT(
+      fixture.environment.evaluate(candidates.finish()).wait(fixture.io.waitScope).text == "42");
 
   KJ_EXPECT_STARTS_WITH(
       fixture.evalAwait("await Promise.reject(new Error('no'))"), "Uncaught Error: no");

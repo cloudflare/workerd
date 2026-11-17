@@ -302,17 +302,18 @@ void ReplEnvironment::startSession() {
   incomingRequest = kj::mv(request);
 }
 
-kj::Promise<kj::String> ReplEnvironment::evaluate(kj::Array<Candidate> candidates) {
+kj::Promise<ReplEnvironment::Evaluation> ReplEnvironment::evaluate(
+    kj::Array<Candidate> candidates) {
   KJ_REQUIRE(candidates.size() > 0, "nothing to evaluate");
   auto& context = KJ_REQUIRE_NONNULL(incomingRequest, "the REPL session has ended")->getContext();
 
-  kj::Maybe<kj::String> rendered;
+  kj::Maybe<Evaluation> evaluation;
   kj::Maybe<Awaiting> awaiting;
   co_await context.run([&](Worker::Lock& lock, IoContext& context) {
     auto& js = jsg::Lock::from(lock.getIsolate());
     KJ_SWITCH_ONEOF(run(js, context, candidates)) {
-      KJ_CASE_ONEOF(text, kj::String) {
-        rendered = kj::mv(text);
+      KJ_CASE_ONEOF(e, Evaluation) {
+        evaluation = kj::mv(e);
       }
       KJ_CASE_ONEOF(a, Awaiting) {
         awaiting = kj::mv(a);
@@ -331,20 +332,23 @@ kj::Promise<kj::String> ReplEnvironment::evaluate(kj::Array<Candidate> candidate
       // The input awaited the promise, so a rejection is thrown, as at the top level of a module.
       if (promise.state() == jsg::PromiseState::REJECTED) {
         record(js, "_error"_kj, promise.result());
-        rendered = kj::str("Uncaught ", describeException(js, promise.result()));
+        evaluation = Evaluation{
+          .text = kj::str("Uncaught ", describeException(js, promise.result())),
+          .threw = true,
+        };
       } else {
         record(js, "_"_kj, promise.result());
-        rendered = render(js, promise.result());
+        evaluation = Evaluation{.text = render(js, promise.result()), .threw = false};
       }
     });
   }
 
-  co_return KJ_ASSERT_NONNULL(kj::mv(rendered));
+  co_return KJ_ASSERT_NONNULL(kj::mv(evaluation));
 }
 
-kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
+kj::OneOf<ReplEnvironment::Evaluation, ReplEnvironment::Awaiting> ReplEnvironment::run(
     jsg::Lock& js, IoContext& context, kj::ArrayPtr<const Candidate> candidates) {
-  using Outcome = kj::OneOf<kj::String, Awaiting>;
+  using Outcome = kj::OneOf<Evaluation, Awaiting>;
   return js.tryCatch([&]() -> Outcome {
     auto compiled = compile(js, candidates);
     auto result = compiled.script.runAndReturn(js);
@@ -352,7 +356,7 @@ kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
       // A promise the user did not await renders as a promise: awaiting it could hang the REPL on
       // one that never settles.
       record(js, "_"_kj, result);
-      return render(js, result);
+      return Evaluation{.text = render(js, result), .threw = false};
     }
     auto promise = KJ_ASSERT_NONNULL(result.tryCast<jsg::JsPromise>());
     // Settling is all that matters here; evaluate() reads the outcome off the promise.
@@ -365,7 +369,7 @@ kj::OneOf<kj::String, ReplEnvironment::Awaiting> ReplEnvironment::run(
   }, [&](jsg::Value exception) -> Outcome {
     auto thrown = jsg::JsValue(exception.getHandle(js));
     record(js, "_error"_kj, thrown);
-    return kj::str("Uncaught ", describeException(js, thrown));
+    return Evaluation{.text = kj::str("Uncaught ", describeException(js, thrown)), .threw = true};
   });
 }
 
@@ -497,7 +501,8 @@ class ReplEnvironment::Nested final: public ReplEnvironmentHost, public kj::Refc
       ReplEnvironment& open, kj::Array<Candidate> candidates) {
     // Asked for under the REPL's isolate lock; the input runs under the environment's own.
     co_await kj::yield();
-    co_return co_await open.evaluate(kj::mv(candidates));
+    // Only the rendering crosses between environments.
+    co_return (co_await open.evaluate(kj::mv(candidates))).text;
   }
 
   kj::Promise<void> closeEnvironment() {

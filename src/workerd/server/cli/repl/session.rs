@@ -46,8 +46,9 @@ pub enum Request {
 
 /// What became of an input.
 pub enum Evaluated {
-    /// The text to print: the rendered result, or "Uncaught " followed by the exception.
-    Printed(String),
+    /// The text to print: the rendered result, or, if the input `threw`, "Uncaught " followed by
+    /// the exception.
+    Printed { text: String, threw: bool },
     /// The session stopped awaiting the input. Its promise and what the input started go on.
     Abandoned,
 }
@@ -94,7 +95,10 @@ async fn evaluate(
         if let Poll::Ready(result) = evaluation.as_mut().poll(cx) {
             return Poll::Ready(
                 result
-                    .map(Evaluated::Printed)
+                    .map(|evaluation| Evaluated::Printed {
+                        text: evaluation.text,
+                        threw: evaluation.threw,
+                    })
                     .map_err(|error| error.description().to_owned()),
             );
         }

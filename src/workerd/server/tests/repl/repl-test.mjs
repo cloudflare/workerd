@@ -69,9 +69,24 @@ test('a config that does not load leaves the REPL running', async () => {
     ['no-such-config.capnp'],
     ['typeof s', '1 + 1']
   );
-  assert.strictEqual(code, 0, stderr);
+  // The load is an input that failed.
+  assert.strictEqual(code, 1, stderr);
   assert(stdout.startsWith('Uncaught Error: no-such-config.capnp'), stdout);
   assert.deepStrictEqual(results.slice(-2), ["'undefined'", '2'], stdout);
+});
+
+test('the exit status says whether an input failed', async () => {
+  for (const [lines, failed] of [
+    [['1 + 1', '_error'], false],
+    [['null.x', '1 + 1'], true],
+    [["await Promise.reject(new Error('no'))"], true],
+    [['.no-such-command'], true],
+    // A result that renders as an exception does is a result.
+    [['class Uncaught {}; new Uncaught()'], false],
+  ]) {
+    const { code, stderr } = await repl([], lines);
+    assert.strictEqual(code, failed ? 1 : 0, `${lines}: ${stderr}`);
+  }
 });
 
 test('--v8-flag passes a flag to V8, with or without `=`', async () => {

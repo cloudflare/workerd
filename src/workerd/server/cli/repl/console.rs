@@ -81,18 +81,19 @@ fn is_interactive() -> bool {
 
 /// Runs the console until the input ends or `.exit`, sending `requests` to the session; the
 /// session ends when the console drops them. `first_input`, if any, runs before the first prompt,
-/// shown as if typed at it.
-pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>) {
+/// shown as if typed at it. Whether an input failed, or reading the input did.
+pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>) -> bool {
     eprintln!("{BANNER}");
     let mut console = Console {
         requests,
         input: String::new(),
         scanner: Scanner::default(),
+        failed: false,
     };
     if let Some(input) = first_input {
         eprintln!("{PROMPT}{input}");
         if console.evaluate(input) == Next::Exit {
-            return;
+            return console.failed;
         }
     }
     let result = if is_interactive() {
@@ -102,7 +103,9 @@ pub fn run(requests: mpsc::UnboundedSender<Request>, first_input: Option<String>
     };
     if let Err(error) = result {
         eprintln!("Error: reading input: {error}");
+        console.failed = true;
     }
+    console.failed
 }
 
 /// Whether the console continues after an input.
@@ -117,6 +120,8 @@ struct Console {
     /// The lines of the unfinished input, and the scanner that has read them.
     input: String,
     scanner: Scanner,
+    /// An input failed: it threw, the session could not evaluate it, or it is no command.
+    failed: bool,
 }
 
 impl Console {
@@ -220,7 +225,7 @@ impl Console {
         self.evaluate(input)
     }
 
-    fn command(&self, command: &str) -> Next {
+    fn command(&mut self, command: &str) -> Next {
         match command {
             ".help" => eprint!("{HELP}"),
             ".servers" => return self.evaluate("workerd.servers".to_owned()),
@@ -230,13 +235,16 @@ impl Console {
                 }
             }
             ".exit" => return Next::Exit,
-            _ => eprintln!("Unknown command: {command} (try .help)"),
+            _ => {
+                eprintln!("Unknown command: {command} (try .help)");
+                self.failed = true;
+            }
         }
         Next::Continue
     }
 
     /// Prints what the session makes of `input`. The console ends if the session has.
-    fn evaluate(&self, input: String) -> Next {
+    fn evaluate(&mut self, input: String) -> Next {
         let (reply, result) = oneshot::channel();
         let (abandon, abandoned) = oneshot::channel();
         // On Unix, Ctrl+C abandons the input while it awaits. Elsewhere it ends the REPL.
@@ -253,7 +261,8 @@ impl Console {
             return Next::Exit;
         }
         match result.blocking_recv() {
-            Ok(Ok(Evaluated::Printed(text))) => {
+            Ok(Ok(Evaluated::Printed { text, threw })) => {
+                self.failed |= threw;
                 let mut stdout = io::stdout().lock();
                 // A closed stdout leaves nothing to print to; the inputs may still have effects.
                 let _ = writeln!(stdout, "{text}").and_then(|()| stdout.flush());
@@ -263,7 +272,10 @@ impl Console {
                     "Interrupted: no longer awaiting the input, whose promise may still settle."
                 );
             }
-            Ok(Err(error)) => eprintln!("Error: {error}"),
+            Ok(Err(error)) => {
+                eprintln!("Error: {error}");
+                self.failed = true;
+            }
             Err(_) => return Next::Exit,
         }
         Next::Continue

@@ -23,6 +23,7 @@ namespace workerd::server::repl {
 
 struct ReplOptions;
 struct ReplCandidate;
+struct ReplEvaluation;
 
 // A REPL session: V8, the I/O the loaded configs use, and the environment input runs in. Created
 // on the event loop's thread, and used only there.
@@ -45,7 +46,7 @@ class ReplSession {
 // See the bridge (cli/repl/bridge.rs).
 kj::Own<ReplSession> repl_session_new(
     kj_rs_tokio::TokioAsyncIoContext& loop, const ReplOptions& options);
-kj::Promise<::rust::String> repl_evaluate(
+kj::Promise<ReplEvaluation> repl_evaluate(
     ReplSession& session, ::rust::Vec<ReplCandidate> candidates);
 kj::Promise<::rust::Vec<::rust::String>> repl_property_names(
     ReplSession& session, ::rust::String base);

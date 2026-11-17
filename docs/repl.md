@@ -80,6 +80,12 @@ every config it loads.
 
 Results are colored when stdout is a terminal, unless `NO_COLOR` is set.
 
+The REPL exits with status 1 if an input failed, or if the REPL itself did, and 0 otherwise. An
+input fails if it throws, if the promise it awaits rejects, or if it is a command the REPL doesn't
+know. The REPL prints the failure and goes on to the next input, so a script's later inputs still
+run. A config named on the command line that fails to load is an input that failed. An input that
+Ctrl+C stops awaiting hasn't failed.
+
 ## Typing input
 
 An input runs once it is finished. While a bracket, a template literal or a `/* */` comment is still
