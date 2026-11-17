@@ -60,3 +60,5 @@ any registration macro are required.
 - Shared validators in `internal/validators.ts`; shared errors in `internal/internal_errors.ts`
 - `_` prefix files (e.g., `_http_agent.ts`, `_stream_readable.ts`) = Node.js legacy internal module aliases
 - Some Node.js compat APIs are non-functional stubs that are either non-ops or throw when called
+- Object literals that must not inherit from `Object.prototype` use `__proto__: kNullProtoObject` (from `node-internal:internal_utils`), not `__proto__: null`, which makes V8 create the object in slow dictionary mode. The object's prototype is then the frozen `kNullProtoObject`, not `null`, so `Object.getPrototypeOf()` and `util.inspect()` (`Object <[Object: null prototype] {}> {...}`) differ from Node for objects users can reach
+- New exports from `node:*` modules are additive and need no compatibility flag; say so in the commit message. Replacing a throwing stub with a working implementation needs none either, but the shipped behaviour is then fixed: changing it later, including finishing a partial or no-op implementation, usually needs a flag. Unimplemented APIs throw rather than silently succeed (`README.md`)
