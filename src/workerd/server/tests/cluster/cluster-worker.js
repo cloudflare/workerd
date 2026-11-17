@@ -32,6 +32,12 @@
 //                    `path`, or with `rpc` set its identity() method. Returns
 //                    the target's response. A failure is reported with the
 //                    error's `retryable`.
+//   /hold-stubs      Like /hold-stub, `n` stubs at once, each to the DO named
+//                    by `target`, kept for /call-stub-n. Returns the node each
+//                    reached.
+//   /call-stub-n     Calls /identity, or the path given by `path`, on the stub
+//                    /hold-stubs keeps at index `i`. Returns the target's
+//                    response, or `{ error }` with status 500.
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /hold-increment  Waits `ms` (default 1000), then increments.
@@ -367,6 +373,34 @@ export class Counter extends DurableObject {
           { error: String(err), retryable: err.retryable === true },
           { status: 500 }
         );
+      }
+    } else if (url.pathname === '/hold-stubs') {
+      const target = url.searchParams.get('target');
+      const n = Number(url.searchParams.get('n'));
+      this.heldStubList = Array.from({ length: n }, () =>
+        this.env.COUNTER.get(this.env.COUNTER.idFromName(target))
+      );
+      const reached = await Promise.all(
+        this.heldStubList.map(
+          async (stub) =>
+            (await (await stub.fetch('http://do/identity')).json()).nodeId
+        )
+      );
+      return Response.json({ nodeId, id: idHex, reached });
+    } else if (url.pathname === '/call-stub-n') {
+      const stub = this.heldStubList[Number(url.searchParams.get('i'))];
+      try {
+        const response = await stub.fetch(
+          'http://do' + (url.searchParams.get('path') ?? '/identity')
+        );
+        if (!response.ok) return response;
+        return Response.json({
+          nodeId,
+          id: idHex,
+          target: await response.json(),
+        });
+      } catch (err) {
+        return Response.json({ error: String(err) }, { status: 500 });
       }
     } else if (url.pathname === '/vend-stub') {
       const kind = url.searchParams.get('kind');
