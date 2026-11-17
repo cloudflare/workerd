@@ -2102,6 +2102,10 @@ impl<T: Traced> Traced for FunctionData<T> {
 }
 
 impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn detach_before_drop(&self) -> bool {
+        T::needs_drop_detach()
+    }
+
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // C++ JSG's name for the object that owns a wrapped function.
         c"WrappableFunction"
@@ -4904,7 +4908,7 @@ unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
         ffi::TraitObjectPtr::clear_wrappable(wrappable);
         // The resource is alive until `drop_rc`.
         let resource = saved.as_gc_ref();
-        if resource.has_drop_impl() {
+        if resource.detach_before_drop() {
             GcVisitor::detach_for_drop(resource);
         }
         saved.drop_rc();
