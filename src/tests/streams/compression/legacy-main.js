@@ -10,3 +10,12 @@ export {
   legacyTruncatedMemberCloseTolerated,
   legacyInvalidChunkThrowsSynchronously,
 } from 'legacy-nonstrict';
+
+export {
+  brotliDecodesKnownVector,
+  brotliLargeRoundTrip,
+  brotliCorruptInputRejectsWrite,
+  brotliTrailingDataRejectsWrite,
+  brotliCloseWithoutDataRejects,
+  brotliTruncatedStreamRejectsClose,
+} from 'brotli';

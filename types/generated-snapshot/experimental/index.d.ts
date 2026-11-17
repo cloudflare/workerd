@@ -3302,7 +3302,7 @@ declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3313,7 +3313,7 @@ declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
