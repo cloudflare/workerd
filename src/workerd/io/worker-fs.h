@@ -317,6 +317,12 @@ class File: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  virtual bool isSameNode(const File& other) const {
+    return this == &other;
+  }
+
   // Ensures that the symlink instance itself is counted towards the isolate
   // memory limit.
   virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
@@ -341,18 +347,20 @@ class Directory: public kj::Refcounted {
   virtual size_t count(
       jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
-  // Provides a simple iterator iterface over the directory entries. It is important
-  // to only use these iterators while holding the isolate lock as entries may have
-  // their refcounts incremented and decremented while iterating. To avoid issues using
-  // the iterators using idiomatic C++ syntax, we don't require passing the jsg::Lock&
-  // to the begin() and end() methods so it is important to ensure they are only called
-  // while holding the lock.
   using Item = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
-  using Entry = kj::HashMap<kj::String, Item>::Entry;
-  virtual Entry* begin() = 0;
-  virtual Entry* end() = 0;
-  virtual const Entry* begin() const = 0;
-  virtual const Entry* end() const = 0;
+
+  // One entry of a directory listing.
+  struct ListEntry {
+    kj::String name;
+    Item item;
+  };
+
+  // Returns the entries of this directory in iteration order. The order is the
+  // order in which entries were added, except that removing an entry moves the
+  // last entry into its place. readdir() reports entries in this order, so it is
+  // observable by Workers. The listing holds its own references to the entries,
+  // so it stays valid if the directory is changed while the listing is used.
+  virtual kj::Array<ListEntry> list(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   struct OpenOptions {
     // When set, if the path does not exist, we will attempt to create the
@@ -482,6 +490,12 @@ class Directory: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  virtual bool isSameNode(const Directory& other) const {
+    return this == &other;
+  }
+
   // Ensures that the directory instance itself is counted towards the isolate
   // memory limit. Not every directory needs to be counted so we don't do this
   // by default automatically for every Directory instance.
@@ -530,6 +544,12 @@ class SymbolicLink final: public kj::Refcounted {
   // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
   // but is being implemented and has Web Platform Tests.
   kj::StringPtr getUniqueId(jsg::Lock&) const;
+
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  bool isSameNode(const SymbolicLink& other) const {
+    return this == &other;
+  }
 
   // Ensures that the symlink instance itself is counted towards the isolate
   // memory limit.

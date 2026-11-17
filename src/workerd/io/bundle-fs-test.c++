@@ -60,12 +60,8 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"a", "foo"})) == kj::none);
     KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"zzz", "yyy"})) == kj::none);
 
-    // Iterating over the directory should work.
-    size_t counter = 0;
-    for (auto& _ KJ_UNUSED: *dir) {
-      counter++;
-    }
-    KJ_EXPECT(counter, 3);
+    // Listing the directory should work.
+    KJ_EXPECT(dir->list(env.js).size() == 3);
 
     KJ_EXPECT(dir->count(env.js) == 3);
 

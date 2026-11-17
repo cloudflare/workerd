@@ -88,30 +88,9 @@ class TmpDirectory final: public Directory {
     return 0;
   }
 
-  Entry* begin() override {
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->begin();
-    }
-    return nullptr;
-  }
-
-  Entry* end() override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->end();
-    }
-    return nullptr;
-  }
-
-  const Entry* begin() const override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->begin();
-    }
-    return nullptr;
-  }
-
-  const Entry* end() const override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->end();
+      return dir->list(js);
     }
     return nullptr;
   }
@@ -196,20 +175,8 @@ class LazyDirectory final: public Directory {
     return getDirectory()->count(js, typeFilter);
   }
 
-  Entry* begin() override {
-    return getDirectory()->begin();
-  }
-
-  Entry* end() override {
-    return getDirectory()->end();
-  }
-
-  const Entry* begin() const override {
-    return getDirectory()->begin();
-  }
-
-  const Entry* end() const override {
-    return getDirectory()->end();
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
+    return getDirectory()->list(js);
   }
 
   kj::Maybe<FsNodeWithError> tryOpen(
@@ -351,7 +318,7 @@ class DirectoryBase final: public Directory {
 
   size_t count(jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) override {
     KJ_IF_SOME(type, typeFilter) {
-      return std::count_if(begin(), end(), [type](const auto& entry) {
+      return std::count_if(entries.begin(), entries.end(), [type](const auto& entry) {
         KJ_SWITCH_ONEOF(entry.value) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
             return type == FsType::FILE;
@@ -369,20 +336,21 @@ class DirectoryBase final: public Directory {
     return entries.size();
   }
 
-  Entry* begin() override {
-    return entries.begin();
-  }
-
-  Entry* end() override {
-    return entries.end();
-  }
-
-  const Entry* begin() const override {
-    return entries.begin();
-  }
-
-  const Entry* end() const override {
-    return entries.end();
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
+    return KJ_MAP(entry, entries) -> ListEntry {
+      KJ_SWITCH_ONEOF(entry.value) {
+        KJ_CASE_ONEOF(file, kj::Rc<File>) {
+          return {.name = kj::str(entry.key), .item = file.addRef()};
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+          return {.name = kj::str(entry.key), .item = dir.addRef()};
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+          return {.name = kj::str(entry.key), .item = link.addRef()};
+        }
+      }
+      KJ_UNREACHABLE;
+    };
   }
 
   kj::Maybe<FsNodeWithError> tryOpen(
