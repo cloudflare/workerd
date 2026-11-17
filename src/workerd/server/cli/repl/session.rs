@@ -9,6 +9,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::pin::pin;
 use std::task::Poll;
+use std::time::Duration;
 
 use kj_rs::KjOwn;
 use tokio::sync::mpsc;
@@ -52,12 +53,17 @@ pub enum Evaluated {
     Printed { text: String, threw: bool },
     /// The session stopped awaiting the input. Its promise and what the input started go on.
     Abandoned,
+    /// The session stopped awaiting the input once it had taken this long, as for
+    /// [`Self::Abandoned`].
+    TimedOut(Duration),
 }
 
-/// Serves `requests` until the console drops its sender, then drains the session.
+/// Serves `requests` until the console drops its sender, then drains the session. An input that
+/// takes longer than `timeout` times out.
 pub async fn serve(
     mut session: KjOwn<ReplSession>,
     mut requests: mpsc::UnboundedReceiver<Request>,
+    timeout: Option<Duration>,
 ) -> Result<(), cxx::KjError> {
     while let Some(request) = requests.recv().await {
         // A console that gave up on the reply has ended; its next `recv` sees that.
@@ -67,7 +73,8 @@ pub async fn serve(
                 abandon,
                 reply,
             } => {
-                let _ = reply.send(evaluate(session.as_mut(), &input, abandon).await);
+                let evaluated = evaluate(session.as_mut(), &input, abandon, timeout).await;
+                let _ = reply.send(evaluated);
             }
             Request::Complete {
                 line,
@@ -82,16 +89,19 @@ pub async fn serve(
     bridge::drain(session).await
 }
 
-/// Evaluates `input`, unless abandoned first. Abandoning drops the evaluation, which stops awaiting
-/// the input's promise.
+/// Evaluates `input`, unless abandoned or timed out first. Either drops the evaluation, which stops
+/// awaiting the input's promise. The timer runs only while the event loop does, so it can't time
+/// out JavaScript that runs without awaiting.
 async fn evaluate(
     session: Pin<&mut ReplSession>,
     input: &str,
     abandon: oneshot::Receiver<()>,
+    timeout: Option<Duration>,
 ) -> Result<Evaluated, String> {
     let mut evaluation = pin!(bridge::evaluate(session, input::candidates(input)));
     // None once the console has dropped its sender without sending: it never abandons then.
     let mut abandon = Some(abandon);
+    let mut deadline = pin!(timeout.map(tokio::time::sleep));
     std::future::poll_fn(|cx| {
         if let Poll::Ready(result) = evaluation.as_mut().poll(cx) {
             return Poll::Ready(
@@ -109,6 +119,11 @@ async fn evaluate(
                 Poll::Ready(Err(_)) => abandon = None,
                 Poll::Pending => {}
             }
+        }
+        if let (Some(timeout), Some(deadline)) = (timeout, deadline.as_mut().as_pin_mut())
+            && deadline.poll(cx).is_ready()
+        {
+            return Poll::Ready(Ok(Evaluated::TimedOut(timeout)));
         }
         Poll::Pending
     })

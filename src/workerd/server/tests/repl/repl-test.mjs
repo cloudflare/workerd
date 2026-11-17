@@ -146,6 +146,21 @@ test('an input left unfinished when the input ends is reported', async () => {
   );
 });
 
+test('--input-timeout stops awaiting an input that takes longer', async () => {
+  const { code, results, stderr } = await repl(
+    ['--input-timeout=0.1'],
+    ['await new Promise(() => {})', '1 + 1']
+  );
+  assert.strictEqual(code, 1, stderr);
+  assert.deepStrictEqual(results, ['2']);
+  assert(
+    stderr.includes(
+      'Error: Timed out after 100ms: no longer awaiting the input, whose promise may still settle.'
+    ),
+    stderr
+  );
+});
+
 test('.break abandons an unfinished input', async () => {
   const { code, results, stderr } = await repl(
     [],

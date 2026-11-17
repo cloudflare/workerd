@@ -5,6 +5,8 @@
 //! they depended on (e.g. `--watch` and `--binary` must take effect before `<config>` is
 //! parsed).
 
+use std::time::Duration;
+
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -263,6 +265,9 @@ pub struct ReplArgs {
     #[arg(long = "v8-flag", value_name = "flag", allow_hyphen_values = true)]
     pub v8_flags: Vec<String>,
 
+    #[arg(long, value_name = "seconds", value_parser = parse_seconds)]
+    pub input_timeout: Option<Duration>,
+
     #[arg(long)]
     pub experimental: bool,
 }
@@ -285,6 +290,16 @@ impl DeployArgs {
         let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
         let region = self.region.iter().map(|r| format!("aws_region={r}"));
         Ok(endpoint.chain(region).collect())
+    }
+}
+
+/// Parse a positive number of seconds, such as `30` or `0.5`.
+fn parse_seconds(param: &str) -> Result<Duration, &'static str> {
+    let expected = "expected a positive number of seconds, such as 30 or 0.5";
+    let seconds: f64 = param.parse().map_err(|_| expected)?;
+    match Duration::try_from_secs_f64(seconds) {
+        Ok(duration) if !duration.is_zero() => Ok(duration),
+        _ => Err(expected),
     }
 }
 
