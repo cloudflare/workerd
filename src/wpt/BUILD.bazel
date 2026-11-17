@@ -364,3 +364,9 @@ wpt_test(
     config = "xhr/formdata-test.ts",
     wpt_directory = "@wpt//:xhr/formdata@module",
 )
+
+wpt_test(
+    name = "html/webappapis/system-state-and-capabilities/the-navigator-object",
+    config = "html/webappapis/system-state-and-capabilities/the-navigator-object-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/system-state-and-capabilities/the-navigator-object@module",
+)
