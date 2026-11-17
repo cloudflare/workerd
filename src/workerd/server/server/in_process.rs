@@ -264,7 +264,7 @@ impl InProcessServer {
         props: KjMaybe<KjOwn<ffi::Frankenvalue>>,
     ) -> Result<Box<SubrequestChannel>> {
         self.revoker.check()?;
-        let server = ServerHandle(Weak::clone(&self.server.borrow()));
+        let server = self.server_with_service(name)?;
         let channel = server.resolve_debug_entrypoint(name, entrypoint, props)?;
         let channel = self
             .revoker
@@ -292,12 +292,28 @@ impl InProcessServer {
                 ));
             }
         };
-        let server = ServerHandle(Weak::clone(&self.server.borrow()));
+        let server = self.server_with_service(service)?;
         let (namespace, id) = server.resolve_actor_key(service, class_name, key)?;
         let channel =
             self.revoker
                 .channel(namespace.channel(id, false), &self.factory, Events::All)?;
         Ok(SubrequestChannel::new(channel))
+    }
+
+    /// The server, which must have a service `name`. The debug port's lookups, which `service()`
+    /// and `actor()` share, say that a missing service is a missing Worker.
+    fn server_with_service(&self, name: &str) -> Result<ServerHandle> {
+        let handle = ServerHandle(Weak::clone(&self.server.borrow()));
+        if !handle
+            .server()?
+            .services()
+            .any(|(service, _)| service == name)
+        {
+            return Err(kj::failed!(
+                "jsg.Error: The config has no service named \"{name}\"."
+            ));
+        }
+        Ok(handle)
     }
 
     /// HTTP requests to the config's http socket `name`, as a client of the socket sends them,
