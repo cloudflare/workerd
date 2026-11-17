@@ -371,14 +371,11 @@ class WebSocket: public EventTarget {
   // in each `WebSocket` constructor below); a follow-up commit introduces a
   // `HibernatableWebSocketAdapter` swapped in at `acceptAsHibernatable()` and on revival.
   //
-  // WARNING — DO NOT replace this `kj::Own` after `visitForGc()` has traced through it. V8 marks
-  // the traced children (Refs/V8Refs held by the adapter) weak on the trace pass; moving them via
-  // the kj::Own swap would leave them weak without anyone tracing them again, and GC can then
-  // collect them out from under the new adapter. Today this is moot because the adapter is never
-  // swapped; the hibernatable rewrite that does swap it must either (a) defer the swap until after
-  // migrating any traced state, (b) wait for the upcoming jsg::Own<T> which integrates with
-  // cppgc to handle this correctly, or (c) re-trigger tracing post-swap.
-  kj::Own<WebSocketAdapter> impl;
+  // With the gc-complete-tracing autogate enabled, the adapter's handles become strong when it is
+  // moved out or released, so swapping it is safe after a trace; see `jsg::TracedOwn`. With the
+  // gate disabled, swapping it after a trace leaves the old adapter's handles traced with nothing
+  // visiting them, so don't swap it until the gate is removed.
+  jsg::TracedOwn<WebSocketAdapter> impl;
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \

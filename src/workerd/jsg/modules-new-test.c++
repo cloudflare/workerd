@@ -1866,6 +1866,28 @@ KJ_TEST("Recursive import works or fails as expected") {
 
 // ======================================================================================
 
+KJ_TEST("Dynamic import of a module that is still evaluating resolves to its namespace") {
+  PREAMBLE([&](Lock& js) {
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // foo is still evaluating when bar, which foo imports dynamically from its top-level code,
+    // dynamically imports foo back. V8 aborts the process if asked to evaluate foo again.
+    bundleBuilder.addEsmModule("foo", "export const bar = import('bar'); export default 1;"_kjc);
+    bundleBuilder.addEsmModule("bar", "export const foo = import('foo'); export default 2;"_kjc);
+
+    auto registry = ModuleRegistry::Builder(BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    auto val = ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
+    KJ_ASSERT(val.isNumber());
+  });
+}
+
+// ======================================================================================
+
 KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (dynamic import)") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;
