@@ -90,8 +90,8 @@ import { default as cffs } from 'cloudflare-internal:filesystem';
 import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import { expandBraces } from 'node-internal:internal_glob_pattern';
 import {
-  expandBraces,
   normalizePattern,
   walkGlob,
   compileExcludePatterns,

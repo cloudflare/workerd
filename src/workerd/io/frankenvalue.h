@@ -131,28 +131,28 @@ class Frankenvalue {
 
   // Kind of like `rewriteCaps()`, but the callback returns
   // kj::OneOf<kj::Own<CapTableEntry>, kj::Promise<kj::Own<CapTableEntry>>>, i.e. it may optionally
-  // decide to be async. If any of the calls return a promise, then `resolveCaps()` returns a
-  // promise created by joining the inner promises -- the Frankenvalue MUST NOT be used until that
-  // promise resolves. (If the promise fails or is canceled, the Frankenvalue must be discarded.)
+  // decide to be async. If none of the calls return a promise, the caps are rewritten in place and
+  // `resolveCaps()` returns kj::none. Otherwise this Frankenvalue is moved into the returned
+  // promise, which resolves to it once every cap has resolved.
   template <typename Func>
-  kj::Maybe<kj::Promise<void>> resolveCaps(Func&& resolve) {
-    kj::Vector<kj::Promise<void>> promises;
-    for (auto& slot: capTable) {
-      auto* slotPtr = &slot;
-      KJ_SWITCH_ONEOF(resolve(kj::mv(slot))) {
+  kj::Maybe<kj::Promise<Frankenvalue>> resolveCaps(Func&& resolve) {
+    kj::Vector<size_t> pendingSlots;
+    kj::Vector<kj::Promise<kj::Own<CapTableEntry>>> pendingCaps;
+    for (auto i: kj::indices(capTable)) {
+      KJ_SWITCH_ONEOF(resolve(kj::mv(capTable[i]))) {
         KJ_CASE_ONEOF(replacement, kj::Own<CapTableEntry>) {
-          *slotPtr = kj::mv(replacement);
+          capTable[i] = kj::mv(replacement);
         }
         KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<CapTableEntry>>) {
-          promises.add(promise.then(
-              [slotPtr](kj::Own<CapTableEntry> replacement) { *slotPtr = kj::mv(replacement); }));
+          pendingSlots.add(i);
+          pendingCaps.add(kj::mv(promise));
         }
       }
     }
-    if (promises.empty()) {
+    if (pendingCaps.empty()) {
       return kj::none;
     } else {
-      return kj::joinPromisesFailFast(promises.releaseAsArray());
+      return fillCaps(kj::mv(*this), pendingSlots.releaseAsArray(), pendingCaps.releaseAsArray());
     }
   }
 
@@ -226,6 +226,12 @@ class Frankenvalue {
   size_t fromCapnpImpl(rpc::Frankenvalue::Reader reader, size_t capCount, size_t capTableTotal);
   void toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTableSize);
   jsg::JsValue toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTableEntry>> capTable);
+
+  // Implements the async case of resolveCaps(): fills `value`'s cap table slot `slots[i]` with
+  // `caps[i]` once all of `caps` resolve.
+  static kj::Promise<Frankenvalue> fillCaps(Frankenvalue value,
+      kj::Array<size_t> slots,
+      kj::Array<kj::Promise<kj::Own<CapTableEntry>>> caps);
 };
 
 // Can't be defined inline since `Frankenvalue` is still incomplete there.

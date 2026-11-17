@@ -48,7 +48,7 @@ struct OptionalPoint {
 
 /// `kj::OneOf<double, kj::String, Ref<NumberBox>>`.
 #[jsg_oneof]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum NumberStringOrBox {
     Number(f64),
     String(String),
@@ -106,7 +106,7 @@ enum StringOrOptionalPoint {
 }
 
 #[jsg_oneof]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum PointOrBox {
     Point(OptionalPoint),
     Box(jsg::Rc<OneOfBox>),
@@ -206,11 +206,11 @@ struct OneOfContext;
 #[jsg_resource]
 impl OneOfContext {
     #[jsg_method]
-    pub fn take_one_of(&self, value: NumberStringOrBox) -> String {
+    pub fn take_one_of(&self, lock: &mut jsg::Lock<'_>, value: NumberStringOrBox) -> String {
         match value {
             NumberStringOrBox::Number(n) => format!("number:{n}"),
             NumberStringOrBox::String(s) => format!("string:{s}"),
-            NumberStringOrBox::Box(b) => format!("box:{}", b.value),
+            NumberStringOrBox::Box(b) => format!("box:{}", b.get(lock).value),
         }
     }
 
@@ -285,10 +285,10 @@ impl OneOfContext {
     }
 
     #[jsg_method]
-    pub fn take_point_or_box(&self, value: PointOrBox) -> String {
+    pub fn take_point_or_box(&self, lock: &mut jsg::Lock<'_>, value: PointOrBox) -> String {
         match value {
             PointOrBox::Point(p) => format!("point:{:?}", p.x),
-            PointOrBox::Box(b) => format!("box:{}", b.value),
+            PointOrBox::Box(b) => format!("box:{}", b.get(lock).value),
         }
     }
 
@@ -655,7 +655,6 @@ impl Drop for TracedBox {
 impl TracedBox {}
 
 #[jsg_oneof]
-#[derive(Clone)]
 enum TracedBoxOrNumber {
     Box(jsg::Rc<TracedBox>),
     Number(f64),
@@ -680,12 +679,12 @@ fn union_field_traces_its_resource_variant() {
         let parent = jsg::Rc::new(
             lock,
             HoldsUnion {
-                held: TracedBoxOrNumber::Box(held.clone()),
+                held: TracedBoxOrNumber::Box(held.clone(lock)),
             },
         );
         // Give the inner box a wrapper too, so that only tracing keeps it alive.
-        let _wrapper = held.clone().to_js(lock)?;
-        let wrapped = parent.clone().to_js(lock)?;
+        let _wrapper = held.clone(lock).to_js(lock)?;
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(held);
         std::mem::drop(parent);

@@ -220,6 +220,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` undefined for both streams; encoder drains as one `Uint8Array` chunk per read (HWM 0 — nothing synchronously buffered) with EOF as a separate empty batch; a tee-sibling backlog IS swept in one batched read; decoder chunks pass through the conduit as raw strings (byte validation happens at consumption) |
 | `gc-interplay.js` | a writer keeps its collected encoder wrapper operable (abort); reader+writer keep a collected decoder wrapper decoding through close (`--expose-gc`) |
 | `pollution.js` | prototype pollution neither implementation observes: a patched TransformStreamDefaultController enqueue() never rewrites output; Object.prototype members reach neither the internal transformers nor the omitted strategies |
+| `transfer.js` | structuredClone() rejects DataCloneError for both streams (parity) |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (pre-flag) behaviors

@@ -27,8 +27,7 @@ def kj_test(
         ] + deps,
         linkstatic = CC_TEST_LINKSTATIC,
         data = data,
-        # Tag with cpu:2 since this target depends on linkopts_default.
-        tags = tags + ["cpu:2"],
+        tags = tags,
         target_compatible_with = target_compatible_with,
         **kwargs
     )

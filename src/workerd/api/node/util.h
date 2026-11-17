@@ -69,6 +69,9 @@ class UtilModule final: public jsg::Object {
   UtilModule() = default;
   UtilModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::JsSymbol getResourceTypeInspect(jsg::Lock& js);
 
   // `getOwnNonIndexProperties()` `filter`s

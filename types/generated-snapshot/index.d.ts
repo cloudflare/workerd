@@ -15,60 +15,6 @@ and limitations under the License.
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;
-/**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
-declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  /**
-   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
-   */
-  readonly message: string;
-  /**
-   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
-   */
-  readonly name: string;
-  /**
-   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
-   */
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: number;
-  static readonly DOMSTRING_SIZE_ERR: number;
-  static readonly HIERARCHY_REQUEST_ERR: number;
-  static readonly WRONG_DOCUMENT_ERR: number;
-  static readonly INVALID_CHARACTER_ERR: number;
-  static readonly NO_DATA_ALLOWED_ERR: number;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
-  static readonly NOT_FOUND_ERR: number;
-  static readonly NOT_SUPPORTED_ERR: number;
-  static readonly INUSE_ATTRIBUTE_ERR: number;
-  static readonly INVALID_STATE_ERR: number;
-  static readonly SYNTAX_ERR: number;
-  static readonly INVALID_MODIFICATION_ERR: number;
-  static readonly NAMESPACE_ERR: number;
-  static readonly INVALID_ACCESS_ERR: number;
-  static readonly VALIDATION_ERR: number;
-  static readonly TYPE_MISMATCH_ERR: number;
-  static readonly SECURITY_ERR: number;
-  static readonly NETWORK_ERR: number;
-  static readonly ABORT_ERR: number;
-  static readonly URL_MISMATCH_ERR: number;
-  static readonly QUOTA_EXCEEDED_ERR: number;
-  static readonly TIMEOUT_ERR: number;
-  static readonly INVALID_NODE_TYPE_ERR: number;
-  static readonly DATA_CLONE_ERR: number;
-  get stack(): any;
-  set stack(value: any);
-}
 type WorkerGlobalScopeEventMap = {
   fetch: FetchEvent;
   scheduled: ScheduledEvent;
@@ -3195,7 +3141,7 @@ declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3206,7 +3152,7 @@ declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3413,361 +3359,6 @@ interface TraceMetrics {
 interface UnsafeTraceMetrics {
   fromTrace(item: TraceItem): TraceMetrics;
 }
-/**
- * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
- */
-declare class URL {
-  constructor(url: string | URL, base?: string | URL);
-  /**
-   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
-   */
-  get origin(): string;
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  get href(): string;
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  set href(value: string);
-  /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
-   */
-  get protocol(): string;
-  /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
-   */
-  set protocol(value: string);
-  /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
-   */
-  get username(): string;
-  /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
-   */
-  set username(value: string);
-  /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
-   */
-  get password(): string;
-  /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
-   */
-  set password(value: string);
-  /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
-   */
-  get host(): string;
-  /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
-   */
-  set host(value: string);
-  /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
-   */
-  get hostname(): string;
-  /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
-   */
-  set hostname(value: string);
-  /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
-   */
-  get port(): string;
-  /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
-   */
-  set port(value: string);
-  /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
-   */
-  get pathname(): string;
-  /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
-   */
-  set pathname(value: string);
-  /**
-   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
-   */
-  get search(): string;
-  /**
-   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
-   */
-  set search(value: string);
-  /**
-   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  get hash(): string;
-  /**
-   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  set hash(value: string);
-  /**
-   * The **`searchParams`** read-only property of the URL interface returns a URLSearchParams object allowing access to the GET decoded query arguments contained in the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
-   */
-  get searchParams(): URLSearchParams;
-  /**
-   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as URL.toString().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
-   */
-  toJSON(): string;
-  /*function toString() { [native code] }*/
-  toString(): string;
-  /**
-   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
-   */
-  static canParse(url: string, base?: string): boolean;
-  /**
-   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
-   */
-  static parse(url: string, base?: string): URL | null;
-  /**
-   * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
-   */
-  static createObjectURL(object: File | Blob): string;
-  /**
-   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling URL.createObjectURL().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
-   */
-  static revokeObjectURL(object_url: string): void;
-}
-/**
- * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams)
- */
-declare class URLSearchParams {
-  constructor(
-    init?: Iterable<Iterable<string>> | Record<string, string> | string,
-  );
-  /**
-   * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size)
-   */
-  get size(): number;
-  /**
-   * The **`append()`** method of the URLSearchParams interface appends a specified key/value pair as a new search parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/append)
-   */
-  append(name: string, value: string): void;
-  /**
-   * The **`delete()`** method of the URLSearchParams interface deletes specified parameters and their associated value(s) from the list of all search parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
-   */
-  delete(name: string, value?: string): void;
-  /**
-   * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/get)
-   */
-  get(name: string): string | null;
-  /**
-   * The **`getAll()`** method of the URLSearchParams interface returns all the values associated with a given search parameter as an array.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/getAll)
-   */
-  getAll(name: string): string[];
-  /**
-   * The **`has()`** method of the URLSearchParams interface returns a boolean value that indicates whether the specified parameter is in the search parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
-   */
-  has(name: string, value?: string): boolean;
-  /**
-   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value. If there were several matching values, this method deletes the others. If the search parameter doesn't exist, this method creates it.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
-   */
-  set(name: string, value: string): void;
-  /**
-   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns undefined. Key/value pairs are sorted by the values of the UTF-16 code units of the keys. This method uses a stable sorting algorithm (i.e., the relative order between key/value pairs with equal keys will be preserved).
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
-   */
-  sort(): void;
-  entries(): IterableIterator<[key: string, value: string]>;
-  keys(): IterableIterator<string>;
-  values(): IterableIterator<string>;
-  forEach<This = unknown>(
-    callback: (
-      this: This,
-      value: string,
-      key: string,
-      parent: URLSearchParams,
-    ) => void,
-    thisArg?: This,
-  ): void;
-  /*function toString() { [native code] }*/
-  toString(): string;
-  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-}
-/**
- * The **`URLPattern`** interface of the URL Pattern API matches URLs or parts of URLs against a pattern. The pattern can contain capturing groups that extract parts of the matched URL.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern)
- */
-declare class URLPattern {
-  constructor(
-    input?: string | URLPatternInit,
-    baseURL?: string | URLPatternOptions,
-    patternOptions?: URLPatternOptions,
-  );
-  /**
-   * The **`protocol`** read-only property of the URLPattern interface is a string containing the pattern used to match the protocol part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/protocol)
-   */
-  get protocol(): string;
-  /**
-   * The **`username`** read-only property of the URLPattern interface is a string containing the pattern used to match the username part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/username)
-   */
-  get username(): string;
-  /**
-   * The **`password`** read-only property of the URLPattern interface is a string containing the pattern used to match the password part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/password)
-   */
-  get password(): string;
-  /**
-   * The **`hostname`** read-only property of the URLPattern interface is a string containing the pattern used to match the hostname part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hostname)
-   */
-  get hostname(): string;
-  /**
-   * The **`port`** read-only property of the URLPattern interface is a string containing the pattern used to match the port part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/port)
-   */
-  get port(): string;
-  /**
-   * The **`pathname`** read-only property of the URLPattern interface is a string containing the pattern used to match the pathname part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/pathname)
-   */
-  get pathname(): string;
-  /**
-   * The **`search`** read-only property of the URLPattern interface is a string containing the pattern used to match the search part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/search)
-   */
-  get search(): string;
-  /**
-   * The **`hash`** read-only property of the URLPattern interface is a string containing the pattern used to match the fragment part of a URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hash)
-   */
-  get hash(): string;
-  /**
-   * The **`hasRegExpGroups`** read-only property of the URLPattern interface is a boolean indicating whether or not any of the URLPattern components contain regular expression capturing groups.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hasRegExpGroups)
-   */
-  get hasRegExpGroups(): boolean;
-  /**
-   * The **`test()`** method of the URLPattern interface takes a URL string or object of URL parts, and returns a boolean indicating if the given input matches the current pattern.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/test)
-   */
-  test(input?: string | URLPatternInit, baseURL?: string): boolean;
-  /**
-   * The **`exec()`** method of the URLPattern interface takes a URL or object of URL parts, and returns either an object containing the results of matching the URL to the pattern, or null if the URL does not match the pattern.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/exec)
-   */
-  exec(
-    input?: string | URLPatternInit,
-    baseURL?: string,
-  ): URLPatternResult | null;
-}
-interface URLPatternInit {
-  protocol?: string;
-  username?: string;
-  password?: string;
-  hostname?: string;
-  port?: string;
-  pathname?: string;
-  search?: string;
-  hash?: string;
-  baseURL?: string;
-}
-interface URLPatternComponentResult {
-  input: string;
-  groups: Record<string, string>;
-}
-interface URLPatternResult {
-  inputs: (string | URLPatternInit)[];
-  protocol: URLPatternComponentResult;
-  username: URLPatternComponentResult;
-  password: URLPatternComponentResult;
-  hostname: URLPatternComponentResult;
-  port: URLPatternComponentResult;
-  pathname: URLPatternComponentResult;
-  search: URLPatternComponentResult;
-  hash: URLPatternComponentResult;
-}
-interface URLPatternOptions {
-  ignoreCase?: boolean;
-}
 type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -3818,6 +3409,12 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
   readyState: number;
+  /**
+   * The **`WebSocket.bufferedAmount`** read-only property returns the number of bytes of data that have been queued using calls to send() but not yet transmitted to the network. This value resets to zero once all queued data has been sent. This value does not reset to zero when the connection is closed; if you keep calling send(), this will continue to climb.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/bufferedAmount)
+   */
+  bufferedAmount: number;
   /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
@@ -13558,6 +13155,49 @@ type BrowserRunDevtools = {
 type BrowserRunCloseSessionResult = {
   status: "closing" | "closed";
 };
+/** Library the script runs against. Omit it to receive a raw CDP client. */
+type BrowserRunScriptLibrary = "playwright" | "puppeteer";
+/** Options for `script()`. */
+type BrowserRunScriptOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds, not counting browser
+   * acquisition. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** How long the session stays open without activity after the run, in
+   * milliseconds. Between 10000 and 1200000.
+   * @default 60000
+   */
+  keepAlive?: number;
+  /** Use the experimental pool, whose browsers enable Chrome features before
+   * they reach stable Chrome.
+   * @default false
+   */
+  lab?: boolean;
+  /** Record the browser session. @default false */
+  recording?: boolean;
+};
+/** Options for `scriptInSession()`. */
+type BrowserRunScriptSessionOptions = {
+  /** Library whose objects are passed to the script. Omit it for raw CDP. */
+  library?: BrowserRunScriptLibrary;
+  /** Maximum run time of the script in milliseconds. Between 1 and 120000.
+   * @default 60000
+   */
+  timeout?: number;
+  /** Page target the script attaches to, such as the `cf-browser-target-id`
+   * header returned by `script()`. Defaults to the session's first page.
+   */
+  targetId?: string;
+};
+/** JSON success body of `script()` and `scriptInSession()`. */
+type BrowserRunScriptSuccessResponse = {
+  success: true;
+  /** The script's return value, or `null` when it returned nothing. */
+  result: unknown;
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13772,6 +13412,57 @@ declare abstract class BrowserRun {
   getSession(sessionId: string): Promise<BrowserRunSession | null>;
   /** Close a browser session. */
   closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /**
+   * Run a script against a new browser session.
+   * @param code - Source of an async function. It receives the selected
+   * library's objects (Playwright `{ page, context, browser }`, Puppeteer
+   * `{ page, browser }`) or, without `library`, a CDP client.
+   * @param options - Library, timeout and session launch options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScriptSuccessResponse` JSON with `Content-Type: application/json`
+   * when the script returns a JSON-serializable value or nothing
+   * - The raw body and content type when the script returns binary or other
+   * non-JSON output
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 404, 408, 422, 429, 500, 503)
+   * - HTTP 408 when the script exceeds `timeout`
+   * - HTTP 422 when the script fails to compile or throws
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `cf-browser-session-id`: Session kept open for `scriptInSession()`
+   * - `cf-browser-target-id`: Page target the script ran on
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  script(code: string, options?: BrowserRunScriptOptions): Promise<Response>;
+  /**
+   * Run a script against an existing browser session, such as one kept open by
+   * `script()`.
+   * @param sessionId - Session to run in, such as the `cf-browser-session-id`
+   * header returned by `script()`.
+   * @param code - Source of an async function, as for `script()`.
+   * @param options - Library, timeout and page target options.
+   * @returns A `Response` with the same success bodies as `script()`.
+   *
+   * **Error:**
+   * - JSON error body with an HTTP status code (400, 401, 404, 408, 410, 422, 500)
+   * - HTTP 404 when the session or `targetId` does not exist
+   * - HTTP 410 when the session is already closed
+   * - HTTP errors are returned as a `Response`, not thrown. Invalid `options`
+   * throw before any request is made.
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds
+   */
+  scriptInSession(
+    sessionId: string,
+    code: string,
+    options?: BrowserRunScriptSessionOptions,
+  ): Promise<Response>;
   /** DevTools JSON methods exposed through one nested binding target. */
   get devtools(): BrowserRunDevtools;
 }
@@ -15088,6 +14779,60 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+/**
+ * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
+ */
+declare class DOMException extends Error {
+  constructor(message?: string, name?: string);
+  /**
+   * The **`message`** read-only property of the DOMException interface returns a string representing a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
+  readonly message: string;
+  /**
+   * The **`name`** read-only property of the DOMException interface returns a string that contains one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
+  readonly name: string;
+  /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or 0 if none match.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
+   */
+  readonly code: number;
+  static readonly INDEX_SIZE_ERR: number;
+  static readonly DOMSTRING_SIZE_ERR: number;
+  static readonly HIERARCHY_REQUEST_ERR: number;
+  static readonly WRONG_DOCUMENT_ERR: number;
+  static readonly INVALID_CHARACTER_ERR: number;
+  static readonly NO_DATA_ALLOWED_ERR: number;
+  static readonly NO_MODIFICATION_ALLOWED_ERR: number;
+  static readonly NOT_FOUND_ERR: number;
+  static readonly NOT_SUPPORTED_ERR: number;
+  static readonly INUSE_ATTRIBUTE_ERR: number;
+  static readonly INVALID_STATE_ERR: number;
+  static readonly SYNTAX_ERR: number;
+  static readonly INVALID_MODIFICATION_ERR: number;
+  static readonly NAMESPACE_ERR: number;
+  static readonly INVALID_ACCESS_ERR: number;
+  static readonly VALIDATION_ERR: number;
+  static readonly TYPE_MISMATCH_ERR: number;
+  static readonly SECURITY_ERR: number;
+  static readonly NETWORK_ERR: number;
+  static readonly ABORT_ERR: number;
+  static readonly URL_MISMATCH_ERR: number;
+  static readonly QUOTA_EXCEEDED_ERR: number;
+  static readonly TIMEOUT_ERR: number;
+  static readonly INVALID_NODE_TYPE_ERR: number;
+  static readonly DATA_CLONE_ERR: number;
+  get stack(): any;
+  set stack(value: any);
+}
 declare module "cloudflare:durable-objects" {
   /**
    * Marks Durable Object methods as safe to run more than once. The runtime may then retry calls
@@ -15155,6 +14900,10 @@ interface ForwardableEmailMessage extends EmailMessage {
    * Size of the email message content.
    */
   readonly rawSize: number;
+  /**
+   * Whether this email message can be forwarded with `forward()`.
+   */
+  readonly canBeForwarded: boolean;
   /**
    * Reject this email message by returning a permanent SMTP error back to the connecting client including the given reason.
    * @param reason The reject reason.
@@ -17810,6 +17559,365 @@ declare namespace TailStream {
     attributes?: TailEventHandler<Attributes>;
   };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
+}
+// URL and URLSearchParams, as WHATWG URL declares them, at every compatibility
+// date. Without the urlsearchparams_delete_has_value_arg compatibility flag
+// (the default from 2023-07-01), delete() and has() ignore `value`.
+/**
+ * The **`URL`** interface is used to parse, construct, normalize, and encode URLs. It works by providing properties which allow you to easily read and modify the components of a URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
+ */
+declare class URL {
+  constructor(url: string | URL, base?: string | URL);
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
+  get href(): string;
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
+  set href(value: string);
+  /**
+   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
+   */
+  get origin(): string;
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
+  get protocol(): string;
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final ":".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
+  set protocol(value: string);
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
+  get username(): string;
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL. If the URL does not have a username, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
+  set username(value: string);
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
+  get password(): string;
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL. If the URL does not have a password, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
+  set password(value: string);
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
+  get host(): string;
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the hostname, and then, if the port of the URL is nonempty, a ":", followed by the port of the URL. If the URL does not have a hostname, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
+  set host(value: string);
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
+  get hostname(): string;
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL. If the URL does not have a hostname, this property contains an empty string, "". IPv4 and IPv6 addresses are normalized, such as stripping leading zeros, and domain names are converted to IDN.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
+  set hostname(value: string);
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
+  get port(): string;
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL. If the port is the default for the protocol (80 for ws: and http:, 443 for wss: and https:, and 21 for ftp:), this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
+  set port(value: string);
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
+  get pathname(): string;
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure. It is a string constructed from a list of path segments, each of which is prefixed by a / character.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
+  set pathname(value: string);
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
+  get search(): string;
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a query string, that is a string containing a "?" followed by the parameters of the URL. If the URL does not have a search query, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
+  set search(value: string);
+  /**
+   * The **`searchParams`** read-only property of the URL interface returns a URLSearchParams object allowing access to the GET decoded query arguments contained in the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
+   */
+  get searchParams(): URLSearchParams;
+  /**
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
+  get hash(): string;
+  /**
+   * The **`hash`** property of the URL interface is a string containing a "#" followed by the fragment identifier of the URL. If the URL does not have a fragment identifier, this property contains an empty string, "".
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
+  set hash(value: string);
+  /**
+   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as URL.toString().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
+   */
+  toJSON(): string;
+  toString(): string;
+  /**
+   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
+   */
+  static canParse(url: string | URL, base?: string | URL): boolean;
+  /**
+   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
+   */
+  static parse(url: string | URL, base?: string | URL): URL | null;
+  /**
+   * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
+   */
+  static createObjectURL(object: File | Blob): string;
+  /**
+   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling URL.createObjectURL().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
+   */
+  static revokeObjectURL(object_url: string): void;
+}
+/**
+ * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams)
+ */
+declare class URLSearchParams {
+  constructor(
+    init?: Iterable<Iterable<string>> | Record<string, string> | string,
+  );
+  /**
+   * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size)
+   */
+  get size(): number;
+  /**
+   * The **`append()`** method of the URLSearchParams interface appends a specified key/value pair as a new search parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/append)
+   */
+  append(name: string, value: string): void;
+  /**
+   * The **`delete()`** method of the URLSearchParams interface deletes specified parameters and their associated value(s) from the list of all search parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
+   */
+  delete(name: string, value?: string): void;
+  /**
+   * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/get)
+   */
+  get(name: string): string | null;
+  /**
+   * The **`getAll()`** method of the URLSearchParams interface returns all the values associated with a given search parameter as an array.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/getAll)
+   */
+  getAll(name: string): string[];
+  /**
+   * The **`has()`** method of the URLSearchParams interface returns a boolean value that indicates whether the specified parameter is in the search parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
+   */
+  has(name: string, value?: string): boolean;
+  /**
+   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value. If there were several matching values, this method deletes the others. If the search parameter doesn't exist, this method creates it.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
+   */
+  set(name: string, value: string): void;
+  /**
+   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns undefined. Key/value pairs are sorted by the values of the UTF-16 code units of the keys. This method uses a stable sorting algorithm (i.e., the relative order between key/value pairs with equal keys will be preserved).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
+   */
+  sort(): void;
+  entries(): IterableIterator<[key: string, value: string]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<string>;
+  forEach<This = unknown>(
+    callback: (
+      this: This,
+      value: string,
+      key: string,
+      parent: URLSearchParams,
+    ) => void,
+    thisArg?: This,
+  ): void;
+  toString(): string;
+  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+}
+// URLPattern, as the URLPattern standard declares it, for both parsers.
+// The legacy parser (the urlpattern_original compatibility flag, the
+// default before 2025-05-01) has no hasRegExpGroups.
+/**
+ * The **`URLPattern`** interface of the URL Pattern API matches URLs or parts of URLs against a pattern. The pattern can contain capturing groups that extract parts of the matched URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern)
+ */
+declare class URLPattern {
+  constructor(
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions,
+  );
+  /**
+   * The **`protocol`** read-only property of the URLPattern interface is a string containing the pattern used to match the protocol part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/protocol)
+   */
+  get protocol(): string;
+  /**
+   * The **`username`** read-only property of the URLPattern interface is a string containing the pattern used to match the username part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/username)
+   */
+  get username(): string;
+  /**
+   * The **`password`** read-only property of the URLPattern interface is a string containing the pattern used to match the password part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/password)
+   */
+  get password(): string;
+  /**
+   * The **`hostname`** read-only property of the URLPattern interface is a string containing the pattern used to match the hostname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hostname)
+   */
+  get hostname(): string;
+  /**
+   * The **`port`** read-only property of the URLPattern interface is a string containing the pattern used to match the port part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/port)
+   */
+  get port(): string;
+  /**
+   * The **`pathname`** read-only property of the URLPattern interface is a string containing the pattern used to match the pathname part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/pathname)
+   */
+  get pathname(): string;
+  /**
+   * The **`search`** read-only property of the URLPattern interface is a string containing the pattern used to match the search part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/search)
+   */
+  get search(): string;
+  /**
+   * The **`hash`** read-only property of the URLPattern interface is a string containing the pattern used to match the fragment part of a URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hash)
+   */
+  get hash(): string;
+  /**
+   * The **`hasRegExpGroups`** read-only property of the URLPattern interface is a boolean indicating whether or not any of the URLPattern components contain regular expression capturing groups.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/hasRegExpGroups)
+   */
+  get hasRegExpGroups(): boolean;
+  /**
+   * The **`test()`** method of the URLPattern interface takes a URL string or object of URL parts, and returns a boolean indicating if the given input matches the current pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/test)
+   */
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
+  /**
+   * The **`exec()`** method of the URLPattern interface takes a URL or object of URL parts, and returns either an object containing the results of matching the URL to the pattern, or null if the URL does not match the pattern.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLPattern/exec)
+   */
+  exec(
+    input?: string | URLPatternInit,
+    baseURL?: string,
+  ): URLPatternResult | null;
+}
+interface URLPatternInit {
+  protocol?: string;
+  username?: string;
+  password?: string;
+  hostname?: string;
+  port?: string;
+  pathname?: string;
+  search?: string;
+  hash?: string;
+  baseURL?: string;
+}
+interface URLPatternComponentResult {
+  input: string;
+  groups: Record<string, string | undefined>;
+}
+interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
+}
+interface URLPatternOptions {
+  ignoreCase?: boolean;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:

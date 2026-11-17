@@ -61,6 +61,11 @@ impl<V> Dict<V> {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// The entries, for heap snapshots, which report the memory they allocate.
+    pub(crate) fn entries(&self) -> &Vec<(String, V)> {
+        &self.entries
+    }
 }
 
 impl<V> Default for Dict<V> {

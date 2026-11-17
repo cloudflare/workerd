@@ -58,6 +58,7 @@ use crate::cluster::ClusterNode;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
+use crate::services::assets::Assets;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -102,6 +103,14 @@ impl Factory {
     #[must_use]
     pub fn experimental(&self) -> bool {
         ffi::factory_experimental(&self.inner)
+    }
+
+    /// The navigation flag of the assets service `services[service]`.
+    pub fn assets_navigation_prefers_asset_serving(&self, service: u32) -> Result<bool> {
+        Ok(ffi::factory_assets_navigation_prefers_asset_serving(
+            &self.inner,
+            service,
+        )?)
     }
 
     /// Whether requests get tail workers: not under `workerd bench`, unless given `--trace`.
@@ -417,6 +426,7 @@ pub enum Service {
     /// the rest of the config can be checked.
     Leaf(Rc<dyn Channel>),
     Disk(Rc<DiskDirectoryService>),
+    Assets(Rc<Assets>),
 }
 
 impl Service {
@@ -427,6 +437,7 @@ impl Service {
             Self::Worker(worker) => worker.default_entrypoint(),
             Self::Leaf(channel) => Rc::clone(channel),
             Self::Disk(disk) => Rc::clone(disk) as Rc<dyn Channel>,
+            Self::Assets(assets) => assets.channel(false),
         }
     }
 
@@ -681,6 +692,29 @@ pub fn collect_actor_configs(
     Ok(actor_configs)
 }
 
+/// Bundled modules (`Worker.Module.bundled`) need `--experimental`.
+fn check_bundled(
+    name: &str,
+    worker: worker::Reader<'_>,
+    experimental: bool,
+    report: &Reporter,
+) -> capnp::Result<()> {
+    let bundled = match worker.which() {
+        Ok(worker::Which::Modules(modules)) => modules?
+            .iter()
+            .any(|m| matches!(m.which(), Ok(worker::module::Which::Bundled(_)))),
+        _ => false,
+    };
+    if bundled && !experimental {
+        report.error_in(
+            name,
+            "Bundled modules are an experimental feature which may change or go away in the \
+             future. You must run workerd with `--experimental` to use this feature.",
+        );
+    }
+    Ok(())
+}
+
 /// [`collect_actor_configs`] for the service `name`, whose config is `service_conf`.
 fn collect_service_actor_configs(
     name: &str,
@@ -696,6 +730,7 @@ fn collect_service_actor_configs(
         return Ok(configs);
     };
     let worker_conf = worker_conf?;
+    check_bundled(name, worker_conf, experimental, report)?;
     let mut had_durable = false;
     for (namespace_index, ns) in (0..).zip(worker_conf.get_durable_object_namespaces()?) {
         let class_name = ns.get_class_name()?.to_string()?;
@@ -777,6 +812,8 @@ fn collect_service_actor_configs(
     }
 
     // Meant for parameterized workers; nothing implements it, so nothing may set it.
+    // TODO(someday): implement it, so that a Worker with Durable Objects can be
+    // `inherit`ed, as a bundled Worker's config constant would be.
     if worker_conf.has_durable_object_unique_key_modifier() {
         report.service_error(
             name,
@@ -1234,6 +1271,11 @@ pub fn lookup_service(
     };
     let props = configured_props(props_json.as_deref());
 
+    if let Service::Assets(assets) = service
+        && entrypoint.as_deref().is_none_or(|e| e == "AssetWorker")
+    {
+        return assets.channel(entrypoint.is_some());
+    }
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
             report.reference_error(
@@ -1456,6 +1498,7 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
+        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
 
         let server = Rc::new(Self {
             report,
@@ -1471,6 +1514,11 @@ impl Server {
         // Third pass: the links.
         for (name, worker) in server.workers() {
             tolerate_deployment(&server.report, name, server.link_worker(name, worker))?;
+        }
+        for (name, service) in &server.services.0 {
+            if let Service::Assets(assets) = service {
+                assets.link(|d| lookup_service(&server.services.0, &server.report, Some(name), d));
+            }
         }
 
         // A deployment's service with errors fails every request.
@@ -1769,6 +1817,25 @@ async fn make_service(
                     .map(Service::Disk),
             ))
         }
+        Ok(service::Which::Assets(assets)) => {
+            if !factory.experimental() {
+                report.error_in(
+                    name,
+                    "Assets services are an experimental feature which may change or go away in \
+                     the future. You must run workerd with `--experimental` to use this feature.",
+                );
+                return Ok(Service::Leaf(Rc::new(InvalidConfigChannel)));
+            }
+            let assets = assets.map_err(capnp_error)?;
+            Ok(invalid_on_error(
+                name,
+                report,
+                crate::services::assets::make_assets_service(name, index, assets, factory, report)
+                    .map(Service::Assets),
+            ))
+        }
+        // Made once the cluster is joined (`make_bucket_services`).
+        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
         Err(capnp::NotInSchema(_)) => {
             report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -1897,7 +1964,7 @@ impl ServerHandle {
             )
         })?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.channel(ffi::actor_id_from_hex(actor_id)?, false),
+            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
             None => namespace.channel_by_name(actor_id, false),
         }))
     }
@@ -1926,6 +1993,38 @@ impl Server {
 #[cfg(test)]
 #[path = "config-test.rs"]
 mod tests;
+
+/// Replaces each `bucket` service's stand-in with the directory of the
+/// cluster's bucket it names.
+fn make_bucket_services(
+    config: config::Reader<'_>,
+    services: &mut Services,
+    cluster: Option<&Rc<ClusterNode>>,
+    factory: &Rc<Factory>,
+    report: &Reporter,
+) -> Result<()> {
+    for conf in config.get_services().map_err(capnp_error)? {
+        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
+            continue;
+        };
+        let name = text(conf.get_name())?;
+        let Some(node) = cluster else {
+            report.service_error(&name, "A bucket service requires Config.cluster.");
+            continue;
+        };
+        let bucket = bucket.map_err(capnp_error)?;
+        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let channel: Rc<dyn Channel> = match made {
+            Ok(service) => Rc::new(service),
+            Err(error) => {
+                report.service_error(&name, error.description());
+                continue;
+            }
+        };
+        services.0.insert(name, Service::Leaf(channel));
+    }
+    Ok(())
+}
 
 /// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.
 fn make_cluster(

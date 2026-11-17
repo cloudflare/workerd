@@ -122,6 +122,8 @@ wd_cc_library(
         "//src/workerd/api:fuzzilli",
         "//src/workerd/api:hibernation-event-params",
         "//src/workerd/api:url",
+        "//src/workerd/api:url-bootstrap",
+        "//src/workerd/api:urlpattern-bootstrap",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
@@ -637,6 +639,13 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-stream-test.c++",
+    deps = [
+        ":io",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
         ":trace",
@@ -756,6 +765,14 @@ kj_test(
 
 kj_test(
     src = "trace-scope-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "uncaught-exception-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

@@ -22,10 +22,13 @@ namespace workerd::api {
 class Fetcher;
 
 // A special binding object that allows for dynamic evaluation.
-class UnsafeEval: public jsg::Object {
+class UnsafeEval final: public jsg::Object {
  public:
   UnsafeEval() = default;
   UnsafeEval(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless binding object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   // A non-capturing eval. Compile and evaluates the given script, returning whatever
   // value is returned by the script. This version of eval intentionally does not
@@ -96,10 +99,13 @@ class Stdin: public jsg::Object {
   }
 };
 
-class UnsafeModule: public jsg::Object {
+class UnsafeModule final: public jsg::Object {
  public:
   UnsafeModule() = default;
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
   // Like abortAllDurableObjects(), but also deletes storage and cancels alarms so DOs
@@ -133,12 +139,18 @@ class UnsafeModule: public jsg::Object {
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
 
+  // Whether this Worker's isolate was started from a startup snapshot rather than evaluating its
+  // top level itself (docs/startup-snapshot.md). Meaningful at request time only: asked at module
+  // scope, the answer is the zygote's and is baked into the snapshot.
+  bool startedFromStartupSnapshot(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
     JSG_METHOD(deleteAllDurableObjects);
     JSG_METHOD(evict);
     JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
+    JSG_METHOD(startedFromStartupSnapshot);
   }
 };
 

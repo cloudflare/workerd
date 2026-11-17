@@ -6,10 +6,13 @@ namespace workerd::api::node {
 
 // node:diagnostics_channel is implemented in TypeScript (src/node/diagnostics_channel.ts). Only
 // forwarding published messages to tail workers lives here, since it needs the IoContext.
-class DiagnosticsChannelModule: public jsg::Object {
+class DiagnosticsChannelModule final: public jsg::Object {
  public:
   DiagnosticsChannelModule() = default;
   DiagnosticsChannelModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   // Called by Channel.publish() after the subscribers have run. Records the message for tail
   // workers if the current request has a tracer. Throws if there is no current request.

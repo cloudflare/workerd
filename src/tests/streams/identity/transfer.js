@@ -4,39 +4,32 @@
 
 // structuredClone over identity streams: transfer rejects TypeError in
 // both implementations (transferable streams unimplemented); plain
-// cloning diverges — C++ DataCloneError (the generic does-not-support-
-// serialization message), TypeScript yields a useless empty plain
-// Object (defect pin; see the readable suite's transfer.js for the
-// family).
+// cloning rejects DataCloneError in both, with the generic
+// does-not-support-serialization message (see the readable suite's
+// transfer.js for the family).
 
-import { strictEqual, throws, match } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { strictEqual, throws } from 'node:assert';
+
+function notSerializable(type) {
+  return {
+    name: 'DataCloneError',
+    message: `Could not serialize object of type "${type}". This type does not support serialization.`,
+  };
+}
 
 export const structuredCloneIdentity = {
   test() {
-    const its = new IdentityTransformStream();
-    throws(() => structuredClone(its, { transfer: [its] }), {
-      name: 'TypeError',
-      message: 'Object is not transferable',
-    });
-    if (usingTsImpl) {
-      const clone = structuredClone(its);
-      strictEqual(clone instanceof IdentityTransformStream, false);
-      strictEqual(Object.getPrototypeOf(clone), Object.prototype);
-      strictEqual(Object.keys(clone).length, 0);
-    } else {
-      try {
-        structuredClone(its);
-        throw new Error('expected DataCloneError');
-      } catch (e) {
-        strictEqual(e.name, 'DataCloneError');
-        match(
-          e.message,
-          /Could not serialize object of type "IdentityTransformStream"/
-        );
-      }
+    for (const [type, its] of [
+      ['IdentityTransformStream', new IdentityTransformStream()],
+      ['FixedLengthStream', new FixedLengthStream(1)],
+    ]) {
+      throws(() => structuredClone(its, { transfer: [its] }), {
+        name: 'TypeError',
+        message: 'Object is not transferable',
+      });
+      throws(() => structuredClone(its), notSerializable(type));
+      strictEqual(its.readable.locked, false);
+      strictEqual(its.writable.locked, false);
     }
-    strictEqual(its.readable.locked, false);
-    strictEqual(its.writable.locked, false);
   },
 };

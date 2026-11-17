@@ -385,9 +385,7 @@ void EventSource::start(jsg::Lock& js) {
   auto fetcher = i.options.fetcher.map([](jsg::Ref<Fetcher>& f) { return f.addRef(); });
 
   static constexpr auto handleError = [](auto& js, auto& self, kj::String message) {
-    auto ex = js.domException(kj::str("AbortError"), kj::mv(message));
-    auto handle = KJ_ASSERT_NONNULL(ex.tryGetHandle(js));
-    self->notifyError(js, jsg::JsValue(handle));
+    self->notifyError(js, js.domException(kj::str("AbortError"), kj::mv(message)));
     return js.resolvedPromise();
   };
 

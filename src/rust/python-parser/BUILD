@@ -6,8 +6,8 @@ wd_rust_crate(
     cxx_bridge_src = "lib.rs",
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:ruff_python_ast",
-        "@crates_vendor//:ruff_python_parser",
+        "@crates_vendor//ruff_python_ast",
+        "@crates_vendor//ruff_python_parser",
     ],
 )
 

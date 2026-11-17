@@ -261,9 +261,9 @@ impl NumberBox {
     }
 
     #[jsg_method]
-    fn take_lenient(&self, _lock: &mut jsg::Lock, num: jsg::Lenient<jsg::Rc<NumberBox>>) -> f64 {
+    fn take_lenient(&self, lock: &mut jsg::Lock, num: jsg::Lenient<jsg::Rc<NumberBox>>) -> f64 {
         match num {
-            jsg::Lenient::Some(b) => b.value,
+            jsg::Lenient::Some(b) => b.get(lock).value,
             jsg::Lenient::Unconvertable(_) => 321.0,
             jsg::Lenient::Null => 42.97,
             jsg::Lenient::Undefined => -12.6,

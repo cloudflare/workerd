@@ -1961,6 +1961,10 @@ class StreamWorkerInterface final: public WorkerInterface {
     KJ_UNIMPLEMENTED("runAlarm() not supported on StreamWorkerInterface");
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_UNIMPLEMENTED("abandonAlarm() not supported on StreamWorkerInterface");
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     return event->notSupported();
   }

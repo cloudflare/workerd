@@ -26,5 +26,9 @@ export default {
       'Hangs: workerd takes the setTimeout delay as a double instead of converting it to a WebIDL long, so a delay of 2 ** 32 waits about 49 days instead of wrapping to 0. done() is never called, so the single test never completes.',
     disabledTests: true,
   },
-  'zero-settimeout.any.js': {},
+  'zero-settimeout.any.js': {
+    comment:
+      'Assumes setTimeout(f, 1) and the later setTimeout(g, 0) are called less than 1ms apart. workerd measures each delay from the precise wall clock at the call, so on a slow build the 1ms deadline can come first and fire first, which the HTML spec permits: it orders only an earlier timer whose delay is no greater than the later one. workerd does not clamp a 0ms delay to 1ms (see IoContext::setTimeoutImpl()).',
+    omittedTests: ['A 0ms timeout should not be clamped to 1ms'],
+  },
 } satisfies TestRunnerConfig;

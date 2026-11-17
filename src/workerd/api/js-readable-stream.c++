@@ -1657,8 +1657,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   // buffered tee or decompressed data), settling the pull without an event-loop round
   // trip. Skipped when the read has already been abandoned: the asynchronous path stashes
   // the bytes for redelivery in that case, and there is no reason to hurry it.
-  if (!signal->getAborted(js) &&
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+  if (!signal->getAborted(js)) {
     kj::Maybe<size_t> maybeSyncAmount;
     KJ_TRY {
       maybeSyncAmount = active.source->tryReadSync(scratch.asPtr(), 1);
@@ -1805,8 +1804,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   // already been abandoned (matching pullDefault's fast path). Unlike the asynchronous
   // read, no JS runs between the view extraction above and the delivery below, so the
   // view cannot have been detached in between.
-  if (!signal->getAborted(js) &&
-      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+  if (!signal->getAborted(js)) {
     kj::Maybe<size_t> maybeSyncAmount;
     KJ_TRY {
       maybeSyncAmount = active.source->tryReadSync(scratch.first(maxBytes), minBytes);

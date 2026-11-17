@@ -98,6 +98,57 @@ main:empty
     );
 }
 
+#[test]
+fn text_labels_startup_groups_and_leaves_out_those_the_filter_emptied() {
+    let mut message = TypedBuilder::<bench_report::Owned>::new_default();
+    let mut report = message.init_root();
+    let mut environment = report.reborrow().init_environment();
+    environment.set_build_mode("release");
+    environment.set_v8_version("14.0.0");
+
+    let mut groups = report.init_groups(3);
+    let mut group = groups.reborrow().get(0);
+    group.set_name("main");
+    group.set_startup(true);
+    let mut case = group.init_cases(1).get(0);
+    case.set_name("startup:total");
+    case.set_iterations_per_sample(1);
+    let mut wall = case.reborrow().init_wall_ns();
+    wall.reborrow().init_samples(50);
+    wall.set_median(4.5e6);
+    wall.set_median_low(4.4e6);
+    wall.set_median_high(4.6e6);
+    wall.set_mean(4.5e6);
+    case.reborrow().init_cpu_ns().set_median(4.2e6);
+    case.init_flags(1).set(0, Flag::HighVariance);
+
+    // A startup group whose phases the case filter all excluded.
+    let mut group = groups.reborrow().get(1);
+    group.set_name("other");
+    group.set_startup(true);
+
+    let mut group = groups.get(2);
+    group.set_name("broken");
+    group.set_startup(true);
+    group.set_error("the worker failed to start");
+
+    let text = format_text(message.get_root_as_reader().unwrap()).unwrap();
+    assert_eq!(
+        text,
+        "Results compare runs on this machine and build; they don't predict production latency.
+release build, V8 14.0.0
+
+main (startup)
+  case           median   95% CI             mean     cpu median  samples
+  startup:total  4.50 ms  4.40 ms - 4.60 ms  4.50 ms  4.20 ms     50 x 1   \
+(high variance: check that the machine is quiet)
+
+broken (startup)
+  FAILED: the worker failed to start
+"
+    );
+}
+
 fn options_with_compat_date(compat_date: Option<&str>) -> Options {
     Options {
         no_verbose: false,
@@ -108,7 +159,16 @@ fn options_with_compat_date(compat_date: Option<&str>) -> Options {
         json: false,
         output: None,
         trace: false,
+        no_startup: false,
     }
+}
+
+#[test]
+fn no_startup_reaches_the_params() {
+    let mut options = options_with_compat_date(None);
+    assert!(!skips_startup(&options.params()).unwrap());
+    options.no_startup = true;
+    assert!(skips_startup(&options.params()).unwrap());
 }
 
 fn is_date(date: &str) -> bool {
@@ -202,7 +262,8 @@ fn json_is_capnp_json_with_null_pointers_left_out() {
           "error": "Error: boom\n",
           "iterationsPerSample": "18446744073709551615"
         }
-      ]
+      ],
+      "startup": false
     }
   ]
 }

@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same module runs with and without `rpc_dispose_cancels_call`. Each service binds `SELF` to
+# its own `Callee` entrypoint, so the callee's handlers share the tests' isolate and module
+# globals, and the tests can see whether a handler ran to completion.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "service-binding-dispose-cancels",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = [
+          "nodejs_compat", "service_binding_extra_handlers", "rpc_dispose_cancels_call",
+        ],
+        bindings = [
+          (name = "SELF",
+           service = (name = "service-binding-dispose-cancels", entrypoint = "Callee")),
+        ],
+      )
+    ),
+    ( name = "service-binding-dispose-legacy",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        bindings = [
+          (name = "SELF",
+           service = (name = "service-binding-dispose-legacy", entrypoint = "Callee")),
+        ],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "service-binding-dispose-cancels-test.js")
+];

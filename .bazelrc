@@ -12,10 +12,6 @@ build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.
 build:regenerate-snapshots --test_size_filters=small,medium,large,enormous
 build:regenerate-snapshots --//build/config:python_snapshots=false
-# Don't run tests that set up TCP sockets in parallel since they may try to use the same ports. This
-# is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
-# at the same time.
-test --local_resources=socket=1
 # Tests that start a wptserve sidecar (wpt_test with start_server = True) are tagged
 # "resources:wptserve:1", so that at most one wptserve runs at a time.
 test --local_resources=wptserve=1
@@ -234,6 +230,12 @@ build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
+# Enable Rust pipelining so dependent crates can start building without needing to fully compile a
+# crate resulting in a shorter critical path. This should be a bit faster and reliable once
+# https://github.com/bazelbuild/rules_rust/issues/3977 is implemented. Appears to be unstable on
+# Windows, perhaps due to missing sandbox support.
+build:unix --@rules_rust//rust/settings:pipelined_compilation=True
+
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
@@ -247,7 +249,7 @@ build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # common sanitizers options
-build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
+build:sanitizer-common --//src/workerd/server:use_tcmalloc=False
 build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
 build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
@@ -257,6 +259,12 @@ build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-f
 build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 # Rust and C++ share Clang's sanitizer runtime, linked by the C++ driver.
 build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+# Optimize Rust like the C++ above. --copt does not reach rustc, which otherwise compiles at
+# opt-level 0: every local lives in memory, so the sanitizer checks every access to it, and under
+# TSan every call, however trivial, also calls into the runtime on entry and exit. rustc enables
+# debug assertions and overflow checks by default only at opt-level 0, so keep them on.
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Copt-level=1
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=on
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 #
@@ -276,6 +284,9 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# Keep kj's stack traces on backtrace(). Under ASan kj defaults to _Unwind_Backtrace(), which with
+# our statically linked LLVM libunwind is much slower; exception-heavy tests time out.
+build:asan --per_file_copt='external/.*capnp-cpp/src/kj/exception\.c\+\+@-DKJ_BACKTRACE_WITH_UNWINDER=0'
 # One toolchain per host, plus its cargo toolchain; resolution picks the one matching the
 # (host-parented) asan platform.
 build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64
@@ -306,9 +317,10 @@ build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
 build:tsan-common --test_timeout=30,150,600,2400
-# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
-# not currently derive these defines from the compiler's sanitizer flags.
-build:tsan-common --copt="-DV8_IS_TSAN"
+# Enable V8's TSan synchronization annotations. V8's Bazel build does not currently derive this
+# define from the compiler's sanitizer flags. V8_IS_TSAN, which would also make V8's generated code
+# call into TSan on every load and store, is left off: that costs V8-heavy tests about 20x the time
+# they take under ASan, to check races with V8's background compilers and marker.
 build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
 # Perfetto also requires this define to enable its shared-memory scraping annotations.
 build:tsan-common --per_file_copt='external/.*perfetto@-DTHREAD_SANITIZER'
@@ -637,6 +649,8 @@ common:bazelflare --cpu=k8 --host_cpu=k8
 common:bazelflare --platforms=//build/bazelflare:linux_x86_64
 common:bazelflare --host_platform=//build/bazelflare:linux_x86_64
 common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
+# Assign full runner for linking select binaries to avoid slowdown due to size/linker optimizations
+build:bazelflare --//build/config:link_executor=bazelflare
 # Host tools are Linux binaries, so actions don't fall back to the client, where most of them
 # couldn't run. One that could, such as a shell script's, can be allowed to run on the client with
 # --strategy=<Mnemonic>=remote,sandboxed.
@@ -680,6 +694,12 @@ coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no
 # a second spawn per test, with the same inputs, and needs every coverage output fetched.
 build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
 build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
+# Generated headers and Rust sources that editors read from bazel-bin, which
+# --remote_download_minimal otherwise leaves remote. The aspect (build/generated_srcs.bzl) generates
+# those of the built C++ and Rust targets and their dependencies, and the regex downloads them.
+build:bazelflare-generated --aspects=//:build/generated_srcs.bzl%generated_srcs_aspect
+build:bazelflare-generated --output_groups=+generated_srcs
+common:bazelflare-generated --remote_download_regex=bazel-out/(?![^/]*-exec)[^/]+/bin/(?!node_modules/).*[.](h|hh|hpp|hxx|h[+][+]|inc|rs)
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc

@@ -894,14 +894,14 @@ class AsyncIteratorBase: public Object {
 
   void pushCurrent(Lock& js, Promise<void> promise) {
     auto& inner = state.template get<InnerState>();
-    auto result = promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
+    auto result = promise.whenResolved(js).then(js, [self = JSG_THIS](Lock& js) mutable {
       // If state is Finished, then there's nothing we need to do here.
-      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+      KJ_IF_SOME(inner, self->state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
       }
       return js.resolvedPromise();
-    }, [this, self = JSG_THIS](Lock& js, Value value) {
-      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+    }, [self = JSG_THIS](Lock& js, Value value) mutable {
+      KJ_IF_SOME(inner, self->state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
       }
       return js.rejectedPromise<void>(kj::mv(value));
@@ -925,20 +925,20 @@ class AsyncIteratorBase: public Object {
           return js.resolvedPromise(Next{.done = true});
         }
 
-        auto callNext = [this, self = JSG_THIS, nextFunc = kj::mv(nextFunc)](Lock& js) mutable {
-          KJ_SWITCH_ONEOF(state) {
+        auto callNext = [self = JSG_THIS, nextFunc = kj::mv(nextFunc)](Lock& js) mutable {
+          KJ_SWITCH_ONEOF(self->state) {
             KJ_CASE_ONEOF(finished, Finished) {
               return js.resolvedPromise(Next{.done = true});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               auto promise = nextFunc(js, inner.state);
-              pushCurrent(js, promise.whenResolved(js));
+              self->pushCurrent(js, promise.whenResolved(js));
               return promise.then(
-                  js, [this, self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
+                  js, [self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
                 KJ_IF_SOME(result, maybeResult) {
                   return js.resolvedPromise(Next{.done = false, .value = kj::mv(result)});
                 } else {
-                  state.template init<Finished>();
+                  self->state.template init<Finished>();
                   return js.resolvedPromise(Next{.done = true});
                 }
               });
@@ -977,16 +977,16 @@ class AsyncIteratorBase: public Object {
 
         inner.impl.returning = true;
 
-        auto callReturn = [this, self = JSG_THIS, value = kj::mv(value),
-                              returnFunc = kj::mv(returnFunc)](Lock& js) mutable {
-          KJ_SWITCH_ONEOF(state) {
+        auto callReturn = [self = JSG_THIS, value = kj::mv(value), returnFunc = kj::mv(returnFunc)](
+                              Lock& js) mutable {
+          KJ_SWITCH_ONEOF(self->state) {
             KJ_CASE_ONEOF(finished, Finished) {
               return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               return returnFunc(js, inner.state, value)
-                  .then(js, [this, self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
-                state.template init<Finished>();
+                  .then(js, [self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
+                self->state.template init<Finished>();
                 return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
               });
             }

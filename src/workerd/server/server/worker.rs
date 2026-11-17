@@ -117,6 +117,11 @@ pub struct WorkerService {
     /// The service's name in the config; none for a dynamic worker, which no token can name.
     service_name: Option<String>,
     worker: KjOwn<ffi::CompiledWorker>,
+    /// Under `workerd bench`, a config worker's index in the config's services and the spec it
+    /// was compiled from, from which throwaway copies are compiled to time startup. None
+    /// otherwise, since nothing else reads it and its bindings can be large, and for a dynamic
+    /// worker.
+    config_spec: Option<(u32, ffi::WorkerSpec)>,
     /// The default export's handlers, if the worker has a default export.
     default_handlers: Option<HashSet<String>>,
     /// Named exports with their handlers, in export order (loopback channels follow it).
@@ -226,11 +231,13 @@ impl WorkerService {
         ffi::worker_set_ctx_exports(&compiled, &loopback.globals)?;
 
         let pending = pending_link(name, conf, bindings, loopback, report).map_err(capnp_error)?;
+        let config_spec = ffi::is_bench_mode().then_some((service_index, spec));
 
         let this = Rc::new(Self {
             factory,
             service_name: Some(name.to_owned()),
             worker: compiled,
+            config_spec,
             default_handlers,
             named_entrypoints,
             actor_classes: info.actor_classes,
@@ -326,6 +333,7 @@ impl WorkerService {
             factory,
             service_name: None,
             worker: compiled,
+            config_spec: None,
             default_handlers,
             named_entrypoints,
             actor_classes: info.actor_classes,
@@ -588,6 +596,19 @@ impl WorkerService {
     /// The named entrypoints, in export order.
     pub fn entrypoint_names(&self) -> impl Iterator<Item = &str> {
         self.named_entrypoints.keys().map(String::as_str)
+    }
+
+    /// Times starting this worker in new isolates, for `workerd bench`, as
+    /// `ffi::factory_bench_startup` does: `params` is an encoded `BenchParams` message, and the
+    /// result an encoded startup `BenchReport.Group`. Only for a config worker under
+    /// `workerd bench`, which keeps the spec to start copies from.
+    pub async fn bench_startup(&self, params: &[u64]) -> Result<Vec<u64>> {
+        let Some((service_index, spec)) = &self.config_spec else {
+            return Err(kj::failed!(
+                "startup is timed only for config workers under `workerd bench`"
+            ));
+        };
+        Ok(ffi::factory_bench_startup(self.factory.raw(), spec, *service_index, params).await?)
     }
 
     /// The namespace of `class_name`, if the config gives the class storage.

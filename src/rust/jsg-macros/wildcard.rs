@@ -206,7 +206,7 @@ impl Signature {
             // V8 calls an interceptor only on objects made from the resource's instance
             // template, so this is the resource's own wrapper; a mismatch is still a
             // TypeError rather than a panic.
-            let resource = jsg::v8::WrappableRc::resolve_receiver::<Self>(lock, this);
+            let resource = jsg::v8::resolve_receiver::<Self>(lock, this);
             let Some(resource) = resource else {
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
                 return jsg::Intercepted::Yes;
@@ -221,8 +221,9 @@ impl Signature {
                 }
             };
             // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
-            // during the call. Resources are only ever borrowed shared.
-            let self_: &Self = unsafe { resource.as_ref() };
+            // during the call, and the borrow lasts no longer than that of the local `this`.
+            // Resources are only ever borrowed shared.
+            let self_: &Self = unsafe { jsg::v8::borrow_receiver(resource, &this) };
             let result = self_.#fn_name(#lock_arg #name_arg);
             let result: Result<_, jsg::Error> = #to_result;
         }

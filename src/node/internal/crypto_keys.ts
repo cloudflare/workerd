@@ -62,7 +62,7 @@ import {
   ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS,
   ERR_INCOMPATIBLE_OPTION_PAIR,
   ERR_INVALID_ARG_TYPE,
-  ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_INVALID_ARG_VALUE,
   ERR_MISSING_OPTION,
 } from 'node-internal:internal_errors';
 
@@ -262,11 +262,85 @@ export abstract class KeyObject {
     return cryptoImpl.equals(this[kHandle], otherKeyObject[kHandle]);
   }
 
+  toCryptoKey(
+    algorithm: unknown,
+    extractable: unknown,
+    keyUsages: unknown
+  ): CryptoKey {
+    // Argument conversion follows the Web IDL types Node.js uses: AlgorithmIdentifier,
+    // boolean and sequence<KeyUsage>. Everything else is validated by the Web Crypto
+    // import.
+    return cryptoImpl.toCryptoKey(
+      this[kHandle],
+      toAlgorithmIdentifier(algorithm),
+      Boolean(extractable),
+      toKeyUsages(keyUsages)
+    );
+  }
+
   abstract get type(): KeyObjectType;
 
   get [Symbol.toStringTag](): string {
     return 'KeyObject';
   }
+}
+
+const kKeyUsages: ReadonlySet<string> = new Set([
+  'encrypt',
+  'decrypt',
+  'sign',
+  'verify',
+  'deriveKey',
+  'deriveBits',
+  'wrapKey',
+  'unwrapKey',
+  'encapsulateBits',
+  'decapsulateBits',
+  'encapsulateKey',
+  'decapsulateKey',
+]);
+
+function toDOMString(value: unknown, name: string): string {
+  if (typeof value === 'symbol') {
+    throw new ERR_INVALID_ARG_TYPE(name, 'string', value);
+  }
+  return String(value);
+}
+
+function toAlgorithmIdentifier(
+  algorithm: unknown
+): string | Record<string, unknown> {
+  if (
+    algorithm !== null &&
+    (typeof algorithm === 'object' || typeof algorithm === 'function')
+  ) {
+    return algorithm as Record<string, unknown>;
+  }
+  return toDOMString(algorithm, 'algorithm');
+}
+
+function toKeyUsages(keyUsages: unknown): string[] {
+  if (
+    keyUsages === null ||
+    (typeof keyUsages !== 'object' && typeof keyUsages !== 'function') ||
+    typeof (keyUsages as Partial<Iterable<unknown>>)[Symbol.iterator] !==
+      'function'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE('keyUsages', 'Iterable', keyUsages);
+  }
+  const usages: string[] = [];
+  for (const usage of keyUsages as Iterable<unknown>) {
+    const name = toDOMString(usage, 'keyUsages');
+    if (!kKeyUsages.has(name)) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'keyUsages',
+        name,
+        'is not a valid enum value of type KeyUsage'
+      );
+    }
+    usages.push(name);
+  }
+  return usages;
 }
 
 export function isKeyObject(obj: unknown): obj is KeyObject {
@@ -290,11 +364,6 @@ abstract class AsymmetricKeyObject extends KeyObject {
 
   get asymmetricKeyType(): AsymmetricKeyType {
     return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
-  }
-
-  toCryptoKey(): void {
-    // TODO(soon): Implement the toCryptoKey API (added in Node.js 23.0.0)
-    throw new ERR_METHOD_NOT_IMPLEMENTED('toCryptoKey');
   }
 
   [kInspect](

@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 use quote::quote;
 use syn::FnArg;
 use syn::ItemImpl;
@@ -23,13 +24,13 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
-use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
+use crate::utils::typescript_options;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -44,13 +45,18 @@ pub enum PropertyKind {
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
-    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+    if let Some(err) = validate_struct_args(attr.clone().into()) {
         return err.to_compile_error().into();
     }
 
-    // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
+    // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let ts_root = has_flag(&attr, "ts_root");
+    let typescript = typescript_options(attr.clone());
+    let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
+        Ok(generated) => generated,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let input = &input;
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -69,36 +75,15 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
     let trace_statements = generate_trace_statements(&fields);
     let name_str = name.to_string();
 
-    let traced_impl = if custom_trace {
-        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
-        quote! {}
-    } else {
-        quote! {
-            #[automatically_derived]
-            impl jsg::Traced for #name {
-                fn trace(&self, visitor: &mut jsg::GcVisitor) {
-                    // Suppress unused warning when there are no traceable fields.
-                    let _ = visitor;
-                    #(#trace_statements)*
-                }
-            }
-        }
-    };
+    let traced_impl = generate_traced_impl(&name, &trace_statements, custom_trace);
 
-    let gc_impl = quote! {
-        #[automatically_derived]
-        impl jsg::GarbageCollected for #name {
-            fn memory_name(&self) -> &'static ::std::ffi::CStr {
-                // from_bytes_with_nul on a concat!(name, "\0") literal is a
-                // compile-time constant expression — the compiler folds the
-                // unwrap and emits a direct pointer into the read-only data
-                // segment. The C++ side constructs a kj::StringPtr directly
-                // from data()+size() with no allocation.
-                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
-                    .unwrap()
-            }
-        }
-    };
+    let gc_impl = generate_gc_impl(
+        &name,
+        &name_str,
+        &memory_info.gc_fn,
+        &drop_detach_types(custom_trace, &fields),
+    );
+    let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
         #input
@@ -118,7 +103,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+                cx.structure::<Self>(
+                    #class_name,
+                    #typescript,
+                    jsg::rtti::resource_members::<Self>,
+                )
             }
         }
 
@@ -138,6 +127,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
             type ResultType = jsg::Rc<Self>;
 
             const UNION_MEMBER: jsg::UnionMember = jsg::UnionMember::Resource;
+            const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
 
             fn type_name() -> String {
                 <Self as jsg::Type>::class_name().to_owned()
@@ -160,6 +150,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #visit_for_memory_info_impl
     }
     .into()
 }
@@ -376,6 +367,34 @@ fn collect_callable_registrations(
     })
 }
 
+/// Scans `impl_block` for `#[jsg_iterable]` methods, registered as the type's
+/// `[Symbol.iterator]()`, which it has at most one of. The factory is `{name}_iterable_member`,
+/// so that a method can also be a `#[jsg_method]`. As in C++ RTTI, the description names the
+/// method after the Rust method.
+fn collect_iterable_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let factory_name = |rust_name: &syn::Ident| {
+        syn::Ident::new(&format!("{rust_name}_iterable_member"), rust_name.span())
+    };
+    collect_at_most_one(impl_block, mode, "jsg_iterable", factory_name, |method| {
+        let callback = crate::iterable_callback_name(&method.sig.ident);
+        let member = quote! { jsg::Member::Iterable { callback: Self::#callback() } };
+        let name = snake_to_camel(&method.sig.ident.to_string());
+        let args = describe_args(method, Callable::Method);
+        let result = describe_result(method);
+        let description = quote! {
+            jsg::rtti::Member::Iterator {
+                name: #name,
+                args: vec![#(#args),*],
+                result: #result,
+            }
+        };
+        (member, Some(description))
+    })
+}
+
 /// Registers each method of `impl_block` annotated with `#[attr]`, a member a resource type has
 /// at most one of, in a factory named by `factory_name`; `registration` gives the member and its
 /// RTTI description. With automatic registration a second such method is a compile error,
@@ -442,7 +461,7 @@ pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
 /// registrations and the compile errors of those that are invalid.
 ///
 /// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
-/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// property: its callback expects the type's `v8::Signature`, which those are registered without. A
 /// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
 /// registration a second one of a kind is an error too; custom registration may choose between
 /// several by compatibility flag, and registering two of a kind at once panics when the template
@@ -565,22 +584,189 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
-/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
-/// `nested_types(...)`, which belongs on the impl block.
-fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+/// The `jsg::Traced` impl of a resource named `name` that visits its fields with
+/// `trace_statements`, or nothing for a `custom_trace` resource.
+fn generate_traced_impl(
+    name: &syn::Ident,
+    trace_statements: &[proc_macro2::TokenStream],
+    custom_trace: bool,
+) -> proc_macro2::TokenStream {
+    if custom_trace {
+        // `custom_trace` suppresses the generated `Traced` impl — the user will write their own.
+        quote! {}
+    } else {
+        let drop_probe = drop_probe_items();
+        quote! {
+            #[automatically_derived]
+            impl jsg::Traced for #name {
+                fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                    // Suppress unused warning when there are no traceable fields.
+                    let _ = visitor;
+                    #(#trace_statements)*
+                }
+
+                // For a resource held inline in another. Its fields aren't asked, which a
+                // recursive type would make loop forever.
+                fn needs_drop_detach() -> bool {
+                    #drop_probe
+                    __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
+                }
+            }
+        }
+    }
+}
+
+/// The items of the probes that `__JsgDropProbe::<T>(PhantomData)` answers: `has_drop_impl`,
+/// whether `T` implements `Drop` itself, and `needs_drop_detach`, `T`'s
+/// `Traced::needs_drop_detach`, or `false` for a type that isn't `Traced`, so that such a field
+/// reports its error once, from the `Traced` impl.
+fn drop_probe_items() -> proc_macro2::TokenStream {
+    quote! {
+        // A method of an inherent impl whose bound holds is picked over a trait's. The items are
+        // named so that they don't shadow a field's type.
+        struct __JsgDropProbe<T>(::std::marker::PhantomData<T>);
+        trait __JsgDropProbeFallback {
+            fn has_drop_impl(&self) -> bool {
+                false
+            }
+            fn needs_drop_detach(&self) -> bool {
+                false
+            }
+        }
+        impl<T> __JsgDropProbeFallback for __JsgDropProbe<T> {}
+        #[allow(drop_bounds, reason = "detects an explicit `Drop` impl")]
+        impl<T: ::std::ops::Drop> __JsgDropProbe<T> {
+            fn has_drop_impl(&self) -> bool {
+                true
+            }
+        }
+        #[allow(dead_code, reason = "not every caller asks a field")]
+        impl<T: jsg::Traced> __JsgDropProbe<T> {
+            fn needs_drop_detach(&self) -> bool {
+                T::needs_drop_detach()
+            }
+        }
+    }
+}
+
+/// The types whose `Traced::needs_drop_detach` makes a resource with `fields` detach its
+/// references before it is dropped. A `custom_trace` resource's own `Traced` impl answers for
+/// its fields, which need not be `Traced`.
+fn drop_detach_types(
+    custom_trace: bool,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<proc_macro2::TokenStream> {
+    if custom_trace {
+        vec![quote! { Self }]
+    } else {
+        fields
+            .iter()
+            .map(|field| field.ty.to_token_stream())
+            .collect()
+    }
+}
+
+/// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
+/// `memory_info` method or nothing, and `drop_detach_types`, the types whose
+/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped.
+fn generate_gc_impl(
+    name: &syn::Ident,
+    name_str: &str,
+    memory_info_fn: &proc_macro2::TokenStream,
+    drop_detach_types: &[proc_macro2::TokenStream],
+) -> proc_macro2::TokenStream {
+    let drop_probe = drop_probe_items();
+    quote! {
+        #[automatically_derived]
+        impl jsg::GarbageCollected for #name {
+            fn memory_name(&self) -> &'static ::std::ffi::CStr {
+                // from_bytes_with_nul on a concat!(name, "\0") literal is a
+                // compile-time constant expression — the compiler folds the
+                // unwrap and emits a direct pointer into the read-only data
+                // segment. The C++ side constructs a kj::StringPtr directly
+                // from data()+size() with no allocation.
+                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
+                    .unwrap()
+            }
+
+            #memory_info_fn
+
+            fn detach_before_drop(&self) -> bool {
+                #drop_probe
+                __JsgDropProbe::<Self>(::std::marker::PhantomData).has_drop_impl()
+                    #(|| __JsgDropProbe::<#drop_detach_types>(::std::marker::PhantomData)
+                        .needs_drop_detach())*
+            }
+        }
+    }
+}
+
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
+/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
+/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
+/// the impl block.
+fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
+    const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
+                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `ts_define = \"...\"` on a #[jsg_resource] struct";
+
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
-        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
-    metas
-        .iter()
-        .find(|meta| meta.path().is_ident("nested_types"))
-        .map(|meta| {
-            syn::Error::new_spanned(
-                meta.path(),
-                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
-            )
-        })
+        match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
+            Ok(metas) => metas,
+            Err(err) => return Some(err),
+        };
+    metas.iter().enumerate().find_map(|(i, meta)| {
+        let path = meta.path();
+        if metas.iter().take(i).any(|earlier| earlier.path() == path) {
+            return Some(syn::Error::new_spanned(
+                path,
+                "a #[jsg_resource] struct flag can be given once",
+            ));
+        }
+        if path.is_ident("nested_types") || path.is_ident("custom_members") {
+            let flag = if path.is_ident("nested_types") {
+                "nested_types(...)"
+            } else {
+                "custom_members"
+            };
+            return Some(syn::Error::new_spanned(
+                path,
+                format!("`{flag}` belongs on the #[jsg_resource] impl block, not the struct"),
+            ));
+        }
+        match meta {
+            syn::Meta::Path(path)
+                if [
+                    "custom_trace",
+                    "memory_info",
+                    "custom_memory_info",
+                    "ts_root",
+                ]
+                .iter()
+                .any(|flag| path.is_ident(flag)) =>
+            {
+                None
+            }
+            syn::Meta::NameValue(syn::MetaNameValue {
+                path,
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(_),
+                        ..
+                    }),
+                ..
+            }) if path.is_ident("name") => None,
+            // `typescript_options` reports a value that is not a string literal.
+            syn::Meta::NameValue(syn::MetaNameValue { path, .. })
+                if path.is_ident("ts_override") || path.is_ident("ts_define") =>
+            {
+                None
+            }
+            _ => Some(syn::Error::new_spanned(meta, EXPECTED)),
+        }
+    })
 }
 
 /// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
@@ -674,6 +860,8 @@ enum RegistrationMode {
 struct ImplArgs {
     mode: RegistrationMode,
     nested_types: Vec<NestedTypeArg>,
+    /// The `jsg::Intrinsic` variant of `inherit_intrinsic = ...`.
+    inherit_intrinsic: Option<syn::Ident>,
 }
 
 /// Parses the arguments of `#[jsg_resource]` on an impl block: `custom_members` and any
@@ -689,16 +877,31 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::parse::Parser as _;
     use syn::punctuated::Punctuated;
 
-    const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
-                            the struct)";
+    const EXPECTED: &str = "expected `custom_members`, `nested_types(...)` or \
+                            `inherit_intrinsic = ...` on a #[jsg_resource] impl block (`name`, \
+                            `custom_trace`, `memory_info`, `custom_memory_info`, `ts_root`, \
+                            `ts_override` and `ts_define` belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;
     let mut nested_types = Vec::<NestedTypeArg>::new();
     let mut first_nested_types = None;
+    let mut inherit_intrinsic = None;
     for arg in args {
         match &arg {
+            syn::Meta::NameValue(name_value) if name_value.path.is_ident("inherit_intrinsic") => {
+                if inherit_intrinsic.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        &name_value.path,
+                        "duplicate `inherit_intrinsic`; a resource type inherits from at most \
+                         one intrinsic",
+                    ));
+                }
+                inherit_intrinsic = Some((
+                    name_value.path.clone(),
+                    inherit_intrinsic_variant(&name_value.value)?,
+                ));
+            }
             syn::Meta::Path(path) if path.is_ident("custom_members") => {
                 if custom_members.is_some() {
                     return Err(syn::Error::new_spanned(arg, "duplicate `custom_members`"));
@@ -741,7 +944,7 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     } else {
         RegistrationMode::Automatic
     };
-    if let (Some(custom_members), Some(nested)) = (custom_members, first_nested_types) {
+    if let (Some(custom_members), Some(nested)) = (&custom_members, first_nested_types) {
         let mut error = syn::Error::new_spanned(
             nested,
             "`nested_types(...)` cannot be combined with `custom_members`; register \
@@ -753,7 +956,39 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
         ));
         return Err(error);
     }
-    Ok(ImplArgs { mode, nested_types })
+    if let (Some(custom_members), Some((inherit, _))) = (&custom_members, &inherit_intrinsic) {
+        let mut error = syn::Error::new_spanned(
+            inherit,
+            "`inherit_intrinsic` cannot be combined with `custom_members`; call \
+             `registry.inherit_intrinsic(jsg::Intrinsic::...)` in `Resource::members` instead",
+        );
+        error.combine(syn::Error::new_spanned(
+            custom_members,
+            "`custom_members` given here",
+        ));
+        return Err(error);
+    }
+    Ok(ImplArgs {
+        mode,
+        nested_types,
+        inherit_intrinsic: inherit_intrinsic.map(|(_, variant)| variant),
+    })
+}
+
+/// The `jsg::Intrinsic` variant that `inherit_intrinsic = <value>` names.
+fn inherit_intrinsic_variant(value: &syn::Expr) -> syn::Result<syn::Ident> {
+    let syn::Expr::Path(path) = value else {
+        return Err(syn::Error::new_spanned(
+            value,
+            "expected a `jsg::Intrinsic` variant, such as `IteratorPrototype`",
+        ));
+    };
+    path.path.get_ident().cloned().ok_or_else(|| {
+        syn::Error::new_spanned(
+            path,
+            "expected a `jsg::Intrinsic` variant without a path, such as `IteratorPrototype`",
+        )
+    })
 }
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on an impl block.
@@ -781,8 +1016,11 @@ fn generate_resource_bindings(
     attr: proc_macro2::TokenStream,
     impl_block: &ItemImpl,
 ) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
-    let ImplArgs { mode, nested_types } =
-        parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
+    let ImplArgs {
+        mode,
+        nested_types,
+        inherit_intrinsic,
+    } = parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
     let self_ty = &impl_block.self_ty;
 
     if !matches!(&**self_ty, syn::Type::Path(_)) {
@@ -805,10 +1043,15 @@ fn generate_resource_bindings(
     registrations.extend(disposers);
     let (callable, callable_error) = collect_callable_registrations(impl_block, mode);
     registrations.extend(callable);
+    let (iterable, iterable_error) = collect_iterable_registrations(impl_block, mode);
+    registrations.extend(iterable);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
     let nested_type_registrations = nested_types.iter().map(nested_type_registration);
+    let inherit_intrinsic_registration = inherit_intrinsic.map(|variant| {
+        quote! { registry.inherit_intrinsic(jsg::Intrinsic::#variant); }
+    });
 
     let resource_impl = if mode == RegistrationMode::Automatic {
         quote! {
@@ -819,6 +1062,7 @@ fn generate_resource_bindings(
                     _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
                 ) {
                     let _ = &registry;
+                    #inherit_intrinsic_registration
                     #(registry.add(#automatic);)*
                     #(registry.add(#nested_type_registrations);)*
                 }
@@ -832,6 +1076,7 @@ fn generate_resource_bindings(
         #wildcard_error
         #(#dispose_errors)*
         #callable_error
+        #iterable_error
 
         #[automatically_derived]
         impl #self_ty {
@@ -1094,7 +1339,7 @@ fn generate_constructor_registration(
 
                 #construct
                 let rc = jsg::Rc::new(lock, resource);
-                rc.attach_to_this(args);
+                rc.attach_to_this(lock, args);
             }),
             length: #length,
         }

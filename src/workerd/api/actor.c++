@@ -6,7 +6,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
@@ -279,10 +278,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   ActorRoutingMode routingMode = ActorRoutingMode::DEFAULT;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(r, o.retry) {
-      auto policy = toUserDefinedRetryPolicy(r);
-      if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-        retryPolicy = policy;
-      }
+      retryPolicy = toUserDefinedRetryPolicy(r);
     }
     KJ_IF_SOME(rm, o.routingMode) {
       JSG_REQUIRE(rm == "primary-only", RangeError, "unknown routingMode: ", rm);
@@ -383,23 +379,10 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
         KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
           // Token isn't available synchronously, so we have to send a promise.
-          auto paf = kj::newPromiseAndFulfiller<
-              rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-
-          // Arrange to send the token when it's ready.
-          ioctx.addTask(promise.then(
-              [pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller),
-                  attachedChannel = kj::mv(channel)](kj::Array<byte> token) mutable {
-            auto req = pusher.pushDelayedChannelTokenRequest(
-                capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
-            req.setToken(token);
-            fulfiller->fulfill(req.send().getCap());
-          }));
-
-          // Write the promise for now.
           rpcHandler.write(
-              [promise = kj::mv(paf.promise)](rpc::JsValue::External::Builder builder) mutable {
-            builder.setDelayedActorClassChannelToken(kj::mv(promise));
+              [delayed = rpcHandler.pushDelayedChannelToken(promise.attach(kj::mv(channel)))](
+                  rpc::JsValue::External::Builder builder) mutable {
+            builder.setDelayedActorClassChannelToken(kj::mv(delayed));
           });
         }
       }
@@ -494,6 +477,33 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
   }
 
   JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be deserialized in this context.");
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> ColoLocalActorNamespace::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<ColoLocalActorNamespace>(channel));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectId::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<DurableObjectId>(id->clone()));
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObject::snapshotClone() const {
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectNamespace::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
+        copy.channel, kj::mv(copy.idFactory), actorCallRetriesAllowed, persistent));
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> DurableObjectClass::snapshotClone() const {
+  KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+    return ownAsWrappable(kj::refcounted<DurableObjectClass>(channelNumber));
+  }
+  return kj::none;
 }
 
 }  // namespace workerd::api

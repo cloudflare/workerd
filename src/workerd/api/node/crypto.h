@@ -202,6 +202,9 @@ class CryptoImpl final: public jsg::Object {
   CryptoImpl() = default;
   CryptoImpl(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options);
 
@@ -214,6 +217,17 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+
+  // Implements KeyObject.prototype.toCryptoKey(): imports the key material held by `key` into a
+  // new Web Crypto key through SubtleCrypto::importKeySync(), so algorithm, usage and key data
+  // validation are the same as crypto.subtle.importKey(). On top of that, it rejects Ed25519 and
+  // X25519 key material imported under the other algorithm, which the Web Crypto importers accept.
+  jsg::Ref<CryptoKey> toCryptoKey(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      kj::OneOf<kj::String, SubtleCrypto::ImportKeyAlgorithm> algorithm,
+      bool extractable,
+      kj::Array<kj::String> keyUsages);
+
   static kj::Maybe<ncrypto::EVPKeyPointer> tryGetKey(jsg::Ref<CryptoKey>& key);
   static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
 
@@ -568,6 +582,7 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(createSecretKey);
     JSG_METHOD(createPrivateKey);
     JSG_METHOD(createPublicKey);
+    JSG_METHOD(toCryptoKey);
     // Spkac
     JSG_METHOD(verifySpkac);
     JSG_METHOD(exportPublicKey);

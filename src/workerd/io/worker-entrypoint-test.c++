@@ -7,7 +7,6 @@
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/exception.h>
 
 #include <kj/async-io.h>
@@ -655,30 +654,18 @@ constexpr kj::StringPtr RETRYABLE_FETCH_ACTOR_SOURCE = R"SCRIPT(
   export default Actor;
 )SCRIPT"_kj;
 
-IsRetryableHandler claimRetryableForMarkedFetch(kj::ArrayPtr<const kj::StringPtr> autogates) {
+KJ_TEST("a retryable() fetch claims as retryable") {
   auto observer = kj::refcounted<RetryClaimObserver>();
   auto params = recordingActorParams(*observer);
   params.mainModuleSource = RETRYABLE_FETCH_ACTOR_SOURCE;
   TestFixture fixture(kj::mv(params));
-  // Set after the fixture, which initializes autogates, and ignore the @all-autogates variant so the
-  // disabled case stays disabled.
-  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
   TestResponse response;
 
   KJ_EXPECT(sendFetch(fixture, response) == kj::none);
 
   KJ_EXPECT(response.statusCode == 200);
   KJ_EXPECT(observer->claimCount == 1);
-  return observer->retryableAtClaim;
-}
-
-KJ_TEST("a retryable() fetch claims as retryable when the userland gate is enabled") {
-  auto gates = kj::arr("durable-object-retries-userland"_kj);
-  KJ_EXPECT(claimRetryableForMarkedFetch(gates) == IsRetryableHandler::YES);
-}
-
-KJ_TEST("a retryable() fetch claims as not retryable when the userland gate is disabled") {
-  KJ_EXPECT(claimRetryableForMarkedFetch(nullptr) == IsRetryableHandler::NO);
+  KJ_EXPECT(observer->retryableAtClaim == IsRetryableHandler::YES);
 }
 
 KJ_TEST("a rejected actor fetch claim runs the constructor but not the handler") {
@@ -947,7 +934,6 @@ KJ_TEST("alarm scheduling tags failures after delivery") {
 KJ_TEST("an alarm that fails to schedule drains its request") {
   RejectingTimerChannel timer;
   TestFixture fixture(TestFixture::SetupParams{
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .actorId = Worker::Actor::Id(kj::str("alarm-drain-test")),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
@@ -979,8 +965,7 @@ KJ_TEST("an alarm that fails to schedule drains its request") {
 }
 
 KJ_TEST("an alarm canceled while it waits for its scheduled time drains its request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("alarm-cancel-drain-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("alarm-cancel-drain-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto& actor = fixture.getActor();
   auto context = fixture.newIoContext();
@@ -1153,7 +1138,6 @@ KJ_TEST("a promise settled from another context while an actor idles with a hibe
   auto loopback = kj::refcounted<FixtureLoopback>();
   TestFixture fixture(TestFixture::SetupParams{
     .featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .mainModuleSource = PROMISE_WEB_SOCKET_SOURCE,
     .actorId = Worker::Actor::Id(kj::str("idle-web-socket-promise-test")),
     .actorClassName = "default"_kj,

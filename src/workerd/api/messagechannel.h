@@ -193,6 +193,9 @@ class MessageChannelModule final: public jsg::Object {
   jsg::JsValue getMessageChannel(jsg::Lock& js);
   jsg::JsValue getMessagePort(jsg::Lock& js);
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   JSG_RESOURCE_TYPE(MessageChannelModule) {
     if (useTypeScriptMessageChannel()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(MessageChannel, getMessageChannel);

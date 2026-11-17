@@ -19,6 +19,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use cluster_logic::lease::Timing;
+
 use crate::Cluster;
 use crate::Layout;
 use crate::Route;
@@ -327,7 +329,10 @@ impl Sim {
             options: Vec::new(),
             address: format!("{node}:1"),
             node,
-            ttl_ms: LEASE,
+            timing: Timing {
+                lease_ms: LEASE,
+                ..Timing::DEFAULT
+            },
             key: Vec::new(),
         };
         self.clusters

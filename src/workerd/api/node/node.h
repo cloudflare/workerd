@@ -2,7 +2,6 @@
 
 #include "crypto.h"
 #include "diagnostics-channel.h"
-#include "module-source.h"
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
@@ -71,28 +70,21 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
+// The RTTI registry (api/rtti.c++) only has the one-argument addBuiltinModule(), and no source
+// storage to map, so it takes the plain form.
 template <class Registry>
 void addNodeJsCompatModule(
-    Registry& registry, jsg::Module::Reader module, const ModuleSource* moduleSource) {
-  if (moduleSource != nullptr) {
-    if constexpr (requires {
-                    registry.addBuiltinModule(module.getName(),
-                        moduleSource->get(module.getSrc().asChars()), module.getType(),
-                        module.getCompileCache().asBytes());
-                  }) {
-      if (module.which() == jsg::Module::SRC) {
-        registry.addBuiltinModule(module.getName(), moduleSource->get(module.getSrc().asChars()),
-            module.getType(), module.getCompileCache().asBytes());
-        return;
-      }
-    }
+    Registry& registry, jsg::Module::Reader module, const jsg::ModuleSource* moduleSource) {
+  if constexpr (requires { registry.addBuiltinModule(module, kj::none, moduleSource); }) {
+    registry.addBuiltinModule(module, kj::none, moduleSource);
+  } else {
+    registry.addBuiltinModule(module);
   }
-  registry.addBuiltinModule(module);
 }
 
 template <class Registry>
 void registerNodeJsCompatModules(
-    Registry& registry, auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    Registry& registry, auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
 #define V(T, N)                                                                                    \
   registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
@@ -232,7 +224,7 @@ void registerNodeJsCompatModules(
 
 template <class TypeWrapper>
 kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
-    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
 #define V(M, N)                                                                                    \
@@ -244,14 +236,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   }
 #undef V
 
-  if (moduleSource == nullptr) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
-        builder, NODE_BUNDLE, [](jsg::Module::Reader) { return true; });
-  } else {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE,
-        [](jsg::Module::Reader) { return true; },
-        [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
-  }
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, moduleSource);
 
   // Register Rust-implemented Node.js modules that declare Internal
   // visibility. The adapter registers only the modules whose declared type
@@ -267,7 +252,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
 }
 
 kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
-    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
+    auto featureFlags, const jsg::ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
   if (isNodeJsCompatEnabled(featureFlags)) {
@@ -343,12 +328,8 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
       }
       return true;
     };
-    if (moduleSource == nullptr) {
-      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter));
-    } else {
-      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter),
-          [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
-    }
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builder, NODE_BUNDLE, kj::mv(filter), moduleSource);
   } else if (featureFlags.getNodeJsAls()) {
     // The AsyncLocalStorage API can be enabled independently of the rest
     // of the nodejs_compat layer.

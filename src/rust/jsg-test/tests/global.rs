@@ -267,11 +267,11 @@ fn global_into_traced_global_is_traced() {
                 handle: jsg::Cell::new(None),
             },
         );
-        let wrapper = resource.clone().to_js(lock)?;
+        let wrapper = resource.clone(lock).to_js(lock)?;
         let global = v8::Global::new(lock, wrapper);
         let traced = v8::TracedGlobal::from(global);
         assert!(traced.as_local(lock).is_object());
-        resource.handle.set(Some(traced));
+        resource.get(lock).handle.set(Some(traced));
         drop(resource);
         Ok(())
     });

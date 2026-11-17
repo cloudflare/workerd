@@ -310,7 +310,7 @@ kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
 
 kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
   KJ_SWITCH_ONEOF(event) {
-    KJ_CASE_ONEOF(onset, Onset) {
+    KJ_CASE_ONEOF(onset, kj::Own<Onset>) {
       return kj::str("Onset");
     }
     KJ_CASE_ONEOF(outcome, Outcome) {
@@ -846,6 +846,34 @@ ErrorInfo::ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> 
     : name(kj::mv(name)),
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
+
+ErrorInfo ErrorInfo::fromErrorProperties(
+    kj::String name, kj::String message, kj::Maybe<kj::StringPtr> stack) {
+  kj::Maybe<kj::String> strippedStack;
+  KJ_IF_SOME(slice, stack) {
+    // Normally `error.stack` repeats the error type and message first. We don't want send two
+    // copies of that to the trace so we'll strip it off.
+    if (slice.startsWith(name)) {
+      slice = slice.slice(name.size());
+      if (slice.startsWith(": "_kj)) {
+        slice = slice.slice(2);
+      }
+    }
+
+    if (slice.startsWith(message)) {
+      slice = slice.slice(message.size());
+      if (slice.startsWith("\n")) {
+        slice = slice.slice(1);
+      }
+    }
+
+    if (slice.size() > 0) {
+      strippedStack = kj::str(slice);
+    }
+  }
+
+  return ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(strippedStack));
+}
 
 ErrorInfo::ErrorInfo(rpc::Trace::ErrorInfo::Reader reader)
     : name(kj::str(reader.getName())),
@@ -1764,6 +1792,83 @@ Onset Onset::clone() const {
       KJ_MAP(attr, attributes) { return attr.clone(); });
 }
 
+namespace {
+size_t stringSize(const kj::Maybe<kj::String>& string) {
+  return string.map([](const kj::String& value) { return value.size(); }).orDefault(0);
+}
+
+size_t eventInfoSize(const EventInfo& info) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+      size_t size = fetch.url.size() + fetch.cfJson.size();
+      for (auto& header: fetch.headers) {
+        size += sizeof(header) + header.name.size() + header.value.size();
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+      return jsrpc.methodName.size();
+    }
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+      return scheduled.cron.size();
+    }
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
+      return queue.queueName.size();
+    }
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
+      return email.mailFrom.size() + email.rcptTo.size();
+    }
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
+      size_t size = 0;
+      for (auto& item: trace.traces) {
+        size += sizeof(item) + stringSize(item.scriptName);
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      return 0;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+size_t workerInfoSize(const Onset::WorkerInfo& info) {
+  size_t size = stringSize(info.scriptName) + stringSize(info.dispatchNamespace) +
+      stringSize(info.scriptId) + stringSize(info.entrypoint) + stringSize(info.durableObjectId);
+  KJ_IF_SOME(version, info.scriptVersion) {
+    size += version->totalSize().wordCount * sizeof(capnp::word);
+  }
+  KJ_IF_SOME(preview, info.preview) {
+    size += preview.id.size() + preview.slug.size() + preview.name.size();
+  }
+  KJ_IF_SOME(tags, info.scriptTags) {
+    for (auto& tag: tags) {
+      size += sizeof(tag) + tag.size();
+    }
+  }
+  return size;
+}
+
+size_t attributeSize(const Attribute& attribute) {
+  size_t size = sizeof(attribute) + attribute.name.size();
+  for (auto& value: attribute.value) {
+    size += sizeof(value);
+    KJ_IF_SOME(string, value.tryGet<kj::ConstString>()) {
+      size += string.size();
+    }
+  }
+  return size;
+}
+}  // namespace
+
+size_t Onset::size() const {
+  size_t size = eventInfoSize(info) + workerInfoSize(workerInfo);
+  for (auto& attribute: attributes) {
+    size += attributeSize(attribute);
+  }
+  return size;
+}
+
 Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
     : outcome(outcome),
       cpuTime(cpuTime),
@@ -1810,7 +1915,7 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
   const auto event = reader.getEvent();
   switch (event.which()) {
     case rpc::Trace::TailEvent::Event::ONSET: {
-      return Onset(event.getOnset());
+      return kj::heap<Onset>(event.getOnset());
     }
     case rpc::Trace::TailEvent::Event::OUTCOME: {
       return Outcome(event.getOutcome());
@@ -1866,8 +1971,8 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
   builder.setSequence(sequence);
   auto eventBuilder = builder.initEvent();
   KJ_SWITCH_ONEOF(event) {
-    KJ_CASE_ONEOF(onset, Onset) {
-      onset.copyTo(eventBuilder.initOnset());
+    KJ_CASE_ONEOF(onset, kj::Own<Onset>) {
+      onset->copyTo(eventBuilder.initOnset());
     }
     KJ_CASE_ONEOF(outcome, Outcome) {
       outcome.copyTo(eventBuilder.initOutcome());
@@ -1909,8 +2014,8 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
 TailEvent TailEvent::clone() const {
   constexpr auto cloneEvent = [](const Event& event) -> Event {
     KJ_SWITCH_ONEOF(event) {
-      KJ_CASE_ONEOF(onset, Onset) {
-        return onset.clone();
+      KJ_CASE_ONEOF(onset, kj::Own<Onset>) {
+        return kj::heap(onset->clone());
       }
       KJ_CASE_ONEOF(outcome, Outcome) {
         return outcome.clone();

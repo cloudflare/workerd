@@ -4,8 +4,6 @@
 
 #include "kj-hyper.h"
 
-#include <workerd/util/weak-refs.h>
-
 #include <kj-hyper/ffi.rs.h>
 #include <openssl/digest.h>
 #include <openssl/ec.h>
@@ -353,13 +351,19 @@ kj::Promise<void> pump_websockets(kj::Own<kj::WebSocket> a, kj::Own<kj::WebSocke
   return kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(a), kj::mv(b));
 }
 
+namespace {
+
+kj::Promise<void> pumpThenShutdownWrite(kj::AsyncIoStream& from, kj::AsyncIoStream& to) {
+  co_await from.pumpTo(to);
+  to.shutdownWrite();
+}
+
+}  // namespace
+
 kj::Promise<void> pump_tunnel(kj::AsyncIoStream& connection, kj::Own<kj::AsyncIoStream> tunnel) {
-  auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
-  promises.add(
-      connection.pumpTo(*tunnel).then([&tunnel = *tunnel](uint64_t) { tunnel.shutdownWrite(); }));
-  promises.add(
-      tunnel->pumpTo(connection).then([&connection](uint64_t) { connection.shutdownWrite(); }));
-  return kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(tunnel));
+  // The coroutine frame owns `tunnel` until both directions finish.
+  co_await kj::joinPromisesFailFast(kj::arr(
+      pumpThenShutdownWrite(connection, *tunnel), pumpThenShutdownWrite(*tunnel, connection)));
 }
 
 namespace {

@@ -172,7 +172,7 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
 }
 
 // Converts a source's autoAllocateChunkSize as WebIDL converts an
-// [EnforceRange] unsigned long long: ToNumber, then NaN, ±Infinity and a
+// [EnforceRange] unsigned long long: ToNumber, then NaN, +/-Infinity and a
 // result outside [0, 2^53 - 1] are a TypeError, and a fraction truncates.
 // undefined means none. Zero passes: the byte controller rejects it itself,
 // after the highWaterMark, as the spec does.

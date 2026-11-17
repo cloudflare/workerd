@@ -127,6 +127,11 @@ export function spliceOne(list: unknown[], index: number): void {
   list.pop();
 }
 
+// Use as `__proto__: kNullProtoObject` in an object literal to get an object
+// with no Object.prototype members. Unlike `__proto__: null`, this keeps the
+// object out of V8's slow dictionary mode.
+export const kNullProtoObject = Object.freeze({ __proto__: null });
+
 export const ALL_PROPERTIES = 0;
 export const ONLY_WRITABLE = 1;
 export const ONLY_ENUMERABLE = 2;

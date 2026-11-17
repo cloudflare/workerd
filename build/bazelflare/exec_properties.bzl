@@ -27,3 +27,18 @@ def test_exec_properties(size, tags = []):
         Label("//build/bazelflare:on_bazelflare"): props,
         "//conditions:default": {},
     })
+
+def link_exec_properties():
+    """exec_properties for select binaries that we want to link quickly to keep the critical path
+    short.
+    Linking large binaries can be slow, especially since lld runs optimizations such as -Wl,-O2 in
+    release builds, so we should use a larger runner: a whole executor for bazelflare and a high-CPU
+    one for internal RBE. The `cpp_link.` prefix is used so this is limited to the cpp_link exec
+    group (only for internal builds as rules_rust doesn't use the cpp_link group by default).
+    """
+    return select({
+        Label("//build/config:link_on_bazelflare"): {"slots": "1"},
+        Label("//build/config:link_on_bazelflare_internal"): {"cpp_link.slots": "1"},
+        Label("//build/config:link_on_rbe_ci"): {"cpp_link.runner": "high-cpu"},
+        "//conditions:default": {},
+    })

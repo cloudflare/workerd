@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // `this: jsg::Rc<Self>` takes the place of `&self` on methods and accessors, before the lock
-// and the JavaScript arguments, and a JavaScript argument of type `jsg::Rc<Self>` stays one.
+// and the JavaScript arguments, and a JavaScript argument of type `jsg::Rc<Self>` stays one. The
+// resource behind a `jsg::Rc` is borrowed with the lock.
 
 use jsg::Rc;
 use jsg::ToJS;
@@ -26,8 +27,8 @@ impl Counter {
     }
 
     #[jsg_method]
-    pub fn imported(this: Rc<Self>) -> u32 {
-        this.count.get()
+    pub fn imported(this: Rc<Self>, lock: &mut jsg::Lock<'_>) -> u32 {
+        this.get(lock).count.get()
     }
 
     #[jsg_method]
@@ -36,8 +37,9 @@ impl Counter {
         lock: &mut jsg::Lock<'s>,
         by: u32,
     ) -> jsg::Result<v8::Local<'s, v8::Value>> {
-        this.count.set(this.count.get() + by);
-        this.count.get().to_js(lock)
+        let count = &this.get(lock).count;
+        count.set(count.get() + by);
+        count.get().to_js(lock)
     }
 
     #[jsg_method]
@@ -46,8 +48,8 @@ impl Counter {
     }
 
     #[jsg_method]
-    pub fn argument_of_own_type(&self, other: jsg::Rc<Self>) -> bool {
-        std::ptr::eq(self, &*other)
+    pub fn argument_of_own_type(&self, lock: &mut jsg::Lock<'_>, other: jsg::Rc<Self>) -> bool {
+        std::ptr::eq(self, other.get(lock))
     }
 
     #[jsg_method]
@@ -56,30 +58,31 @@ impl Counter {
     }
 
     #[jsg_property]
-    pub fn get_total(this: jsg::Rc<Self>) -> u32 {
-        this.count.get()
+    pub fn get_total(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> u32 {
+        this.get(lock).count.get()
     }
 
     #[jsg_property]
-    pub fn set_total(this: jsg::Rc<Self>, v: u32) {
-        this.count.set(v);
+    pub fn set_total(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, v: u32) {
+        this.get(lock).count.set(v);
     }
 
     #[jsg_property(instance)]
-    pub fn get_current(this: jsg::Rc<Self>) -> u32 {
-        this.count.get()
+    pub fn get_current(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> u32 {
+        this.get(lock).count.get()
     }
 
     #[jsg_inspect_property]
-    pub fn debug_info(this: jsg::Rc<Self>) -> String {
-        format!("Counter({})", this.count.get())
+    pub fn debug_info(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>) -> String {
+        format!("Counter({})", this.get(lock).count.get())
     }
 }
 
 // The methods are ordinary associated functions to Rust.
-pub fn calls(counter: jsg::Rc<Counter>) -> bool {
-    let _ = Counter::itself(counter.clone());
-    let _ = Counter::imported(counter.clone());
-    Counter::set_total(counter.clone(), 1);
-    Counter::compare(counter.clone(), counter.clone()) && Counter::same_as(counter.clone(), counter)
+pub fn calls(lock: &mut jsg::Lock<'_>, counter: jsg::Rc<Counter>) -> bool {
+    let _ = Counter::itself(counter.clone(lock));
+    let _ = Counter::imported(counter.clone(lock), lock);
+    Counter::set_total(counter.clone(lock), lock, 1);
+    Counter::compare(counter.clone(lock), counter.clone(lock))
+        && Counter::same_as(counter.clone(lock), counter)
 }

@@ -47,12 +47,12 @@ fn python_workers_makes_the_cpp_global_prototype_read_only() {
 #[should_panic(expected = "an Autogates guard is already alive")]
 fn autogate_guards_do_not_nest() {
     let _outer = crate::set_autogates(&[]);
-    let _inner = crate::set_autogates(&["jsg-integer-enforce-range"]);
+    let _inner = crate::set_autogates(&["test-workerd"]);
 }
 
 /// Dropping the guard lets the next one be made.
 #[test]
 fn autogate_guards_follow_each_other() {
-    drop(crate::set_autogates(&["jsg-integer-enforce-range"]));
+    drop(crate::set_autogates(&["test-workerd"]));
     let _again = crate::set_autogates(&[]);
 }

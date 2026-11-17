@@ -1,0 +1,9 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Base = import "memory-cache-test.wd-test";
+
+# The tests of memory-cache-test.wd-test, against the Rust MemoryCache, so that each variant of
+# this target (compatibility dates, GC stress) covers it.
+const unitTests :Workerd.Config = (
+  services = Base.services,
+  autogates = ["workerd-autogate-rust-memory-cache"],
+);

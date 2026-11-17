@@ -46,12 +46,14 @@ kj::Array<int> getProducedCompileHints(Lock& js, v8::Local<v8::Module> module);
 // definition, never with the isolate-local module instance. Every call must use the same source.
 class SharedModuleCompilationCache {
  public:
-  // Compiles using the slot, regenerating rejected bytecode. Snapshot preparation consumes
-  // existing bytecode but never generates it, because V8 forbids serialization in that phase.
+  // Compiles using the slot, regenerating rejected bytecode. An empty slot uses supplied hints
+  // for source compilation. Snapshot preparation consumes existing bytecode but never generates
+  // it, because V8 forbids serialization in that phase.
   v8::MaybeLocal<v8::Module> compile(Lock& js,
       v8::Local<v8::String> source,
       const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer) const;
+      const CompilationObserver& observer,
+      kj::ArrayPtr<const int> compileHints = nullptr) const;
 
  private:
   struct State {

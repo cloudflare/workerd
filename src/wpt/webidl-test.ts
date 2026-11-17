@@ -4,6 +4,19 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript URL (the TS_URL autogate) is only an own property of the
+// global, as WebIDL installs an interface; JSG puts the C++ one on the
+// global's prototype (src/tests/url/api-surface.js).
+const usingTsUrl = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis) as object,
+  'URL'
+);
+
+// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) follows WebIDL,
+// and its instances are native errors; the C++ one's are not
+// (src/tests/dom-exception/).
+const usingTsDomException = Error.isError(new DOMException());
+
 export default {
   'ecmascript-binding/builtin-function-properties.any.js': {},
   'ecmascript-binding/class-string-interface.any.js': {
@@ -13,12 +26,14 @@ export default {
     ],
   },
   'ecmascript-binding/class-string-iterator-prototype-object.any.js': {
-    comment: 'Iterator @@toStringTag is different in workerd',
-    expectedFailures: [
-      '@@toStringTag exists with the appropriate descriptor',
-      'Object.prototype.toString',
-      'Object.prototype.toString applied to a null-prototype instance',
-    ],
+    comment: "The C++ URLSearchParams iterator's @@toStringTag differs",
+    expectedFailures: usingTsUrl
+      ? []
+      : [
+          '@@toStringTag exists with the appropriate descriptor',
+          'Object.prototype.toString',
+          'Object.prototype.toString applied to a null-prototype instance',
+        ],
   },
   'ecmascript-binding/class-string-named-properties-object.window.js': {
     comment: 'Window-specific test',
@@ -31,24 +46,24 @@ export default {
   },
   'ecmascript-binding/es-exceptions/DOMException-constants.any.js': {
     comment: 'DOMException constants have wrong configurable descriptor',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-constructor-and-prototype.any.js':
     {
       comment: 'DOMException property descriptors differ from spec',
-      expectedFailures: true,
+      expectedFailures: usingTsDomException ? [] : true,
     },
   'ecmascript-binding/es-exceptions/DOMException-constructor-behavior.any.js': {
     comment: 'DOMException property inheritance differs from spec',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-custom-bindings.any.js': {
     comment: 'DOMException property descriptors differ from spec',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-is-error.any.js': {
-    comment: 'DOMException.prototype not in Error.prototype chain',
-    expectedFailures: [''],
+    comment: 'DOMException instances are not native errors',
+    expectedFailures: usingTsDomException ? [] : [''],
   },
   'ecmascript-binding/es-exceptions/DOMException-stack-accessor.any.js': {
     comment:
@@ -106,16 +121,21 @@ export default {
   'ecmascript-binding/support/create-realm.js': {},
   'idlharness.any.js': {
     comment:
-      'Remaining IDL failures: DOMException attribute/inherit checks and QuotaExceededError (not implemented)',
+      'The C++ DOMException fails attribute/inherit checks and has no QuotaExceededError',
     expectedFailures: [
-      // DOMException attributes (name, message, code) use instance properties instead of
-      // prototype accessors, so both the attribute descriptor checks and inherit checks fail
-      'DOMException interface: attribute name',
-      'DOMException interface: attribute message',
-      'DOMException interface: attribute code',
-      /^DOMException interface: new DOMException.*must inherit property/,
-      // QuotaExceededError is not implemented
-      /^QuotaExceededError interface/,
+      // The C++ DOMException's attributes (name, message, code) are instance properties
+      // instead of prototype accessors, so both the attribute descriptor checks and inherit
+      // checks fail
+      ...(usingTsDomException
+        ? []
+        : [
+            'DOMException interface: attribute name',
+            'DOMException interface: attribute message',
+            'DOMException interface: attribute code',
+            /^DOMException interface: new DOMException.*must inherit property/,
+          ]),
+      // Only the TypeScript implementation has QuotaExceededError.
+      ...(usingTsDomException ? [] : [/^QuotaExceededError interface/]),
     ],
   },
 } satisfies TestRunnerConfig;

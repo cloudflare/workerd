@@ -4,9 +4,11 @@ load("//:build/wd_test.bzl", "wd_test")
 # scaling-cpp against the C++ implementation, scaling-ts against the
 # TypeScript implementation. Each test times a shape at n and at a
 # multiple of n. The assertion is a ratio, so it holds on slow machines,
-# but the runs themselves are long: the cells get the longest timeout,
-# skip the sanitizer builds, and have no @gc-stress variant (a GC per
-# continuation would drown the timing).
+# but the runs themselves are long: the cells get the longest timeout and
+# have no @gc-stress variant (a GC per continuation would drown the
+# timing). They skip the sanitizer builds, which slow C++ far more than
+# JIT-compiled JavaScript, so a run's time no longer tracks the queue's
+# cost.
 #
 # The C++ cell is off by default: it is the control, not the subject (the
 # suite guards the TypeScript queues), and it costs 35-60 s per variant on
@@ -22,6 +24,7 @@ wd_test(
     generate_gc_stress_variant = False,
     tags = [
         "no-asan",
+        "no-tsan",
         "off-by-default",
     ],
 )
@@ -32,5 +35,8 @@ wd_test(
     args = ["--experimental"],
     data = scaling_suite_srcs,
     generate_gc_stress_variant = False,
-    tags = ["no-asan"],
+    tags = [
+        "no-asan",
+        "no-tsan",
+    ],
 )

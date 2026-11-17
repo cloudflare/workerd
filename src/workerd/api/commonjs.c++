@@ -77,7 +77,7 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
 
   auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
   if (specifier == "node:process") {
-    targetPath = kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+    targetPath = kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:process_exports"_kj
                                                               : "node-internal:legacy_process"_kj);
     resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
   }

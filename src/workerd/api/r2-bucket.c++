@@ -1933,4 +1933,11 @@ kj::ArrayPtr<kj::StringPtr> fillR2Path(
   return kj::arrayPtr(pathStorage, numComponents);
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> R2Bucket::snapshotClone() const {
+  KJ_IF_SOME(channel, clientChannel.tryGet<uint>()) {
+    return ownAsWrappable(kj::refcounted<R2Bucket>(snapshot_clone_tag_t{}, *this, channel));
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api::public_beta

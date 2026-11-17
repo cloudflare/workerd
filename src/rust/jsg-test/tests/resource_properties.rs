@@ -226,9 +226,9 @@ fn prototype_getter_reflects_rust_side_mutation() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(lock, Counter::new(1, "x"));
-        let r2 = r.clone();
+        let r2 = r.clone(lock);
         ctx.set_global(lock, "c", r);
-        r2.value.set(99);
+        r2.get(lock).value.set(99);
         assert_eq!(ctx.eval::<i32>(lock, "c.value").unwrap(), 99);
         Ok(())
     });
@@ -267,10 +267,10 @@ fn prototype_setter_mutation_visible_from_rust() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(lock, Counter::new(0, "x"));
-        let r2 = r.clone();
+        let r2 = r.clone(lock);
         ctx.set_global(lock, "c", r);
         ctx.eval_raw(lock, "c.value = 55").unwrap();
-        assert_eq!(r2.value.get(), 55);
+        assert_eq!(r2.get(lock).value.get(), 55);
         Ok(())
     });
 }
@@ -686,10 +686,10 @@ fn instance_setter_visible_from_rust() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(lock, Token::new("orig", "bearer"));
-        let r2 = r.clone();
+        let r2 = r.clone(lock);
         ctx.set_global(lock, "t", r);
         ctx.eval_raw(lock, "t.id = 'updated'").unwrap();
-        assert_eq!(*r2.id.borrow(), "updated");
+        assert_eq!(*r2.get(lock).id.borrow(), "updated");
         Ok(())
     });
 }

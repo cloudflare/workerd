@@ -7,6 +7,7 @@ load("//:build/wd_bench.bzl", "wd_bench")
 encoding_bench_srcs = glob(["*.js"]) + ["encoding-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "encoding-cpp.wd-bench",
     data = encoding_bench_srcs,
 )

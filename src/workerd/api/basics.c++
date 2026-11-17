@@ -9,7 +9,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -100,6 +99,62 @@ size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
 
 kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
+}
+
+void EventTarget::forEachSnapshotListener(
+    jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb) {
+  for (auto& entry: typeMap) {
+    // The on<type> attribute trampoline (if activated for this type) occupies a regular
+    // listener slot under a synthesized identity. It is owned by the C++ attribute state and
+    // cannot be replayed through addEventListener(), so it is not transferred.
+    kj::Maybe<v8::Local<v8::Object>> trampolineIdentity;
+    KJ_IF_SOME(attribute, eventHandlerAttributes.find(entry.key)) {
+      KJ_IF_SOME(identity, attribute.listenerIdentity) {
+        trampolineIdentity = identity.getHandle(js);
+      }
+    }
+
+    for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
+      auto identity = handler->identity.getHandle(js);
+      KJ_IF_SOME(trampoline, trampolineIdentity) {
+        if (identity == trampoline) continue;
+      }
+      KJ_REQUIRE(handler->abortHandler == kj::none,
+          "startup snapshot: top-level addEventListener with a `signal` option is not supported",
+          entry.key);
+      auto callback = KJ_REQUIRE_NONNULL(handler->callback.tryGetHandle(js.v8Isolate),
+          "startup snapshot: a listener backed by a native function cannot be transferred",
+          entry.key);
+      auto receiver = KJ_ASSERT_NONNULL(handler->callback.tryGetReceiver(js.v8Isolate));
+      cb(SnapshotListener{
+        .type = entry.key,
+        .identity = identity,
+        .callback = callback,
+        .receiver = receiver,
+        .once = handler->once,
+        .passive = handler->passive,
+      });
+    }
+  }
+}
+
+void EventTarget::restoreSnapshotListener(jsg::Lock& js,
+    kj::StringPtr type,
+    v8::Local<v8::Object> identity,
+    HandlerFunction callback,
+    SnapshotListenerOptions options) {
+  auto& handlerSet = getOrCreate(type);
+  auto sizeBefore = handlerSet.handlers.size();
+  handlerSet.handlers.upsert(kj::heap<EventHandler>(EventHandler{
+                               .identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, identity),
+                               .callback = kj::mv(callback),
+                               .once = options.once,
+                               .passive = options.passive,
+                             }),
+      [&](auto&&...) {});
+  if (handlerSet.handlers.size() != sizeBefore) {
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
+  }
 }
 
 void EventTarget::addEventListener(jsg::Lock& js,
@@ -588,22 +643,20 @@ size_t getOwnedBytes(const kj::Exception& exception) {
   return size;
 }
 
-// One copy of an abort's payload, shared by its deliveries. With the DEFER_CROSS_CONTEXT_ACTIONS
-// autogate, deliveries to an idle actor wait in its queue for its next request (see
-// DeleteQueue::scheduleAction()), so the copy counts as external memory.
+// One copy of an abort's payload, shared by its deliveries. Deliveries to an idle actor wait in its
+// queue for its next request (see DeleteQueue::scheduleAction()), so the copy counts as external
+// memory.
 template <typename T>
 class SharedAbortPayload final: public kj::AtomicRefcounted {
  public:
-  SharedAbortPayload(jsg::Lock& js, T value): value(kj::mv(value)) {
-    if (util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
-      externalMemory = js.getExternalMemoryAdjustment(getOwnedBytes(this->value));
-    }
-  }
+  SharedAbortPayload(jsg::Lock& js, T value)
+      : value(kj::mv(value)),
+        externalMemory(js.getExternalMemoryAdjustment(getOwnedBytes(this->value))) {}
 
   const T value;
 
  private:
-  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemory;
+  jsg::ExternalMemoryAdjustment externalMemory;
 };
 
 using SerializedAbortReason = SharedAbortPayload<SerializedBytes>;
@@ -1348,13 +1401,12 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
     // through the pending-reason box (see docs/reference/detail/abort-signal.md).
     if (!rpcSubscriptionRequested) {
       KJ_IF_SOME(executor, rpcReceiverContext) {
-        bool queued = executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+        rpcSubscriptionRequested =
+            executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
           KJ_IF_SOME(self, weakSelf.tryAddRef(js)) {
             self->subscribeToRpcAbort(js);
           }
         });
-        rpcSubscriptionRequested =
-            queued && util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS);
       }
     }
     return;

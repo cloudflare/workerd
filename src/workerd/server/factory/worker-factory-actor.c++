@@ -174,7 +174,7 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
       sqliteDirectory(actors->replicated()
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
-      vfs(*sqliteDirectory),
+      vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
@@ -303,6 +303,10 @@ class AlarmOwnedElsewhere final: public WorkerInterface {
       .retryCountsAgainstLimit = false,
       .outcome = again ? EventOutcome::CANCELED : EventOutcome::OK};
   }
+  // The owning instance holds the alarm state, so there is nothing to clear here.
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date) override {
+    return kj::Maybe<kj::Date>(kj::none);
+  }
   kj::Promise<void> request(kj::HttpMethod,
       kj::StringPtr,
       const kj::HttpHeaders&,
@@ -409,6 +413,10 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
                             public kj::Refcounted {
  public:
   explicit ActorHooksImpl(::rust::Box<ActorHooks> hooks): hooks(kj::mv(hooks)) {}
+
+  const ActorHooks& getHooks() const {
+    return *hooks;
+  }
 
   kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return hooks->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
@@ -626,9 +634,10 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
   auto previousCleanup = state.cleanup.addBranch();
   state.canceler.cancel("a new container client took the container over"_kj);
   auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
-      factory.network, kj::str(docker.getSocketPath()), kj::mv(id), kj::mv(imageName),
-      kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId), factory.tasks,
-      kj::mv(previousCleanup), [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
+      factory.network, factory.weakNetwork.addWeak(), kj::str(docker.getSocketPath()), kj::mv(id),
+      kj::mv(imageName), kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId),
+      factory.tasks, kj::mv(previousCleanup),
+      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
     // The client's shutdown began: the next incarnation of the actor gets a new client.
     state.client = kj::none;
     state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();
@@ -639,6 +648,16 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
 }
 
 }  // namespace
+
+void stamp_current_actor_cause(RequestMetadata& metadata) {
+  if (!IoContext::hasCurrent()) return;
+  KJ_IF_SOME(actor, IoContext::current().getActor()) {
+    auto loopback = actor.getLoopback();
+    KJ_IF_SOME(hooks, kj::dynamicDowncastIfAvailable<ActorHooksImpl>(*loopback)) {
+      hooks.getHooks().stamp_cause(metadata);
+    }
+  }
+}
 
 ActorHandle::ActorHandle(kj::Own<Worker::Actor::FacetManager> hooks,
     kj::Own<RequestTracker> tracker,
@@ -724,13 +743,12 @@ kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken) {
   return kj::mv(*broken);
 }
 
-void actor_abort(const ActorHandle& actor, const AbortReason& reason) {
-  // Raising the reason across the bridge is the bridge's own KjError -> kj::Exception conversion.
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { reason.raise(); })) {
-    actor.getActor().abort(exception);
-  } else {
-    actor.getActor().shutdown(0, kj::none);
-  }
+void actor_abort(const ActorHandle& actor, kj::Exception reason) {
+  actor.getActor().abort(reason);
+}
+
+void actor_stop(const ActorHandle& actor) {
+  actor.getActor().shutdown(0, kj::none);
 }
 
 bool actor_has_on_hibernate_handler(const ActorHandle& actor) {
@@ -778,7 +796,7 @@ void actor_close_storage(const ActorHandle& actor) {
 
 kj::Maybe<kj::Rc<HibernationManager>> actor_hibernation_manager(const ActorHandle& actor) {
   return actor.getActor().getHibernationManager().map(
-      [](HibernationManager& m) { return kj::Rc<HibernationManager>(m.addRef()); });
+      [](HibernationManager& m) { return m.toRc(); });
 }
 
 kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start) {
@@ -800,6 +818,20 @@ kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory) {
   kj::Vector<kj::Promise<void>> cleanups(impl.containers.size());
   for (auto& entry: impl.containers) {
     // A client's shutdown replaces its entry's `cleanup`.
+    KJ_IF_SOME(client, entry.value->client) client.shutdown();
+    cleanups.add(entry.value->cleanup.addBranch());
+  }
+  return kj::joinPromises(cleanups.releaseAsArray());
+}
+
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor) {
+  auto& impl = factory.getImpl();
+  // Container ids end in `<uniqueKey>-<actorId>` (getContainerClient).
+  auto suffix = kj::str("-", uniqueKey, "-", actor);
+  kj::Vector<kj::Promise<void>> cleanups;
+  for (auto& entry: impl.containers) {
+    if (!entry.key.endsWith(suffix)) continue;
     KJ_IF_SOME(client, entry.value->client) client.shutdown();
     cleanups.add(entry.value->cleanup.addBranch());
   }

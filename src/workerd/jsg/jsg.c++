@@ -20,11 +20,55 @@
 
 namespace workerd::jsg {
 
+namespace {
+// As V8 describes an error whose name and message are `name` and `message`, except that a name
+// and message too long to join into one string are described by the name, where V8 abbreviates
+// the message.
+v8::Local<v8::String> describeError(
+    v8::Isolate* isolate, v8::Local<v8::String> name, v8::Local<v8::String> message) {
+  if (name->Length() == 0) return message;
+  if (message->Length() == 0) return name;
+  auto prefix = v8::String::Concat(isolate, name, v8::String::NewFromUtf8Literal(isolate, ": "));
+  if (prefix.IsEmpty()) return name;
+  auto description = v8::String::Concat(isolate, prefix, message);
+  return description.IsEmpty() ? name : description;
+}
+
+v8::Local<v8::Private> privateKey(v8::Isolate* isolate, kj::StringPtr name) {
+  return v8::Private::ForApi(isolate,
+      v8::String::NewFromUtf8(isolate, name.begin(), v8::NewStringType::kInternalized, name.size())
+          .ToLocalChecked());
+}
+}  // namespace
+
+v8::MaybeLocal<v8::String> toDetailString(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  auto context = isolate->GetCurrentContext();
+  if (value->IsObject()) {
+    // Reading a private symbol runs no JavaScript: it skips interceptors, Proxy traps and the
+    // prototype chain.
+    auto object = value.As<v8::Object>();
+    v8::Local<v8::Value> name;
+    if (!object->GetPrivate(context, privateKey(isolate, ERROR_NAME_KEY)).ToLocal(&name)) {
+      return {};
+    }
+    if (name->IsString()) {
+      v8::Local<v8::Value> message;
+      if (!object->GetPrivate(context, privateKey(isolate, ERROR_MESSAGE_KEY)).ToLocal(&message)) {
+        return {};
+      }
+      if (message->IsString()) {
+        return describeError(isolate, name.As<v8::String>(), message.As<v8::String>());
+      }
+    }
+  }
+  return value->ToDetailString(context);
+}
+
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
   // TODO(cleanup): Perhaps we should require you to call `js.toString(handle)`?
   auto& js = jsg::Lock::current();
   return js.withinHandleScope([&] {
-    v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+    v8::Local<v8::String> str = workerd::jsg::check(toDetailString(js.v8Isolate, value));
     v8::String::Utf8Value utf8(js.v8Isolate, str);
     if (*utf8 == nullptr) {
       return kj::str("(couldn't stringify)");
@@ -497,11 +541,38 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requ
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
+namespace {
+
+// Bound on the magnitude of external memory passed to V8 in one call, matching the bound V8 itself
+// enforces in AdjustAmountOfExternalAllocatedMemoryImpl() (--external-memory-max-reasonable-size,
+// 32 GiB). V8 only sees the values that reach it, and a deferred update reaches it as the sum of
+// every adjustment made since the isolate was last locked, so a V8 failure cannot be attributed to
+// the adjustment responsible. These checks run where the adjustment is made, so the failure's stack
+// trace identifies it. Like V8's check, a failure aborts the process.
+constexpr int64_t MAX_REASONABLE_EXTERNAL_MEMORY = int64_t(32) << 30;
+
+void checkReasonableExternalMemoryDelta(int64_t amount) {
+  if (amount > -MAX_REASONABLE_EXTERNAL_MEMORY && amount < MAX_REASONABLE_EXTERNAL_MEMORY) return;
+  KJ_LOG(FATAL, "unreasonable external memory adjustment", amount);
+  abort();
+}
+
+// An adjustment object's whole amount is released in a single call when it is destroyed, so its
+// running total is subject to the same bound as a single delta.
+void checkReasonableExternalMemoryTotal(size_t amount) {
+  if (amount < static_cast<size_t>(MAX_REASONABLE_EXTERNAL_MEMORY)) return;
+  KJ_LOG(FATAL, "unreasonable total external memory attributed to one adjustment", amount);
+  abort();
+}
+
+}  // namespace
+
 void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   // Carefully check whether `isolate` is locked by the current thread. Note that there's a
   // possibility that the isolate is being torn down in a different thread, which means we cannot
   // safely call `v8::Locekr::IsLocked()` on it.
   if (amount == 0) return;
+  checkReasonableExternalMemoryDelta(amount);
   v8::Isolate* current = v8::Isolate::TryGetCurrent();
   v8::Isolate* target = isolate.load(std::memory_order_relaxed);  // could be null!
 
@@ -532,6 +603,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
+  checkReasonableExternalMemoryDelta(amount);
   js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
@@ -564,6 +636,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
   if (amount == 0) return;
+  checkReasonableExternalMemoryTotal(this->amount + amount);
   this->amount += amount;
   externalMemory->maybeDeferAdjustment(amount);
 }
@@ -607,6 +680,7 @@ void ExternalMemoryAdjustment::adjustNow(Lock& js, ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
 
+  checkReasonableExternalMemoryTotal(this->amount + amount);
   this->amount += amount;
   externalMemory->adjustNow(js, amount);
 }

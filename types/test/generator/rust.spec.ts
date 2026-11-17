@@ -141,6 +141,10 @@ test('Rust bindings generate TypeScript through the shared RTTI schema', () => {
 
   const { ambient, importable } = printDefinitions(root, {}, '');
   assert.match(ambient, /declare class RustRttiFixture/);
+  // `ts_override` and `ts_define` customize the declarations, as in C++.
+  assert.match(ambient, /echo<T extends Uint8Array>\(value: T\): T/);
+  assert.match(ambient, /type RustRttiCount = number/);
+  assert.match(ambient, /count: RustRttiCount/);
   assert.match(importable, /export (?:declare )?class RustRttiFixture/);
 
   const usage = `
@@ -157,6 +161,7 @@ test('Rust bindings generate TypeScript through the shared RTTI schema', () => {
     const bytes: number[] = fixture.copyBytes([1, 2]);
     const typed: Uint16Array = fixture.typedBytes([1, 2]);
     const echoed: Uint8Array = fixture.echo(new Uint8Array());
+    const count: RustRttiCount = result.count;
     const choice: string = RustRttiFixture.choose(42);
     const symbol: symbol = fixture.makeSymbol();
     const name: string | symbol = fixture.makeName();
@@ -227,12 +232,24 @@ function versionedMembers(args: string[]): string[] {
   });
 }
 
+/** The TypeScript override of `RustRttiVersioned` in the fixture exported with `args`. */
+function versionedOverride(args: string[]): string {
+  const versioned = readFixture(args)
+    .groups.get(0)
+    .structures.toArray()
+    .find((structure) => structure.name === 'RustRttiVersioned');
+  assert(versioned);
+  return versioned.tsOverride;
+}
+
 test('Rust RTTI describes the members registered under the export flags', () => {
   assert.deepEqual(versionedMembers([]), ['instance readonly mode']);
   assert.deepEqual(versionedMembers(['--flagged']), [
     'prototype readonly mode',
     'method cached',
   ]);
+  assert.equal(versionedOverride([]), '');
+  assert.equal(versionedOverride(['--flagged']), '{ cached(): true }');
 });
 
 test('Rust definitions are omitted when their exposure root is absent', () => {

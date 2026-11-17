@@ -104,4 +104,5 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `data-volumes.js` | volumes through JS transformers with concurrent producer/consumer: 1 MiB passthrough, 8 MiB XOR (proves every byte passed through the transformer), 4096-chunk value mapping |
 | `pollution.js` | Object.prototype members stand in for neither an omitted transformer or strategy nor the internal source/sink dictionaries (neither implementation reads them) |
 | `expected-length.js` | ledger #21, with the converted length observed as a fetch body's Content-Length (the `roundtrip.js` echo); integral lengths up to the uint64 maximum accepted; ledger #28, the Content-Length of forks of the readable side made before and after a read |
+| `transfer.js` | structuredClone() rejects DataCloneError for a TransformStream and its controller (parity); `{ transfer }` rejects TypeError (transferable streams unimplemented) |
 | `which-impl.js` / `helpers.js` | implementation detection; consume helpers |

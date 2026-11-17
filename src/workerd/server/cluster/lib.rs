@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! A Durable Object cluster whose shared state is an S3-compatible bucket
-//! (S3, R2, `MinIO`) instead of a shared filesystem.
+//! A Durable Object cluster whose shared state is a bucket instead of a
+//! shared filesystem: an S3-compatible one (S3, R2, `MinIO`; `s3.rs`) or a
+//! Google Cloud Storage one (`gcs.rs`).
 //!
 //! Everything lives under `v1/` in the configured prefix, so a later format
 //! can tell an old bucket from its own:
@@ -41,11 +42,16 @@
 mod alarms;
 mod bucket;
 mod capture;
+mod client;
 pub mod cluster;
 pub mod compose;
 pub mod deploy;
 #[cfg(test)]
 mod dst;
+#[cfg(test)]
+mod fake_http;
+pub mod gcs;
+mod google_auth;
 mod http;
 mod log;
 #[cfg(test)]
@@ -80,7 +86,8 @@ pub enum Error {
     /// The bucket URL or an option is missing or malformed.
     #[error("bucket config: {0}")]
     Config(String),
-    /// A claim or a commit's capture could not proceed.
+    /// A claim or a commit could not proceed: its capture failed, the
+    /// object is not open here, or another owner took it over.
     #[error("replica: {0}")]
     Replica(String),
     /// This instance does not serve the object and cannot claim it: it is draining, or the
@@ -91,9 +98,16 @@ pub enum Error {
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),
+    /// The store refused a conditional write's guard, but an earlier attempt
+    /// of the same request, or a copy sent beside it, may have been applied,
+    /// and the refusal may be of that one's own write: whether the write
+    /// landed is unknown. Reading the object back tells, unless a copy still
+    /// in flight lands after the read.
+    #[error("bucket: {0}; an earlier attempt may have landed")]
+    OutcomeUnknown(String),
     #[error("record: {0}")]
     Codec(#[from] serde_json::Error),
-    /// Another writer kept winning the conditional write.
+    /// Another writer kept winning the conditional write to the key named.
     #[error("{0} is contended")]
     Contended(String),
     /// Someone else rewrote this node's own record: this process no longer

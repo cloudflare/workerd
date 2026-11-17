@@ -71,6 +71,45 @@ class RewritingResponse final: public kj::HttpService::Response {
   }
 };
 
+// The user Worker's answer to a request for a remote image, sent only if
+// `should_block_image_response` lets it through, else replaced by a 403 whose body `finish()`
+// writes.
+class ImageFilterResponse final: public kj::HttpService::Response {
+ public:
+  explicit ImageFilterResponse(kj::HttpService::Response& inner): inner(inner) {}
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    auto type = headers.get(kj::HttpHeaderId::CONTENT_TYPE).orDefault(""_kj);
+    if (!should_block_image_response(
+            static_cast<uint16_t>(statusCode), type.asBytes().as<Rust>())) {
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
+    auto blocked = headers.cloneShallow();
+    blocked.clear();
+    blocked.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "text/plain;charset=UTF-8");
+    body = inner.send(403, "Forbidden", blocked, BLOCKED.size());
+    return newNullOutputStream();
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    return inner.acceptWebSocket(headers);
+  }
+
+  kj::Promise<void> finish() {
+    KJ_IF_SOME(out, body) {
+      co_await out->write(BLOCKED.asBytes());
+    }
+  }
+
+ private:
+  static constexpr kj::StringPtr BLOCKED = "Blocked"_kj;
+  kj::HttpService::Response& inner;
+  kj::Maybe<kj::Own<kj::AsyncOutputStream>> body;
+};
+
 // The connect() answer of a raw TCP connection: there is no HTTP response to write.
 class NullConnectResponse final: public kj::HttpService::ConnectResponse {
  public:
@@ -125,6 +164,14 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits) {
   return kj::heap<RewritingResponse>(inner, resolveEdits(table, edits));
+}
+
+kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner) {
+  return kj::heap<ImageFilterResponse>(inner);
+}
+
+kj::Promise<void> image_filter_finish(kj::HttpService::Response& response) {
+  return kj::downcast<ImageFilterResponse>(response).finish();
 }
 
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response() {

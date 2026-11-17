@@ -93,7 +93,8 @@ impl Node {
     #[jsg_property(prototype)]
     fn get_child(&self, lock: &mut jsg::Lock<'_>) -> Option<jsg::Rc<Node>> {
         let child = self.child.take(lock);
-        self.child.set(child.clone());
+        self.child
+            .set(child.as_ref().map(|child| child.clone(lock)));
         child
     }
 }
@@ -247,13 +248,13 @@ impl Target {
     }
 
     #[jsg_method]
-    fn same_node(&self) -> jsg::Rc<Node> {
-        self.child.clone()
+    fn same_node(&self, lock: &mut jsg::Lock<'_>) -> jsg::Rc<Node> {
+        self.child.clone(lock)
     }
 
     #[jsg_method]
-    fn take_node(&self, a: jsg::Rc<Node>) -> u32 {
-        a.value.get()
+    fn take_node(&self, lock: &mut jsg::Lock<'_>, a: jsg::Rc<Node>) -> u32 {
+        a.get(lock).value.get()
     }
 
     #[jsg_method]
@@ -323,10 +324,10 @@ unsafe fn native_lifetime(isolate: *mut v8::ffi::Isolate, count: u32, clones: u3
         let node = jsg::Rc::new(lock, Node::constructor(i));
         black_box(&node);
         for _ in 0..clones {
-            let copy = node.clone();
+            let copy = node.clone(lock);
             black_box(&copy);
         }
-        result ^= node.value.get();
+        result ^= node.get(lock).value.get();
     }
     result
 }

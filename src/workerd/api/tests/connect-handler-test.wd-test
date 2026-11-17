@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
           (name = "TARGET", service = (
             name = "connect-handler-test-local-address-endpoint",
             entrypoint = "LocalAddressEndpoint")),
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "CONNECT_HANDLER_PORT", fromEnvironment = "CONNECT_HANDLER_PORT"),
+          (name = "CONNECT_PROXY_PORT", fromEnvironment = "CONNECT_PROXY_PORT"),
         ],
       )
     ),
@@ -33,6 +36,8 @@ const unitTests :Workerd.Config = (
           (name = "STARTTLS_TARGET", service = (
             name = "connect-handler-test-starttls-endpoint",
             entrypoint = "StartTlsEndpoint")),
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "STARTTLS_PORT", fromEnvironment = "STARTTLS_PORT"),
         ],
       )
     ),
@@ -50,6 +55,10 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
         compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "CONNECT_ENDPOINT_PORT", fromEnvironment = "CONNECT_ENDPOINT_PORT"),
+        ],
       )
     ),
     ( name = "connect-handler-test-endpoint",
@@ -69,14 +78,16 @@ const unitTests :Workerd.Config = (
       )
     )
   ],
+  # BUILD.bazel's listen_port_bindings replaces each address with a port assigned when the test
+  # runs.
   sockets = [
-    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
-    (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
-    (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint")),
+    (name = "connect-handler", address = "127.0.0.1:0", tcp = (), service = "connect-handler-test"),
+    (name = "connect-proxy", address = "127.0.0.1:0", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
+    (name = "connect-endpoint", address = "127.0.0.1:0", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint")),
     # A keypair with tlsMode = startTls is what lets the handler on the other end of this socket
     # accept a startTls() upgrade; the matching certificate is the one the `internet` service
     # trusts above.
-    (name = "tcp", address = "*:8084", tcp = (
+    (name = "connect-starttls", address = "127.0.0.1:0", tcp = (
       tlsOptions = (
         keypair = (
           privateKey = embed "connect-handler-server.key",

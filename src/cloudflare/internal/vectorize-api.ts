@@ -324,7 +324,7 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
     throw new Error(
       `Failed to parse body as JSON, got: ${
         body.length > maxBodyLogChars
-          ? `${body.slice(0, maxBodyLogChars)}…`
+          ? `${body.slice(0, maxBodyLogChars)}...`
           : body
       }`
     );

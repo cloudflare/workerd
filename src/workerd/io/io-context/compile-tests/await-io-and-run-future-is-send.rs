@@ -3,8 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // The future given to `await_io_and_run` is polled without the isolate lock, so it cannot hold a
-// value that is not `Send`, such as a `jsg::Rc` (which holds a `std::rc::Rc`) or anything else
-// bound to the isolate.
+// value that is not `Send`, such as an `std::rc::Rc`.
 use std::rc::Rc;
 
 use io_context::IoContext;

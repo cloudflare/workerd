@@ -1,0 +1,18 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "queues-test.wd-test",
+    args = ["--experimental"],
+    data = ["queues-test.js"],
+)
+
+# `workerd serve` of the queues module, killed and started again.
+js_test(
+    name = "queues-restart-test",
+    size = "medium",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "queues-restart-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

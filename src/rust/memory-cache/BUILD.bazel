@@ -4,9 +4,9 @@ wd_rust_crate(
     name = "memory-cache",
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:bytes",
-        "@crates_vendor//:futures",
-        "@crates_vendor//:hashlink",
-        "@crates_vendor//:tokio",
+        "@crates_vendor//bytes",
+        "@crates_vendor//futures",
+        "@crates_vendor//hashlink",
+        "@crates_vendor//tokio",
     ],
 )

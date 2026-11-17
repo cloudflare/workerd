@@ -1,0 +1,8 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# D1, the bundled module `/workerd/d1.js` (Worker.Module.bundled).
+wd_cc_embed(
+    name = "d1-js",
+    src = "d1.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

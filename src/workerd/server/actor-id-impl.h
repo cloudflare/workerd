@@ -51,6 +51,7 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
   kj::Own<ActorIdFactory> cloneWithJurisdiction(
       kj::Maybe<kj::StringPtr> maybeJurisdiction) override;
   bool matchesJurisdiction(const ActorId& id) override;
+  kj::Maybe<kj::Own<ActorIdFactory>> cloneForSnapshot() const override;
 
  private:
   kj::byte key[SHA256_DIGEST_LENGTH];

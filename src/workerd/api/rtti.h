@@ -18,6 +18,9 @@ class RTTIModule final: public jsg::Object {
   RTTIModule() = default;
   RTTIModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   kj::Array<byte> exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags);
   kj::Array<byte> exportExperimentalTypes();
 

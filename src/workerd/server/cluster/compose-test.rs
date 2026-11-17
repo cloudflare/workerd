@@ -34,6 +34,7 @@ struct Worker<'a> {
 enum Kind<'a> {
     Worker(Worker<'a>),
     Disk,
+    Bucket,
     Network,
 }
 
@@ -87,6 +88,9 @@ fn set_service(mut service: service::Builder<'_>, name: &str, kind: Kind<'_>) {
         }
         Kind::Disk => {
             service.init_disk().set_writable(true);
+        }
+        Kind::Bucket => {
+            service.init_bucket().set_path("kv");
         }
         Kind::Network => {
             service.init_network();
@@ -219,11 +223,17 @@ fn a_deployment_may_contain_only_services() {
 
 #[test]
 fn a_deployment_defines_no_disk_and_no_internet() {
-    let config = services(&[("files", Kind::Disk), ("internet", Kind::Network)]);
+    let config = services(&[
+        ("files", Kind::Disk),
+        ("blobs", Kind::Bucket),
+        ("internet", Kind::Network),
+    ]);
     assert_eq!(
         refusal(deployment_config("app", &config)),
         "deployment \"app\" defines disk service \"files\". A deployment cannot define a disk. \
          Define the disk in the instance's config and refer to it by name.\n\
+         deployment \"app\" defines bucket service \"blobs\". A deployment cannot define a \
+         bucket service. Define it in the instance's config and refer to it by name.\n\
          deployment \"app\" defines service \"internet\". Only an instance's config may define \
          this service."
     );

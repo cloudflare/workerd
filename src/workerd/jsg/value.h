@@ -12,7 +12,6 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
-#include <workerd/util/autogate.h>
 
 #include <v8-container.h>
 #include <v8-date.h>
@@ -24,21 +23,6 @@
 #include <cmath>
 
 namespace workerd::jsg {
-
-// What the 8-, 16- and 32-bit integer unwraps below range-check for a finite number: with the
-// JSG_INTEGER_ENFORCE_RANGE autogate its integer part, so that a fraction just past a range limit
-// converts as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API arguments convert it
-// (2 ** 31 - 0.5 is the largest int, -0.5 is 0 as an unsigned type); without it the number
-// itself, so that such a fraction is out of range. The truncation is `trunc`'s, toward zero. An
-// integral value is returned as it is without reading the gate.
-inline double integerPartForRangeCheck(double value) {
-  double integerPart = std::trunc(value);
-  if (integerPart != value &&
-      util::Autogate::isEnabled(util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE)) {
-    return integerPart;
-  }
-  return value;
-}
 
 // =======================================================================================
 // Primitives (numbers, booleans)
@@ -102,7 +86,7 @@ class PrimitiveWrapper {
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     JSG_REQUIRE(
         value <= static_cast<int8_t>(kj::maxValue) && value >= static_cast<int8_t>(kj::minValue),
@@ -137,7 +121,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "
@@ -175,7 +159,7 @@ class PrimitiveWrapper {
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     JSG_REQUIRE(
         value <= static_cast<int16_t>(kj::maxValue) && value >= static_cast<int16_t>(kj::minValue),
@@ -210,7 +194,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "
@@ -252,7 +236,7 @@ class PrimitiveWrapper {
     if (!isFinite(value)) {
       return 0;
     }
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     // One would think that RangeError is more appropriate than TypeError,
     // but WebIDL says it should be TypeError.
@@ -292,7 +276,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
-    value = integerPartForRangeCheck(value);
+    value = std::trunc(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "
@@ -1431,18 +1415,10 @@ class ExceptionWrapper {
       kj::Exception*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
 
-    // If handle is a DOMException, then createTunneledException will not work
-    // here. We have to manually handle the DOMException case.
-    //
-    // Note that this is a general issue with any JSG_RESOURCE_TYPE that we
-    // happen to use as Errors. The createTunneledException() method uses V8's
-    // ToDetailString() to extract the detail about the error in a manner that
-    // is safe and side-effect free. Unfortunately, that mechanism does not
-    // work for JSG_RESOURCE_TYPE objects that are used as errors. For those,
-    // we need to drop down to the C++ interface and generate the kj::Exception
-    // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
-    // introduced, they'll need to be handled explicitly here also.
-    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    // A DOMException tunnels by the name and message it holds, which
+    // Lock::tryGetDomExceptionInfo() reads without running JavaScript. Other
+    // values tunnel by what kj::str() describes them as, which runs no
+    // JavaScript either.
     kj::Exception result = [&]() {
       kj::Exception::Type excType = [&]() {
         // Use .retryable and .overloaded properties as hints for what kj exception type to use.
@@ -1459,19 +1435,9 @@ class ExceptionWrapper {
         return kj::Exception::Type::FAILED;
       }();
 
-      KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(
-              js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
-        return KJ_EXCEPTION(FAILED,
-            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+      KJ_IF_SOME(info, js.tryGetDomExceptionInfo(JsValue(handle))) {
+        return KJ_EXCEPTION(FAILED, kj::str("jsg.DOMException(", info.name, "): ", info.message));
       } else {
-
-        static const constexpr kj::StringPtr PREFIXES[] = {
-#define V(name, _) name##_kj,
-          JS_ERROR_TYPES(V)
-#undef V
-              "DOMException"_kj,
-        };
 
         kj::String reason;
         if (!handle->IsObject()) {
@@ -1479,18 +1445,11 @@ class ExceptionWrapper {
           reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
         } else {
           reason = kj::str(handle);
-          bool found = false;
           // If the error message starts with a platform error type that we tunnel,
-          // prefix it with "jsg."
-          for (const auto& name: PREFIXES) {
-            if (reason.startsWith(name)) {
-              reason = kj::str("jsg.", reason);
-              found = true;
-              break;
-            }
-          }
-          // Everything else should just come through as a normal error.
-          if (!found) {
+          // prefix it with "jsg."; everything else should just come through as a normal error.
+          if (startsWithTunneledErrorType(reason)) {
+            reason = kj::str("jsg.", reason);
+          } else {
             reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }

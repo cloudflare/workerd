@@ -83,15 +83,10 @@ export function getRandomValues(
 }
 
 /**
- * We call this regardless of whether we are restoring from a snapshot or not,
- * after instantiating the Emscripten module but before restoring the snapshot.
- * Hypothetically, we could skip it for new dedicated snapshots.
+ * The entropy patch modules, as (file name, contents) pairs for the `_cloudflare` package.
  */
-export function entropyMountFiles(Module: Module): void {
-  const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
-  Module.FS.mkdir(cloudflareDir);
+export function entropyModuleFiles(): [string, ArrayBuffer][] {
   const files: [string, ArrayBuffer][] = [
-    ['__init__.py', new ArrayBuffer(0)],
     ['entropy_patches.py', entropyPatches],
     ['entropy_import_context.py', entropyImportContext],
     ['import_patch_manager.py', importPatchManager],
@@ -103,19 +98,14 @@ export function entropyMountFiles(Module: Module): void {
       entropyImportContextPackages,
     ]);
   }
-
-  for (const [name, contents] of files) {
-    Module.FS.writeFile(cloudflareDir + '/' + name, new Uint8Array(contents), {
-      canOwn: true,
-    });
-  }
+  return files;
 }
 
 /**
  * This prepares us to execute the top level scope. It changes JS state so it
  * needs to be called whether restoring snapshot or not. We have to call this
  * after the runtime is ready, so after restoring the snapshot in the snapshot
- * branch and after entropyMountFiles in the no-snapshot branch.
+ * branch and after mountCloudflarePackage in the no-snapshot branch.
  */
 export function entropyAfterRuntimeInit(Module: Module): void {
   setupShouldAllowBadEntropy(Module);

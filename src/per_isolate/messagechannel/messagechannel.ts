@@ -46,24 +46,21 @@ import type {
   EventTargetInternals,
   ExceptionPolicy,
 } from '../events/event-target-internals';
+import type { RuntimeClassHelpers } from '../runtime-class';
 
 const {
   ArrayIsArray,
   ArrayPrototypePush,
   Error,
   ObjectDefineProperties,
-  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   Symbol,
-  SymbolFor,
-  SymbolToStringTag,
   TypeError,
   WeakRef,
   WeakRefPrototypeDeref,
 } = primordials;
 
-const { cloneMessageData, getApiSymbol, getPrivateSymbol, queueReaction } =
-  utils;
+const { cloneMessageData, getPrivateSymbol, queueReaction } = utils;
 
 const {
   EventTarget,
@@ -75,6 +72,8 @@ const {
   setEventHandlerAttribute,
   setListenerCountHook,
 } = require('events/event-target-internals') as EventTargetInternals;
+const { markAsRuntimeClass, setNameAndLength } =
+  require('runtime-class') as RuntimeClassHelpers;
 
 // JSG's messages, so that misuse reads the same as with the C++ classes.
 const kIllegalInvocation =
@@ -332,52 +331,6 @@ class MessageChannel {
 
 const kSpecCompliantPropertyAttributes =
   compatFlags['spec_compliant_property_attributes'] === true;
-const kInternalClass = SymbolFor('cloudflare:internal-class');
-const kResourceTypeInspect = getApiSymbol('kResourceTypeInspect');
-const kNoInspectProperties = ObjectFreeze({ __proto__: null });
-
-function setNameAndLength(fn: unknown, name: string, length: number): void {
-  ObjectDefineProperties(fn, {
-    __proto__: null,
-    name: { __proto__: null, value: name },
-    length: { __proto__: null, value: length },
-  });
-}
-
-// What JSG puts on every resource type's prototype: the marker tools use to
-// recognize runtime classes, util.inspect()'s formatting hook, and, under
-// set_tostring_tag, the tag.
-function markAsRuntimeClass(proto: object, name: string): void {
-  ObjectDefineProperties(proto, {
-    __proto__: null,
-    [kInternalClass]: {
-      __proto__: null,
-      value: kInternalClass,
-      writable: false,
-      enumerable: false,
-      configurable: false,
-    },
-    [kResourceTypeInspect]: {
-      __proto__: null,
-      value: kNoInspectProperties,
-      writable: false,
-      enumerable: false,
-      configurable: true,
-    },
-  });
-  if (compatFlags['set_tostring_tag'] === true) {
-    ObjectDefineProperties(proto, {
-      __proto__: null,
-      [SymbolToStringTag]: {
-        __proto__: null,
-        value: name,
-        writable: true,
-        enumerable: false,
-        configurable: true,
-      },
-    });
-  }
-}
 
 // JSG methods are enumerable, and their length counts no optional
 // parameters.

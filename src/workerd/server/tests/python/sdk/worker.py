@@ -1,5 +1,4 @@
-# The tests in this file are primarily spread across Default.fetch() (in this module) and
-# Default.fetch() (in server.py).
+# The tests in this file are primarily spread across Default.fetch() and Server.fetch().
 #
 # The code in `Default.test()` (in this module) is used to actually perform the testing and its
 # behaviour doesn't need to strictly be held consistent. In fact it uses the JS fetch, so it's not
@@ -573,3 +572,35 @@ async def response_buffer_source_unit_tests(env):
 async def can_support_scheduled_cron_trigger(env):
     result = await env.SELF.scheduled(scheduledTime=1000, cron="* * * * 30")
     assert result.outcome == "ok"
+
+
+class Server(WorkerEntrypoint):
+    # The server that Default.fetch() sends its subrequests to, as `env.SERVER`.
+    async def fetch(self, request):
+        if request.url.endswith("/sub"):
+            return Response("Hi there!")
+        elif request.url.endswith("/sub_headers"):
+            assert request.headers.get("Custom-Req-Header") == "123"
+            return Response(
+                "Hi there!", headers={"Custom-Header-That-Should-Passthrough": True}
+            )
+        elif request.url.endswith("/redirect"):
+            return Response.redirect("https://example.com/sub", status=301)
+        elif request.url.endswith("/formdata"):
+            data = FormData({"field": "value"})
+            return Response(data)
+        elif request.url.endswith("/formdatablob"):
+            data = FormData({"field": "value"})
+            data["blob.py"] = Blob("print(42)", content_type="text/python")
+            data.append(
+                "metadata",
+                Blob("{}", content_type="text/python"),
+                filename="metadata.json",
+            )
+            return Response(data)
+        elif request.url.endswith("/ignore"):
+            # Just a test path that we ignore, used for requests that we don't care about
+            # the result of.
+            return Response("ignored")
+        else:
+            raise ValueError("Unexpected path " + request.url)

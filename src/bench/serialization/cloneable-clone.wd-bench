@@ -1,0 +1,11 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "cloneable-clone",
+    worker = (
+      modules = [(name = "worker", esModule = embed "cloneable-clone.js")],
+      compatibilityFlags = ["experimental", "expose_serialization_test_class"],
+    ),
+  )],
+);

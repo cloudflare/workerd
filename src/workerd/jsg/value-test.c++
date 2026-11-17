@@ -4,23 +4,11 @@
 
 #include "jsg-test.h"
 
-#include <workerd/util/autogate.h>
-
 namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
 class ContextGlobalObject: public Object, public ContextGlobal {};
-
-// Configure the process's autogates to exactly the JSG_INTEGER_ENFORCE_RANGE gate, or to none,
-// whatever the test variant's gates are. The caller deinitializes the gates afterwards.
-void enableIntegerEnforceRange() {
-  util::Autogate::initAutogateNamesForTest(
-      {kj::str(util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE)}, util::IgnoreAllAutogatesEnv::YES);
-}
-void disableIntegerEnforceRange() {
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
-}
 
 struct BoolContext: public ContextGlobalObject {
   kj::String takeBool(bool b) {
@@ -452,21 +440,8 @@ KJ_TEST("integers") {
       "-2147483648 and 2147483647 (inclusive).");
 }
 
-KJ_TEST("integers with the JSG_INTEGER_ENFORCE_RANGE autogate") {
+KJ_TEST("integers truncate before the range check") {
   Evaluator<IntContext, IntIsolate> e(v8System);
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  // Without the gate, the range check sees the fraction.
-  disableIntegerEnforceRange();
-  e.expectEval("takeInt(2147483647.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-2147483648 and 2147483647 (inclusive).");
-  e.expectEval("takeInt(-2147483648.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-2147483648 and 2147483647 (inclusive).");
-
-  // With the gate, the value is truncated first, as [EnforceRange] does.
-  enableIntegerEnforceRange();
   e.expectEval("takeInt(2147483647.5)", "string", "int: 2147483647");
   e.expectEval("takeInt(-2147483648.5)", "string", "int: -2147483648");
   e.expectEval("takeInt(-0.5)", "string", "int: 0");
@@ -541,18 +516,8 @@ KJ_TEST("unsigned integers") {
       "TypeError: Value out of range. Must be less than or equal to 4294967295.");
 }
 
-KJ_TEST("unsigned integers with the JSG_INTEGER_ENFORCE_RANGE autogate") {
+KJ_TEST("unsigned integers truncate before the range check") {
   Evaluator<Uint32Context, Uint32Isolate> e(v8System);
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  disableIntegerEnforceRange();
-  e.expectEval("takeUint32(-0.5)", "throws",
-      "TypeError: The value cannot be converted because it is negative and this "
-      "API expects a positive number.");
-  e.expectEval("takeUint32(4294967295.5)", "throws",
-      "TypeError: Value out of range. Must be less than or equal to 4294967295.");
-
-  enableIntegerEnforceRange();
   e.expectEval("takeUint32(-0.5)", "string", "uint32_t: 0");
   e.expectEval("takeUint32(4294967295.5)", "string", "uint32_t: 4294967295");
   e.expectEval("takeUint32(123.5)", "string", "uint32_t: 123");
@@ -688,12 +653,8 @@ KJ_TEST("bigints") {
       "TypeError: The value cannot be converted because it would be truncated.");
 }
 
-KJ_TEST(
-    "bigints range-check the untruncated number whatever the JSG_INTEGER_ENFORCE_RANGE autogate") {
+KJ_TEST("bigints range-check the untruncated number") {
   Evaluator<Uint64Context, Uint64Isolate> e(v8System);
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  enableIntegerEnforceRange();
   e.expectEval("takeUint64(-0.5)", "throws",
       "TypeError: The value cannot be converted because it is negative and this "
       "API expects a positive bigint.");
@@ -757,24 +718,8 @@ KJ_TEST("int8 integers") {
       "-128 and 127 (inclusive).");
 }
 
-KJ_TEST("int8 integers with the JSG_INTEGER_ENFORCE_RANGE autogate") {
+KJ_TEST("int8 integers truncate before the range check") {
   Evaluator<Int8Context, Int8Isolate> e(v8System);
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  disableIntegerEnforceRange();
-  e.expectEval("takeInt8(127.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-128 and 127 (inclusive).");
-  e.expectEval("takeInt8(-128.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-128 and 127 (inclusive).");
-  e.expectEval("takeUint8(255.5)", "throws",
-      "TypeError: Value out of range. Must be less than or equal to 255.");
-  e.expectEval("takeUint8(-0.5)", "throws",
-      "TypeError: The value cannot be converted because it is negative and this "
-      "API expects a positive number.");
-
-  enableIntegerEnforceRange();
   e.expectEval("takeInt8(127.5)", "string", "int8_t: 127");
   e.expectEval("takeInt8(-128.5)", "string", "int8_t: -128");
   e.expectEval("takeUint8(255.5)", "string", "uint8_t: 255");
@@ -852,24 +797,8 @@ KJ_TEST("int16 integers") {
       "-32768 and 32767 (inclusive).");
 }
 
-KJ_TEST("int16 integers with the JSG_INTEGER_ENFORCE_RANGE autogate") {
+KJ_TEST("int16 integers truncate before the range check") {
   Evaluator<Int16Context, Int16Isolate> e(v8System);
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  disableIntegerEnforceRange();
-  e.expectEval("takeInt16(32767.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-32768 and 32767 (inclusive).");
-  e.expectEval("takeInt16(-32768.5)", "throws",
-      "TypeError: Value out of range. Must be between "
-      "-32768 and 32767 (inclusive).");
-  e.expectEval("takeUint16(65535.5)", "throws",
-      "TypeError: Value out of range. Must be less than or equal to 65535.");
-  e.expectEval("takeUint16(-0.5)", "throws",
-      "TypeError: The value cannot be converted because it is negative and this "
-      "API expects a positive number.");
-
-  enableIntegerEnforceRange();
   e.expectEval("takeInt16(32767.5)", "string", "int16_t: 32767");
   e.expectEval("takeInt16(-32768.5)", "string", "int16_t: -32768");
   e.expectEval("takeUint16(65535.5)", "string", "uint16_t: 65535");

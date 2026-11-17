@@ -11,7 +11,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 #include <workerd/util/strong-bool.h>
 
@@ -60,6 +59,36 @@ capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler:
     externals[i](builder[i]);
   }
   return result;
+}
+
+namespace {
+
+kj::Promise<void> pushDelayedChannelTokenWhenReady(kj::Promise<kj::Array<byte>> token,
+    rpc::JsValue::ExternalPusher::Client pusher,
+    kj::Own<kj::PromiseFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>>
+        fulfiller) {
+  KJ_TRY {
+    auto bytes = co_await token;
+    auto req = pusher.pushDelayedChannelTokenRequest(
+        capnp::MessageSize{4 + bytes.size() / sizeof(capnp::word), 0});
+    req.setToken(bytes);
+    fulfiller->fulfill(req.send().getCap());
+  }
+  KJ_CATCH(exception) {
+    fulfiller->reject(exception.clone());
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+}  // namespace
+
+rpc::JsValue::ExternalPusher::DelayedChannelToken::Client RpcSerializerExternalHandler::
+    pushDelayedChannelToken(kj::Promise<kj::Array<byte>> token) {
+  auto paf =
+      kj::newPromiseAndFulfiller<rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
+  pendingExternals.add(
+      pushDelayedChannelTokenWhenReady(kj::mv(token), getExternalPusher(), kj::mv(paf.fulfiller)));
+  return kj::mv(paf.promise);
 }
 
 namespace {
@@ -465,7 +494,8 @@ class JsRpcCallRetryState final: public kj::Refcounted {
       kj::Own<JsRpcReplayMemoryTracker> replayMemoryTracker,
       rpc::JsRpcTarget::CallResults::Pipeline pipeline,
       kj::Maybe<kj::Rc<JsRpcCallAttemptObserver>> attemptObserver,
-      kj::Maybe<TraceContextParent> callSpanParents)
+      kj::Maybe<TraceContextParent> callSpanParents,
+      kj::Maybe<kj::Rc<kj::Canceler>> callCanceler)
       : parent(kj::mv(parent)),
         name(kj::mv(name)),
         operation(operation),
@@ -474,7 +504,8 @@ class JsRpcCallRetryState final: public kj::Refcounted {
         replayMemoryTracker(kj::mv(replayMemoryTracker)),
         pipeline(nullptr),
         attemptObserver(kj::mv(attemptObserver)),
-        callSpanParents(kj::mv(callSpanParents)) {
+        callSpanParents(kj::mv(callSpanParents)),
+        callCanceler(kj::mv(callCanceler)) {
     setPipeline(kj::mv(pipeline));
   }
 
@@ -566,6 +597,31 @@ class JsRpcCallRetryState final: public kj::Refcounted {
 
   StartedAttempt startAttempt(jsg::Lock& js, ActorCallRetryState::Attempt attempt);
 
+  // Lets disposing the JsRpcPromise cancel `promise`, an attempt or a backoff wait. The canceled
+  // promise rejects past the retry logic, so a canceled call is never retried.
+  template <typename T>
+  kj::Promise<T> wrapCancelable(kj::Promise<T> promise) {
+    KJ_IF_SOME(exception, canceledWith) {
+      return exception.clone();
+    }
+    KJ_IF_SOME(canceler, callCanceler) {
+      return canceler->wrap(kj::mv(promise)).attach(canceler.addRef());
+    }
+    return kj::mv(promise);
+  }
+
+  // Called when the JsRpcPromise is disposed. The JsRpcPromise cancels the canceler itself; this
+  // covers the gaps between one attempt or backoff wait settling and the next one starting, when
+  // the canceler wraps nothing.
+  void cancelCall(kj::Exception exception) {
+    canceledWith = kj::mv(exception);
+  }
+
+  // The exception the call was canceled with, if its JsRpcPromise was disposed.
+  kj::Maybe<kj::Exception> getCancellation() const {
+    return canceledWith.map([](const kj::Exception& exception) { return exception.clone(); });
+  }
+
  private:
   void releaseReplayState() {
     parent = kj::none;
@@ -599,6 +655,8 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
   kj::Maybe<TraceContextParent> callSpanParents;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> backoffCommitFulfiller;
+  kj::Maybe<kj::Rc<kj::Canceler>> callCanceler;
+  kj::Maybe<kj::Exception> canceledWith;
   bool committed = false;
 };
 
@@ -608,14 +666,15 @@ JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
     kj::Maybe<TraceContextParent> originatingCall,
     kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
     kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker,
-    kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver)
+    kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver,
+    kj::Maybe<IoOwn<kj::Canceler>> callCanceler)
     : inner(kj::mv(inner)),
       weakRef(kj::mv(weakRefParam)),
       originatingCall(ownOriginatingCall(kj::mv(originatingCall))),
       actorTargetRetryability(actorTargetRetryability),
       replayMemoryTracker(kj::mv(replayMemoryTracker)),
       attemptObserver(kj::mv(attemptObserver)),
-      state(Pending{kj::mv(pipeline)}) {
+      state(Pending{kj::mv(pipeline), kj::mv(callCanceler)}) {
   KJ_REQUIRE(weakRef->ref == kj::none);
   weakRef->ref = *this;
 }
@@ -658,9 +717,28 @@ void JsRpcPromise::setOriginatingCall(kj::Maybe<TraceContextParent> value) {
 }
 
 void JsRpcPromise::dispose(jsg::Lock& js) {
-  KJ_IF_SOME(resolved, state.tryGet<Resolved>()) {
-    // Disposing the promise implies disposing the final result.
-    tryCallDisposeMethod(js, jsg::JsValue(resolved.result.getHandle(js)));
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(pending, Pending) {
+      KJ_IF_SOME(canceler, pending.callCanceler) {
+        // The caller doesn't want the result, so cancel the call. Dropping the pipeline below
+        // releases the call's answer, which lets the callee cancel its side. If the response
+        // has already arrived, the canceler wraps nothing and the result is disposed on delivery.
+        auto exception = JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError,
+            "The RPC call was canceled because its promise was disposed.");
+        KJ_IF_SOME(retryState, pending.pipeline.tryGet<IoOwn<JsRpcCallRetryState>>()) {
+          retryState->cancelCall(exception.clone());
+        }
+        // Whoever awaits the promise sees the rejection. Nobody else asked to be told.
+        inner.getHandle(js).markAsHandled(js);
+        canceler->cancel(exception);
+      }
+    }
+    KJ_CASE_ONEOF(resolved, Resolved) {
+      // Disposing the promise implies disposing the final result.
+      tryCallDisposeMethod(js, jsg::JsValue(resolved.result.getHandle(js)));
+    }
+    KJ_CASE_ONEOF(rejected, Rejected) {}
+    KJ_CASE_ONEOF(disposed, Disposed) {}
   }
 
   state = Disposed();
@@ -784,15 +862,19 @@ struct JsRpcPromiseAndPipeline {
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
   kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
   kj::Maybe<kj::Rc<JsRpcCallAttemptObserver>> attemptObserver;
+  kj::Maybe<kj::Rc<kj::Canceler>> callCanceler;
 
   jsg::Ref<JsRpcPromise> asJsRpcPromise(jsg::Lock& js) && {
     auto makePromise = [&](JsRpcPromise::PendingPipeline pendingPipeline) {
+      auto ownAttemptObserver = attemptObserver.map([](kj::Rc<JsRpcCallAttemptObserver>& observer) {
+        return IoContext::current().addObject(observer.addRef());
+      });
+      auto ownCallCanceler = callCanceler.map([](kj::Rc<kj::Canceler>& canceler) {
+        return IoContext::current().addObject(canceler.addRef().toOwn());
+      });
       return js.alloc<JsRpcPromise>(jsg::JsRef<jsg::JsPromise>(js, promise), kj::mv(weakRef),
           kj::mv(pendingPipeline), kj::mv(originatingCall), actorTargetRetryability,
-          kj::mv(replayMemoryTracker),
-          attemptObserver.map([](kj::Rc<JsRpcCallAttemptObserver>& observer) {
-        return IoContext::current().addObject(observer.addRef());
-      }));
+          kj::mv(replayMemoryTracker), kj::mv(ownAttemptObserver), kj::mv(ownCallCanceler));
     };
     KJ_SWITCH_ONEOF(pipeline) {
       KJ_CASE_ONEOF(pipeline, rpc::JsRpcTarget::CallResults::Pipeline) {
@@ -916,13 +998,10 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
-// A stub's own policy applies only when it was given one and the userland gate is on. Otherwise
-// the runtime's default applies.
+// A stub's own policy applies when it was given one. Otherwise the runtime's default applies.
 ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent) {
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
-      return ActorRetryPolicy::userDefined(userPolicy);
-    }
+  KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
+    return ActorRetryPolicy::userDefined(userPolicy);
   }
   return ActorRetryPolicy::systemDefault();
 }
@@ -1060,11 +1139,16 @@ JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
   auto backoffCommitted = state->beginBackoff();
   state->onRetryAccepted();
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
-  auto backoff =
-      IoContext::current().afterLimitTimeout(delay).exclusiveJoin(kj::mv(backoffCommitted));
+  auto backoff = state->wrapCancelable(
+      IoContext::current().afterLimitTimeout(delay).exclusiveJoin(kj::mv(backoffCommitted)));
   return IoContext::current().awaitIo(js, kj::mv(backoff),
       [state = kj::mv(state)](jsg::Lock& js) mutable -> JsRpcCallAttemptPromise {
     state->finishBackoffWait();
+    // The promise may have been disposed after the backoff finished. Don't send another attempt
+    // only to cancel it.
+    KJ_IF_SOME(exception, state->getCancellation()) {
+      return finishFailedJsRpcCall(js, *state, kj::mv(exception));
+    }
     if (state->isCommitted()) {
       auto exception = state->getRetryState().handleCommittedAttemptFailure(
           state->getRetryState().getOriginalFailure());
@@ -1102,7 +1186,8 @@ JsRpcCallAttemptPromise awaitJsRpcCallAttempt(jsg::Lock& js,
       kj::mv(promise), [state = state.addRef()](const kj::Exception& exception) mutable {
     state->cancelAttempt(exception);
   });
-  auto attempt = captureJsRpcCallAttempt(kj::mv(timedAttempt), kj::mv(callSpan), state.addRef());
+  auto attempt = state->wrapCancelable(
+      captureJsRpcCallAttempt(kj::mv(timedAttempt), kj::mv(callSpan), state.addRef()));
   return IoContext::current().awaitIo(js, kj::mv(attempt),
       [state = kj::mv(state)](
           jsg::Lock& js, JsRpcCallAttemptResult result) mutable -> JsRpcCallAttemptPromise {
@@ -1136,6 +1221,23 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallA
     observerState->recordFailure(kj::mv(observer), exception);
     kj::throwException(kj::mv(exception));
   }
+}
+
+// Settles like `call`, except that it rejects as soon as one of `pendingExternals` does, with its
+// error, and resolves only after they have all been delivered. An argument whose external could
+// not be delivered, such as a stub whose channel's owner refused to issue a token for it, is
+// unusable on the other side, so the caller gets the reason instead of the call's result. The
+// call is canceled in that case.
+kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> awaitCallAndPendingExternals(
+    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> call,
+    kj::Array<kj::Promise<void>> pendingExternals) {
+  auto delivered = kj::joinPromisesFailFast(kj::mv(pendingExternals)).fork();
+  auto response = co_await call.exclusiveJoin(delivered.addBranch().then(
+      []() -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
+    return kj::NEVER_DONE;
+  }));
+  co_await delivered.addBranch();
+  co_return kj::mv(response);
 }
 
 // Core implementation of making an RPC call, reusable for many cases below.
@@ -1225,6 +1327,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       kj::Array<const byte> serializedData;
       size_t serializedDataCapacity = 0;
       auto serializerReplayability = RpcSerializerExternalHandler::Replayability::REPLAYABLE;
+      kj::Array<kj::Promise<void>> pendingExternals;
       KJ_IF_SOME(args, maybeArgs) {
         // If we have arguments, serialize them.
         // Note that we may fail to serialize some element, in which case this will throw back to
@@ -1254,6 +1357,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           serializedData = kj::mv(serialized.data);
           serializedDataCapacity = serialized.dataCapacity;
           serializerReplayability = externalHandler.getReplayability();
+          pendingExternals = externalHandler.releasePendingExternals();
         }
       } else {
         // This is a property access.
@@ -1273,6 +1377,12 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(resolveOneCall().client), callPlan,
           jsRpcCallSpan, actorTargetRetryability, DeferActorRpcFailure(retriesEnabled));
       auto resultPromise = kj::mv(dispatch.promise);
+      if (pendingExternals.size() > 0) {
+        // Pending externals make the call ineligible for replay (see JsRpcCallPlan), so this
+        // wraps the only attempt.
+        resultPromise =
+            awaitCallAndPendingExternals(kj::mv(resultPromise), kj::mv(pendingExternals));
+      }
 
       // A follow-up call through this result's pending pipeline still targets the actor, but cannot
       // create a fresh attempt without replaying the call that produced the pipeline.
@@ -1292,6 +1402,11 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // retained when traced, so the untraced path holds no span state.
       auto originatingCall = jsRpcCallSpan.getSpanParentsIfObserved();
 
+      kj::Maybe<kj::Rc<kj::Canceler>> callCanceler;
+      if (FeatureFlags::get(js).getRpcDisposeCancelsCall()) {
+        callCanceler = kj::rc<kj::Canceler>();
+      }
+
       kj::Maybe<kj::Rc<JsRpcCallRetryState>> callRetryState;
       KJ_IF_SOME(retryState, retrySetup.state) {
         if (retryState->isRetryEnabled()) {
@@ -1301,7 +1416,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               kj::mv(KJ_ASSERT_NONNULL(retrySetup.replayMemoryTracker)), kj::mv(dispatch.pipeline),
               dispatch.attemptObserver.map(
                   [](kj::Rc<JsRpcCallAttemptObserver>& observer) { return observer.addRef(); }),
-              originatingCall.map([](TraceContextParent& value) { return value.addRef(); }));
+              originatingCall.map([](TraceContextParent& value) { return value.addRef(); }),
+              callCanceler.map([](kj::Rc<kj::Canceler>& canceler) { return canceler.addRef(); }));
           // As with fetch, the retry timeout excludes the output-gate wait. The first attempt
           // cannot settle before its gate clears, so the restart precedes any retry decision. If
           // the gate breaks, the attempt fails through its client instead.
@@ -1319,6 +1435,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         KJ_IF_SOME(tracker, retrySetup.replayMemoryTracker) {
           resultPromise = resultPromise.attach(
               kj::defer([tracker = kj::addRef(*tracker)]() mutable { tracker->release(); }));
+        }
+        // With retries, the retry state wraps each attempt and backoff wait instead.
+        KJ_IF_SOME(canceler, callCanceler) {
+          resultPromise = canceler->wrap(kj::mv(resultPromise)).attach(canceler.addRef());
         }
       }
 
@@ -1420,6 +1540,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         .actorTargetRetryability = pipelineActorTargetRetryability,
         .replayMemoryTracker = kj::mv(promiseReplayMemoryTracker),
         .attemptObserver = kj::mv(pendingAttemptObserver),
+        .callCanceler = kj::mv(callCanceler),
       };
     }, [&](jsg::Value error) -> JsRpcPromiseAndPipeline {
       // Probably a serialization error. Need to convert to an async error since we never throw
@@ -1817,24 +1938,13 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
           }
           KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
             // Token isn't available synchronously, so we have to send a promise.
-            auto paf = kj::newPromiseAndFulfiller<
-                rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
-
-            // Arrange to send the token when it's ready.
-            ioctx.addTask(
-                promise.then([pusher = externalHandler.getExternalPusher(),
-                                 fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
-              auto req = pusher.pushDelayedChannelTokenRequest(
-                  capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
-              req.setToken(token);
-              fulfiller->fulfill(req.send().getCap());
-            }));
-
-            externalHandler.write([cap = kj::mv(cap), promise = kj::mv(paf.promise)](
-                                      rpc::JsValue::External::Builder builder) mutable {
+            externalHandler.write(
+                [cap = kj::mv(cap),
+                    delayed = externalHandler.pushDelayedChannelToken(kj::mv(promise))](
+                    rpc::JsValue::External::Builder builder) mutable {
               auto target = builder.initRpcTarget();
               target.setCap(kj::mv(cap));
-              target.setDelayedChannelToken(kj::mv(promise));
+              target.setDelayedChannelToken(kj::mv(delayed));
             });
           }
         }
@@ -1974,6 +2084,101 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     jsg::JsValue value,
     Func makeBuilder,
     rpc::JsValue::ExternalPusher::Client externalPusher);
+
+namespace {
+
+// Where an incoming call's JavaScript continuation writes the call's result.
+struct JsRpcCallResultTarget {
+  capnp::CallContext<rpc::JsRpcTarget::CallParams, rpc::JsRpcTarget::CallResults> callContext;
+  kj::Own<capnp::CallContextHook> ownCallContext;
+  rpc::JsValue::ExternalPusher::Client externalPusher;
+};
+
+// Serializes `value` into the results of `target`'s call, setting the call's pipeline.
+void writeJsRpcCallResult(jsg::Lock& js,
+    jsg::JsValue value,
+    JsRpcCallResultTarget& target,
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>>& callPipelineFulfiller) {
+  rpc::JsRpcTarget::CallResults::Builder results = nullptr;
+  auto maybePipeline = serializeJsValueWithPipeline(js, value, [&](capnp::MessageSize hint) {
+    hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
+    hint.capCount += 1;  // for callPipeline
+    results = target.callContext.initResults(hint);
+    return results.initResult();
+  }, kj::mv(target.externalPusher));
+
+  KJ_SWITCH_ONEOF(maybePipeline) {
+    KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
+      results.setCallPipeline(kj::mv(obj.cap));
+
+      // Note that hasDisposer is ONLY meant to indicate the presence of an
+      // application-level disposer. It need not be true if we only have stub disposers.
+      results.setHasDisposer(obj.hasDispose);
+    }
+    KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
+      // Serialization should have produced a single stub. We can use that same stub as
+      // the callPipeline.
+      auto externals = results.asReader().getResult().getExternals();
+      KJ_ASSERT(externals.size() == 1);
+      auto external = externals[0];
+      KJ_ASSERT(external.isRpcTarget());
+      results.setCallPipeline(external.getRpcTarget().getCap());
+    }
+    KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
+      results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
+      // leave hasDisposer false
+    }
+  }
+
+  KJ_IF_SOME(cpf, callPipelineFulfiller) {
+    cpf->fulfill(results.getCallPipeline());
+  }
+}
+
+// The stubs an incoming call received as arguments. The method's continuation owns them and
+// disposes them when the method settles.
+using JsRpcParamStubs = WeakOwner<kj::Own<RpcStubDisposalGroup>>;
+
+// Disposes the argument stubs of a canceled call, if the method's continuation still holds them.
+// Disposing stubs requires the isolate lock, which the frame teardown that detects the
+// cancellation does not hold, so it runs in a waitUntil task; nothing waits for plain tasks once
+// the request is done. If the IoContext is gone or no incoming request is left to run the task,
+// the session has already ended and the stubs are left to the continuation.
+void disposeParamStubsOfCanceledCall(
+    IoContext::WeakRef& weakContext, kj::Weak<JsRpcParamStubs> paramStubs) {
+  weakContext.runIfAlive([&](IoContext& context) {
+    if (!context.hasCurrentIncomingRequest()) return;
+    auto disposal = context.run([paramStubs = kj::mv(paramStubs)](Worker::Lock&) mutable {
+      KJ_IF_SOME(stubs, paramStubs.tryGet()) {
+        stubs.get()->disposeAll();
+      }
+    });
+    context.addWaitUntil(disposal.catch_([](kj::Exception&&) {}));
+  });
+}
+
+// Awaits the result of an incoming call. Dropping the returned promise before the method settles
+// means the call was canceled. The frame's teardown then drops
+// `target`, which holds the call context and with it the caller's ExternalPusher, and disposes the
+// stubs the caller passed as arguments. Once the caller's capabilities are released, they no
+// longer keep the session open, even though the method's JavaScript keeps running.
+kj::Promise<void> awaitCancelableIncomingCall(IoContext& context,
+    kj::Promise<void> result,
+    kj::Own<WeakOwner<JsRpcCallResultTarget>> target,
+    kj::Maybe<kj::Weak<JsRpcParamStubs>> paramStubs) {
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  auto weakContext = context.getWeakRef();
+  KJ_DEFER(if (invocation.isCanceling()) {
+    KJ_IF_SOME(stubs, paramStubs) {
+      disposeParamStubsOfCanceledCall(*weakContext, kj::mv(stubs));
+    } else {
+      // silence bogus clang warning about dangling else
+    }
+  });
+  co_await result;
+}
+
+}  // namespace
 
 // Callee-side implementation of JsRpcTarget.
 //
@@ -2179,11 +2384,26 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
       // backing object's lifetime is that of the RPC call, but in reality they are refcounted
       // under the hood. Since we'll be executing the call in the JS microtask queue, we have no
       // ability to actually cancel execution if a cancellation arrives over RPC, and at the end of
-      // that execution we're going to access the call context to write the results. We could
-      // invent some complicated way to skip initializing results in the case the call has been
-      // canceled, but it's easier and safer to just grab a refcount on the call context object
-      // itself, which fully protects us. So... do that.
-      auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
+      // that execution we're going to access the call context to write the results. So the
+      // result target holds a refcount on the call context object itself.
+      //
+      // The call context's params include the caller's ExternalPusher, and the argument stubs
+      // also point back at the caller, so holding either keeps the session open. So the call's
+      // promise owns the target and the continuation only refers to it weakly, and canceling the
+      // call disposes the argument stubs (see awaitCancelableIncomingCall()). This way a canceled
+      // call doesn't keep the session open until the method settles.
+      auto resultTarget = kj::heap<WeakOwner<JsRpcCallResultTarget>>(JsRpcCallResultTarget{
+        .callContext = callContext,
+        .ownCallContext = capnp::CallContextHook::from(callContext).addRef(),
+        .externalPusher = kj::mv(externalPusher),
+      });
+      auto weakResultTarget = resultTarget->addWeak();
+      auto paramStubs =
+          invocationResult.paramDisposalGroup.map([](kj::Own<RpcStubDisposalGroup>& group) {
+        return kj::heap<JsRpcParamStubs>(kj::mv(group));
+      });
+      auto weakParamStubs =
+          paramStubs.map([](kj::Own<JsRpcParamStubs>& stubs) { return stubs->addWeak(); });
 
       auto result = ctx.awaitJs(js,
           js.toPromise(invocationResult.returnValue)
@@ -2193,52 +2413,21 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
                       // this continuation will still execute, sice it's a JS promise continuation.
                       // But `this` could have been destroyed in the meantime. So all our captures
                       // must take full ownership.
-                      [callContext, ownCallContext = kj::mv(ownCallContext),
-                          paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
-                          externalPusher = kj::mv(externalPusher),
+                      [weakResultTarget = kj::mv(weakResultTarget), paramStubs = kj::mv(paramStubs),
                           callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
                           jsg::Lock& js, jsg::Value value) mutable {
         jsg::JsValue resultValue(value.getHandle(js));
 
-        rpc::JsRpcTarget::CallResults::Builder results = nullptr;
-        auto maybePipeline =
-            serializeJsValueWithPipeline(js, resultValue, [&](capnp::MessageSize hint) {
-          hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
-          hint.capCount += 1;  // for callPipeline
-          results = callContext.initResults(hint);
-          return results.initResult();
-        }, kj::mv(externalPusher));
-
-        KJ_SWITCH_ONEOF(maybePipeline) {
-          KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
-            results.setCallPipeline(kj::mv(obj.cap));
-
-            // Note that hasDisposer is ONLY meant to indicate the presence of an
-            // application-level disposer. It need not be true if we only have stub disposers.
-            results.setHasDisposer(obj.hasDispose);
-          }
-          KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
-            // Serialization should have produced a single stub. We can use that same stub as
-            // the callPipeline.
-            auto externals = results.asReader().getResult().getExternals();
-            KJ_ASSERT(externals.size() == 1);
-            auto external = externals[0];
-            KJ_ASSERT(external.isRpcTarget());
-            results.setCallPipeline(external.getRpcTarget().getCap());
-          }
-          KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
-            results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
-            // leave hasDisposer false
-          }
+        KJ_IF_SOME(target, weakResultTarget.tryGet()) {
+          writeJsRpcCallResult(js, resultValue, target.get(), callPipelineFulfiller);
+        } else {
+          // The call was canceled, so nobody will receive the result. Dispose it as the
+          // caller would have.
+          tryCallDisposeMethod(js, resultValue);
         }
 
-        KJ_IF_SOME(cpf, callPipelineFulfiller) {
-          cpf->fulfill(results.getCallPipeline());
-        }
-
-        // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
-        // as a result of the promise being rejected). This will implicitly dispose the param
-        // stubs.
+        // paramStubs will be destroyed when we return (or when this lambda is destroyed as a
+        // result of the promise being rejected). This will implicitly dispose the param stubs.
       }),
                   ctx.addFunctor(
                       [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
@@ -2252,6 +2441,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         }
         js.throwException(kj::mv(error));
       })));
+      result = awaitCancelableIncomingCall(
+          ctx, kj::mv(result), kj::mv(resultTarget), kj::mv(weakParamStubs));
 
       if (ctx.hasOutputGate()) {
         // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
@@ -2817,6 +3008,12 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
 
+  // There is no call left to fail when a returned external can't be delivered. The recipient gets
+  // the error when it uses the external, and the IoContext reports it as an uncaught exception.
+  for (auto& pending: externalHandler.releasePendingExternals()) {
+    IoContext::current().addTask(kj::mv(pending));
+  }
+
   return js.withinHandleScope([&]() -> MakeCallPipeline::Result {
     jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {
       // Primitive value. Return a fake pipeline just so that we get nice errors if someone tries
@@ -3233,22 +3430,34 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         incomingRequest(incomingRequest),
         isDynamicDispatch(isDynamicDispatch) {}
 
-  // Override call() to emit the Return event when the top-level RPC call completes.
-  // This marks when the handler returned a value, NOT when all data has been streamed or all
-  // capabilities released.
+  // Override call() to emit the Return event when the top-level RPC call completes, and to note
+  // whether it completed.
+  // The Return event marks when the handler returned a value, NOT when all data has been streamed
+  // or all capabilities released.
   kj::Promise<void> call(CallContext callContext) override {
-    return JsRpcTargetBase::call(kj::mv(callContext))
-        .then([weakThis = addWeakToThis()]() {
-      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before return");
-      KJ_IF_SOME(t, self.tracer) {
-        t->setReturn(self.ioCtx.now());
-      }
-    }).catch_([weakThis = addWeakToThis()](kj::Exception&& exception) {
-      markJsRpcExceptionAsDelivered(
-          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before exception").ioCtx,
-          exception);
+    topLevelCallStarted = true;
+    auto weakThis = addWeakToThis();
+    KJ_TRY {
+      co_await JsRpcTargetBase::call(kj::mv(callContext));
+    }
+    KJ_CATCH(exception) {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before exception");
+      self.topLevelCallCompleted = true;
+      markJsRpcExceptionAsDelivered(self.ioCtx, exception);
       kj::throwException(kj::mv(exception));
-    });
+    }
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before return");
+    self.topLevelCallCompleted = true;
+    KJ_IF_SOME(t, self.tracer) {
+      t->setReturn(self.ioCtx.now());
+    }
+  }
+
+  // Whether the session's top-level call was canceled before it completed, for example because the
+  // caller disposed its promise. (If the caller goes away, the session's event is torn down rather
+  // than completing, so nothing asks.)
+  bool wasTopLevelCallCanceled() const {
+    return topLevelCallStarted && !topLevelCallCompleted;
   }
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
@@ -3340,6 +3549,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   kj::Maybe<kj::Rc<BaseTracer>> tracer;
   IoContext::IncomingRequest& incomingRequest;
   bool isDynamicDispatch;
+  bool topLevelCallStarted = false;
+  bool topLevelCallCompleted = false;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
@@ -3405,13 +3616,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     }
   }
 
-  // YES if the call invokes a method marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND
-  // is enabled. This runs before the claim, so it must run no user code.
+  // YES if the call invokes a method marked with retryable(). This runs before the claim, so it
+  // must run no user code.
   IsRetryableHandler isRetryableMethod(
       jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) {
-    if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-      return IsRetryableHandler::NO;
-    }
     auto name = KJ_UNWRAP_OR(directMethodName(params), return IsRetryableHandler::NO);
     if (isReservedName(name)) return IsRetryableHandler::NO;
     auto method = KJ_UNWRAP_OR(findMethodWithoutUserCode(js, targetInfo.target,
@@ -3479,7 +3687,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
-    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+    // Like a fetch handler whose client went away, a session that ended before its top-level call
+    // completed reports a canceled outcome.
+    co_return WorkerInterface::CustomEvent::Result{
+      .outcome = target.wasTopLevelCallCanceled() ? EventOutcome::CANCELED : EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.

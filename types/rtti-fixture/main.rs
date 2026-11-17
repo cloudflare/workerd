@@ -18,7 +18,11 @@ use jsg_macros::jsg_struct;
 type Label = String;
 type OptionalLabel = Option<Label>;
 
-#[jsg_struct(name = "RustRttiResult")]
+#[jsg_struct(
+    name = "RustRttiResult",
+    ts_override = "{ count: RustRttiCount }",
+    ts_define = "type RustRttiCount = number;"
+)]
 struct ResultData {
     pub label: String,
     pub count: u32,
@@ -39,7 +43,11 @@ enum Payload<'a> {
     Text(String),
 }
 
-#[jsg_resource(name = "RustRttiFixture", ts_root)]
+#[jsg_resource(
+    name = "RustRttiFixture",
+    ts_root,
+    ts_override = "{ echo<T extends Uint8Array>(value: T): T }"
+)]
 struct Fixture {
     label: String,
     child: jsg::Cell<Option<jsg::Rc<Self>>>,
@@ -182,7 +190,7 @@ impl Fixture {
     #[jsg_property(prototype)]
     fn get_child(&self, lock: &mut jsg::Lock<'_>) -> jsg::Nullable<jsg::Rc<Self>> {
         let child = self.child.take(lock);
-        let result = child.clone();
+        let result = child.as_ref().map(|child| child.clone(lock));
         self.child.set(child);
         match result {
             Some(child) => jsg::Nullable::Some(child),
@@ -219,8 +227,8 @@ impl Fixture {
     }
 
     #[jsg_method]
-    fn with_this(this: jsg::Rc<Self>, _lock: &mut jsg::Lock, suffix: String) -> String {
-        format!("{}{suffix}", this.label)
+    fn with_this(this: jsg::Rc<Self>, lock: &mut jsg::Lock, suffix: String) -> String {
+        format!("{}{suffix}", this.get(lock).label)
     }
 
     #[jsg_method]
@@ -316,6 +324,7 @@ impl jsg::Resource for Versioned {
         registry.add(Self::get_mode_member(placement));
         if flags.get_cache_option_enabled() {
             registry.add(Self::cached_member());
+            registry.ts_override("{ cached(): true }");
         }
     }
 }

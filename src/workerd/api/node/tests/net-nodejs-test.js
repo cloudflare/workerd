@@ -2296,3 +2296,103 @@ export const testBlockList = {
     ok(bl.check('::ffff:192.168.12.100', 'ipv6'));
   },
 };
+
+// Addresses are compared by value, not by spelling.
+export const testBlockListAddressComparison = {
+  test() {
+    // IPv4 addresses at or above 128.0.0.0 order correctly.
+    const v4 = new net.BlockList();
+    v4.addRange('10.0.0.0', '200.0.0.0');
+    ok(v4.check('10.0.0.0'));
+    ok(v4.check('150.0.0.0'));
+    ok(v4.check('200.0.0.0'));
+    ok(!v4.check('9.255.255.255'));
+    ok(!v4.check('200.0.0.1'));
+    ok(!v4.check('255.255.255.255'));
+    throws(() => v4.addRange('200.0.0.0', '10.0.0.0'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+    v4.addSubnet('224.0.0.0', 4);
+    ok(v4.check('239.255.255.255'));
+    ok(!v4.check('240.0.0.0'));
+
+    // A /0 covers everything, a /32 or /128 exactly one address.
+    const all = new net.BlockList();
+    all.addSubnet('0.0.0.0', 0);
+    all.addSubnet('::', 0, 'ipv6');
+    ok(all.check('255.255.255.255'));
+    ok(all.check('ffff::', 'ipv6'));
+    const one = new net.BlockList();
+    one.addSubnet('10.0.0.1', 32);
+    one.addSubnet('2001:db8::1', 128, 'ipv6');
+    ok(one.check('10.0.0.1'));
+    ok(!one.check('10.0.0.0'));
+    ok(one.check('2001:db8::1', 'ipv6'));
+    ok(!one.check('2001:db8::2', 'ipv6'));
+
+    // Equivalent IPv6 spellings match, while the rule keeps its spelling.
+    const v6 = new net.BlockList();
+    v6.addAddress('2001:DB8::1', 'ipv6');
+    ok(v6.check('2001:db8:0:0:0:0:0:1', 'ipv6'));
+    ok(v6.check('2001:0db8::0001', 'ipv6'));
+    ok(!v6.check('2001:db8::2', 'ipv6'));
+    deepStrictEqual(v6.rules, ['Address: IPv6 2001:DB8::1']);
+
+    // IPv4 rules match an IPv4-mapped IPv6 address however it is written.
+    const mapped = new net.BlockList();
+    mapped.addAddress('192.168.10.1');
+    mapped.addRange('192.168.11.1', '192.168.11.10');
+    mapped.addSubnet('192.168.12.0', 24);
+    ok(mapped.check('::FFFF:192.168.10.1', 'ipv6'));
+    ok(mapped.check('::ffff:c0a8:a01', 'ipv6'));
+    ok(mapped.check('0:0:0:0:0:ffff:192.168.11.5', 'ipv6'));
+    ok(mapped.check('::ffff:c0a8:c64', 'ipv6'));
+    ok(!mapped.check('::ffff:192.168.10.2', 'ipv6'));
+    // An embedded IPv4 address that is not IPv4-mapped is not an IPv4 address.
+    ok(!mapped.check('64:ff9b::192.168.10.1', 'ipv6'));
+    ok(!mapped.check('::192.168.10.1', 'ipv6'));
+
+    // IPv6 rules accept and match embedded dotted-quad notation.
+    const embedded = new net.BlockList();
+    embedded.addAddress('64:ff9b::192.168.10.1', 'ipv6');
+    embedded.addSubnet('::ffff:10.0.0.0', 104, 'ipv6');
+    ok(embedded.check('64:ff9b::c0a8:a01', 'ipv6'));
+    ok(embedded.check('::ffff:10.1.2.3', 'ipv6'));
+    ok(embedded.check('::ffff:a01:203', 'ipv6'));
+    ok(!embedded.check('::ffff:11.0.0.0', 'ipv6'));
+    deepStrictEqual(embedded.rules, [
+      'Address: IPv6 64:ff9b::192.168.10.1',
+      'Subnet: IPv6 ::ffff:10.0.0.0/104',
+    ]);
+
+    // Rules survive a round trip through toJSON/fromJSON.
+    const copy = new net.BlockList();
+    copy.fromJSON(embedded.toJSON());
+    deepStrictEqual(copy.rules, embedded.rules);
+    const copy2 = new net.BlockList();
+    copy2.fromJSON([
+      'Range: IPv6 ::ffff:10.0.0.1-::ffff:10.0.0.9',
+      'Address: IPv6 ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255',
+    ]);
+    ok(copy2.check('::ffff:10.0.0.5', 'ipv6'));
+    ok(!copy2.check('::ffff:10.0.0.10', 'ipv6'));
+    ok(copy2.check('ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'ipv6'));
+
+    // A zone takes no part in matching, so appending one cannot evade a rule.
+    const zoned = new net.BlockList();
+    zoned.addAddress('fe80::1', 'ipv6');
+    zoned.addSubnet('fe80:1::', 32, 'ipv6');
+    zoned.addRange('fe80:2::1', 'fe80:2::9', 'ipv6');
+    zoned.addAddress('10.0.0.1');
+    ok(zoned.check('fe80::1%eth0', 'ipv6'));
+    ok(!zoned.check('fe80::%eth0', 'ipv6'));
+    ok(zoned.check('fe80:1::5%eth0', 'ipv6'));
+    ok(zoned.check('fe80:2::5%eth0', 'ipv6'));
+    ok(zoned.check('::ffff:10.0.0.1%eth0.1', 'ipv6'));
+    ok(!zoned.check('::ffff:10.0.0.2%10.0.0.1', 'ipv6'));
+    zoned.addAddress('fe80::2%eth0', 'ipv6');
+    ok(zoned.check('fe80::2', 'ipv6'));
+    ok(zoned.check('fe80::2%eth1', 'ipv6'));
+    deepStrictEqual(zoned.rules.at(-1), 'Address: IPv6 fe80::2%eth0');
+  },
+};

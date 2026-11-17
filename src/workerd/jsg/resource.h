@@ -13,7 +13,6 @@
 #include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/meta.h>
-#include <workerd/jsg/modules.capnp.h>
 // JSG has very entrenched include cycles
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
@@ -46,8 +45,6 @@ const auto kIllegalInvocation =
 
 class Serializer;
 class Deserializer;
-
-void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
 
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
@@ -1311,6 +1308,9 @@ struct ResourceTypeBuilder {
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
     // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
     auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    // If the parent's template was restored from a startup snapshot, its registerMembers never
+    // ran and wildcardHandler is still unset so run it now.
+    parentWrapper.ensureMembersRegistered(isolate);
     if (parentWrapper.wildcardHandler != kj::none) {
       auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
       KJ_ASSERT(
@@ -1702,8 +1702,6 @@ struct ResourceTypeBuilder {
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
 
-  inline void registerJsBundle(Bundle::Reader bundle) { /* handled at the second stage */ }
-
  private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
@@ -1712,86 +1710,6 @@ struct ResourceTypeBuilder {
   v8::Local<v8::ObjectTemplate> prototype;
   v8::Local<v8::ObjectTemplate> inspectProperties;
   v8::Local<v8::Signature> signature;
-};
-
-// initializes javascript parts of a context
-template <typename TypeWrapper, typename Self>
-struct JsSetup {
-  KJ_DISALLOW_COPY_AND_MOVE(JsSetup);
-
-  JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
-
-  inline void registerJsBundle(Bundle::Reader bundle) {
-    ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
-  }
-
-  // the rest of the callbacks are empty
-
-  template <typename Type>
-  inline void registerInherit() {}
-
-  template <const char* name>
-  inline void registerInheritIntrinsic(v8::Intrinsic intrinsic) {}
-
-  template <typename Method, Method method>
-  inline void registerCallable() {}
-
-  template <const char* name, auto method>
-  inline void registerMethod() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerStaticMethod() {}
-
-  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerInstanceProperty() {}
-
-  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerPrototypeProperty() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyInstanceProperty() {}
-
-  template <typename T>
-  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {}
-
-  template <const char* name>
-  inline void registerPrivateSymbol() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyPrototypeProperty() {}
-
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
-  inline void registerLazyInstanceProperty() {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerInspectProperty() {}
-
-  template <const char* name, typename T>
-  inline void registerStaticConstant(T value) {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerIterable() {}
-
-  template <const char* name, typename Method, Method method>
-  inline void registerAsyncIterable() {}
-
-  template <typename Type, const char* name>
-  inline void registerNestedType() {}
-
-  inline void registerTypeScriptRoot() {}
-
-  template <const char* tsOverride>
-  inline void registerTypeScriptOverride() {}
-
-  template <const char* tsDefine>
-  inline void registerTypeScriptDefine() {}
-
- private:
-  jsg::Lock& js;
-  v8::Local<v8::Context> context;
 };
 
 class ModuleRegistryBase {
@@ -1820,6 +1738,15 @@ struct NewContextOptions {
   // --harmony-temporal flag, which cannot vary per isolate, so gating Temporal per Worker
   // means removing what V8 already installed.
   bool enableTemporal = false;
+
+  // Callback V8 invokes to deserialize the internal fields of a JS object.
+  v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
+
+  // Same as the internal fields callback, but for objects that reference
+  // cppgc-managed objects. Its default constructor is explicit, so aggregate initialization that
+  // omits this member (e.g. `NewContextOptions{}`) needs the `{}` initializer.
+  v8::DeserializeAPIWrapperCallback
+      apiWrapperDeserializer{};  // NOLINT(readability-redundant-member-init)
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
@@ -1956,7 +1883,10 @@ class ResourceWrapper {
         "jsg::ContextGlobal");
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
+        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
+        /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
+        options.apiWrapperDeserializer);
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
@@ -2005,10 +1935,7 @@ class ResourceWrapper {
       ptr->setSchemaLoader(loader);
     }
 
-    return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-      setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr));
-    });
+    return JsContext<T>(context, kj::mv(ptr));
   }
 
   kj::Maybe<T&> tryUnwrap(Lock& js,
@@ -2082,6 +2009,19 @@ class ResourceWrapper {
   }
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
+
+  // Ensure T's registerMembers() has run in this isolate, so that side effects recorded on the
+  // wrapper itself.
+  void ensureMembersRegistered(v8::Isolate* isolate) {
+    if (membersRegistered) return;
+    if (memoizedConstructor.IsEmpty()) {
+      getTemplate(isolate, static_cast<T*>(nullptr));
+      return;
+    }
+    v8::Global<v8::FunctionTemplate> restored = kj::mv(memoizedConstructor);
+    getTemplate(isolate, static_cast<T*>(nullptr));
+    memoizedConstructor = kj::mv(restored);
+  }
 
   // Enumerate this type's two constructor-template slots (empty or not) for startup-snapshot
   // handling. Slots are visited in a fixed compile-time order (parameter-pack order of the
@@ -2170,6 +2110,7 @@ class ResourceWrapper {
     } else {
       T::template registerMembers<decltype(builder), T>(builder);
     }
+    membersRegistered = true;
 
     KJ_IF_SOME(handler, wildcardHandler) {
       instance->SetHandler(handler);
@@ -2178,15 +2119,10 @@ class ResourceWrapper {
     return scope.Escape(constructor);
   }
 
-  void setupJavascript(jsg::Lock& js) {
-    JsSetup<TypeWrapper, T> setup(js, js.v8Context());
-
-    if constexpr (isDetected<GetConfiguration, T>()) {
-      T::template registerMembers<decltype(setup), T>(setup, configuration);
-    } else {
-      T::template registerMembers<decltype(setup), T>(setup);
-    }
-  }
+  // Whether registerMembers() has run in this isolate (createTemplate(), reached from
+  // getTemplate() or ensureMembersRegistered()). False after a snapshot restore repopulates the
+  // slots directly.
+  bool membersRegistered = false;
 
   template <typename, typename, typename, typename>
   friend struct ConstructorCallback;

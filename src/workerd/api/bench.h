@@ -11,11 +11,44 @@
 // high-resolution clock. For each case, the runner calls the function repeatedly to warm up,
 // calibrates a batch size, then times `samples` batches, reading the monotonic and thread CPU
 // clocks only between batches. Each sample is a batch's time divided by its number of calls.
+//
+// This file also holds the runner of startup groups (`benchWorkerStartup()`), which times
+// starting a Worker in new isolates.
 
 #include <workerd/io/bench.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
+
+// A reading of the monotonic and thread CPU clocks, in nanoseconds. The difference of two
+// readings times the code between them.
+struct BenchTiming {
+  int64_t wallNs = 0;
+  int64_t cpuNs = 0;
+
+  static BenchTiming now();
+  BenchTiming operator-(const BenchTiming& other) const {
+    return {.wallNs = wallNs - other.wallNs, .cpuNs = cpuNs - other.cpuNs};
+  }
+};
+
+// How long the phases of starting one Worker took; see `BenchReport.Group.startup` for what each
+// covers.
+struct WorkerStartupTiming {
+  BenchTiming isolate;
+  BenchTiming script;
+  BenchTiming worker;
+  BenchTiming total;
+};
+
+// Runs a startup group: calls `startWorker`, which starts a new copy of a Worker in a new isolate
+// and destroys it, until the samples or the sampling budget in `params` run out (see
+// `BenchReport.Group.startup`), and writes the phases selected by the case filter to `report` as
+// its cases. Doesn't call `startWorker` if the filter selects no phase. A
+// start that throws fails the group. Doesn't set the group's name, which the caller knows.
+kj::Promise<void> benchWorkerStartup(bench::BenchParams::Reader params,
+    kj::Function<kj::Promise<WorkerStartupTiming>()> startWorker,
+    bench::BenchReport::Group::Builder report);
 
 // Results of one case, before they are written to a `BenchReport::Case`.
 struct BenchCaseResult {
@@ -147,7 +180,6 @@ class BenchController final: public jsg::Object {
   };
 
   struct CaseRun;
-  struct BatchTiming;
 
   kj::String caseFilter;
   bool quick;
@@ -169,9 +201,9 @@ class BenchController final: public jsg::Object {
       jsg::Lock& js, size_t index, size_t end, kj::Vector<BenchCaseResult> results);
   jsg::Promise<BenchCaseResult> runCase(jsg::Lock& js, size_t index);
   jsg::Promise<BenchCaseResult> step(jsg::Lock& js, kj::Own<CaseRun> run);
-  jsg::Promise<BatchTiming> runBatch(jsg::Lock& js, size_t index, uint64_t calls);
-  jsg::Promise<BatchTiming> callBatch(
-      jsg::Lock& js, size_t index, jsg::Value state, uint64_t remaining, BatchTiming start);
+  jsg::Promise<BenchTiming> runBatch(jsg::Lock& js, size_t index, uint64_t calls);
+  jsg::Promise<BenchTiming> callBatch(
+      jsg::Lock& js, size_t index, jsg::Value state, uint64_t remaining, BenchTiming start);
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

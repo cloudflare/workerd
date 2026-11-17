@@ -248,6 +248,12 @@ export function createPrivateKey(
 export function createPublicKey(
   key: InnerCreateAsymmetricKeyOptions
 ): CryptoKey;
+export function toCryptoKey(
+  key: CryptoKey,
+  algorithm: string | Record<string, unknown>,
+  extractable: boolean,
+  keyUsages: string[]
+): CryptoKey;
 
 export interface RsaKeyPairOptions {
   type: string;

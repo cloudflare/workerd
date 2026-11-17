@@ -2,33 +2,54 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// structuredClone over WritableStreams: transfer rejects TypeError in
-// both implementations (transferable streams unimplemented); plain
-// cloning diverges — C++ DataCloneError (RPC-only serialization),
-// TypeScript yields a useless empty plain Object (defect pin; see
+// structuredClone over WritableStreams and the objects they hand out:
+// transfer rejects TypeError in both implementations (transferable
+// streams unimplemented); plain cloning rejects DataCloneError in both,
+// with the stream's message diverging as for ReadableStream (see
 // readable/transfer.js for the family).
 
 import { strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
+function notSerializable(type) {
+  return {
+    name: 'DataCloneError',
+    message: `Could not serialize object of type "${type}". This type does not support serialization.`,
+  };
+}
+
 export const structuredCloneWritable = {
   test() {
-    const ws = new WritableStream({});
+    let controller;
+    const ws = new WritableStream({
+      start(c) {
+        controller = c;
+      },
+    });
     throws(() => structuredClone(ws, { transfer: [ws] }), {
       name: 'TypeError',
       message: 'Object is not transferable',
     });
-    if (usingTsImpl) {
-      const clone = structuredClone(ws);
-      strictEqual(clone instanceof WritableStream, false);
-      strictEqual(Object.getPrototypeOf(clone), Object.prototype);
-      strictEqual(Object.keys(clone).length, 0);
-    } else {
-      throws(() => structuredClone(ws), {
-        name: 'DataCloneError',
-        message: 'WritableStream can only be serialized for RPC.',
-      });
-    }
+    throws(
+      () => structuredClone(ws),
+      usingTsImpl
+        ? notSerializable('WritableStream')
+        : {
+            name: 'DataCloneError',
+            message: 'WritableStream can only be serialized for RPC.',
+          }
+    );
     strictEqual(ws.locked, false);
+
+    throws(
+      () => structuredClone(controller),
+      notSerializable('WritableStreamDefaultController')
+    );
+    const writer = ws.getWriter();
+    throws(
+      () => structuredClone(writer),
+      notSerializable('WritableStreamDefaultWriter')
+    );
+    writer.releaseLock();
   },
 };

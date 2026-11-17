@@ -61,3 +61,7 @@ export function utcDate(): string {
 }
 
 export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
+
+// In Node.js, parsers is a FreeList instance for managing HTTP parser objects.
+// We provide a stub with the expected properties for compatibility.
+export const parsers = { name: 'parsers', max: 1000 };

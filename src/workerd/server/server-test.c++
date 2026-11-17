@@ -412,6 +412,9 @@ class Server: public kj::PtrTarget {
   void setDefaultCompatibilityDate(kj::String date) {
     options->defaultCompatibilityDate = kj::mv(date);
   }
+  void setTestCompatibilityDateOverride(kj::String date) {
+    options->testCompatibilityDateOverride = kj::mv(date);
+  }
   void enableDebugPort(kj::String addr) {
     debugPort = kj::str("loopback:", addr);
   }
@@ -1059,6 +1062,27 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+KJ_TEST("Server: module registry enabled by date starts without experimental mode") {
+  TestServer test(singleWorker(R"((
+    modules = [
+      ( name = "worker",
+        esModule =
+          `import message from "./message.js";
+          `export default {
+          `  fetch() { return new Response(message + ":" + import.meta.main); }
+          `}
+      ),
+      ( name = "message.js", esModule = "export default 'date-default';" )
+    ]
+  ))"_kj));
+
+  test.server.setTestCompatibilityDateOverride(kj::str("2026-11-17"));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "date-default:true");
 }
 
 // Note: Python workers ignore the new_module_registry flag entirely — they
@@ -6686,9 +6710,11 @@ KJ_TEST("Server: bench command") {
     ]
   ))"_kj;
 
+  // Two samples for the startup group, which also apply to the cases that don't set any.
   auto makeParams = [](capnp::MallocMessageBuilder& message, kj::StringPtr caseFilter) {
     auto params = message.initRoot<bench::BenchParams>();
     params.setCaseFilter(caseFilter);
+    params.initDefaults().setSamples(2);
     return params.asReader();
   };
 
@@ -6703,14 +6729,17 @@ KJ_TEST("Server: bench command") {
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/throws: Error: boom");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/late: Error: BenchController.run() must be called by");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello (");
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello (startup)");
+    KJ_EXPECT_LOG(DBG, "[ DONE ] hello (startup) (");
     KJ_EXPECT(!test.server
                    .bench(v8System, *test.config, makeParams(paramsMessage, ""), report, "hello",
                        "default")
                    .wait(test.ws));
 
     auto groups = report.getGroups();
-    KJ_ASSERT(groups.size() == 1);
+    KJ_ASSERT(groups.size() == 2);
     KJ_EXPECT(groups[0].getName() == "hello");
+    KJ_EXPECT(!groups[0].getStartup());
     KJ_EXPECT(!groups[0].hasError());
     KJ_ASSERT(groups[0].hasOverhead());
     auto overhead = groups[0].getOverhead();
@@ -6747,6 +6776,34 @@ KJ_TEST("Server: bench command") {
     KJ_EXPECT(!cases[6].hasWallNs());
 
     KJ_EXPECT(kj::StringPtr(cases[7].getError()).startsWith("Error: boom"));
+
+    // The service's startup, timed by starting copies of the worker after the handlers ran.
+    auto startup = groups[1];
+    KJ_EXPECT(startup.getName() == "hello");
+    KJ_EXPECT(startup.getStartup());
+    KJ_EXPECT(!startup.hasError(), startup.getError());
+    KJ_EXPECT(!startup.hasOverhead());
+    auto phases = startup.getCases();
+    KJ_ASSERT(phases.size() == 4);
+    kj::StringPtr phaseNames[] = {
+      "startup:isolate", "startup:script", "startup:worker", "startup:total"};
+    for (auto i: kj::indices(phaseNames)) {
+      auto phase = phases[i];
+      KJ_EXPECT(phase.getName() == phaseNames[i]);
+      KJ_EXPECT(phase.getStatus() == Status::OK, phase.getError());
+      KJ_EXPECT(phase.getIterationsPerSample() == 1);
+      KJ_EXPECT(phase.getWallNs().getSamples().size() == 2);
+      KJ_EXPECT(phase.getCpuNs().getSamples().size() == 2);
+      KJ_EXPECT(phase.getWallNs().getMin() > 0, phaseNames[i]);
+    }
+    // The total includes each phase.
+    auto total = phases[3].getWallNs().getSamples();
+    for (auto i: kj::zeroTo(3)) {
+      auto samples = phases[i].getWallNs().getSamples();
+      for (auto j: kj::indices(samples)) {
+        KJ_EXPECT(samples[j] <= total[j], phaseNames[i]);
+      }
+    }
   }
 
   {
@@ -6765,14 +6822,42 @@ KJ_TEST("Server: bench command") {
                    .wait(test.ws));
 
     // The default entrypoint's options check fails because a filter is set. The Rpc and Flow
-    // classes' `bench` methods aren't handlers, so they have no groups.
+    // classes' `bench` methods aren't handlers, so they have no groups. The filter matches no
+    // phase of the service's startup, so its group is empty.
     kj::HashMap<kj::StringPtr, kj::StringPtr> errors;
+    uint startupGroups = 0;
     for (auto group: report.getGroups()) {
       KJ_EXPECT(group.getCases().size() == 0, group.getName());
+      if (group.getStartup()) {
+        ++startupGroups;
+        KJ_EXPECT(group.getName() == "hello");
+        KJ_EXPECT(!group.hasError(), group.getError());
+        continue;
+      }
       errors.insert(group.getName(), group.getError());
     }
+    KJ_EXPECT(startupGroups == 1);
     KJ_EXPECT(errors.size() == 3);
     KJ_EXPECT(KJ_ASSERT_NONNULL(errors.find("hello"_kj)).startsWith("Error: unexpected options"));
+  }
+
+  {
+    // `--no-startup` leaves out the startup group.
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    auto params = paramsMessage.initRoot<bench::BenchParams>();
+    params.setSkipStartup(true);
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello:broken");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:broken: TypeError: not today");
+    KJ_EXPECT(
+        !test.server.bench(v8System, *test.config, params.asReader(), report, "hello", "broken")
+             .wait(test.ws));
+    auto groups = report.getGroups();
+    KJ_ASSERT(groups.size() == 1);
+    KJ_EXPECT(groups[0].getName() == "hello:broken");
+    KJ_EXPECT(!groups[0].getStartup());
   }
 
   {

@@ -11,3 +11,6 @@ build:clang-tidy-warnings --config=clang-tidy --aspects_parameters=clang_tidy_ar
 # Unsafe continuation captures: flags bare references, raw pointers, and
 # non-owning views captured into lambdas passed to async sinks.
 build:clang-tidy-unsafe-continuation-capture --config=clang-tidy --aspects_parameters=clang_tidy_args=--checks=workerd-unsafe-continuation-capture
+
+# Borrows into JSG-owned state used after a call that can run JavaScript.
+build:clang-tidy-js-reentry --config=clang-tidy --aspects_parameters=clang_tidy_args=--checks=jsg-js-reentry

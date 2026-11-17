@@ -503,6 +503,141 @@ fn vec_from_js_parses_array() {
     });
 }
 
+/// Converting to a `Vec` reads elements through getters, holes and the prototype chain, and reads
+/// the elements that a getter appends. No conversion here runs script, so the results hold whether
+/// each element is read before or after the previous one is converted.
+#[test]
+fn vec_from_js_reads_getters_holes_and_inherited_elements() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [0, , 2.5];
+                     Object.defineProperty(arr, 1, { get() { arr.push(3); return 1; } });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 1.0, 2.5, 3.0]);
+
+        let strings: Vec<String> = ctx.eval(lock, "[1, , 3]").unwrap();
+        assert_eq!(strings, vec!["1", "undefined", "3"]);
+        let strings: Vec<String> = ctx
+            .eval(lock, "Array.prototype[1] = 'inherited'; [1, , 3]")
+            .unwrap();
+        assert_eq!(strings, vec!["1", "inherited", "3"]);
+        Ok(())
+    });
+}
+
+/// Each element converts before the next is read, as in C++ JSG and Web IDL, when a conversion
+/// runs script.
+#[test]
+fn vec_from_js_converts_each_element_before_reading_the_next() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.log = [];
+             globalThis.element = (i) => ({ valueOf() { log.push(`convert ${i}`); return i; } });",
+        )
+        .unwrap();
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [element(0), , element(2)];
+                     Object.defineProperty(arr, 1, {
+                         get() { log.push('get 1'); return element(1); },
+                     });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 1.0, 2.0]);
+        assert_eq!(
+            ctx.eval::<String>(lock, "log.join()").unwrap(),
+            "convert 0,get 1,convert 1,convert 2"
+        );
+
+        // A conversion that changes the array changes the elements read after it.
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [{ valueOf() { arr[1] = 10; arr.push(20); return 0; } }, 1];
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 10.0, 20.0]);
+
+        // A conversion that throws stops the reads.
+        let arr = ctx
+            .eval_raw(
+                lock,
+                "log = [];
+                 (() => {
+                     const arr = [{ valueOf() { throw new Error('stop'); } }, 1];
+                     Object.defineProperty(arr, 1, { get() { log.push('get 1'); return 1; } });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        let caught = lock.try_catch(|lock| <Vec<f64> as jsg::FromJS>::from_js(lock, arr))?;
+        assert!(caught.is_err());
+        assert_eq!(ctx.eval::<String>(lock, "log.join()").unwrap(), "");
+        Ok(())
+    });
+}
+
+/// Holes convert as `undefined` for an array in dictionary mode too, for which V8's
+/// `Array::Iterate()` passes only the elements that exist.
+#[test]
+fn vec_from_js_reads_holes_of_a_dictionary_array() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let strings: Vec<String> = ctx
+            .eval(
+                lock,
+                "const a = [1, , 3];
+                 Object.defineProperty(a, 0, { value: 1, enumerable: false });
+                 a",
+            )
+            .unwrap();
+        assert_eq!(strings, vec!["1", "undefined", "3"]);
+
+        let strings: Vec<String> = ctx.eval(lock, "const b = []; b[3000] = 1; b").unwrap();
+        assert_eq!(strings.len(), 3001);
+        assert!(strings[..3000].iter().all(|s| s == "undefined"));
+        assert_eq!(strings[3000], "1");
+
+        let strings: Vec<String> = ctx
+            .eval(lock, "const c = []; c[3000] = 1; c.length = 3005; c")
+            .unwrap();
+        assert_eq!(strings.len(), 3005);
+        assert_eq!(strings[3000], "1");
+        assert!(strings[3001..].iter().all(|s| s == "undefined"));
+
+        // Elements read before a getter shortened the array still convert.
+        let strings: Vec<String> = ctx
+            .eval(
+                lock,
+                "const d = [0, 1, 2, 3];
+                 Object.defineProperty(d, 1, {
+                     get() { d.length = 1; return 1; },
+                     configurable: true,
+                 });
+                 d",
+            )
+            .unwrap();
+        assert_eq!(strings, vec!["0", "1"]);
+        Ok(())
+    });
+}
+
 #[test]
 fn vec_empty_roundtrip() {
     let harness = crate::Harness::new();

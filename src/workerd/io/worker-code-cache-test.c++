@@ -86,6 +86,7 @@ struct CountingObserver final: public JsgIsolateObserver {
   mutable uint found = 0;
   mutable uint generated = 0;
   mutable uint bundleCompilationDepth = 0;
+  mutable uint hintedFunctions = 0;
 
   kj::Own<void> onEsmCompilationStart(v8::Isolate*, kj::StringPtr, Option option) const override {
     if (option != Option::BUNDLE) return {};
@@ -93,6 +94,9 @@ struct CountingObserver final: public JsgIsolateObserver {
     return kj::heap(kj::defer([this]() { --bundleCompilationDepth; }));
   }
 
+  void onCompileHintsConsumed(v8::Isolate*, size_t, size_t eagerFunctionCount) const override {
+    hintedFunctions += eagerFunctionCount;
+  }
   void onCompileCacheFound(v8::Isolate*) const override {
     // Bootstrap scripts use the same observer; count only worker bundle hits here.
     if (bundleCompilationDepth > 0) ++found;
@@ -258,6 +262,37 @@ KJ_TEST("A Worker with the new registry consumes a lookup prepared outside the s
     KJ_EXPECT(observer->generated == initialGenerated + 1);
     KJ_EXPECT(observer->found == initialFound + i);
   }
+}
+
+KJ_TEST("Worker registry construction owns and consumes source compile hints") {
+  constexpr kj::StringPtr code =
+      "function used() { return 1; } used(); export default { fetch() {} };"_kj;
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+  api::pyodide::PythonConfig pythonConfig{};
+  auto registry = [&]() {
+    auto positions = kj::arr(13);
+    Worker::Script::ModulesSource source{
+      .mainModule = "main"_kj,
+      .modules = kj::arr(Worker::Script::Module{
+        .name = "main"_kj,
+        .content = Worker::Script::EsModule{.body = code, .compileHints = positions},
+      }),
+      .isPython = false,
+    };
+    return server::WorkerdApi::newWorkerdModuleRegistry(
+        source, flags.asReader(), pythonConfig, "file:///"_url, {});
+  }();
+  auto observer = kj::atomicRefcounted<CountingObserver>();
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = code,
+    .useRealTimers = false,
+    .jsgIsolateObserver = kj::atomicAddRef(*observer),
+    .newModuleRegistry = kj::mv(registry),
+  });
+  KJ_EXPECT(observer->hintedFunctions == 1);
 }
 
 KJ_TEST("A Worker's bundle modules use the isolate's compile hint session with either registry") {

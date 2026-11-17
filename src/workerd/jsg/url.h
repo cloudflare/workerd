@@ -119,6 +119,22 @@ class Url final {
   HostType getHostType() const;
   SchemeType getSchemeType() const;
 
+  // Byte offsets into getHref(), laid out as ada::url_components documents them, except `port`,
+  // which is the port number. An absent port, query or fragment is OMITTED.
+  struct Components {
+    static constexpr uint32_t OMITTED = 0xffffffff;
+
+    uint32_t protocolEnd;
+    uint32_t usernameEnd;
+    uint32_t hostStart;
+    uint32_t hostEnd;
+    uint32_t port;
+    uint32_t pathnameStart;
+    uint32_t searchStart;
+    uint32_t hashStart;
+  };
+  Components getComponents() const;
+
   // Convert an ASCII hostname to Unicode.
   static kj::Array<const char> idnToUnicode(kj::ArrayPtr<const char> value) KJ_WARN_UNUSED_RESULT;
 

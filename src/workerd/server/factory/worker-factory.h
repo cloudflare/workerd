@@ -57,7 +57,6 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
-struct AbortReason;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -125,6 +124,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     // workers would add their cost to each. The server still looks a config worker's tails up, so
     // that their config errors are reported, but does not link them.
     bool tailWorkers = true;
+    // Whether Durable Object storage on disk is synced (see SqliteDatabase::VfsOptions::sync).
+    // `workerd test` turns this off, since a test's storage need not survive a crash of the
+    // machine.
+    bool syncStorage = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
     // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute
@@ -191,6 +194,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource);
+kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& factory,
+    const WorkerSpec& spec,
+    uint32_t configService,
+    ::rust::Slice<const uint64_t> params);
 
 // =======================================================================================
 
@@ -208,6 +215,8 @@ class CompiledWorker final {
   mutable kj::Own<Impl> impl;
 };
 
+bool factory_assets_navigation_prefers_asset_serving(
+    const WorkerFactory& factory, uint32_t configService);
 WorkerInfo worker_info(const CompiledWorker& worker);
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals);
 void worker_unlink(const CompiledWorker& worker);
@@ -265,7 +274,8 @@ class ActorHandle final {
 
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
-void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+void actor_abort(const ActorHandle& actor, kj::Exception reason);
+void actor_stop(const ActorHandle& actor);
 bool actor_has_on_hibernate_handler(const ActorHandle& actor);
 bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
@@ -321,6 +331,9 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor);
+void stamp_current_actor_cause(RequestMetadata& metadata);
 
 // =======================================================================================
 
@@ -328,6 +341,12 @@ kj::Own<RequestMetadata> new_request_metadata(
     kj::Maybe<::rust::Str> cfBlobJson, kj::Maybe<::rust::Str> clientAddress);
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata);
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent);
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata);
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node);
+bool request_metadata_from_handoff(const RequestMetadata& metadata);
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata);
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy);
 void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     RequestMetadata& metadata,
     ::rust::Str uniqueKey,
@@ -335,7 +354,7 @@ void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     bool persistent);
 
 void exception_throw(const kj::Exception& exception);
-::rust::String exception_text(const AbortReason& error);
+::rust::String exception_text(kj::Exception error);
 
 kj::Own<Frankenvalue> frankenvalue_from_json(::rust::Str json);
 kj::Own<Frankenvalue> frankenvalue_clone(const Frankenvalue& value);
@@ -437,6 +456,8 @@ kj::Own<kj::HttpHeaders> edit_headers(const kj::HttpHeaderTable& table,
 kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Response& inner,
     const kj::HttpHeaderTable& table,
     ::rust::Slice<const HeaderEdit> edits);
+kj::Own<kj::HttpService::Response> new_image_filter_response(kj::HttpService::Response& inner);
+kj::Promise<void> image_filter_finish(kj::HttpService::Response& response);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(

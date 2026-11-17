@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { match, rejects, strictEqual } from 'assert';
+import { match, ok, rejects, strictEqual } from 'assert';
 import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
 import { mock } from 'node:test';
@@ -119,6 +119,29 @@ export const expiredContextWorks = {
   },
 };
 
+export const awaitingOrphanedPromiseFails = {
+  async test(_, env) {
+    // The second request awaits a promise from the first, which is then
+    // canceled as hung without anything having settled the promise.
+    const results = await Promise.allSettled([
+      env.subrequest.fetch('http://example.org/orphaned'),
+      env.subrequest.fetch('http://example.org/orphaned'),
+    ]);
+    strictEqual(results[0].status, 'rejected');
+    ok(isHungRequest(results[0].reason), results[0].reason);
+    strictEqual(results[1].status, 'fulfilled');
+    strictEqual(await results[1].value.text(), 'ok');
+
+    // Resolving the promise once the first request has ended is dropped, so
+    // awaiting it then fails too.
+    const response = await env.subrequest.fetch(
+      'http://example.org/orphaned-resolve'
+    );
+    strictEqual(await response.text(), 'ok');
+    globalThis.orphaned = undefined;
+  },
+};
+
 export const asyncIterWorks = {
   async test(_, env) {
     // We're going to send two simultaneous requests to the same endpoint.
@@ -173,6 +196,10 @@ export default {
       return unhandledRejection(req, env, ctx);
     } else if (req.url.endsWith('/expired')) {
       return expiredContext(req, env, ctx);
+    } else if (req.url.endsWith('/orphaned')) {
+      return orphanedPromise(req, env, ctx, { resolve: false });
+    } else if (req.url.endsWith('/orphaned-resolve')) {
+      return orphanedPromise(req, env, ctx, { resolve: true });
     } else if (req.url.endsWith('/asynciter')) {
       return asyncIterator(req, env, ctx);
     } else if (req.url.endsWith('/cyclic')) {
@@ -401,6 +428,25 @@ async function expiredContext(req, env, ctx) {
   // The caller has already observed cancellation of the creating request.
   globalThis.expired.resolve();
   globalThis.expired = undefined;
+  return new Response('ok');
+}
+
+async function orphanedPromise(req, env, ctx, { resolve }) {
+  if (globalThis.orphaned === undefined) {
+    // Nothing keeps this request alive, so it is canceled as hung.
+    globalThis.orphaned = Promise.withResolvers();
+    await new Promise(() => {});
+    throw new Error('should never get here');
+  }
+
+  if (resolve) {
+    globalThis.orphaned.resolve();
+  }
+  // Only the request that created the promise could settle it, so the await
+  // fails once that request has ended, rather than waiting forever.
+  await rejects(globalThis.orphaned.promise, {
+    message: /created by a request that has since ended/,
+  });
   return new Response('ok');
 }
 

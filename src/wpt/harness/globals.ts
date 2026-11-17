@@ -92,6 +92,20 @@ globalThis.fetch = async (
   return realFetch(relativizeRequest(input, init));
 };
 
+// workerd's EventSource has no base URL to resolve against, so tests that pass a path such as
+// "resources/message.py" would fail to construct. Resolve it against the test URL first. A URL
+// that doesn't parse is passed through so the constructor still throws its own SyntaxError.
+globalThis.EventSource = class _EventSource extends EventSource {
+  constructor(url: string | URL, init?: EventSourceInit) {
+    super(URL.parse(url, globalThis.state.testUrl)?.href ?? String(url), init);
+    // A test that fails before calling close() would leave the source reconnecting while later
+    // files run, so close every source once its file is done.
+    add_completion_callback(() => {
+      this.close();
+    });
+  }
+};
+
 function loadResourceBinding(input: string): unknown {
   const relativePath = getBindingPath(
     path.dirname(globalThis.state.testFileName),

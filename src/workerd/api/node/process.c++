@@ -81,6 +81,11 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   return js.undefined();
 }
 
+jsg::JsObject ProcessModule::getInternalModule(jsg::Lock& js, kj::String specifier) {
+  return JSG_REQUIRE_NONNULL(js.resolveInternalModule(specifier), Error,
+      kj::str("Failed to resolve internal module ", specifier));
+}
+
 jsg::JsObject ProcessModule::getEnvObject(jsg::Lock& js) {
   if (FeatureFlags::get(js).getPopulateProcessEnv()) {
     KJ_IF_SOME(env, js.getWorkerEnv()) {

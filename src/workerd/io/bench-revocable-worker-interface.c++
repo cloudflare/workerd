@@ -42,6 +42,9 @@ class SendingWorker final: public WorkerInterface {
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     KJ_UNIMPLEMENTED("not used in this benchmark");
   }
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_UNIMPLEMENTED("not used in this benchmark");
+  }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     return event->notSupported();
   }

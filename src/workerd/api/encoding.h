@@ -30,7 +30,7 @@ class IcuDecoder final: public Decoder {
 
   static kj::Maybe<IcuDecoder> create(Encoding encoding, bool fatal, bool ignoreBom);
 
-  Encoding getEncoding() override {
+  Encoding getEncoding() const override {
     return encoding;
   }
 
@@ -117,11 +117,19 @@ class TextDecoder final: public jsg::Object {
   kj::Maybe<jsg::JsString> decodePtr(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush);
 
+  // A decoder between inputs transfers through a startup snapshot as its encoding and options: the
+  // copy is a fresh decoder of the same kind. One that a streaming decode left with part of an
+  // input pending does not transfer.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+
  private:
   Decoder& getImpl();
 
   DecoderImpl decoder;
   ConstructorOptions ctorOptions;
+
+  // Whether the last decode streamed, so that the decoder may hold part of an input.
+  bool midStream = false;
 
   static const DecodeOptions DEFAULT_OPTIONS;
   static constexpr kj::byte DUMMY = 0;
@@ -151,6 +159,9 @@ class TextEncoder final: public jsg::Object {
     return "utf-8";
   }
 
+  // TextEncoder is stateless, so a fresh instance is indistinguishable from the original.
+  static constexpr bool jsgSnapshotStateless = true;
+
   JSG_RESOURCE_TYPE(TextEncoder, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encode);
     JSG_METHOD(encodeInto);
@@ -166,10 +177,6 @@ class TextEncoder final: public jsg::Object {
   }
 };
 
-// Encodes a string as UTF-8, as TextEncoder.encode() does: a lone surrogate becomes U+FFFD.
-// Whatever the ENABLE_FAST_TEXTENCODER autogate says, a two-byte string is encoded with
-// simdutf, as the C++ TextEncoderStream encodes it; the TypeScript TextEncoderStream encodes
-// every chunk with it (utils.encodeUtf8).
 jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str);
 
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \

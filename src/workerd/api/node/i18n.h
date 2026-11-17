@@ -10,8 +10,6 @@
 
 #include <cstdint>
 
-struct UConverter;
-
 namespace workerd::api::node {
 
 using EncodingValue = uint8_t;
@@ -41,26 +39,9 @@ constexpr bool canBeTranscoded(Encoding encoding) noexcept {
   }
 }
 
-class Converter final {
- public:
-  explicit Converter(Encoding encoding, kj::StringPtr substitude = ""_kj);
-  KJ_DISALLOW_COPY_AND_MOVE(Converter);
-
-  UConverter* conv() const;
-  size_t maxCharSize() const;
-  size_t minCharSize() const;
-  void reset();
-  void setSubstituteChars(kj::StringPtr sub);
-
- private:
-  kj::Own<UConverter> conv_;
-};
-
 jsg::JsUint8Array transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);
 
 }  // namespace i18n
 
 }  // namespace workerd::api::node
-
-KJ_DECLARE_NON_POLYMORPHIC(UConverter)

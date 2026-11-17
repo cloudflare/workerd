@@ -17,9 +17,10 @@ Once a check is fully rolled out, remove its entry to run everywhere.
 """
 
 CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
-        # Add paths here as they are cleaned up:
-        # "src/workerd/io",
-        # "src/workerd/api",
+    # Runs where it reports nothing today. Elsewhere, run it with --config=clang-tidy-js-reentry,
+    # and add a directory here once its reports are fixed or suppressed.
+    "jsg-js-reentry": [
+        "src/workerd/tools",
+        "src/workerd/util",
     ],
 }

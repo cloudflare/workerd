@@ -18,6 +18,7 @@ jobs:
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
+      build_target: '//src/wpt/...'
       test_target: '//src/wpt/...'
       upload_test_logs: true
       fetch_depth: 0

@@ -163,9 +163,12 @@ struct InternalExceptionObserver {
     kj::Maybe<InternalErrorId> internalErrorId;
   };
 
-  // Called when an internal exception is created (see exceptionToJs).
-  // Used to collect metrics on various internal error conditions.
-  virtual void reportInternalException(const kj::Exception&, Detail detail) {}
+  // Called when an internal exception is created (see exceptionToJs) or described (see
+  // describeAsJsError). Used to collect metrics on various internal error conditions.
+  //
+  // This can be called without the isolate lock, while another thread runs JavaScript in the
+  // isolate, so implementations must be thread-safe.
+  virtual void reportInternalException(const kj::Exception&, Detail detail) const {}
 };
 
 WD_STRONG_BOOL(IsCodeLike);

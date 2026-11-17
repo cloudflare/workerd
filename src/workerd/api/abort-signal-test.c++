@@ -6,7 +6,6 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/external-pusher.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/capability.h>
 #include <capnp/message.h>
@@ -74,7 +73,7 @@ QueuedAbortMemory measureQueuedAbort(TestFixture& fixture,
 }
 
 KJ_TEST("queued native abort deliveries share one counted copy of the exception") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  TestFixture fixture;
   uint delivered = 0;
   kj::Vector<kj::Own<void>> registrations;
   auto memory =
@@ -92,26 +91,8 @@ KJ_TEST("queued native abort deliveries share one counted copy of the exception"
   KJ_EXPECT(memory.retained < REASON_SIZE, memory.retained);
 }
 
-KJ_TEST("queued native abort deliveries aren't counted without the autogate") {
-  TestFixture fixture({.ignoreAllAutogatesEnv = true});
-  uint delivered = 0;
-  kj::Vector<kj::Own<void>> registrations;
-  auto memory =
-      measureQueuedAbort(fixture, [&](TestFixture::Environment& env, AbortSignal& signal) {
-    for (uint i = 0; i < DELIVERIES; i++) {
-      registrations.add(signal.addAbortAction(
-          env.js, [&delivered](jsg::Lock&, const kj::Exception&) { ++delivered; }));
-    }
-  });
-
-  // A counted copy would hold the reason at least once.
-  KJ_EXPECT(memory.queued < REASON_SIZE, memory.queued);
-  KJ_EXPECT(delivered == DELIVERIES, delivered);
-}
-
 KJ_TEST("a native abort delivery to an idle actor waits for its next request") {
-  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("idle-native-delivery-test"))});
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("idle-native-delivery-test"))});
   auto actorContext = fixture.newIoContext();
   auto statelessContext = fixture.newStatelessIoContext();
   auto aborter = fixture.newIncomingRequest(*statelessContext);
@@ -193,8 +174,7 @@ KJ_TEST("queued RPC abort deliveries share one counted copy of the serialized re
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setAbortSignalRpc(true);
   uint aborts = 0;
-  TestFixture fixture({.featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  TestFixture fixture({.featureFlags = flags.asReader()});
   rpc::JsValue::ExternalPusher::Client pusher = kj::heap<TestExternalPusher>(aborts);
 
   int64_t capacity = 0;
@@ -214,26 +194,6 @@ KJ_TEST("queued RPC abort deliveries share one counted copy of the serialized re
   KJ_EXPECT(memory.queued >= capacity && memory.queued < 2 * capacity, memory.queued, capacity);
   KJ_EXPECT(aborts == DELIVERIES, aborts);
   KJ_EXPECT(memory.retained < REASON_SIZE, memory.retained);
-}
-
-KJ_TEST("queued RPC abort deliveries aren't counted without the autogate") {
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setAbortSignalRpc(true);
-  uint aborts = 0;
-  TestFixture fixture({.featureFlags = flags.asReader(), .ignoreAllAutogatesEnv = true});
-  rpc::JsValue::ExternalPusher::Client pusher = kj::heap<TestExternalPusher>(aborts);
-
-  auto memory =
-      measureQueuedAbort(fixture, [&](TestFixture::Environment& env, AbortSignal& signal) {
-    for (uint i = 0; i < DELIVERIES; i++) {
-      cloneForRpc(env.js, signal, pusher);
-    }
-  });
-
-  // A counted copy would hold the reason at least once.
-  KJ_EXPECT(memory.queued < REASON_SIZE, memory.queued);
-  KJ_EXPECT(aborts == DELIVERIES, aborts);
 }
 
 constexpr uint REGISTRATIONS = 100;
@@ -281,7 +241,6 @@ KJ_TEST("an idle actor queues one request to arm a received signal's RPC subscri
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setAbortSignalRpc(true);
   TestFixture fixture({.featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
     .actorId = Worker::Actor::Id(kj::str("idle-receiver-test"))});
   auto actorContext = fixture.newIoContext();
   auto receiverQueue = actorContext->getCrossContextExecutor();
@@ -337,11 +296,12 @@ KJ_TEST("an idle actor queues one request to arm a received signal's RPC subscri
   fixture.drainAndDestroy(kj::mv(sender));
 }
 
-// Has another context make REGISTRATIONS registrations on a signal that an actor request received
-// over RPC, while that request is current but its input lock is held. Returns how many requests to
-// arm the signal's RPC subscription the actor queued meanwhile, then checks that they run without
-// aborting it.
-size_t countArmRequestsQueuedOnBusyReceiver(TestFixture& fixture) {
+KJ_TEST("registrations from other contexts queue one request per received signal to arm it") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setAbortSignalRpc(true);
+  TestFixture fixture({.featureFlags = flags.asReader(),
+    .actorId = Worker::Actor::Id(kj::str("busy-receiver-test"))});
   auto actorContext = fixture.newIoContext();
   auto receiverQueue = actorContext->getCrossContextExecutor();
   auto statelessContext = fixture.newStatelessIoContext();
@@ -364,13 +324,16 @@ size_t countArmRequestsQueuedOnBusyReceiver(TestFixture& fixture) {
   });
   fixture.pollEventLoop();
 
-  // Holding the receiver's input lock keeps the requests to arm the subscription queued.
+  // Holding the receiver's input lock keeps the request to arm the subscription queued, while
+  // another context makes REGISTRATIONS registrations on the clone.
   auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(fixture.getWaitScope());
   fixture.enterContext(*sender,
       [&](TestFixture::Environment& env) { churnAbortActions(env.js, *KJ_ASSERT_NONNULL(clone)); });
   fixture.pollEventLoop();
-  size_t queued = receiverQueue.getQueuedActionCountForTest();
+  KJ_EXPECT(receiverQueue.getQueuedActionCountForTest() == 1,
+      receiverQueue.getQueuedActionCountForTest());
 
+  // Running it arms the subscription without aborting the receiver.
   { auto released = kj::mv(inputLock); }
   fixture.pollEventLoop();
   KJ_EXPECT(receiverQueue.getQueuedActionCountForTest() == 0,
@@ -383,30 +346,6 @@ size_t countArmRequestsQueuedOnBusyReceiver(TestFixture& fixture) {
     signal = kj::none;
   });
   fixture.drainAndDestroy(kj::mv(sender));
-  return queued;
-}
-
-KJ_TEST("registrations from other contexts queue one request per received signal to arm it") {
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setAbortSignalRpc(true);
-  TestFixture fixture({.featureFlags = flags.asReader(),
-    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
-    .actorId = Worker::Actor::Id(kj::str("busy-receiver-test"))});
-  auto queued = countArmRequestsQueuedOnBusyReceiver(fixture);
-  KJ_EXPECT(queued == 1, queued);
-}
-
-KJ_TEST("without the autogate, each registration from another context queues a request to arm a "
-        "received signal") {
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setAbortSignalRpc(true);
-  TestFixture fixture({.featureFlags = flags.asReader(),
-    .ignoreAllAutogatesEnv = true,
-    .actorId = Worker::Actor::Id(kj::str("busy-receiver-test"))});
-  auto queued = countArmRequestsQueuedOnBusyReceiver(fixture);
-  KJ_EXPECT(queued == REGISTRATIONS, queued);
 }
 
 }  // namespace

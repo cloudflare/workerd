@@ -9,69 +9,50 @@
 
 namespace workerd::api::node {
 
-bool ModuleUtil::isBuiltin(kj::String specifier) {
-  return jsg::checkNodeSpecifier(specifier) != kj::none;
-}
+namespace {
 
-jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
-  // Node.js requires that the specifier path is a File URL or an absolute
-  // file path string. To be compliant, we will convert whatever specifier
-  // is into a File URL if possible, then take the path as the actual
-  // specifier to use.
-  static constexpr auto kInvalidArg = "The argument must be a file URL object, "
-                                      "a file URL string, or an absolute path string."_kj;
+// The require() function createRequire() returns. Each is a functor with a clone() rather than a
+// lambda so that a startup snapshot can carry the function (jsg::WrappableFunctionImpl's
+// snapshotClone()): bundled Node.js code commonly calls createRequire() at the top level.
 
-  // Matching Node.js: only a file: URL (object or string) or an absolute path
-  // is accepted. Anything else — a relative path, a bare name, or a URL with a
-  // non-file scheme — is rejected. Parsing against the file:/// base alone
-  // would accept nearly any string, so absolute-URL inputs are checked for the
-  // file: scheme and everything else must start with '/'.
-  KJ_IF_SOME(absolute, jsg::Url::tryParse(path.asPtr())) {
-    JSG_REQUIRE(absolute.getProtocol() == "file:"_kj, TypeError, kInvalidArg);
-  } else {
-    JSG_REQUIRE(path.startsWith("/"), TypeError, kInvalidArg);
+// For the new module registry.
+struct NewRegistryRequire {
+  jsg::Url referrer;
+
+  NewRegistryRequire clone() const {
+    return {referrer.clone()};
   }
 
-  auto parsed =
-      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
-
-  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
-    return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
-        [referrer = parsed.clone()](jsg::Lock& js,
-            const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
-      auto specifier = js.toString(jsg::check(args[0]->ToString(js.v8Context())));
-      if (jsg::isNodeJsCompatEnabled(js)) {
-        KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
-          specifier = kj::mv(nodeSpec);
-        }
+  v8::Local<v8::Value> operator()(
+      jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
+    auto specifier = js.toString(jsg::check(args[0]->ToString(js.v8Context())));
+    if (jsg::isNodeJsCompatEnabled(js)) {
+      KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
+        specifier = kj::mv(nodeSpec);
       }
-      KJ_IF_SOME(val,
-          jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, specifier,
-              jsg::modules::ResolveContext::Type::BUNDLE,
-              jsg::modules::ResolveContext::Source::REQUIRE, referrer,
-              jsg::modules::UnwrapDefault::YES)) {
-        return val;
-      }
-      JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
-    }));
+    }
+    KJ_IF_SOME(val,
+        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, specifier,
+            jsg::modules::ResolveContext::Type::BUNDLE,
+            jsg::modules::ResolveContext::Source::REQUIRE, referrer,
+            jsg::modules::UnwrapDefault::YES)) {
+      return val;
+    }
+    JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
+  }
+};
+
+// For the original module registry.
+struct LegacyRegistryRequire {
+  // The referrer's path.
+  kj::String referrer;
+
+  LegacyRegistryRequire clone() const {
+    return {kj::str(referrer)};
   }
 
-  // We do not currently handle specifiers as URLs, so let's treat any
-  // input that has query string params or hash fragments as errors.
-  if (parsed.getSearch().size() > 0 || parsed.getHash().size() > 0) {
-    JSG_FAIL_REQUIRE(
-        Error, "The specifier must not have query string parameters or hash fragments.");
-  }
-
-  // The specifier must be a file: URL
-  JSG_REQUIRE(parsed.getProtocol() == "file:"_kj, TypeError, "The specifier must be a file: URL.");
-
-  return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
-      [referrer = kj::str(parsed.getPathname())](
-          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
-    // This closure services the original module registry only; when the new
-    // module registry is enabled, createRequire() returned a different
-    // implementation above.
+  v8::Local<v8::Value> operator()(
+      jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) const {
     auto registry = jsg::ModuleRegistry::from(js);
     JSG_REQUIRE(registry != nullptr, Error, "Module registry not available.");
 
@@ -111,7 +92,7 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
     auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
     if (spec == "node:process") {
       targetPath =
-          kj::Path::parse(jsg::isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+          kj::Path::parse(jsg::isNodeJsProcessV2Enabled(js) ? "node-internal:process_exports"_kj
                                                             : "node-internal:legacy_process"_kj);
       resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
@@ -130,7 +111,54 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
     }
 
     return jsg::ModuleRegistry::requireImpl(js, info, options);
-  }));
+  }
+};
+
+}  // namespace
+
+bool ModuleUtil::isBuiltin(kj::String specifier) {
+  return jsg::checkNodeSpecifier(specifier) != kj::none;
+}
+
+jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
+  // Node.js requires that the specifier path is a File URL or an absolute
+  // file path string. To be compliant, we will convert whatever specifier
+  // is into a File URL if possible, then take the path as the actual
+  // specifier to use.
+  static constexpr auto kInvalidArg = "The argument must be a file URL object, "
+                                      "a file URL string, or an absolute path string."_kj;
+
+  // Matching Node.js: only a file: URL (object or string) or an absolute path
+  // is accepted. Anything else — a relative path, a bare name, or a URL with a
+  // non-file scheme — is rejected. Parsing against the file:/// base alone
+  // would accept nearly any string, so absolute-URL inputs are checked for the
+  // file: scheme and everything else must start with '/'.
+  KJ_IF_SOME(absolute, jsg::Url::tryParse(path.asPtr())) {
+    JSG_REQUIRE(absolute.getProtocol() == "file:"_kj, TypeError, kInvalidArg);
+  } else {
+    JSG_REQUIRE(path.startsWith("/"), TypeError, kInvalidArg);
+  }
+
+  auto parsed =
+      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError, kInvalidArg);
+
+  if (isNewModuleRegistryEnabled(FeatureFlags::get(js))) {
+    return jsg::JsValue(
+        js.wrapReturningFunction(js.v8Context(), NewRegistryRequire{parsed.clone()}));
+  }
+
+  // We do not currently handle specifiers as URLs, so let's treat any
+  // input that has query string params or hash fragments as errors.
+  if (parsed.getSearch().size() > 0 || parsed.getHash().size() > 0) {
+    JSG_FAIL_REQUIRE(
+        Error, "The specifier must not have query string parameters or hash fragments.");
+  }
+
+  // The specifier must be a file: URL
+  JSG_REQUIRE(parsed.getProtocol() == "file:"_kj, TypeError, "The specifier must be a file: URL.");
+
+  return jsg::JsValue(js.wrapReturningFunction(
+      js.v8Context(), LegacyRegistryRequire{kj::str(parsed.getPathname())}));
 }
 
 }  // namespace workerd::api::node

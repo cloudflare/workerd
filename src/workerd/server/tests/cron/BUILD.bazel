@@ -1,0 +1,20 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The cron module's parser and plan.
+wd_test(
+    src = "cron-units-test.wd-test",
+    args = ["--experimental"],
+    data = ["cron-units-test.js"],
+)
+
+# `workerd serve` of the cron module; waits for real minutes to pass.
+js_test(
+    name = "cron-test",
+    size = "large",
+    timeout = "eternal",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "cron-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

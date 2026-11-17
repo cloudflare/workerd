@@ -193,10 +193,13 @@ namespace workerd::api {
 // is what shows up in `.d.ts` output and in `typeof ctx.tracing` — historically this was
 // called `TracingModule` back when the API was only reachable via an ES module import;
 // that suffix is vestigial now that it's also a property on `ctx`.
-class Tracing: public jsg::Object {
+class Tracing final: public jsg::Object {
  public:
   Tracing() = default;
   Tracing(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   // Creates a new child span of the current user trace span, pushes it onto the
   // AsyncContextFrame as the active user span, invokes callback(span, ...args), and

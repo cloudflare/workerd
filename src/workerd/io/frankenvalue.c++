@@ -82,6 +82,16 @@ kj::Own<Frankenvalue::CapTableEntry> Frankenvalue::CapTableEntry::threadSafeClon
   KJ_FAIL_REQUIRE("a capability in the Frankenvalue does not implement threadSafeClone()");
 }
 
+kj::Promise<Frankenvalue> Frankenvalue::fillCaps(Frankenvalue value,
+    kj::Array<size_t> slots,
+    kj::Array<kj::Promise<kj::Own<CapTableEntry>>> caps) {
+  auto resolved = co_await kj::joinPromisesFailFast(kj::mv(caps));
+  for (auto i: kj::indices(slots)) {
+    value.capTable[slots[i]] = kj::mv(resolved[i]);
+  }
+  co_return kj::mv(value);
+}
+
 void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) {
   toCapnpImpl(builder, capTable.size());
 }

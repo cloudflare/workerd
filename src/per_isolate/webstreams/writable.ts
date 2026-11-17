@@ -1,13 +1,13 @@
 'use strict';
 
 // WritableStream, WritableStreamDefaultWriter, WritableStreamDefaultController
-// (WHATWG Streams §5). Unlike the readable side, the writable side has a
-// single consumer (the sink), so there is no shared-queue/cursor machinery —
+// (WHATWG Streams section 5). Unlike the readable side, the writable side has a
+// single consumer (the sink), so there is no shared-queue/cursor machinery -
 // the controller keeps a simple spec-shaped FIFO of {chunk, size} plus a
 // running total for backpressure.
 //
-// The state machine follows the spec closely: states are 'writable' →
-// ('erroring' →) 'errored', or 'writable' → 'closed'; write/close requests
+// The state machine follows the spec closely: states are 'writable' ->
+// ('erroring' ->) 'errored', or 'writable' -> 'closed'; write/close requests
 // are promise pairs; at most one sink operation (write or close) is in
 // flight at a time.
 
@@ -54,6 +54,7 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
 import type { CommonHelpers, PromiseSlot, UnderlyingSinkDict } from './common';
+import type { SerializationHelpers } from '../serialization';
 const {
   isActualObject,
   kNullProtoObject,
@@ -72,6 +73,8 @@ const {
   convertUnderlyingSink,
 } = require('webstreams/common') as CommonHelpers;
 
+const { markUncloneable } = require('serialization') as SerializationHelpers;
+
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteLength } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -88,11 +91,15 @@ const kCloseMarker: symbol = Symbol('close');
 // workerd extension consumed only by the C++ bridge (cppExports below); it
 // resolves once every write queued ahead of it has completed, mirroring the
 // legacy WritableStreamInternalController's Flush write-event. Never
-// user-visible.
+// user-visible. When the marker reaches the head of the queue, a native
+// sink's flush hook (WritableStreamNativeSink::flush) may return a promise:
+// in a Durable Object, the output gate's wait. The marker stays at the head
+// until it settles, holding back everything queued behind it, as the legacy
+// Flush event does when it waits for its output lock.
 const kFlushMarker: symbol = Symbol('flush');
 
 // A sink write() rejection wrapped in this marker rejects the WRITE
-// REQUEST but leaves the stream writable — the workerd-internal contract
+// REQUEST but leaves the stream writable - the workerd-internal contract
 // for the identity transforms (IdentityTransformStream, FixedLengthStream;
 // matching the C++ internal controllers), where an invalid chunk is a
 // per-write error, not a stream error. The standard CompressionStream pair
@@ -334,7 +341,7 @@ class WritableStream<W = unknown> {
   // 'errored'.
   #closedPromise?: PromiseWithResolversType<void> | undefined;
   // Back-reference to the native underlying sink (undefined for
-  // JS-backed streams). Kept for extraction — C++ unwraps the backing
+  // JS-backed streams). Kept for extraction - C++ unwraps the backing
   // class from the returned object.
   #nativeSink?: object | undefined;
   // The pending-closure gate (JsWritableStream::setPendingClosure): set by
@@ -409,7 +416,7 @@ class WritableStream<W = unknown> {
 
     // JS-to-C++ extraction for native-backed writable streams.
     // Mirrors extractNativeSource on the readable side: atomic
-    // validate → extract → lock. No "disturbed" concept on writable.
+    // validate -> extract -> lock. No "disturbed" concept on writable.
     extractNativeSink = function <W>(this: WritableStream<W>): object {
       assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
@@ -432,7 +439,7 @@ class WritableStream<W = unknown> {
     // neutralize the stream because its underlying connection is being
     // taken over (e.g. Socket startTls / takeConnectionStream). The
     // precondition errors match the legacy C++ arm EXACTLY
-    // (WritableStreamInternalController::detach, internal.c++) — they are
+    // (WritableStreamInternalController::detach, internal.c++) - they are
     // user-visible through the sockets API:
     //   locked            -> TypeError, text below (with trailing period)
     //   closed or closing -> TypeError "This WritableStream is closed."
@@ -500,9 +507,9 @@ class WritableStream<W = unknown> {
       );
     };
 
-    // Includes writes queued before the controller has started. A flush
-    // marker is only ever queued behind a write, so when this is false no
-    // flush is pending either.
+    // Includes writes queued before the controller has started. Ignores
+    // flush markers, which do no sink I/O; a native sink's flush can be
+    // pending with no write ahead of it (see kFlushMarker).
     writableStreamWriteQueuedOrInFlight = (stream) => {
       return (
         stream.#writeRequests.length > 0 ||
@@ -547,7 +554,7 @@ class WritableStream<W = unknown> {
         stream.#abortHook = undefined;
         abortHook();
       }
-      // signalAbort dispatches 'abort' events SYNCHRONOUSLY — the sink may
+      // signalAbort dispatches 'abort' events SYNCHRONOUSLY - the sink may
       // have registered listeners on controller.signal, and that user code
       // can re-enter (write/error/close). Re-read the state, per spec.
       const stateNow = stream.#state;
@@ -726,7 +733,7 @@ class WritableStream<W = unknown> {
 
     // The non-fatal variant (see NonFatalWriteRejection): rejects the
     // in-flight write's request WITHOUT the deal-with-rejection state
-    // transition — the stream stays writable and the queue keeps going.
+    // transition - the stream stays writable and the queue keeps going.
     writableStreamFinishInFlightWriteWithNonFatalError = (stream, error) => {
       // assert: in-flight write request is set (caller guarantee)
       const request = stream.#inFlightWriteRequest as WriteRequest;
@@ -748,7 +755,7 @@ class WritableStream<W = unknown> {
       request.resolve();
       // assert: state 'writable' or 'erroring'
       if (stream.#state === 'erroring') {
-        // The close succeeded — the abort (if any) is moot.
+        // The close succeeded - the abort (if any) is moot.
         stream.#storedError = undefined;
         const abortRequest = stream.#pendingAbortRequest;
         if (abortRequest !== undefined) {
@@ -799,6 +806,7 @@ class WritableStream<W = unknown> {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
     (this as unknown as Record<symbol, unknown>)[kWritableStreamBrand] = true;
+    markUncloneable(this);
 
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the sink is typed `object` (null and every other primitive
@@ -869,7 +877,7 @@ class WritableStream<W = unknown> {
   }
 
   // Node.js interop (see kIsClosedPromise): an object whose promise settles
-  // with the stream — fulfilled on close, rejected with the stored error.
+  // with the stream - fulfilled on close, rejected with the stored error.
   // Nothing may ever look at the rejection, so it is marked handled.
   get [kIsClosedPromise](): { promise: Promise<void> } {
     assertIsWritableStream(this);
@@ -888,8 +896,8 @@ class WritableStream<W = unknown> {
   // interop error hook, once this half is erroring: the entry half always
   // goes first, so the pair's rejections land writable-then-readable here
   // (TransformStreamError's land readable-then-writable; nothing depends on
-  // the order). The 'writable' check is what gates the hook — the
-  // controller's errorIfNeeded is already a no-op past 'writable' — so that
+  // the order). The 'writable' check is what gates the hook - the
+  // controller's errorIfNeeded is already a no-op past 'writable' - so that
   // an 'erroring' writable, whose pair is already being torn down, does not
   // fire it again with a second reason.
   [kControllerErrorFunction](reason: unknown): void {
@@ -945,6 +953,14 @@ class WritableStreamDefaultController<
   #writeHook: Function | undefined;
   #closeHook: Function | undefined;
   #abortHook: Function | undefined;
+  // A native sink's flush member (see kFlushMarker), called on the sink by
+  // #callFlush. Never read from a user sink: flush is not an UnderlyingSink
+  // member.
+  #flushHook: Function | undefined;
+  // Set while the flush marker at the head of the queue waits on the flush
+  // hook's promise. Nothing queued behind the marker reaches the sink until
+  // the wait ends.
+  #flushPending = false;
   // The controller behind `signal`, created when `signal` is first read:
   // until then no code can hold the signal, listen to it, or read its
   // reason, so an abort only records that it happened. An AbortController
@@ -1027,15 +1043,19 @@ class WritableStreamDefaultController<
     // The flush extension (C++ bridge only; see kFlushMarker). Positional
     // semantics, mirroring the legacy controller's Flush write-event: the
     // returned promise settles once every write queued AHEAD of the marker
-    // has completed. Writes enqueued after the flush do not delay it.
+    // has completed and the sink's flush hook, if any, has finished waiting.
+    // Writes enqueued after the flush do not delay it.
     controllerFlush = <W>(
       controller: WritableStreamDefaultController<W>
     ): Promise<void> => {
       // An empty queue means nothing is in flight either: a write stays at
       // the queue head until it settles, and the caller
       // (writableStreamFlush) has already rejected the queued/in-flight
-      // close cases.
-      if (controller.#queue.length === 0) {
+      // close cases. A flush hook still runs, from the head of the queue.
+      if (
+        controller.#queue.length === 0 &&
+        controller.#flushHook === undefined
+      ) {
         return PromiseResolve();
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
@@ -1048,7 +1068,7 @@ class WritableStreamDefaultController<
       return request.promise;
     };
 
-    // WritableStreamDefaultControllerGetChunkSize (spec §5.5.4)
+    // WritableStreamDefaultControllerGetChunkSize (spec section 5.5.4)
     // Runs the strategy size algorithm; if it throws, errors the stream and
     // returns 1 (spec step 3).  Called BEFORE state checks / write-request
     // enqueue per WritableStreamDefaultWriterWrite step 4. The result is
@@ -1068,7 +1088,7 @@ class WritableStreamDefaultController<
       }
     };
 
-    // WritableStreamDefaultControllerWrite (spec §5.5.4)
+    // WritableStreamDefaultControllerWrite (spec section 5.5.4)
     // Enqueues chunk with pre-computed chunkSize (from controllerGetChunkSize),
     // updates backpressure, and advances the queue.
     controllerWrite = <W>(
@@ -1108,6 +1128,7 @@ class WritableStreamDefaultController<
     sizeAlgorithm: (chunk: W) => number,
     highWaterMark: number
   ) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
@@ -1121,6 +1142,9 @@ class WritableStreamDefaultController<
     this.#writeHook = writeFn;
     this.#closeHook = closeFn;
     this.#abortHook = abortFn;
+    if (isNativeUnderlyingSink(underlyingSink)) {
+      this.#flushHook = (underlyingSink as { flush?: Function }).flush;
+    }
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -1172,7 +1196,7 @@ class WritableStreamDefaultController<
   #errorIfNeeded(error: unknown): void {
     if (getWritableStreamState(this.#stream) !== 'writable') return;
     // WritableStreamDefaultControllerError: clear algorithms, start erroring.
-    // Note: the queue is NOT cleared here — it is cleared later during
+    // Note: the queue is NOT cleared here - it is cleared later during
     // WritableStreamFinishErroring (via controllerErrorSteps).
     this.#clearAlgorithms();
     writableStreamStartErroring(this.#stream, error);
@@ -1183,6 +1207,7 @@ class WritableStreamDefaultController<
     this.#writeHook = undefined;
     this.#closeHook = undefined;
     this.#abortHook = undefined;
+    this.#flushHook = undefined;
     this.#sizeAlgorithm = undefined;
   }
 
@@ -1225,6 +1250,19 @@ class WritableStreamDefaultController<
     }
   }
 
+  // Unlike the others, returns undefined when there is nothing to wait for,
+  // so that such a flush completes in the same turn.
+  #callFlush(): Promise<void> | undefined {
+    const hook = this.#flushHook;
+    if (hook === undefined) return undefined;
+    try {
+      return FunctionPrototypeCall(hook, this.#underlyingSink) as
+        Promise<void> | undefined;
+    } catch (e) {
+      return PromiseReject(e);
+    }
+  }
+
   #advanceQueueIfNeeded(): void {
     if (!this.#started) return;
     const stream = this.#stream;
@@ -1235,6 +1273,7 @@ class WritableStreamDefaultController<
       writableStreamFinishErroringIfNeeded(stream);
       return;
     }
+    if (this.#flushPending) return;
     const head = this.#queue.peek();
     if (head === undefined) return;
     if (head.value === kCloseMarker) {
@@ -1248,9 +1287,42 @@ class WritableStreamDefaultController<
 
   #processFlush(): void {
     // Every write ahead of the marker has completed (queue processing is
-    // strictly serial); the marker itself involves no sink operation.
-    const entry = this.#queue.shift() as QueuedWrite<W>;
-    (entry.flushRequest as PromiseWithResolversType<void>).resolve();
+    // strictly serial).
+    const entry = this.#queue.peek() as QueuedWrite<W>;
+    const request = entry.flushRequest as PromiseWithResolversType<void>;
+    const wait = this.#callFlush();
+    if (wait === undefined) {
+      this.#completeFlush(request.resolve);
+      return;
+    }
+    // The marker stays at the head while the hook waits. An error, abort or
+    // detach meanwhile drops it with the queue, rejecting the request, and
+    // the wait's settlement is then ignored.
+    this.#flushPending = true;
+    PromisePrototypeThen(
+      wait,
+      () => {
+        this.#flushPending = false;
+        if (this.#queue.peek() === entry) {
+          this.#completeFlush(request.resolve);
+        }
+      },
+      (e: unknown) => {
+        this.#flushPending = false;
+        if (this.#queue.peek() === entry) {
+          this.#completeFlush(() => {
+            request.reject(e);
+          });
+        }
+      }
+    );
+  }
+
+  // Dequeues the flush marker at the head and settles its request before
+  // anything queued behind it can reach the sink.
+  #completeFlush(settle: () => void): void {
+    this.#queue.shift();
+    settle();
     // Consecutive markers (or a close queued behind the flush) continue
     // processing in the same turn.
     this.#advanceQueueIfNeeded();
@@ -1302,7 +1374,7 @@ class WritableStreamDefaultController<
         if (getWritableStreamState(stream) === 'closed') return;
         // Workerd-internal non-fatal rejection (identity-stream invalid
         // chunks): reject THIS write's request but keep the stream
-        // writable and continue with the queue — the fulfillment
+        // writable and continue with the queue - the fulfillment
         // bookkeeping with the request rejected instead of resolved.
         if (isNonFatalWriteRejection(e)) {
           this.#completeInFlightWrite(() => {
@@ -1386,7 +1458,7 @@ class WritableStreamDefaultWriter<
     getWriterClosedPromiseInternal = (writer) =>
       slotPromise(writer.#closedPromise);
 
-    // WritableStreamDefaultWriterWrite (spec §5.3.4)
+    // WritableStreamDefaultWriterWrite (spec section 5.3.4)
     // Step order is critical: size algorithm runs BEFORE state re-checks,
     // because size() can re-entrantly call close()/releaseLock()/error().
     writerWriteInternal = <W>(
@@ -1412,20 +1484,20 @@ class WritableStreamDefaultWriter<
       }
       const controller = getWritableStreamController(stream);
 
-      // Step 4: GetChunkSize — runs size() which may re-entrantly mutate
+      // Step 4: GetChunkSize - runs size() which may re-entrantly mutate
       // stream state (e.g. writer.close() called from size()).
       const chunkSize =
         controller !== undefined
           ? controllerGetChunkSize(controller, chunk)
           : 1;
 
-      // Step 5: Re-check writer.[[stream]] — size() may have called
+      // Step 5: Re-check writer.[[stream]] - size() may have called
       // releaseLock().
       if (writer.#stream !== stream) {
         return writeFailed(request, releasedWriterError());
       }
 
-      // Steps 6–9: State checks (AFTER size ran).
+      // Steps 6-9: State checks (AFTER size ran).
       const state = getWritableStreamState(stream);
       if (state === 'errored') {
         return writeFailed(request, getWritableStreamStoredError(stream));
@@ -1444,7 +1516,7 @@ class WritableStreamDefaultWriter<
       const promise = writableStreamAddWriteRequest(stream, request);
 
       // Step 12: ControllerWrite (with pre-computed chunkSize, no size()
-      // call — that already happened in step 4).
+      // call - that already happened in step 4).
       if (controller !== undefined) {
         controllerWrite(controller, chunk, chunkSize);
       }
@@ -1504,6 +1576,7 @@ class WritableStreamDefaultWriter<
   }
 
   constructor(stream: WritableStream<W>) {
+    markUncloneable(this);
     if (!isActualObject(stream)) {
       throw new TypeError('stream must be a WritableStream');
     }
@@ -1616,7 +1689,7 @@ class WritableStreamDefaultWriter<
   }
 }
 
-// Spec WritableStreamDefaultWriterCloseWithErrorPropagation — the pipe's
+// Spec WritableStreamDefaultWriterCloseWithErrorPropagation - the pipe's
 // close path: an already-closing/closed destination is success, an errored
 // one propagates its stored error.
 function writerCloseWithErrorPropagation<W>(
@@ -1678,10 +1751,10 @@ ObjectDefineProperties(WritableStreamDefaultController.prototype, {
 // WritableStreamInternalController::isClosedOrClosing(): closed, or a close
 // is queued / in flight. Deliberate deltas from the legacy heuristic, both
 // confined to the flag-guarded TS path:
-//   - errored / erroring answer false (both C++ controllers agree);
-//   - a PENDING FLUSH does not count (the legacy internal controller's
+//  - errored / erroring answer false (both C++ controllers agree);
+//  - a PENDING FLUSH does not count (the legacy internal controller's
 //     queue.back().isCloseOrFlush() quirk treats it as "closing");
-//   - #pendingClosure does not enter the query (matches C++, where the
+//  - #pendingClosure does not enter the query (matches C++, where the
 //     pending-closure flag is separate state).
 function isWritableStreamClosedOrClosing<W>(
   stream: WritableStream<W>
@@ -1716,8 +1789,9 @@ function writableStreamClose<W>(stream: WritableStream<W>): Promise<void> {
 //   closed or closing -> reject TypeError "This WritableStream has been
 //     closed." (exact text);
 //   errored / erroring -> reject with the stored error;
-//   otherwise resolve once every write queued at call time has completed,
-//   rejecting if the stream errors first.
+//   otherwise resolve once every write queued at call time has completed
+//   and, for a native sink, the Durable Object output gate has opened (see
+//   kFlushMarker), rejecting if the stream errors or is aborted first.
 // Delta from legacy (flag-guarded): no "currently being piped to" rejection
 // -- the TS pipe holds an ordinary writer lock rather than a queue-level
 // pipe event, so a mid-pipe forceFlush simply parks behind the pipe's
@@ -1805,7 +1879,7 @@ const cppExports = ObjectFreeze({
   // The RPC-transfer writer operations (JsWritableStream::serialize's
   // TsWriterSink): acquisition and per-operation dispatch go through these
   // internal algorithms rather than the public prototype methods, which are
-  // user-patchable — a replaced getWriter/write/close/abort must not be able
+  // user-patchable - a replaced getWriter/write/close/abort must not be able
   // to intercept or fake a stream's RPC transfer. Acquisition has the public
   // getWriter's exact semantics (the locked TypeError comes from the same
   // constructor path).
@@ -1903,7 +1977,7 @@ module.exports = {
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so
     // sinks that snapshot chunks in size() (identity, compression) consult
-    // this to skip copying for doomed writes — the FIFO stays aligned
+    // this to skip copying for doomed writes - the FIFO stays aligned
     // because everything between size() and the checks is synchronous, so
     // the answer cannot change before the machinery re-asks.
     willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
@@ -1924,7 +1998,7 @@ module.exports = {
     },
     // Wraps a sink write() rejection so it rejects only ITS write request,
     // leaving the stream writable (the identity streams' invalid-chunk
-    // contract — see NonFatalWriteRejection). The sink throws (or rejects
+    // contract - see NonFatalWriteRejection). The sink throws (or rejects
     // with) the wrapper; the write request rejects with `error`.
     nonFatalWriteRejection: (error: unknown): NonFatalWriteRejection =>
       new NonFatalWriteRejection(error),

@@ -83,7 +83,7 @@ fn enum_unit_variant_does_not_crash_during_gc() {
                 state: StreamState::Closed,
             },
         );
-        let wrapped = parent.clone().to_js(lock)?;
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
@@ -111,10 +111,10 @@ fn enum_variant_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(
             lock,
             StreamController {
-                state: StreamState::Readable(child.clone()),
+                state: StreamState::Readable(child.clone(lock)),
             },
         );
-        let wrapped = parent.clone().to_js(lock)?;
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -147,11 +147,11 @@ fn enum_named_variant_child_kept_alive_through_gc() {
             lock,
             StreamController {
                 state: StreamState::Errored {
-                    reason: child.clone(),
+                    reason: child.clone(lock),
                 },
             },
         );
-        let wrapped = parent.clone().to_js(lock)?;
+        let wrapped = parent.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -253,14 +253,16 @@ fn cycle_through_struct_field_is_collected() {
             lock,
             Node {
                 link: jsg::RefCell::new(Some(Link {
-                    target: back.clone(),
+                    target: back.clone(lock),
                 })),
             },
         );
-        let node_wrapper = node.clone().to_js(lock)?;
-        back.node.set(Some(node_wrapper.to_traced_global(lock)));
+        let node_wrapper = node.clone(lock).to_js(lock)?;
+        back.get(lock)
+            .node
+            .set(Some(node_wrapper.to_traced_global(lock)));
         // `Back` needs a wrapper for the `jsg::Rc<Back>` in the `Link` to trace it.
-        let _ = back.clone().to_js(lock)?;
+        let _ = back.clone(lock).to_js(lock)?;
         std::mem::drop(node);
         std::mem::drop(back);
         assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 0);
@@ -319,8 +321,8 @@ fn cycle_through_struct_js_value_field_is_collected() {
                 link: jsg::RefCell::new(None),
             },
         );
-        let wrapper = holder.clone().to_js(lock)?;
-        *holder.link.borrow_mut(lock) = Some(ValueLink {
+        let wrapper = holder.clone(lock).to_js(lock)?;
+        *holder.get(lock).link.borrow_mut(lock) = Some(ValueLink {
             value: wrapper.to_traced_global(lock),
         });
         std::mem::drop(holder);
@@ -348,7 +350,7 @@ fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
                 link: jsg::RefCell::new(None),
             },
         );
-        let wrapper = holder.clone().to_js(lock)?;
+        let wrapper = holder.clone(lock).to_js(lock)?;
         ctx.set_global(lock, "holder", wrapper);
         // Only the `Holder` keeps the value alive; the script ends in `undefined` so that no
         // `Local` of it outlives the script.
@@ -357,7 +359,12 @@ fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
         // The holder's wrapper is reachable, so the visit puts the value's handle in traced mode.
         crate::Harness::request_gc(lock);
 
-        let link = holder.link.borrow_mut(lock).take().expect("set above");
+        let link = holder
+            .get(lock)
+            .link
+            .borrow_mut(lock)
+            .take()
+            .expect("set above");
         crate::Harness::request_gc(lock);
         let back = link.to_js(lock)?;
         ctx.set_global(lock, "back", back);

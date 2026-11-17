@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+using UrlModules = import "url-modules.capnp";
+
+# Runs the URL suite against the TypeScript implementation
+# (src/per_isolate/url/) with its ada backend, with the dated flags on.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util, node:url), enable_nodejs_fs_module (node:fs),
+# expose_global_message_channel, enable_weak_ref (FinalizationRegistry) and
+# urlpattern_standard.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url-standard-ts",
+      worker = (
+        modules = UrlModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_fs_module",
+          "expose_global_message_channel",
+          "enable_weak_ref",
+          "urlpattern_standard",
+          "url_standard",
+          "urlsearchparams_delete_has_value_arg",
+          "set_tostring_tag",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-ts-url"],
+);

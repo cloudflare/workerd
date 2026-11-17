@@ -51,55 +51,63 @@ impl Lazy {
     }
 }
 
-/// Runs `code` with a fresh `Lazy` as the global `l`, and returns its result and the resource.
-fn eval_lazy<T>(code: &str) -> (T, jsg::Rc<Lazy>)
+/// How often each lazy getter of a `Lazy` ran.
+struct Calls {
+    list: u32,
+    label: u32,
+}
+
+/// Runs `code` with a fresh `Lazy` as the global `l`, and returns its result and how often the
+/// getters ran.
+fn eval_lazy<T>(code: &str) -> (T, Calls)
 where
     T: for<'a> jsg::FromJS<'a, ResultType = T> + Default,
 {
     let mut out = T::default();
-    let mut resource = None;
+    let mut calls = None;
     Harness::new().run_in_context(|lock, ctx| {
         let lazy = jsg::Rc::new(lock, Lazy::new());
-        resource = Some(lazy.clone());
-        ctx.set_global(lock, "l", lazy);
+        ctx.set_global(lock, "l", lazy.clone(lock));
         out = ctx.eval(lock, code).unwrap();
+        let lazy = lazy.get(lock);
+        calls = Some(Calls {
+            list: lazy.list_calls.get(),
+            label: lazy.label_calls.get(),
+        });
         Ok(())
     });
-    (out, resource.expect("created in the context"))
+    (out, calls.expect("counted in the context"))
 }
 
 #[test]
 fn lazy_getter_runs_once_and_caches_its_result() {
-    let (same, lazy) = eval_lazy::<bool>("l.list === l.list && l.list.join() === 'a,b'");
+    let (same, calls) = eval_lazy::<bool>("l.list === l.list && l.list.join() === 'a,b'");
     assert!(same, "every read must return the value of the first one");
-    assert_eq!(lazy.list_calls.get(), 1);
+    assert_eq!(calls.list, 1);
 }
 
 #[test]
 fn lazy_getter_does_not_run_until_first_access() {
-    let (keys, lazy) = eval_lazy::<String>("Object.keys(l).join()");
+    let (keys, calls) = eval_lazy::<String>("Object.keys(l).join()");
     // Listing the keys does not read the values.
     assert_eq!(keys, "label,list");
-    assert_eq!(lazy.list_calls.get(), 0);
-    assert_eq!(lazy.label_calls.get(), 0);
+    assert_eq!(calls.list, 0);
+    assert_eq!(calls.label, 0);
 }
 
 #[test]
 fn lazy_getters_run_per_instance() {
-    let mut created = None;
     Harness::new().run_in_context(|lock, ctx| {
         let lazy = jsg::Rc::new(lock, Lazy::new());
         let other = jsg::Rc::new(lock, Lazy::new());
-        created = Some((lazy.clone(), other.clone()));
-        ctx.set_global(lock, "a", lazy);
-        ctx.set_global(lock, "b", other);
+        ctx.set_global(lock, "a", lazy.clone(lock));
+        ctx.set_global(lock, "b", other.clone(lock));
         let distinct: bool = ctx.eval(lock, "a.list !== b.list").unwrap();
         assert!(distinct);
+        assert_eq!(lazy.get(lock).list_calls.get(), 1);
+        assert_eq!(other.get(lock).list_calls.get(), 1);
         Ok(())
     });
-    let (first, second) = created.expect("created in the context");
-    assert_eq!(first.list_calls.get(), 1);
-    assert_eq!(second.list_calls.get(), 1);
 }
 
 #[test]
@@ -130,16 +138,16 @@ fn lazy_property_is_own_and_not_on_prototype() {
 
 #[test]
 fn writable_lazy_property_takes_assignments_without_running_the_getter() {
-    let (value, lazy) = eval_lazy::<String>("'use strict'; l.list = 'mine'; l.list");
+    let (value, calls) = eval_lazy::<String>("'use strict'; l.list = 'mine'; l.list");
     assert_eq!(value, "mine");
-    assert_eq!(lazy.list_calls.get(), 0);
+    assert_eq!(calls.list, 0);
 }
 
 #[test]
 fn writable_lazy_property_takes_assignments_after_first_read() {
-    let (value, lazy) = eval_lazy::<String>("'use strict'; l.list; l.list = 'mine'; l.list");
+    let (value, calls) = eval_lazy::<String>("'use strict'; l.list; l.list = 'mine'; l.list");
     assert_eq!(value, "mine");
-    assert_eq!(lazy.list_calls.get(), 1);
+    assert_eq!(calls.list, 1);
 }
 
 #[test]
@@ -155,12 +163,10 @@ fn readonly_lazy_property_rejects_assignment() {
 
 #[test]
 fn lazy_getter_error_is_thrown_and_not_cached() {
-    let mut resource = None;
     Harness::new().run_in_context(|lock, ctx| {
         let lazy = jsg::Rc::new(lock, Lazy::new());
-        lazy.fail.set(true);
-        resource = Some(lazy.clone());
-        ctx.set_global(lock, "l", lazy.clone());
+        lazy.get(lock).fail.set(true);
+        ctx.set_global(lock, "l", lazy.clone(lock));
         let thrown: String = ctx
             .eval(
                 lock,
@@ -169,17 +175,14 @@ fn lazy_getter_error_is_thrown_and_not_cached() {
             .unwrap();
         assert_eq!(thrown, "RangeError: no label");
         // A failed read leaves the property lazy, so the next read runs the getter again.
-        lazy.fail.set(false);
+        lazy.get(lock).fail.set(false);
         let label: String = ctx.eval(lock, "l.label").unwrap();
         assert_eq!(label, "lazy");
         let cached: String = ctx.eval(lock, "l.label").unwrap();
         assert_eq!(cached, "lazy");
+        assert_eq!(lazy.get(lock).label_calls.get(), 2);
         Ok(())
     });
-    assert_eq!(
-        resource.expect("created in the context").label_calls.get(),
-        2
-    );
 }
 
 #[jsg_resource]
@@ -253,9 +256,9 @@ fn eval_placed(harness: &Harness, code: &str) -> (String, u32) {
                 calls: Cell::new(0),
             },
         );
-        ctx.set_global(lock, "p", placed.clone());
+        ctx.set_global(lock, "p", placed.clone(lock));
         out = ctx.eval(lock, code).unwrap();
-        calls = placed.calls.get();
+        calls = placed.get(lock).calls.get();
         Ok(())
     });
     (out, calls)

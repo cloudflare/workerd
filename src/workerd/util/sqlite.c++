@@ -2063,7 +2063,14 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
   WRAP(xRead),
   WRAP(xWrite),
   WRAP(xTruncate),
-  WRAP(xSync),
+  .xSync = [](sqlite3_file* file, int flags) noexcept -> int {
+    // Also skips the directory sync that the native xSync does after creating a journal or WAL.
+    if (!static_cast<WrappedNativeFileImpl*>(file)->vfs->options.sync) {
+      return SQLITE_OK;
+    }
+    return MethodWrapperHack<decltype(&sqlite3_io_methods::xSync),
+        &sqlite3_io_methods::xSync>::wrapper(file, flags);
+  },
   WRAP(xFileSize),
   WRAP(xLock),
   WRAP(xUnlock),
@@ -2298,6 +2305,9 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
 
   .xSync = [](sqlite3_file* file, int flags) noexcept -> int {
     WRAP_METHOD(SQLITE_IOERR_FSYNC, {
+      if (!self.vfs.options.sync) {
+        return SQLITE_OK;
+      }
       if (flags & SQLITE_SYNC_DATAONLY) {
         self.file->datasync();
       } else {

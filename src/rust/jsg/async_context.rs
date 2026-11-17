@@ -168,6 +168,28 @@ impl From<AsyncContextFrame> for TracedAsyncContextFrame {
     }
 }
 
+/// An edge to the frame's wrapper in the V8 heap; nothing for the root frame.
+impl crate::MemoryInfo for AsyncContextFrame {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        self.value.track_as_field(tracker, edge_name);
+    }
+}
+
+/// An edge to the frame's wrapper in the V8 heap; nothing for the root frame.
+impl crate::MemoryInfo for TracedAsyncContextFrame {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        self.value.track_as_field(tracker, edge_name);
+    }
+}
+
 impl Traced for TracedAsyncContextFrame {
     fn trace(&self, visitor: &mut GcVisitor) {
         if let Some(value) = &self.value {

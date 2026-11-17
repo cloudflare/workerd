@@ -439,4 +439,8 @@ kj::Own<CompatibilityFlags::Reader> WorkerLoader::extractCompatFlags(
   return capnp::clone(compatFlagsBuilder.asReader());
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> WorkerLoader::snapshotClone() const {
+  return ownAsWrappable(kj::refcounted<WorkerLoader>(channel, compatDateValidation));
+}
+
 }  // namespace workerd::api

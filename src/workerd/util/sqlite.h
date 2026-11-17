@@ -896,6 +896,13 @@ struct SqliteDatabase::VfsOptions {
   // will fall back to the native VFS implementation. In that case, the options you set here will
   // be ORed with the ones set by the underlying VFS.
   int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
+
+  // Whether the VFS syncs files (fsync() and the like). When false, syncs succeed without doing
+  // anything, so a crash of the machine can lose or corrupt recent commits; a crash of the
+  // process alone cannot, since its writes are already in the OS's page cache. For databases that
+  // need not survive the machine, such as those of tests, where a sync can stall for seconds on a
+  // busy disk.
+  bool sync = true;
 };
 
 // Implements a SQLite VFS based on a KJ directory.

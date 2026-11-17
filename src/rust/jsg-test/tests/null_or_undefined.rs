@@ -60,7 +60,7 @@ fn gc_traces_the_contained_resource() {
     let mut weak_child = None;
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(lock, Child {});
-        weak_child = Some(child.downgrade());
+        weak_child = Some(child.downgrade(lock));
         let parent = jsg::Rc::new(
             lock,
             Parent {
@@ -70,13 +70,13 @@ fn gc_traces_the_contained_resource() {
         let wrapped = parent.to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         crate::Harness::request_gc(lock);
-        assert!(weak_child.as_ref().unwrap().is_alive());
+        assert!(weak_child.as_ref().unwrap().is_alive(lock));
         Ok(())
     });
     // The parent global is scoped to its context; it and its child can now be collected.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
-        assert!(!weak_child.as_ref().unwrap().is_alive());
+        assert!(!weak_child.as_ref().unwrap().is_alive(lock));
         for child in [NullOrUndefined::Null, NullOrUndefined::Undefined] {
             let parent = jsg::Rc::new(lock, Parent { child });
             let _wrapped = parent.to_js(lock)?;

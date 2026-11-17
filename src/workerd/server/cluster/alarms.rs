@@ -185,7 +185,9 @@ impl Index {
             }
         }
         dead.extend(self.orphans.borrow().iter().cloned());
-        self.adopt(&live, &dead, adopted).await;
+        // A draining node, though live, takes on no alarms.
+        self.adopt(&registry.serving_nodes(now_ms), &dead, adopted)
+            .await;
         self.tidy().await;
     }
 

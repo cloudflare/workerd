@@ -116,7 +116,7 @@ fn install_probe(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>) -> jsg::Rc<
             saw_pending: Cell::new(false),
         },
     );
-    ctx.set_global(lock, "probe", probe.clone());
+    ctx.set_global(lock, "probe", probe.clone(lock));
     probe
 }
 
@@ -266,7 +266,7 @@ fn enter_restores_while_terminating() {
     Harness::new().run_in_context(|lock, ctx| {
         let probe = install_probe(lock, ctx);
         let value = "a".to_js(lock)?;
-        probe.capture_in(lock, value);
+        probe.get(lock).capture_in(lock, value);
         let value = "outer".to_js(lock)?;
         let result = Harness::run_in_async_context(lock, value, |lock| {
             let result = ctx.eval_raw(
@@ -277,8 +277,8 @@ fn enter_restores_while_terminating() {
             result.is_err()
         });
         assert!(result, "the script was not terminated");
-        assert!(probe.saw_pending.get());
-        assert!(probe.restored.get());
+        assert!(probe.get(lock).saw_pending.get());
+        assert!(probe.get(lock).restored.get());
         assert_eq!(current(lock), None);
         Ok(())
     });
@@ -382,16 +382,16 @@ fn frame_in_resource_is_traced() {
         );
         // The probe's wrapper is reachable, but the probe has no strong reference from Rust, so
         // GC traces its frame through the wrapper.
-        let wrapper = probe.clone().to_js(lock)?;
+        let wrapper = probe.clone(lock).to_js(lock)?;
         let stored = jsg::Rc::new(
             lock,
             Stored {
-                owner: jsg::Cell::new(Some(probe.clone())),
+                owner: jsg::Cell::new(Some(probe.clone(lock))),
             },
         )
         .to_js(lock)?;
-        probe.capture_in(lock, stored);
-        kept = Some((wrapper.to_global(lock), probe.downgrade()));
+        probe.get(lock).capture_in(lock, stored);
+        kept = Some((wrapper.to_global(lock), probe.downgrade(lock)));
         Ok(())
     });
     let (wrapper, probe) = kept.unwrap();
@@ -406,8 +406,8 @@ fn frame_in_resource_is_traced() {
             0,
             "the stored value was collected while the frame was held"
         );
-        let probe = probe.upgrade().unwrap();
-        let stored = probe.value_in_frame(lock);
+        let probe = probe.upgrade(lock).unwrap();
+        let stored = probe.get(lock).value_in_frame(lock);
         assert!(jsg::Rc::<Stored>::from_js(lock, stored).is_ok());
         Ok(())
     });
@@ -524,7 +524,7 @@ fn frames_dropped_at_or_after_teardown() {
     harness.run_in_context(|lock, ctx| {
         let probe = install_probe(lock, ctx);
         let value = "held by the probe".to_js(lock)?;
-        probe.capture_in(lock, value);
+        probe.get(lock).capture_in(lock, value);
         kept = Some(frame_storing(lock, "held by Rust"));
         Ok(())
     });

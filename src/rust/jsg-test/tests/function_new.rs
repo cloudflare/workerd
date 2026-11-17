@@ -162,9 +162,7 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(DropCounter);
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -225,7 +223,7 @@ fn function_new_while_terminating_keeps_the_termination() {
                 saw_pending: Cell::new(false),
             },
         );
-        ctx.set_global(lock, "creator", creator.clone());
+        ctx.set_global(lock, "creator", creator.clone(lock));
         let result = ctx.eval_raw(
             lock,
             "globalThis.caught = false; globalThis.after = false;
@@ -234,7 +232,7 @@ fn function_new_while_terminating_keeps_the_termination() {
              globalThis.after = true;",
         );
         assert!(result.is_err(), "the script was not terminated");
-        assert!(creator.saw_pending.get());
+        assert!(creator.get(lock).saw_pending.get());
         assert!(!ctx.eval::<bool>(lock, "globalThis.caught").unwrap());
         assert!(!ctx.eval::<bool>(lock, "globalThis.after").unwrap());
         Ok(())
@@ -277,7 +275,7 @@ fn function_new_while_exception_pending_keeps_the_exception() {
                 saw_pending: Cell::new(false),
             },
         );
-        ctx.set_global(lock, "creator", creator.clone());
+        ctx.set_global(lock, "creator", creator.clone(lock));
         assert_eq!(
             ctx.eval::<String>(
                 lock,
@@ -290,7 +288,7 @@ fn function_new_while_exception_pending_keeps_the_exception() {
             .unwrap(),
             "same"
         );
-        assert!(creator.saw_pending.get());
+        assert!(creator.get(lock).saw_pending.get());
         Ok(())
     });
 }
@@ -316,7 +314,7 @@ fn data_keeps_traced_resources_alive() {
             },
         );
         let function =
-            v8::Function::new(lock, leaf, |lock, leaf, _| leaf.clone().to_js(lock)).unwrap();
+            v8::Function::new(lock, leaf, |lock, leaf, _| leaf.clone(lock).to_js(lock)).unwrap();
         ctx.set_global(lock, "getLeaf", v8::Local::<v8::Value>::from(function));
         // Only the function's data holds the resource now.
         crate::Harness::request_gc(lock);

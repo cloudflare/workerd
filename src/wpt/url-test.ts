@@ -4,6 +4,19 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript URL (the TS_URL autogate) is only an own property of the
+// global, as WebIDL installs an interface; JSG puts the C++ one on the
+// global's prototype (src/tests/url/api-surface.js).
+const usingTsUrl = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis) as object,
+  'URL'
+);
+
+// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) brand-checks
+// its attributes, so its prototype is not a valid record for
+// URLSearchParams; the C++ one's are instance properties.
+const usingTsDomException = Error.isError(new DOMException());
+
 export default {
   'IdnaTestV2-removed.any.js': {},
   'IdnaTestV2.any.js': {
@@ -23,9 +36,9 @@ export default {
   'idlharness.any.js': {
     comment:
       'IDL tests fail because Workers exposes globals differently than browsers (not as own properties of self)',
-    expectedFailures: [
-      'URLSearchParams interface: iterable<USVString, USVString>',
-    ],
+    expectedFailures: usingTsUrl
+      ? []
+      : ['URLSearchParams interface: iterable<USVString, USVString>'],
   },
   'javascript-urls.window.js': {
     comment: 'Implement `globalThis.document`',
@@ -71,8 +84,10 @@ export default {
   },
   'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: ['URLSearchParams constructor, DOMException as argument'],
+    comment: 'The C++ DOMException.prototype converts to a record',
+    expectedFailures: usingTsDomException
+      ? []
+      : ['URLSearchParams constructor, DOMException as argument'],
   },
   'urlsearchparams-delete.any.js': {},
   'urlsearchparams-foreach.any.js': {},

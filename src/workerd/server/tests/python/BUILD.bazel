@@ -33,6 +33,12 @@ py_wd_test("top-level-entropy")
 py_wd_test("subdirectory")
 
 py_wd_test(
+    "subdirectory",
+    name = "subdirectory-keep-import-caches",
+    src = "subdirectory/subdirectory-keep-import-caches.wd-test",
+)
+
+py_wd_test(
     "sdk",
     compat_date = "2026-01-01",
 )
@@ -80,7 +86,19 @@ py_wd_test(
     ],
 )
 
-py_wd_test("workflow-entrypoint")
+# TODO(later): having multiple Python workers in a single wd-test makes the dedicated snapshot
+# created by one Python worker used by the other Python worker, which is wrong and causes issues.
+# Since this is test-only, fix it later.
+py_wd_test(
+    "workflow-entrypoint",
+    src = "workflow-entrypoint/workflow-entrypoint.wd-test",
+)
+
+py_wd_test(
+    "workflow-entrypoint",
+    name = "workflow-entrypoint-old",
+    src = "workflow-entrypoint/workflow-entrypoint-old.wd-test",
+)
 
 py_wd_test("vendor_dir_compat_flag")
 

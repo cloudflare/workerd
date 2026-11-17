@@ -300,6 +300,10 @@ enum class ResponseMode {
   CONNECT_FAILURE,
   UPSTREAM_FAILURE,
   UPSTREAM_END_FAILURE,
+  // Port.connect() hands out a SubstreamFailingUp as `up` before it returns, then fails.
+  PIPELINED_CONNECT_FAILURE,
+  // Port.connect() drops `down`, then fails.
+  DOWN_DROPPED_CONNECT_FAILURE,
 };
 
 enum class WaitForClose { NO, YES };
@@ -338,6 +342,96 @@ class FailingEndOutput final: public capnp::ExplicitEndOutputStream {
   }
 };
 
+// The `up` of a tunnel that fails to open: writes are accepted while the tunnel is set up, and
+// getSubstream() fails with an error other than Port.connect()'s.
+class SubstreamFailingUp final: public capnp::ByteStream::Server {
+ public:
+  explicit SubstreamFailingUp(bool& substreamRequested): substreamRequested(substreamRequested) {}
+
+  kj::Promise<void> write(WriteContext context) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> end(EndContext context) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> getSubstream(GetSubstreamContext context) override {
+    substreamRequested = true;
+    return JSG_KJ_EXCEPTION(FAILED, Error, "Testing getSubstream() error");
+  }
+
+ private:
+  bool& substreamRequested;
+};
+
+// Forwards to `inner`, recording whether getSubstream() was called.
+class RecordingStream final: public capnp::ByteStream::Server {
+ public:
+  RecordingStream(capnp::ByteStream::Client inner, bool& substreamRequested)
+      : inner(kj::mv(inner)),
+        substreamRequested(substreamRequested) {}
+
+  kj::Promise<void> write(WriteContext context) override {
+    auto params = context.getParams();
+    auto req = inner.writeRequest(params.totalSize());
+    req.setBytes(params.getBytes());
+    return req.send();
+  }
+
+  kj::Promise<void> end(EndContext context) override {
+    return context.tailCall(inner.endRequest(capnp::MessageSize{2, 0}));
+  }
+
+  kj::Promise<void> getSubstream(GetSubstreamContext context) override {
+    substreamRequested = true;
+    auto params = context.getParams();
+    auto req = inner.getSubstreamRequest(params.totalSize());
+    req.setCallback(params.getCallback());
+    req.setLimit(params.getLimit());
+    return context.tailCall(kj::mv(req));
+  }
+
+ private:
+  capnp::ByteStream::Client inner;
+  bool& substreamRequested;
+};
+
+// Reports a length, so that the HTTP client sends Content-Length and passes the body's pump through
+// to the connection.
+class KnownLengthInput final: public kj::AsyncInputStream {
+ public:
+  KnownLengthInput(kj::AsyncInputStream& inner, uint64_t length): inner(inner), length(length) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner.tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner.tryReadSync(buffer, minBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return length;
+  }
+
+  kj::Promise<uint64_t> pumpTo(
+      kj::AsyncOutputStream& output, uint64_t amount = kj::maxValue) override {
+    return inner.pumpTo(output, amount);
+  }
+
+ private:
+  kj::AsyncInputStream& inner;
+  uint64_t length;
+};
+
+// What a TestPort saw on `up`.
+struct UpRecording {
+  bool substreamRequested = false;
+  // The body of each request read from `up`.
+  kj::Vector<kj::String> requestBodies;
+};
+
 class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::ErrorHandler {
  public:
   TestPort(capnp::ByteStreamFactory& byteStreamFactory,
@@ -345,19 +439,43 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
       size_t& connectCount,
       kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller,
       kj::Maybe<bool&> upEndedUncleanly = kj::none,
-      bool deferConnect = false)
+      bool deferConnect = false,
+      kj::Maybe<UpRecording&> upRecording = kj::none)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
         closeFulfiller(closeFulfiller),
         upEndedUncleanly(upEndedUncleanly),
         deferConnect(deferConnect),
+        upRecording(upRecording),
         tasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
     ++connectCount;
     if (mode == ResponseMode::CONNECT_FAILURE) {
       return JSG_KJ_EXCEPTION(FAILED, Error, "Testing error path");
+    }
+    if (mode == ResponseMode::PIPELINED_CONNECT_FAILURE) {
+      heldDown = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
+      capnp::PipelineBuilder<ConnectResults> pipeline;
+      pipeline.setUp(capnp::ByteStream::Client(
+          kj::heap<SubstreamFailingUp>(KJ_REQUIRE_NONNULL(upRecording).substreamRequested)));
+      context.setPipeline(pipeline.build());
+      // Fail once the caller has done all it does before connect() returns.
+      return kj::yieldUntilQueueEmpty().then([]() -> kj::Promise<void> {
+        return JSG_KJ_EXCEPTION(FAILED, Error, "Testing error path");
+      });
+    }
+    if (mode == ResponseMode::DOWN_DROPPED_CONNECT_FAILURE) {
+      // Drop `down` once the caller has done all it does before connect() returns, and fail once
+      // that has reached the caller.
+      return kj::yieldUntilQueueEmpty()
+          .then([context]() mutable {
+        context.releaseParams();
+        return kj::yieldUntilQueueEmpty();
+      }).then([]() -> kj::Promise<void> {
+        return JSG_KJ_EXCEPTION(FAILED, Error, "Testing error path");
+      });
     }
     if (mode == ResponseMode::UPSTREAM_FAILURE) {
       heldDown = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
@@ -376,15 +494,18 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
       // observable: the callback fires only if the up stream is destroyed without end().
       up = capnp::ExplicitEndOutputStream::wrap(kj::mv(up), [&flag]() { flag = true; });
     }
-    auto upCap = byteStreamFactory.kjToCapnp(kj::mv(up));
+    capnp::ByteStream::Client upCap = byteStreamFactory.kjToCapnp(kj::mv(up));
+    KJ_IF_SOME(recording, upRecording) {
+      upCap = capnp::ByteStream::Client(
+          kj::heap<RecordingStream>(kj::mv(upCap), recording.substreamRequested));
+    }
     auto down = byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
     if (deferConnect) {
-      // Mirror the real container service: the Port.connect() RPC does not resolve until the
-      // connection is torn down, and `up` is delivered early via promise pipelining
-      // (context.setPipeline) so the caller can use the tunnel before connect() returns. Returning
-      // the serve() promise directly (rather than backgrounding it via tasks and resolving now)
-      // keeps the call outstanding for the connection's lifetime. Code under test must therefore
-      // hand back a usable stream without waiting for this RPC to complete; otherwise it deadlocks.
+      // `up` is delivered early via promise pipelining (context.setPipeline), so the caller can
+      // use the tunnel before connect() returns. Returning the serve() promise directly (rather
+      // than backgrounding it via tasks and resolving now) keeps the call outstanding for the
+      // connection's lifetime, so code under test must hand back a usable stream without waiting
+      // for this RPC to complete; otherwise it deadlocks.
       capnp::PipelineBuilder<ConnectResults> pipeline;
       pipeline.setUp(upCap);
       context.setPipeline(pipeline.build());
@@ -403,6 +524,7 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
   kj::Maybe<bool&> upEndedUncleanly;
   bool deferConnect;
+  kj::Maybe<UpRecording&> upRecording;
   kj::TaskSet tasks;
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> heldDown;
 
@@ -412,31 +534,43 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
     }
   }
 
-  // Reads a request's header block. Resolves to true once a full \r\n\r\n-delimited block has been
-  // read, or false if the client cleanly closed the connection first. A client close is a normal
-  // end-of-connection for a keep-alive server, not an error, so it must not throw (see taskFailed).
-  kj::Promise<bool> readRequest(kj::AsyncInputStream& input) {
-    kj::byte buffer[1024]{};
-    size_t matched = 0;
-    constexpr kj::byte delimiter[] = {'\r', '\n', '\r', '\n'};
-    while (matched < kj::size(delimiter)) {
-      auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
-      if (amount == 0) co_return false;
-      for (auto byte: kj::arrayPtr(buffer, amount)) {
-        if (byte == delimiter[matched]) {
-          ++matched;
-        } else {
-          matched = byte == delimiter[0] ? 1 : 0;
-        }
-      }
+  // Reads a request: its \r\n\r\n-delimited header block, then a body of Content-Length bytes,
+  // which is empty without that header. Resolves to the body, or to none if the client cleanly
+  // closed the connection first. A client close is a normal end-of-connection for a keep-alive
+  // server, not an error, so it must not throw (see taskFailed).
+  kj::Promise<kj::Maybe<kj::String>> readRequest(kj::AsyncInputStream& input) {
+    kj::Vector<char> header;
+    while (!header.asPtr().endsWith("\r\n\r\n"_kj)) {
+      char c;
+      if (co_await input.tryRead(&c, 1, 1) == 0) co_return kj::none;
+      header.add(c);
     }
-    co_return true;
+
+    auto headerText = kj::heapString(header.asPtr());
+    constexpr auto CONTENT_LENGTH = "\r\nContent-Length: "_kj;
+    size_t length = 0;
+    KJ_IF_SOME(start, kj::StringPtr(headerText).find(CONTENT_LENGTH)) {
+      auto value = headerText.slice(start + CONTENT_LENGTH.size());
+      length = kj::str(value.first(KJ_ASSERT_NONNULL(value.findFirst('\r')))).parseAs<size_t>();
+    }
+    auto body = kj::heapString(length);
+    if (length > 0) {
+      co_await input.read(body.asBytes());
+    }
+    co_return kj::mv(body);
   }
 
   kj::Promise<void> serve(
       kj::Own<kj::AsyncInputStream> input, kj::Own<capnp::ExplicitEndOutputStream> down) {
     for (;;) {
-      if (!co_await readRequest(*input)) co_return;
+      auto request = co_await readRequest(*input);
+      KJ_IF_SOME(body, request) {
+        KJ_IF_SOME(recording, upRecording) {
+          recording.requestBodies.add(kj::mv(body));
+        }
+      } else {
+        co_return;
+      }
       switch (mode) {
         case ResponseMode::KEEP_ALIVE:
           co_await down->write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"_kjb);
@@ -465,6 +599,8 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
         case ResponseMode::CONNECT_FAILURE:
         case ResponseMode::UPSTREAM_FAILURE:
         case ResponseMode::UPSTREAM_END_FAILURE:
+        case ResponseMode::PIPELINED_CONNECT_FAILURE:
+        case ResponseMode::DOWN_DROPPED_CONNECT_FAILURE:
           KJ_UNREACHABLE;
         case ResponseMode::MALFORMED_KEEP_OPEN:
           co_await down->write("not an HTTP response\r\n\r\n"_kjb);
@@ -495,13 +631,15 @@ class TestContainerServer final: public rpc::Container::Server {
       size_t& connectCount,
       kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller = kj::none,
       kj::Maybe<bool&> upEndedUncleanly = kj::none,
-      bool deferConnect = false)
+      bool deferConnect = false,
+      kj::Maybe<UpRecording&> upRecording = kj::none)
       : byteStreamFactory(byteStreamFactory),
         mode(mode),
         connectCount(connectCount),
         closeFulfiller(closeFulfiller),
         upEndedUncleanly(upEndedUncleanly),
-        deferConnect(deferConnect) {}
+        deferConnect(deferConnect),
+        upRecording(upRecording) {}
 
   kj::Promise<void> start(StartContext context) override {
     return kj::READY_NOW;
@@ -512,8 +650,8 @@ class TestContainerServer final: public rpc::Container::Server {
   }
 
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override {
-    context.getResults().setPort(kj::heap<TestPort>(
-        byteStreamFactory, mode, connectCount, closeFulfiller, upEndedUncleanly, deferConnect));
+    context.getResults().setPort(kj::heap<TestPort>(byteStreamFactory, mode, connectCount,
+        closeFulfiller, upEndedUncleanly, deferConnect, upRecording));
     return kj::READY_NOW;
   }
 
@@ -524,6 +662,7 @@ class TestContainerServer final: public rpc::Container::Server {
   kj::Maybe<kj::PromiseFulfiller<void>&> closeFulfiller;
   kj::Maybe<bool&> upEndedUncleanly;
   bool deferConnect;
+  kj::Maybe<UpRecording&> upRecording;
 };
 
 class TestResponse final: public kj::HttpService::Response {
@@ -1246,12 +1385,11 @@ KJ_TEST("Container propagates clean EOF for a close-delimited response") {
 }
 
 KJ_TEST("Container fetch completes when Port.connect() stays outstanding") {
-  // The real container service keeps the Port.connect() RPC outstanding for the lifetime of the
-  // connection: the response is not sent until the tunnel is torn down. The tunnel must therefore
-  // become usable as soon as the pipelined `up`/`down` streams exist, without waiting for connect()
-  // to resolve -- otherwise the request writes and the connect completion deadlock on each other.
-  // `deferConnect` reproduces that server behavior; a fetcher that awaited connect() before
-  // returning the stream would hang here.
+  // Port.connect() returns only once the container has accepted the connection, but the request
+  // can be written on the pipelined `up` before then, so the tunnel must be usable as soon as the
+  // `up`/`down` streams exist. `deferConnect` resolves `up` with setPipeline() and keeps connect()
+  // outstanding for the whole request; a fetcher that awaited connect() before returning the
+  // stream would hang here.
   auto fixture = makeFixture();
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
@@ -1333,6 +1471,85 @@ KJ_TEST("Container propagates pooled upstream pump failures") {
 KJ_TEST("Container propagates non-pooled upstream pump failures") {
   runFetchFailureTest(
       ResponseMode::UPSTREAM_FAILURE, PortPooling::UNPOOLED, "jsg.Error: Upstream write failed"_kj);
+}
+
+KJ_TEST("Container preserves Port.connect() errors when a request body is pumped") {
+  // The request body comes from a capnp ByteStream, which a pump into `up` would redirect with
+  // getSubstream(). While Port.connect() is outstanding the body must be written instead, so that
+  // the fetch fails with connect()'s error.
+  auto fixture = makeFixture();
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+  UpRecording recording;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = env.js.alloc<Container>(
+        rpc::Container::Client(kj::heap<TestContainerServer>(byteStreamFactory,
+            ResponseMode::PIPELINED_CONNECT_FAILURE, connectCount, kj::none, kj::none,
+            /*deferConnect=*/false, recording)),
+        true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
+
+    auto bodyPipe = kj::newOneWayPipe();
+    auto bodyStream = byteStreamFactory.kjToCapnp(kj::mv(bodyPipe.out));
+    KnownLengthInput requestBody(*bodyPipe.in, 4);
+    kj::HttpHeaders headers(env.context.getHeaderTable());
+    TestResponse response;
+    bool threw = false;
+    try {
+      co_await client->request(
+          kj::HttpMethod::POST, "http://container/"_kj, headers, requestBody, response);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      KJ_EXPECT(exception.getDescription() == "jsg.Error: Testing error path", exception);
+      threw = true;
+    }
+    KJ_EXPECT(threw, "expected container fetch to fail");
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(!recording.substreamRequested);
+}
+
+KJ_TEST("Container redirects a pumped request body to `up` once Port.connect() has returned") {
+  auto fixture = makeFixture();
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+  UpRecording recording;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = env.js.alloc<Container>(
+        rpc::Container::Client(
+            kj::heap<TestContainerServer>(byteStreamFactory, ResponseMode::KEEP_ALIVE, connectCount,
+                kj::none, kj::none, /*deferConnect=*/false, recording)),
+        true);
+    auto firstFetcher = container->getTcpPort(env.js, 8080);
+    auto secondFetcher = container->getTcpPort(env.js, 8080);
+    auto first = firstFetcher->getClient(env.context, kj::none, "container"_kjc);
+    auto second = secondFetcher->getClient(env.context, kj::none, "container"_kjc);
+    auto& headerTable = env.context.getHeaderTable();
+
+    // Opens the tunnel that the second request reuses.
+    co_await makeTestRequest(*first, headerTable);
+
+    auto bodyPipe = kj::newOneWayPipe();
+    auto bodyStream = byteStreamFactory.kjToCapnp(kj::mv(bodyPipe.out));
+    auto bodyWriter = byteStreamFactory.capnpToKjExplicitEnd(bodyStream);
+    KnownLengthInput requestBody(*bodyPipe.in, 4);
+    kj::HttpHeaders headers(headerTable);
+    TestResponse response;
+    co_await kj::joinPromisesFailFast(
+        kj::arr(second->request(
+                    kj::HttpMethod::POST, "http://container/"_kj, headers, requestBody, response),
+            bodyWriter->write("body"_kjb).then([&bodyWriter]() { return bodyWriter->end(); })));
+    KJ_EXPECT(response.statusCode == 200);
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(recording.substreamRequested);
+  KJ_ASSERT(recording.requestBodies.size() == 2);
+  KJ_EXPECT(recording.requestBodies[1] == "body");
 }
 
 KJ_TEST("Container fails a raw connect() when the tunnel disconnects uncleanly") {
@@ -1475,6 +1692,96 @@ KJ_TEST("Container fails a raw connect() when the upstream half-close fails") {
   });
 
   KJ_EXPECT(connectCount == 1);
+}
+
+KJ_TEST("Container redirects `down` when a raw connect() is pumped into a capnp ByteStream") {
+  auto fixture = makeFixture();
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+  bool substreamRequested = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<TestContainerServer>(
+                                    byteStreamFactory, ResponseMode::KEEP_ALIVE, connectCount)),
+            true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
+
+    auto pipe = kj::newTwoWayPipe();
+    auto responsePipe = kj::newOneWayPipe();
+    auto destination =
+        byteStreamFactory.capnpToKjExplicitEnd(capnp::ByteStream::Client(kj::heap<RecordingStream>(
+            byteStreamFactory.kjToCapnp(kj::mv(responsePipe.out)), substreamRequested)));
+    TestConnectResponse response;
+    kj::HttpHeaders headers(env.context.getHeaderTable());
+    kj::HttpConnectSettings settings{.useTls = false};
+
+    auto connectPromise =
+        client->connect("container"_kjc, headers, *pipe.ends[0], response, settings);
+    // Like a native pump of the socket's readable into a stream that is sent over RPC.
+    auto pumpResponse = pipe.ends[1]->pumpTo(*destination).then([](uint64_t) -> kj::Promise<void> {
+      return kj::NEVER_DONE;
+    });
+    constexpr auto EXPECTED_RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"_kj;
+    auto received = kj::heapString(EXPECTED_RESPONSE.size());
+    auto exchange =
+        pipe.ends[1]->write("GET / HTTP/1.1\r\n\r\n"_kjb).then([&responsePipe, &received]() {
+      return responsePipe.in->read(received.asBytes());
+    });
+    co_await connectPromise.exclusiveJoin(kj::mv(pumpResponse)).exclusiveJoin(kj::mv(exchange));
+    KJ_EXPECT(received == EXPECTED_RESPONSE);
+    KJ_EXPECT(response.accepted);
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(substreamRequested);
+}
+
+KJ_TEST("Container preserves Port.connect() errors when `down` is redirected") {
+  // Dropping `down` after it has been redirected fails the pump with a generic error before
+  // Port.connect() fails.
+  auto fixture = makeFixture();
+  capnp::ByteStreamFactory byteStreamFactory;
+  size_t connectCount = 0;
+  bool substreamRequested = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = env.js.alloc<Container>(
+        rpc::Container::Client(kj::heap<TestContainerServer>(
+            byteStreamFactory, ResponseMode::DOWN_DROPPED_CONNECT_FAILURE, connectCount)),
+        true);
+    auto fetcher = container->getTcpPort(env.js, 8080);
+    auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
+
+    auto pipe = kj::newTwoWayPipe();
+    auto destination =
+        byteStreamFactory.capnpToKjExplicitEnd(capnp::ByteStream::Client(kj::heap<RecordingStream>(
+            byteStreamFactory.kjToCapnp(kj::heap<kj::NullStream>()), substreamRequested)));
+    TestConnectResponse response;
+    kj::HttpHeaders headers(env.context.getHeaderTable());
+    kj::HttpConnectSettings settings{.useTls = false};
+
+    auto connectPromise =
+        client->connect("container"_kjc, headers, *pipe.ends[0], response, settings);
+    // Only connect()'s outcome is checked here, not the pump's.
+    auto pumpResponse = pipe.ends[1]->pumpTo(*destination).then([](uint64_t) -> kj::Promise<void> {
+      return kj::NEVER_DONE;
+    }, [](kj::Exception&&) -> kj::Promise<void> { return kj::NEVER_DONE; });
+
+    bool threw = false;
+    try {
+      co_await connectPromise.exclusiveJoin(kj::mv(pumpResponse));
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      KJ_EXPECT(exception.getDescription() == "jsg.Error: Testing error path", exception);
+      threw = true;
+    }
+    KJ_EXPECT(threw, "expected connect() to fail");
+  });
+
+  KJ_EXPECT(connectCount == 1);
+  KJ_EXPECT(substreamRequested);
 }
 
 KJ_TEST("Container does not reuse tunnels for ports beyond the pool limit") {

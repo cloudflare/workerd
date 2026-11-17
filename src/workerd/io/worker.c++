@@ -46,6 +46,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <v8-cppgc.h>
 #include <v8-inspector.h>
 #include <v8-metrics.h>
 #include <v8-profiler.h>
@@ -162,7 +163,8 @@ void maybePerIsolateBootstrap(
     const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-    runPerIsolateBootstrap(js, api.getFeatureFlags(), api.getEmbedderBootstrap());
+    runPerIsolateBootstrap(
+        js, api.getFeatureFlags(), api.getEmbedderBootstrap(), api.getModuleSource());
   });
 }
 
@@ -186,14 +188,13 @@ void sendExceptionToInspector(jsg::Lock& js,
   jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
-// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is the single
-// source of truth for how an error is represented in traces, shared by the uncaught-exception
-// path (addExceptionToTrace) and the console.* logging path (handleLog), so that an error
-// reported either way produces an identical representation.
+// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is shared by the
+// uncaught-exception path (addExceptionToTrace) and the console.* logging path (handleLog), so
+// that an error reported either way produces an identical representation.
 //
 // `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
-// and the redundant leading "Name: message" prefix is stripped off `stack` (since name and message
-// are stored as separate fields).
+// and tracing::ErrorInfo::fromErrorProperties() defines the rest, as it does for an exception
+// that is traced without the isolate lock.
 tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -230,32 +231,8 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     }
   }
 
-  kj::Maybe<kj::String> stack;
-  KJ_IF_SOME(s, error.stack) {
-    kj::StringPtr slice = s;
-
-    // Normally `error.stack` repeats the error type and message first. We don't want send two
-    // copies of that to the trace so we'll strip it off.
-    if (slice.startsWith(name)) {
-      slice = slice.slice(name.size());
-      if (slice.startsWith(": "_kj)) {
-        slice = slice.slice(2);
-      }
-    }
-
-    if (slice.startsWith(message)) {
-      slice = slice.slice(message.size());
-      if (slice.startsWith("\n")) {
-        slice = slice.slice(1);
-      }
-    }
-
-    if (slice.size() > 0) {
-      stack = kj::str(slice);
-    }
-  }
-
-  return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message),
+      error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
 }
 
 void addExceptionToTrace(jsg::Lock& js,
@@ -1119,7 +1096,12 @@ kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
 // be held on the Promise itself, and will be fulfilled/rejected when the
 // promise is resolved or rejected. This will signal all of the waiters
 // from other IoContexts.
-jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js, v8::Local<v8::Promise>& promise) {
+//
+// `tag` is the promise's context tag, identifying the IoContext that created it. The returned
+// promise also resolves once that IoContext is destroyed, if only it can settle the promise;
+// the caller must check whether the promise has settled.
+jsg::Promise<void> addCrossThreadPromiseWaiter(
+    jsg::Lock& js, v8::Local<v8::Promise>& promise, v8::Local<v8::Object> tag) {
   auto waiter = kj::newPromiseAndCrossThreadFulfiller<void>();
 
   struct Waiter: public kj::Refcounted {
@@ -1146,7 +1128,16 @@ jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js, v8::Local<v8::Prom
 
   js.toPromise(promise).then(js, kj::mv(onSuccess), kj::mv(onFailure));
 
-  return IoContext::current().awaitIo(js, kj::mv(waiter.promise));
+  kj::Promise<void> settled = kj::mv(waiter.promise);
+  if (FeatureFlags::get(js).getHandleCrossRequestPromiseResolution()) {
+    // Settlement from another IoContext is deferred to the creating IoContext (see the
+    // PromiseCrossContextResolveCallback in Worker::Isolate's constructor), and dropped if it has
+    // been destroyed. A promise still pending then can never settle, so stop waiting.
+    auto& owner = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(js.v8Isolate, tag);
+    settled = settled.exclusiveJoin(owner->whenTargetDestroyed());
+  }
+
+  return IoContext::current().awaitIo(js, kj::mv(settled));
 }
 
 struct HeapSnapshotDeleter: public kj::Disposer {
@@ -1251,6 +1242,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
     }
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, jsg::modules::getSyntheticModuleEvaluationStepsRef());
 
     configureJsgIsolate(*lock, features);
 
@@ -1352,8 +1345,17 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
             "request.");
 
         return js.wrapSimplePromise(
-            addCrossThreadPromiseWaiter(js, promise)
-                .then(js, [promise = js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
+            addCrossThreadPromiseWaiter(js, promise, tag)
+                .then(js, [promise = js.v8Ref(promise.As<v8::Value>())](jsg::Lock& js) mutable {
+          // The waiter also resolves once the creating IoContext is gone, if that leaves the
+          // promise unable to settle.
+          JSG_REQUIRE(promise.getHandle(js).As<v8::Promise>()->State() !=
+                  v8::Promise::PromiseState::kPending,
+              Error,
+              "This promise was created by a request that has since ended, so it can never "
+              "settle. With the handle_cross_request_promise_resolution compatibility flag, a "
+              "promise can only settle in the request that created it, and settling it after "
+              "that request ends is dropped.");
           // Once the waiter has been resolved, return the now settled promise.
           // Since the promise has been settled, it is now safe to access from
           // other requests. Note that the resolved value of the promise still
@@ -1582,6 +1584,46 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         recordedLock.setupContext(context);
 
         maybePerIsolateBootstrap(isolate->getApi(), lock, context);
+
+        if (lock.isStartingFromSnapshot()) {
+          auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+          const auto& artifact = isolateBase.finalizedSnapshotArtifact();
+
+          // The zygote's global scope state (process, Buffer) carries over to the fresh one.
+          KJ_IF_SOME(index, artifact.globalScopeStateIndex) {
+            JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+              mContext->restoreSnapshotState(
+                  js, jsg::JsObject(isolateBase.extractOnceFromSnapshot(context, index)));
+            });
+          }
+
+          // Re-register the zygote's top-level event listeners on the fresh global scope, in
+          // C++ and as they were registered: the callback and receiver the zygote's registration
+          // derived, with its once and passive options. Nothing here runs JavaScript or reads
+          // the global's (possibly replaced) addEventListener. The identities and callbacks live
+          // in the snapshot heap, so their closures and module state stay shared with the baked
+          // module graph.
+          if (!artifact.listenerRecords.empty()) {
+            auto& callbackHandler = KJ_ASSERT_NONNULL(
+                isolate->getApi().tryGetEventListenerCallbackTypeHandler(lock),
+                "START_FROM_SNAPSHOT: the snapshot has top-level listeners this Api cannot restore");
+            JSG_WITHIN_CONTEXT_SCOPE(lock, context, ([&](jsg::Lock& js) {
+              for (auto& rec: artifact.listenerRecords) {
+                auto identity = isolateBase.extractOnceFromSnapshot(context, rec.identityIndex);
+                auto callbackValue =
+                    isolateBase.extractValueOnceFromSnapshot(context, rec.callbackIndex);
+                auto receiver =
+                    isolateBase.extractValueOnceFromSnapshot(context, rec.receiverIndex);
+                auto callback = KJ_ASSERT_NONNULL(callbackHandler.tryUnwrap(js, callbackValue),
+                    "START_FROM_SNAPSHOT: a recorded listener callback is not a function",
+                    rec.type);
+                callback.setReceiver(js.v8Ref(receiver));
+                mContext->restoreSnapshotListener(js, rec.type, identity, kj::mv(callback),
+                    {.once = rec.once, .passive = rec.passive});
+              }
+            }));
+          }
+        }
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -1671,9 +1713,47 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   } else {
                     limitScope = isolate->getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
                   }
-                  impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
+                  auto& registry = *jsg::ModuleRegistry::from(lock);
+                  impl->configureDynamicImports(lock, registry);
+
+                  // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
+                  // is the default.
+                  //
+                  // Hand the registry every module handle baked into the context snapshot
+                  // before the entries are registered: compileModules() then registers each
+                  // bundle ES module the zygote instantiated around its baked instance instead
+                  // of compiling it again, and applySnapshotSeeds() below seeds or overwrites
+                  // every other entry. compileModules() must still run: it registers the builtin
+                  // source/callback entries that stay lazily compilable for modules the zygote
+                  // never touched, and materializing a callback entry rebuilds C++ state (CJS
+                  // providers, capnp scopes) that the snapshot cannot carry. Without this the
+                  // baked main-module graph and runtime import()/require() yield two module
+                  // graphs (e.g. two Buffer.prototype identities).
+                  if (lock.isStartingFromSnapshot()) {
+                    const auto& artifact =
+                        jsg::IsolateBase::from(lock.v8Isolate).finalizedSnapshotArtifact();
+                    for (auto& rec: artifact.moduleRecords) {
+                      v8::Local<v8::Data> data;
+                      KJ_REQUIRE(
+                          context->GetDataFromSnapshotOnce<v8::Data>(rec.dataIndex).ToLocal(&data),
+                          "START_FROM_SNAPSHOT: module snapshot data missing", rec.specifier,
+                          rec.dataIndex);
+                      registry.addSnapshotSeed(js, rec.specifier,
+                          static_cast<jsg::ModuleRegistry::Type>(rec.moduleType),
+                          static_cast<jsg::ModuleRegistry::SnapshotHandleKind>(rec.handleKind),
+                          data);
+                    }
+                  }
                   isolate->getApi().compileModules(
                       lock, modulesSource, *isolate, kj::mv(artifacts), parentSpan.addRef());
+                  if (lock.isStartingFromSnapshot()) {
+                    // Every pinned module has an entry by now: only modules of a fallback service
+                    // are registered lazily, and a Worker with one never gets a snapshot.
+                    registry.applySnapshotSeeds(js, [&](kj::StringPtr specifier) {
+                      KJ_FAIL_REQUIRE(
+                          "START_FROM_SNAPSHOT: pinned module has no registry entry", specifier);
+                    });
+                  }
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
               }
@@ -1916,6 +1996,13 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 }
 
 namespace {
+// One console line to stdout or stderr, flushed so that it interleaves with the process's own
+// logging.
+void writeConsoleLine(FILE* fd, kj::StringPtr text) {
+  fprintf(fd, "%s\n", text.cStr());
+  fflush(fd);
+}
+
 void handleLog(jsg::Lock& js,
     const Worker::LoggingOptions& loggingOptions,
     LogLevel level,
@@ -2114,8 +2201,12 @@ void handleLog(jsg::Lock& js,
     args[length + 2] = js.strIntern(levelStr);
     auto formatted = js.toString(
         jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
-    fprintf(fd, "%s\n", formatted.cStr());
-    fflush(fd);
+    if (js.isPreparingSnapshot()) {
+      Worker::Isolate::from(js).deferConsoleLine(
+          {.text = kj::mv(formatted), .toStderr = useStderr});
+    } else {
+      writeConsoleLine(fd, formatted);
+    }
   }
 }
 
@@ -2165,15 +2256,21 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // The zygote has no `WebAssembly` global to shim: V8's bootstrapper skips
+  // InstallSpecialObjects() in a SnapshotCreator isolate, and IsolateBase installs the name as a
+  // fail-closed accessor (RESTORE_TIME_GLOBALS in jsg/setup.h) that throws on any read, the probe
+  // below included. Wasm modules aren't captured in the snapshot anyway, and this runs again on
+  // the context restored from it, installing the shims then.
+  if (lock.isPreparingSnapshot()) {
+    return;
+  }
+
   // V8 only installs the `WebAssembly` global when a Wasm engine is available. It is absent under
-  // the `--jitless` v8Flag, since V8 has no Wasm interpreter, and in isolates created by
-  // SnapshotCreator, whose bootstrapper skips InstallSpecialObjects. Both helpers below reach into
-  // that global unconditionally, so running them in such an isolate aborts the entire process
-  // during context setup, before any script executes. Skip them instead: a Worker that never
-  // touches WebAssembly is perfectly serviceable without either, so an absent optional capability
-  // must not be fatal. For snapshots this is also correct because wasm modules aren't captured in
-  // the snapshot anyway, and this runs again on the context restored from it, installing the shims
-  // then.
+  // the `--jitless` v8Flag, since V8 has no Wasm interpreter. Both helpers below reach into that
+  // global unconditionally, so running them in such an isolate aborts the entire process during
+  // context setup, before any script executes. Skip them instead: a Worker that never touches
+  // WebAssembly is perfectly serviceable without either, so an absent optional capability must
+  // not be fatal.
   bool hasWebAssembly = false;
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
     hasWebAssembly = lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() != kj::none;
@@ -2221,10 +2318,15 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
   // the modules are already resolved so we don't pump the microtask queue while
   // synchronously accessing those globals. Resolving them here ensures that they are
   // ready to go before we begin evaluating the main module.
+  //
+  // The process global reads the process object's own module, not node:process, whose
+  // named exports include the stdio streams and so force them to be built.
   auto featureFlags = FeatureFlags::get(js);
   if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
-    JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
-        "Failed to initialize node:process module");
+    auto processSpec = featureFlags.getEnableNodeJsProcessV2() ? "node-internal:public_process"_kj
+                                                               : "node-internal:legacy_process"_kj;
+    JSG_REQUIRE_NONNULL(js.resolveInternalModule(processSpec), Error, "Failed to initialize ",
+        processSpec, " module");
     JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
         "Failed to initialize node:buffer module");
   }
@@ -2286,6 +2388,19 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     currentSpan = maybeMakeSpan("lw:new_context"_kjc);
 
     jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
+
+    // Data of the snapshot serializer callbacks registered with the zygote context. Both outlive
+    // the handle scope below because createSnapshotBlob() checks them after that scope closes.
+    // Unused unless the isolate is preparing a snapshot.
+    // * The counter serializeInternalFields() writes through while V8 runs CreateBlob().
+    uint32_t snapshotBadTagFieldsCount = 0;
+    // * The API-wrapper serializer's metadata.
+    jsg::WrappablesSerializeMetadata wrappablesMetadata;
+
+    // Zygote only: the context global's JS event listeners, recorded inside the handle scope
+    // below once the top level has run and stored in the SnapshotArtifact by
+    // createSnapshotBlob().
+    kj::Vector<jsg::SnapshotArtifact::ListenerRecord> listenerRecords;
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       bool freshContext = false;
@@ -2309,20 +2424,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(context);
+        isolateBase.setSnapshotDefaultContext(
+            context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
       }
-
-      // The zygote context is never disposed through disposeContext() (see the snapshot step
-      // after this handle scope), so release the per-isolate bootstrap state on the way out,
-      // while the context handle is still valid. Its Globals (require(), the
-      // compatFlags/autogates/utils objects, primordials, the require() cache, the
-      // context-extension template) are not Wrappables and would otherwise be reported as
-      // unserialized by CreateBlob. A worker started from the snapshot re-runs the bootstrap.
-      KJ_DEFER({
-        if (lock.isPreparingSnapshot()) {
-          cleanupPerIsolateBootstrap(lock, context);
-        }
-      });
 
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
@@ -2363,10 +2467,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           try {
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
+            auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.
-              bindingsScope = v8::Object::New(lock.v8Isolate);
+              bindingsScope = isolateBase.isStartingFromSnapshot()
+                  ? isolateBase.extractOnceFromSnapshot(context, jsg::BINDINGS_SCOPE_SNAPSHOT_INDEX)
+                  : v8::Object::New(lock.v8Isolate);
               if (!FeatureFlags::get(js).getDisableImportableEnv()) {
                 lock.setWorkerEnv(lock.v8Ref(bindingsScope));
               }
@@ -2419,8 +2526,16 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 lock.runMicrotasks();
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
-                KJ_IF_SOME(ns,
-                    tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                if (lock.isPreparingSnapshot() && script->isModular()) {
+                  auto idx = isolateBase.pinIntoSnapshot(context, bindingsScope);
+                  KJ_REQUIRE(idx == jsg::BINDINGS_SCOPE_SNAPSHOT_INDEX,
+                      "the bindings scope was pinned at an unexpected index", idx);
+                }
+                kj::Maybe<jsg::JsObject> maybeNs = lock.isStartingFromSnapshot()
+                    ? jsg::JsObject(isolateBase.extractOnceFromSnapshot(
+                          context, jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX))
+                    : tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime);
+                KJ_IF_SOME(ns, maybeNs) {
                   // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
                   // create them eagerly. This is safe because the top-level code has already executed,
                   // and the zygote worker will not handle any requests.
@@ -2430,6 +2545,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    if (script->isModular()) {
+                      auto idx = isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(ns));
+                      KJ_REQUIRE(idx == jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX,
+                          "the main module namespace was pinned at an unexpected index", idx);
+                    }
                     break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
@@ -2486,6 +2606,21 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               }
             }
 
+            if (lock.isPreparingSnapshot()) {
+              // The zygote's top level has run. Run the FinalizationRegistry cleanups it left due
+              // now, while the context is still a normal one and nothing of it has been recorded
+              // for the snapshot. The callbacks run without an IoContext, as they do at request
+              // time (IoContext::runImpl()), and under the startup limits, as the top level did.
+              auto limitScope =
+                  script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
+              isolateBase.settleFinalizationRegistriesForSnapshot(js);
+              if (lock.v8Isolate->IsExecutionTerminating()) {
+                // A limit cut a callback short. reportStartupError() reads the limit error that
+                // `limitScope` leaves in `limitErrorOrTime`, as for the top level itself.
+                throw jsg::JsExceptionThrown();
+              }
+            }
+
             KJ_IF_SOME(s, startupTime) {
               KJ_SWITCH_ONEOF(limitErrorOrTime) {
                 KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {
@@ -2525,16 +2660,79 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (script->isolate->impl->inspector == kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
       }
+
+      if (lock.isPreparingSnapshot() && impl->permanentException == kj::none) {
+        // The zygote's top level has run to completion: record what it left for the snapshot.
+        // A top level that failed is recorded nowhere; the check after this handle scope ends
+        // the zygote instead.
+
+        // Record what the top level left of the properties V8 adds when the snapshot is
+        // restored, and remove them so that V8 can add them.
+        auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+        isolateBase.removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
+
+        // Record the context global's JS event listeners. newContext() on load attaches a
+        // *fresh* ServiceWorkerGlobalScope to the deserialized global proxy, discarding the
+        // zygote's listener map, and clear() below drops the zygote global's listener map along
+        // with its identity handles. Pin what each registration left (identity, callback,
+        // receiver) and its options, so that the replay in the Script constructor re-registers
+        // it as it was.
+        auto canRestoreListeners =
+            script->isolate->getApi().tryGetEventListenerCallbackTypeHandler(lock) != kj::none;
+        (*jsContext)
+            ->forEachSnapshotListener(
+                lock, [&](const api::EventTarget::SnapshotListener& listener) {
+          KJ_REQUIRE(canRestoreListeners,
+              "startup snapshot: this Worker::Api cannot restore top-level event listeners",
+              listener.type);
+          listenerRecords.add(jsg::SnapshotArtifact::ListenerRecord{
+            .type = kj::str(listener.type),
+            .identityIndex = isolateBase.pinIntoSnapshot(context, listener.identity),
+            .callbackIndex = isolateBase.pinIntoSnapshot(context, listener.callback),
+            .receiverIndex = isolateBase.pinIntoSnapshot(context, listener.receiver),
+            .once = listener.once,
+            .passive = listener.passive,
+          });
+        });
+
+        // The global scope's own state for its JavaScript (process, Buffer), which the
+        // restored Worker's fresh global scope would otherwise lack.
+        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+          auto state = (*jsContext)->getSnapshotState(js);
+          if (state != kj::none) {
+            isolateBase.mutableSnapshotArtifact().globalScopeStateIndex =
+                isolateBase.pinIntoSnapshot(
+                    context, v8::Local<v8::Object>(KJ_ASSERT_NONNULL(state)));
+          }
+        });
+
+        // Bundle the per-isolate bootstrap's JS-held state and pin it, the last of the record
+        // steps. This also releases the bootstrap's C++ state, which createSnapshotBlob() would
+        // otherwise reject as a live handle; a context the zygote abandons releases it when the
+        // context is disposed.
+        stashPerIsolateBootstrapForSnapshot(lock, context);
+      }
     });
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.isPreparingSnapshot()) {
+      KJ_IF_SOME(e, impl->permanentException) {
+        // A top level that failed leaves nothing worth a snapshot, and CreateBlob() on its
+        // half-built context would only risk a V8 fatal (an unregistered external reference, a
+        // handle left behind). The Worker starts without a snapshot: factory_new_worker() catches
+        // this and logs the reason. The context is disposed with the script (or with `impl`),
+        // which releases the per-isolate bootstrap's state.
+        KJ_FAIL_REQUIRE(
+            "the zygote's top level failed; no startup snapshot was created", e.getDescription());
+      }
+
       // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
       // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
       // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
       // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. Templates are recreated
-      // lazily on demand and a START_FROM_SNAPSHOT isolate starts with an empty cache.
+      // createSnapshotBlob() to reset like any other isolate handle. The handles the Realm caches
+      // for struct types are reset by the same call. Templates are recreated lazily on demand and
+      // a START_FROM_SNAPSHOT isolate starts with an empty cache.
       kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
       {
         auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
@@ -2547,7 +2745,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
-      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles));
+      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
+          &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords));
     }
   });
 }
@@ -2824,6 +3023,11 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     }
   }
 
+  logUncaughtExceptionToConsole(source, exception, message);
+}
+
+void Worker::Lock::logUncaughtExceptionToConsole(
+    UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {
     JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(),
         [&](jsg::Lock& js) { sendExceptionToInspector(js, *i.get(), source, exception, message); });
@@ -2848,16 +3052,19 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   }
 }
 
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+void Worker::Lock::logUncaughtExceptionToConsole(UncaughtExceptionSource source,
     kj::Exception&& exception,
-    kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
+    const jsg::JsErrorDescription& error) {
   jsg::Lock& js = *this;
   try {
+    // Describing an internal exception logged and reported it, so the conversion is told not to
+    // do so again and to refer to it by the same internal error id.
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
           .trusted = true,
+          .alreadyDescribed = error,
         });
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   } catch (const jsg::JsExceptionThrown&) {
     // An exception occurred while trying to convert the exception to a JS value.
     // With exceptionToJs, this should only happen if the isolate is terminating
@@ -2866,8 +3073,9 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     // so let's try exceptionToJs again but this time ignoring the detail, and
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
-    auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    auto jsError =
+        js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true, .alreadyDescribed = error});
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   }
 }
 
@@ -3296,6 +3504,11 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
         takeHeapSnapshot(*lock, cmd.getTakeHeapSnapshot().getParams());
         break;
       }
+      case cdp::Command::RUNTIME_GET_HEAP_USAGE: {
+        auto& lock = recordedLock.lock;
+        getHeapUsage(*lock, cmd.getRuntimeGetHeapUsage().initResult());
+        break;
+      }
     }
 
     if (!cmd.isUnknown()) {
@@ -3628,6 +3841,17 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
 
   WebSocketIoHandler ioHandler;
 
+  void getHeapUsage(jsg::Lock& js, cdp::Runtime::Command::GetHeapUsage::Result::Builder result) {
+    v8::HeapStatistics stats;
+    js.v8Isolate->GetHeapStatistics(&stats);
+    result.setUsedSize(stats.used_heap_size());
+    result.setTotalSize(stats.total_heap_size());
+    result.setBackingStorageSize(stats.external_memory());
+    auto& cppHeap = KJ_ASSERT_NONNULL(js.v8Isolate->GetCppHeap());
+    auto cppStats = cppHeap.CollectStatistics(cppgc::HeapStatistics::DetailLevel::kBrief);
+    result.setEmbedderHeapUsedSize(cppStats.used_size_bytes);
+  }
+
   void takeHeapSnapshot(
       jsg::Lock& js, cdp::HeapProfiler::Command::TakeHeapSnapshot::Params::Reader params) {
     struct Activity: public v8::ActivityControl {
@@ -3821,12 +4045,14 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
+  jsg::Lock& js = lock;
   if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
     KJ_LOG(INFO, "console warning", description);
+  } else if (js.isPreparingSnapshot()) {
+    deferConsoleLine({.text = kj::str(description), .toStderr = true});
   } else {
-    fprintf(stderr, "%s\n", description.cStr());
-    fflush(stderr);
+    writeConsoleLine(stderr, description);
   }
 
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
@@ -3840,7 +4066,6 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
       // active user span, which creates V8 handles. Our callers are not
       // required to have a HandleScope and eg. the GC destructors in
       // worker-rpc.c++ reach here without one.  We establish one here.
-      jsg::Lock& js = lock;
       js.withinHandleScope([&] {
         auto timestamp = ioContext.now();
         tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
@@ -3855,6 +4080,17 @@ void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
     logWarning(description, lock);
     return kj::str(description);
   });
+}
+
+void Worker::Isolate::deferConsoleLine(DeferredConsoleLine line) const {
+  deferredConsoleLines.lockExclusive()->add(kj::mv(line));
+}
+
+void Worker::Isolate::flushDeferredConsoleOutput() {
+  auto lines = kj::mv(*deferredConsoleLines.lockExclusive());
+  for (auto& line: lines) {
+    writeConsoleLine(line.toStderr ? stderr : stdout, line.text);
+  }
 }
 
 void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
@@ -5223,6 +5459,7 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface, public kj
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:
@@ -5457,6 +5694,10 @@ kj::Promise<WorkerInterface::ScheduledResult> Worker::Isolate::SubrequestClient:
 kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::runAlarm(
     kj::Date scheduledTime, uint32_t retryCount) {
   return inner->runAlarm(scheduledTime, retryCount);
+}
+kj::Promise<kj::Maybe<kj::Date>> Worker::Isolate::SubrequestClient::abandonAlarm(
+    kj::Date scheduledTime) {
+  return inner->abandonAlarm(scheduledTime);
 }
 kj::Promise<WorkerInterface::CustomEvent::Result> Worker::Isolate::SubrequestClient::customEvent(
     kj::Own<CustomEvent> event) {

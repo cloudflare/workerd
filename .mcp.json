@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "workerd": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "exec node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"$(git rev-parse --show-toplevel)/.opencode/lib/mcp-server.ts\""
+      ]
+    }
+  }
+}

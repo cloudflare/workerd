@@ -184,6 +184,9 @@ class ZlibUtil final: public jsg::Object {
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
    public:

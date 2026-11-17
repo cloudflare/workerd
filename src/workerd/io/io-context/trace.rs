@@ -164,9 +164,6 @@ impl TraceContext {
     }
 }
 
-// Holds no JavaScript handles.
-jsg::jsg_traced!(SpanBuilder, TraceContext);
-
 /// A literal as the bridge passes it: the bytes of `str` with its NUL.
 fn literal(str: &'static CStr) -> &'static [u8] {
     str.to_bytes_with_nul()

@@ -19,6 +19,5 @@ mod ffi;
 pub use ffi::CppRef;
 pub use ffi::CppResource;
 pub use ffi::Ref;
-pub use ffi::bridge;
 pub use ffi::call_cpp;
 pub use ffi::call_cpp_for_ref;

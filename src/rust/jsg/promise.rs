@@ -181,6 +181,10 @@ impl<T: Traced> Traced for ReactionData<T> {
     fn trace(&self, visitor: &mut crate::GcVisitor) {
         self.0.trace(visitor);
     }
+
+    fn needs_drop_detach() -> bool {
+        T::needs_drop_detach()
+    }
 }
 
 /// The callback of a reaction that [`Local::then`], [`Local::catch`] or
@@ -299,8 +303,7 @@ impl<'s> Local<'s, Promise> {
     /// once the reactions are unreachable, or the teardown does. Until then the garbage collector
     /// traces `data`, so it may hold `TracedGlobal`s and `jsg::Rc`s, including ones that lead
     /// back to the promise. It must be their only owner that the garbage collector traces: to
-    /// share a resource's state, hold a `jsg::Rc` or `jsg::Weak` to the resource rather than an
-    /// `std::rc::Rc` of the state.
+    /// share a resource's state, hold a `jsg::Rc` or `jsg::Weak` to the resource.
     ///
     /// # Errors
     ///

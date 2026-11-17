@@ -181,7 +181,7 @@ struct FakeBackingStore {
   FakeBackingStore(bool& destroyed, size_t size)
       : destroyed(destroyed),
         data(kj::heapArray<kj::byte>(size)) {
-    memset(data.begin(), 0, data.size());
+    data.asPtr().fill(0);
   }
   ~FakeBackingStore() noexcept(false) {
     destroyed = true;
@@ -318,7 +318,7 @@ struct V8LifetimeAwareStore {
         freedAfterV8(freedAfterV8),
         dtorCount(dtorCount),
         data(kj::heapArray<kj::byte>(size)) {
-    memset(data.begin(), 0, data.size());
+    data.asPtr().fill(0);
   }
   ~V8LifetimeAwareStore() noexcept(false) {
     ++dtorCount;

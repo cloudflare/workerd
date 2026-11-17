@@ -145,13 +145,14 @@ WINDOWS_TEMPLATE = """
 @echo off
 setlocal EnableDelayedExpansion
 
-REM Run supervisor to start sidecar if specified
-if not "{sidecar}" == "" (
+REM Run supervisor to assign ports and start the sidecar, if any
+if "{supervise}" == "true" (
     REM These environment variables are processed by the supervisor executable
     set PORTS_TO_ASSIGN={port_bindings}
+    set LISTEN_PORT_BINDINGS={listen_port_bindings}
     set RANDOMIZE_IP={randomize_ip}
     set SIDECAR_PORT_MODE={sidecar_port_mode}
-    set SIDECAR_COMMAND="{sidecar}"
+    set SIDECAR_COMMAND={windows_sidecar_command}
     powershell -Command \"{supervisor} {runtest}\"
 ) else (
     {runtest}
@@ -186,12 +187,12 @@ if [ -n "${{COVERAGE_DIR:-}}" ]; then
     export KJ_CLEAN_SHUTDOWN=1
 fi
 {load_images}
-# Run supervisor to start sidecar if specified
-if [ ! -z "{sidecar}" ]; then
+# Run supervisor to assign ports and start the sidecar, if any
+if [ "{supervise}" = "true" ]; then
     # These environment variables are processed by the supervisor executable. The supervisor and
     # the sidecar aren't instrumented, and under COVERAGE_DIR a js_binary loads a coverage module
     # that only instrumented ones carry; workerd's profile goes to LLVM_PROFILE_FILE.
-    env -u COVERAGE_DIR PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    env -u COVERAGE_DIR PORTS_TO_ASSIGN={port_bindings} LISTEN_PORT_BINDINGS={listen_port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi
@@ -234,11 +235,12 @@ echo Using Python Snapshot
 
 def _wd_test_impl(ctx):
     is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
+    supervise = ctx.file.sidecar or ctx.attr.listen_port_bindings
 
-    if ctx.file.sidecar and ctx.attr.python_snapshot_test:
+    if supervise and ctx.attr.python_snapshot_test:
         # TODO(later): Implement support for generating a combined script with these two options
         # if we have a test that requires it. Not doing it for now due to complexity.
-        return print("sidecar and python_snapshot_test currently cannot be used together")
+        return print("sidecar or listen_port_bindings and python_snapshot_test currently cannot be used together")
 
     # Bazel insists that the rule must actually create the executable that it intends to run; it
     # can't just specify some other executable with some args. OK, fine, we'll use a script that
@@ -249,7 +251,7 @@ def _wd_test_impl(ctx):
         template = WINDOWS_TEMPLATE
         if ctx.attr.python_snapshot_test:
             runtest = WINDOWS_RUNTEST_SNAPSHOT
-        elif ctx.file.sidecar:
+        elif supervise:
             runtest = WINDOWS_RUNTEST_SIDECAR
         else:
             runtest = WINDOWS_RUNTEST_NORMAL
@@ -259,10 +261,14 @@ def _wd_test_impl(ctx):
         runtest = SH_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else SH_RUNTEST_NORMAL
 
     content = template.format(
+        supervise = "true" if supervise else "false",
         sidecar = ctx.file.sidecar.short_path if ctx.file.sidecar else "",
+        # `set NAME=` with nothing after it leaves NAME unset, where `""` would set it to two quotes.
+        windows_sidecar_command = '"{}"'.format(ctx.file.sidecar.short_path) if ctx.file.sidecar else "",
         runtest = runtest,
         supervisor = ctx.file.sidecar_supervisor.short_path if ctx.file.sidecar_supervisor else "",
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
+        listen_port_bindings = ",".join(["{}={}".format(name, env) for name, env in ctx.attr.listen_port_bindings.items()]),
         randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
         sidecar_port_mode = ctx.attr.sidecar_port_mode,
         load_images = "".join([
@@ -292,6 +298,7 @@ def _wd_test_impl(ctx):
         if default_runfiles:
             runfiles = runfiles.merge(default_runfiles)
 
+    if supervise:
         runfiles = runfiles.merge(ctx.runfiles(files = [ctx.file.sidecar_supervisor]))
 
         # Also merge the supervisor's own runfiles if it has any
@@ -383,8 +390,8 @@ _wd_test = rule(
         #
         # Reminder: you'll also need to add a network = ( allow = ["private"] ) service as well.
         "sidecar_port_bindings": attr.string_list(),
-        # If true, a random IP address will be assigned to the sidecar process, and provided in the
-        # environment variable SIDECAR_HOSTNAME,
+        # If true, a random loopback IP address is chosen for the sidecar and for the sockets in
+        # listen_port_bindings, and provided in the environment variable SIDECAR_HOSTNAME.
         "sidecar_randomize_ip": attr.bool(default = True),
         # How port assignments are coordinated between the supervisor and the sidecar.
         # - "report" (default): the sidecar binds port 0 and prints "<NAME>=<PORT>" on stdout, and
@@ -394,8 +401,15 @@ _wd_test = rule(
         #   has an inherent close-then-rebind race (mitigated by retry inside the supervisor) and
         #   exists only for sidecars that can't participate in the report protocol (e.g. wptserve).
         "sidecar_port_mode": attr.string(default = "report", values = ["report", "preallocate"]),
+        # Sockets of the test's own config that listen on a port assigned when the test runs, rather
+        # than on a fixed one that another test on the same machine might hold. Maps each socket's
+        # name to the environment variable that receives its port. The supervisor assigns each port
+        # as in "preallocate" mode, on the address in SIDECAR_HOSTNAME, and overrides the socket's
+        # address with `--socket-addr`. Expose the variables to the test with fromEnvironment
+        # bindings, as for sidecar_port_bindings; the address in the config is replaced.
+        "listen_port_bindings": attr.string_dict(),
         # An executable that is used to manage port assignments and child process creation when a
-        # sidecar is specified.
+        # sidecar or listen_port_bindings is specified.
         "sidecar_supervisor": attr.label(
             allow_single_file = True,
             executable = True,

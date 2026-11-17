@@ -100,3 +100,5 @@ export {
 } from 'reentrancy';
 
 export { desiredSizeCountsAndRecovers } from 'backpressure';
+
+export { structuredCloneDigestStream } from 'transfer';

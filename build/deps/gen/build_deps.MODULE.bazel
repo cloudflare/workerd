@@ -86,7 +86,7 @@ git_repository(
 bazel_dep(name = "platforms", version = "1.1.0")
 
 # rules_cc
-bazel_dep(name = "rules_cc", version = "0.2.27")
+bazel_dep(name = "rules_cc", version = "0.2.28")
 
 # rules_foreign_cc
 bazel_dep(name = "rules_foreign_cc", version = "0.17.0")

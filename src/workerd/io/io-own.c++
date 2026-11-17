@@ -3,7 +3,6 @@
 #include "io-context.h"
 
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 namespace workerd {
@@ -71,6 +70,31 @@ bool DeleteQueue::isDefunct() const {
   return *crossThreadDeleteQueue.lockShared() == kj::none;
 }
 
+kj::Promise<void> DeleteQueue::whenDefunct() const {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    if (state.defunctFulfillers.size() >= state.pruneDefunctFulfillersAt) {
+      kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> waiting;
+      for (auto& fulfiller: state.defunctFulfillers) {
+        if (fulfiller->isWaiting()) {
+          waiting.add(kj::mv(fulfiller));
+        }
+      }
+      {
+        // Destroying the fulfiller of a canceled promise destroys that promise's node.
+        kj::AllowAsyncDestructorsScope scope;
+        state.defunctFulfillers = kj::mv(waiting);
+      }
+      state.pruneDefunctFulfillersAt =
+          kj::max(State::MIN_PRUNE_DEFUNCT_FULFILLERS_AT, state.defunctFulfillers.size() * 2);
+    }
+    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+    state.defunctFulfillers.add(kj::mv(paf.fulfiller));
+    return kj::mv(paf.promise);
+  }
+  return kj::READY_NOW;
+}
+
 kj::Array<kj::Function<void(jsg::Lock&)>> DeleteQueue::takeActions() const {
   auto lock = crossThreadDeleteQueue.lockExclusive();
   KJ_IF_SOME(state, *lock) {
@@ -123,10 +147,12 @@ DeleteQueuePtr::~DeleteQueuePtr() noexcept(false) {
   auto ptr = queue.get();
   if (ptr != nullptr) {
     size_t droppedActions = 0;
+    kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> defunctFulfillers;
     {
       auto lock = ptr->crossThreadDeleteQueue.lockExclusive();
       KJ_IF_SOME(state, *lock) {
         droppedActions = state.actions.size();
+        defunctFulfillers = kj::mv(state.defunctFulfillers);
         // The delete queue state may include a kj::CrossThreadPromiseFulfiller that
         // needs to be destroyed. To do so, we need to allow async destructors here.
         // We only want to destroy the crossThreadFulfiller in this scope tho, not
@@ -136,8 +162,15 @@ DeleteQueuePtr::~DeleteQueuePtr() noexcept(false) {
       }
       *lock = kj::none;
     }
-    if (droppedActions > 0 &&
-        util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+    {
+      // As above, destroying a fulfiller may destroy its canceled promise's node.
+      kj::AllowAsyncDestructorsScope scope;
+      for (auto& fulfiller: defunctFulfillers) {
+        fulfiller->fulfill();
+      }
+      defunctFulfillers.clear();
+    }
+    if (droppedActions > 0) {
       LOG_PERIODICALLY(WARNING,
           "NOSENTRY IoContext dropped queued cross-context actions when destroyed", droppedActions);
     }
@@ -190,6 +223,10 @@ bool IoCrossContextExecutor::tryExecute(kj::Function<void(jsg::Lock&)>&& func) c
 
 bool IoCrossContextExecutor::isTargetDestroyed() const {
   return deleteQueue->isDefunct();
+}
+
+kj::Promise<void> IoCrossContextExecutor::whenTargetDestroyed() const {
+  return deleteQueue->whenDefunct();
 }
 
 size_t IoCrossContextExecutor::getQueuedActionCountForTest() const {

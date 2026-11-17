@@ -292,6 +292,7 @@ class Bootstrap {
     KJ_IF_SOME(compatDate, testOptions.compat_date) {
       options.testCompatibilityDateOverride = kj::str(compatDate);
     }
+    options.syncStorage = false;
   }
 
   // The `bench` options that apply to the process. Bench mode is on before any worker compiles.

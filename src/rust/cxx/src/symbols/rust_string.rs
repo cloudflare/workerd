@@ -1,5 +1,6 @@
 use alloc::borrow::ToOwned;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -22,6 +23,15 @@ unsafe extern "C" fn string_clone(this: &mut MaybeUninit<String>, other: &String
     unsafe { ptr::write(this, clone) }
 }
 
+unsafe extern "C" {
+    #[link_name = "cxxbridge1$latin1$validate_ascii"]
+    fn latin1_validate_ascii(ptr: *const u8, len: usize) -> bool;
+    #[link_name = "cxxbridge1$latin1$utf8_length"]
+    fn latin1_utf8_length(ptr: *const u8, len: usize) -> usize;
+    #[link_name = "cxxbridge1$latin1$convert_to_utf8"]
+    fn latin1_convert_to_utf8(ptr: *const u8, len: usize, out: *mut u8) -> usize;
+}
+
 #[unsafe(export_name = "cxxbridge1$string$from_latin1")]
 unsafe extern "C" fn string_from_latin1(
     this: &mut MaybeUninit<String>,
@@ -31,26 +41,25 @@ unsafe extern "C" fn string_from_latin1(
     // Safety: the bridge representation and ownership invariants satisfy this operation.
     let slice = unsafe { slice::from_raw_parts(ptr, len) };
     let this = this.as_mut_ptr();
-    let (ascii, rest) = slice.split_at(leading_ascii_len(slice));
-    let mut owned = String::with_capacity(len + rest.iter().filter(|&&c| c >= 0x80).count());
-    // Safety: every byte of `ascii` is ASCII, which is valid UTF-8.
-    owned.push_str(unsafe { str::from_utf8_unchecked(ascii) });
-    owned.extend(rest.iter().map(|&c| c as char));
+    // Safety: `ptr` is valid for reads of `len` bytes.
+    let owned = if unsafe { latin1_validate_ascii(ptr, len) } {
+        // Safety: ASCII is valid UTF-8.
+        unsafe { String::from_utf8_unchecked(slice.to_vec()) }
+    } else {
+        // Safety: `ptr` is valid for reads of `len` bytes.
+        let utf8_len = unsafe { latin1_utf8_length(ptr, len) };
+        let mut utf8 = Vec::<u8>::with_capacity(utf8_len);
+        // Safety: Latin-1 converts to exactly `utf8_len` bytes of UTF-8, which `utf8` has room
+        // for.
+        let written = unsafe { latin1_convert_to_utf8(ptr, len, utf8.as_mut_ptr()) };
+        debug_assert_eq!(written, utf8_len);
+        // Safety: simdutf initialized the first `written` bytes.
+        unsafe { utf8.set_len(written) };
+        // Safety: simdutf writes valid UTF-8.
+        unsafe { String::from_utf8_unchecked(utf8) }
+    };
     // Safety: the bridge representation and ownership invariants satisfy this operation.
     unsafe { ptr::write(this, owned) }
-}
-
-fn leading_ascii_len(bytes: &[u8]) -> usize {
-    // 32-byte chunks let the compiler vectorize the scan.
-    const CHUNK: usize = 32;
-    let mut len = 0;
-    for chunk in bytes.chunks_exact(CHUNK) {
-        if chunk.iter().fold(0, |acc, &b| acc | b) >= 0x80 {
-            break;
-        }
-        len += CHUNK;
-    }
-    len + bytes[len..].iter().take_while(|b| b.is_ascii()).count()
 }
 
 #[unsafe(export_name = "cxxbridge1$string$from_utf8")]

@@ -113,6 +113,27 @@ fn ephemeral_namespaces_need_experimental() {
 }
 
 #[test]
+fn bundled_modules_need_experimental() {
+    let (result, errors) = actor_configs_of(
+        |config| {
+            let mut service = config.init_services(1).get(0);
+            service.set_name("kv");
+            let worker = service.init_worker();
+            worker.init_modules(1).get(0).set_bundled("/workerd/kv.js");
+        },
+        false,
+    );
+    result.unwrap();
+    assert_eq!(
+        errors,
+        [
+            "Bundled modules are an experimental feature which may change or go away in the \
+                 future. You must run workerd with `--experimental` to use this feature."
+        ]
+    );
+}
+
+#[test]
 fn durable_classes_need_storage() {
     let (result, errors) = actor_configs_of(
         |config| {

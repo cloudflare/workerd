@@ -15,6 +15,7 @@ import {
   IS_EW_VALIDATING,
   IS_DYNAMIC_WORKER,
   IS_DEDICATED_SNAPSHOT_ENABLED,
+  KEEP_DEDICATED_SNAPSHOT_IMPORT_CACHES,
   COMPATIBILITY_FLAGS,
   type CompatibilityFlags,
   IS_SECOND_VALIDATION_PHASE,
@@ -202,6 +203,9 @@ if (LOADED_SNAPSHOT_META) {
   CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
 }
 export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
+
+export const KEEP_RESTORED_IMPORT_CACHES =
+  LOADED_SNAPSHOT_TYPE === 'dedicated' && KEEP_DEDICATED_SNAPSHOT_IMPORT_CACHES;
 
 /**
  * Preload a dynamic library.
@@ -996,11 +1000,12 @@ export function maybeRestoreSnapshot(Module: Module): void {
     },
     () => ({ snapshot_type: settings.snapshotType })
   );
-  // Invalidate caches if we have a snapshot because the contents of site-packages
-  // may have changed.
-  enterJaegerSpan('invalidate_caches', () => {
-    invalidateCaches(Module);
-  });
+  // The contents of site-packages may have changed since the snapshot was collected.
+  if (!KEEP_RESTORED_IMPORT_CACHES) {
+    enterJaegerSpan('invalidate_caches', () => {
+      invalidateCaches(Module);
+    });
+  }
 }
 
 function collectSnapshot(

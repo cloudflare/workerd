@@ -158,6 +158,26 @@ fn call_with_object_receiver_via_into() {
     });
 }
 
+/// `Lock::global_object()` is `globalThis`, the receiver C++ JSG gives a `jsg::Function`.
+#[test]
+fn call_with_global_object_receiver() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let func_val = ctx
+            .eval_raw(
+                lock,
+                "(function() { 'use strict'; return this === globalThis; })",
+            )
+            .unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
+
+        let global = lock.global_object();
+        let result = func.call(lock, Some(global.into()), &[])?;
+        assert!(bool::from_js(lock, result)?);
+        Ok(())
+    });
+}
+
 /// `Local<Function>::call` leaves what the function threw pending, which `try_catch` catches.
 #[test]
 fn call_leaves_thrown_exception_pending() {

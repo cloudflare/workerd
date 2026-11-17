@@ -213,8 +213,8 @@ kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChann
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::rc<PromisedSubrequestChannel>(
-          promise.then([self = addRefToThis(), channel, props = kj::mv(p),
-                           versionRequest = kj::mv(versionRequest), persistent]() mutable {
+          promise.then([self = addRefToThis(), channel, versionRequest = kj::mv(versionRequest),
+                           persistent](Frankenvalue props) mutable {
         return self->getSubrequestChannelResolved(
             channel, kj::mv(props), kj::mv(versionRequest), persistent);
       }));
@@ -228,7 +228,7 @@ kj::Rc<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
       return kj::rc<PromisedActorClassChannel>(
-          promise.then([self = addRefToThis(), channel, props = kj::mv(p), persistent]() mutable {
+          promise.then([self = addRefToThis(), channel, persistent](Frankenvalue props) mutable {
         return self->getActorClassResolved(channel, kj::mv(props), persistent);
       }));
     }
@@ -246,9 +246,9 @@ kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubreq
   // this method would get a lot more complicated!
 
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
-    return kj::rc<PromisedSubrequestChannel>(promise.then(
-        [self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
-            restoreParams = kj::mv(restoreParams), inner = kj::mv(inner), persistent]() mutable {
+    return kj::rc<PromisedSubrequestChannel>(
+        promise.then([self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
+                         inner = kj::mv(inner), persistent](Frankenvalue restoreParams) mutable {
       return self->makeRestoredSubrequestChannelResolved(
           kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner), persistent);
     }));
@@ -263,7 +263,7 @@ kj::Rc<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
     return kj::rc<PromisedRpcChannel>(
         promise.then([self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
-                         restoreParams = kj::mv(restoreParams), persistent]() mutable {
+                         persistent](Frankenvalue restoreParams) mutable {
       return self->makeRestoredRpcChannelResolved(
           kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
     }));
@@ -277,8 +277,8 @@ kj::Rc<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
     kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
   KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
     return kj::rc<PromisedSubrequestChannel>(
-        promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
-                         limits = kj::mv(limits)]() mutable {
+        promise.then([self = addRefToThis(), name = kj::mv(name), limits = kj::mv(limits)](
+                         Frankenvalue props) mutable {
       return self->getEntrypointResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
     }));
   } else {
@@ -290,8 +290,8 @@ kj::Rc<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
     kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
   KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
     return kj::rc<PromisedActorClassChannel>(
-        promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
-                         limits = kj::mv(limits)]() mutable {
+        promise.then([self = addRefToThis(), name = kj::mv(name), limits = kj::mv(limits)](
+                         Frankenvalue props) mutable {
       return self->getActorClassResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
     }));
   } else {
@@ -327,7 +327,7 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
   kj::Vector<kj::Promise<void>> promises;
 
   KJ_IF_SOME(promise, env.resolveCaps(resolveCap)) {
-    promises.add(kj::mv(promise));
+    promises.add(promise.then([this](Frankenvalue resolved) { env = kj::mv(resolved); }));
   }
 
   auto resolveChannelSlot = [&](auto& slot) {

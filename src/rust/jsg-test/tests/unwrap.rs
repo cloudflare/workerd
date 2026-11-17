@@ -103,7 +103,7 @@ fn v8_unwrap_number_returns_correct_values() {
 fn v8_unwrap_string_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        for expected in ["hello world", "", "こんにちは"] {
+        for expected in ["hello world", "", "héllo ÿ", "こんにちは"] {
             let s = expected.to_js(lock)?;
             let mut unwrapped = String::new();
             // SAFETY: The isolate is locked and the value is a valid V8 local handle.

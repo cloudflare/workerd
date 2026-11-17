@@ -47,6 +47,16 @@ pub struct InspectorConnection {
     draining: Cell<bool>,
 }
 
+// SAFETY: a session holds V8 inspector state, which any thread holding the isolate lock may use,
+// and the buffer of messages for `inspector_session_take_messages`; nothing in it belongs to a
+// thread or a KJ event loop. Every call to it, its destructor included, requires the isolate
+// lock (`inspector.h`), and its only owner, `InspectorConnection`, calls it with a `jsg::Lock`
+// and is dropped as a resource is: under the lock, by teardown at the latest. The exception is a
+// `jsg::Rc<InspectorConnection>` kept past teardown, whose release after the isolate is disposed
+// would destroy the session after the V8 inspector it belongs to. Nothing keeps one; `Send` is
+// not what allows it, since a `jsg::Rc` on the isolate's own thread can outlive it the same way.
+unsafe impl Send for ffi::InspectorSession {}
+
 impl jsg::Traced for InspectorConnection {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
         jsg::Traced::trace(&self.callback, visitor);

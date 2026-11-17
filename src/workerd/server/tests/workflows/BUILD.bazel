@@ -1,0 +1,18 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "workflows-test.wd-test",
+    args = ["--experimental"],
+    data = ["workflows-test.js"],
+)
+
+# `workerd serve` of the Workflows engine, killed and started again.
+js_test(
+    name = "workflows-restart-test",
+    size = "medium",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "workflows-restart-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

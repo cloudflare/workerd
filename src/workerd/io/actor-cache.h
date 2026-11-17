@@ -325,9 +325,17 @@ class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
     JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
   }
 
-  // Schedule restoration from an opaque snapshot capability on the next session. Back-ends must
-  // validate the capability before using it.
-  virtual kj::Promise<kj::String> onNextSessionRestore(capnp::Capability::Client bookmarkSnapshot) {
+  // A key-value pair to write into the KV table after a restore, before the application sees the
+  // database. `value` is serialized like values written through `ctx.storage.kv`.
+  struct RestoreKvEntry {
+    kj::String key;
+    kj::Array<kj::byte> value;
+  };
+
+  // Schedule restoration from an opaque snapshot capability on the next session, then write
+  // `kvData` into the restored database. Back-ends must validate the capability before using it.
+  virtual kj::Promise<kj::String> onNextSessionRestore(
+      capnp::Capability::Client bookmarkSnapshot, kj::Array<RestoreKvEntry> kvData) {
     JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
   }
 
