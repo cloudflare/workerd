@@ -817,7 +817,8 @@ fn content_range(range: &str) -> Option<(u64, u64, u64)> {
     let (span, size) = range.strip_prefix("bytes ")?.split_once('/')?;
     let (first, last) = span.split_once('-')?;
     let (first, last): (u64, u64) = (first.parse().ok()?, last.parse().ok()?);
-    Some((first, (last + 1).checked_sub(first)?, size.parse().ok()?))
+    let len = last.checked_add(1)?.checked_sub(first)?;
+    Some((first, len, size.parse().ok()?))
 }
 
 /// The headers of a write's content headers and user metadata.
