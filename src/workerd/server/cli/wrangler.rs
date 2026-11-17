@@ -37,8 +37,8 @@
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
 //! `AssetWorker` entrypoint. Without `main` it serves only the files. Under `--experimental` the
 //! Worker's `caches` are served by the cache service `<name>-cache`, its entries in
-//! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured", as
-//! before. The server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if
+//! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured". The
+//! server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if
 //! there are assets, else to the worker; `--socket-addr http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment

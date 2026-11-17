@@ -751,9 +751,14 @@ impl CacheRequest {
             let deleted = self.cache.store.delete(key, now).await?;
             return self.stored(response, deleted.map(|_| true));
         }
+        // A head `load` could not read back is refused, as an unparsed one is.
+        let record = record_head(now.saturating_add(ttl), status, &text, &headers);
+        if record.len() > MAX_HEAD {
+            return self.refuse(body, response, 400, "Bad Request").await;
+        }
         let (temp, mut file) = self.cache.store.draft(key)?;
         let mut write = |bytes: &[u8]| file.write_all(bytes).map_err(|e| io_kj_error(&e));
-        write(&record_head(now + ttl, status, &text, &headers))?;
+        write(&record)?;
         write(rest)?;
         let mut size = rest.len() as u64;
         loop {

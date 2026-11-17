@@ -162,8 +162,8 @@ export const overwrite = {
   },
 };
 
-// Fresh for a tenth of the time since Last-Modified, 400 ms, then a miss,
-// then gone.
+// Fresh for a tenth of the time since Last-Modified, 1 s, then a miss, then
+// gone.
 export const expires = {
   async test() {
     const cache = caches.default;
@@ -171,14 +171,14 @@ export const expires = {
     const now = Math.floor(Date.now() / 1000) * 1000;
     const headers = {
       Date: new Date(now).toUTCString(),
-      'Last-Modified': new Date(now - 4000).toUTCString(),
+      'Last-Modified': new Date(now - 10_000).toUTCString(),
     };
     await cache.put(key, new Response('body', { headers }));
     assert.strictEqual((await cache.match(key)).status, 200);
-    await scheduler.wait(500);
+    await scheduler.wait(1_200);
     assert.strictEqual(await cache.match(key), undefined);
     await cache.put(key, new Response('body', { headers }));
-    await scheduler.wait(500);
+    await scheduler.wait(1_200);
     assert.strictEqual(await cache.delete(key), false);
   },
 };
