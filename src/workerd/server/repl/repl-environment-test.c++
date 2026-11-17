@@ -466,7 +466,8 @@ KJ_TEST("REPL loads a config and calls its services and sockets") {
 
   KJ_EXPECT_STARTS_WITH(
       fixture.eval("s.socket('nope')"), "Uncaught Error: The config has no socket named \"nope\".");
-  KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('nope')"), "Uncaught Error:");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.service('nope')"),
+      "Uncaught Error: The config has no service named \"nope\".");
 }
 
 KJ_TEST("REPL calls a service's scheduled() and queue() handlers with --experimental") {
@@ -574,6 +575,8 @@ KJ_TEST("REPL reaches a config's Durable Objects and evicts them") {
       "Uncaught TypeError: A Durable Object is named by one of a name and an id.");
   KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('main', 'Nope', 'x')"),
       "Uncaught Error: Worker does not export a Durable Object class named \"Nope\"");
+  KJ_EXPECT_STARTS_WITH(fixture.eval("s.durableObject('nope', 'Counter', 'x')"),
+      "Uncaught Error: The config has no service named \"nope\".");
 
   fixture.evalAwait("await s.close()");
   auto closed = "Uncaught Error: The server for durable-objects.capnp was closed."_kj;
