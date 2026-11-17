@@ -13,7 +13,7 @@
 namespace workerd::api {
 
 kj::Maybe<kj::Own<jsg::Wrappable>> Performance::snapshotClone() const {
-  if (entries.size() != 0 || hasEventListeners()) return kj::none;
+  if (!entries.empty() || hasEventListeners()) return kj::none;
   // The current isolate's limit enforcer, not `isolateLimitEnforcer`: this runs in the zygote, to
   // produce the copy stored in the SnapshotArtifact, and again in every Worker started from that
   // snapshot, on the stored copy, to produce the instance attached to the restored wrapper. The
