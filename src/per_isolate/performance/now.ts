@@ -63,7 +63,7 @@ function matchShape(replacement: AnyFunction, original: AnyFunction): void {
 // property introspection. Replacing them on the prototype reaches every route
 // to a Performance: globalThis.performance, node:perf_hooks, and the class.
 //
-// TODO(cleanup): Once the typescript-performance-now autogate is fully rolled
+// TODO(cleanup): Once the ts-performance-now autogate is fully rolled
 // out and removed, the JSG `now` and `timeOrigin` are deleted, and there is
 // nothing left to replace or copy the shape from. install() then has to define
 // both members outright: every attribute true (as performance-now-test.js

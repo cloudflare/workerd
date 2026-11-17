@@ -52,6 +52,6 @@ const unitTests :Workerd.Config = (
   # optimizedCalls uses %OptimizeFunctionOnNextCall to reach the fast-API path.
   v8Flags = ["--allow-natives-syntax"],
   autogates = [
-    "workerd-autogate-typescript-performance-now",
+    "workerd-autogate-ts-performance-now",
   ],
 );

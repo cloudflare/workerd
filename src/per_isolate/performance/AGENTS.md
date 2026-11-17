@@ -11,7 +11,7 @@ The class itself is the JSG `Performance` (`src/workerd/api/performance.h`),
 and so is the lazily created `globalThis.performance` instance. `now.ts`
 replaces just two of its prototype members.
 
-The install is gated by the `typescript-performance-now` autogate
+The install is gated by the `ts-performance-now` autogate
 (`util/autogate.h`), not by a compat flag, so every worker in a process with
 the gate on gets it. That works only because the swap is meant to be
 unobservable, apart from the divergences listed below. Keep it that way, or
@@ -85,7 +85,7 @@ reaches every route to them: `globalThis.performance`, `node:perf_hooks`'
 Both implementations run `src/workerd/api/tests/performance-now-test.js`
 unmodified. `performance-now-test.wd-test` runs it against JSG, and its
 `@all-autogates` variant against TS. `performance-now-ts-test.wd-test` turns
-on the `typescript-performance-now` autogate, so all of its variants run
+on the `ts-performance-now` autogate, so all of its variants run
 against TS. Each config covers the default compat date, the
 `spec_compliant_property_attributes` attributes, and the perf-hooks flag.
 The test reads both flags from `Cloudflare.compatibilityFlags`, so every

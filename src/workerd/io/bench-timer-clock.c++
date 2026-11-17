@@ -10,7 +10,7 @@ namespace workerd {
 namespace {
 
 // `autogates` selects the performance.now() implementation: without the
-// typescript-performance-now autogate it is the JSG method, with it the
+// ts-performance-now autogate it is the JSG method, with it the
 // TypeScript facade over a fast-API call (src/per_isolate/performance/).
 void clockReads(benchmark::State& state, kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> autogates) {
   constexpr uint READS = 10'000;
@@ -56,7 +56,7 @@ void clockReadsWithBlockedTimers(benchmark::State& state) {
 }
 
 void clockReadsWithBlockedTimersTypeScript(benchmark::State& state) {
-  static constexpr kj::StringPtr AUTOGATES[] = {"typescript-performance-now"_kj};
+  static constexpr kj::StringPtr AUTOGATES[] = {"ts-performance-now"_kj};
   clockReads(state, kj::arrayPtr(AUTOGATES));
 }
 

@@ -142,7 +142,7 @@ declare const utils: {
   // TypeError for a non-string.
   utf8Length(str: string): number;
   // The three Performance members below exist only under the
-  // typescript-performance-now autogate; only performance/now uses them.
+  // ts-performance-now autogate; only performance/now uses them.
   //
   // performance.now() on `this`: the Spectre-safe clock plus the native
   // perf-event accounting. It and requirePerformance() take the Performance as

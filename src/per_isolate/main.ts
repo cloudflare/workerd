@@ -84,7 +84,7 @@ if (autogates['ts-dom-exception']) {
 // performance.now() and performance.timeOrigin. Gated by an autogate rather
 // than a compat flag because the swap preserves the observable shape (see
 // performance/AGENTS.md).
-if (autogates['typescript-performance-now']) {
+if (autogates['ts-performance-now']) {
   require('performance/now').install(utils.getPerformancePrototype());
 }
 

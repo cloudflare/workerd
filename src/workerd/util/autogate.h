@@ -120,7 +120,7 @@ namespace workerd::util {
   V(TS_DOM_EXCEPTION)                                                                              \
   /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
      performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
-  V(TYPESCRIPT_PERFORMANCE_NOW)                                                                    \
+  V(TS_PERFORMANCE_NOW)                                                                            \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

@@ -686,7 +686,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   v8::MaybeLocal<v8::Value> performanceNow;
   v8::MaybeLocal<v8::Value> requirePerformance;
   v8::MaybeLocal<v8::Value> getPerformancePrototype;
-  if (util::Autogate::isEnabled(util::AutogateKey::TYPESCRIPT_PERFORMANCE_NOW)) {
+  if (util::Autogate::isEnabled(util::AutogateKey::TS_PERFORMANCE_NOW)) {
     auto performanceTemplate = api::getPerformanceTemplateForBootstrap(js);
     performanceNow = getFastReceiverMethod(js, PerformanceNow, &fast_performance_now_,
         performanceTemplate, packTagRange(js, api::getPerformanceTagRangeForBootstrap(js)));
