@@ -28,6 +28,7 @@ export {
   typeNormalization,
   loneSurrogates,
   fileConstructorIgnoresItsPrototype,
+  sliceIgnoresAReplacedPrototype,
   files,
   sizeLimit,
   resizableBuffers,

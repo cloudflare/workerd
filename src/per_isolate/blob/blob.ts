@@ -507,7 +507,7 @@ const kBlobMembers = {
     if (to < 0) to += size;
     from = from < 0 ? 0 : from > size ? size : from;
     to = to < from ? from : to > size ? size : to;
-    const blob = ObjectCreate(Blob.prototype) as object;
+    const blob = ObjectCreate(kBlobPrototype) as object;
     initInstance(blob, subrange(bytes, from, to), type);
     return blob;
   },
@@ -580,7 +580,10 @@ function shapePrototype(ctor: object, members: object, names: string[]): void {
   }
 }
 
-ObjectSetPrototypeOf(File.prototype, Blob.prototype);
+// Captured because Blob.prototype stays writable unless immutable_api_prototypes
+// is set, and slice() must not depend on what user code assigns there.
+const kBlobPrototype: object = Blob.prototype;
+ObjectSetPrototypeOf(File.prototype, kBlobPrototype);
 shapePrototype(Blob, kBlobMembers, [
   'size',
   'type',

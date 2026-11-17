@@ -242,6 +242,24 @@ export const fileConstructorIgnoresItsPrototype = {
   },
 };
 
+export const sliceIgnoresAReplacedPrototype = {
+  async test() {
+    const descriptor = Object.getOwnPropertyDescriptor(Blob, 'prototype');
+    if (!descriptor.writable) return;
+    const original = Blob.prototype;
+    const blob = new Blob(['abc']);
+    let slice;
+    try {
+      Blob.prototype = 1;
+      slice = blob.slice(1);
+    } finally {
+      Blob.prototype = original;
+    }
+    strictEqual(Object.getPrototypeOf(slice), original);
+    strictEqual(await slice.text(), 'bc');
+  },
+};
+
 export const files = {
   async test() {
     throws(() => new File(), {
