@@ -460,6 +460,9 @@ MaybeLocal array_buffer_new_with_mode(
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
 size_t local_array_buffer_byte_length(const Local& buffer);
 uint8_t* local_array_buffer_data(const Local& buffer);
+// Returns the address of the buffer's first byte (zero if it has none) and sets `byteLength` to
+// its byte length.
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<ArrayBufferView>

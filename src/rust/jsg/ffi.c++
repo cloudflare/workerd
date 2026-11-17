@@ -814,6 +814,12 @@ uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
+  auto buf = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  byteLength = buf->ByteLength();
+  return byteLength == 0 ? 0 : reinterpret_cast<uintptr_t>(buf->Data());
+}
+
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));

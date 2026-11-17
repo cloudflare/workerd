@@ -320,6 +320,8 @@ pub mod ffi {
         -> Local;
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
         pub unsafe fn local_array_buffer_data(buffer: &Local) -> *mut u8;
+        pub unsafe fn local_array_buffer_contents(buffer: &Local, byte_length: &mut usize)
+        -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
         // Local<ArrayBufferView>
@@ -2729,12 +2731,9 @@ impl<'s> Local<'s, ArrayBuffer> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        if self.is_empty() {
-            return &[];
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid
-        // until JS runs, which the shared borrow of the lock prevents for 'b.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }
+        // SAFETY: the FFI returns this region's bytes, and the lock borrow prevents
+        // JavaScript from detaching, resizing or writing to the buffer for 'b.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice view into the `ArrayBuffer`'s backing store.
@@ -2759,22 +2758,38 @@ impl<'s> Local<'s, ArrayBuffer> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        if self.is_empty() {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; data() is non-null for
-        // non-empty buffers; byte_length() bytes are valid while the lock is borrowed.
-        unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
+        // SAFETY: caller guarantees exclusive access; the lock borrow keeps the
+        // buffer in place while the slice is live.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the `ArrayBuffer` contents into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        if self.is_empty() {
-            return Vec::new();
-        }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid,
-        // and no JS can run before the copy completes.
-        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }.to_vec()
+        // SAFETY: the FFI returns this region's bytes, and no JavaScript runs
+        // before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the buffer's bytes, read from V8 in one call. It is dangling, with no
+    /// bytes, for an empty or detached buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees a buffer's backing store.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
+        let mut byte_length = 0;
+        // SAFETY: handle is valid within the current HandleScope.
+        let data = unsafe { ffi::local_array_buffer_contents(self.raw(), &mut byte_length) };
+        let ptr = if byte_length == 0 {
+            NonNull::<u8>::dangling().as_ptr()
+        } else {
+            data as *mut u8
+        };
+        std::ptr::slice_from_raw_parts_mut(ptr, byte_length)
     }
 
     /// Detaches this `ArrayBuffer`, setting its byte length to zero.
@@ -2911,14 +2926,9 @@ impl<'s> Local<'s, ArrayBufferView> {
     /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &[];
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers, which are valid until JS
-        // runs, which the lock borrow prevents.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }
+        // SAFETY: the bytes are this view's, and the borrow of `lock` keeps JavaScript from
+        // running, so they stay in place and unchanged.
+        unsafe { &*self.as_raw_slice() }
     }
 
     /// Returns a mutable byte slice of the view's visible region.
@@ -2943,26 +2953,31 @@ impl<'s> Local<'s, ArrayBufferView> {
     #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
-        // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return &mut [];
-        }
-        // SAFETY: caller guarantees exclusive access; `data` points to the `len` bytes the
-        // view covers; the lock borrow keeps JS from running.
-        unsafe { std::slice::from_raw_parts_mut(data, len) }
+        // SAFETY: the caller guarantees exclusive access to this buffer region, and the borrow
+        // of `lock` keeps JavaScript from running.
+        unsafe { &mut *self.as_raw_slice() }
     }
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
+        // SAFETY: the bytes are this view's, and no JavaScript runs before the copy completes.
+        unsafe { &*self.as_raw_slice() }.to_vec()
+    }
+
+    /// A raw pointer to the view's visible bytes, read from V8 in one call. It is dangling, with
+    /// no bytes, for an empty or detached view and for one that does not lie within its buffer.
+    ///
+    /// Dereferencing it is sound only while no JavaScript runs, since JavaScript can detach,
+    /// resize or write to the buffer, and while the buffer is neither detached nor resized. A
+    /// `&mut` made from it must not overlap any other reference to the same memory. Garbage
+    /// collection may run: it neither moves nor frees an off-heap backing store, and reading the
+    /// view's buffer here moves an on-heap typed array's elements off the heap.
+    /// [`as_slice`](Self::as_slice) and [`as_mut_slice`](Self::as_mut_slice) borrow the lock to
+    /// keep JavaScript from running.
+    #[inline]
+    pub fn as_raw_slice(&self) -> *mut [u8] {
         // SAFETY: handle is valid within the current HandleScope.
-        let (data, len) = unsafe { array_buffer_view_data::<u8>(self.raw()) };
-        if len == 0 {
-            return Vec::new();
-        }
-        // SAFETY: `data` points to the `len` bytes the view covers; no JS can run before the
-        // copy completes.
-        unsafe { std::slice::from_raw_parts(data.cast_const(), len) }.to_vec()
+        unsafe { array_buffer_view_raw_slice::<u8>(self.raw()) }
     }
 }
 
