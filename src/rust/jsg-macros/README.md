@@ -659,13 +659,14 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced!`); containers/wrappers recurse to
-inner values. `Traced::trace` has no default, so a hand-written impl must spell out its visits.
+use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced_unchecked!`); containers/wrappers
+recurse to inner values. `Traced::trace` has no default, so a hand-written impl must spell out
+its visits.
 
 `#[jsg_traced]` on a struct implements a no-op `Traced` and `jsg::HoldsNoGcReferences`, bounding
 each field's type by `HoldsNoGcReferences`, so a field that holds a `jsg::Rc` or a `TracedGlobal`
-fails to compile. `jsg::jsg_traced!(Foo)` makes the same claim unchecked; it is for a type whose
-fields can't implement the marker, such as a wrapper of a type from outside JSG.
+fails to compile. `jsg::jsg_traced_unchecked!(Foo)` makes the same claim without checking it; it is
+for a type whose fields can't implement the marker, such as a wrapper of a type from outside JSG.
 
 ### Supported field shapes
 
@@ -849,7 +850,7 @@ jsg::jsg_memory_retainer!(Cache);
 ```
 
 A retainer held as a field of a resource without `custom_trace` is traced too, so it also needs a
-`Traced` impl: `jsg::jsg_traced!(Cache);` for one that holds no GC references.
+`Traced` impl: `#[jsg_traced]` on `Cache` for one that holds no GC references.
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
 capacity. A retainer reached twice is one node, and so is an allocation that several

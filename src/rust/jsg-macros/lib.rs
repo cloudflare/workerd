@@ -1333,7 +1333,7 @@ pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
 /// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
-/// can't implement the marker, see `jsg::jsg_traced!`.
+/// can't implement the marker, see `jsg::jsg_traced_unchecked!`.
 ///
 /// ```ignore
 /// #[jsg_traced]

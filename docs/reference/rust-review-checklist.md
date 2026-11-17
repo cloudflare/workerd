@@ -130,8 +130,9 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   cause use-after-free when the child is collected prematurely. `Traced::trace` has no
   default; a struct with nothing to trace uses `#[jsg_traced]`, which checks that each field
   holds no GC references, rather than an empty `trace` next to a hand-written
-  `HoldsNoGcReferences`. `jsg::jsg_traced!` makes the same claim unchecked; accept it only for a
-  type whose fields can't implement the marker, such as a wrapper of a type from outside JSG.
+  `HoldsNoGcReferences`. `jsg::jsg_traced_unchecked!` makes the same claim without checking it;
+  accept it only for a type whose fields can't implement the marker, such as a wrapper of a type
+  from outside JSG.
 
 ### Rust JSG Safety Rules
 
