@@ -69,4 +69,5 @@ mod traced_global_lifetime;
 mod tunneled_exception;
 mod typed_promise;
 mod unwrap;
+mod weak_condemned;
 mod wildcard_property;

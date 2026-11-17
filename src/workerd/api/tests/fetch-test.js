@@ -23,6 +23,14 @@ export const test = {
     throws(() => new Request('http://example.org', { method: 'patchy' }), {
       message: /^Invalid HTTP method string: patchy$/,
     });
+
+    // CONNECT is refused in any case.
+    throws(() => new Request('http://example.org', { method: 'CONNECT' }), {
+      message: /^Invalid HTTP method string: CONNECT$/,
+    });
+    throws(() => new Request('http://example.org', { method: 'connect' }), {
+      message: /^Invalid HTTP method string: connect$/,
+    });
   },
 };
 

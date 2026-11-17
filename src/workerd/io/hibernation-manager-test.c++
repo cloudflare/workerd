@@ -44,7 +44,7 @@ struct LegacyHibernationManagerTestAccess {
   static bool findManagerForEventMatches(
       kj::StringPtr websocketId, LegacyHibernationManagerImpl& expectedManager) {
     KJ_IF_SOME(manager, LegacyHibernationManagerImpl::findManagerForEvent(websocketId)) {
-      return &kj::downcast<LegacyHibernationManagerImpl>(manager) == &expectedManager;
+      return &kj::downcast<LegacyHibernationManagerImpl>(*manager) == &expectedManager;
     }
     return false;
   }
@@ -274,14 +274,14 @@ TestFixture::SetupParams stubLoopbackParams(
 // production typically constructs the HM inside one only because the trigger — a JS call to
 // state.acceptWebSocket — runs in one. The HM itself is IoContext-independent and this test
 // pattern keeps that explicit so any inadvertent dependency growth shows up.
-kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture) {
-  auto hm = kj::refcounted<LegacyHibernationManagerImpl>(fixture.getActor().getLoopback(), 0);
+kj::Rc<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture) {
+  auto hm = kj::rc<LegacyHibernationManagerImpl>(fixture.getActor().getLoopback(), 0);
   hm->setTimerChannel(fixture.getTimerChannel());
   return hm;
 }
 
 // Same, but configure auto-response. Both `autoRequest` and `autoResponse` are required.
-kj::Own<Worker::Actor::HibernationManager> makeTestHm(
+kj::Rc<Worker::Actor::HibernationManager> makeTestHm(
     TestFixture& fixture, kj::StringPtr autoRequest, kj::StringPtr autoResponse) {
   auto hm = makeTestHm(fixture);
   hm->setWebSocketAutoResponse(autoRequest, autoResponse);
@@ -344,7 +344,7 @@ KJ_TEST("HibernationManager: event delivery resolves the manager that registered
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "local-event"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
@@ -515,7 +515,7 @@ KJ_TEST("HibernationManager: event naming another actor's manager is rejected") 
   // The event ID resolves to a manager, but not the one this actor is using. The ID is the only
   // part of an event not derived from the receiving actor, so this is the shape a misrouted event
   // takes.
-  fixture.getActor().setHibernationManager(actorHm->addRef());
+  fixture.getActor().setHibernationManager(actorHm.addRef());
 
   constexpr kj::StringPtr websocketId = "other-manager-event"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(
@@ -568,7 +568,7 @@ KJ_TEST("HibernationManager: claiming a socket owned by another live actor is re
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "cross-actor-claim"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
@@ -612,7 +612,7 @@ KJ_TEST("HibernationManager: claiming a socket owned by a live actor sharing its
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "same-id-claim"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
@@ -646,14 +646,14 @@ KJ_TEST("HibernationManager: an actor handed a running actor's manager does not 
   auto hm = makeTestHm(ownerFixture);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   DispatchStats otherStats;
   TestFixture otherFixture({
     .waitScope = ownerFixture.getWaitScope(),
     .actorId = Worker::Actor::Id(kj::str("adopt-other")),
     .actorLoopback = kj::refcounted<StubLoopback>(otherStats),
-    .hibernationManager = hm->addRef(),
+    .hibernationManager = hm.addRef(),
   });
 
   // The manager stayed with the actor it belongs to, and the other actor kept nothing.
@@ -698,8 +698,8 @@ KJ_TEST("HibernationManager: a manager-less actor adopts the event's manager") {
   api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
       *event, fixture.getActor(), websocketId);
 
-  auto& adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
-  KJ_ASSERT(&adopted == eventHm.get());
+  auto adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
+  KJ_ASSERT(adopted.get() == eventHm.get());
 
   // Having adopted it, the actor now passes the same check the delivery path applies, so the event
   // that follows can claim its socket.
@@ -727,7 +727,7 @@ KJ_TEST("HibernationManager: a sibling holder sharing the actor ID does not take
   auto hm = makeTestHm(ownerFixture);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   // Orphan the manager, as hibernating the owning actor does.
   ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
@@ -741,7 +741,7 @@ KJ_TEST("HibernationManager: a sibling holder sharing the actor ID does not take
     .waitScope = ownerFixture.getWaitScope(),
     .actorId = Worker::Actor::Id(kj::str("sibling-shared-id")),
     .actorLoopback = kj::refcounted<StubLoopback>(siblingStats),
-    .hibernationManager = hm->addRef(),
+    .hibernationManager = hm.addRef(),
     .holderToken = 2,
   });
 
@@ -762,7 +762,7 @@ KJ_TEST("HibernationManager: an event does not hand a sibling holder an orphan")
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   // Orphan the manager, as hibernating the owning actor does.
   ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
@@ -819,7 +819,7 @@ KJ_TEST("HibernationManager: a manager that forgot its holder is adopted by anot
   auto hm = makeTestHm(ownerFixture);
   auto ownerRequest = ownerFixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(ownerFixture, *ownerRequest, *hm);
-  ownerFixture.getActor().setHibernationManager(hm->addRef());
+  ownerFixture.getActor().setHibernationManager(hm.addRef());
 
   // Orphan the manager, as hibernating the owning actor does.
   ownerFixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
@@ -835,13 +835,13 @@ KJ_TEST("HibernationManager: a manager that forgot its holder is adopted by anot
     .waitScope = ownerFixture.getWaitScope(),
     .actorId = Worker::Actor::Id(kj::str("forgotten-holder")),
     .actorLoopback = kj::refcounted<StubLoopback>(replacementStats),
-    .hibernationManager = hm->addRef(),
+    .hibernationManager = hm.addRef(),
     .holderToken = 2,
   });
 
   // The token a sibling was refused for is gone, so this holder takes the sockets.
-  auto& adopted = KJ_ASSERT_NONNULL(replacementFixture.getActor().getHibernationManager());
-  KJ_ASSERT(&adopted == hm.get());
+  auto adopted = KJ_ASSERT_NONNULL(replacementFixture.getActor().getHibernationManager());
+  KJ_ASSERT(adopted.get() == hm.get());
 
   // Adopting names the holder now running, so the next sibling is refused again.
   auto& newOwner = KJ_ASSERT_NONNULL(hm->getOwningActor());
@@ -856,7 +856,7 @@ KJ_TEST("HibernationManager: a new generation of the owning actor adopts its man
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request1 = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request1, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   // Hibernate and replace the actor, as a code update does. The manager outlives the actor that
   // owned it, leaving the copied ID as the only identity it can still be checked against.
@@ -883,8 +883,8 @@ KJ_TEST("HibernationManager: a new generation of the owning actor adopts its man
   api::HibernatableWebSocketCustomEventTestAccess::ensureHibernationManagerForEvent(
       *event, fixture.getActor(), websocketId);
 
-  auto& adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
-  KJ_ASSERT(&adopted == hm.get());
+  auto adopted = KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
+  KJ_ASSERT(adopted.get() == hm.get());
 
   // Adopting re-points the manager at the generation now running.
   auto& newOwner = KJ_ASSERT_NONNULL(hm->getOwningActor());
@@ -898,7 +898,7 @@ KJ_TEST("HibernationManager: a different Durable Object cannot adopt an orphaned
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request1 = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request1, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
   fixture.drainAndDestroy(kj::mv(request1));
@@ -953,7 +953,7 @@ KJ_TEST("HibernationManager: an event re-resolves the pipeline only when no acto
   KJ_ASSERT(KJ_ASSERT_NONNULL(stats.lastReresolveActorPipeline) == ReresolveActorPipeline::YES);
 
   // A live owning actor holds a current pipeline, so reusing its loopback's is correct.
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
   auto worker2 KJ_UNUSED = LegacyHibernationManagerTestAccess::getWorkerForOnlyWebSocket(legacyHm);
   KJ_ASSERT(KJ_ASSERT_NONNULL(stats.lastReresolveActorPipeline) == ReresolveActorPipeline::NO);
 
@@ -967,7 +967,7 @@ KJ_TEST("HibernationManager: a hibernated socket on a running actor reuses the p
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   // Package the sockets away, as an idle actor does. Packaging is not the signal: un-packaging is
   // per-socket, so keying on it would re-resolve the pipeline for every socket a woken actor has
@@ -988,7 +988,7 @@ KJ_TEST("HibernationManager: delivering one event leaves other hibernated WebSoc
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, "first"_kj);
   auto end2 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm, "second"_kj);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr firstId = "multi-socket-event-first"_kj;
   constexpr kj::StringPtr secondId = "multi-socket-event-second"_kj;
@@ -1052,7 +1052,7 @@ KJ_TEST("HibernationManager: cancelling an event deregisters it") {
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "cancel-event"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
@@ -1073,7 +1073,7 @@ KJ_TEST("HibernationManager: cancelling an already-claimed event is a no-op") {
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "cancel-claimed-event"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));
@@ -1101,7 +1101,7 @@ KJ_TEST("HibernationManager: unresolvable event ID fails to claim a WebSocket") 
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "unresolvable-event"_kj;
 
@@ -1123,7 +1123,7 @@ KJ_TEST("HibernationManager: rejected RPC dispatch leaves the event registration
   auto& legacyHm = kj::downcast<LegacyHibernationManagerImpl>(*hm);
   auto request = fixture.newIncomingRequest();
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
-  fixture.getActor().setHibernationManager(hm->addRef());
+  fixture.getActor().setHibernationManager(hm.addRef());
 
   constexpr kj::StringPtr websocketId = "rejected-rpc-event"_kj;
   LegacyHibernationManagerTestAccess::registerOnlyWebSocketForEvent(legacyHm, kj::str(websocketId));

@@ -64,7 +64,7 @@ use crate::services::header_table;
 use crate::services::not_transferable;
 use crate::services::send_error;
 
-/// A session's CONNECT carries `<ms>.<nonce>.<mac>`: see `connect_mac`.
+/// A session's CONNECT carries `<node>.<ms>.<nonce>.<mac>`: see `connect_mac`.
 const AUTH_HEADER: &str = "cf-cluster-auth";
 /// How far a CONNECT's timestamp may be from this instance's clock.
 const AUTH_WINDOW_MS: u64 = 30_000;
@@ -77,7 +77,8 @@ pub struct ClusterNode {
     /// The Cache API's (`services/cache-cluster.rs`), divided as the lease's.
     pub cache_timing: cache::Timing,
     factory: Rc<Factory>,
-    /// One session per peer address, dropped when it disconnects.
+    /// One session per peer instance at its address, dropped when it disconnects. A peer that
+    /// vanishes without its session noticing keeps its entry for the life of the process.
     sessions: Rc<Sessions<Rc<RpcConnection>>>,
     /// The address peers dial, which their CONNECTs are bound to.
     advertise: String,
@@ -151,11 +152,18 @@ pub struct RpcConnection {
 
 type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
 
-/// One value per key, a peer's session: the callers that arrive while it is
-/// being made share the attempt, and a failed attempt is forgotten, so the
-/// next caller makes another.
+/// A peer instance's id and the address it is dialed at.
+type Peer = (String, String);
+
+/// One value per peer instance and its address, a session.
+///
+/// The callers that arrive while it is being made share the attempt, and a
+/// failed attempt is forgotten, so the next caller makes another. Each
+/// instance has a session of its own, also where instances share an address:
+/// a session dialed to one passed its CONNECT, which another must pass for
+/// itself.
 pub struct Sessions<V> {
-    map: RefCell<HashMap<String, Shared<Dial<V>>>>,
+    map: RefCell<HashMap<Peer, Shared<Dial<V>>>>,
 }
 
 impl<V> Default for Sessions<V> {
@@ -167,35 +175,40 @@ impl<V> Default for Sessions<V> {
 }
 
 impl<V: Clone + 'static> Sessions<V> {
-    /// `key`'s value: the one made, the one being made, or one `make` makes.
+    /// The value for instance `node` at `address`: the one made, the one being
+    /// made, or one `make(node, address)` makes.
     pub async fn get(
         &self,
-        key: &str,
-        make: impl FnOnce() -> Dial<V>,
+        node: &str,
+        address: &str,
+        make: impl FnOnce(&str, &str) -> Dial<V>,
     ) -> std::result::Result<V, String> {
-        let attempt = self.map.borrow().get(key).cloned();
+        let key: Peer = (node.to_owned(), address.to_owned());
+        let attempt = self.map.borrow().get(&key).cloned();
         let attempt = attempt.unwrap_or_else(|| {
-            let attempt = make().shared();
+            let attempt = make(node, address).shared();
             let mut map = self.map.borrow_mut();
-            map.insert(key.to_owned(), attempt.clone());
+            map.insert(key.clone(), attempt.clone());
             attempt
         });
         let result = attempt.clone().await;
         if result.is_err() {
             let mut map = self.map.borrow_mut();
-            if map.get(key).is_some_and(|a| a.ptr_eq(&attempt)) {
-                map.remove(key);
+            if map.get(&key).is_some_and(|a| a.ptr_eq(&attempt)) {
+                map.remove(&key);
             }
         }
         result
     }
 
-    /// Forgets `key`'s value if it is the one `is` matches.
-    pub fn forget(&self, key: &str, is: impl Fn(&V) -> bool) {
+    /// Forgets the value for instance `node` at `address` if it is the one `is`
+    /// matches.
+    pub fn forget(&self, node: &str, address: &str, is: impl Fn(&V) -> bool) {
+        let key: Peer = (node.to_owned(), address.to_owned());
         let mut map = self.map.borrow_mut();
-        let made = map.get(key).and_then(|a| a.peek());
+        let made = map.get(&key).and_then(|a| a.peek());
         if made.is_some_and(|r| r.as_ref().is_ok_and(&is)) {
-            map.remove(key);
+            map.remove(&key);
         }
     }
 }
@@ -315,10 +328,89 @@ fn is_public(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// The MAC a CONNECT to `target` carries, at `ms` with `nonce`: a header seen on the wire is
-/// refused at any other target, once used, or once stale.
-fn connect_mac(cluster: &Cluster, target: &str, ms: u64, nonce: &str) -> Vec<u8> {
-    cluster.mac(format!("workerd cluster connect v1\n{target}\n{ms}\n{nonce}").as_bytes())
+/// A new instance's id (`NodeRecord::node`): 16 random bytes in lowercase hex.
+fn new_node_id() -> String {
+    cluster::hex(&rand::random::<[u8; 16]>())
+}
+
+/// Whether `node` has the form of an instance's id (`new_node_id`).
+fn is_node_id(node: &str) -> bool {
+    node.len() == 32 && node.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The cluster key's MAC of some bytes (`Cluster::mac`).
+type Mac<'a> = dyn Fn(&[u8]) -> Vec<u8> + 'a;
+
+/// The MAC a CONNECT to instance `node` at `target` carries, at `ms` with `nonce`: a header seen
+/// on the wire is refused by any other instance, at any other target, once used, or once stale.
+///
+/// An address outlives its instance. A peer that dials a dead owner's address reaches whatever
+/// took the port since: another instance of the cluster, or of another cluster with the same key
+/// and a bucket of its own, which would serve the object from that bucket's state.
+fn connect_mac(mac: &Mac<'_>, node: &str, target: &str, ms: u64, nonce: &str) -> Vec<u8> {
+    mac(format!("workerd cluster connect v2\n{node}\n{target}\n{ms}\n{nonce}").as_bytes())
+}
+
+/// The `AUTH_HEADER` of a CONNECT to instance `node` at `target`. `node` comes from a record in
+/// the bucket: one that is no instance id is refused, so that the signed text has one reading.
+fn connect_auth(
+    mac: &Mac<'_>,
+    node: &str,
+    target: &str,
+    ms: u64,
+    nonce: &str,
+) -> std::io::Result<String> {
+    if !is_node_id(node) {
+        return Err(std::io::Error::other(format!(
+            "a peer's record in the bucket names {node:?}, which is not an instance id"
+        )));
+    }
+    let tag = cluster::hex(&connect_mac(mac, node, target, ms, nonce));
+    Ok(format!("{node}.{ms}.{nonce}.{tag}"))
+}
+
+/// Checks a CONNECT's `AUTH_HEADER` at instance `me`, which peers dial at `advertise`: its MAC,
+/// that it is for `me`, its clock against `now`, and that its nonce is not in `nonces`, which
+/// then holds it.
+fn check_connect_auth(
+    mac: &Mac<'_>,
+    me: &str,
+    advertise: &str,
+    header: Option<&[u8]>,
+    now: u64,
+    nonces: &mut HashMap<String, u64>,
+) -> Result<()> {
+    let bad = || kj::failed!("cluster CONNECT without a valid {AUTH_HEADER}");
+    let header = header
+        .and_then(|h| std::str::from_utf8(h).ok())
+        .ok_or_else(bad)?;
+    let [node, ms, nonce, tag] = header.split('.').collect::<Vec<_>>()[..] else {
+        return Err(bad());
+    };
+    if !is_node_id(node) {
+        return Err(bad());
+    }
+    let ms: u64 = ms.parse().map_err(|_| bad())?;
+    let tag = cluster::unhex(tag).ok_or_else(bad)?;
+    if !constant_time_eq(&connect_mac(mac, node, advertise, ms, nonce), &tag) {
+        return Err(bad());
+    }
+    if node != me {
+        return Err(kj::failed!(
+            "cluster CONNECT for instance {node}, which this one ({me}) is not"
+        ));
+    }
+    if now.abs_diff(ms) > AUTH_WINDOW_MS {
+        return Err(kj::failed!(
+            "cluster CONNECT {}ms off this clock",
+            now.abs_diff(ms)
+        ));
+    }
+    nonces.retain(|_, t| now.abs_diff(*t) <= 2 * AUTH_WINDOW_MS);
+    if nonces.insert(nonce.to_owned(), ms).is_some() {
+        return Err(kj::failed!("cluster CONNECT replayed"));
+    }
+    Ok(())
 }
 
 impl ClusterNode {
@@ -341,7 +433,7 @@ impl ClusterNode {
         let setup = cluster::Setup {
             url: text(conf.get_bucket())?,
             options: options.iter().map(text).collect::<Result<_>>()?,
-            node: cluster::hex(&rand::random::<[u8; 16]>()),
+            node: new_node_id(),
             address: address.clone(),
             timing,
             key: text(conf.get_key())?.into_bytes(),
@@ -509,7 +601,7 @@ impl ClusterNode {
                 let _ = cluster.refresh_route(&namespace, &actor, now).await;
             });
         }
-        let session = self.session(&address).await.map_err(|e| {
+        let session = self.session(&node, &address).await.map_err(|e| {
             // Unreachable: its own record, not the listing, tells whether it still owns the
             // object (`forget_route`).
             self.cluster.forget_route(namespace, actor, &node);
@@ -533,7 +625,7 @@ impl ClusterNode {
             .address(node, cluster::now_ms())
             .ok_or_else(|| kj::disconnected!("cluster node {node} is not live"))?;
         let session = self
-            .session(&address)
+            .session(node, &address)
             .await
             .map_err(|e| kj::disconnected!("cluster node {node}: {e}"))?;
         Ok(Rc::new(PeerService(Rc::new(RpcConnection {
@@ -542,22 +634,22 @@ impl ClusterNode {
         }))))
     }
 
-    /// The session to the peer at `address`: the open one, the one being
-    /// dialed, or a new one.
-    async fn session(&self, address: &str) -> std::io::Result<Rc<RpcConnection>> {
-        let dial = || self.dial(address);
-        let session = self.sessions.get(address, dial).await;
+    /// The session to instance `node` at `address`: the open one, the one
+    /// being dialed, or a new one.
+    async fn session(&self, node: &str, address: &str) -> std::io::Result<Rc<RpcConnection>> {
+        let dial = |node: &str, address: &str| self.dial(node, address);
+        let session = self.sessions.get(node, address, dial).await;
         session.map_err(std::io::Error::other)
     }
 
-    fn dial(&self, address: &str) -> Dial<Rc<RpcConnection>> {
+    fn dial(&self, node: &str, address: &str) -> Dial<Rc<RpcConnection>> {
         let cluster = Rc::clone(&self.cluster);
         let factory = Rc::clone(&self.factory);
         let sessions = Rc::clone(&self.sessions);
-        let address = address.to_owned();
+        let (node, address) = (node.to_owned(), address.to_owned());
         async move {
             // A stalled peer accepts the connection and never answers.
-            let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, tunnel(&cluster, &address));
+            let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, tunnel(&cluster, &node, &address));
             let stream = tunnel
                 .await
                 .map_err(|_| "no answer to CONNECT".to_owned())?
@@ -570,7 +662,7 @@ impl ClusterNode {
             factory.spawn_detached(async move {
                 let _ = ffi::rpc_client_on_disconnect(&watched.client).await;
                 watched.down.set(true);
-                sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
+                sessions.forget(&node, &address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
         }
@@ -578,13 +670,14 @@ impl ClusterNode {
     }
 }
 
-async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
+/// A tunnel to instance `node` at `address`, refused by anything else there.
+async fn tunnel(cluster: &Cluster, node: &str, address: &str) -> std::io::Result<TcpStream> {
     let mut stream = TcpStream::connect(address).await?;
     stream.set_nodelay(true)?;
     let ms = cluster::now_ms();
     let nonce = cluster::hex(&rand::random::<[u8; 16]>());
-    let mac = cluster::hex(&connect_mac(node, address, ms, &nonce));
-    let auth = format!("{AUTH_HEADER}: {ms}.{nonce}.{mac}");
+    let auth = connect_auth(&|data| cluster.mac(data), node, address, ms, &nonce)?;
+    let auth = format!("{AUTH_HEADER}: {auth}");
     let request = format!("CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\n{auth}\r\n\r\n");
     stream.write_all(request.as_bytes()).await?;
     // The response head, read a byte at a time so that nothing past it is consumed.
@@ -713,37 +806,17 @@ struct PeerConnection {
 }
 
 impl PeerConnection {
-    /// Checks a CONNECT's `AUTH_HEADER`: its MAC, its clock, and that its nonce is new.
+    /// Checks a CONNECT's `AUTH_HEADER` (`check_connect_auth`).
     fn verify(&self, header: Option<&[u8]>) -> Result<()> {
-        let bad = || kj::failed!("cluster CONNECT without a valid {AUTH_HEADER}");
-        let header = header
-            .and_then(|h| std::str::from_utf8(h).ok())
-            .ok_or_else(bad)?;
-        let [ms, nonce, mac] = header.split('.').collect::<Vec<_>>()[..] else {
-            return Err(bad());
-        };
-        let ms: u64 = ms.parse().map_err(|_| bad())?;
-        let mac = cluster::unhex(mac).ok_or_else(bad)?;
         let node = &self.node;
-        if !constant_time_eq(
-            &connect_mac(&node.cluster, &node.advertise, ms, nonce),
-            &mac,
-        ) {
-            return Err(bad());
-        }
-        let now = cluster::now_ms();
-        if now.abs_diff(ms) > AUTH_WINDOW_MS {
-            return Err(kj::failed!(
-                "cluster CONNECT {}ms off this clock",
-                now.abs_diff(ms)
-            ));
-        }
-        let mut nonces = node.nonces.borrow_mut();
-        nonces.retain(|_, t| now.abs_diff(*t) <= 2 * AUTH_WINDOW_MS);
-        if nonces.insert(nonce.to_owned(), ms).is_some() {
-            return Err(kj::failed!("cluster CONNECT replayed"));
-        }
-        Ok(())
+        check_connect_auth(
+            &|data| node.cluster.mac(data),
+            node.cluster.node(),
+            &node.advertise,
+            header,
+            cluster::now_ms(),
+            &mut node.nonces.borrow_mut(),
+        )
     }
 }
 

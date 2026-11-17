@@ -252,11 +252,12 @@ struct ClusterConfig {
 
   key @3 :Text;
   # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
-  # of `openssl rand -hex 32`. Each connection between instances opens with
-  # a MAC keyed by it, over the target, a timestamp and a nonce, so a header seen on the wire
-  # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
-  # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
-  # the cluster on a private network (a VPC, WireGuard, Tailscale).
+  # of `openssl rand -hex 32`. Each connection between instances opens with a MAC keyed by it,
+  # over the instance it is for, the target address, a timestamp and a nonce: a header seen on
+  # the wire cannot be replayed, and no other instance accepts it, such as one that took the
+  # address since or shares it. The instances' clocks must agree within 30 seconds. It also keys
+  # channel tokens, which pass service and Durable Object stubs over RPC. Traffic is not
+  # encrypted: run the cluster on a private network (a VPC, WireGuard, Tailscale).
   #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 

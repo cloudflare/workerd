@@ -13,78 +13,23 @@ export default {
   // The legacy configuration disables this file (the C++ pair accepts
   // SharedArrayBuffer chunks and keeps the stream usable after an invalid
   // one); the TypeScript pair rejects both per spec.
-  'compression-bad-chunks.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
-  },
+  'compression-bad-chunks.any.js': {},
   'compression-constructor-error.any.js': {},
-  'compression-including-empty-chunk.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [
-      "the result of compressing [,Hello,Hello] with brotli should be 'HelloHello'",
-      "the result of compressing [Hello,,Hello] with brotli should be 'HelloHello'",
-      "the result of compressing [Hello,Hello,] with brotli should be 'HelloHello'",
-    ],
-  },
-  'compression-large-flush-output.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: ['brotli compression with large flush output'],
-  },
-  'compression-multiple-chunks.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/compressing \d+ chunks with brotli should work/],
-  },
-  'compression-output-length.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [
-      'the length of brotli data should be shorter than that of the original data',
-    ],
-  },
-  'compression-stream.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [
-      /brotli .* data should be reinflated back to its origin/,
-    ],
-  },
+  'compression-including-empty-chunk.any.js': {},
+  'compression-large-flush-output.any.js': {},
+  'compression-multiple-chunks.any.js': {},
+  'compression-output-length.any.js': {},
+  'compression-stream.any.js': {},
   'compression-with-detach.any.js': {},
-  'decompression-bad-chunks.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
-  },
-  'decompression-buffersource.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
-  },
-  'decompression-constructor-error.any.js': {
-    comment:
-      'brotli compression is not supported - these pass because brotli throws',
-  },
-  'decompression-correct-input.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/.*brotli.*/],
-  },
-  'decompression-corrupt-input.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
-  },
-  'decompression-empty-input.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/.*brotli.*/],
-  },
-  'decompression-extra-input.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/brotli/],
-  },
-  'decompression-split-chunk.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [/.*brotli/],
-  },
-  'decompression-uint8array-output.any.js': {
-    comment: 'brotli compression is not supported',
-    expectedFailures: [
-      'decompressing brotli output should give Uint8Array chunks',
-    ],
-  },
+  'decompression-bad-chunks.any.js': {},
+  'decompression-buffersource.any.js': {},
+  'decompression-constructor-error.any.js': {},
+  'decompression-correct-input.any.js': {},
+  'decompression-corrupt-input.any.js': {},
+  'decompression-empty-input.any.js': {},
+  'decompression-extra-input.any.js': {},
+  'decompression-split-chunk.any.js': {},
+  'decompression-uint8array-output.any.js': {},
   'decompression-with-detach.any.js': {
     comment:
       'Environmental, not a streams defect: compression-with-detach.any.js runs first in ' +

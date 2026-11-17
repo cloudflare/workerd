@@ -302,7 +302,7 @@ class PrimitiveWrapper {
 
   v8::Local<v8::BigInt> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
-    return v8::BigInt::New(isolate, value);
+    return v8::BigInt::NewFromUnsigned(isolate, value);
   }
 
   kj::Maybe<uint64_t> tryUnwrap(Lock& js,

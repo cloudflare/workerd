@@ -1,3 +1,4 @@
+diff -u5 -r sqlite-src-pristine/src/select.c sqlite-src-modified/src/select.c
 --- sqlite-src-pristine/src/select.c
 +++ sqlite-src-modified/src/select.c
 @@ -5902,12 +5902,4 @@
@@ -13,6 +14,7 @@
      pParse->nNestSel++;
      if( checkSubqueryNestingDepth(pParse) ) return 2;
  #endif
+diff -u5 -r sqlite-src-pristine/test/with1.test sqlite-src-modified/test/with1.test
 --- sqlite-src-pristine/test/with1.test
 +++ sqlite-src-modified/test/with1.test
 @@ -1090,5 +1090,5 @@

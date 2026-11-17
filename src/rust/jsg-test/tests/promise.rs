@@ -582,7 +582,7 @@ impl Drop for DropCounter {
     }
 }
 
-jsg::jsg_traced!(DropCounter);
+jsg::jsg_traced_unchecked!(DropCounter);
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
