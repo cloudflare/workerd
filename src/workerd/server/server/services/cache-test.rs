@@ -230,3 +230,16 @@ fn keys_are_the_namespace_and_the_cf_cache_key_or_url() {
     assert_eq!(cache_key(r#"{"cacheKey":""}"#), None);
     assert_eq!(cache_key(r#"{"cacheTtl":5}"#), None);
 }
+
+#[test]
+fn a_node_removes_only_directories_no_node_holds() {
+    let tmp = std::env::var_os("TEST_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+    let root = tmp.join("claim");
+    std::fs::create_dir_all(&root).unwrap();
+    let (a, a_lock) = clustered::claim(&root, "a").unwrap();
+    let (b, _b_lock) = clustered::claim(&root, "b").unwrap();
+    assert!(a.exists());
+    drop(a_lock);
+    let (c, _c_lock) = clustered::claim(&root, "c").unwrap();
+    assert!(!a.exists() && b.exists() && c.exists());
+}

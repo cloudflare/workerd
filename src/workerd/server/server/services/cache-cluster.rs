@@ -4,8 +4,8 @@
 
 //! The cache's [`Store`] in a cluster: one cache across the nodes, by the protocol in
 //! `cluster_logic::cache`, which this drives. A value is a record spooled to a file in
-//! `<path>/cluster-<node>/`, removed once the protocol drops it. Nothing survives a restart, so a
-//! node removes every other `cluster-*` directory as it starts.
+//! `<path>/cluster-<node>/`, removed once the protocol drops it. Nothing survives a restart: a node
+//! locks its directory, and as it starts removes every `cluster-*` directory no node has locked.
 //!
 //! The protocol runs on a monotonic clock in ms. Its view, `fresh` and `active` come from the
 //! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms.
@@ -77,6 +77,8 @@ struct Shared {
     node: Rc<ClusterNode>,
     factory: Rc<Factory>,
     dir: PathBuf,
+    /// Held while `dir` is in use, so that other nodes leave it be.
+    _lock: File,
     start: Instant,
     cache: RefCell<Cache<Value>>,
     /// This node's operations, awaiting what they came to.
@@ -94,24 +96,14 @@ pub fn store(
     node: &Rc<ClusterNode>,
     factory: &Rc<Factory>,
 ) -> Result<Clustered> {
-    let io = |e: std::io::Error| io_kj_error(&e);
-    for entry in std::fs::read_dir(root).map_err(io)? {
-        let path = entry.map_err(io)?.path();
-        if path
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("cluster-"))
-        {
-            std::fs::remove_dir_all(path).map_err(io)?;
-        }
-    }
     let me = node.cluster.node();
-    let dir = root.join(format!("cluster-{me}"));
-    std::fs::create_dir(&dir).map_err(io)?;
+    let (dir, lock) = claim(root, me).map_err(|e| io_kj_error(&e))?;
     let shared = Rc::new(Shared {
         name: name.to_owned(),
         node: Rc::clone(node),
         factory: Rc::clone(factory),
         dir,
+        _lock: lock,
         start: Instant::now(),
         cache: RefCell::new(Cache::new(me, node.cache_timing)),
         ops: RefCell::default(),
@@ -129,6 +121,31 @@ pub fn store(
         }
     });
     Ok(Clustered(shared))
+}
+
+/// Node `me`'s directory under `root`, and its lock, held. Nodes may share `root`: one at a time,
+/// under its lock, each first removes the `cluster-*` directories whose lock is free, its own from
+/// before a restart and those of nodes that stopped.
+pub(super) fn claim(root: &Path, me: &str) -> std::io::Result<(PathBuf, File)> {
+    let root_lock = File::create(root.join("cluster.lock"))?;
+    root_lock.lock()?;
+    for entry in std::fs::read_dir(root)? {
+        let path = entry?.path();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let free = || {
+            File::open(path.join("lock"))
+                .ok()
+                .is_none_or(|f| f.try_lock().is_ok())
+        };
+        if name.is_some_and(|n| n.starts_with("cluster-")) && free() {
+            std::fs::remove_dir_all(&path)?;
+        }
+    }
+    let dir = root.join(format!("cluster-{me}"));
+    std::fs::create_dir(&dir)?;
+    let lock = File::create(dir.join("lock"))?;
+    lock.lock()?;
+    Ok((dir, lock))
 }
 
 /// `value`'s file, opened, and its length.
