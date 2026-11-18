@@ -47,7 +47,6 @@ using api::pyodide::PythonConfig;
 
 namespace {
 static const PythonConfig defaultConfig{
-  .packageDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
@@ -889,8 +888,8 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     //   // Inject disk cache module
     //   pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
     //       jsg::modules::Module::newJsgObjectModuleHandler<DiskCache, JsgWorkerdIsolate_TypeWrapper>(
-    //           [&packageDiskCacheRoot = pythonConfig.packageDiskCacheRoot](jsg::Lock& js) mutable
-    //           -> jsg::Ref<DiskCache> { return js.alloc<DiskCache>(packageDiskCacheRoot); }));
+    //           [&snapshotDirectory = pythonConfig.snapshotDirectory](jsg::Lock& js) mutable
+    //           -> jsg::Ref<DiskCache> { return js.alloc<DiskCache>(snapshotDirectory); }));
     //   // Inject a (disabled) SimplePythonLimiter
     //   pyodideBundleBuilder.addSynthetic(limiterSpecifier,
     //       jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,
