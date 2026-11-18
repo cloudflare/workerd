@@ -1176,10 +1176,12 @@ function processHeader(
   }
 
   if (Array.isArray(value)) {
+    // ClientRequest leaves kUniqueHeaders as null when no uniqueHeaders
+    // option is given, so it can be present without being a Set.
     if (
       (value.length < 2 || !isCookieField(key)) &&
       (!(kUniqueHeaders in self) ||
-        !(self[kUniqueHeaders] as Set<string>).has(key.toLowerCase()))
+        !(self[kUniqueHeaders] as Set<string> | null)?.has(key.toLowerCase()))
     ) {
       // Retain for(;;) loop for performance reasons
       // Refs: https://github.com/nodejs/node/pull/30958
