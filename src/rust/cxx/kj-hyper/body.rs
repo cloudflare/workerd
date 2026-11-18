@@ -54,9 +54,9 @@ use crate::ffi;
 use crate::ffi::Borrowing;
 use crate::ffi::HttpHeaderTable;
 use crate::ffi::HttpHeaders;
+use crate::ffi::ReusedHeaders;
 use crate::ffi::for_each_header;
 use crate::ffi::headers_from_block;
-use crate::ffi::headers_over_block;
 use crate::ffi::new_header_ids;
 use crate::scratch::Scratch;
 
@@ -890,8 +890,12 @@ impl HeaderBlock {
     /// # Errors
     ///
     /// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
-    pub fn as_kj<'a>(&'a self, ids: &HeaderIds<'a>) -> Result<Borrowing<'a, HttpHeaders>> {
-        headers_over_block(&ids.kj, &self.arena, &self.fields)
+    pub fn as_kj<'a, 't>(
+        &'a self,
+        ids: &HeaderIds<'t>,
+        headers: &'a mut ReusedHeaders<'t>,
+    ) -> Result<&'a HttpHeaders> {
+        headers.over(&ids.kj, &self.arena, &self.fields)
     }
 
     /// Whether the block is small enough to keep for another request.
