@@ -203,6 +203,14 @@ mod ffi {
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
+        unsafe fn write_logfwdr_with(
+            isolate: usize,
+            channel: u32,
+            message: &[u8],
+            panic: bool,
+        ) -> Result<()>;
+        fn logfwdr_build_times() -> Vec<i64>;
+        unsafe fn new_analytics_engine_request(isolate: usize) -> Result<()>;
     }
 }
 
@@ -277,6 +285,54 @@ unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     IoContext::current(lock)
         .and_then(|context| context.write_logfwdr(channel, message))
+        .map_err(|err| to_io(&err))
+}
+
+thread_local! {
+    /// For each message that `write_logfwdr_with()` built, the request's clock as the build read
+    /// it, in nanoseconds since the Unix epoch, or -1 if there was no current request.
+    static LOGFWDR_BUILD_TIMES: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+}
+
+/// `IoContext::current()?.write_logfwdr_with(channel, ...)`, building a copy of `message`, or
+/// panicking if `panic` is set. Each build is recorded for `logfwdr_build_times()`.
+unsafe fn write_logfwdr_with(
+    isolate: usize,
+    channel: u32,
+    message: &[u8],
+    panic: bool,
+) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let message = message.to_vec();
+    let build = move || {
+        let nanos = IoContext::now_in_current_request().map_or(-1, |now| {
+            let nanos = now
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            i64::try_from(nanos).unwrap_or(i64::MAX)
+        });
+        LOGFWDR_BUILD_TIMES.with_borrow_mut(|times| times.push(nanos));
+        assert!(!panic, "the build was told to panic");
+        message
+    };
+    IoContext::current(lock)
+        .and_then(|context| context.write_logfwdr_with(channel, build))
+        .map_err(|err| to_io(&err))
+}
+
+/// Takes what `write_logfwdr_with()` has recorded since this was last called.
+fn logfwdr_build_times() -> Vec<i64> {
+    LOGFWDR_BUILD_TIMES.take()
+}
+
+/// `IoContext::current()?.new_analytics_engine_request()`.
+unsafe fn new_analytics_engine_request(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    IoContext::current(lock)
+        .and_then(|context| context.new_analytics_engine_request())
         .map_err(|err| to_io(&err))
 }
 
