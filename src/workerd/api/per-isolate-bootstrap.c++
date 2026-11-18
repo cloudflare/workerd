@@ -1245,13 +1245,8 @@ kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
 kj::Maybe<BootstrapCache&> tryGetBootstrapCache(
     jsg::Lock& js, const void* key, kj::FunctionParam<kj::Own<BootstrapCache>()> create) {
   KJ_IF_SOME(state, tryGetBootstrapState(js.v8Context())) {
-    KJ_IF_SOME(cache, state.caches.find(key)) {
-      return *cache;
-    }
-    auto cache = create();
-    auto& result = *cache;
-    state.caches.insert(key, kj::mv(cache));
-    return result;
+    return *state.caches.findOrCreate(
+        key, [&]() -> decltype(state.caches)::Entry { return {key, create()}; });
   }
   return kj::none;
 }
