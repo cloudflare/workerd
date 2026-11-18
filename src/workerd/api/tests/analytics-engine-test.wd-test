@@ -24,8 +24,14 @@ const mainWorker :Workerd.Worker = (
   # The fetch handler settles promises that the tests created.
   compatibilityFlags = ["experimental", "nodejs_compat", "handle_cross_request_promise_resolution"],
 
+  durableObjectNamespaces = [
+    (className = "Writer", uniqueKey = "analytics-engine-test-writer"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
   bindings = [
     ( name = "aebinding", analyticsEngine = "analytics"),
+    ( name = "writer", durableObjectNamespace = "Writer"),
   ]
 );
 

@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import { DurableObject } from 'cloudflare:workers';
 
 // The binding writes each data point to the "analytics" service, as the JSON encoding of its
 // AnalyticsEngineEvent message, and that service passes it on to this worker's fetch handler.
@@ -213,4 +214,98 @@ export const order = testCase(async (env) => {
     blob1: bytes('b'),
   });
   assert.deepStrictEqual(read, ['indexes', 'doubles', 'blobs']);
+});
+
+// A data point over a limit throws from writeDataPoint(), and is not written.
+export const limits = testCase(async (env) => {
+  const ae = env.aebinding;
+  const indexTooLong =
+    'TypeError: writeDataPoint(): Size of indexes[0] exceeds 96 bytes).';
+  await assertThrows(ae, [{ indexes: ['a'.repeat(97)] }], indexTooLong);
+  // The limit is in UTF-8 bytes.
+  await assertThrows(ae, [{ indexes: ['é'.repeat(48) + 'a'] }], indexTooLong);
+  await assertThrows(
+    ae,
+    [{ indexes: ['a', 'b'] }],
+    'TypeError: writeDataPoint(): Maximum of 1 indexes supported.'
+  );
+
+  const blobsTooMany =
+    'TypeError: writeDataPoint(): Maximum of 20 blobs supported.';
+  await assertThrows(ae, [{ blobs: Array(21).fill('x') }], blobsTooMany);
+  // Null and undefined blobs count.
+  await assertThrows(ae, [{ blobs: Array(21).fill(null) }], blobsTooMany);
+  const half = 'a'.repeat(8000);
+  await assertThrows(
+    ae,
+    [{ blobs: [half, half + 'a'] }],
+    'TypeError: writeDataPoint(): Cumulative size of blobs exceeds 16000 bytes).'
+  );
+
+  await assertThrows(
+    ae,
+    [{ doubles: Array(21).fill(1) }],
+    'TypeError: writeDataPoint(): Maximum of 20 doubles supported.'
+  );
+
+  // Every field is read before any limit is checked.
+  await assertThrows(
+    ae,
+    [
+      {
+        indexes: ['a', 'b'],
+        get blobs() {
+          throw new Error('blobs getter');
+        },
+      },
+    ],
+    'Error: blobs getter'
+  );
+  await assertThrows(
+    ae,
+    [{ indexes: ['a', 'b'], doubles: 'x' }],
+    typeError('doubles', 'Array')
+  );
+
+  // The limits are checked for the indexes, then the blobs, then the doubles.
+  const tooMany = Array(21).fill(1);
+  await assertThrows(
+    ae,
+    [{ indexes: ['a', 'b'], blobs: tooMany, doubles: tooMany }],
+    'TypeError: writeDataPoint(): Maximum of 1 indexes supported.'
+  );
+  await assertThrows(
+    ae,
+    [{ blobs: tooMany, doubles: tooMany }],
+    'TypeError: writeDataPoint(): Maximum of 20 blobs supported.'
+  );
+
+  // None of the data points above was written: the next message is this one.
+  await assertWrites(ae, [{ doubles: [7] }], { double1: 7 });
+});
+
+// A Durable Object's data point is written once the output gate opens, but one that cannot be
+// written still throws from writeDataPoint().
+export class Writer extends DurableObject {
+  async write(event) {
+    // An unawaited write holds the output gate shut until it is confirmed.
+    this.ctx.storage.put('key', 'value');
+    try {
+      this.env.aebinding.writeDataPoint(event);
+    } catch (e) {
+      return `${e.name}: ${e.message}`;
+    }
+    return 'ok';
+  }
+}
+
+export const durableObject = testCase(async (env) => {
+  const writer = env.writer.get(env.writer.idFromName('writer'));
+  assert.strictEqual(
+    await writer.write({ doubles: Array(21).fill(1) }),
+    'TypeError: writeDataPoint(): Maximum of 20 doubles supported.'
+  );
+  assert.strictEqual(await writer.write({ doubles: [7] }), 'ok');
+  const { timestamp, ...message } = await takeDataPoint();
+  assert.deepStrictEqual(message, { ...EMPTY, double1: 7 });
 });
