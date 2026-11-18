@@ -59,6 +59,9 @@ const unitTests :Workerd.Config = (
           (name = "RELAY", service = (
             name = "connect-handler-test-immediate-tls-endpoint",
             entrypoint = "ImmediateTlsRelay")),
+          (name = "CUSTOM_PROTOCOL", service = (
+            name = "connect-handler-test-immediate-tls-endpoint",
+            entrypoint = "ImmediateTlsOverCustomProtocol")),
           (name = "HOLDS_WRITES", service = (
             name = "connect-handler-test-immediate-tls-endpoint",
             entrypoint = "ImmediateTlsHoldsWrites")),
@@ -97,6 +100,9 @@ const unitTests :Workerd.Config = (
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "TLS_PORT", fromEnvironment = "TLS_PORT"),
           (name = "CONNECT_ENDPOINT_PORT", fromEnvironment = "CONNECT_ENDPOINT_PORT"),
+          (name = "CUSTOM_PROTOCOL_UPSTREAM", service = (
+            name = "connect-handler-test-endpoint",
+            entrypoint = "CustomProtocolEndpoint")),
           (name = "SOCKET_SINK", service = (
             name = "connect-handler-test-immediate-tls-endpoint",
             entrypoint = "SocketSink")),

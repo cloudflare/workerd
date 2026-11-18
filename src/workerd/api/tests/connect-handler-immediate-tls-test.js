@@ -40,6 +40,22 @@ export const immediateTlsThroughRelay = {
   },
 };
 
+// The handler secures its upstream through a protocol of its own, so the runtime sees a
+// plaintext upstream. The reply shows that the bytes written before the socket opened reached the
+// upstream only after the handler had secured it: the upstream answers a line only once it has
+// seen the handler's request to secure the connection first.
+export const immediateTlsOverCustomProtocol = {
+  async test(ctrl, env) {
+    const socket = env.CUSTOM_PROTOCOL.connect('db.example:5432', {
+      secureTransport: 'on',
+    });
+    const written = writeEarly(socket, 'ping\r\n');
+    await socket.opened;
+    await written;
+    strictEqual(await readAll(socket), 'tunneled:ping\r\n');
+  },
+};
+
 export const immediateTlsHoldsWritesUntilAccepted = {
   async test(ctrl, env) {
     const socket = env.HOLDS_WRITES.connect('db.example:5432', {

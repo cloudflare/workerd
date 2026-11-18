@@ -163,7 +163,48 @@ export class ImmediateTlsHoldsWrites extends WorkerEntrypoint {
   }
 }
 
-// The upstream doesn't speak TLS, so the handshake fails and the handler throws before accepting.
+// Secures the connection through a protocol of the application's own on an upstream that the
+// runtime sees as plaintext, the way a tunnel that runs TLS inside its own framing does. The
+// runtime can't tell that the upstream is secure, so it leaves that to the handler: accept() and
+// proxyTo() don't look at the upstream's secureTransport.
+export class ImmediateTlsOverCustomProtocol extends WorkerEntrypoint {
+  async connect(socket) {
+    strictEqual(socket.secureTransport, 'on');
+    const upstream =
+      this.env.CUSTOM_PROTOCOL_UPSTREAM.connect('db.example:5432');
+    strictEqual(upstream.secureTransport, 'off');
+
+    const reader = upstream.readable.getReader();
+    const writer = upstream.writable.getWriter();
+    await writer.write(new TextEncoder().encode('SECURE\r\n'));
+    strictEqual(await readLine(reader), 'SECURED\r\n');
+    reader.releaseLock();
+    writer.releaseLock();
+
+    socket.accept();
+    await socket.proxyTo(upstream);
+  }
+}
+
+// The upstream ImmediateTlsOverCustomProtocol secures its connection through. It stands in for
+// the far end of a protocol that runs TLS inside its own framing: it answers the handler's
+// request to secure the connection, then answers one line with that line prefixed by `tunneled:`.
+export class CustomProtocolEndpoint extends WorkerEntrypoint {
+  async connect(socket) {
+    strictEqual(socket.secureTransport, 'off');
+    const reader = socket.readable.getReader();
+    const writer = socket.writable.getWriter();
+    const enc = new TextEncoder();
+    strictEqual(await readLine(reader), 'SECURE\r\n');
+    await writer.write(enc.encode('SECURED\r\n'));
+    const line = await readLine(reader);
+    await writer.write(enc.encode(`tunneled:${line}`));
+    await writer.close();
+  }
+}
+
+// The handler asks the runtime for TLS to an upstream that isn't a TLS server, so the handshake
+// fails, upstream.opened rejects, and the handler throws before accepting.
 export class ImmediateTlsFailedHandshake extends WorkerEntrypoint {
   async connect(socket) {
     const upstream = connect(
