@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+using BlobModules = import "blob-modules.capnp";
+
+# Runs the Blob suite against the C++ implementation (api/blob.h).
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util), rpc, expose_global_message_channel, enable_weak_ref
+# (FinalizationRegistry) and
+# formdata_parser_supports_files.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "blob-cpp",
+      worker = (
+        modules = BlobModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "expose_global_message_channel",
+          "enable_weak_ref",
+          "formdata_parser_supports_files",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+          (name = "RPC", service = (name = "blob-cpp", entrypoint = "BlobRpc")),
+        ],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

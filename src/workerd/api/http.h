@@ -58,7 +58,7 @@ class Body: public jsg::Object {
   using Initializer = kj::OneOf<JsReadableStream,
       kj::String,
       jsg::JsRef<jsg::JsBufferSource>,
-      jsg::Ref<Blob>,
+      JsBlob,
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
@@ -105,7 +105,7 @@ class Body: public jsg::Object {
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
   jsg::Promise<jsg::Value> json(jsg::Lock& js);
-  jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
+  jsg::Promise<JsBlob> blob(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Body, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {

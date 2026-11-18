@@ -158,7 +158,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String type,
-    kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
+    kj::OneOf<jsg::JsRef<jsg::JsValue>, JsBlob> data,
     kj::String lastEventId,
     kj::Maybe<messageevent::MessagePort> source,
     kj::Maybe<jsg::Url&> urlForOrigin,
@@ -204,13 +204,13 @@ jsg::Ref<MessageEvent> MessageEvent::constructor(
   return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer).orDefault({}));
 }
 
-kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
+kj::OneOf<jsg::JsValue, JsBlob> MessageEvent::getData(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(data) {
     KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
       return jsValue.getHandle(js);
     }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      return blob.addRef();
+    KJ_CASE_ONEOF(blob, JsBlob) {
+      return blob.addRef(js);
     }
   }
   KJ_UNREACHABLE;
@@ -244,7 +244,7 @@ void MessageEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
       tracker.trackField("data", jsValue);
     }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+    KJ_CASE_ONEOF(blob, JsBlob) {
       tracker.trackField("data", blob);
     }
   }
@@ -259,7 +259,7 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
     KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
       visitor.visit(jsValue);
     }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+    KJ_CASE_ONEOF(blob, JsBlob) {
       visitor.visit(blob);
     }
   }

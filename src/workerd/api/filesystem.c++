@@ -2007,8 +2007,7 @@ void FileSystemModule::cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions 
   cpImpl(js, vfs, normalizedSrc, normalizedDest, options);
 }
 
-jsg::Ref<Blob> FileSystemModule::openAsBlob(
-    jsg::Lock& js, FilePath path, OpenAsBlobOptions options) {
+JsBlob FileSystemModule::openAsBlob(jsg::Lock& js, FilePath path, OpenAsBlobOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedSrc(js, kj::mv(path));
   KJ_IF_SOME(item, vfs.resolve(js, normalizedSrc, {})) {
@@ -2019,7 +2018,7 @@ jsg::Ref<Blob> FileSystemModule::openAsBlob(
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
           KJ_CASE_ONEOF(bytes, jsg::JsRef<jsg::JsUint8Array>) {
-            return js.alloc<Blob>(js, jsg::JsBufferSource(bytes.getHandle(js)),
+            return JsBlob::create(js, jsg::JsBufferSource(bytes.getHandle(js)),
                 kj::mv(options.type).orDefault(kj::String()));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -2644,7 +2643,7 @@ FileSystemFileHandle::FileSystemFileHandle(
     const workerd::VirtualFileSystem& vfs, jsg::Url locator, jsg::USVString name)
     : FileSystemHandle(vfs, kj::mv(locator), kj::mv(name)) {}
 
-jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(jsg::Lock& js) {
+jsg::Promise<JsFile> FileSystemFileHandle::getFile(jsg::Lock& js) {
   // TODO(node-fs): Currently this copies the file data into the new File object.
   // Alternatively, File/Blob can be modified to allow it to be backed by a
   // workerd::File such that it does not need to create a separate in-memory
@@ -2654,29 +2653,29 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(jsg::Lock& js) {
   KJ_IF_SOME(item, getVfs().resolve(js, getLocator(), {})) {
     KJ_SWITCH_ONEOF(item) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        return js.rejectedPromise<jsg::Ref<File>>(fsErrorToDomException(js, err));
+        return js.rejectedPromise<JsFile>(fsErrorToDomException(js, err));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
           KJ_CASE_ONEOF(bytes, jsg::JsRef<jsg::JsUint8Array>) {
-            return js.resolvedPromise(js.alloc<File>(js, jsg::JsBufferSource(bytes.getHandle(js)),
-                jsg::USVString(kj::str(getName(js))), kj::String(),
-                (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+            return js.resolvedPromise(
+                JsFile::create(js, jsg::JsBufferSource(bytes.getHandle(js)), kj::str(getName(js)),
+                    kj::String(), (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
-            return js.rejectedPromise<jsg::Ref<File>>(fsErrorToDomException(js, err));
+            return js.rejectedPromise<JsFile>(fsErrorToDomException(js, err));
           }
         }
         KJ_UNREACHABLE;
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-        return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
+        return js.rejectedPromise<JsFile>(kj::mv(ex));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-        return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
+        return js.rejectedPromise<JsFile>(kj::mv(ex));
       }
     }
     KJ_UNREACHABLE;
@@ -2684,7 +2683,7 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(jsg::Lock& js) {
 
   // If the file does not exist, we reject the promise with a NotFoundError.
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
-  return js.rejectedPromise<jsg::Ref<File>>(kj::mv(ex));
+  return js.rejectedPromise<JsFile>(kj::mv(ex));
 }
 
 jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::createWritable(
@@ -2864,8 +2863,8 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js, FileSystem
   KJ_IF_SOME(inner, temp) {
     return js.tryCatch([&] {
       KJ_SWITCH_ONEOF(data) {
-        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          KJ_SWITCH_ONEOF(inner->write(js, position, blob->getData(js))) {
+        KJ_CASE_ONEOF(blob, JsBlob) {
+          KJ_SWITCH_ONEOF(inner->write(js, position, blob.getData(js))) {
             KJ_CASE_ONEOF(written, uint32_t) {
               position += written;
             }
@@ -2914,8 +2913,8 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js, FileSystem
             KJ_IF_SOME(maybeData, params.data) {
               KJ_IF_SOME(data, maybeData) {
                 KJ_SWITCH_ONEOF(data) {
-                  KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-                    KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData(js))) {
+                  KJ_CASE_ONEOF(blob, JsBlob) {
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, blob.getData(js))) {
                       KJ_CASE_ONEOF(written, uint32_t) {
                         position = offset + written;
                         return js.resolvedPromise();

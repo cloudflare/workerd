@@ -196,10 +196,12 @@ export const statics = {
 export const objectUrlsAreUnsupported = {
   test() {
     if (!urlStandard && !usingTsImpl) return;
-    throws(() => URL.createObjectURL(new Blob(['x'])), {
-      name: 'Error',
-      message: 'URL.createObjectURL() is not implemented',
-    });
+    for (const blob of [new Blob(['x']), new File(['x'], 'f')]) {
+      throws(() => URL.createObjectURL(blob), {
+        name: 'Error',
+        message: 'URL.createObjectURL() is not implemented',
+      });
+    }
     // The argument is converted first.
     throws(
       () => URL.createObjectURL('x'),

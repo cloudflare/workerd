@@ -76,11 +76,11 @@ R2PutValue prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
       }
       return R2PutValue(kj::mv(text));
     }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      auto size = blob->getSize();
+    KJ_CASE_ONEOF(blob, JsBlob) {
+      auto size = blob.getSize(js);
       if (size > R2_RPC_INLINE_BODY_LIMIT) {
         // Blob bytes are V8-backed, so newMemorySource() must copy them into native memory.
-        return R2PutValue(makeR2RpcMemoryStream(js, blob->getData(js)));
+        return R2PutValue(makeR2RpcMemoryStream(js, blob.getData(js)));
       }
       return R2PutValue(kj::mv(blob));
     }
@@ -351,8 +351,8 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
         // bytes while we still hold the key.
         body = kj::heapArray(data.asPtr());
       }
-      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        auto bytes = blob->getData(js);
+      KJ_CASE_ONEOF(blob, JsBlob) {
+        auto bytes = blob.getData(js);
         expectedBodySize = bytes.size();
         KJ_REQUIRE(streamSize == kj::none);
         // Blob data is likewise a V8 ArrayBuffer; see above.

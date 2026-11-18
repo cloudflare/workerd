@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/api/blob-bridge.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -87,9 +88,12 @@ class Blob: public jsg::Object {
     });
   }
 
-  // Serialized as MIME type + raw bytes.
+  // Serialized as MIME type + raw bytes, whichever implementation wrote it. Read as an instance of
+  // whichever implementation the global Blob is (see JsBlob). A File is not serializable.
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<Blob> deserialize(
+  static void serializeStandIn(
+      jsg::Lock& js, v8::Local<v8::Object> instance, jsg::Serializer& serializer);
+  static JsBlob deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
   JSG_SERIALIZABLE(rpc::SerializationTag::BLOB);
 
@@ -163,10 +167,10 @@ class File: public Blob {
   static jsg::Ref<File> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, kj::String name, jsg::Optional<Options> options);
 
-  kj::StringPtr getName() {
+  kj::StringPtr getName() const KJ_LIFETIMEBOUND {
     return name;
   }
-  double getLastModified() {
+  double getLastModified() const {
     return lastModified;
   }
 

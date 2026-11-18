@@ -21,8 +21,10 @@ import type {
   UrlBackend,
 } from './backend';
 import type { InternalArrayHelpers } from './internal-array';
+import type { BlobExports } from '../blob/blob';
 import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
+import type { TypeCheckHelpers } from '../type-checks';
 
 const {
   BlobPrototypeSlice,
@@ -56,7 +58,28 @@ const {
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
 const { markUncloneable } = require('serialization') as SerializationHelpers;
+const { isObject } = require('type-checks') as TypeCheckHelpers;
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
+
+// Whether `value` is a Blob (a File included) of the implementation the
+// global Blob is.
+const isBlob: (value: unknown) => boolean =
+  autogates['ts-blob'] === true
+    ? (require('blob/blob') as BlobExports).isBlob
+    : isCppBlob;
+
+function isCppBlob(value: unknown): boolean {
+  try {
+    (BlobPrototypeSlice as (blob: Blob, start?: number, end?: number) => Blob)(
+      value as Blob,
+      0,
+      0
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Only the selected backend is loaded.
 const backend = require(
@@ -89,12 +112,6 @@ const kInvalidHref =
 
 // ---------------------------------------------------------------------------
 // WebIDL conversions
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
-  );
-}
 
 // ToString, which throws for a Symbol, then lone surrogates to U+FFFD.
 function toUSVString(value: unknown): string {
@@ -380,9 +397,7 @@ class URL {
   static createObjectURL(object: unknown): string {
     const what = "Failed to execute 'createObjectURL' on 'URL'";
     requireArguments(arguments.length, 1, what);
-    try {
-      BlobPrototypeSlice(object as Blob, 0, 0);
-    } catch {
+    if (!isBlob(object)) {
       throw new TypeError(`${what}: parameter 1 is not of type 'Blob'.`);
     }
     throw new Error('URL.createObjectURL() is not implemented');
