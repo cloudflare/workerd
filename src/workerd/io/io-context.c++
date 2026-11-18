@@ -1056,9 +1056,11 @@ void IoContext::scheduleHangCheck() {
     checks.waiting = true;
     // The wait stays pending when every context unlinks: under load the next request would only
     // start a new one.
-    checks.idleWait =
-        Worker::AsyncLock::whenThreadIdle().then([&checks]() {
-      runHangChecks(checks);
+    checks.idleWait = Worker::AsyncLock::whenThreadIdle()
+                          .then([weakChecks = thread.getWeakHangChecks()]() {
+      // The wait is held by the checks, so they are still there when it ends.
+      runHangChecks(
+          KJ_REQUIRE_NONNULL(weakChecks.tryGet(), "hang checks destroyed before their wait"));
     }).eagerlyEvaluate(nullptr);
   }
 }
