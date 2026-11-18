@@ -187,7 +187,8 @@ export default {
   'import_export/okp_fixed_length.https.any.js': {},
   'import_export/okp_importKey.js': {},
   'import_export/okp_importKey_Ed25519.https.any.js': {
-    comment: 'Investigate this',
+    comment:
+      'These tests expect exportKey to return alg "Ed25519" whatever alg was imported (w3c/webcrypto#401); workerd exports "EdDSA"',
     expectedFailures: [
       'Good parameters with JWK alg Ed25519: Ed25519 (jwk, object(kty, crv, x), {name: Ed25519}, true, [verify])',
       'Good parameters with JWK alg Ed25519: Ed25519 (jwk, object(kty, crv, x), Ed25519, true, [verify])',

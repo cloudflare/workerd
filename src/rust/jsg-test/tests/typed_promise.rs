@@ -14,6 +14,7 @@ use jsg::v8;
 use jsg::v8::PromiseState;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
 /// and returns the log joined with `|`.
@@ -30,12 +31,11 @@ const RECORD: &str = "globalThis.record = (p) => p.then(
     (e) => log.push(`rejected: ${e?.name}: ${e?.message ?? e}`));";
 
 /// A Rust value with no JavaScript form, which only a typed promise can carry.
+#[jsg_traced]
 struct Token {
     id: u64,
     name: String,
 }
-
-jsg::jsg_traced!(Token);
 
 // =============================================================================
 // Carrying Rust values
@@ -179,6 +179,7 @@ fn resolver_follows_a_typed_promise() {
 static CARRIED_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// Counts its drops in a static counter.
+#[jsg_traced]
 struct Carried;
 
 impl Drop for Carried {
@@ -186,8 +187,6 @@ impl Drop for Carried {
         CARRIED_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
-
-jsg::jsg_traced!(Carried);
 
 /// The reaction takes the value out of its wrapper, so the value is dropped when the callback is
 /// done with it, and the wrapper, which the garbage collector frees later, holds nothing.
@@ -215,6 +214,7 @@ fn carried_value_is_moved_into_the_reaction() {
 static UNTAKEN_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// Counts its drops in a static counter.
+#[jsg_traced]
 struct Untaken;
 
 impl Drop for Untaken {
@@ -222,8 +222,6 @@ impl Drop for Untaken {
         UNTAKEN_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
-
-jsg::jsg_traced!(Untaken);
 
 /// A value that no reaction takes is dropped with its wrapper, by the garbage collector.
 #[test]
@@ -418,9 +416,8 @@ fn try_consume_resolved_returns_pending_and_rejected_promises() {
 }
 
 /// A value whose conversion to JavaScript fails.
+#[jsg_traced]
 struct Unconvertible;
-
-jsg::jsg_traced!(Unconvertible);
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
@@ -1194,6 +1191,7 @@ impl Source {
 static WAITER_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// Counts its drops in `WAITER_DROPS`.
+#[jsg_traced]
 struct WaiterDrops;
 
 impl Drop for WaiterDrops {
@@ -1201,8 +1199,6 @@ impl Drop for WaiterDrops {
         WAITER_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
-
-jsg::jsg_traced!(WaiterDrops);
 
 /// Returns promises that a `Source` settles.
 #[jsg_resource]

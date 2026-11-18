@@ -173,7 +173,7 @@ struct SharedFill(Arc<Fill>);
 /// A fallback's permit, which holds no JavaScript values, for the request to own.
 struct Permit(FallbackPermit);
 
-jsg::jsg_traced!(Permit);
+jsg::jsg_traced_unchecked!(Permit);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never

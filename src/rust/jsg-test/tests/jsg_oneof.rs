@@ -20,6 +20,7 @@ use jsg_macros::jsg_oneof;
 use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
+use jsg_macros::jsg_traced;
 
 #[jsg_resource]
 struct OneOfBox {
@@ -150,10 +151,9 @@ enum OnlyStrictString {
 }
 
 /// A string that converts from JavaScript but not to it.
+#[jsg_traced]
 #[derive(Debug, Clone, PartialEq)]
 struct FromJsOnly(String);
-
-jsg::jsg_traced!(FromJsOnly);
 
 impl jsg::Type for FromJsOnly {
     fn class_name() -> &'static str {

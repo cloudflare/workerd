@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 // index.mjs
 import { Buffer } from 'node:buffer';
+import url from 'node:url';
 
 const encoder = new TextEncoder();
 
@@ -56,6 +57,10 @@ export default {
     }
     if (request.url.includes('/pbkdf2Derive')) {
       return new Response(await pbkdf2Derive('hello!'));
+    }
+    if (request.url.includes('/urlParse')) {
+      // The legacy parser calls into node-internal:url, a binding implemented in Rust.
+      return new Response(url.parse('https://example.com/path?q=1').hostname);
     }
     if (request.url.includes('/throwException')) {
       const url = new URL(request.url);

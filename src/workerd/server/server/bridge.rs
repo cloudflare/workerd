@@ -204,7 +204,6 @@ pub mod ffi {
         async_trace_stacks: KjMaybe<u32>,
         async_trace_promises: bool,
         experimental: bool,
-        pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,
         python_save_snapshot: bool,
         python_save_baseline_snapshot: bool,

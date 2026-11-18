@@ -673,6 +673,20 @@ class IsolateModuleRegistry final {
       });
     };
 
+    // Retries a failed link after the current evaluation stack unwinds. Nested evaluation
+    // never drains the microtask queue. Capture only the module handle: nothing borrowed
+    // from the registry may outlive this call.
+    static constexpr auto evaluateDeferred = [](Lock& js, v8::Local<v8::Module> module) {
+      return js.resolvedPromise().then(
+          js, [module = js.v8Ref(module)](Lock& js) mutable -> Promise<Value> {
+        auto handle = module.getHandle(js);
+        auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
+        auto& entry = KJ_ASSERT_NONNULL(registry.lookup(js, handle));
+        return evaluate(
+            js, handle, entry.module, registry.getObserver(), registry.inner.getEvaluator());
+      });
+    };
+
     return js.wrapSimplePromise(js.tryCatch([&] -> Promise<Value> {
       // The host callback identifies the referring script only by its origin URL,
       // so probe the lookup cache for that URL across the context types in
@@ -741,8 +755,24 @@ class IsolateModuleRegistry final {
           return js.rejectedPromise<Value>(v8Module->GetException());
         }
 
-        auto evaluatePromise =
-            evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
+        bool deferEvaluation = false;
+        if (v8Module->GetStatus() == v8::Module::kUninstantiated && js.isEvaluatingModule()) {
+          // Linking can reach an evaluating dependency even when the target is not evaluating.
+          // Preserve inline evaluation for graphs that link now. Retry failed links once from
+          // a microtask; permanent link errors then reject the import with their own exception.
+          JSG_TRY(js) {
+            if (!moduleDef.instantiate(js, v8Module, getObserver())) {
+              throw JsExceptionThrown();
+            }
+          }
+          JSG_CATCH(exception KJ_UNUSED) {
+            // JSG_CATCH rethrows termination rather than deferring it.
+            deferEvaluation = true;
+          }
+        }
+        auto evaluatePromise = deferEvaluation
+            ? evaluateDeferred(js, v8Module)
+            : evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
         auto isWasm = moduleDef.isWasm();
 
         if (!sourcePhase) {

@@ -96,9 +96,12 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
-- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
-  as the creator for an instance method and `None` for a static one, as C++ JSG passes
-  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A return of `()`, `bool` or one of the numeric types a Fast API callback returns, directly or
+  as the `Ok` type of a `Result`, is set directly in V8: a `bool` with `set_return_boolean`, a
+  number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return
+  value converts with `jsg::ToJS::to_js_with_creator`. Instance methods pass the resource's
+  wrapper as the creator, and static methods pass `None`. A returned `jsg::Promise` keeps its
+  creator resource alive until it settles, as in C++ JSG.
 - A method, property or call handler that returns a promise (`jsg::Promise<T>` or
   `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
   conversion error included, when the isolate captures throws as rejections (the
@@ -659,13 +662,14 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced!`); containers/wrappers recurse to
-inner values. `Traced::trace` has no default, so a hand-written impl must spell out its visits.
+use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced_unchecked!`); containers/wrappers
+recurse to inner values. `Traced::trace` has no default, so a hand-written impl must spell out
+its visits.
 
 `#[jsg_traced]` on a struct implements a no-op `Traced` and `jsg::HoldsNoGcReferences`, bounding
 each field's type by `HoldsNoGcReferences`, so a field that holds a `jsg::Rc` or a `TracedGlobal`
-fails to compile. `jsg::jsg_traced!(Foo)` makes the same claim unchecked; it is for a type whose
-fields can't implement the marker, such as a wrapper of a type from outside JSG.
+fails to compile. `jsg::jsg_traced_unchecked!(Foo)` makes the same claim without checking it; it is
+for a type whose fields can't implement the marker, such as a wrapper of a type from outside JSG.
 
 ### Supported field shapes
 
@@ -849,7 +853,7 @@ jsg::jsg_memory_retainer!(Cache);
 ```
 
 A retainer held as a field of a resource without `custom_trace` is traced too, so it also needs a
-`Traced` impl: `jsg::jsg_traced!(Cache);` for one that holds no GC references.
+`Traced` impl: `#[jsg_traced]` on `Cache` for one that holds no GC references.
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
 capacity. A retainer reached twice is one node, and so is an allocation that several

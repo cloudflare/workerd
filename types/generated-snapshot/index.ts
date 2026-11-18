@@ -4202,6 +4202,11 @@ export interface Tracing {
   ): T;
   Span: typeof Span;
 }
+export interface TracingSpanLink {
+  context: TracingSpanContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 export declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4234,6 +4239,8 @@ export declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
@@ -17343,6 +17350,22 @@ export declare namespace TailStream {
     readonly type: "spanUpdate";
     readonly info: SpanUpdateInfo;
   }
+  /** A causal relationship to a span, including spans in another trace. */
+  interface SpanLink {
+    readonly context: {
+      readonly traceId: string;
+      readonly spanId: string;
+      readonly traceFlags: number;
+    };
+    readonly attributes: readonly Attribute[];
+    /** Attributes dropped before this link was recorded. */
+    readonly droppedAttributesCount: number;
+  }
+  /** Links added to the receiver identified by the event's spanContext. */
+  interface SpanLinks {
+    readonly type: "spanLinks";
+    readonly links: readonly SpanLink[];
+  }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
     readonly channel: string;
@@ -17413,6 +17436,7 @@ export declare namespace TailStream {
     | SpanOpen
     | SpanClose
     | SpanUpdate
+    | SpanLinks
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17456,6 +17480,7 @@ export declare namespace TailStream {
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
+    spanLinks?: TailEventHandler<SpanLinks>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

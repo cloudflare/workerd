@@ -23,15 +23,13 @@
  *    test process. Any other sidecar stdout is forwarded verbatim so it stays visible in test
  *    logs. This protocol is race-free and is preferred for sidecars under our control.
  *
- *  - "preallocate": the supervisor binds each port itself (port 0, kernel-assigned), records the
- *    chosen port, closes the socket, exports `<NAME>=<PORT>` in the environment, and only then
- *    spawns the sidecar. This exists for sidecars that can't participate in the report protocol
- *    (currently just the WPT entrypoint, which is a shell wrapper around upstream wpt.py and
- *    reads `$HTTP_PORT` etc. from the environment). Between the supervisor's `close()` and the
- *    sidecar's `bind()` the kernel can in principle hand out the port to an unrelated process;
- *    in practice the window is small and the race is rare. If it manifests as test flakiness,
- *    the right response is bazel's existing flaky-test handling — mark the affected test with
- *    `tags = ["flaky"]`.
+ *  - "preallocate": the supervisor binds each port itself, records it, closes the socket,
+ *    exports `<NAME>=<PORT>` in the environment, and only then spawns the sidecar. This exists for
+ *    sidecars that can't participate in the report protocol (currently just the WPT entrypoint,
+ *    which is a shell wrapper around upstream wpt.py and reads `$HTTP_PORT` etc. from the
+ *    environment). The ports are picked at random below the operating systems' default
+ *    ephemeral ranges, so that between the supervisor's `close()` and the sidecar's `bind()` the
+ *    kernel doesn't hand the port to another process's `listen(0)`.
  *
  * A test can also listen on ports of its own, with or without a sidecar: `listen_port_bindings`
  * maps sockets in the test's config to environment variables, passed as `LISTEN_PORT_BINDINGS`
@@ -84,8 +82,11 @@ import readline from 'node:readline';
 // Matches `<NAME>=<PORT>` lines emitted by the sidecar to report bound ports.
 const PORT_LINE = /^([A-Z_][A-Z0-9_]*)=(\d+)$/;
 
-// Tunables for the preallocate path.
-const ANY_PORT = 0;
+// Tunables for the preallocate path. Reserved ports come from [MIN, MAX], which lies below the
+// default ephemeral port ranges (Linux 32768-60999; macOS and Windows 49152-65535).
+const RESERVED_PORT_MIN = 10000;
+const RESERVED_PORT_MAX = 32767;
+const RESERVE_PORT_ATTEMPTS = 100;
 const CONNECT_POLL_INTERVAL_MS = 500;
 
 // === Report-mode helpers ====================================================
@@ -161,11 +162,25 @@ async function runReportMode({ portsToAssign, sidecarCommand, testArgv }) {
 
 // === Preallocate-mode helpers ===============================================
 
-function getListeningServer(hostname) {
-  const { promise, resolve } = Promise.withResolvers();
+function listen(port, hostname) {
+  const { promise, resolve, reject } = Promise.withResolvers();
   const server = net.createServer();
-  server.listen(ANY_PORT, hostname).once('listening', () => resolve(server));
+  server.once('error', reject);
+  server.listen(port, hostname, () => resolve(server));
   return promise;
+}
+
+// Listens on a random free port in [RESERVED_PORT_MIN, RESERVED_PORT_MAX]. A port that can't be
+// bound (EADDRINUSE, or EACCES for a port Windows reserves) is skipped for another.
+async function getListeningServer(hostname) {
+  for (let attempt = 1; ; attempt++) {
+    const port = crypto.randomInt(RESERVED_PORT_MIN, RESERVED_PORT_MAX + 1);
+    try {
+      return await listen(port, hostname);
+    } catch (err) {
+      if (attempt === RESERVE_PORT_ATTEMPTS) throw err;
+    }
+  }
 }
 
 function closeServer(server) {
@@ -174,9 +189,8 @@ function closeServer(server) {
   return promise;
 }
 
-// Bind one socket per requested env-var name, capture the kernel-assigned port, then close all
-// sockets so the sidecar can rebind them. There's an inherent (but small) race between close and
-// rebind — see the file-level comment.
+// Bind one socket per requested env-var name, capture its port, then close all sockets so the
+// sidecar can rebind them. See the file-level comment for the race between close and rebind.
 async function reservePorts(hostname, envVarNames) {
   const servers = await Promise.all(
     envVarNames.map((_) => getListeningServer(hostname))

@@ -8,6 +8,7 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_struct;
+use jsg_macros::jsg_traced;
 
 #[jsg_struct]
 struct TestStruct {
@@ -47,8 +48,8 @@ struct RequiredStruct {
 }
 
 /// A field type whose conversion to JavaScript fails.
+#[jsg_traced]
 struct Unconvertible;
-jsg::jsg_traced!(Unconvertible);
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {

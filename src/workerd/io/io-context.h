@@ -2214,7 +2214,7 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
         return func(lock, ctx, kj::fwd<decltype(params)>(params)...);
       }
     },
-        kj::mv(cs)));
+        cs.map([](kj::Rc<InputGate::CriticalSection>& c) { return c.addRef(); })));
   };
 }
 

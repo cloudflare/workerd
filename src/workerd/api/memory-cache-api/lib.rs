@@ -224,7 +224,7 @@ fn read_with_fallback<'s>(
 /// never JavaScript values, so the binding refers to nothing in the V8 heap.
 struct CacheBinding(memory_cache::Binding);
 
-jsg::jsg_traced!(CacheBinding);
+jsg::jsg_traced_unchecked!(CacheBinding);
 
 impl Drop for CacheBinding {
     fn drop(&mut self) {

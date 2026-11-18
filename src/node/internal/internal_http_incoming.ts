@@ -6,6 +6,7 @@
 import { EventEmitter } from 'node-internal:events';
 import { Readable } from 'node-internal:streams_readable';
 import { isIPv4, Socket, getTimerDuration } from 'node-internal:internal_net';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
@@ -116,17 +117,23 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
       Object.defineProperties(socket, {
         encrypted: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           value: headers.get('x-forwarded-proto') === 'https',
           writable: false,
           configurable: true,
         },
         readable: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           get: () => {
             return incoming.readable;
           },
           configurable: true,
         },
         remoteFamily: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           get: () => {
             if (incoming.destroyed) {
               return undefined;
@@ -136,6 +143,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           configurable: true,
         },
         remoteAddress: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           get: () => {
             // This is defined in production, and will fallback to localhost on local development
             // where request headers does not contain cf-connecting-ip.
@@ -146,6 +155,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           configurable: true,
         },
         remotePort: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           get: () => {
             // Return a port in the ephemeral range (32768-65535) as clients would use,
             // and undefined if the socket is destroyed.
@@ -154,18 +165,24 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           configurable: true,
         },
         localAddress: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           // Host will have a value like "my-worker.yagiz.workers.dev",
           value: headers.get('host') ?? '127.0.0.1',
           writable: false,
           configurable: true,
         },
         localPort: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           // This is the port defined by the `server.listen(port)` call.
           value: localPort,
           writable: false,
           configurable: true,
         },
         destroy: {
+          // @ts-expect-error TS2353 Required for __proto__
+          __proto__: kNullProtoObject,
           value: (err: Error | undefined): IncomingMessage =>
             incoming.destroy(err),
           writable: false,

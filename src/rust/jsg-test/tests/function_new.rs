@@ -162,7 +162,7 @@ impl Drop for DropCounter {
     }
 }
 
-jsg::jsg_traced!(DropCounter);
+jsg::jsg_traced_unchecked!(DropCounter);
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 

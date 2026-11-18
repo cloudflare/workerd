@@ -541,6 +541,14 @@ fn generate_callbacks(
         })
         .unzip();
 
+    // The argument count, which `unwrap_value` checks each required argument against, read from
+    // V8 once.
+    let argc = if method_name.is_some() && params.len() > injected_params {
+        quote! { let argc = args.len(); }
+    } else {
+        quote! {}
+    };
+
     let result_handling = result_handling(fn_sig, receiver);
 
     let invocation = invocation(fn_name, receiver, receiver_check, &arg_exprs);
@@ -553,6 +561,7 @@ fn generate_callbacks(
         quote! {}
     };
     let body = quote! {
+        #argc
         #(#unwraps)*
         #invocation
         #result_handling
@@ -594,6 +603,24 @@ fn generate_callbacks(
 fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::TokenStream {
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
+
+    if let Some(primitive) = utils::primitive_return(fn_sig) {
+        let set = match primitive {
+            utils::PrimitiveReturn::Void => quote! { let () = value; },
+            utils::PrimitiveReturn::Boolean => quote! { args.set_return_boolean(value); },
+            utils::PrimitiveReturn::Number => quote! { args.set_return_number(f64::from(value)); },
+        };
+        return if is_result {
+            quote! {
+                match result {
+                    Ok(value) => { #set }
+                    Err(err) => lock.throw_exception(&err.into()),
+                }
+            }
+        } else {
+            quote! { let value = result; #set }
+        };
+    }
 
     // Like C++ JSG, an instance method or property passes its receiver as the `creator` of the
     // value it returns, which a promise keeps alive until it settles; a static one passes none.
@@ -767,7 +794,7 @@ fn unwrap_value(
             #js_index + 1,
             <#ty as jsg::FromJS<'_>>::type_name(),
         ));
-        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= args.len() {
+        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= argc {
             lock.throw_exception(&not_of_type());
             return;
         }
@@ -1333,7 +1360,7 @@ pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
 /// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
-/// can't implement the marker, see `jsg::jsg_traced!`.
+/// can't implement the marker, see `jsg::jsg_traced_unchecked!`.
 ///
 /// ```ignore
 /// #[jsg_traced]
