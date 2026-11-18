@@ -263,10 +263,11 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
-`GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
-`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
+`ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
+fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
+`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
+`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
@@ -618,6 +619,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
 | `std::sync::Arc<T>`, `std::sync::Mutex<T>` | No | Only for `T: HoldsNoGcReferences`, and `Sync` for `Arc` |
+| `jsg::ExternalMemoryAdjustment`, `jsg::ExternalMemoryTarget` | No | Hold no GC reference; see [External memory](#external-memory) |
 | `std::rc::Rc<T>` | Compile error — not `Send`, so not `Traced` | Share a resource through a `jsg::Rc` or `jsg::Weak`, and plain data with a future through an `Arc` (Safety rules, rules 2 and 5) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
@@ -625,6 +627,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
+- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. A live instance of such a type transfers through a V8 startup snapshot: the generated `GarbageCollected::snapshot_recreate` leaks a `Default` instance (`jsg::snapshot_recreate_leak`) for the C++ `Wrappable` that backs the restored wrapper. Every Rust resource shares one CppHeapPointerTag, so the type is recorded through C++ `snapshotClone()` rather than by tag. A live instance of any other Rust resource type keeps the Worker out of the pipeline (it starts without a snapshot). See `docs/startup-snapshot.md`.
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
@@ -652,6 +655,42 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
   left to update. No lock serializes them, so they go through the queue, which one thread at a
   time drains. Nothing else touches the counts by then: every other operation takes a lock of
   the isolate, and panics once its `Realm` is dropped.
+
+### External memory
+
+A resource reports memory it owns outside the V8 heap through `jsg::ExternalMemoryAdjustment`,
+using the same accounting as C++ JSG. Create an adjustment under the isolate lock, keep it in a
+field, and use `set(total)` as the allocation size changes:
+
+```rust
+#[jsg_resource]
+struct ExternalBuffer {
+    data: RefCell<Vec<u8>>,
+    external_memory: RefCell<jsg::ExternalMemoryAdjustment>,
+}
+
+let external_memory = lock.external_memory_adjustment(data.len());
+// ... and when the buffer grows:
+self.external_memory.borrow_mut().set(data.len());
+```
+
+Keep one adjustment per resource for its significant native allocations, updated at construction,
+growth, and release. Each adjustment allocates an FFI wrapper and holds an atomic reference to the
+target; avoid creating one per string or small allocation, or updating it on every small change.
+
+Adjustments are `Send` and `Sync` and can be updated or dropped on any thread. Dropping one removes
+its charge, including when V8 collects the resource. To create adjustments without the lock, first
+obtain an `ExternalMemoryTarget` with `lock.external_memory_target()`, then call
+`target.adjustment(amount)` on any thread. Both types can outlive the isolate; after its destruction,
+updates no longer reach V8.
+
+Use `adjust(delta)` when tracking changes rather than a total. Lowering an adjustment below zero
+returns an internal error and leaves the amount unchanged, matching C++. An amount or change of
+32 GiB or more aborts the process, including after isolate destruction.
+
+External memory accounting is separate from heap snapshots: a resource reports its allocations
+through `visit_for_memory_info`. See [`external_memory.rs`](external_memory.rs) for reporting and
+deferral details.
 
 ### Creating resources from C++
 

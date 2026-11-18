@@ -18,6 +18,12 @@
 #include <kj/refcount.h>
 
 // Forward declarations needed by v8.rs.h
+namespace workerd::jsg {
+// Defined in jsg.h, which ffi.c++ includes and the crates that include this header don't depend
+// on. The bridge's kj::Arc glue doesn't need the definition.
+class ExternalMemoryTarget;
+}  // namespace workerd::jsg
+
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
@@ -25,6 +31,8 @@ using PropertyCallbackInfo = v8::PropertyCallbackInfo<v8::Value>;
 using PropertySetterCallbackInfo = v8::PropertyCallbackInfo<v8::Boolean>;
 using PropertyQueryCallbackInfo = v8::PropertyCallbackInfo<v8::Integer>;
 using FastApiCallbackOptions = v8::FastApiCallbackOptions;
+// Const, as IsolateBase hands it out: every member that the shims call is const and thread-safe.
+using ExternalMemoryTarget = const ::workerd::jsg::ExternalMemoryTarget;
 struct ModuleRegistry;
 struct Local;
 struct ArrayElement;
@@ -77,6 +85,12 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
   void jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const override;
+
+  // Startup snapshot transfer; see GarbageCollected::snapshot_recreate on the Rust side. Every
+  // Rust resource shares one CppHeapPointerTag, so a stateless Rust type cannot be recorded by
+  // tag alone the way a C++ jsgSnapshotStateless type is: it goes through snapshotClone(), with
+  // a fresh instance standing in for the clone.
+  kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> snapshotClone() const override;
 
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
@@ -735,5 +749,35 @@ bool isolate_in_context(Isolate* isolate);
 // entered. Runs no JavaScript.
 Local isolate_current_context_global(Isolate* isolate);
 void ignore_leak(size_t ptr);
+
+// ExternalMemory
+// The isolate's ExternalMemoryTarget and ExternalMemoryAdjustments of it, shared with C++ JSG.
+// An adjustment may be made, changed or destroyed on any thread. A change made by a thread that
+// has entered the isolate reaches V8 at once. Any other change is added to the target's pending
+// total, which IsolateBase::applyDeferredActions() hands to V8 at the next lock. A decrease that
+// reaches V8 at once has a pending rise netted into it.
+// An adjustment of 32 GiB or more aborts the process, as in C++ JSG.
+// external_memory_adjustment_adjust() throws, as C++ adjust() does, when it would lower an
+// adjustment below zero. None of the others throw: the shims that take an amount cap it at
+// SSIZE_MAX, so that it can't wrap to a fall in C++.
+
+// A jsg::ExternalMemoryAdjustment, which ffi.c++ holds in a subclass. kj::Own's disposal needs a
+// complete type and checks whether it is polymorphic, so the bridge's kj::Own glue needs only this
+// declaration, not the definition in jsg.h.
+class ExternalMemoryAdjustment {
+ public:
+  virtual ~ExternalMemoryAdjustment() noexcept(false) = default;
+};
+
+kj::Arc<ExternalMemoryTarget> isolate_external_memory_target(Isolate* isolate);
+kj::Own<ExternalMemoryAdjustment> isolate_external_memory_adjustment(
+    Isolate* isolate, size_t amount);
+kj::Own<ExternalMemoryAdjustment> external_memory_target_adjustment(
+    ExternalMemoryTarget& target, size_t amount);
+bool external_memory_target_is_isolate_alive(ExternalMemoryTarget& target);
+int64_t external_memory_target_pending_update_for_test(ExternalMemoryTarget& target);
+size_t external_memory_adjustment_amount(const ExternalMemoryAdjustment& adjustment);
+void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::rust::isize delta);
+void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount);
 
 }  // namespace workerd::rust::jsg
