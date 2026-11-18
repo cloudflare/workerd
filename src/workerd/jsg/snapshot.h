@@ -147,11 +147,9 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
 // SerializeInternalFieldsCallback registered with the snapshot's default context
 // (IsolateBase::setSnapshotDefaultContext). V8 runs it inside CreateBlob() for every embedder
 // field that does not hold a heap object (aligned pointers and empty slots alike) the context
-// reaches, ArrayBuffers' views included. `data` is a uint32_t counter of fields the snapshot cannot
-// carry: non-null aligned-pointer fields at the wrong index or with an unknown marker, and off-heap
-// typed arrays over a zero-length ArrayBuffer (see the definition). V8 is built without
-// exceptions, so the callback only increments the counter and IsolateBase::createSnapshotBlob()
-// raises it after CreateBlob() returns.
+// reaches. `data` is a uint32_t counter of non-null aligned-pointer fields at the wrong index or
+// with an unknown marker. V8 is built without exceptions, so the callback only increments the
+// counter and IsolateBase::createSnapshotBlob() raises it after CreateBlob() returns.
 v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data);
 
 // Metadata needed to serialize live wrappable instances.

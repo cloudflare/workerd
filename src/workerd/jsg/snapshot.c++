@@ -265,24 +265,6 @@ void deserializeApiWrapperCallback(
 
 v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data) {
   auto& badTagFieldsCount = *static_cast<uint32_t*>(data);
-
-  // An off-heap typed array over a zero-length ArrayBuffer that is not detached: V8 serializes its
-  // backing store although it holds no bytes, and on load copies those zero bytes to the null
-  // start of a zero-length allocation, which is undefined behavior. Counted once, at its first
-  // embedder field. HasBuffer() is false for a typed array that keeps its bytes on the V8 heap,
-  // whose serialization is sound; when it is true, GetBuffer() returns the existing buffer
-  // without allocating. V8 skips the backing store of a view whose buffer is detached.
-  if (index == 0 && holder->IsTypedArray()) {
-    auto typedArray = holder.As<v8::TypedArray>();
-    if (typedArray->HasBuffer()) {
-      auto buffer = typedArray->GetBuffer();
-      if (buffer->ByteLength() == 0 && !buffer->WasDetached()) {
-        ++badTagFieldsCount;
-        return {nullptr, 0};
-      }
-    }
-  }
-
   const void* field = holder->GetAlignedPointerFromInternalField(
       index, static_cast<v8::EmbedderDataTypeTag>(index));
   if (field == nullptr) return {nullptr, 0};

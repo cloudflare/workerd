@@ -283,10 +283,7 @@ Two outcomes are possible for a Worker that qualifies:
   still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
   left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
   their callbacks as external references while a snapshot is prepared, so that the serializer
-  reports the continuation's opaque data instead of aborting on an unknown address), a typed
-  array that keeps its bytes off the V8 heap over a zero-length ArrayBuffer (`node:zlib`'s flush
-  buffers, `new Uint8Array(new ArrayBuffer(0))`: V8 serializes its empty backing store and on
-  restore copies zero bytes to a null pointer, which `serializeInternalFields()` reports), a
+  reports the continuation's opaque data instead of aborting on an unknown address), a
   restore-time global the top level
   redefined, a listener registered with a `signal` option, FinalizationRegistry cleanups that
   keep dooming new objects or that become due only once the zygote's objects are destroyed, ...
@@ -305,6 +302,15 @@ Two outcomes are possible for a Worker that qualifies:
 V8 fatal errors (`CHECK` failures) abort the process and cannot be caught at either stage. The
 one known way for a Worker's top level to cause one, a duplicate of a property V8 adds on restore,
 is what the restore-time-globals handling exists to prevent.
+
+A typed array that keeps its bytes off the V8 heap, over a zero-length ArrayBuffer that is not
+detached (`new Uint8Array(new ArrayBuffer(0))`), neither fails the zygote nor restores soundly: V8
+serializes its backing store although it holds no bytes, and on restore copies the zero bytes to
+the null start of a zero-length allocation. That is undefined behavior, which UBSan aborts on. The
+zygote cannot detect it in every build: the internal-field serializer that would see the view is
+not called for ArrayBuffer views when V8 is built with `v8_array_buffer_view_internal_field_count
+= 0`. workerd's own modules avoid leaving such a view reachable at their top level (`node:zlib`'s
+flush buffers are `Buffer.alloc(0)`, which V8 keeps on its heap).
 
 ## Console output
 

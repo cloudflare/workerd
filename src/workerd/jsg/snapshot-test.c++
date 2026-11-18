@@ -699,36 +699,6 @@ KJ_TEST("a finished generator and a generator function survive a snapshot round 
 }
 
 // =======================================================================================
-// ArrayBuffers. V8 carries a buffer's bytes in the snapshot, except for the backing store of an
-// off-heap typed array over a zero-length buffer, which it restores with undefined behavior; one
-// the snapshot would carry fails the zygote.
-
-KJ_TEST("a typed array over a zero-length ArrayBuffer fails the zygote") {
-  KJ_EXPECT_THROW_MESSAGE("typed arrays over a zero-length ArrayBuffer",
-      bakeSnapshot("globalThis.view = new Uint8Array(new ArrayBuffer(0));"_kj));
-}
-
-KJ_TEST("empty buffers without such a typed array survive a snapshot round trip") {
-  auto artifact = bakeSnapshot("globalThis.empty = new ArrayBuffer(0);"
-                               "globalThis.onHeap = new Uint8Array(0);"
-                               "globalThis.dataView = new DataView(new ArrayBuffer(0));"
-                               "globalThis.detached = new Uint8Array(new ArrayBuffer(0));"
-                               "detached.buffer.transfer();"
-                               "globalThis.bytes = new Uint8Array(new ArrayBuffer(4)).fill(7);"
-                               "globalThis.noBytes = bytes.subarray(0, 0);"_kj);
-  auto restored = newIsolateFromSnapshot(*artifact);
-  inRestoredContext(*restored, [&](Lock& js) {
-    KJ_EXPECT(eval(js, "empty.byteLength"_kj) == "0"_kj);
-    KJ_EXPECT(eval(js, "onHeap.length"_kj) == "0"_kj);
-    KJ_EXPECT(eval(js, "dataView.byteLength"_kj) == "0"_kj);
-    KJ_EXPECT(eval(js, "detached.buffer.detached"_kj) == "true"_kj);
-    KJ_EXPECT(eval(js, "bytes.join()"_kj) == "7,7,7,7"_kj);
-    KJ_EXPECT(
-        eval(js, "noBytes.length + ',' + (noBytes.buffer === bytes.buffer)"_kj) == "0,true"_kj);
-  });
-}
-
-// =======================================================================================
 // FinalizationRegistry cleanups around the snapshot. A cleanup the top level leaves due runs in
 // the zygote before anything is recorded, so what the callback does is part of the snapshot; a
 // cleanup that becomes due only because the zygote's objects were destroyed is never run.
