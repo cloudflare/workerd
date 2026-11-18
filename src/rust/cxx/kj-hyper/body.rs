@@ -504,7 +504,7 @@ const BUILTIN: [&str; 12] = [
 ];
 
 /// The [`Builtin`] headers' names, indexed by the enum.
-const BUILTIN_NAMES: [http::HeaderName; BUILTIN.len()] = [
+static BUILTIN_NAMES: [http::HeaderName; BUILTIN.len()] = [
     header::CONNECTION,
     http::HeaderName::from_static("keep-alive"),
     header::TE,
@@ -651,16 +651,18 @@ impl Head {
     pub fn apply(mut self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
         let builtins = self.builtin.iter().flatten().count();
         let mut map = http::HeaderMap::with_capacity(self.others.len() + builtins);
-        for ((spelling, name), value) in BUILTIN.into_iter().zip(BUILTIN_NAMES).zip(self.builtin) {
-            if let Some(value) = value {
-                // A builtin header has one value, and no spelling yet.
-                if !is_title_case(spelling.as_bytes()) {
-                    self.spellings
-                        .get_or_insert_with(HeaderCaseMap::default)
-                        .append(&name, Bytes::from_static(spelling.as_bytes()));
-                }
-                map.append(name, value);
+        for (index, value) in self.builtin.into_iter().enumerate() {
+            let Some(value) = value else {
+                continue;
+            };
+            let (spelling, name) = (BUILTIN[index], &BUILTIN_NAMES[index]);
+            // A builtin header has one value, and no spelling yet.
+            if !is_title_case(spelling.as_bytes()) {
+                self.spellings
+                    .get_or_insert_with(HeaderCaseMap::default)
+                    .append(name, Bytes::from_static(spelling.as_bytes()));
             }
+            map.append(name.clone(), value);
         }
         for (name, value) in self.others {
             map.append(name, value);
