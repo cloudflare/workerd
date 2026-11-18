@@ -1,3 +1,4 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "repeatable_string_flag", "string_flag")
 
 bool_flag(
@@ -22,6 +23,39 @@ bool_flag(
 config_setting(
     name = "container_test_images_enabled",
     flag_values = {":container_test_images": "true"},
+    visibility = ["//visibility:public"],
+)
+
+# Whether the machine that runs the tests has a container engine, for those tagged
+# requires-container-engine (see build/test_attrs.bzl). bazelflare's executors have one for
+# them, so they are compatible there without this flag.
+bool_flag(
+    name = "has_container_engine",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "has_container_engine_set",
+    flag_values = {":has_container_engine": "true"},
+)
+
+selects.config_setting_group(
+    name = "container_engine_available",
+    match_any = [
+        ":has_container_engine_set",
+        "//build/bazelflare:on_bazelflare",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# No platform has this constraint value, so Bazel's error for a requested test that needs a
+# container engine where there is none names it (see build/test_attrs.bzl).
+constraint_setting(name = "container_engine_requirement")
+
+constraint_value(
+    name = "requires_container_engine",
+    constraint_setting = ":container_engine_requirement",
     visibility = ["//visibility:public"],
 )
 
