@@ -243,11 +243,6 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    // What the peer asked for, before the startTls setup below takes the tlsStarter slot.
-    auto requestedSecureTransport = settings.useTls ? SecureTransportKind::ON
-        : settings.tlsStarter != kj::none           ? SecureTransportKind::STARTTLS
-                                                    : SecureTransportKind::OFF;
-
     // A peer that asked for TLS from the start must not see the connection open before it is
     // secure. The handler can't run that handshake, so it accepts the connection itself once it
     // has made it secure further along. WorkerEntrypoint::connect() lets such a connection through
@@ -283,10 +278,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     });
     KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
-    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
+    // A peer that asked for TLS from the start shows up as secureTransport 'on', which tells the
+    // handler to call accept() once it has made the connection secure. Otherwise, support startTls
+    // if the transport that delivered this CONNECT offered a tlsStarter slot.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
-    KJ_IF_SOME(starter, settings.tlsStarter) {
+    if (settings.useTls) {
+      secureTransport = SecureTransportKind::ON;
+    } else KJ_IF_SOME(starter, settings.tlsStarter) {
       if (FeatureFlags::get(lock).getConnectHandlerStartTls()) {
         KJ_IF_SOME(s, starter) {
           // The transport can run a real handshake on this connection -- a TCP listener holding a
@@ -329,9 +328,9 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // even while the connection waits for accept(): the handler needs its socket to make the
     // connection secure, and the peer's `opened` is what waits.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
-    jsSocket->initInbound(requestedSecureTransport,
-        acceptance.map(
-            [&](kj::Rc<ConnectAcceptance>& a) { return ioContext.addObject(a.addRef()); }));
+    KJ_IF_SOME(a, acceptance) {
+      jsSocket->setAcceptance(ioContext.addObject(a.addRef()));
+    }
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());

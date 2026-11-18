@@ -293,18 +293,13 @@ class Socket: public jsg::Object {
     KJ_UNREACHABLE;
   }
 
-  // For the socket passed to a connect() handler, the secureTransport its peer asked for.
-  // Undefined on any other socket.
-  jsg::Optional<kj::StringPtr> getRequestedSecureTransport() const;
+  // Marks this socket as the one passed to a connect() handler whose peer asked for TLS from the
+  // start, so that the connection waits for accept().
+  void setAcceptance(IoOwn<ConnectAcceptance> acceptance);
 
-  // Marks this socket as the one passed to a connect() handler, whose peer asked for
-  // `requestedSecureTransport`. `acceptance` is set when the connection waits for accept().
-  void initInbound(
-      SecureTransportKind requestedSecureTransport, kj::Maybe<IoOwn<ConnectAcceptance>> acceptance);
-
-  // Accepts a connection whose peer asked for TLS from the start. The handler calls it once it has
-  // made the connection secure, after which the peer's `opened` resolves. It does nothing for
-  // connections the runtime already accepted on delivery, so a handler can call it regardless.
+  // Accepts a connection whose peer asked for TLS from the start, which the handler sees as
+  // `secureTransport` 'on'. The handler calls it once it has made the connection secure, after
+  // which the peer's `opened` resolves. Accepting again does nothing.
   void accept();
 
   // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
@@ -393,7 +388,6 @@ class Socket: public jsg::Object {
       JSG_METHOD(proxyTo);
     }
     if (flags.getConnectHandlerImmediateTls()) {
-      JSG_READONLY_PROTOTYPE_PROPERTY(requestedSecureTransport, getRequestedSecureTransport);
       JSG_METHOD(accept);
     }
   }
@@ -450,9 +444,8 @@ class Socket: public jsg::Object {
   SocketProtocol protocol;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::Maybe<kj::String> domain;
-  // Set on the socket passed to a connect() handler: what its peer asked for, and the pending
-  // answer to the peer when the handler has to accept the connection itself.
-  kj::Maybe<SecureTransportKind> requestedSecureTransport;
+  // Set on the socket passed to a connect() handler whose peer asked for TLS from the start: the
+  // pending answer to the peer, which the handler gives with accept().
   kj::Maybe<IoOwn<ConnectAcceptance>> acceptance;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;

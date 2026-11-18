@@ -1138,32 +1138,15 @@ bool ConnectAcceptance::abandon(kj::StringPtr reason) {
   return false;
 }
 
-jsg::Optional<kj::StringPtr> Socket::getRequestedSecureTransport() const {
-  return requestedSecureTransport.map([](SecureTransportKind kind) {
-    switch (kind) {
-      case SecureTransportKind::OFF:
-        return "off"_kj;
-      case SecureTransportKind::STARTTLS:
-        return "starttls"_kj;
-      case SecureTransportKind::ON:
-        return "on"_kj;
-    }
-    KJ_UNREACHABLE;
-  });
-}
-
-void Socket::initInbound(
-    SecureTransportKind requested, kj::Maybe<IoOwn<ConnectAcceptance>> pendingAcceptance) {
-  requestedSecureTransport = requested;
+void Socket::setAcceptance(IoOwn<ConnectAcceptance> pendingAcceptance) {
   acceptance = kj::mv(pendingAcceptance);
 }
 
 void Socket::accept() {
-  JSG_REQUIRE(requestedSecureTransport != kj::none, TypeError,
-      "accept() can only be called on the socket passed to a connect() handler.");
-  KJ_IF_SOME(a, acceptance) {
-    a->accept();
-  }
+  auto& a = JSG_REQUIRE_NONNULL(acceptance, TypeError,
+      "accept() can only be called on the socket passed to a connect() handler whose peer "
+      "requested secureTransport 'on'.");
+  a->accept();
 }
 
 jsg::Promise<void> Socket::proxyTo(

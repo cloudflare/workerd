@@ -113,9 +113,10 @@ export class TlsEchoEndpoint extends WorkerEntrypoint {
 // for the handshake, accept, and relay.
 export class ImmediateTlsRelay extends WorkerEntrypoint {
   async connect(socket) {
-    strictEqual(socket.requestedSecureTransport, 'on');
-    // The handler's own socket carries plaintext, which is what the peer writes and reads.
-    strictEqual(socket.secureTransport, 'off');
+    // The peer asked for TLS from the start, so the handler has to accept the connection once it
+    // is secure. The handler's own socket carries plaintext, which is what the peer writes and
+    // reads.
+    strictEqual(socket.secureTransport, 'on');
 
     const upstream = connect(
       `${this.env.SIDECAR_HOSTNAME}:${this.env.TLS_PORT}`,
@@ -123,11 +124,11 @@ export class ImmediateTlsRelay extends WorkerEntrypoint {
     );
     await upstream.opened;
     // Only the socket passed to a connect() handler has a connection to accept.
-    strictEqual(upstream.requestedSecureTransport, undefined);
     throws(() => upstream.accept(), {
       name: 'TypeError',
       message:
-        'accept() can only be called on the socket passed to a connect() handler.',
+        'accept() can only be called on the socket passed to a connect() handler whose ' +
+        "peer requested secureTransport 'on'.",
     });
     socket.accept();
     // A second accept() changes nothing.
@@ -232,12 +233,17 @@ export class SocketSink extends WorkerEntrypoint {
   take(socket) {}
 }
 
-// A peer that didn't ask for TLS gets its connection accepted on delivery, and accept() does
-// nothing.
+// A peer that didn't ask for TLS gets its connection accepted on delivery, leaving nothing for
+// accept() to do.
 export class ImmediateTlsPlaintextPeer extends WorkerEntrypoint {
   async connect(socket) {
-    strictEqual(socket.requestedSecureTransport, 'off');
-    socket.accept();
+    strictEqual(socket.secureTransport, 'off');
+    throws(() => socket.accept(), {
+      name: 'TypeError',
+      message:
+        'accept() can only be called on the socket passed to a connect() handler whose ' +
+        "peer requested secureTransport 'on'.",
+    });
     const writer = socket.writable.getWriter();
     await writer.write(new TextEncoder().encode('plaintext-ok'));
     await writer.close();
