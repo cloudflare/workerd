@@ -108,6 +108,15 @@ impl test_echo::Server for EchoServer {
         Ok(())
     }
 
+    async fn bounce(
+        self: Rc<Self>,
+        params: test_echo::BounceParams,
+        mut results: test_echo::BounceResults,
+    ) -> Result<(), Error> {
+        results.get().set_data(params.get()?.get_data()?);
+        Ok(())
+    }
+
     async fn hang(
         self: Rc<Self>,
         _params: test_echo::HangParams,
@@ -231,4 +240,28 @@ async fn rust_hang(echo: KjOwn<capnp_kj::ClientHook>) -> Result<(), KjError> {
         .await
         .map(drop)
         .map_err(capnp_kj::to_kj)
+}
+
+/// Calls `echo.bounce()` `count` times in a row with `size` bytes, for benchmarks. Looping here
+/// keeps the cost of entering Rust from C++ out of the per-call figure.
+async fn rust_bounce_n(
+    echo: KjOwn<capnp_kj::ClientHook>,
+    size: usize,
+    count: u32,
+) -> Result<(), KjError> {
+    let echo: test_echo::Client = capnp_kj::client_from_kj(echo);
+    let data = vec![0x5a_u8; size];
+    async move {
+        for _ in 0..count {
+            let mut request = echo.bounce_request();
+            request.get().set_data(&data);
+            let response = request.send().promise.await?;
+            if response.get()?.get_data()?.len() != size {
+                return Err(Error::failed("bounce() returned the wrong size".to_owned()));
+            }
+        }
+        Ok(())
+    }
+    .await
+    .map_err(capnp_kj::to_kj)
 }
