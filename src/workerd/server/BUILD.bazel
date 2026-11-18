@@ -452,6 +452,13 @@ kj_test(
 )
 
 kj_test(
+    src = "stack-trace-threads-test.c++",
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
     src = "alarm-scheduler-test.c++",
     deps = [
         ":alarm-scheduler",
