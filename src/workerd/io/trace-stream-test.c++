@@ -4,6 +4,8 @@
 
 #include "trace-stream.h"
 
+#include <workerd/io/tracer.h>
+
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/test.h>
@@ -42,7 +44,17 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
     kj::Maybe<uint32_t> droppedCount;
   };
 
+  // The trace context of an event, in the order received.
+  struct Event {
+    rpc::Trace::TailEvent::Event::Which which;
+    TraceId traceId;
+    kj::Maybe<uint64_t> spanId;
+    // For SpanOpen events, the opened span's ID.
+    uint64_t openedSpanId = 0;
+  };
+
   kj::Vector<Batch> batches;
+  kj::Vector<Event> events;
   bool stopOnOnset = false;
 
   kj::Promise<void> report(ReportContext context) override {
@@ -50,6 +62,18 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
     for (auto event: context.getParams().getEvents()) {
       auto e = event.getEvent();
       batch.events.add(e.which());
+      auto spanContext = event.getSpanContext();
+      Event recorded{
+        .which = e.which(),
+        .traceId = TraceId::fromCapnp(spanContext.getTraceId()),
+      };
+      if (spanContext.getInfo().isSpanId()) {
+        recorded.spanId = spanContext.getInfo().getSpanId();
+      }
+      if (e.isSpanOpen()) {
+        recorded.openedSpanId = e.getSpanOpen().getSpanId();
+      }
+      events.add(kj::mv(recorded));
       if (e.isStreamDiagnostics()) {
         batch.droppedCount = e.getStreamDiagnostics().getDiagnostic().getDroppedEvents().getCount();
       }
@@ -68,6 +92,15 @@ class FakeTailStreamTarget final: public rpc::TailStreamTarget::Server {
   void ack() {
     KJ_ASSERT(nextAck < acks.size());
     acks[nextAck++]->fulfill();
+  }
+
+  // Receives and acknowledges batches until the writer has nothing more to send.
+  void drain(kj::WaitScope& waitScope) {
+    for (;;) {
+      waitScope.poll();
+      if (nextAck == acks.size()) break;
+      while (nextAck < acks.size()) ack();
+    }
   }
 
  private:
@@ -291,6 +324,227 @@ KJ_TEST("TailStreamWriter gives back its budget when the tail worker stops the s
 
   KJ_EXPECT(budget->held == 0);
   KJ_EXPECT(test.target->batches.size() == 1);
+}
+
+// Forwards spans straight to a WorkerTracer, with predictable span and trace IDs.
+class TestSpanSubmitter final: public SpanSubmitter {
+ public:
+  explicit TestSpanSubmitter(WorkerTracer& tracer): tracer(tracer) {}
+
+  bool submitSpanOpen(TraceId traceId,
+      kj::Maybe<TraceFlags> traceFlags,
+      SpanId spanId,
+      SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override {
+    tracer.addSpanOpen(
+        kj::mv(traceId), traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
+    return true;
+  }
+  void submitSpanClose(
+      SpanId spanId, kj::Date startTime, kj::Date endTime, workerd::Span::TagMap&& tags) override {
+    tracer.addSpanClose(SpanEndData(spanId, endTime, kj::mv(tags)), startTime);
+  }
+  void submitSpanUpdate(SpanId spanId, SpanUpdate&& update) override {
+    tracer.addSpanUpdateInternal(spanId, kj::mv(update), kj::UNIX_EPOCH);
+  }
+  void submitSpanException(SpanId spanId,
+      kj::Date timestamp,
+      kj::Maybe<Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override {
+    tracer.addSpanException(
+        spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+  }
+  SpanId makeSpanId() override {
+    return SpanId(nextSpanId++);
+  }
+  TraceId makeRootTraceId() override {
+    return TraceId(nextTraceId++, 0xf00d);
+  }
+
+ private:
+  WorkerTracer& tracer;
+  uint64_t nextSpanId = 100;
+  uint64_t nextTraceId = 1;
+};
+
+struct TracerTest {
+  WriterTest writer;
+  kj::Maybe<kj::Rc<WorkerTracer>> tracer;
+  // The invocation's root user span, as IoContext::IncomingRequest creates it.
+  SpanParent root = nullptr;
+
+  TracerTest() {
+    auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+        kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+    auto& t = tracer.emplace(kj::rc<WorkerTracer>(
+        kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(writer.writer)));
+    t->setEventInfoInternal(writer.context, kj::none, kj::UNIX_EPOCH,
+        FetchEventInfo(
+            kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr));
+    root = SpanParent(kj::rc<UserSpanObserver>(kj::refcounted<TestSpanSubmitter>(*t),
+        writer.context.getTraceId(), writer.context.getTraceFlags()));
+  }
+
+  const TraceId& invocationTraceId() {
+    return writer.context.getTraceId();
+  }
+
+  // Ends the invocation and returns the span events the tail worker received.
+  kj::Vector<FakeTailStreamTarget::Event> finish() {
+    root = nullptr;
+    tracer = kj::none;
+    writer.target->drain(writer.waitScope);
+    kj::Vector<FakeTailStreamTarget::Event> spanEvents;
+    using Which = rpc::Trace::TailEvent::Event;
+    for (auto& event: writer.target->events) {
+      if (event.which == Which::SPAN_OPEN || event.which == Which::SPAN_CLOSE ||
+          event.which == Which::SPAN_UPDATE || event.which == Which::ATTRIBUTE ||
+          event.which == Which::EXCEPTION) {
+        spanEvents.add(kj::mv(event));
+      }
+    }
+    return spanEvents;
+  }
+};
+
+using Which = rpc::Trace::TailEvent::Event;
+
+KJ_TEST("WorkerTracer reports children of a remote parent in the remote trace") {
+  TracerTest test;
+  TraceId remoteTraceId(0x1111, 0x2222);
+  SpanContext remoteContext(remoteTraceId, SpanId(0x77), TraceFlags(1));
+  auto remote = test.root.forActiveContext(remoteContext);
+  KJ_ASSERT(remote.isObserved());
+  {
+    auto child = remote.newChild("child"_kjc, kj::UNIX_EPOCH);
+    child.setStatus(SpanStatus(SpanStatusCode::OK, kj::none));
+    child.setTag("key"_kjc, "value"_kjc);
+    // SpanBuilder::recordException() reads the time from the IoContext, which this test lacks.
+    KJ_ASSERT_NONNULL(child.getObserver())
+        .onException(kj::UNIX_EPOCH, kj::none, kj::str("Error"), kj::str("boom"), kj::none);
+    SpanParent childParent(child);
+    auto grandchild = childParent.newChild("grandchild"_kjc, kj::UNIX_EPOCH);
+  }
+  { auto local = test.root.newChild("local"_kjc, kj::UNIX_EPOCH); }
+  auto events = test.finish();
+
+  KJ_ASSERT(events.size() == 9, events.size());
+  auto& childOpen = events[0];
+  KJ_EXPECT(childOpen.which == Which::SPAN_OPEN);
+  KJ_EXPECT(childOpen.traceId == remoteTraceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(childOpen.spanId) == 0x77);
+  auto childId = childOpen.openedSpanId;
+
+  // The child's own events are all in the remote trace.
+  for (auto i: {1, 2, 5, 6}) {
+    KJ_EXPECT(events[i].traceId == remoteTraceId, i);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(events[i].spanId) == childId, i);
+  }
+  KJ_EXPECT(events[1].which == Which::SPAN_UPDATE);
+  KJ_EXPECT(events[2].which == Which::EXCEPTION);
+  KJ_EXPECT(events[5].which == Which::ATTRIBUTE);
+  KJ_EXPECT(events[6].which == Which::SPAN_CLOSE);
+
+  auto& grandchildOpen = events[3];
+  KJ_EXPECT(grandchildOpen.which == Which::SPAN_OPEN);
+  KJ_EXPECT(grandchildOpen.traceId == remoteTraceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(grandchildOpen.spanId) == childId);
+  KJ_EXPECT(events[4].which == Which::SPAN_CLOSE);
+  KJ_EXPECT(events[4].traceId == remoteTraceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(events[4].spanId) == grandchildOpen.openedSpanId);
+
+  // Spans in the invocation's trace are unaffected.
+  KJ_EXPECT(events[7].which == Which::SPAN_OPEN);
+  KJ_EXPECT(events[7].traceId == test.invocationTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(events[7].spanId) == test.writer.context.getSpanId().getId());
+  KJ_EXPECT(events[8].which == Which::SPAN_CLOSE);
+  KJ_EXPECT(events[8].traceId == test.invocationTraceId());
+}
+
+KJ_TEST("WorkerTracer doesn't make a root of a parentless span in the invocation's trace") {
+  TracerTest test;
+  auto& tracer = *KJ_ASSERT_NONNULL(test.tracer);
+  // A null trace ID also means the invocation's trace.
+  tracer.addSpanOpen(test.invocationTraceId(), kj::none, SpanId(5), SpanId::nullId,
+      kj::ConstString("span"_kjc), kj::UNIX_EPOCH);
+  tracer.addSpanClose(SpanEndData(SpanId(5), kj::UNIX_EPOCH), kj::UNIX_EPOCH);
+  tracer.addSpanOpen(TraceId(nullptr), kj::none, SpanId(6), SpanId::nullId,
+      kj::ConstString("span"_kjc), kj::UNIX_EPOCH);
+  tracer.addSpanClose(SpanEndData(SpanId(6), kj::UNIX_EPOCH), kj::UNIX_EPOCH);
+  auto events = test.finish();
+
+  KJ_ASSERT(events.size() == 4, events.size());
+  for (auto& event: events) {
+    KJ_EXPECT(event.traceId == test.invocationTraceId());
+  }
+  KJ_EXPECT(KJ_ASSERT_NONNULL(events[0].spanId) == test.writer.context.getSpanId().getId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(events[2].spanId) == test.writer.context.getSpanId().getId());
+}
+
+KJ_TEST("WorkerTracer reports a root span with no parent, in its own trace") {
+  TracerTest test;
+  auto roots = test.root.forActiveContext(kj::none);
+  KJ_ASSERT(roots.isObserved());
+  KJ_EXPECT(roots.toSpanContext() == kj::none);
+  {
+    auto first = roots.newChild("first"_kjc, kj::UNIX_EPOCH);
+    // A new trace is sampled, whatever the invocation's trace flags.
+    auto firstContext =
+        KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(first.getObserver()).toSpanContext());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(firstContext.getTraceFlags()) == TraceFlags(1));
+    SpanParent firstParent(first);
+    auto child = firstParent.newChild("child"_kjc, kj::UNIX_EPOCH);
+  }
+  { auto second = roots.newChild("second"_kjc, kj::UNIX_EPOCH); }
+  auto events = test.finish();
+
+  KJ_ASSERT(events.size() == 6, events.size());
+  auto& firstOpen = events[0];
+  KJ_EXPECT(firstOpen.which == Which::SPAN_OPEN);
+  KJ_EXPECT(firstOpen.spanId == kj::none);
+  auto firstTraceId = firstOpen.traceId;
+  KJ_EXPECT(firstTraceId != test.invocationTraceId());
+
+  auto& childOpen = events[1];
+  KJ_EXPECT(childOpen.which == Which::SPAN_OPEN);
+  KJ_EXPECT(childOpen.traceId == firstTraceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(childOpen.spanId) == firstOpen.openedSpanId);
+
+  KJ_EXPECT(events[2].which == Which::SPAN_CLOSE);
+  KJ_EXPECT(events[2].traceId == firstTraceId);
+  KJ_EXPECT(events[3].which == Which::SPAN_CLOSE);
+  KJ_EXPECT(events[3].traceId == firstTraceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(events[3].spanId) == firstOpen.openedSpanId);
+
+  // Each child of the root parent starts its own trace.
+  auto& secondOpen = events[4];
+  KJ_EXPECT(secondOpen.spanId == kj::none);
+  KJ_EXPECT(secondOpen.traceId != firstTraceId);
+  KJ_EXPECT(secondOpen.traceId != test.invocationTraceId());
+  KJ_EXPECT(events[5].traceId == secondOpen.traceId);
+}
+
+KJ_TEST("WorkerTracer treats an invalid active context as no active span") {
+  TracerTest test;
+  SpanContext noSpanId(TraceId(0x1111, 0x2222), SpanId::nullId, TraceFlags(1));
+  SpanContext noTraceId(TraceId(nullptr), SpanId(0x77), TraceFlags(1));
+  for (auto* context: {&noSpanId, &noTraceId}) {
+    auto parent = test.root.forActiveContext(*context);
+    KJ_EXPECT(parent.toSpanContext() == kj::none);
+    { auto span = parent.newChild("span"_kjc, kj::UNIX_EPOCH); }
+  }
+  auto events = test.finish();
+
+  KJ_ASSERT(events.size() == 4, events.size());
+  for (auto i: {0, 2}) {
+    KJ_EXPECT(events[i].which == Which::SPAN_OPEN);
+    KJ_EXPECT(events[i].spanId == kj::none, i);
+    KJ_EXPECT(events[i].traceId != test.invocationTraceId(), i);
+    KJ_EXPECT(events[i].traceId != TraceId(0x1111, 0x2222), i);
+  }
 }
 
 }  // namespace

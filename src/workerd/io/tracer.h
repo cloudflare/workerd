@@ -52,8 +52,12 @@ class BaseTracer: public kj::Refcounted {
       LogLevel logLevel,
       kj::String message,
       tracing::LogErrorInfo errorInfo = kj::none) = 0;
-  // Add a span open event.
-  virtual void addSpanOpen(tracing::SpanId spanId,
+  // Add a span open event. `traceId` is the trace the span belongs to, and the span's later events
+  // are reported in it too. If the span has no parent and `traceId` isn't the invocation's, it is
+  // reported as the root of its trace. A null `traceId` means the invocation's trace.
+  virtual void addSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
@@ -165,7 +169,9 @@ class WorkerTracer final: public BaseTracer {
       LogLevel logLevel,
       kj::String message,
       tracing::LogErrorInfo errorInfo = kj::none) override;
-  void addSpanOpen(tracing::SpanId spanId,
+  void addSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
@@ -250,24 +256,40 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  struct SpanTrace {
+    tracing::TraceId traceId;
+    kj::Maybe<tracing::TraceFlags> traceFlags;
+  };
+  // Open spans outside the invocation's trace, keyed by span ID.
+  kj::HashMap<uint64_t, SpanTrace> spanTraces;
+
+  // The span context for an event on the span `spanId`, in the span's own trace.
+  tracing::InvocationSpanContext spanEventContext(tracing::SpanId spanId);
 };
 
 class SpanSubmitter: public kj::Refcounted {
  public:
   // Called when a span is opened. Submitters may buffer this for later assembly or stream it
-  // immediately.
-  virtual bool submitSpanOpen(tracing::SpanId spanId,
+  // immediately. `traceId` and `traceFlags` are the trace the span belongs to, which may not be the
+  // invocation's (see BaseTracer::addSpanOpen()).
+  virtual bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
 
   // Variant for spans opened directly by user JS (`ctx.tracing.enterSpan`). Submitters can
   // apply different policies (e.g. bypass operation-name allowlists for user spans).
-  virtual bool submitUserSpanOpen(tracing::SpanId spanId,
+  virtual bool submitUserSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) {
-    return submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    return submitSpanOpen(
+        kj::mv(traceId), traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 
   // Called when a span is closed. Together with the open data, provides all span information.
@@ -284,13 +306,24 @@ class SpanSubmitter: public kj::Refcounted {
       kj::Maybe<kj::String> stack) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
+
+  // Returns the ID of a new trace, for a span that starts one.
+  virtual tracing::TraceId makeRootTraceId() = 0;
 };
 
 // The user tracing observer
 class UserSpanObserver final: public SpanObserver {
  public:
-  // constructor for top-level observer
-  UserSpanObserver(kj::Own<SpanSubmitter> submitter)
+  // A top-level observer is never opened; it only parents spans. The invocation's root user span
+  // is one, with the invocation's trace and no span ID. So is the parent returned by
+  // forActiveContext(): with a remote context, its children are children of the remote span, in
+  // its trace. Without one it is withoutActiveSpan()'s observer.
+
+  // Returns a top-level observer that stands in for no active span. It has no trace ID, and each
+  // of its children starts a new trace, as in OpenTelemetry.
+  static kj::Rc<UserSpanObserver> withoutActiveSpan(kj::Own<SpanSubmitter> submitter);
+  // constructor for withoutActiveSpan()
+  UserSpanObserver(kj::Badge<UserSpanObserver>, kj::Own<SpanSubmitter> submitter)
       : submitter(kj::mv(submitter)),
         spanId(tracing::SpanId::nullId),
         parentSpanId(tracing::SpanId::nullId),
@@ -304,6 +337,13 @@ class UserSpanObserver final: public SpanObserver {
         parentSpanId(tracing::SpanId::nullId),
         traceId(kj::mv(traceId)),
         traceFlags(traceFlags) {}
+  // constructor for top-level observer standing in for a span created elsewhere
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter, const tracing::SpanContext& context)
+      : submitter(kj::mv(submitter)),
+        spanId(context.getSpanId().orDefault(tracing::SpanId::nullId)),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(context.getTraceId()),
+        traceFlags(context.getTraceFlags()) {}
   // constructor for subsequent observers attached to a span. `fromUserCode` is true for
   // spans created directly via `ctx.tracing.enterSpan`; this routes onOpen() through
   // submitUserSpanOpen() so submitters can apply different policies than for runtime spans.
@@ -322,6 +362,7 @@ class UserSpanObserver final: public SpanObserver {
 
   kj::Rc<SpanObserver> newChild() override;
   kj::Rc<SpanObserver> newChildFromUserCode() override;
+  kj::Rc<SpanObserver> forActiveContext(kj::Maybe<const tracing::SpanContext&> context) override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
@@ -350,6 +391,9 @@ class UserSpanObserver final: public SpanObserver {
   // children created via `newChild()` — runtime sub-operations nested inside an enterSpan
   // callback (e.g. `kv_get`) should remain subject to runtime-span policies.
   bool fromUserCode = false;
+
+  // The parent span and trace of this observer's children.
+  tracing::SpanContext childParent();
 };
 
 }  // namespace workerd

@@ -542,7 +542,9 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     });
   }
 
-  bool submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
@@ -551,7 +553,8 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       if (isPredictableModeForTest()) {
         startTime = kj::UNIX_EPOCH;
       }
-      tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+      tracer.addSpanOpen(
+          kj::mv(traceId), traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
       submitted = true;
     });
     return submitted;
@@ -562,6 +565,10 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       return tracing::SpanId(nextSpanId++);
     }
     return tracing::SpanId::fromEntropy(entropySource);
+  }
+
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId::fromEntropy(entropySource);
   }
 
  private:

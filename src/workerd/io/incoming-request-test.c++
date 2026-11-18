@@ -666,7 +666,12 @@ class RecordingTracer final: public BaseTracer {
       LogLevel,
       kj::String,
       tracing::LogErrorInfo) override {}
-  void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
+  void addSpanOpen(tracing::TraceId,
+      kj::Maybe<tracing::TraceFlags>,
+      tracing::SpanId,
+      tracing::SpanId,
+      kj::ConstString,
+      kj::Date) override {}
   void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
   void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
   void addSpanAttribute(
