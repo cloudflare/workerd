@@ -13,6 +13,7 @@ import {
   finalizeBootstrap,
   isRestoringSnapshot,
   KEEP_RESTORED_IMPORT_CACHES,
+  LOADED_BAD_ENTROPY_FLAG_ADDR,
   LOADED_SNAPSHOT_TYPE,
   type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
@@ -66,7 +67,7 @@ function prepareWasmLinearMemory(
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   enterJaegerSpan('entropy_after_runtime_init', () => {
-    entropyAfterRuntimeInit(Module);
+    entropyAfterRuntimeInit(Module, LOADED_BAD_ENTROPY_FLAG_ADDR);
   });
   if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
