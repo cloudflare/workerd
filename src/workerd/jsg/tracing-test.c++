@@ -448,8 +448,13 @@ KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {
 // Wrappable bytes charged in this isolate, reported to V8 or not.
 int64_t wrappableBytes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
   return e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
-    auto& tracer = HeapTracer::getTracer(lock.v8Isolate);
-    return tracer.getReportedWrappableBytes() + tracer.getUnreportedWrappableBytesForTest();
+    return HeapTracer::getTracer(lock.v8Isolate).getChargedWrappableBytes();
+  });
+}
+
+int64_t reportedWrappableBytes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
+  return e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    return HeapTracer::getTracer(lock.v8Isolate).getReportedWrappableBytes();
   });
 }
 
@@ -495,13 +500,16 @@ KJ_TEST("wrappables are charged as external memory while they live") {
   KJ_EXPECT(remaining < int64_t(sizeof(NumberBox)) * 16, remaining);
 }
 
-KJ_TEST("wrappables are not charged when the autogate is off") {
+KJ_TEST("wrappables are counted but not reported to V8 when the autogate is off") {
   util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
   KJ_DEFER(util::Autogate::deinitAutogate());
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
   int64_t before = wrappableBytes(e);
+  int64_t reportedBefore = reportedWrappableBytes(e);
   keepBoxes(e);
-  KJ_EXPECT(wrappableBytes(e) == before);
+  int64_t live = wrappableBytes(e) - before;
+  KJ_EXPECT(live >= int64_t(kKeptBoxes * sizeof(NumberBox)), live);
+  KJ_EXPECT(reportedWrappableBytes(e) == reportedBefore);
 }
 
 }  // namespace

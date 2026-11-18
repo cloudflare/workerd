@@ -116,11 +116,7 @@ void Wrappable::unlinkFromTracer() {
 }
 
 void HeapTracer::chargeWrappable(Wrappable& wrappable) {
-  // Releasing goes by `accountedBytes`, so the gate may change while charged Wrappables live.
-  if (wrappable.accountedBytes != 0 ||
-      !util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY)) {
-    return;
-  }
+  if (wrappable.accountedBytes != 0) return;
   size_t size = wrappable.jsgGetMemorySelfSize();
   wrappable.accountedBytes = static_cast<uint16_t>(kj::min(size, size_t{UINT16_MAX}));
   unreportedWrappableBytes += wrappable.accountedBytes;
@@ -132,7 +128,10 @@ void HeapTracer::releaseWrappable(Wrappable& wrappable) {
 }
 
 void HeapTracer::flushExternalMemory() {
-  if (isolate == nullptr) return;
+  if (isolate == nullptr ||
+      !util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY)) {
+    return;
+  }
   if (unreportedWrappableBytes < kExternalMemoryFlushBytes &&
       unreportedWrappableBytes > -kExternalMemoryFlushBytes) {
     return;

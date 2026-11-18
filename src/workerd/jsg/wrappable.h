@@ -641,12 +641,16 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   static void substituteCppgcShimForTest(
       v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
 
-  // External memory accounting for Wrappables (the WRAPPABLE_EXTERNAL_MEMORY autogate).
+  // External memory accounting for Wrappables.
   //
   // V8 sees a Wrappable only as its small CppgcShim, so garbage made of API objects gives it no
   // reason to run a major GC. Each Wrappable is charged its shallow size (jsgGetMemorySelfSize())
   // when first bound to this isolate and released when destroyed, both under the isolate lock, so
-  // the total is a plain integer. Neither calls into V8: both can happen during a GC, and reporting
+  // the total is a plain integer. The total is always kept, so getChargedWrappableBytes() can be
+  // observed before anything depends on it; only with the WRAPPABLE_EXTERNAL_MEMORY autogate is it
+  // reported to V8.
+  //
+  // Neither charging nor releasing calls into V8: both can happen during a GC, and reporting
   // external memory can run a full GC synchronously, which must not happen in the middle of
   // attaching a wrapper. IsolateBase::applyDeferredActions() calls flushExternalMemory() each time
   // the isolate lock is taken, and it reports the total once it has moved by
@@ -656,6 +660,12 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void flushExternalMemory();
 
   static constexpr int64_t kExternalMemoryFlushBytes = 64 * 1024;
+
+  // The shallow size of every Wrappable currently bound to this isolate, whether or not it has
+  // been reported to V8.
+  int64_t getChargedWrappableBytes() const {
+    return reportedWrappableBytes + unreportedWrappableBytes;
+  }
 
   // The Wrappable bytes this isolate has reported to V8 as external memory, and so included in
   // v8::Isolate::GetExternalMemory(). An embedder that enforces a memory limit from
