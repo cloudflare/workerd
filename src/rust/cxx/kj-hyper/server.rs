@@ -54,6 +54,7 @@ use std::pin::pin;
 use std::rc::Rc;
 use std::task::Context;
 use std::task::Poll;
+use std::task::Waker;
 use std::time::Duration;
 
 use cxx::KjError;
@@ -85,7 +86,6 @@ use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
-use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::Result;
@@ -206,10 +206,15 @@ struct Connection<'t> {
     table: &'t HeaderTable,
     settings: Rc<ServerSettings>,
     handler: Rc<dyn Handler + 't>,
+    state: Rc<ConnectionState>,
+}
+
+/// What a connection's responses share with it.
+struct ConnectionState {
     /// Set by the response that upgrades the connection: hyper hands the transport over and is
     /// done, while a call keeps using it. Each request's [`ResponseSender`] sets it and the serve
     /// loop reads it, all on the connection's thread.
-    upgraded: Rc<Cell<bool>>,
+    upgraded: Cell<bool>,
     /// The transport's hang-up signal, which an upgraded transport keeps.
     hangup: Shared<Hangup>,
     /// True once the server drains: the connection closes after its next response.
@@ -251,24 +256,24 @@ where
         table,
         settings,
         handler,
-        upgraded: Rc::default(),
-        hangup: hangup.clone(),
-        draining: shutdown.subscribe(),
+        state: Rc::new(ConnectionState {
+            upgraded: Cell::new(false),
+            hangup: hangup.clone(),
+            draining: shutdown.subscribe(),
+        }),
     });
     let calls: Calls<'_> = Rc::default();
     let service = {
         let conn = Rc::clone(&conn);
         let calls = Rc::clone(&calls);
-        service_fn(move |request| {
-            dispatch(Rc::clone(&conn), Rc::clone(&calls), request).boxed_local()
-        })
+        service_fn(move |request| dispatch(Rc::clone(&conn), Rc::clone(&calls), request))
     };
     let mut serving = pin!(
         http1_builder(conn.settings.header_timeout)
             .serve_connection(TokioIo::new(io), service)
             .with_upgrades()
     );
-    let mut drained = pin!(drained(conn.draining.clone()));
+    let mut drained = pin!(drained(conn.state.draining.clone()));
     let mut hangup = pin!(hangup);
     let mut draining = false;
     let mut served: Option<hyper::Result<()>> = None;
@@ -284,7 +289,7 @@ where
         // that is the close it started, not a peer going away mid-call.
         if woken & HANGUP != 0
             && served.is_none()
-            && !conn.upgraded.get()
+            && !conn.state.upgraded.get()
             && let Poll::Ready(hung_up) = hangup
                 .as_mut()
                 .poll(&mut Context::from_waker(&hangup_waker))
@@ -326,7 +331,7 @@ where
                 .as_mut()
                 .poll(&mut Context::from_waker(&serving_waker))
             {
-                if result.is_err() && !conn.upgraded.get() {
+                if result.is_err() && !conn.state.upgraded.get() {
                     // The connection failed: nothing a call does can reach the peer.
                     calls.borrow_mut().clear();
                 }
@@ -398,23 +403,18 @@ async fn dispatch<'t>(
         request.method() == http::Method::CONNECT || request.headers().contains_key(UPGRADE);
     let upgrade = may_upgrade.then(|| upgrade::on(&mut request));
     let (parts, body) = request.into_parts();
-    let (head_tx, head_rx) = oneshot::channel();
     let sender = Rc::new(ResponseSender {
-        head: RefCell::new(Some(head_tx)),
+        head: RefCell::new(HeadSlot::Waiting(None)),
         head_request: parts.method == http::Method::HEAD,
         websocket_key: parts.headers.get(SEC_WEBSOCKET_KEY).cloned(),
         upgrade: RefCell::new(upgrade),
-        upgraded: Rc::clone(&conn.upgraded),
-        hangup: conn.hangup.clone(),
+        connection: Rc::clone(&conn.state),
         body_abort: RefCell::new(None),
         closing: Cell::new(false),
-        draining: conn.draining.clone(),
     });
-    let call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, sender));
+    let call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, Rc::clone(&sender)));
     calls.borrow_mut().push(call);
-    head_rx
-        .await
-        .map_err(|_| io::Error::other("the handler sent no response"))
+    poll_fn(|cx| sender.poll_head(cx)).await
 }
 
 /// One handler call, and the answer when it sends none (module docs).
@@ -424,6 +424,8 @@ async fn handle(
     body: Incoming,
     sender: Rc<ResponseSender>,
 ) {
+    // However the call ends, hyper stops waiting for a head it did not send.
+    let _abandon = AbandonHead(&sender);
     let headers = match HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(conn.table) {
         Ok(headers) => headers,
         Err(e) => {
@@ -512,26 +514,69 @@ async fn handle(
 /// set within one method and never borrowed across an await or a call out: the head goes out
 /// once, the upgrade is taken once, and `closing` is set before the refusal it marks is sent.
 struct ResponseSender {
-    /// Until the head goes out.
-    head: RefCell<Option<oneshot::Sender<Response>>>,
+    /// The head, on its way to hyper's service future ([`dispatch`]).
+    head: RefCell<HeadSlot>,
     head_request: bool,
     websocket_key: Option<http::HeaderValue>,
     /// For a request that may upgrade the connection: hyper's hand-over of the transport.
     upgrade: RefCell<Option<OnUpgrade>>,
-    upgraded: Rc<Cell<bool>>,
-    hangup: Shared<Hangup>,
+    connection: Rc<ConnectionState>,
     /// Fails the response body a `send()` opened, for a failure after the head went out.
     body_abort: RefCell<Option<BodyAbort>>,
     /// The connection closes after this response (kj's `closeAfterSend`), which says so.
     closing: Cell<bool>,
-    /// As the connection's: a response sent while the server drains says so too.
-    draining: Option<watch::Receiver<bool>>,
+}
+
+/// A response head on its way to hyper.
+enum HeadSlot {
+    /// Not sent yet; the waker is hyper's, waiting for it.
+    Waiting(Option<Waker>),
+    /// Sent; `None` once hyper has it.
+    Sent(Option<Response>),
+    /// The call ended without sending one.
+    Abandoned,
+}
+
+/// Abandons the head of a call that ends, or is dropped, without sending one.
+struct AbandonHead<'a>(&'a ResponseSender);
+
+impl Drop for AbandonHead<'_> {
+    fn drop(&mut self) {
+        let mut head = self.0.head.borrow_mut();
+        if let HeadSlot::Waiting(waker) = &mut *head {
+            let waker = waker.take();
+            *head = HeadSlot::Abandoned;
+            drop(head);
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }
+    }
 }
 
 impl ResponseSender {
     /// The head went out.
     fn sent(&self) -> bool {
-        self.head.borrow().is_none()
+        matches!(*self.head.borrow(), HeadSlot::Sent(_))
+    }
+
+    /// hyper's wait for the head.
+    fn poll_head(&self, cx: &Context<'_>) -> Poll<Result<Response, io::Error>> {
+        match &mut *self.head.borrow_mut() {
+            HeadSlot::Waiting(waker) => {
+                if !waker.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+                    *waker = Some(cx.waker().clone());
+                }
+                Poll::Pending
+            }
+            HeadSlot::Sent(head) => Poll::Ready(
+                head.take()
+                    .ok_or_else(|| io::Error::other("the response head was already taken")),
+            ),
+            HeadSlot::Abandoned => {
+                Poll::Ready(Err(io::Error::other("the handler sent no response")))
+            }
+        }
     }
 
     /// The transport this request upgrades the connection to, once hyper hands it over.
@@ -539,14 +584,15 @@ impl ResponseSender {
         self.upgrade
             .borrow_mut()
             .take()
-            .map(|upgrade| Upgrading::new(upgrade, self.hangup.clone()))
+            .map(|upgrade| Upgrading::new(upgrade, self.connection.hangup.clone()))
             .ok_or_else(|| failed("this request does not upgrade the connection"))
     }
 
     /// Says `Connection: close` when the connection closes after this response: the response
     /// refuses a CONNECT, or the server is draining.
     fn announce_close(&self, head: &mut Head) {
-        if self.closing.get() || self.draining.as_ref().is_some_and(|d| *d.borrow()) {
+        let draining = self.connection.draining.as_ref();
+        if self.closing.get() || draining.is_some_and(|d| *d.borrow()) {
             head.set(Builtin::Connection, http::HeaderValue::from_static("close"));
         }
     }
@@ -569,12 +615,16 @@ impl ResponseSender {
             parts.extensions.insert(reason);
         }
         head.apply(&mut parts.headers, &mut parts.extensions);
-        let tx = self
-            .head
-            .borrow_mut()
-            .take()
-            .ok_or_else(|| failed("response already sent"))?;
-        let _ = tx.send(http::Response::from_parts(parts, body));
+        let mut slot = self.head.borrow_mut();
+        let HeadSlot::Waiting(waker) = &mut *slot else {
+            return Err(failed("response already sent"));
+        };
+        let waker = waker.take();
+        *slot = HeadSlot::Sent(Some(http::Response::from_parts(parts, body)));
+        drop(slot);
+        if let Some(waker) = waker {
+            waker.wake();
+        }
         Ok(())
     }
 
@@ -626,7 +676,7 @@ impl ResponseSender {
         let mut head = Head::new(headers);
         head.claim(Protocol::Message);
         self.send_head(status, status_text, head, ChannelBody::empty())?;
-        self.upgraded.set(true);
+        self.connection.upgraded.set(true);
         Ok(())
     }
 
@@ -732,7 +782,7 @@ impl ServerResponse {
         }
         self.0
             .send_head(101, b"Switching Protocols", head, ChannelBody::empty())?;
-        self.0.upgraded.set(true);
+        self.0.connection.upgraded.set(true);
         Ok(Box::new(RustIo::from(io)))
     }
 }
