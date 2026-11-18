@@ -437,6 +437,47 @@ kj::Promise<DeferredProxy<void>> sendWithDefaultHandling(Worker::Lock& lock,
   return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
 }
 
+// A request body's ReadableStream needs an Own<AsyncInputStream> so that it can drop the stream
+// whenever it gets GC'ed. But the request's stream is attached to the request, so its lifetime is
+// not under our control. So, it is wrapped in a NeuterableInputStream, which is disconnected
+// before the request's stream becomes invalid: once `sent` and its proxy task finish, or once the
+// request is canceled.
+kj::Promise<DeferredProxy<void>> neuterBodyAfterSend(
+    kj::Promise<DeferredProxy<void>> sent, kj::Own<NeuterableInputStream> ownRequestBody) {
+  auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
+    // Make sure to cancel the request body stream since the native stream is no longer valid once
+    // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
+    // haven't consumed the entire request body. After a normal response the stream is already
+    // neutered, so skip building an exception that would be discarded.
+    if (!ownRequestBody->isNeutered()) {
+      ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    }
+  });
+  auto body2 = kj::addRef(*ownRequestBody);
+  return sent.then(
+      [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
+          DeferredProxy<void> deferredProxy) mutable {
+    // In the case of bidirectional streaming, the request body stream needs to remain valid
+    // while proxying the response. So, arrange for neutering to happen only after the proxy
+    // task finishes.
+    deferredProxy.proxyTask = deferredProxy.proxyTask
+                                  .then([body = kj::addRef(*ownRequestBody)]() mutable {
+      body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
+    }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
+      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      kj::throwException(kj::mv(e));
+    }).attach(kj::mv(deferredNeuter));
+
+    return deferredProxy;
+  },
+      [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+    // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
+    //   so `deferredNeuter` hasn't been destroyed yet.
+    body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+    kj::throwException(kj::mv(e));
+  });
+}
+
 }  // namespace
 
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
@@ -449,21 +490,21 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::Maybe<ExportedHandler&> exportedHandler,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
-  // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
-  // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
-  // is not under our control -- it's attached to the request. So, we wrap it in a
-  // NeuterableInputStream which allows us to disconnect the stream before it becomes invalid.
-  auto ownRequestBody = newNeuterableInputStream(requestBody);
-  auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
-    // Make sure to cancel the request body stream since the native stream is no longer valid once
-    // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
-    // haven't consumed the entire request body. After a normal response the stream is already
-    // neutered, so skip building an exception that would be discarded.
-    if (!ownRequestBody->isNeutered()) {
-      ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+  // Set only if the request has a body. See neuterBodyAfterSend() for why it is wrapped.
+  kj::Maybe<kj::Own<NeuterableInputStream>> ownRequestBody;
+  // Unless the body is handed to neuterBodyAfterSend(), its stream is canceled on return.
+  kj::UnwindDetector unwindDetector;
+  KJ_DEFER({
+    KJ_IF_SOME(b, ownRequestBody) {
+      if (unwindDetector.isUnwinding()) {
+        b->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      } else if (!b->isNeutered()) {
+        b->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+      }
+    } else {
+      // (else block needed to squelch spurious clang warning)
     }
   });
-  KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
@@ -499,7 +540,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       requestBody.tryGetLength().orDefault(1) > 0) {
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
-    auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+    auto& ownBody = ownRequestBody.emplace(newNeuterableInputStream(requestBody));
+    auto b = newSystemStream(kj::addRef(*ownBody), StreamEncoding::IDENTITY);
     auto jsStream = JsReadableStream::create(js, ioContext, kj::mv(b));
     body = Body::ExtractedBody(js, jsStream.addRef(js));
     maybeJsStream = kj::mv(jsStream);
@@ -612,7 +654,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   }
 
   maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
-  auto body2 = kj::addRef(*ownRequestBody);
 
   auto sendResponse =
       [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
@@ -650,28 +691,12 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     sent =
         ioContext.awaitJs(lock, KJ_ASSERT_NONNULL(kj::mv(responsePromise)), kj::mv(sendResponse));
   }
-  return sent.then(
-      [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
-          DeferredProxy<void> deferredProxy) mutable {
-    // In the case of bidirectional streaming, the request body stream needs to remain valid
-    // while proxying the response. So, arrange for neutering to happen only after the proxy
-    // task finishes.
-    deferredProxy.proxyTask = deferredProxy.proxyTask
-                                  .then([body = kj::addRef(*ownRequestBody)]() mutable {
-      body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
-    }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
-      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-      kj::throwException(kj::mv(e));
-    }).attach(kj::mv(deferredNeuter));
-
-    return deferredProxy;
-  },
-      [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
-    // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
-    //   so `deferredNeuter` hasn't been destroyed yet.
-    body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-    kj::throwException(kj::mv(e));
-  });
+  KJ_IF_SOME(b, ownRequestBody) {
+    auto body = kj::mv(b);
+    ownRequestBody = kj::none;
+    return neuterBodyAfterSend(kj::mv(sent), kj::mv(body));
+  }
+  return sent;
 }
 
 void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
