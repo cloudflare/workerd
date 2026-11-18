@@ -36,6 +36,7 @@ use bytes::Bytes;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
+use http::header;
 use http_body::Body;
 use http_body::Frame;
 use http_body::SizeHint;
@@ -343,6 +344,22 @@ const BUILTIN: [&str; 12] = [
     "Host",
 ];
 
+/// The [`Builtin`] headers' names, indexed by the enum.
+const BUILTIN_NAMES: [http::HeaderName; BUILTIN.len()] = [
+    header::CONNECTION,
+    http::HeaderName::from_static("keep-alive"),
+    header::TE,
+    header::TRAILER,
+    header::UPGRADE,
+    header::CONTENT_LENGTH,
+    header::TRANSFER_ENCODING,
+    header::SEC_WEBSOCKET_KEY,
+    header::SEC_WEBSOCKET_VERSION,
+    header::SEC_WEBSOCKET_ACCEPT,
+    header::SEC_WEBSOCKET_EXTENSIONS,
+    header::HOST,
+];
+
 /// The builtin headers a message's protocol sets itself (kj's `connectionHeaders`): the
 /// application's values for them are not sent.
 #[derive(Clone, Copy, Debug)]
@@ -385,7 +402,7 @@ impl Protocol {
 pub struct Head {
     builtin: [Option<http::HeaderValue>; BUILTIN.len()],
     /// Every other header, in kj's order.
-    map: http::HeaderMap,
+    others: Vec<(http::HeaderName, http::HeaderValue)>,
     /// None until a name is spelled other than as hyper title-cases it.
     spellings: Option<HeaderCaseMap>,
 }
@@ -402,7 +419,7 @@ impl Head {
     pub fn empty() -> Self {
         Self {
             builtin: Default::default(),
-            map: http::HeaderMap::new(),
+            others: Vec::new(),
             spellings: None,
         }
     }
@@ -419,7 +436,7 @@ impl Head {
             self.builtin[builtin] = Some(value);
         } else if let Ok(header) = http::HeaderName::from_bytes(name) {
             self.spell(&header, name);
-            self.map.append(header, value);
+            self.others.push((header, value));
         }
     }
 
@@ -435,7 +452,12 @@ impl Head {
         }
         let spellings = self.spellings.get_or_insert_with(HeaderCaseMap::default);
         // The name's earlier values went unspelled, as hyper would write them.
-        for _ in spelled..self.map.get_all(name).iter().count() {
+        let values = self
+            .others
+            .iter()
+            .filter(|(other, _)| other == name)
+            .count();
+        for _ in spelled..values {
             spellings.append(name, title_case(name));
         }
         spellings.append(name, Bytes::copy_from_slice(spelling));
@@ -468,12 +490,10 @@ impl Head {
 
     /// Installs the headers and their spellings on a message's parts.
     pub fn apply(mut self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
-        let mut map = http::HeaderMap::with_capacity(self.map.len() + BUILTIN.len());
-        for (spelling, value) in BUILTIN.into_iter().zip(self.builtin) {
-            // `from_bytes` lowercases; the spellings are valid header names.
-            if let (Some(value), Ok(name)) =
-                (value, http::HeaderName::from_bytes(spelling.as_bytes()))
-            {
+        let builtins = self.builtin.iter().flatten().count();
+        let mut map = http::HeaderMap::with_capacity(self.others.len() + builtins);
+        for ((spelling, name), value) in BUILTIN.into_iter().zip(BUILTIN_NAMES).zip(self.builtin) {
+            if let Some(value) = value {
                 // A builtin header has one value, and no spelling yet.
                 if !is_title_case(spelling.as_bytes()) {
                     self.spellings
@@ -483,7 +503,9 @@ impl Head {
                 map.append(name, value);
             }
         }
-        map.extend(self.map);
+        for (name, value) in self.others {
+            map.append(name, value);
+        }
         // hyper's client writes an empty value as `Name:` only through the extension.
         let spellings = self.spellings.or_else(|| {
             map.values()
