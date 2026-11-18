@@ -180,7 +180,7 @@ impl Isolate {
 }
 
 // Neither holds a GC reference, so a resource can keep either in a field.
-crate::jsg_traced!(ExternalMemoryAdjustment, ExternalMemoryTarget);
+crate::jsg_traced_unchecked!(ExternalMemoryAdjustment, ExternalMemoryTarget);
 
 // C++ JSG reports neither in heap snapshots: the memory an adjustment counts belongs to its
 // owner, which reports it if it reports it at all. Each is reported as plain data: what it owns
