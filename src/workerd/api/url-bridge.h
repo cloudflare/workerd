@@ -62,6 +62,7 @@ class JsUrlSearchParams final {
  public:
   // URLSearchParams.prototype.toString(), whatever the instance's own toString() does.
   kj::String serialize(jsg::Lock& js) const;
+  jsg::JsString serializeJs(jsg::Lock& js) const;
 
   // Undefined unless `value` is a TypeScript URLSearchParams.
   static kj::Maybe<JsUrlSearchParams> tryUnwrap(jsg::Lock& js, jsg::JsValue value);

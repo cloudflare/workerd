@@ -822,8 +822,11 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data
 JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
     : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}
 
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view)
-    : JsReadableStream(js, view.getHandle(js).copy()) {}
+JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsString str)
+    : JsReadableStream(js, str.toString(js)) {}
+
+JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsBufferSource view)
+    : JsReadableStream(js, view.copy()) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
     : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}

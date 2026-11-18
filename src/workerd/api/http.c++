@@ -104,22 +104,17 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     KJ_CASE_ONEOF(value, jsg::JsRef<jsg::JsValue>) {
       auto handle = value.getHandle(js);
       KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
-        // TODO (soon): Lazily consume the JS string...
-        auto text = str.toString(js);
         auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
+        return ExtractedBody(js, JsReadableStream(js, str), kj::mv(contentType));
       } else KJ_IF_SOME(bufferSource, handle.tryCast<jsg::JsBufferSource>()) {
-        return ExtractedBody(js, JsReadableStream(js, bufferSource.addRef(js)));
+        return ExtractedBody(js, JsReadableStream(js, bufferSource));
       } else {
         // In this case we have to convert the value to a JS string now as the
         // timing of the stringify call on the value is observable. The call
         // cannot be deferred.
-        auto val = value.getHandle(js);
-        auto jsStr = val.toJsString(js);
-        // TODO (soon) Lazily consume the JS string...
-        auto text = jsStr.toString(js);
+        auto str = value.getHandle(js).toJsString(js);
         auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
+        return ExtractedBody(js, JsReadableStream(js, str), kj::mv(contentType));
       }
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
@@ -155,7 +150,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
-      return ExtractedBody(js, JsReadableStream(js, searchParams.serialize(js)),
+      return ExtractedBody(js, JsReadableStream(js, searchParams.serializeJs(js)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
   }

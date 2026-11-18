@@ -85,7 +85,8 @@ class JsReadableStream final {
   // stream is unaffected if the source ArrayBuffer is later detached or transferred.
   JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data);
   JsReadableStream(jsg::Lock& js, kj::String data);
-  JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource> view);
+  JsReadableStream(jsg::Lock& js, jsg::JsString str);
+  JsReadableStream(jsg::Lock& js, jsg::JsBufferSource view);
   JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob);
   JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams);
   JsReadableStream(jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams);
