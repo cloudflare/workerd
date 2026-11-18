@@ -70,6 +70,21 @@ const cache :Workerd.Config = (
   cluster = .cluster,
 );
 
+# As `config`, with a tenth of the default lease rather than a quarter: a node whose event loop
+# makes no progress fences within seconds.
+const shortLease :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 10000,
+    unsafeTimeDivisor = 10,
+  ),
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (

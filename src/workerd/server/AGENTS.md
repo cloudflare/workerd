@@ -128,7 +128,10 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   (`cluster/keeper.rs`), with a tokio `current_thread` runtime and a bucket client of its own,
   so that a renewal never waits for a turn of the loop. The loop reads the lease's expiry from
   an atomic and sends the thread commands; a lease that cannot be kept ends the process from
-  that thread.
+  that thread. Once the node serves, the thread also watches the loop: a count the loop
+  advances while it makes progress (`kj_rs_tokio::watch_progress`, which misses the busy
+  stretches that `progress.rs` names) that stands still for three leases (`Timing::stall_ms`,
+  `cluster_logic::watchdog`) fences the node the same way.
 - `kj::setupAsyncIo()` (which `//src/workerd/util:setup-async-io` supplies over kj-rs-tokio and
   kj-rs-io) is the same loop for the threads that block on a `kj::WaitScope` from C++: the
   inspector and fallback-service threads, and every `kj_test` binary.

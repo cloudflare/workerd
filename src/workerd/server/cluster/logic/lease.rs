@@ -64,6 +64,14 @@ pub struct Timing {
     /// Peers judge this node's lease by their own clocks; one off from the
     /// bucket's clock by more than this exits.
     pub max_skew_ms: u64,
+    /// A node whose event loop makes no progress for this long fences
+    /// (`watchdog`). The lease is kept on a thread of its own, so a turn of
+    /// the loop longer than a lease does not lose it; a loop stuck for good
+    /// would keep it, and the node's objects unreachable, for good. Three
+    /// leases leaves room for turns longer than a lease, which the lease
+    /// thread rides out, and is short enough that peers take a stuck node's
+    /// objects over within a few leases more.
+    pub stall_ms: u64,
 }
 
 impl Timing {
@@ -77,6 +85,7 @@ impl Timing {
         list_attempt_ms: 1_000,
         contended_pause_ms: 1_000,
         max_skew_ms: 2_000,
+        stall_ms: 60_000,
     };
 
     /// `DEFAULT` with every time divided by `divisor`: for tests, which
@@ -96,11 +105,12 @@ impl Timing {
             list_attempt_ms: t.list_attempt_ms / divisor,
             contended_pause_ms: t.contended_pause_ms / divisor,
             max_skew_ms: t.max_skew_ms / divisor,
+            stall_ms: t.stall_ms / divisor,
         };
         (!divided.times().contains(&0)).then_some(divided)
     }
 
-    const fn times(self) -> [u64; 9] {
+    const fn times(self) -> [u64; 10] {
         [
             self.lease_ms,
             self.interval_ms,
@@ -111,6 +121,7 @@ impl Timing {
             self.list_attempt_ms,
             self.contended_pause_ms,
             self.max_skew_ms,
+            self.stall_ms,
         ]
     }
 

@@ -26,6 +26,12 @@ fn divided_times_keep_their_proportions() {
             round + divided.safety_ms() < divided.lease_ms,
             "{divided:?}"
         );
+        // A turn of the loop that outlasts the lease keeps it, and the
+        // node: the watchdog waits out a longer stall than that.
+        assert!(divided.stall_ms >= 3 * divided.lease_ms, "{divided:?}");
+        // An idle loop beats once a round, which the keeper reads once a
+        // round: either late by a round leaves it far from a stall.
+        assert!(4 * divided.interval_ms < divided.stall_ms, "{divided:?}");
     }
 }
 

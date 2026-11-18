@@ -19,8 +19,12 @@
 //! registry of its own.
 //!
 //! The lease therefore says that the process runs and reaches the bucket,
-//! not that its event loop takes turns: a node whose loop is stuck keeps
-//! its lease and its objects.
+//! not that its event loop takes turns. So once the node serves, the lease
+//! thread also watches the loop (`cluster_logic::watchdog`): it reads a
+//! count the loop advances while it makes progress (`Progress`), once a
+//! round, and a count that stands still for `Timing::stall_ms` fences the
+//! node as a lease that cannot be kept does. Not before: linking, after
+//! `join`, runs in turns that last as long as it does.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -35,6 +39,7 @@ use cluster_logic::lease;
 use cluster_logic::lease::Lease;
 use cluster_logic::lease::Step;
 use cluster_logic::lease::Timing;
+use cluster_logic::watchdog::Watchdog;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -98,6 +103,8 @@ pub struct Keeper {
     bucket: Bucket,
     lease: RefCell<Lease>,
     held: Held,
+    /// The loop the rounds watch, from `watch` on.
+    watched: RefCell<Option<Progress>>,
 }
 
 impl Keeper {
@@ -107,7 +114,13 @@ impl Keeper {
             bucket,
             lease: RefCell::new(Lease::new(timing)),
             held: Held::new(timing),
+            watched: RefCell::new(None),
         }
+    }
+
+    /// From here on, the rounds watch the loop that `progress` counts.
+    pub fn watch(&self, progress: Progress) {
+        *self.watched.borrow_mut() = Some(progress);
     }
 
     pub fn held(&self) -> Held {
@@ -141,10 +154,15 @@ impl Keeper {
         self.lease.borrow_mut().renewed(now_ms, result)
     }
 
-    /// Keeps the lease until the node must stop serving: answers why. Runs
-    /// for the life of the process.
+    /// Keeps the lease until the node must stop serving, or until the
+    /// loop it watches (`watch`) makes no progress: answers why. Runs for
+    /// the life of the process.
     pub async fn maintain(&self) -> String {
         let timing = self.held.timing;
+        let started = std::time::Instant::now();
+        // Its clock starts at its first observation, once there is a loop
+        // to watch.
+        let mut watchdog = Watchdog::new(&timing);
         loop {
             if self.lease.borrow().left {
                 std::future::pending::<()>().await;
@@ -169,13 +187,24 @@ impl Keeper {
                 step = self.renewed(result);
             }
             let delay = match step {
-                Step::Fence(reason) => return reason,
+                Step::Fence(reason) => return lease_lost(reason),
                 Step::Retry(reason) => {
                     tracing::warn!("renewing the cluster lease failed; retrying: {reason}");
                     timing.retry_ms
                 }
                 Step::Renew => timing.interval_ms,
             };
+            // After the lease: a round that a stop of the whole process
+            // delayed finds the lease lapsed, and says so.
+            let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let stalled = {
+                let watched = self.watched.borrow();
+                let progress = watched.as_ref();
+                progress.and_then(|progress| watchdog.observe(now_ms, progress()))
+            };
+            if let Some(reason) = stalled {
+                return reason;
+            }
             tokio::time::sleep(ms(delay)).await;
         }
     }
@@ -234,6 +263,8 @@ enum Command {
     Take(oneshot::Sender<Result<()>>),
     /// Start `Keeper::maintain`, once.
     Maintain,
+    /// `Keeper::watch`.
+    Watch(Progress),
     /// `Keeper::start_draining`.
     Drain,
     /// `Keeper::announce_draining`.
@@ -247,11 +278,14 @@ enum Command {
     Panic,
 }
 
-/// Called on the lease thread, at most once, when the lease cannot be kept.
+/// Called on the lease thread, at most once, when the lease cannot be kept
+/// or the loop makes no progress.
 ///
 /// That is when its rounds end, or when the thread ends while they run
-/// without being told to stop. Called with the reason and how much longer the
-/// lease holds, it must end the process itself, within that time.
+/// without being told to stop. Called with the reason, which says which
+/// ("its lease cannot be kept: ...", "its event loop made no progress ..."),
+/// and how much longer the lease holds, it must end the process itself,
+/// within that time.
 ///
 /// The process must be gone before peers may take the node's objects over,
 /// and the loop thread may be in a turn that never ends.
@@ -260,6 +294,13 @@ pub type Fence = Box<dyn FnOnce(String, Duration) + Send>;
 /// Runs the lease thread's body, on the lease thread, inside what the
 /// process sets up for a thread of its own: its logger.
 pub type Within = Box<dyn FnOnce(Box<dyn FnOnce() + Send>) + Send>;
+
+/// Reads, on the lease thread, a count that the server's event loop
+/// advances while it makes progress.
+///
+/// It stands still while one turn holds the loop, and through the busy
+/// stretches that `kj_rs_tokio::Progress` names.
+pub type Progress = Box<dyn Fn() -> u64 + Send>;
 
 /// How long a lease thread told to stop may take to end. Stopping cancels
 /// its requests, but tokio waits for work on its blocking pool, such as a
@@ -357,6 +398,13 @@ impl Thread {
         self.send(Command::Maintain);
     }
 
+    /// From here on, the rounds watch the loop that `progress` counts: one
+    /// that makes no progress for `Timing::stall_ms` ends the process
+    /// (`Fence`).
+    pub fn watch(&self, progress: Progress) {
+        self.send(Command::Watch(progress));
+    }
+
     pub fn start_draining(&self) {
         self.send(Command::Drain);
     }
@@ -404,6 +452,11 @@ impl Drop for Thread {
     }
 }
 
+/// What fences a node whose lease cannot be kept, for `reason`.
+fn lease_lost(reason: impl std::fmt::Display) -> String {
+    format!("its lease cannot be kept: {reason}")
+}
+
 fn stopped() -> Error {
     Error::Replica("the cluster lease thread stopped".into())
 }
@@ -441,7 +494,7 @@ struct Watch {
 impl Drop for Watch {
     fn drop(&mut self) {
         if !self.stopped && !self.keeper.left() {
-            let reason = "the lease thread stopped".to_owned();
+            let reason = lease_lost("the lease thread stopped");
             self.armed.fence(reason, &self.keeper.held);
         }
     }
@@ -475,10 +528,11 @@ async fn serve(
                     // Rounds that ended any other way renew no more either.
                     let reason = rounds
                         .await
-                        .unwrap_or_else(|e| format!("the lease's task: {e}"));
+                        .unwrap_or_else(|e| lease_lost(format!("the lease's task: {e}")));
                     armed.fence(reason, &held);
                 });
             }
+            Command::Watch(progress) => keeper.watch(progress),
             Command::Drain => keeper.start_draining(),
             Command::Announce(reply) => {
                 tokio::task::spawn_local(async move {
@@ -524,6 +578,14 @@ impl Lessee {
             Self::Thread(thread) => thread.take_lease().await,
             #[cfg(test)]
             Self::Here(keeper) => keeper.take_lease().await,
+        }
+    }
+
+    pub fn watch(&self, progress: Progress) {
+        match self {
+            Self::Thread(thread) => thread.watch(progress),
+            #[cfg(test)]
+            Self::Here(keeper) => keeper.watch(progress),
         }
     }
 
