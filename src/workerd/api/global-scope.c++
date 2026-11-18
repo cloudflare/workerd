@@ -531,7 +531,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   kj::Maybe<jsg::Promise<jsg::Ref<Response>>> responsePromise;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), jsg::JsValue(h.env.getHandle(js)), h.getCtx())) {
+      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), jsg::JsValue(h.env.getHandle(js)), h.getCtx())
+                          .value) {
         KJ_CASE_ONEOF(response, jsg::Ref<Response>) {
           syncResponse = kj::mv(response);
         }
