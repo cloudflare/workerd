@@ -205,6 +205,31 @@ private:
   };
 
   // This wastes one slot, but it is a fixed array for fast access.
+  // Headers copied from a kj::HttpHeaders, kept in one buffer until something reads or changes
+  // them, since many Workers never look at most of a request's or a subrequest response's headers.
+  // parse() adds them to `commonHeaders` and `uncommonHeaders` in their original order, exactly as
+  // the constructor once did.
+  struct Unparsed {
+    struct Entry {
+      kj::StringPtr name;
+      kj::StringPtr value;
+    };
+    // Each name and value, NUL-terminated, in order.
+    kj::Array<char> chars;
+    kj::Array<Entry> entries;
+
+    explicit Unparsed(const kj::HttpHeaders& headers);
+    Unparsed(kj::Array<char> chars, kj::Array<Entry> entries)
+        : chars(kj::mv(chars)),
+          entries(kj::mv(entries)) {}
+    Unparsed clone() const;
+  };
+
+  kj::Maybe<Unparsed> unparsed;
+
+  // Every method that reads or changes the parsed tables calls this first.
+  void parse();
+
   kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
 
   // The key is always lower-case.
