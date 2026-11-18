@@ -437,12 +437,19 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
     // needing to wait for them to complete.
     alarmScheduledNoLaterThan = requestedTime;
   }
+  auto requestNumber = ++alarmRequestCount;
 
   return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
-      .then([weakThis = addWeakToThis(), movingAlarmLater, requestedTime]() {
+      .then([weakThis = addWeakToThis(), movingAlarmLater, requestedTime, requestNumber]() {
     if (!movingAlarmLater) {
-      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled")
-          .alarmScheduledNoLaterThan = requestedTime;
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled");
+      // A request issued after this one may schedule a later alarm, which lowering the value
+      // would hide.
+      if (requestNumber == self.alarmRequestCount ||
+          willFireEarlier(self.alarmScheduledNoLaterThan, requestedTime)) {
+        self.alarmScheduledNoLaterThan = requestedTime;
+      }
     }
   });
 }

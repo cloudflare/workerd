@@ -302,6 +302,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // the alarm value in the persisted database state.
   kj::Maybe<kj::Date> alarmScheduledNoLaterThan;
 
+  // How many scheduling requests requestScheduledAlarm() has issued. A request that completes
+  // lowers alarmScheduledNoLaterThan only if no later request has been issued, since that one may
+  // schedule a later alarm.
+  uint64_t alarmRequestCount = 0;
+
   // A promise for an in-progress alarm notification update and database commit.
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 

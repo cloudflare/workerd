@@ -86,12 +86,7 @@ struct ActorSqliteTest final: public kj::PtrTarget {
       KJ_IF_SOME(h, parent.scheduleRunHandler) {
         return h(newAlarmTime);
       }
-      auto desc = newAlarmTime.map([](auto& t) {
-        return kj::str("scheduleRun(", t, ")");
-      }).orDefault(kj::str("scheduleRun(none)"));
-      auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
-      parent.calls.add(Call{kj::mv(desc), kj::mv(fulfiller)});
-      return kj::mv(promise);
+      return parent.recordScheduleRun(newAlarmTime);
     }
 
     ActorSqliteTest& parent;
@@ -100,6 +95,28 @@ struct ActorSqliteTest final: public kj::PtrTarget {
   kj::Maybe<kj::Function<kj::Promise<void>(kj::Maybe<kj::Date>, kj::Promise<void>)>>
       scheduleRunWithPriorHandler;
   ActorSqliteTestHooks hooks = ActorSqliteTestHooks(*this);
+
+  // Records a scheduleRun() call. The returned promise resolves when the test fulfills the call.
+  kj::Promise<void> recordScheduleRun(kj::Maybe<kj::Date> newAlarmTime) {
+    auto desc = newAlarmTime.map([](auto& t) {
+      return kj::str("scheduleRun(", t, ")");
+    }).orDefault(kj::str("scheduleRun(none)"));
+    auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+    calls.add(Call{kj::mv(desc), kj::mv(fulfiller)});
+    return kj::mv(promise);
+  }
+
+  // Makes scheduleRun() record each call only once its priorTask completes, as the real alarm
+  // manager waits for priorTask before it sends its request.
+  void recordScheduleRunsAfterPriorTask() {
+    scheduleRunWithPriorHandler = [this](kj::Maybe<kj::Date> newAlarmTime,
+                                      kj::Promise<void> priorTask) -> kj::Promise<void> {
+      return priorTask.then([weakThis = addWeak(), newAlarmTime]() {
+        return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test ended before scheduleRun")
+            .recordScheduleRun(newAlarmTime);
+      });
+    };
+  }
 
   ActorSqlite actor;
 
@@ -1279,6 +1296,48 @@ KJ_TEST("armAlarmHandler with coalesced pending alarms schedules reschedule exac
   fulfiller10Ms->fulfill();
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == tenMs);
+}
+
+KJ_TEST("armAlarmHandler's reschedule doesn't hide a later alarm requested after it") {
+  // The reschedule doesn't move the alarm later, so when it completes it would lower the latest
+  // time the scheduled alarm may fire at to the time it requested. A move-later requested while
+  // the reschedule is in flight may already have scheduled a later alarm by then. If the value
+  // were lowered anyway, a commit that moves the alarm earlier, but not as early as that value,
+  // wouldn't schedule its alarm before committing it.
+  ActorSqliteTest test;
+  test.recordScheduleRunsAfterPriorTask();
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
+      KJ_EXCEPTION(DISCONNECTED, "move-later request failed"));
+  test.pollAndExpectCalls({});
+
+  // The scheduler still has 1ms, so its run reschedules 2ms.
+  auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+  KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
+  auto waitBeforeCancel = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>().waitBeforeCancel);
+  auto reschedule = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // The move-later waits for the reschedule.
+  test.setAlarm(fourMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  reschedule->fulfill();
+  waitBeforeCancel.wait(test.ws);
+  test.pollAndExpectCalls({"scheduleRun(4ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // The scheduler has 4ms, so moving the alarm to 3ms schedules it before committing it.
+  test.setAlarm(threeMs);
+  test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == threeMs);
 }
 
 KJ_TEST("coalesced move-later followed by move-earlier does not race") {
