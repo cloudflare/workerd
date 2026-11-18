@@ -76,19 +76,30 @@ class RustIoStream final: public kj::AsyncIoStream {
   kj::Promise<void> shutdownTask = kj::READY_NOW;
 };
 
+// A request body, over the Rust body of the call that has it.
 class BodyStream final: public kj::AsyncInputStream {
  public:
-  explicit BodyStream(::rust::Box<RustBody> body): body(kj::mv(body)) {}
+  void start(const RustBody& body) {
+    this->body = body;
+  }
+  void finish() {
+    body = kj::none;
+  }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
+    // The read holds a share of the body, so the call may end while it waits.
+    return hot(body_read(get(), static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
   kj::Maybe<uint64_t> tryGetLength() override {
-    return body_length(*body);
+    return body_length(get());
   }
 
  private:
-  ::rust::Box<RustBody> body;
+  kj::Maybe<const RustBody&> body;
+
+  const RustBody& get() {
+    return KJ_REQUIRE_NONNULL(body, "request body used after its call ended");
+  }
 };
 
 class BodySinkStream final: public kj::AsyncOutputStream {
@@ -204,22 +215,30 @@ struct WebSocketRequest {
   kj::Maybe<kj::String> offers;
 };
 
+// A request's response, over the Rust response of the call that has it. What it sends or
+// accepts owns its own Rust objects, so it outlives the call.
 class ServerResponseImpl final: public kj::HttpService::Response {
  public:
-  ServerResponseImpl(::rust::Box<ServerResponse> impl,
+  void start(const ServerResponse& impl,
       kj::Maybe<kj::WebSocketErrorHandler&> webSocketErrors,
       WebSocketCompression compressionMode,
-      kj::Maybe<WebSocketRequest> webSocketRequest)
-      : impl(kj::mv(impl)),
-        webSocketErrors(webSocketErrors),
-        compressionMode(compressionMode),
-        webSocketRequest(kj::mv(webSocketRequest)) {}
+      kj::Maybe<WebSocketRequest> webSocketRequest) {
+    this->impl = impl;
+    this->webSocketErrors = webSocketErrors;
+    this->compressionMode = compressionMode;
+    this->webSocketRequest = kj::mv(webSocketRequest);
+  }
+  void finish() {
+    impl = kj::none;
+    webSocketErrors = kj::none;
+    webSocketRequest = kj::none;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(kj::uint statusCode,
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize) override {
-    auto sink = impl->send(statusCode, bytes(statusText), headers, kj::mv(expectedBodySize));
+    auto sink = get().send(statusCode, bytes(statusText), headers, kj::mv(expectedBodySize));
     return kj::heap<BodySinkStream>(kj::mv(sink));
   }
 
@@ -229,7 +248,7 @@ class ServerResponseImpl final: public kj::HttpService::Response {
     KJ_IF_SOME(refused, request.refusal) {
       // As kj's HttpServer: answers, closes the connection, and fails the service's call as if
       // the client had gone away, since the fault is the client's.
-      impl->send_error(
+      get().send_error(
           refused.status, bytes(refused.statusText), bytes(kj::str("ERROR: ", refused.message)));
       kj::throwException(
           KJ_EXCEPTION(DISCONNECTED, "received bad WebSocket handshake", refused.message));
@@ -257,17 +276,61 @@ class ServerResponseImpl final: public kj::HttpService::Response {
       agreement = kj::_::generateExtensionResponse(p);
     }
     auto io =
-        impl->accept_websocket(headers, bytes(agreement == nullptr ? ""_kj : agreement.asPtr()));
+        get().accept_websocket(headers, bytes(agreement == nullptr ? ""_kj : agreement.asPtr()));
     // A server's frames are unmasked (RFC 6455 section 5.1), hence no entropy source.
     return kj::newWebSocket(
         kj::heap<RustIoStream>(kj::mv(io)), kj::none, kj::mv(agreed), webSocketErrors);
   }
 
  private:
-  ::rust::Box<ServerResponse> impl;
+  kj::Maybe<const ServerResponse&> impl;
   kj::Maybe<kj::WebSocketErrorHandler&> webSocketErrors;
-  WebSocketCompression compressionMode;
+  WebSocketCompression compressionMode = WebSocketCompression::NONE;
   kj::Maybe<WebSocketRequest> webSocketRequest;
+
+  const ServerResponse& get() {
+    return KJ_REQUIRE_NONNULL(impl, "response used after its call ended");
+  }
+};
+
+// The handshake a request of `method` with `headers` asks for, if it asks for one.
+kj::Maybe<WebSocketRequest> webSocketRequestOf(
+    kj::HttpMethod method, const kj::HttpHeaders& headers) {
+  if (!headers.isWebSocket()) return kj::none;
+  return WebSocketRequest{
+    .refusal = websocketRefusal(method, headers),
+    .offers = headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
+    return kj::str(offers);
+  }),
+  };
+}
+
+class ServerCallImpl final: public ServerCall {
+ public:
+  void start(const RustBody& body,
+      const ServerResponse& response,
+      kj::HttpMethod method,
+      const kj::HttpHeaders& headers,
+      WebSocketCompression compression,
+      kj::Maybe<const kj::WebSocketErrorHandler&> errors) override {
+    bodyStream.start(body);
+    serverResponse.start(
+        response, mutableHandler(errors), compression, webSocketRequestOf(method, headers));
+  }
+  void finish() override {
+    bodyStream.finish();
+    serverResponse.finish();
+  }
+  kj::AsyncInputStream& body() override {
+    return bodyStream;
+  }
+  kj::HttpService::Response& response() override {
+    return serverResponse;
+  }
+
+ private:
+  BodyStream bodyStream;
+  ServerResponseImpl serverResponse;
 };
 
 class ConnectResponseImpl final: public kj::HttpService::ConnectResponse {
@@ -373,7 +436,7 @@ void refill_headers_over_block(kj::HttpHeaders& headers,
     const HeaderIds& ids,
     ::rust::Slice<const uint8_t> arena,
     ::rust::Slice<const uint32_t> fields) {
-  // Nulls the set slots and empties the rest without reading what they point to.
+  // Empties the headers without reading the values they point to.
   headers.clear();
   addBlock(headers, ids, kj::arrayPtr(reinterpret_cast<const char*>(arena.data()), arena.size()),
       fields);
@@ -383,27 +446,8 @@ kj::Own<kj::AsyncIoStream> new_rust_io_stream(::rust::Box<RustIo> io) {
   return kj::heap<RustIoStream>(kj::mv(io));
 }
 
-kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body) {
-  return kj::heap<BodyStream>(kj::mv(body));
-}
-
-kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
-    const kj::HttpHeaders& headers,
-    WebSocketCompression compression,
-    kj::Maybe<const kj::WebSocketErrorHandler&> errors) {
-  kj::Maybe<WebSocketRequest> webSocketRequest;
-  if (headers.isWebSocket()) {
-    webSocketRequest = WebSocketRequest{
-      .refusal = websocketRefusal(method, headers),
-      .offers =
-          headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
-      return kj::str(offers);
-    }),
-    };
-  }
-  return kj::heap<ServerResponseImpl>(
-      kj::mv(response), mutableHandler(errors), compression, kj::mv(webSocketRequest));
+kj::Own<ServerCall> new_server_call() {
+  return kj::heap<ServerCallImpl>();
 }
 
 kj::Own<kj::HttpService::ConnectResponse> new_connect_response(
