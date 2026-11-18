@@ -56,7 +56,8 @@
 //  17. Workers Caching (cache.js's `ReadThrough`) is one cache across the
 //      nodes too: a node hits what another filled, and once a purge from
 //      either is done no node serves what it removed; with a node out of
-//      reach, a purge fails.
+//      reach, a purge fails; a fill begun before a purge serves no read
+//      issued after it, joined or stored.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -1422,7 +1423,10 @@ async function readThrough(node, path) {
 async function purge(node, body) {
   const url = `http://127.0.0.1:${node.httpPort}/purge`;
   const init = { method: 'POST', body: JSON.stringify(body) };
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  const res = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(20_000),
+  });
   return res.json();
 }
 
@@ -1432,14 +1436,17 @@ test('cluster: a read-through purge is done on every node', async () => {
     async ({ nodes }) => {
       const [a, b] = nodes;
       const paths = Array.from({ length: 16 }, (_, i) => `/t${i % 2}/k${i}`);
-      const each = (node) => Promise.all(paths.map((p) => readThrough(node, p)));
+      const each = (node) =>
+        Promise.all(paths.map((p) => readThrough(node, p)));
       // A node stores once it has been registered for `join_ms`.
       let filled;
       await until(
         async () => {
           filled = (await each(a)).map(([, body]) => body);
           const seen = await each(b);
-          return seen.every(([s, body], i) => s === 'HIT' && body === filled[i]);
+          return seen.every(
+            ([s, body], i) => s === 'HIT' && body === filled[i]
+          );
         },
         20_000,
         "b never hit a's fills"
@@ -1450,7 +1457,11 @@ test('cluster: a read-through purge is done on every node', async () => {
       for (const node of [b, a]) {
         (await each(node)).forEach(([status, body], i) => {
           if (paths[i].startsWith('/t0/')) {
-            assert.notStrictEqual(body, filled[i], `${node.nodeId} ${paths[i]}`);
+            assert.notStrictEqual(
+              body,
+              filled[i],
+              `${node.nodeId} ${paths[i]}`
+            );
           } else {
             assert.deepStrictEqual([status, body], ['HIT', filled[i]]);
           }
@@ -1468,6 +1479,40 @@ test('cluster: a read-through purge is done on every node', async () => {
       await b.stop({ signal: 'SIGKILL' });
       const failed = await purge(a, { purgeEverything: true });
       assert.strictEqual(failed.success, false);
+    },
+    { configName: 'readThrough', disk: 'cache' }
+  );
+});
+
+test('cluster: a read-through fill begun before a purge serves no later read', async () => {
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      const [a, b] = nodes;
+      await until(
+        async () => {
+          await readThrough(a, '/ready/x');
+          return (await readThrough(b, '/ready/x'))[0] === 'HIT';
+        },
+        20_000,
+        'b never hit a fill'
+      );
+      // The Worker picks its answer, then takes a second to send it.
+      const path = '/slow/k?ms=1000';
+      const filling = readThrough(a, path);
+      await sleep(200);
+      const ok = { success: true, errors: [] };
+      assert.deepStrictEqual(await purge(b, { tags: ['slow'] }), ok);
+      // Issued once the purge is done: neither joins the fill on a nor hits
+      // what the fill stored.
+      const [, later] = await readThrough(a, path);
+      const [, filled] = await filling;
+      assert.notStrictEqual(
+        later,
+        filled,
+        'a read after the purge saw its fill'
+      );
+      assert.deepStrictEqual(await readThrough(a, path), ['HIT', later]);
     },
     { configName: 'readThrough', disk: 'cache' }
   );
@@ -3362,7 +3407,7 @@ test('cluster: a cron occurrence does not run again on an owner whose clock lags
     // Its arm fails until it has taken the schedule over, then plans on its
     // own clock.
     let armed;
-    for (const deadline = Date.now() + 40_000; armed === undefined;) {
+    for (const deadline = Date.now() + 40_000; armed === undefined; ) {
       try {
         armed = await clock(survivor, 0);
       } catch (e) {
