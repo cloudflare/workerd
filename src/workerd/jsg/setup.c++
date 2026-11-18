@@ -583,6 +583,9 @@ IsolateBase::IsolateBase(V8System& system,
       jsSerializeModeKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, JS_SERIALIZE_MODE_KEY)));
 
+      functionBindKey.Reset(
+          ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, "workerd:functionPrototypeBind")));
+
       domExceptionBrandKey.Reset(
           ptr, v8::Private::ForApi(ptr, v8StrIntern(ptr, DOM_EXCEPTION_BRAND_KEY)));
 
@@ -768,6 +771,8 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
   domExceptionTemplate.Reset();
+  internalFunctionTemplates.clear();
+  functionBindKey.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
   domExceptionBrandKey.Reset();
@@ -1225,6 +1230,52 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate
   return from(isolate).domExceptionTemplate.Get(isolate);
 }
 
+v8::Local<v8::FunctionTemplate> IsolateBase::getInternalFunctionTemplate(
+    v8::FunctionCallback callback) {
+  auto& slot = internalFunctionTemplates.findOrCreate(reinterpret_cast<uintptr_t>(callback), [&]() {
+    auto functionTemplate =
+        v8::FunctionTemplate::New(ptr, callback, {}, {}, 0, v8::ConstructorBehavior::kThrow);
+    // A startup snapshot that holds one of these functions refers to the callback.
+    registerExternalReference(reinterpret_cast<intptr_t>(callback));
+    return decltype(internalFunctionTemplates)::Entry{reinterpret_cast<uintptr_t>(callback),
+      v8::Global<v8::FunctionTemplate>(ptr, functionTemplate)};
+  });
+  return slot.Get(ptr);
+}
+
+void saveFunctionPrototypeBind(v8::Local<v8::Context> context) {
+  auto isolate = v8::Isolate::GetCurrent();
+  auto global = context->Global();
+  auto key = IsolateBase::from(isolate).functionBindKey.Get(isolate);
+  // A context restored from a startup snapshot already has the original, saved before the
+  // snapshotted code ran, which may have replaced Function.prototype.bind since.
+  if (check(global->HasPrivate(context, key))) return;
+  auto function = check(global->Get(context, v8StrIntern(isolate, "Function"))).As<v8::Object>();
+  auto prototype =
+      check(function->Get(context, v8StrIntern(isolate, "prototype"))).As<v8::Object>();
+  auto bind = check(prototype->Get(context, v8StrIntern(isolate, "bind")));
+  KJ_ASSERT(bind->IsFunction());
+  KJ_ASSERT(check(global->SetPrivate(context, key, bind)));
+}
+
+v8::Local<v8::Function> newInternalFunction(
+    v8::Local<v8::Context> context, v8::FunctionCallback callback, v8::Local<v8::Object> data) {
+  auto isolate = v8::Isolate::GetCurrent();
+  auto& base = IsolateBase::from(isolate);
+  auto target = check(base.getInternalFunctionTemplate(callback)->GetFunction(context));
+  if (data.IsEmpty()) return target;
+
+  // Function.prototype.bind() makes a JSBoundFunction, a small object in new space.
+  auto bind = check(context->Global()->GetPrivate(context, base.functionBindKey.Get(isolate)));
+  if (bind->IsFunction()) {
+    v8::Local<v8::Value> args[] = {data};
+    return check(bind.As<v8::Function>()->Call(context, target, 1, args)).As<v8::Function>();
+  }
+
+  // A context that jsg did not make, which saveFunctionPrototypeBind() never saw.
+  return check(v8::Function::New(context, callback, data, 0, v8::ConstructorBehavior::kThrow));
+}
+
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->jsSerializeModeKey.Get(isolate);
@@ -1270,6 +1321,8 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(domExceptionTemplate.Reset());
+    KJ_DEFER(internalFunctionTemplates.clear());
+    KJ_DEFER(functionBindKey.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(domExceptionBrandKey.Reset());

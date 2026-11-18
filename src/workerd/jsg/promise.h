@@ -135,6 +135,35 @@ void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
 }
 
 // =======================================================================================
+// Functions that only V8 calls
+
+// Returns a new function that runs `callback`, for functions that only V8 itself calls, such as
+// the continuations that jsg::Promise attaches to a promise. `callback` reads `data` back with
+// internalFunctionData().
+//
+// Prefer this to v8::Function::New() for functions made in bulk. v8::Function::New() allocates
+// a FunctionTemplateInfo and a SharedFunctionInfo for every function, in old space, where they stay
+// until the next full GC. The template refers to `data`, and a scavenge treats every reference
+// from old space as a root, so `data` and everything it reaches survive every scavenge until then.
+// This function instead binds `data`, as the receiver, to a function made once per context and
+// callback, using the context's original Function.prototype.bind(). That allocates only the bound
+// function, in new space, so a scavenge frees it together with what `data` holds. Like any API
+// function, the callback stays out of stack traces.
+//
+// Without `data`, returns the shared function itself. Don't give the result to JavaScript; use
+// v8::Function::New() or jsg::Function for functions JavaScript can see.
+v8::Local<v8::Function> newInternalFunction(
+    v8::Local<v8::Context> context, v8::FunctionCallback callback, v8::Local<v8::Object> data = {});
+
+// The `data` given to newInternalFunction() for the function that `args` is a call to.
+inline v8::Local<v8::Object> internalFunctionData(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // newInternalFunction() binds `data` as the receiver, or as v8::Function::New()'s data, when the
+  // context has no saved Function.prototype.bind().
+  auto data = args.DataV2().As<v8::Value>();
+  return data->IsObject() ? data.As<v8::Object>() : args.This();
+}
+
+// =======================================================================================
 // Promise implementation
 
 // This type (opaque-wrapped) is the type of the "data" for a continuation callback. We have both
@@ -158,8 +187,9 @@ struct ThenCatchPair {
 };
 // FunctionCallback implementing a C++ .then() continuation on a JS promise.
 //
-// We expect the input is already an opaque-wrapped value, the callback data is an opaque-wrapped C++
-// function to execute, and we want to produce an opaque-wrapped output or Promise.
+// We expect the input is already an opaque-wrapped value, the function's data (see
+// newInternalFunction()) is an opaque-wrapped C++ function to execute, and we want to produce an
+// opaque-wrapped output or Promise.
 template <typename FuncPairType, bool isCatch, typename Input, typename Output>
 void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   liftKj(args, [&]() {
@@ -170,7 +200,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // so it's likely to be caught in debug, and we'd like to avoid the extra overhead in releases.
     DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
 #endif
-    auto funcPair = unwrapOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
+    auto funcPair = unwrapOpaque<FuncPairType>(isolate, internalFunctionData(args));
 #ifdef KJ_DEBUG
     kj::AllowAsyncDestructorsScope allowAsyncDestructors;
 #endif
@@ -211,7 +241,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
 template <typename FuncPairType, bool isCatch>
 void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto isolate = args.GetIsolate();
-  dropOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
+  dropOpaque<FuncPairType>(isolate, internalFunctionData(args));
   if constexpr (isCatch) {
     isolate->ThrowException(args[0]);
   } else {
@@ -467,13 +497,10 @@ class Promise {
         isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(errCallback));
       }
 
-      auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
+      auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair)).template As<v8::Object>();
 
-      auto then = check(v8::Function::New(
-          context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
-
-      auto errThen = check(v8::Function::New(
-          context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
+      auto then = newInternalFunction(context, thenCallback, funcPairHandle);
+      auto errThen = newInternalFunction(context, errCallback, funcPairHandle);
 
       return MaintainPromise<Result>(
           js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
@@ -578,7 +605,7 @@ template <typename TypeWrapper, typename Input>
 void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
   if constexpr (isVoid<Input>()) {
     // No wrapping needed. Note that we still attach `thenWrap` to the promise chain only because
-    // we use `args.data` to prevent the object from being GC'ed while the promise is still
+    // we use the function's data to prevent the object from being GC'ed while the promise is still
     // executing.
     args.GetReturnValue().SetUndefined();
   } else if constexpr (isV8Ref<Input>()) {
@@ -643,8 +670,7 @@ class PromiseWrapper {
       isolateRegisterExternalReference(
           js.v8Isolate, reinterpret_cast<intptr_t>(&thenWrap<TypeWrapper, T>));
     }
-    auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
-        1, v8::ConstructorBehavior::kThrow));
+    auto then = newInternalFunction(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}));
     auto ret = check(promise.consumeHandle(js)->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
@@ -685,8 +711,7 @@ class PromiseWrapper {
           isolateRegisterExternalReference(
               js.v8Isolate, reinterpret_cast<intptr_t>(&thenUnwrap<TypeWrapper, T>));
         }
-        auto then = check(v8::Function::New(
-            context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
+        auto then = newInternalFunction(context, &thenUnwrap<TypeWrapper, T>);
         promise = check(promise->Then(context, then));
       }
       return Promise<T>(js.v8Isolate, promise);

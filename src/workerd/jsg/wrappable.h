@@ -52,6 +52,11 @@ namespace workerd::jsg {
 // serialize it; a no-op unless the isolate is preparing one (IsolateBase in setup.h).
 void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
 
+// Saves `context`'s Function.prototype.bind() for newInternalFunction() (promise.h), which must
+// not call a replacement that JavaScript installed. Call it on each new context before any
+// JavaScript runs in it.
+void saveFunctionPrototypeBind(v8::Local<v8::Context> context);
+
 WD_STRONG_BOOL(IsContextGlobal);
 
 // The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
@@ -605,8 +610,8 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void clearWrappers();
 
   // Calls `fn` for every Wrappable in `wrappers`, i.e. every one that currently has a V8 wrapper
-  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. Startup-snapshot
-  // preparation only: the one caller is WrappablesSerializeMetadata::recordLiveWrappables().
+  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. For startup-snapshot
+  // preparation, by WrappablesSerializeMetadata::recordLiveWrappables(), and for tests.
   //
   // The caller holds the isolate lock. The references are valid only for the duration of the
   // call: `fn` must not attach or detach wrappers (the list is being iterated) and must not

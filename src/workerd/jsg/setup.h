@@ -233,6 +233,10 @@ class IsolateBase {
   // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
   static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
+  // The template of the function that newInternalFunction() makes for `callback`, created on
+  // first use.
+  v8::Local<v8::FunctionTemplate> getInternalFunctionTemplate(v8::FunctionCallback callback);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -965,6 +969,13 @@ class IsolateBase {
   // FunctionTemplate returned by getDomExceptionTemplate().
   v8::Global<v8::FunctionTemplate> domExceptionTemplate;
 
+  // Templates returned by getInternalFunctionTemplate(), keyed by callback address.
+  kj::HashMap<uintptr_t, v8::Global<v8::FunctionTemplate>> internalFunctionTemplates;
+
+  // The private symbol under which saveFunctionPrototypeBind() keeps a context's original
+  // Function.prototype.bind, on its global object.
+  v8::Global<v8::Private> functionBindKey;
+
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
 
@@ -1129,6 +1140,9 @@ class IsolateBase {
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
+  friend void saveFunctionPrototypeBind(v8::Local<v8::Context> context);
+  friend v8::Local<v8::Function> newInternalFunction(
+      v8::Local<v8::Context> context, v8::FunctionCallback callback, v8::Local<v8::Object> data);
 
   friend kj::Exception createTunneledException(
       v8::Isolate* isolate, v8::Local<v8::Value> exception);

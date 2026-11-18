@@ -1887,6 +1887,7 @@ class ResourceWrapper {
         /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
         /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
         options.apiWrapperDeserializer);
+    saveFunctionPrototypeBind(context);
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);

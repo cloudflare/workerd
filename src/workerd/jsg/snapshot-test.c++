@@ -698,6 +698,20 @@ KJ_TEST("a finished generator and a generator function survive a snapshot round 
   });
 }
 
+KJ_TEST("a restored context's C++ continuations use the bind the zygote saved") {
+  auto artifact =
+      bakeSnapshot("Function.prototype.bind = () => { throw new Error('replaced bind'); };"_kj);
+  auto restored = newIsolateFromSnapshot(*artifact);
+  inRestoredContext(*restored, [&](Lock& js) {
+    // The zygote saved Function.prototype.bind before its top level replaced it, and the restored
+    // context keeps that original rather than saving the replacement.
+    bool ran = false;
+    js.resolvedPromise().then(js, [&ran](Lock&) { ran = true; });
+    js.runMicrotasks();
+    KJ_EXPECT(ran);
+  });
+}
+
 // =======================================================================================
 // FinalizationRegistry cleanups around the snapshot. A cleanup the top level leaves due runs in
 // the zygote before anything is recorded, so what the callback does is part of the snapshot; a

@@ -11,6 +11,7 @@ V8System v8System;
 
 int promiseTestResult = 0;
 kj::String catchTestResult;
+kj::String continuationErrorStack;
 
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   Promise<kj::String> makePromise(jsg::Lock& js) {
@@ -114,6 +115,18 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     js.runMicrotasks();
   }
 
+  // Records in continuationErrorStack the stack of an error that a C++ continuation throws.
+  void throwFromContinuation(jsg::Lock& js) {
+    js.resolvedPromise(1)
+        .then(js, [](jsg::Lock&, int) -> int {
+      JSG_FAIL_REQUIRE(Error, "canceled");
+    }).catch_(js, [](jsg::Lock& js, Value value) -> int {
+      auto error = KJ_ASSERT_NONNULL(JsValue(value.getHandle(js)).tryCast<JsObject>());
+      continuationErrorStack = kj::str(error.get(js, "stack"));
+      return 0;
+    });
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -129,6 +142,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(thenable);
     JSG_METHOD(prototypePolution);
     JSG_METHOD(resolveWithCppValues);
+    JSG_METHOD(throwFromContinuation);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -225,6 +239,32 @@ KJ_TEST("prototype polution") {
     prototypePolution();
     m;
   )A",
+      "boolean", "false");
+}
+
+KJ_TEST("an error a C++ continuation throws has no frame for the continuation") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  // The continuations run from the microtask queue with no JavaScript on the stack, as they do
+  // when a request's I/O resolves a promise. The continuation is internal, so like any API
+  // function it stays out of stack traces.
+  e.expectEval("throwFromContinuation()", "undefined", "undefined");
+  e.runMicrotasks();
+  KJ_EXPECT(continuationErrorStack == "Error: canceled", continuationErrorStack);
+}
+
+KJ_TEST("C++ continuations don't call a Function.prototype.bind that JavaScript replaced") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  e.expectEval(R"(
+    let called = false;
+    Function.prototype.bind = function() {
+      called = true;
+      throw new Error("replaced bind");
+    };
+    resolveWithCppValues();
+    called
+  )",
       "boolean", "false");
 }
 
