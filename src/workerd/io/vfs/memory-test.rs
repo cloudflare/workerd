@@ -12,6 +12,7 @@ use crate::File;
 use crate::Node;
 use crate::SymbolicLink;
 use crate::tests::TestHost;
+use crate::tests::clear;
 use crate::tests::p;
 
 /// Writes what is reported as an outline, one line per edge, indented by depth.
@@ -102,6 +103,7 @@ fn reports_each_node_with_what_it_retains() {
             "      owned: kj::Array<T> 4".to_owned(),
         ]
     );
+    clear(&host, &root);
 }
 
 #[test]

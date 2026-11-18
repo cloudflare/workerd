@@ -9,6 +9,7 @@ use std::rc::Rc;
 use super::*;
 use crate::SymbolicLink;
 use crate::tests::TestHost;
+use crate::tests::clear;
 use crate::tests::names;
 use crate::tests::p;
 
@@ -126,6 +127,7 @@ fn stat_count_and_list() {
     assert_eq!(dir.stat(&host, &p("l")).unwrap().unwrap().size, 3);
     assert!(dir.stat(&host, &p("missing")).is_none());
     assert!(dir.stat(&host, &p("f/x")).is_none());
+    clear(&host, &dir);
 }
 
 #[test]
@@ -432,6 +434,7 @@ fn links_are_followed_unless_asked_not_to() {
         Some(Ok(Node::File(_)))
     ));
     open_file(&host, &root, "dir/new");
+    clear(&host, &root);
 }
 
 #[test]
@@ -472,6 +475,7 @@ fn link_cycles_are_detected() {
         open(&host, &root, "self/self/d/f"),
         Some(Err(FsError::SymlinkDepthExceeded))
     ));
+    clear(&host, &root);
 }
 
 #[test]
@@ -492,6 +496,7 @@ fn a_chain_of_257_links_is_too_deep() {
         open(&host, &root, "l256"),
         Some(Err(FsError::SymlinkDepthExceeded))
     ));
+    clear(&host, &root);
 }
 
 #[test]

@@ -159,6 +159,15 @@ pub fn names(host: &dyn VfsHost, dir: &Directory) -> Vec<String> {
         .collect()
 }
 
+/// Removes everything in `dir`. A test that adds to a directory a link that resolves from it calls
+/// this at its end: the link holds the directory, so otherwise the two keep each other alive.
+pub fn clear(host: &dyn VfsHost, dir: &Directory) {
+    for entry in dir.list(host) {
+        dir.remove(host, &[entry.name], RemoveOptions { recursive: true })
+            .unwrap();
+    }
+}
+
 /// `text` evaluated as a path from the root.
 pub fn p(text: &str) -> Vec<Vec<u8>> {
     path::eval(text.as_bytes()).unwrap()
