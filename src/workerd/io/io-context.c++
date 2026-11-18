@@ -1031,6 +1031,9 @@ IoContext::~IoContext() noexcept(false) {
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;
   }
+  if (hangCheckWaiter.link.isLinked()) {
+    thread.getHangChecks().waiters.remove(hangCheckWaiter);
+  }
 
   // Invalidate ReverseIoOwn instances before destroying their backing OwnedObjects.
   reverseIoOwnValidity->invalidate();
@@ -1050,29 +1053,57 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
   // We can't abort just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.abortFromHangTask =
-      Worker::AsyncLock::whenThreadIdle()
-          .then([weakContext = context.getWeakRef()]() mutable noexcept -> kj::Promise<void> {
-    // Reject rather than throw: a throw would terminate the process from this `noexcept` lambda.
-    auto& ctx = KJ_UNWRAP_OR(weakContext->tryGet(),
-        { return KJ_EXCEPTION(FAILED, "IoContext destroyed before hang abort"); });
+  context.scheduleHangCheck();
+}
+
+void IoContext::scheduleHangCheck() {
+  auto& checks = thread.getHangChecks();
+  if (!hangCheckWaiter.link.isLinked()) {
+    checks.waiters.add(hangCheckWaiter);
+  }
+  if (!checks.waiting) {
+    checks.waiting = true;
+    // The wait stays pending when every context unlinks: under load the next request would only
+    // start a new one.
+    checks.idleWait =
+        Worker::AsyncLock::whenThreadIdle().then([&checks]() {
+      runHangChecks(checks);
+    }).eagerlyEvaluate(nullptr);
+  }
+}
+
+void IoContext::cancelHangCheck() {
+  if (hangCheckWaiter.link.isLinked()) {
+    thread.getHangChecks().waiters.remove(hangCheckWaiter);
+  }
+  abortFromHangTask = kj::none;
+}
+
+void IoContext::runHangChecks(ThreadContext::HangChecks& checks) {
+  // Cleared on the way out, so that the wait whose continuation this is isn't replaced while it
+  // runs. Starting an abort runs no JavaScript and registers no PendingEvent, so no context links
+  // itself while we drain the list, and no context is destroyed.
+  KJ_DEFER(checks.waiting = false);
+  while (!checks.waiters.empty()) {
+    auto& context = checks.waiters.front().context;
+    checks.waiters.remove(context.hangCheckWaiter);
 
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
     //
     // By the time the thread goes idle the IncomingRequest may already be gone, even though the
     // IoContext lives on (e.g. waitUntil work is still outstanding). getMetrics() requires a
-    // current IncomingRequest, and this continuation is `noexcept`, so reaching for it in that
-    // state would terminate the process instead of aborting the context. Fall back to the
-    // request-less lock, which only costs us the lock-timing metrics.
-    auto lockPromise = ctx.incomingRequests.empty()
-        ? ctx.worker->takeAsyncLockWithoutRequest(nullptr)
-        : ctx.worker->takeAsyncLock(ctx.getMetrics());
-    return lockPromise.then([weakContext = kj::mv(weakContext)](Worker::AsyncLock asyncLock) {
-      // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
+    // current IncomingRequest, so fall back to the request-less lock, which only costs us the
+    // lock-timing metrics.
+    auto lockPromise = context.incomingRequests.empty()
+        ? context.worker->takeAsyncLockWithoutRequest(nullptr)
+        : context.worker->takeAsyncLock(context.getMetrics());
+    context.abortFromHangTask =
+        lockPromise
+            .then([weakContext = context.getWeakRef()](Worker::AsyncLock asyncLock) {
       KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before hang abort")
           .abortFromHang(asyncLock);
-    });
-  }).eagerlyEvaluate(nullptr);
+    }).eagerlyEvaluate(nullptr);
+  }
 }
 
 kj::Own<void> IoContext::registerPendingEvent() {
@@ -1090,7 +1121,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
     }
 
     // Cancel any already-scheduled finalization.
-    abortFromHangTask = kj::none;
+    cancelHangCheck();
 
     auto result = kj::refcounted<PendingEvent>(*this);
     pendingEvent = *result;
