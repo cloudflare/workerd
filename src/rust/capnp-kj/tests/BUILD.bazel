@@ -1,0 +1,31 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_capnp_library(src = "test.capnp")
+
+# The Rust half of capnp-kj-test: Rust servers and clients of TestEcho, called from C++.
+wd_rust_crate(
+    name = "capnp-kj-test-rust",
+    testonly = True,
+    cxx_bridge_deps = [
+        "//src/rust/capnp-kj:ffi",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    deps = [
+        ":test_capnp_rust",
+        "//src/rust/capnp-kj",
+        "@crates_vendor//capnp",
+        "@crates_vendor//futures",
+    ],
+)
+
+kj_test(
+    src = "capnp-kj-test.c++",
+    deps = [
+        ":capnp-kj-test-rust",
+        ":test_capnp",
+        "//src/rust/capnp-kj:ffi",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
