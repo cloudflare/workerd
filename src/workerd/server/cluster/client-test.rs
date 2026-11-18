@@ -40,6 +40,12 @@ fn listing_xml() {
         .map(|c| unescape(elements(c, "Key").next().unwrap()))
         .collect();
     assert_eq!(keys, ["a&b"]);
+    for (xml, text) in [
+        ("&amp;lt;&#13;&#x1F600;", "&lt;\r\u{1F600}"),
+        ("a & b &bogus; &#xD800;", "a & b &bogus; &#xD800;"),
+    ] {
+        assert_eq!(unescape(xml), text, "{xml}");
+    }
     let prefixes: Vec<_> = elements(xml, "CommonPrefixes")
         .map(|c| elements(c, "Prefix").next().unwrap())
         .collect();

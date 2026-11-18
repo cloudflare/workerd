@@ -866,12 +866,41 @@ fn iso_ms(time: &str) -> Option<u64> {
     u64::try_from((days * 86_400 + h * 3600 + m * 60 + s) * 1000 + ms).ok()
 }
 
+/// `text` with its XML entities decoded, numeric ones too: S3 writes a key's
+/// control characters as `&#13;`.
 fn unescape(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let entity = rest
+            .find(';')
+            .and_then(|end| Some((entity(&rest[1..end])?, end)));
+        let Some((c, end)) = entity else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        out.push(c);
+        rest = &rest[end + 1..];
+    }
+    out + rest
+}
+
+fn entity(name: &str) -> Option<char> {
+    let n = match name {
+        "lt" => '<'.into(),
+        "gt" => '>'.into(),
+        "quot" => '"'.into(),
+        "apos" => '\''.into(),
+        "amp" => '&'.into(),
+        _ => match name.strip_prefix("#x") {
+            Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+            None => name.strip_prefix('#')?.parse().ok()?,
+        },
+    };
+    char::from_u32(n)
 }
 
 fn unix_ms(t: SystemTime) -> i64 {

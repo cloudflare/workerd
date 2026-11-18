@@ -50,6 +50,10 @@
 //   - the record is user metadata, which S3 caps at 2 KB, so on S3 a put
 //     with more customMetadata than fits is refused as MetadataTooLarge;
 //   - a listing that includes metadata is a HEAD of each object listed;
+//     one that doesn't gives the store's time, not the put's, and says
+//     every object's storage class is Standard;
+//   - a key with a `.` or `..` segment is refused (InvalidObjectName), as
+//     stores and proxies may resolve them;
 //   - an upload never completed or aborted keeps its parts: a store's
 //     lifecycle rule for incomplete multipart uploads collects them.
 //
@@ -330,7 +334,8 @@ function object(k, h, size) {
     size,
     version: h.get('x-version'),
     etag: (h.get('ETag') ?? '').replace(/^(W\/)?"|"$/g, ''),
-    uploaded: Number(h.get('x-modified')),
+    // The write's own time, which the record keeps, else the store's.
+    uploaded: recorded(meta)?.uploaded ?? Number(h.get('x-modified')),
     headers: Object.fromEntries(
       HTTP_FIELDS.map(([field, header]) => [field, h.get(header) ?? undefined])
     ),
@@ -379,11 +384,14 @@ function serialisedLength(s) {
   return s.length;
 }
 
-// The headers that store `record` with an object.
+// The headers that store `record` with an object. The content fields are
+// also headers, for tools that read the store, when they can be: the record
+// is what counts.
 function headers(record) {
   const out = {};
   for (const [field, header] of HTTP_FIELDS) {
-    if (record.http[field] !== undefined) out[header] = record.http[field];
+    const v = record.http[field];
+    if (typeof v === 'string' && /^[\t\x20-\x7e]*$/.test(v)) out[header] = v;
   }
   const json = JSON.stringify(record).replace(
     /[\u007f-￿]/g,
@@ -393,13 +401,20 @@ function headers(record) {
   return out;
 }
 
+// The record in user metadata `meta`, if any.
+function recorded(meta) {
+  try {
+    const record = JSON.parse(meta[ENVELOPE]);
+    if (typeof record === 'object' && record !== null) return record;
+  } catch {}
+  return null;
+}
+
 // The R2 record of a stored object: its envelope, or for an object written
 // by something else, its user metadata and headers.
 function stored(o) {
-  try {
-    const record = JSON.parse(o.meta[ENVELOPE]);
-    if (typeof record === 'object' && record !== null) return record;
-  } catch {}
+  const record = recorded(o.meta);
+  if (record) return record;
   const http = {};
   for (const [field] of HTTP_FIELDS) {
     if (o.headers[field] !== undefined) http[field] = o.headers[field];
@@ -600,23 +615,30 @@ async function list(bucket, req) {
     uploaded: e.modified,
   }));
   // Metadata the listing doesn't carry is a HEAD of each object.
-  const objects = await parallel(entries, async (e) => {
+  let objects = await parallel(entries, async (e) => {
     if (!wanted.http && !wanted.custom) return describe(e, undefined, wanted);
     return describe((await head(bucket, e.key)) ?? e, undefined, wanted);
   });
   let delimitedPrefixes = page.prefixes.map(strip);
   let next = page.token == null ? undefined : CURSOR + page.token;
-  // Fewer than `limit` when the reply would be too large, as R2 does.
+  // Fewer than `limit` when the reply would be too large, as R2 does: the
+  // objects and prefixes in the store's order, until their JSON's bytes
+  // pass the budget.
+  const items = [
+    ...objects.map((o) => [o.name, o]),
+    ...delimitedPrefixes.map((p) => [p, null]),
+  ].sort(([a], [b]) => compare(a, b));
   let size = 0;
-  const fit = Math.max(
-    1,
-    objects.findIndex((o) => (size += JSON.stringify(o).length) > MAX_REPLY)
+  const over = items.findIndex(
+    ([p, o]) => (size += utf8Bytes(JSON.stringify(o ?? p)).length) > MAX_REPLY
   );
-  if (size > MAX_REPLY && fit < objects.length) {
-    objects.length = fit;
-    const last = objects[fit - 1].name;
-    delimitedPrefixes = delimitedPrefixes.filter((p) => p < last);
-    next = AFTER + last;
+  const kept = items.slice(0, Math.max(1, over));
+  if (over !== -1 && kept.length < items.length) {
+    objects = kept.filter(([, o]) => o).map(([, o]) => o);
+    delimitedPrefixes = kept.filter(([, o]) => !o).map(([p]) => p);
+    // After a prefix is after every key in it.
+    const [last, o] = kept.at(-1);
+    next = AFTER + (o ? last : last + '\u{10FFFF}');
   }
   const result = { objects, truncated: next !== undefined, delimitedPrefixes };
   if (next !== undefined) result.cursor = next;
@@ -652,6 +674,7 @@ async function put(bucket, req, take, size) {
   // An empty value has no last chunk to hold back.
   if (size === 0) await check.end();
   const body = take.stream(size, size === 0 ? null : check);
+  record.uploaded = Date.now();
   let r;
   try {
     r = await blobs(bucket, k, {
@@ -672,7 +695,8 @@ async function put(bucket, req, take, size) {
 // The object a write's answer describes.
 function written(k, h, size, record) {
   const o = object(k, h, size);
-  return { ...o, meta: { [ENVELOPE]: JSON.stringify(record) } };
+  const meta = { [ENVELOPE]: JSON.stringify(record) };
+  return { ...o, uploaded: record.uploaded ?? o.uploaded, meta };
 }
 
 // The hashes of a put's value as it streams, refused at its end unless it
@@ -869,3 +893,10 @@ const unbase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const utf8 = (bytes) => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 
 const utf8Bytes = (s) => new TextEncoder().encode(s);
+
+// `a` against `b` in UTF-8 byte order, as stores sort keys.
+function compare(a, b) {
+  const [x, y] = [utf8Bytes(a), utf8Bytes(b)];
+  const i = x.findIndex((c, i) => c !== y[i]);
+  return i === -1 ? x.length - y.length : x[i] - (y[i] ?? -1);
+}

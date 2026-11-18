@@ -166,7 +166,8 @@ impl From<cluster::Error> for Fail {
     fn from(error: cluster::Error) -> Self {
         match error {
             cluster::Error::Refused { what, status, code } => Self::Refuse {
-                status,
+                // A refusal in a 200, as S3 answers a completion it failed.
+                status: if status < 400 { 500 } else { status },
                 code,
                 message: what,
             },

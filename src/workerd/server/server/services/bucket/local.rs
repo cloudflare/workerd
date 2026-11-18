@@ -253,39 +253,38 @@ impl Local {
         hex(&md5(key.as_bytes()))
     }
 
-    /// Writes `blobs` at `key` if `guard` holds; otherwise drops them.
-    fn store(
+    /// Writes `blobs` at `key` if `guard` holds; otherwise drops them. The
+    /// caller holds the lock.
+    fn commit(
         &self,
         key: &str,
         mut object: Object,
         blobs: Vec<(String, u64)>,
         guard: Option<&Guard>,
     ) -> Result<Option<Object>> {
-        self.locked(|| {
-            let current = self.meta(key)?;
-            let holds = match (guard, &current) {
-                (None, _) | (Some(Guard::Absent), None) => true,
-                (Some(Guard::Match(version)), Some(meta)) => *version == meta.object.version,
-                _ => false,
-            };
-            if !holds {
-                self.drop_blobs(&blobs);
-                return Ok(None);
-            }
-            object.version = Version::new(random());
-            object.modified_ms = cluster::now_ms();
-            let meta = Meta {
-                key: key.to_owned(),
-                object: object.clone(),
-                blobs,
-            };
-            let json = meta.to_json().to_string();
-            self.save("objects", &Self::object_file(key), json.as_bytes())?;
-            if let Some(old) = current {
-                self.drop_blobs(&old.blobs);
-            }
-            Ok(Some(object))
-        })
+        let current = self.meta(key)?;
+        let holds = match (guard, &current) {
+            (None, _) | (Some(Guard::Absent), None) => true,
+            (Some(Guard::Match(version)), Some(meta)) => *version == meta.object.version,
+            _ => false,
+        };
+        if !holds {
+            self.drop_blobs(&blobs);
+            return Ok(None);
+        }
+        object.version = Version::new(random());
+        object.modified_ms = cluster::now_ms();
+        let meta = Meta {
+            key: key.to_owned(),
+            object: object.clone(),
+            blobs,
+        };
+        let json = meta.to_json().to_string();
+        self.save("objects", &Self::object_file(key), json.as_bytes())?;
+        if let Some(old) = current {
+            self.drop_blobs(&old.blobs);
+        }
+        Ok(Some(object))
     }
 
     /// Upload `id` of `key`. An ID is user input (`resumeMultipartUpload`),
@@ -506,7 +505,7 @@ impl Store for Local {
         let etag = hex(&md5(&body));
         let blobs = vec![(self.put_blob(&body)?, body.len() as u64)];
         let object = new_object(body.len() as u64, etag, headers, metadata);
-        let stored = self.store(key, object, blobs, guard.as_ref())?;
+        let stored = self.locked(|| self.commit(key, object, blobs, guard.as_ref()))?;
         Ok(stored.map(|o| Written {
             version: Some(o.version),
             etag: o.etag,
@@ -540,17 +539,44 @@ impl Store for Local {
         let part = (etag.clone(), body.len() as u64, blob);
         let old = self.locked(|| {
             let mut state = self.upload(key, upload)?;
-            let old = state.parts.insert(n, part);
+            let old = state.parts.insert(n, part.clone());
             self.save_upload(upload, &state)?;
             Ok(old)
-        })?;
-        if let Some((_, _, old)) = old {
-            self.drop_blob(&old);
-        }
+        });
+        match old {
+            Ok(old) => old.map(|(_, _, old)| self.drop_blob(&old)),
+            Err(e) => {
+                self.drop_blob(&part.2);
+                return Err(e);
+            }
+        };
         Ok(etag)
     }
 
     async fn complete(&self, key: &str, upload: &str, parts: &[(u32, String)]) -> Result<Written> {
+        self.locked(|| self.complete_locked(key, upload, parts))
+    }
+
+    async fn abort(&self, key: &str, upload: &str) -> Result<()> {
+        self.locked(|| {
+            let state = self.upload(key, upload)?;
+            self.forget(upload, &state);
+            Ok(())
+        })
+    }
+
+    async fn parts(&self, key: &str, upload: &str) -> Result<Vec<(u32, String, u64)>> {
+        let state = self.upload(key, upload)?;
+        Ok(state
+            .parts
+            .into_iter()
+            .map(|(n, (etag, size, _))| (n, etag, size))
+            .collect())
+    }
+}
+
+impl Local {
+    fn complete_locked(&self, key: &str, upload: &str, parts: &[(u32, String)]) -> Result<Written> {
         let what = || format!("COMPLETE {key}");
         let state = self.upload(key, upload)?;
         if parts.is_empty() {
@@ -581,7 +607,7 @@ impl Store for Local {
         let size = chosen.iter().map(|p| p.1).sum();
         let blobs = chosen.iter().map(|p| (p.2.clone(), p.1)).collect();
         let object = new_object(size, etag.clone(), &state.headers, &state.metadata);
-        let stored = self.store(key, object, blobs, None)?;
+        let stored = self.commit(key, object, blobs, None)?;
         // The object now holds the chosen parts' blobs; the rest go.
         let mut state = state;
         state
@@ -593,21 +619,6 @@ impl Store for Local {
             etag,
             modified_ms: stored.map(|o| o.modified_ms),
         })
-    }
-
-    async fn abort(&self, key: &str, upload: &str) -> Result<()> {
-        let state = self.upload(key, upload)?;
-        self.forget(upload, &state);
-        Ok(())
-    }
-
-    async fn parts(&self, key: &str, upload: &str) -> Result<Vec<(u32, String, u64)>> {
-        let state = self.upload(key, upload)?;
-        Ok(state
-            .parts
-            .into_iter()
-            .map(|(n, (etag, size, _))| (n, etag, size))
-            .collect())
     }
 }
 

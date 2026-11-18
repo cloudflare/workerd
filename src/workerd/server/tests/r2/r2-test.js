@@ -26,16 +26,22 @@ const defined = (o) =>
 
 const md5 = (b) => createHash('md5').update(b).digest('hex');
 
-// Buckets apart, keys that need escaping, metadata that isn't ASCII, R2's
-// storage class and `If-None-Match: *`.
+// Buckets apart, keys that need escaping, metadata that isn't ASCII (as a
+// content header too), one upload time, R2's storage class and
+// `If-None-Match: *`.
 export const bucketsKeysAndMetadata = {
   async test(ctrl, env) {
+    const contentDisposition = 'attachment; filename="résumé.pdf"';
     const put = await env.BUCKET.put('k', 'hello', {
       customMetadata: { a: '1', é: 'ü' },
+      httpMetadata: { contentDisposition },
     });
     assert.strictEqual(put.storageClass, 'Standard');
     const got = await env.BUCKET.get('k');
     assert.deepStrictEqual(got.customMetadata, { a: '1', é: 'ü' });
+    assert.strictEqual(got.httpMetadata.contentDisposition, contentDisposition);
+    // One time, however the object is read.
+    assert.strictEqual(got.uploaded.getTime(), put.uploaded.getTime());
     assert.strictEqual(await (await env.SAME.get('k')).text(), 'hello');
     // A listing names the version a head does.
     const listed = (await env.BUCKET.list({ prefix: 'k' })).objects[0];
@@ -214,5 +220,34 @@ export const largeListings = {
     assert.ok(pages > 1, `${pages} page`);
     assert.deepStrictEqual(listed, keys.toSorted());
     await env.BUCKET.delete(keys);
+
+    // The budget is bytes, not characters, and counts prefixes, which a
+    // page may stop at: here each object is over 10 KB of UTF-8 in 3,500
+    // characters, and is followed by a prefix of almost 1 KB.
+    const wide = { customMetadata: { m: '字'.repeat(3500) } };
+    const names = keys.map((k) => `w/${k.slice(2)}`);
+    const long = (n) => `${n}${'x'.repeat(900)}/`;
+    await Promise.all(
+      names.flatMap((n) => [
+        env.BUCKET.put(n, '', wide),
+        env.BUCKET.put(`${long(n)}k`, ''),
+      ])
+    );
+    const seen = { objects: [], prefixes: [] };
+    cursor = undefined;
+    do {
+      const page = await env.BUCKET.list({
+        prefix: 'w/',
+        delimiter: '/',
+        include: ['customMetadata'],
+        cursor,
+      });
+      seen.objects.push(...page.objects.map((o) => o.key));
+      seen.prefixes.push(...page.delimitedPrefixes);
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    assert.deepStrictEqual(seen.objects, names);
+    assert.deepStrictEqual(seen.prefixes, names.map(long));
+    await env.BUCKET.delete([...names, ...names.map((n) => `${long(n)}k`)]);
   },
 };

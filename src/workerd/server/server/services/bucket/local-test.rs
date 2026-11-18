@@ -145,3 +145,22 @@ fn stores_of_one_directory_share_it() {
         assert!(a.get("k").await.unwrap().is_none());
     });
 }
+
+#[test]
+fn an_upload_completes_once_across_stores() {
+    block_on(async {
+        let dir = dir();
+        let (a, b) = (local(&dir, 1), local(&dir, 1));
+        let upload = a.begin("k", &Headers::default(), &[]).await.unwrap();
+        let parts = [(1, a.part("k", &upload, 1, "ab".into()).await.unwrap())];
+        b.complete("k", &upload, &parts).await.unwrap();
+        let again = a.complete("k", &upload, &parts).await;
+        assert!(matches!(again, Err(Error::Refused { .. })), "{again:?}");
+        assert_eq!(a.get("k").await.unwrap().unwrap().0, b"ab");
+        // A part for an upload that is gone keeps no blob.
+        let late = b.part("k", &upload, 2, "c".into()).await;
+        assert!(matches!(late, Err(Error::Refused { .. })), "{late:?}");
+        let blobs = std::fs::read_dir(dir.join("blobs")).unwrap().count();
+        assert_eq!(blobs, 1);
+    });
+}
