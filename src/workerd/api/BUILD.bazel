@@ -664,6 +664,11 @@ wd_cc_library(
     ]
 ]
 
+kj_test(
+    src = "crypto/crc-impl-test.c++",
+    deps = [":crypto-crc-impl"],
+)
+
 [
     kj_test(
         src = f,
