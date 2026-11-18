@@ -182,6 +182,19 @@ class TextEncoder final: public jsg::Object {
 
 jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str);
 
+// The part of a string that encodeUtf8Prefix() encoded: the UTF-16 code units it read and the
+// bytes of UTF-8 it wrote.
+struct Utf8EncodedPrefix {
+  size_t read;
+  size_t written;
+};
+
+// Encodes as much of `str`, starting at UTF-16 code unit `start`, as fits in `output` as UTF-8,
+// as TextEncoder.encodeInto() does: it writes only whole code points, never splitting a surrogate
+// pair, and writes a lone surrogate as U+FFFD. `start` must not fall inside a surrogate pair.
+Utf8EncodedPrefix encodeUtf8Prefix(
+    jsg::Lock& js, jsg::JsString str, size_t start, kj::ArrayPtr<char> output);
+
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \
       api::TextDecoder::DecodeOptions, api::TextEncoder::EncodeIntoResult
