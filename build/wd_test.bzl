@@ -396,10 +396,10 @@ _wd_test = rule(
         # How port assignments are coordinated between the supervisor and the sidecar.
         # - "report" (default): the sidecar binds port 0 and prints "<NAME>=<PORT>" on stdout, and
         #   the supervisor reads those lines. Race-free; preferred for sidecars under our control.
-        # - "preallocate": the supervisor binds port 0, captures the kernel-assigned port, closes
+        # - "preallocate": the supervisor binds a random port below the OS ephemeral range, closes
         #   the socket, and exports the port in the environment before spawning the sidecar. This
-        #   has an inherent close-then-rebind race (mitigated by retry inside the supervisor) and
-        #   exists only for sidecars that can't participate in the report protocol (e.g. wptserve).
+        #   has an inherent close-then-rebind race and exists only for sidecars that can't
+        #   participate in the report protocol (e.g. wptserve).
         "sidecar_port_mode": attr.string(default = "report", values = ["report", "preallocate"]),
         # Sockets of the test's own config that listen on a port assigned when the test runs, rather
         # than on a fixed one that another test on the same machine might hold. Maps each socket's
