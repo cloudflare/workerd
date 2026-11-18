@@ -15,6 +15,7 @@ const ALGORITHMS = {
   'SHA-512': 64,
   MD5: 16,
   crc32: 4,
+  crc64nvme: 8,
 };
 
 async function digest(algorithm, count, size) {
