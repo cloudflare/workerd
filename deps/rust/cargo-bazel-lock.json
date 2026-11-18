@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "d5a68a5f67e46fdb5553aa5982b40f7698c58ef96170f86162f7015f8dbb0c02",
+  "checksum": "89368047691308592bf289d4c895ff31dccad267d9870d220463414f8ac88569",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -5114,6 +5114,7 @@
             "@@//:patches/rust/crates/hyper/graceful-shutdown-partial-request.patch",
             "@@//:patches/rust/crates/hyper/parse-error-explanation.patch",
             "@@//:patches/rust/crates/hyper/public-header-case-map.patch",
+            "@@//:patches/rust/crates/hyper/skip-date-update-without-date-header.patch",
             "@@//:patches/rust/crates/hyper/stack-headers-first.patch",
             "@@//:patches/rust/crates/hyper/unrecorded-lowercase-spellings.patch"
           ],
