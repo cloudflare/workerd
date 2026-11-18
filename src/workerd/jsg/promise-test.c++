@@ -12,6 +12,10 @@ V8System v8System;
 int promiseTestResult = 0;
 kj::String catchTestResult;
 
+struct PromiseValue: public jsg::Object {
+  JSG_RESOURCE_TYPE(PromiseValue) {}
+};
+
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   Promise<kj::String> makePromise(jsg::Lock& js) {
     auto [p, r] = js.newPromiseAndResolver<int>();
@@ -104,6 +108,23 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     js.resolvedPromise(js.num(1));
   }
 
+  jsg::Ref<PromiseValue> makeValue(jsg::Lock& js) {
+    return js.alloc<PromiseValue>();
+  }
+
+  // Whether a promise for a resource can be taken out without waiting for a microtask. A promise
+  // that can't records the reason it rejects in catchTestResult.
+  kj::StringPtr consumeIfSettled(jsg::Lock& js, Promise<jsg::Ref<PromiseValue>> promise) {
+    if (promise.tryConsumeResolved(js) != kj::none) {
+      return "settled"_kj;
+    }
+    promise.catch_(js, [](jsg::Lock& js, Value value) -> jsg::Ref<PromiseValue> {
+      catchTestResult = kj::str(value.getHandle(js));
+      return js.alloc<PromiseValue>();
+    });
+    return "pending"_kj;
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -118,11 +139,13 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     JSG_METHOD(thenable);
     JSG_METHOD(prototypePolution);
+    JSG_METHOD(makeValue);
+    JSG_METHOD(consumeIfSettled);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
 };
-JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext);
+JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext, PromiseValue);
 
 KJ_TEST("jsg::Promise<T>") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
@@ -175,6 +198,23 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   }
 
   { e.expectEval("testConsumeResolved()", "undefined", "undefined"); }
+}
+
+KJ_TEST("a promise already fulfilled with a resource is unwrapped settled") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  e.expectEval("consumeIfSettled(Promise.resolve(makeValue()))", "string", "settled");
+  e.expectEval("consumeIfSettled((async () => makeValue())())", "string", "settled");
+  e.expectEval("consumeIfSettled(new Promise(() => {}))", "string", "pending");
+
+  // A value of another type still rejects, with the usual TypeError.
+  e.expectEval("consumeIfSettled(Promise.resolve(123))", "string", "pending");
+  KJ_EXPECT(catchTestResult == nullptr);
+  e.runMicrotasks();
+  KJ_EXPECT(catchTestResult ==
+          "TypeError: Incorrect type for Promise: the Promise did not resolve to 'PromiseValue'.",
+      catchTestResult);
+  catchTestResult = nullptr;
 }
 
 KJ_TEST("whenResolved") {
