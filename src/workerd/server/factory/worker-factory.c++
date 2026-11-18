@@ -396,6 +396,9 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
+  bool canExceedLimits() override {
+    return false;
+  }
   void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
