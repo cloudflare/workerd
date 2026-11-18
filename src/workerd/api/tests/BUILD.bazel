@@ -307,6 +307,11 @@ wd_test(
 )
 
 wd_test(
+    src = "response-headers-test.wd-test",
+    data = ["response-headers-test.js"],
+)
+
+wd_test(
     src = "connect-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["connect-half-open-test.js"],
