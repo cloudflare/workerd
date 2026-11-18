@@ -999,12 +999,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
               }
             }
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(file));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(file));
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
           if (opts.write) {
@@ -1012,12 +1007,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
             // directories for writing.
             return FsError::NOT_PERMITTED_ON_DIRECTORY;
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(dir));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(dir));
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
           // Symlinks are never directly writable so the write flag
@@ -1025,12 +1015,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
           if (opts.write) {
             return FsError::NOT_PERMITTED;
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(link));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(link));
         }
         KJ_CASE_ONEOF(err, FsError) {
           // If we got an error, we just return it.
@@ -1160,6 +1145,19 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   void closeFdWithoutExplicitLock(int fd) const {
     openedFiles.erase(fd);
     observer->onClose(openedFiles.size(), nextFd);
+  }
+
+  // Gives node the next file descriptor and tells the observer. The descriptor stays open if the
+  // observer throws. The observer is called before the return rather than from a KJ_DEFER: an
+  // exception from a scope guard after the return value is constructed leaks that value, since
+  // Clang does not destroy it (CWG 2176).
+  kj::Rc<OpenedFile> addOpenedFile(const OpenOptions& opts, FsNode node) const {
+    KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+    auto fd = nextFd++;
+    auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(node));
+    openedFiles.insert(fd, opened.addRef());
+    observer->onOpen(openedFiles.size(), nextFd);
+    return kj::mv(opened);
   }
 };
 
