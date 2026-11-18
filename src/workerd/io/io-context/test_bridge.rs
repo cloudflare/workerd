@@ -29,6 +29,7 @@ use io_context::AwaitJs;
 use io_context::IoContext;
 use io_context::IoOwned;
 use io_context::IoOwnedSpan;
+use io_context::ReentryCallback;
 use io_context::SpanBuilder;
 use jsg::FromJS;
 use jsg::ToJS;
@@ -141,6 +142,25 @@ mod ffi {
         InternalAsync,
     }
 
+    /// What the function of a `make_reentry_callback()` callback does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ReentryBehavior {
+        /// Calls the JavaScript function, and waits for its promise with `await_js()`, whose
+        /// conversion takes a string.
+        CallJs,
+        /// Returns a future that is ready with "ready", without JavaScript.
+        Ready,
+        /// Returns a `RangeError`.
+        Fail,
+        /// Calls the JavaScript function, terminates execution, then calls it again.
+        Terminate,
+        /// Calls the JavaScript function, aborts the IoContext with a `RangeError`, which
+        /// terminates execution, then calls the function again.
+        Abort,
+        /// Calls the JavaScript function, then panics.
+        Panic,
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
@@ -203,6 +223,20 @@ mod ffi {
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
+
+        /// A `ReentryCallback`, as a crate that hands one to C++ wraps it.
+        type HeldReentryCallback;
+        unsafe fn make_reentry_callback(
+            isolate: usize,
+            behavior: ReentryBehavior,
+            function: Local,
+        ) -> Result<Box<HeldReentryCallback>>;
+        async unsafe fn call_reentry_callback<'a>(
+            callback: &'a HeldReentryCallback,
+        ) -> Result<String>;
+        fn reentry_function_runs() -> u32;
+        fn reentry_function_dropped() -> bool;
+
     }
 }
 
@@ -1102,6 +1136,107 @@ unsafe fn log_uncaught_exception(
     IoContext::current(lock)
         .and_then(|context| context.log_uncaught_exception(lock, source, exception))
         .map_err(|err| to_io(&err))
+}
+
+/// A `ReentryCallback`, held in a type of this bridge, as a crate that hands one to C++ holds it:
+/// C++ calls it through `call_reentry_callback()`.
+struct HeldReentryCallback(ReentryCallback<String>);
+
+/// How many times the function of a `make_reentry_callback()` callback has run.
+static REENTRY_FUNCTION_RUNS: AtomicU32 = AtomicU32::new(0);
+/// Whether the function of the last `make_reentry_callback()` callback has been dropped.
+static REENTRY_FUNCTION_DROPPED: AtomicBool = AtomicBool::new(false);
+
+/// Sets `REENTRY_FUNCTION_DROPPED` when the function that holds it is dropped.
+struct ReentryDropFlag;
+
+impl Drop for ReentryDropFlag {
+    fn drop(&mut self) {
+        REENTRY_FUNCTION_DROPPED.store(true, Ordering::SeqCst);
+    }
+}
+
+type ReentryOutputFuture =
+    Pin<Box<dyn Future<Output = std::result::Result<String, cxx::KjException>> + Send>>;
+
+/// In a request, makes a reentry callback whose function records the `IoContext` it runs in,
+/// then does as `behavior` says, with `function`, a JavaScript function in the caller's scope.
+unsafe fn make_reentry_callback(
+    isolate: usize,
+    behavior: ffi::ReentryBehavior,
+    function: v8::ffi::Local,
+) -> Result<Box<HeldReentryCallback>> {
+    REENTRY_FUNCTION_RUNS.store(0, Ordering::SeqCst);
+    REENTRY_FUNCTION_DROPPED.store(false, Ordering::SeqCst);
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    // SAFETY: C++ passes a function handle of the scope `lock` stands for.
+    let function = unsafe { v8::Local::<v8::Function>::from_ffi(function) }.to_global(lock);
+    let drop_flag = ReentryDropFlag;
+    let callback = IoContext::current(lock)
+        .and_then(|context| {
+            context.make_reentry_callback_weak(move |lock, context| {
+                let _ = &drop_flag;
+                ffi::record_await_context();
+                REENTRY_FUNCTION_RUNS.fetch_add(1, Ordering::SeqCst);
+                let future: ReentryOutputFuture = match behavior {
+                    ffi::ReentryBehavior::CallJs => {
+                        let result = function.as_local(lock).call(lock, None, &[])?;
+                        let promise = v8::Promise::resolved(lock, result)?;
+                        Box::pin(context.await_js(lock, promise, |lock, value| {
+                            // The conversion runs in the IoContext too.
+                            ffi::record_await_context();
+                            String::from_js(lock, value)
+                        })?)
+                    }
+                    ffi::ReentryBehavior::Ready => {
+                        Box::pin(std::future::ready(Ok("ready".to_owned())))
+                    }
+                    ffi::ReentryBehavior::Fail => {
+                        return Err(jsg::Error::new_range_error("the function failed"));
+                    }
+                    ffi::ReentryBehavior::Terminate => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        lock.terminate_execution();
+                        function.as_local(lock).call(lock, None, &[])?;
+                        unreachable!("execution is terminating")
+                    }
+                    ffi::ReentryBehavior::Abort => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        let reason = jsg::Error::new_range_error("the abort reason");
+                        let reason = lock.exception(&reason)?;
+                        let termination = context.abort(lock, Some(reason));
+                        assert!(termination.is_pending());
+                        function.as_local(lock).call(lock, None, &[])?;
+                        unreachable!("execution is terminating")
+                    }
+                    ffi::ReentryBehavior::Panic => {
+                        function.as_local(lock).call(lock, None, &[])?;
+                        panic!("the reentry function panicked")
+                    }
+                    _ => unreachable!(),
+                };
+                Ok(future)
+            })
+        })
+        .map_err(|err| to_io(&err))?;
+    Ok(Box::new(HeldReentryCallback(callback)))
+}
+
+/// Calls `callback`, as the `kj::Function` that C++ wraps it in does, and returns its output, or
+/// the exception it failed with as it is.
+async unsafe fn call_reentry_callback(
+    callback: &HeldReentryCallback,
+) -> std::result::Result<String, cxx::KjException> {
+    callback.0.call().await
+}
+
+fn reentry_function_runs() -> u32 {
+    REENTRY_FUNCTION_RUNS.load(Ordering::SeqCst)
+}
+
+fn reentry_function_dropped() -> bool {
+    REENTRY_FUNCTION_DROPPED.load(Ordering::SeqCst)
 }
 
 /// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the
