@@ -729,7 +729,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler,
-      kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
+      kj::Maybe<jsg::Ref<IncomingRequestSignal>> signal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 
