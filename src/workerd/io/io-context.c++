@@ -913,6 +913,15 @@ void IoContext::IncomingRequest::drain(
     return;
   }
 
+  if (context->actor == kj::none && context->waitUntilTasks.isEmpty()) {
+    // There is nothing to wait for: waiting on the empty task set would finish on the next turn
+    // without the timeout or abort ever mattering. Drop the request on the next turn the same
+    // way, without building that wait.
+    waitUntilTasks.add(
+        maybeAddGcPassForTest(kj::Promise<void>(kj::READY_NOW).attach(kj::mv(ownedSelf))));
+    return;
+  }
+
   kj::Promise<void> timeoutPromise = nullptr;
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
