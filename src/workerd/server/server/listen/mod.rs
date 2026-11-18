@@ -526,12 +526,16 @@ impl Handler for HttpConnection {
                 .headers
                 .as_deref()
                 .map_or(headers, HeadersRef::from);
-            let mut response =
-                bridge::rewriting_response(response.into_ffi(), table, rewriter.response_edits())?;
+            let url = rewritten.url.as_bytes();
+            let edits = rewriter.response_edits();
+            if edits.is_empty() {
+                return worker.request(method, url, headers, body, response).await;
+            }
+            let mut response = bridge::rewriting_response(response.into_ffi(), table, edits)?;
             worker
                 .request(
                     method,
-                    rewritten.url.as_bytes(),
+                    url,
                     headers,
                     body,
                     ServiceResponse::from(response.as_mut()),
