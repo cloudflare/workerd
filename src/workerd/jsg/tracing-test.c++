@@ -211,6 +211,11 @@ struct TraceTestContext: public Object, public ContextGlobal {
     strongRef = kj::mv(ref);
   }
 
+  // Sets `strongRef` to a new NumberBox that has no wrapper yet.
+  void makeStrongRef(jsg::Lock& js, double value) {
+    strongRef = js.alloc<NumberBox>(value);
+  }
+
   kj::Array<jsg::Ref<GcDetector>> makeGcDetectorPair(jsg::Lock& js) {
     auto obj1 = js.alloc<GcDetector>();
     auto obj2 = js.alloc<GcDetector>();
@@ -286,6 +291,7 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(ItemQueue);
     JSG_METHOD(take);
     JSG_METHOD(putBack);
+    JSG_METHOD(makeStrongRef);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD(wrapOpaquely);
@@ -602,6 +608,22 @@ KJ_TEST("TracedReference usage does not lead to crashes") {
       // Verify the value is still there...
       "holder.inner.value",
       "number", "123");
+}
+
+KJ_TEST("a wrapper made by consuming one of two strong Refs stays alive") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // Reading `strongRef` wraps a new Ref to an object with no wrapper, consuming that Ref. The
+  // context's own Ref is still strong, so the wrapper must survive both kinds of GC with its
+  // properties.
+  e.expectEval(R"(
+    makeStrongRef(123);
+    strongRef.note = "kept";
+    gc({type: "minor"});
+    gc();
+    strongRef.note + " " + strongRef.value
+  )",
+      "string", "kept 123");
 }
 
 KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {
