@@ -11,3 +11,6 @@ assert_not_impl_any!(CallbacksFuture<u32>: Send, Sync);
 // event-loop-linked (see `PromiseAwaiter::_pinned`); it must stay `!Unpin` so safe code
 // cannot move it between polls (`&mut`-based awaits require `Unpin`).
 assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Unpin);
+
+// The composed future the comment in promise.rs relies on stays `!Send` as well.
+assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Send);

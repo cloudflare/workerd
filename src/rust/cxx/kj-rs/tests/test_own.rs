@@ -243,10 +243,11 @@ pub mod tests {
         assert!(!debug_str.is_empty());
     }
 
-    // NOTE: `KjOwn<T>` is deliberately neither `Send` nor `Sync`, even for `T: Send + Sync`
-    // (like `OpaqueCxxClass` here): the `KjOwn` carries a type-erased C++ disposer which may
-    // not be thread-safe (kj::Rc, arena allocations, ...). The negative is asserted at compile
-    // time in lib.rs (assert_not_impl_any).
+    // NOTE: `KjOwn<T>` is `Send` only when `T` is `DisposableOnAnyThread`, even for
+    // `T: Send + Sync` (like `OpaqueCxxClass` here): the `KjOwn` carries a type-erased C++
+    // disposer which may not be thread-safe (kj::Rc, arena allocations, ...). It is `Sync`
+    // whenever `T` is, since a shared `KjOwn` cannot run the disposer. lib.rs and own-test.rs
+    // assert both at compile time.
 
     #[test]
     fn test_own_concurrent_creation() {

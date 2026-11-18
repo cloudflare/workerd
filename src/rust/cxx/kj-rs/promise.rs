@@ -212,7 +212,7 @@ impl<T> KjPromise for CallbacksFuture<T> {
 // `Option<OwnPromiseNode>` (a raw pointer, hence `!Send`), so the composed future is `!Send`
 // regardless. The bridged async machinery is confined to the KJ event-loop thread and `spawn` is
 // `spawn_local`-backed (no `Send` requirement), so nothing needs a `Send` impl. `promise-test.rs`
-// asserts that the wrapper stays `!Send`.
+// asserts that both it and the composed future stay `!Send`.
 
 #[cfg(test)]
 #[path = "promise-test.rs"]
