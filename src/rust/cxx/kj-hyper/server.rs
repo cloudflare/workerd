@@ -64,7 +64,6 @@ use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
 use futures::StreamExt;
-use futures::future::LocalBoxFuture;
 use futures::future::Shared;
 use futures::stream::FuturesUnordered;
 use http::header::SEC_WEBSOCKET_KEY;
@@ -275,7 +274,14 @@ struct ConnectionState {
 /// The handler calls in flight (see the module docs). Owned by [`serve_connection`]'s future,
 /// not by the [`Connection`] the calls themselves hold, so dropping the future drops the calls.
 /// hyper's service pushes to it and the serve loop polls it, each borrowing it only for that.
-type Calls<'t> = Rc<RefCell<FuturesUnordered<LocalBoxFuture<'t, ()>>>>;
+///
+/// `F` is [`handle`]'s future, held in the queue's own task rather than boxed apart from it.
+type Calls<F> = Rc<RefCell<FuturesUnordered<F>>>;
+
+/// An empty queue of the calls `start` starts.
+fn calls<A, F>(_start: &impl Fn(A, Parts, Incoming, Rc<ResponseSender>) -> F) -> Calls<F> {
+    Rc::default()
+}
 
 /// Serves HTTP/1.1 on `io` until the peer is done with the connection (or `shutdown` says so)
 /// and every handler call has finished.
@@ -316,11 +322,12 @@ where
         ids: RefCell::new(HeaderIds::new(table)),
         blocks: RefCell::default(),
     });
-    let calls: Calls<'_> = Rc::default();
+    let start = handle::<H>;
+    let calls = calls(&start);
     let service = {
         let conn = Rc::clone(&conn);
         let calls = Rc::clone(&calls);
-        service_fn(move |request| dispatch(Rc::clone(&conn), Rc::clone(&calls), request))
+        service_fn(move |request| dispatch(Rc::clone(&conn), Rc::clone(&calls), start, request))
     };
     let mut serving = pin!(
         http1_builder(conn.settings.header_timeout)
@@ -448,11 +455,15 @@ fn transport_error(error: &hyper::Error) -> Option<KjError> {
 
 /// hyper's service: starts the handler call alongside the connection and waits for the response
 /// head it sends. A call that ends without one closes the connection.
-async fn dispatch<'t, H: Handler + 't>(
+async fn dispatch<'t, H, S, F>(
     conn: Rc<Connection<'t, H>>,
-    calls: Calls<'t>,
+    calls: Calls<F>,
+    start: S,
     mut request: http::Request<Incoming>,
-) -> Result<Response, io::Error> {
+) -> Result<Response, io::Error>
+where
+    S: Fn(Rc<Connection<'t, H>>, Parts, Incoming, Rc<ResponseSender>) -> F,
+{
     let may_upgrade =
         request.method() == http::Method::CONNECT || request.headers().contains_key(UPGRADE);
     let upgrade = may_upgrade.then(|| upgrade::on(&mut request));
@@ -466,8 +477,9 @@ async fn dispatch<'t, H: Handler + 't>(
         body_abort: RefCell::new(None),
         closing: Cell::new(false),
     });
-    let call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, Rc::clone(&sender)));
-    calls.borrow_mut().push(call);
+    calls
+        .borrow_mut()
+        .push(start(conn, parts, body, Rc::clone(&sender)));
     poll_fn(|cx| sender.poll_head(cx)).await
 }
 
