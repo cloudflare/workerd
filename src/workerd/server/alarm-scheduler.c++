@@ -248,8 +248,8 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
         // Notify the actor to clear its in-memory alarm state so getAlarm() reflects the
-        // deletion. We ignore the returned alarm: the actor's SQLite hooks give this scheduler
-        // each alarm synchronously, so it already has the alarm.
+        // deletion. We ignore the returned alarm: the actor gives it to this scheduler before it
+        // replies.
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost, and tell the actor again later.
         entry.value.task = abandonAlarm(ownActor, scheduledTime);

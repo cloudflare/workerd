@@ -1070,10 +1070,11 @@ interface EventDispatcher @0xf20697475ec1752d {
   # time again.
   #
   # Returns the actor's current alarm time (in ms since epoch) if it differs from scheduledTimeMs,
-  # indicating the user set a new alarm that should still fire. The scheduler should make sure it
-  # does, since the request that gave the scheduler that alarm may have failed. Returns 0
-  # otherwise, which doesn't rule out a different alarm the actor doesn't know about, so the
-  # scheduler deletes only the abandoned alarm. See ActorCacheInterface::abandonAlarm().
+  # indicating the user set a new alarm that should still fire. The actor makes sure that the
+  # scheduler has that alarm before it returns, since the request that gave the scheduler the alarm
+  # may have failed. Returns 0 otherwise, which doesn't rule out a different alarm the actor doesn't
+  # know about, so the scheduler deletes only the abandoned alarm. See
+  # ActorCacheInterface::abandonAlarm().
 
   restoreService @12 (params :Frankenvalue) -> (service :WorkerdBootstrap);
   restoreRpcStub @13 (params :Frankenvalue) -> (target :JsRpcTarget, session :JsRpcSession);

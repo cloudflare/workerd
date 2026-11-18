@@ -124,7 +124,8 @@ class WorkerInterface: public kj::HttpService {
   // Called when the alarm scheduler has given up on an alarm, e.g. after too many counted failures
   // or an abort that doesn't retry. The actor should clear its alarm state so getAlarm() reflects
   // the deletion. Returns the actor's stored alarm time if it differs from scheduledTime (i.e. the
-  // user set a new alarm), or else kj::none. See ActorCacheInterface::abandonAlarm().
+  // user set a new alarm), once the scheduler has it, or else kj::none. See
+  // ActorCacheInterface::abandonAlarm().
   // Default is a no-op so subclasses that don't host actors need not override it.
   virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
     return kj::Maybe<kj::Date>(kj::none);

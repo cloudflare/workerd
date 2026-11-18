@@ -291,10 +291,10 @@ class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
   // too many counted failures or an abort that doesn't retry. The caller holds the actor's input
   // lock, so no transaction is open. Implementations should clear that alarm from their local
   // state so getAlarm() reflects the deletion. If a different alarm is stored durably (the user set
-  // a new alarm), it stays set, and its time is returned so that the scheduler can make sure it
-  // runs, since the request that gave the scheduler that alarm may have failed. Otherwise this
-  // returns kj::none, which doesn't rule out a different alarm the implementation doesn't know
-  // about, so the scheduler must delete only the alarm at scheduledTime.
+  // a new alarm), it stays set, and the implementation makes sure that the scheduler has it before
+  // returning its time, since the request that gave the scheduler that alarm may have failed.
+  // Otherwise this returns kj::none, which doesn't rule out a different alarm the implementation
+  // doesn't know about, so the scheduler must delete only the alarm at scheduledTime.
   virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
     return kj::Maybe<kj::Date>(kj::none);
   }
