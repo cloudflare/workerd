@@ -1,9 +1,9 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/lint_test.bzl", "lint_test")
 load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_bench.bzl", "wd_bench")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
 
 wasm_tools_parse(
@@ -2056,7 +2056,7 @@ wd_test(
     data = ["ts-webstreams-test.js"],
 )
 
-sh_test(
+wd_sh_test(
     name = "abortIsolate",
     size = "medium",
     srcs = ["abortIsolate.sh"],

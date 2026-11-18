@@ -1,6 +1,6 @@
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 
 wd_rust_crate(
     name = "jsg-bench-fixture",
@@ -30,7 +30,7 @@ wd_cc_benchmark(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "smoke-test",
     size = "large",
     srcs = ["smoke-test.sh"],
@@ -45,7 +45,7 @@ sh_test(
 
 # Writes Google Benchmark JSON reports to the test outputs, so a remote executor can measure; see
 # README.md.
-sh_test(
+wd_sh_test(
     name = "bench-report",
     size = "enormous",
     srcs = ["bench-report.sh"],

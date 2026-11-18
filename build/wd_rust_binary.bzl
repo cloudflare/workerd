@@ -1,5 +1,6 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("@workerd//:build/test_attrs.bzl", "test_attrs")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
 load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
@@ -155,9 +156,8 @@ def wd_rust_binary(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         },
-        target_compatible_with = target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        tags = ["no-coverage"],
+        **test_attrs(["no-coverage"], test_size, target_compatible_with)
     )
