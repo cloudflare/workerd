@@ -278,6 +278,11 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // The user trace scope value for rootUserTraceSpan, made the first time a request-root frame
+  // (see Worker::Lock::getRequestRootTraceFrame()) needs one. The active span that
+  // tracing.getActiveSpan() returns for such a frame is cached on it.
+  kj::Maybe<jsg::Value> rootUserTraceScope;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
@@ -642,6 +647,18 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // allowing accessors to fall back to the current request when a captured frame is foreign.
   using TraceScopeState = kj::OneOf<Id, IoOwn<SpanParent>>;
   using UserTraceScopeState = kj::OneOf<Id, IoOwn<UserTraceAsyncContext>>;
+
+  // True if `value`, read from a trace key of an async context frame, is a request-root entry
+  // rather than a wrapped TraceScopeState or UserTraceScopeState. A request-root entry stands for
+  // the root spans of whichever request is current. See Worker::Lock::getRequestRootTraceFrame().
+  static bool isRequestRootTraceScope(v8::Local<v8::Value> value) {
+    return value->IsNull();
+  }
+
+  // Returns the wrapped UserTraceScopeState for the current request's root user span, which is
+  // what a request-root entry of the user trace key resolves to. The value is made once per
+  // request.
+  v8::Local<v8::Value> getRequestRootUserTraceScope(Worker::Lock& lock);
 
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
@@ -1317,8 +1334,23 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Captures the request's internal and user tracing contexts in a single async frame.
-  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
-      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  //
+  // When neither span is observed, a stateless request uses its worker's shared request-root
+  // frame instead of building one, so an untraced request allocates nothing here. Its IoContext
+  // never runs another request, so resolving the frame against the current request yields this
+  // request's spans. Actors don't use it: a continuation of an unobserved actor request must keep
+  // masking the spans of a newer, observed request in the same IoContext.
+  class RequestTraceScope {
+   public:
+    RequestTraceScope(Worker::Lock& lock, IoContext& context);
+    KJ_DISALLOW_COPY_AND_MOVE(RequestTraceScope);
+
+   private:
+    kj::OneOf<jsg::AsyncContextFrame::Scope, jsg::AsyncContextFrame::StorageScope> scope;
+  };
+  [[nodiscard]] RequestTraceScope makeRequestTraceScope(Worker::Lock& lock) {
+    return RequestTraceScope(lock, *this);
+  }
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
