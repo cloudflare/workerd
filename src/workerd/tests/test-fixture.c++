@@ -321,7 +321,10 @@ struct MemoryOutputStream final: kj::AsyncOutputStream, public kj::Refcounted {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+    for (auto piece: pieces) {
+      content.addAll(piece);
+    }
+    return kj::READY_NOW;
   }
 
   kj::Promise<void> whenWriteDisconnected() override {
