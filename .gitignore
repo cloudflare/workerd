@@ -53,3 +53,4 @@ perf.data
 
 # python
 __pycache__
+/build/pgo/workerd.profdata
