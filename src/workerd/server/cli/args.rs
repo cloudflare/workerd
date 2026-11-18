@@ -231,7 +231,7 @@ pub struct ServeArgs {
     /// cluster on that thread. A Durable Object does not see the trace span of a caller on
     /// another thread. --inspector-addr and the options that save a Python snapshot are not
     /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
-    /// served by one thread only.
+    /// served by one thread only. More than one thread is not supported on Windows.
     #[arg(
         long,
         value_name = "N",
@@ -566,12 +566,36 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
         })
 }
 
-/// Why `serve` cannot run on the `--threads` asked for with the other options given, if it
-/// cannot. The server reports the inspector as a config error, too
+/// The platform `serve` runs on, which decides what `--threads` it supports
+/// ([`threads_refused`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Platform {
+    Windows,
+    Unix,
+}
+
+impl Platform {
+    /// The platform this binary is built for.
+    pub const CURRENT: Self = if cfg!(windows) {
+        Self::Windows
+    } else {
+        Self::Unix
+    };
+}
+
+/// Why `serve` cannot run on the `--threads` asked for with the other options given on
+/// `platform`, if it cannot. The server reports the inspector as a config error, too
 /// (`workerd_server::threads::obstacles`).
-pub fn threads_refused(serve: &ServeArgs, serve_or_test: &ServeOrTestArgs) -> Option<&'static str> {
+pub fn threads_refused(
+    serve: &ServeArgs,
+    serve_or_test: &ServeOrTestArgs,
+    platform: Platform,
+) -> Option<&'static str> {
     if serve.threads <= 1 {
         return None;
+    }
+    if platform == Platform::Windows {
+        return Some("--threads: Serving on more than one thread is not supported on Windows.");
     }
     if !serve_or_test.experimental {
         return Some(

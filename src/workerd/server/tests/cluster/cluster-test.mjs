@@ -438,6 +438,12 @@ async function fetchJson(port, path, { timeoutMs } = {}) {
 const THREADS = 3;
 // What makes the nodes of `withCluster` serve on that many.
 const THREADED = { extraArgs: () => [`--threads=${THREADS}`] };
+// More than one thread is a usage error on Windows.
+const SEVERAL_THREADS = {
+  skip:
+    process.platform === 'win32' &&
+    'several threads are not supported on Windows',
+};
 
 // One connection to a node, kept open. A node that serves on several threads
 // (`--threads`) serves every request on it on the thread that accepted it.
@@ -3460,89 +3466,97 @@ test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO a
 // the cluster, are its first thread's, and a request another thread serves
 // reaches them through it.
 
-test('cluster: on several threads, the requests of every thread of every node reach one DO', async () => {
-  await withCluster(
-    2,
-    async ({ nodes, bucket, nodeKeys }) => {
-      // The threads of the DO's owner, and those of the other node, whose
-      // requests go through its own first thread to the owner's.
-      const connections = (
-        await Promise.all(nodes.map((node) => threadConnections(node)))
-      ).flat();
-      const ROUNDS = 4;
-      const observed = [];
-      const owners = new Set();
-      let id;
-      for (let round = 0; round < ROUNDS; round++) {
-        const answers = await Promise.all(
-          connections.map((c) => c.fetchJson('/increment?name=threads'))
-        );
-        for (const { status, body } of answers) {
-          assert.strictEqual(status, 200, JSON.stringify(body));
-          observed.push(body.count);
-          owners.add(body.nodeId);
-          id = body.id;
+test(
+  'cluster: on several threads, the requests of every thread of every node reach one DO',
+  SEVERAL_THREADS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes, bucket, nodeKeys }) => {
+        // The threads of the DO's owner, and those of the other node, whose
+        // requests go through its own first thread to the owner's.
+        const connections = (
+          await Promise.all(nodes.map((node) => threadConnections(node)))
+        ).flat();
+        const ROUNDS = 4;
+        const observed = [];
+        const owners = new Set();
+        let id;
+        for (let round = 0; round < ROUNDS; round++) {
+          const answers = await Promise.all(
+            connections.map((c) => c.fetchJson('/increment?name=threads'))
+          );
+          for (const { status, body } of answers) {
+            assert.strictEqual(status, 200, JSON.stringify(body));
+            observed.push(body.count);
+            owners.add(body.nodeId);
+            id = body.id;
+          }
         }
-      }
-      observed.sort((a, b) => a - b);
-      assert.deepStrictEqual(
-        observed,
-        observed.map((_, i) => i + 1),
-        'each /increment must be a unique strictly-increasing count'
-      );
-      assert.strictEqual(observed.length, ROUNDS * nodes.length * THREADS);
-      assert.strictEqual(owners.size, 1, [...owners].join(', '));
-      const [owner] = owners;
-      assert.strictEqual(await bucket.owner(id), nodeKeys.get(owner));
-
-      // JS RPC from every thread, too.
-      for (const connection of connections) {
-        const { status, body } = await connection.fetchJson(
-          '/rpc-identity?name=threads'
+        observed.sort((a, b) => a - b);
+        assert.deepStrictEqual(
+          observed,
+          observed.map((_, i) => i + 1),
+          'each /increment must be a unique strictly-increasing count'
         );
-        assert.strictEqual(status, 200, JSON.stringify(body));
-        assert.strictEqual(body.nodeId, owner);
-      }
+        assert.strictEqual(observed.length, ROUNDS * nodes.length * THREADS);
+        assert.strictEqual(owners.size, 1, [...owners].join(', '));
+        const [owner] = owners;
+        assert.strictEqual(await bucket.owner(id), nodeKeys.get(owner));
 
-      // Only a node's first thread is a member of the cluster.
-      assert.strictEqual((await bucket.nodes()).length, nodes.length);
-      for (const connection of connections) connection.close();
-    },
-    THREADED
-  );
-});
+        // JS RPC from every thread, too.
+        for (const connection of connections) {
+          const { status, body } = await connection.fetchJson(
+            '/rpc-identity?name=threads'
+          );
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          assert.strictEqual(body.nodeId, owner);
+        }
 
-test('cluster: on several threads, KV keeps a large value in the bucket from any thread', async () => {
-  await withCluster(
-    2,
-    async ({ nodes, bucket }) => {
-      const connections = (
-        await Promise.all(nodes.map((node) => threadConnections(node)))
-      ).flat();
-      const q = (params) => new URLSearchParams(params);
-      // Each thread writes a value large enough to go in the bucket, through
-      // its node's `bucket` service, which is the first thread's.
-      const size = 2 * 1024 * 1024;
-      for (const [i, connection] of connections.entries()) {
-        const put = await connection.fetchJson(
-          `/kv/put?${q({ key: `large-${i}`, size })}`
-        );
-        assert.strictEqual(put.status, 200, JSON.stringify(put.body));
-      }
-      const blobs = await bucket.list('services/kv/');
-      assert(blobs.length >= connections.length, blobs.join(', '));
-      // And every thread reads the value another wrote.
-      for (const [i, connection] of connections.entries()) {
-        const key = `large-${(i + 1) % connections.length}`;
-        const got = await connection.fetchJson(`/kv/get?${q({ key })}`);
-        assert.strictEqual(got.status, 200, JSON.stringify(got.body));
-        assert.strictEqual(got.body.value.length, size);
-      }
-      for (const connection of connections) connection.close();
-    },
-    THREADED
-  );
-});
+        // Only a node's first thread is a member of the cluster.
+        assert.strictEqual((await bucket.nodes()).length, nodes.length);
+        for (const connection of connections) connection.close();
+      },
+      THREADED
+    );
+  }
+);
+
+test(
+  'cluster: on several threads, KV keeps a large value in the bucket from any thread',
+  SEVERAL_THREADS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes, bucket }) => {
+        const connections = (
+          await Promise.all(nodes.map((node) => threadConnections(node)))
+        ).flat();
+        const q = (params) => new URLSearchParams(params);
+        // Each thread writes a value large enough to go in the bucket, through
+        // its node's `bucket` service, which is the first thread's.
+        const size = 2 * 1024 * 1024;
+        for (const [i, connection] of connections.entries()) {
+          const put = await connection.fetchJson(
+            `/kv/put?${q({ key: `large-${i}`, size })}`
+          );
+          assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+        }
+        const blobs = await bucket.list('services/kv/');
+        assert(blobs.length >= connections.length, blobs.join(', '));
+        // And every thread reads the value another wrote.
+        for (const [i, connection] of connections.entries()) {
+          const key = `large-${(i + 1) % connections.length}`;
+          const got = await connection.fetchJson(`/kv/get?${q({ key })}`);
+          assert.strictEqual(got.status, 200, JSON.stringify(got.body));
+          assert.strictEqual(got.body.value.length, size);
+        }
+        for (const connection of connections) connection.close();
+      },
+      THREADED
+    );
+  }
+);
 
 test(
   "cluster: on several threads, requests on every thread follow a draining owner's DO",
@@ -3637,43 +3651,52 @@ test(
   }
 );
 
-test('cluster: on several threads, a node whose lease lapses exits at once', async () => {
-  await withCluster(
-    1,
-    async ({ nodes: [node], bucket, nodeKeys }) => {
-      const key = nodeKeys.get(node.nodeId);
-      // Every thread has a request in a DO, which outlasts the lease.
-      const connections = await threadConnections(node);
-      const held = connections.map((c) =>
-        c
-          .fetchJson(`/hold-increment?name=lapse&ms=${4 * LEASE_MS}`)
-          .catch((error) => ({ error }))
-      );
-      await sleep(250);
-      // The node cannot renew its lease from here on.
-      await bucket.setFaults([
-        { method: 'PUT', prefix: `nodes/${key}.json`, status: 500, times: 1e6 },
-      ]);
-      const lapsing = Date.now();
-      const exit = await Promise.race([
-        node.closed(),
-        sleep(3 * LEASE_MS).then(() => 'still running'),
-      ]);
-      assert.deepStrictEqual(exit, { code: 1, signal: null });
-      assert(
-        Date.now() - lapsing < 2 * LEASE_MS,
-        'the node outlived its lease'
-      );
-      assert.match(node.stderr, /leaving the cluster/);
-      // The requests ended with the process.
-      for (const answer of await Promise.all(held)) {
-        assert(answer.error !== undefined, JSON.stringify(answer));
-      }
-      for (const connection of connections) connection.close();
-    },
-    THREADED
-  );
-});
+test(
+  'cluster: on several threads, a node whose lease lapses exits at once',
+  SEVERAL_THREADS,
+  async () => {
+    await withCluster(
+      1,
+      async ({ nodes: [node], bucket, nodeKeys }) => {
+        const key = nodeKeys.get(node.nodeId);
+        // Every thread has a request in a DO, which outlasts the lease.
+        const connections = await threadConnections(node);
+        const held = connections.map((c) =>
+          c
+            .fetchJson(`/hold-increment?name=lapse&ms=${4 * LEASE_MS}`)
+            .catch((error) => ({ error }))
+        );
+        await sleep(250);
+        // The node cannot renew its lease from here on.
+        await bucket.setFaults([
+          {
+            method: 'PUT',
+            prefix: `nodes/${key}.json`,
+            status: 500,
+            times: 1e6,
+          },
+        ]);
+        const lapsing = Date.now();
+        const exit = await Promise.race([
+          node.closed(),
+          sleep(3 * LEASE_MS).then(() => 'still running'),
+        ]);
+        assert.deepStrictEqual(exit, { code: 1, signal: null });
+        assert(
+          Date.now() - lapsing < 2 * LEASE_MS,
+          'the node outlived its lease'
+        );
+        assert.match(node.stderr, /leaving the cluster/);
+        // The requests ended with the process.
+        for (const answer of await Promise.all(held)) {
+          assert(answer.error !== undefined, JSON.stringify(answer));
+        }
+        for (const connection of connections) connection.close();
+      },
+      THREADED
+    );
+  }
+);
 
 // The config of a node that serves the deployments in its bucket, and its disk,
 // on which a deployment's Durable Objects are stored (`workerd deploy --help`).
@@ -3884,62 +3907,69 @@ test('cluster: a node serves beside deployments it cannot serve', async () => {
   );
 });
 
-test('cluster: on several threads, every thread serves beside deployments it cannot serve', async () => {
-  const deployments = {
-    app: await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment'),
-    // Its service is broken because its worker throws while loading.
-    throws: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'throws'),
-    // It is skipped because it defines "router", as the node does.
-    clash: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'clash'),
-    // Its service is broken, and so is its Durable Object namespace.
-    'broken-do': await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'brokenDo'),
-  };
-  await withCluster(
-    1,
-    async ({ nodes: [node] }) => {
-      // The deployments' errors are no thread's failure: each serves what the
-      // first does.
-      const connections = await threadConnections(node);
-      const counts = [];
-      for (const connection of connections) {
-        let { status, body } = await connection.fetchJson('/own');
-        assert.strictEqual(status, 200, JSON.stringify(body));
-        ({ status, body } = await connection.fetchJson(
-          '/MAIN/increment?name=beside-threads'
-        ));
-        assert.strictEqual(status, 200, JSON.stringify(body));
-        counts.push(body.count);
-        for (const path of [
-          '/THROWS/',
-          '/SKIPPED/',
-          '/UNKNOWN/',
-          '/BROKEN_DO/x',
-        ]) {
-          ({ status, body } = await connection.fetchJson(path));
-          assert.strictEqual(status, 500, path);
-          assert.match(
-            body.error,
-            /Service cannot handle requests because its config is invalid/,
-            path
-          );
+test(
+  'cluster: on several threads, every thread serves beside deployments it cannot serve',
+  SEVERAL_THREADS,
+  async () => {
+    const deployments = {
+      app: await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment'),
+      // Its service is broken because its worker throws while loading.
+      throws: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'throws'),
+      // It is skipped because it defines "router", as the node does.
+      clash: await compileConfig(env.BROKEN_DEPLOYMENTS_CONFIG, 'clash'),
+      // Its service is broken, and so is its Durable Object namespace.
+      'broken-do': await compileConfig(
+        env.BROKEN_DEPLOYMENTS_CONFIG,
+        'brokenDo'
+      ),
+    };
+    await withCluster(
+      1,
+      async ({ nodes: [node] }) => {
+        // The deployments' errors are no thread's failure: each serves what the
+        // first does.
+        const connections = await threadConnections(node);
+        const counts = [];
+        for (const connection of connections) {
+          let { status, body } = await connection.fetchJson('/own');
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          ({ status, body } = await connection.fetchJson(
+            '/MAIN/increment?name=beside-threads'
+          ));
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.count);
+          for (const path of [
+            '/THROWS/',
+            '/SKIPPED/',
+            '/UNKNOWN/',
+            '/BROKEN_DO/x',
+          ]) {
+            ({ status, body } = await connection.fetchJson(path));
+            assert.strictEqual(status, 500, path);
+            assert.match(
+              body.error,
+              /Service cannot handle requests because its config is invalid/,
+              path
+            );
+          }
+          connection.close();
         }
-        connection.close();
+        assert.deepStrictEqual(counts, [1, 2, 3]);
+        // The errors are reported once, by the first thread.
+        const reported = node.stderr.match(
+          /deployment "throws": service "throws" cannot handle requests/g
+        );
+        assert.strictEqual(reported.length, 1, node.stderr);
+      },
+      {
+        ...THREADED,
+        config: env.BROKEN_NODE_CONFIG,
+        disk: DEPLOYMENT_NODE.disk,
+        before: (bucket) => deploy(bucket, deployments),
       }
-      assert.deepStrictEqual(counts, [1, 2, 3]);
-      // The errors are reported once, by the first thread.
-      const reported = node.stderr.match(
-        /deployment "throws": service "throws" cannot handle requests/g
-      );
-      assert.strictEqual(reported.length, 1, node.stderr);
-    },
-    {
-      ...THREADED,
-      config: env.BROKEN_NODE_CONFIG,
-      disk: DEPLOYMENT_NODE.disk,
-      before: (bucket) => deploy(bucket, deployments),
-    }
-  );
-});
+    );
+  }
+);
 
 // `config` with the first byte of its text "PLACEHOLDER" replaced by one that
 // is not valid UTF-8.

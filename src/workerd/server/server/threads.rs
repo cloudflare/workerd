@@ -35,6 +35,10 @@
 //! (`restore()`) from a replica by an event of the same session, whose parameters carry their
 //! capabilities as channel tokens too; the object's `[restore]()` runs on the first thread.
 //!
+//! Several threads are not supported on Windows, where `--threads` above one is a usage error
+//! (`cli/args.rs`, `threads_refused`): a server on several threads there at times left a
+//! connection the system had accepted for it unanswered, for reasons not yet known.
+//!
 //! What the threads share besides is [`Phase`], which the first thread sets and the replicas
 //! follow, and the events a replica sends back: that it is ready, and how it ended.
 //!

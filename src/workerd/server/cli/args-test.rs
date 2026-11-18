@@ -528,7 +528,10 @@ fn serve_args(args: &[&str]) -> (ServeArgs, ServeOrTestArgs) {
 fn threads_default_to_one() {
     let (serve, serve_or_test) = serve_args(&[]);
     assert_eq!(serve.threads, 1);
-    assert_eq!(threads_refused(&serve, &serve_or_test), None);
+    assert_eq!(
+        threads_refused(&serve, &serve_or_test, Platform::Unix),
+        None
+    );
     let (serve, _) = serve_args(&["--threads=4"]);
     assert_eq!(serve.threads, 4);
     let main = CompiledMain::try_parse_from(["workerd", "--threads=3"]).unwrap();
@@ -545,7 +548,10 @@ fn one_thread_is_refused_nothing() {
         &["--inspector-addr=127.0.0.1:0", "--python-save-snapshot"],
     ] {
         let (serve, serve_or_test) = serve_args(args);
-        assert_eq!(threads_refused(&serve, &serve_or_test), None, "{args:?}");
+        for platform in [Platform::Unix, Platform::Windows] {
+            let refused = threads_refused(&serve, &serve_or_test, platform);
+            assert_eq!(refused, None, "{args:?} on {platform:?}");
+        }
     }
 }
 
@@ -553,7 +559,7 @@ fn one_thread_is_refused_nothing() {
 fn several_threads_refuse_what_they_do_not_support() {
     let refused = |args: &[&str]| {
         let (serve, serve_or_test) = serve_args(args);
-        threads_refused(&serve, &serve_or_test)
+        threads_refused(&serve, &serve_or_test, Platform::Unix)
     };
     let experimental = refused(&["--threads=2"]).unwrap();
     assert!(experimental.contains("`--experimental`"), "{experimental}");
@@ -588,4 +594,30 @@ fn several_threads_refuse_what_they_do_not_support() {
     ] {
         assert_eq!(refused(args), None, "{args:?}");
     }
+}
+
+#[test]
+fn several_threads_are_refused_on_windows() {
+    let refused = |args: &[&str], platform| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test, platform)
+    };
+    // Whatever else is given, --experimental too.
+    for args in [
+        &["--threads=2"][..],
+        &["--threads=2", "--experimental"],
+        &[
+            "--threads=256",
+            "--experimental",
+            "--inspector-addr=127.0.0.1:0",
+        ],
+    ] {
+        let message = refused(args, Platform::Windows).unwrap();
+        assert!(message.starts_with("--threads: "), "{message}");
+        assert!(message.contains("not supported on Windows"), "{message}");
+    }
+    assert_eq!(
+        refused(&["--threads=2", "--experimental"], Platform::Unix),
+        None
+    );
 }
