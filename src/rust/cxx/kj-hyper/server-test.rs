@@ -27,7 +27,6 @@ fn table() -> KjOwn<HeaderTable> {
 /// needed.
 struct Echo<'t>(&'t HeaderTable);
 
-#[async_trait::async_trait(?Send)]
 impl Handler for Echo<'_> {
     async fn request<'a>(
         &'a self,
@@ -80,7 +79,6 @@ impl Handler for Echo<'_> {
 /// `X-Custom` headers, `-` for one it lacks.
 struct Report<'t>(&'t HeaderTable);
 
-#[async_trait::async_trait(?Send)]
 impl Handler for Report<'_> {
     async fn request<'a>(
         &'a self,
@@ -115,24 +113,21 @@ impl Handler for Report<'_> {
 
 /// Serves `request` and returns what the peer read until the server closed the connection.
 fn exchange(request: &[u8]) -> String {
-    exchange_with(request, |table| Rc::new(Echo(table)))
+    let table = table();
+    exchange_with(&table, request, Echo(&table))
 }
 
-/// [`exchange`], with the handler `handler` makes.
-fn exchange_with(
-    request: &[u8],
-    handler: for<'t> fn(&'t HeaderTable) -> Rc<dyn Handler + 't>,
-) -> String {
-    let table = table();
+/// [`exchange`], with `handler` over `table`.
+fn exchange_with(table: &HeaderTable, request: &[u8], handler: impl Handler) -> String {
     runtime().block_on(async {
         let (ours, mut peer) = duplex(1 << 16);
         let shutdown = Shutdown::new();
         let served = serve_connection(
             ours,
             Box::pin(pending()),
-            &table,
+            table,
             Rc::new(ServerSettings::default()),
-            handler(&table),
+            Rc::new(handler),
             &shutdown,
         );
         let client = async {
@@ -167,11 +162,13 @@ fn a_request_reaches_the_handler_with_kj_types_and_its_response_is_written() {
 #[test]
 fn each_request_on_a_connection_gets_its_own_headers() {
     // The second request reuses what the first resolved and the block it filled.
+    let table = table();
     let response = exchange_with(
+        &table,
         b"GET /a HTTP/1.1\r\nHost: example.com\r\nRange: bytes=0-1\r\nX-Custom: one\r\n\
           range: bytes=2-3\r\n\r\n\
           GET /b HTTP/1.1\r\nHost: example.com\r\nX-Custom: two\r\n\r\n",
-        |table| Rc::new(Report(table)),
+        Report(&table),
     );
     // A repeated header the table has is one, its values joined as kj joins them.
     assert!(
