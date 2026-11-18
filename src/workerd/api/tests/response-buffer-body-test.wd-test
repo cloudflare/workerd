@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "response-buffer-body-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-buffer-body-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+        bindings = [
+          (name = "self", service = "response-buffer-body-test")
+        ]
+      )
+    ),
+  ],
+);
