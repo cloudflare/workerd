@@ -2,10 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// The cache service, through `caches`: Miniflare's
-// test/plugins/cache/index.spec.ts, ported. How long a response stays fresh
-// is unit-tested in Rust (services/cache-test.rs); here one entry expires in
-// real time.
+// /workerd/cache.js on a disk, through `caches`: Miniflare's
+// test/plugins/cache/index.spec.ts, ported, and how long a response stays
+// fresh (`lifetimes`, on the cache Worker's TEST_CLOCK; `expires` in real
+// time).
 
 import assert from 'node:assert';
 
@@ -177,8 +177,6 @@ export const expires = {
     assert.strictEqual((await cache.match(key)).status, 200);
     await scheduler.wait(1_200);
     assert.strictEqual(await cache.match(key), undefined);
-    await cache.put(key, new Response('body', { headers }));
-    await scheduler.wait(1_200);
     assert.strictEqual(await cache.delete(key), false);
   },
 };
@@ -216,11 +214,12 @@ export const notCached = {
 export const privateSetCookie = {
   async test() {
     const res = await isCached('private-set-cookie', {
-      'Cache-Control': 'private=set-cookie',
+      'Cache-Control': 'private=Set-Cookie, max-age=60',
       'Set-Cookie': 'key=value',
     });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.headers.get('Set-Cookie'), null);
+    assert.strictEqual(res.headers.get('Cache-Control'), 'max-age=60');
   },
 };
 
@@ -297,6 +296,10 @@ export const truncatedPut = {
     assert.strictEqual(await put(head(600 * 1024 * 1024) + 'abc'), 413);
     assert.strictEqual(await caches.default.match(key), undefined);
     assert.strictEqual(await put('HTTP/1.1 200 OK\r\n'), 400);
+    assert.strictEqual(await put('HTTP/1.1 2000 OK\r\n\r\n'), 400);
+    const header = (line) => put(`HTTP/1.1 200 OK\r\n${line}\r\n\r\n`);
+    assert.strictEqual(await header('no colon'), 400);
+    assert.strictEqual(await header('bad name: x'), 400);
     assert.strictEqual(await put(head(3) + 'abc'), 204);
     assert.strictEqual(await (await caches.default.match(key)).text(), 'abc');
   },
@@ -326,5 +329,132 @@ export const failedPut = {
     await writer.abort(new Error('boom'));
     await assert.rejects(put, /boom/);
     assert.strictEqual(await (await cache.match(key)).text(), 'old');
+  },
+};
+
+// Each case puts 'old' for an hour, then 'new' with `headers()`, which live
+// `ms`: 0 deletes 'old', null stores nothing and keeps it. As
+// http-cache-semantics decides for Miniflare.
+export const lifetimes = {
+  async test(ctrl, env) {
+    let skew = 0;
+    const advance = async (ms) => {
+      skew += ms;
+      const at = `http://cache/clock?advance=${ms}`;
+      assert.ok((await env.CACHE.fetch(at, { method: 'POST' })).ok);
+    };
+    // An HTTP date `ms` from the cache's clock, in whole seconds.
+    const date = (ms) => new Date(Date.now() + skew + ms).toUTCString();
+    const cc = (value) => () => ({ 'Cache-Control': value });
+    const hour = 3_600_000;
+    const cases = [
+      ['s-maxage', 1000, cc('s-maxage=1, max-age=10')],
+      ['age', 6000, () => ({ 'Cache-Control': 'max-age=10', Age: '4' })],
+      ['too-old', 0, () => ({ 'Cache-Control': 'max-age=10', Age: '40' })],
+      ['quoted', 10_000, cc('max-age="10s"')],
+      ['bare', 0, cc('max-age')],
+      ['no-cache', 0, cc('max-age=60, no-cache')],
+      ['expires', 2000, () => ({ Date: date(-5000), Expires: date(-3000) })],
+      ['expires-undated', 2000, () => ({ Expires: date(2000) })],
+      ['expired', 0, () => ({ Expires: date(-2000) })],
+      ['expires-0', 0, () => ({ Expires: '0' })],
+      [
+        'last-modified',
+        2000,
+        () => ({ Date: date(0), 'Last-Modified': date(-20_000) }),
+      ],
+      [
+        'last-modified-undated',
+        2000,
+        () => ({ 'Last-Modified': date(-20_000) }),
+      ],
+      [
+        'immutable',
+        24 * hour,
+        () => ({
+          'Cache-Control': 'immutable',
+          'Last-Modified': date(-20_000),
+        }),
+      ],
+      ['none', 0, () => ({})],
+      ['pragma', 0, () => ({ Pragma: 'no-cache', Expires: date(2000) })],
+      ['private', null, cc('private')],
+      ['no-store', null, cc('no-store, max-age=60')],
+      ['set-cookie', null, () => ({ ...HOUR, 'Set-Cookie': 'key=value' })],
+      ['500', null, () => HOUR, { status: 500 }],
+      ['302', hour, () => HOUR, { status: 302 }],
+      [
+        '308',
+        2000,
+        () => ({ 'Last-Modified': date(-20_000) }),
+        { status: 308 },
+      ],
+      ['404', 0, () => ({}), { status: 404 }],
+      ['authorization', null, () => HOUR, { auth: true }],
+      ['public', 60_000, cc('public, max-age=60'), { auth: true }],
+    ];
+    const cache = caches.default;
+    for (const [name, ms, headers, { status = 200, auth } = {}] of cases) {
+      const key = url(`lifetime-${name}`);
+      await cache.put(key, new Response('old', { headers: HOUR }));
+      const init = auth ? { headers: { Authorization: 'x' } } : {};
+      const res = new Response('new', { status, headers: headers() });
+      await cache.put(new Request(key, init), res);
+      const text = async () => (await cache.match(key))?.text();
+      if (!ms) {
+        assert.strictEqual(await text(), ms === null ? 'old' : undefined, name);
+        continue;
+      }
+      assert.strictEqual(await text(), 'new', name);
+      await advance(ms / 4);
+      assert.strictEqual(await text(), 'new', name);
+      await advance((ms * 3) / 4 + 500);
+      assert.strictEqual(await text(), undefined, name);
+    }
+  },
+};
+
+// Hop-by-hop headers are not stored, nor a cookie `private=set-cookie` names.
+// (`Connection`, and so the headers it names, never reaches the cache.)
+export const storedHeaders = {
+  async test() {
+    const key = url('stored-headers');
+    const headers = {
+      'Cache-Control': 'max-age=60, private=set-cookie',
+      'Set-Cookie': 'key=value',
+      'Keep-Alive': 'timeout=5',
+      'X-Kept': '2',
+    };
+    await caches.default.put(key, new Response('body', { headers }));
+    const res = await caches.default.match(key);
+    assert.strictEqual(res.headers.get('Cache-Control'), 'max-age=60');
+    assert.strictEqual(res.headers.get('X-Kept'), '2');
+    assert.strictEqual(res.headers.get('Set-Cookie'), null);
+    assert.strictEqual(res.headers.get('Keep-Alive'), null);
+  },
+};
+
+// An entry is a record on the disk at the SHA-256 of `<namespace>\0<key>`:
+// a 4-byte length, that much JSON, then the body.
+export const storeKey = {
+  async test(ctrl, env) {
+    const key = url('store-key');
+    await caches.default.put(key, new Response('body', { headers: HOUR }));
+    const digest = await crypto.subtle.digest('SHA-256', bytes(`\0${key}`));
+    const hex = Array.from(new Uint8Array(digest), (b) =>
+      b.toString(16).padStart(2, '0')
+    ).join('');
+    const r = await env.DISK.fetch(`http://d/${hex}`);
+    assert.strictEqual(r.status, 200);
+    const record = new Uint8Array(await r.arrayBuffer());
+    const n = new DataView(record.buffer).getUint32(0);
+    const head = JSON.parse(new TextDecoder().decode(record.slice(4, 4 + n)));
+    assert.strictEqual(head.status, 200);
+    assert.ok(head.expires > Date.now());
+    assert.strictEqual(new TextDecoder().decode(record.slice(4 + n)), 'body');
+    // Not a record: a miss, and deleted.
+    await env.DISK.fetch(`http://d/${hex}`, { method: 'PUT', body: 'junk' });
+    assert.strictEqual(await caches.default.match(key), undefined);
+    assert.strictEqual((await env.DISK.fetch(`http://d/${hex}`)).status, 404);
   },
 };

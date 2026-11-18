@@ -454,8 +454,8 @@ struct Service {
     assets @7 :AssetsService;
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
     cache @8 :CacheDirectory;
-    # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
-    # directory on disk.
+    # In a cluster, the store of the Cache API's Worker, `/workerd/cache.js`. Requires
+    # `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -507,13 +507,13 @@ struct AssetsService {
 }
 
 struct CacheDirectory {
-  # Serves `caches.default` and `caches.open()` for the Workers whose `cacheApiOutbound` names
-  # it: a response is stored for as long as its `Cache-Control`, `Expires` or `Last-Modified`
-  # allows, and a match answers `Range`, `If-None-Match` and `If-Modified-Since`. Each entry is a
-  # file in the directory, so entries survive a restart. With `Config.cluster`, the instances
-  # share one cache instead, which every instance must name the same: an entry lives on one
-  # instance, and the directory holds this instance's in `cluster-<instance>/`, emptied as it
-  # starts. Experimental: requires `--experimental`.
+  # The `STORE` of `/workerd/cache.js` (the Worker a `cacheApiOutbound` names) shared by the
+  # instances of a cluster, which every instance must name the same: GET, PUT with `X-Expires`
+  # and DELETE of records by key. A record lives on one instance, the directory holding this
+  # instance's in `cluster-<instance>/`, emptied as it starts. While an instance drains, the keys
+  # it is home to, about 1/N, miss and their puts are not stored, until it leaves the cluster. On
+  # one machine, that Worker's `STORE` is a writable `disk` instead. Experimental: requires
+  # `--experimental`.
 
   path @0 :Text;
   # The directory, as in `DiskDirectory`: relative to the current directory, and if not
@@ -666,9 +666,10 @@ struct Worker {
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
-      # `/workerd/workflows.js`, a Workflows engine, or `/workerd/d1.js`, D1 databases (see each
-      # one's header for the config it takes). Unlike built-in modules such as `node:` ones, user
-      # code cannot import it; it is a Worker's source. Experimental.
+      # `/workerd/workflows.js`, a Workflows engine, `/workerd/d1.js`, D1 databases, or
+      # `/workerd/cache.js`, the Cache API's backend (see each one's header for the config it
+      # takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is a
+      # Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

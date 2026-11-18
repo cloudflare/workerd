@@ -19,6 +19,7 @@
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/cache/cache_js.embed.h>
 #include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/d1/d1_js.embed.h>
 #include <workerd/server/fallback-service.h>
@@ -56,6 +57,7 @@ static const PythonConfig defaultConfig{
 kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
   static const auto bundled = [] {
     kj::HashMap<kj::StringPtr, kj::StringPtr> map;
+    map.insert("/workerd/cache.js"_kj, CACHE_JS);
     map.insert("/workerd/kv.js"_kj, KV_JS);
     map.insert("/workerd/cron.js"_kj, CRON_JS);
     map.insert("/workerd/queues.js"_kj, QUEUES_JS);

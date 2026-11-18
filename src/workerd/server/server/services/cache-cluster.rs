@@ -2,13 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The cache's [`Store`] in a cluster: one cache across the nodes, by the protocol in
+//! The `cache` service's store: one across the nodes, by the protocol in
 //! `cluster_logic::cache`, which this drives. A value is a record spooled to a file in
 //! `<path>/cluster-<node>/`, removed once the protocol drops it. Nothing survives a restart: a node
 //! locks its directory, and as it starts removes every `cluster-*` directory no node has locked.
 //!
 //! The protocol runs on a monotonic clock in ms. Its view, `fresh` and `active` come from the
-//! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms.
+//! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms. A
+//! draining node is not active but stays in views until it leaves: the keys it is home to, about
+//! 1/N, miss meanwhile, and their puts are not stored.
 //!
 //! A message is HTTP to this service on node `to` (`ClusterNode::peer_service`), whose metadata
 //! names its sender as `forwardedBy`, which only a peer sets:
@@ -50,7 +52,6 @@ use kj_hyper::io_kj_error;
 use kj_rs::KjMaybe;
 use tokio::sync::oneshot;
 
-use super::Store;
 use crate::Result;
 use crate::bridge::ffi;
 use crate::cluster::ClusterNode;
@@ -337,41 +338,44 @@ impl Shared {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl Store for Clustered {
-    async fn get(&self, key: &str) -> Result<Option<File>> {
+impl Clustered {
+    pub(super) async fn get(&self, key: &str) -> Result<Option<File>> {
         match self.0.run(|cache| cache.get(key)).await {
             Some(Done::Match(Some(value))) => value.open().map(Some),
             _ => Ok(None),
         }
     }
 
-    fn draft(&self, _key: &str) -> Result<(Temporary, File)> {
+    /// A file to write a value to, removed unless [`Clustered::put`] stores it.
+    pub(super) fn draft(&self) -> Result<(Temporary, File)> {
         Temporary::beside(&self.0.dir.join("value"))
     }
 
-    async fn put(&self, key: &str, temp: Temporary, file: File) -> Result<Option<bool>> {
+    /// Makes the value written to `file` that of `key`: whether it was stored, if known.
+    pub(super) async fn put(&self, key: &str, temp: Temporary, file: File) -> Option<bool> {
         drop(file);
         let value = Rc::new(temp);
         match self.0.run(|cache| cache.put(key, value)).await {
-            Some(Done::Put(stored)) => Ok(stored),
-            _ => Ok(None),
+            Some(Done::Put(stored)) => stored,
+            _ => None,
         }
     }
 
-    async fn delete(&self, key: &str, _now: u64) -> Result<Option<bool>> {
+    /// Deletes the value of `key`: whether there was an unexpired one, if known.
+    pub(super) async fn delete(&self, key: &str) -> Option<bool> {
         match self.0.run(|cache| cache.delete(key)).await {
-            Some(Done::Delete(had)) => Ok(had),
-            _ => Ok(None),
+            Some(Done::Delete(had)) => had,
+            _ => None,
         }
     }
 
-    async fn expire(&self, key: &str) -> Result<()> {
+    /// Drops a value of `key` found expired. Not a write: what any reader may do.
+    pub(super) fn expire(&self, key: &str) {
         self.0.step(|cache| cache.evict(key));
-        Ok(())
     }
 
-    async fn message(
+    /// A message from cluster node `from`, a request that names it as `forwardedBy`.
+    pub(super) async fn message(
         &self,
         from: &str,
         method: Method,

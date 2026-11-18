@@ -1,0 +1,9 @@
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+
+# The Cache API Worker, the bundled module `/workerd/cache.js`
+# (Worker.Module.bundled).
+wd_cc_embed(
+    name = "cache-js",
+    src = "cache.js",
+    visibility = ["//src/workerd/server:__pkg__"],
+)

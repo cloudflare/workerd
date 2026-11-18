@@ -6,11 +6,24 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [ ( name = "worker", esModule = embed "cache-test.js" ) ],
         compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
-        cacheApiOutbound = "TEST_TMPDIR",
-        bindings = [ ( name = "CACHE", service = "TEST_TMPDIR" ) ],
+        cacheApiOutbound = "cache",
+        bindings = [
+          ( name = "CACHE", service = "cache" ),
+          ( name = "DISK", service = "TEST_TMPDIR" ),
+        ],
       )
     ),
-    # The cache, its entries in the directory the runner gives as -dTEST_TMPDIR.
-    ( name = "TEST_TMPDIR", cache = () ),
+    # The Cache API Worker, its entries on the disk the runner gives as -dTEST_TMPDIR.
+    ( name = "cache",
+      worker = (
+        modules = [ ( name = "cache.js", bundled = "/workerd/cache.js" ) ],
+        compatibilityFlags = ["streams_enable_constructors", "transformstream_enable_standard_constructor"],
+        bindings = [
+          ( name = "STORE", service = "TEST_TMPDIR" ),
+          ( name = "TEST_CLOCK", json = "true" ),
+        ],
+      )
+    ),
+    ( name = "TEST_TMPDIR", disk = ( writable = true ) ),
   ],
 );

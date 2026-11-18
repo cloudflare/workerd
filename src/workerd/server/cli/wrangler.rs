@@ -36,10 +36,11 @@
 //! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
 //! `AssetWorker` entrypoint. Without `main` it serves only the files. Under `--experimental` the
-//! Worker's `caches` are served by the cache service `<name>-cache`, its entries in
-//! `.wrangler/state/workerd/cache/`; without it, `caches` throw "No Cache was configured". The
-//! server listens on `localhost:8787`, as `wrangler dev` does, to `<name>-assets` if
-//! there are assets, else to the worker; `--socket-addr http=<addr>` overrides the address.
+//! Worker's `caches` are served by the Worker `<name>-cache` (the bundled module
+//! `/workerd/cache.js`), its entries in `.wrangler/state/workerd/cache/`; without it, `caches`
+//! throw "No Cache was configured". The server listens on `localhost:8787`, as `wrangler dev`
+//! does, to `<name>-assets` if there are assets, else to the worker; `--socket-addr
+//! http=<addr>` overrides the address.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
@@ -430,7 +431,8 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
-    let cache = u32::from(workers == 1 && matches!(target, Target::Serve { experimental: true }));
+    let cache =
+        2 * u32::from(workers == 1 && matches!(target, Target::Serve { experimental: true }));
     let mut services = conf.reborrow().init_services(
         workers
             + do_storage
@@ -460,8 +462,8 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         }
         set_durable_objects(worker, &classes, &name, serving);
     }
-    if cache == 1 {
-        cache_service(&mut services, &name, &storage)?;
+    if cache > 0 {
+        cache_services(&mut services, &name, &storage)?;
     }
     if do_storage == 1 {
         disk_service(
@@ -744,20 +746,30 @@ fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     disk.set_writable(true);
 }
 
-/// The cache service `<name>-cache`, last in `services`, its entries under `storage`, as the Cache
-/// API backend of the Worker, `services[0]`.
-fn cache_service(
+/// The Cache API Worker `<name>-cache` (the bundled `/workerd/cache.js`) and its disk
+/// `<name>-cache-storage` under `storage`, last in `services`, as the Cache API backend of the
+/// Worker, `services[0]`.
+fn cache_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     name: &str,
     storage: &Path,
 ) -> Result<(), String> {
     let dir = storage.join("cache");
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let cache = format!("{name}-cache");
-    let last = services.len() - 1;
-    let mut service = services.reborrow().get(last);
-    service.set_name(&cache);
-    service.init_cache().set_path(dir.to_string_lossy());
+    let (cache, disk) = (format!("{name}-cache"), format!("{name}-cache-storage"));
+    let at = services.len() - 2;
+    disk_service(services.reborrow().get(at + 1), &disk, &dir);
+    let mut store = bundled_worker(
+        services.reborrow().get(at),
+        &cache,
+        "cache.js",
+        &[],
+        None,
+        1,
+    );
+    let mut store = store.reborrow().get(0);
+    store.set_name("STORE");
+    store.init_service().set_name(disk);
     let Ok(service::Which::Worker(Ok(worker))) = services.reborrow().get(0).which() else {
         unreachable!("services[0] is the Worker");
     };
