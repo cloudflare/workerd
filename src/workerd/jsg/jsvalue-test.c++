@@ -80,6 +80,9 @@ struct JsValueContext: public ContextGlobalObject {
   JsValue callFunction(Lock& js, JsFunction fn) {
     return fn.callNoReceiver(js, js.num(1));
   }
+  kj::String functionLength(Lock& js, JsFunction fn) {
+    return kj::str(fn.length(js));
+  }
 
   struct Foo: public Object {
     JSG_RESOURCE_TYPE(Foo) {}
@@ -152,6 +155,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
     JSG_METHOD(callFunction);
+    JSG_METHOD(functionLength);
     JSG_METHOD(describeWithErrorSlots);
     JSG_METHOD(checkWriteIntoPrefix);
     JSG_NESTED_TYPE(Foo);
@@ -196,6 +200,24 @@ KJ_TEST("simple") {
       "boolean", "false");
   e.expectEval("function f(val) { return this == globalThis && val === 1; }; callFunction(f);",
       "boolean", "true");
+}
+
+KJ_TEST("JsFunction::length() clamps a redefined length to a size_t") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  auto expect = [&](kj::StringPtr length, kj::StringPtr expected) {
+    e.expectEval(kj::str("functionLength(Object.defineProperty(function(a, b) {}, 'length', "
+                         "{ value: ",
+                     length, " }))"),
+        "string", expected);
+  };
+  e.expectEval("functionLength(function(a, b) {})", "string", "2");
+  expect("'3'", "0");
+  expect("2.5", "2");
+  expect("-1", "0");
+  expect("-Infinity", "0");
+  expect("NaN", "0");
+  expect("Infinity", "18446744073709551615");
+  expect("1e300", "18446744073709551615");
 }
 
 KJ_TEST("kj::str() describes an object by the error name and message it holds") {
