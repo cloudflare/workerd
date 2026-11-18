@@ -470,3 +470,26 @@ export const contentEncoding = {
     assert.strictEqual(await res.text(), 'text');
   },
 };
+
+// A body with no length that fails after the store began writing it stores
+// nothing, and keeps what was there.
+export const failedLatePut = {
+  async test() {
+    const cache = caches.default;
+    const key = url('failed-late-put');
+    await cache.put(key, new Response('old', { headers: HOUR }));
+    let chunks = 0;
+    const body = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(10);
+        if (++chunks > 3) c.error(new Error('boom'));
+        else c.enqueue(bytes('x'.repeat(64 * 1024)));
+      },
+    });
+    await assert.rejects(
+      cache.put(key, new Response(body, { headers: HOUR })),
+      /boom/
+    );
+    assert.strictEqual(await (await cache.match(key))?.text(), 'old');
+  },
+};

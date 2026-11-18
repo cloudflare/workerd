@@ -37,8 +37,9 @@
 //   GET     200 with the record and its Content-Length, or 404
 //   PUT     the record, with `X-Expires: <ms since the epoch>`, after which
 //           the store may drop it: 2xx stored, 413 refused. A body that
-//           fails must not be stored; a `disk` sees one without a length
-//           that fails as one that ends.
+//           fails must not be stored, but a `disk` sees one without a
+//           length that fails as one that ends: this Worker then cancels
+//           the request first.
 //   DELETE  2xx had an unexpired record, 404 did not. A `disk` does not
 //           know expiry: there an entry that expired unread is deleted.
 //
@@ -398,12 +399,15 @@ async function put(request, env, at) {
   // A failed body may still reach the store as a clean end: in workerd, a
   // service binding's request body ends rather than fails when its stream
   // errors, unless it has a length. So a put with a length sends one, and
-  // the store keeps what it had; one without is deleted if it fails. When
-  // both lengths are known workerd pumps the body; else it streams through
-  // here, counted.
+  // the store keeps what it had; one without is cancelled if it fails, and
+  // deleted should the store have taken it. When both lengths are known
+  // workerd pumps the body; else it streams through here, counted.
   let failed = null;
   let pumped;
   let body;
+  // Cancels the store's request before it sees the failed body end.
+  const abort = new AbortController();
+  const fail = (e) => abort.abort((failed = e));
   const first = concat(concat(prefix, json), buf.subarray(end + 4));
   if (known) {
     const fixed = new FixedLengthStream(skip + length);
@@ -421,10 +425,8 @@ async function put(request, env, at) {
     body = fixed.readable;
   } else {
     body = rest(first, reader, (n, error) => {
-      if (error) failed = error;
-      if (n - skip > MAX_ENTRY) {
-        throw (failed = new Fail(413, 'Payload Too Large'));
-      }
+      if (error) fail(error);
+      if (n - skip > MAX_ENTRY) throw fail(new Fail(413, 'Payload Too Large'));
     });
     if (length >= 0) {
       body = body.pipeThrough(new FixedLengthStream(skip + length));
@@ -434,6 +436,7 @@ async function put(request, env, at) {
     method: 'PUT',
     headers: { 'X-Expires': `${expires}` },
     body,
+    signal: abort.signal,
   }).catch((e) => ({ error: e }));
   await pumped;
   if (failed !== null) {

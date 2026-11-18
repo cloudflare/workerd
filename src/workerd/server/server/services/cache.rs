@@ -13,8 +13,9 @@
 //! - `DELETE <url>`: 204 had an unexpired record, 404 did not, 500 if unknown.
 //!
 //! The URL's last segment is the key. A value is a file: its expiry and a newline, then the
-//! record. A put writes a draft that the store takes once the whole body was read, so a value is
-//! never partial. Disk I/O is synchronous, as in `disk`.
+//! record. A put writes a draft that the store takes once the whole body was read; a request
+//! cancelled first stores nothing. From a worker in this process, a body without a length that
+//! fails ends instead, so the worker cancels. Disk I/O is synchronous, as in `disk`.
 
 use std::fs::File;
 use std::io::Read;
