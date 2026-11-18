@@ -190,6 +190,10 @@ WorkerFactory::~WorkerFactory() noexcept(false) {
   KJ_DTOR_ASSERT(onItsLoop, "a worker factory must be destroyed on the loop it was constructed on");
 }
 
+void factory_share_workers(const WorkerFactory& factory, uint32_t copy) {
+  factory.getImpl().sharedCopy = copy;
+}
+
 kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory) {
   return factory.getImpl().sharedRef.addRef();
 }
@@ -1683,13 +1687,16 @@ bool supportsStartupSnapshot(kj::StringPtr name,
 
 // `factory_new_worker()`, which records the timing of each phase in the worker's
 // `startupTiming`. The isolate gets an inspector, and is registered with it, only if `registrar` is
-// given.
+// given. A config worker is read from `sharedConfig`, if given, rather than through the loop's
+// own reader: a Worker that loops share must not point into what one loop owns.
 kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFactory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource,
-    kj::Maybe<InspectorServiceIsolateRegistrar&> registrar) {
+    kj::Maybe<InspectorServiceIsolateRegistrar&> registrar,
+    kj::Maybe<config::Config::Reader> sharedConfig = kj::none) {
   auto& factory = constFactory.getImpl();
+  auto config = sharedConfig.orDefault(factory.config);
   auto name = kj::str(spec.name);
   TRACE_EVENT("workerd", "factory_new_worker()", "name", name.cStr());
   auto impl = kj::refcounted<CompiledWorker::Impl>(constFactory, kj::mv(name));
@@ -1705,10 +1712,13 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   capnp::List<config::Extension>::Reader extensions;
   kj::Function<void(jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>)> compileBindings;
   KJ_IF_SOME(index, configService) {
-    auto conf = factory.config.getServices()[index].getWorker();
-    extensions = factory.config.getExtensions();
+    auto conf = config.getServices()[index].getWorker();
+    extensions = config.getExtensions();
     impl->flagsArena = kj::heap<capnp::MallocMessageBuilder>();
     featureFlags = compileFlags(options, conf, *impl->flagsArena, errorReporter);
+    // Nothing runs a Python Worker's isolate from several threads in turn yet.
+    KJ_REQUIRE(sharedConfig == kj::none || !featureFlags.getPythonWorkers(),
+        "Python Workers are not supported with --loops", impl->name);
     source = WorkerdApi::extractSource(impl->name, conf, featureFlags, errorReporter);
     if (conf.hasModuleFallback()) moduleFallback = conf.getModuleFallback();
     compileBindings = [globals = kj::heapArray(kj::from<Rust>(spec.globals))](
@@ -1972,13 +1982,151 @@ kj::Promise<api::WorkerStartupTiming> startThrowawayWorker(
   co_return impl.startupTiming;
 }
 
+// This loop's claim to compile the shared Worker `key`, taken under the table's lock. Unless
+// the worker is published, destroying it gives the claim up, so that a loop that waits compiles
+// the worker itself (and fails as this one did, if it failed). Either way the waiters are woken.
+class SharedCompile final {
+ public:
+  SharedCompile(const kj::MutexGuarded<SharedWorkers>& table, uint64_t key)
+      : table(table),
+        key(key) {}
+  ~SharedCompile() noexcept(false) {
+    if (!published) finish(kj::none);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(SharedCompile);
+
+  void publish(const SharedWorker& worker) {
+    published = true;
+    finish(worker);
+  }
+
+ private:
+  const kj::MutexGuarded<SharedWorkers>& table;
+  uint64_t key;
+  bool published = false;
+
+  void finish(kj::Maybe<const SharedWorker&> worker) {
+    kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> waiters;
+    {
+      auto lock = table.lockExclusive();
+      auto& slot = KJ_ASSERT_NONNULL(lock->slots.find(key));
+      slot.worker = worker;
+      slot.compiling = false;
+      waiters = kj::mv(slot.waiters);
+    }
+    for (auto& waiter: waiters) waiter->fulfill();
+  }
+};
+
+// This loop's `CompiledWorker` over a Worker that another loop compiled.
+kj::Own<CompiledWorker> newWorkerView(
+    const WorkerFactory& factory, kj::StringPtr name, kj::Own<const SharedWorker> shared) {
+  auto impl = kj::refcounted<CompiledWorker::Impl>(factory, kj::str(name));
+  impl->worker = kj::atomicAddRef(*shared->worker);
+  impl->accessBlobHeader = shared->accessBlobHeader.map([](auto& h) { return kj::str(h); });
+  impl->info = shared->info;
+  impl->startupTiming = shared->startupTiming;
+  impl->shared = kj::mv(shared);
+  return kj::heap<CompiledWorker>(kj::mv(impl));
+}
+
+// `factory_new_worker()` for a config worker on a loop that shares the config's Workers: the
+// process's copy `copy` of it, which the first loop to ask compiles while the others wait.
+kj::Promise<kj::Own<CompiledWorker>> newSharedWorker(const WorkerFactory& constFactory,
+    const WorkerSpec& spec,
+    uint32_t configService,
+    uint32_t copy) {
+  auto& factory = constFactory.getImpl();
+  auto& table = factory.shared.sharedWorkers;
+  auto key = SharedWorkers::key(configService, copy);
+  for (;;) {
+    kj::Maybe<kj::Own<const SharedWorker>> found;
+    kj::Maybe<kj::Promise<void>> compiled;
+    {
+      auto lock = table.lockExclusive();
+      auto& slot = lock->slots.findOrCreate(
+          key, [&]() { return decltype(lock->slots)::Entry{key, SharedWorkers::Slot{}}; });
+      KJ_IF_SOME(worker, slot.worker) {
+        // None if the last loop to hold it is letting go of it right now.
+        found = kj::atomicAddRefWeak(worker);
+      }
+      if (found == kj::none) {
+        if (slot.compiling) {
+          auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+          slot.waiters.add(kj::mv(paf.fulfiller));
+          compiled = kj::mv(paf.promise);
+        } else {
+          slot.worker = kj::none;
+          slot.compiling = true;
+        }
+      }
+    }
+    KJ_IF_SOME(shared, found) {
+      co_return newWorkerView(constFactory, kj::str(spec.name), kj::mv(shared));
+    }
+    KJ_IF_SOME(promise, compiled) {
+      co_await promise;
+      continue;
+    }
+
+    SharedCompile compile(table, key);
+    auto reader = kj::heap<capnp::FlatArrayMessageReader>(
+        asWords(factory.sharedRef->getConfigWords()), CONFIG_READER_OPTIONS);
+    auto worker = co_await compileWorker(
+        constFactory, spec, configService, kj::none, kj::none, reader->getRoot<config::Config>());
+    auto& impl = worker->getImpl();
+    auto shared = kj::atomicRefcounted<SharedWorker>(factory.shared, key, kj::mv(reader),
+        kj::mv(impl.flagsArena), kj::atomicAddRef(impl.getWorker()), impl);
+    compile.publish(*shared);
+    impl.shared = kj::mv(shared);
+    co_return kj::mv(worker);
+  }
+}
+
 }  // namespace
+
+SharedWorker::SharedWorker(const SharedFactory::Impl& factory,
+    uint64_t key,
+    kj::Own<capnp::MessageReader> config,
+    kj::Own<capnp::MallocMessageBuilder> flagsArena,
+    kj::Own<const Worker> worker,
+    const CompiledWorker::Impl& compiled)
+    : factory(factory),
+      key(key),
+      config(kj::mv(config)),
+      flagsArena(kj::mv(flagsArena)),
+      worker(kj::mv(worker)),
+      accessBlobHeader(compiled.accessBlobHeader.map([](auto& h) { return kj::str(h); })),
+      info(compiled.info),
+      startupTiming(compiled.startupTiming) {}
+
+SharedWorker::~SharedWorker() noexcept(false) {
+  auto lock = factory.sharedWorkers.lockExclusive();
+  KJ_IF_SOME(slot, lock->slots.find(key)) {
+    // A loop that found this one dying may have compiled the Worker again by now.
+    bool isThis =
+        slot.worker.map([&](const SharedWorker& w) { return &w == this; }).orDefault(false);
+    if (isThis) {
+      if (slot.compiling || !slot.waiters.empty()) {
+        slot.worker = kj::none;
+      } else {
+        lock->slots.erase(key);
+      }
+    }
+  }
+}
 
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource) {
   auto& impl = factory.getImpl();
+  KJ_IF_SOME(copy, impl.sharedCopy) {
+    // Dynamic workers stay the loop's own: their channel tables are that loop's objects.
+    KJ_IF_SOME(service, configService) {
+      return newSharedWorker(factory, spec, service, copy);
+    }
+  }
   // The inspector knows the primary loop's isolates only: it holds one isolate per worker name
   // and dispatches its messages on the primary loop's thread.
   kj::Maybe<InspectorServiceIsolateRegistrar&> registrar;
@@ -2034,6 +2182,9 @@ WorkerInfo worker_info(const CompiledWorker& worker) {
 
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals) {
   auto& impl = worker.getImpl();
+  // A view of a Worker another loop compiled: that loop fills the object in, before any loop
+  // serves.
+  if (impl.ctxExportsHandle == kj::none && impl.shared != kj::none) return;
   impl.getWorker().runInLockScope(
       Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     KJ_IF_SOME(handle, impl.ctxExportsHandle) {

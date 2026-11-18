@@ -228,6 +228,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
 };
 
 kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory);
+// Has `factory` serve the config's Workers from the process's shared copies of number `copy`
+// instead of compiling its own (see `SharedWorker`). Before the factory compiles a Worker.
+void factory_share_workers(const WorkerFactory& factory, uint32_t copy);
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory);
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory);
 bool factory_experimental(const WorkerFactory& factory);
@@ -251,7 +254,9 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
 // =======================================================================================
 
 // A compiled worker: its isolate, script and `Worker`, and what compiling them revealed. Bound to
-// the loop of the factory that compiled it: each loop thread compiles its own copy of a worker.
+// the loop of the factory it came from. Each loop thread compiles its own copy of a worker;
+// loops that share Workers (`factory_share_workers`) each have their own `CompiledWorker` over
+// one isolate.
 class CompiledWorker final {
  public:
   class Impl;
