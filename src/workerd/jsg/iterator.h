@@ -376,11 +376,14 @@ class AsyncGenerator final {
   AsyncGenerator(Lock& js, kj::Ptr<State> other): state(js, other) {}
 };
 
+// An AsyncGenerator that refuses to unwrap strings and buffer sources, which are sync iterables,
+// so that a later member of the enclosing OneOf can handle them as a whole. See
+// GeneratorWrapper::tryUnwrap().
 template <typename T>
-class AsyncGeneratorIgnoringStrings final {
+class AsyncGeneratorIgnoringStringsAndBufferSources final {
  public:
   template <typename TypeWrapper>
-  AsyncGeneratorIgnoringStrings(Lock& js, JsObject object, TypeWrapper* ptr)
+  AsyncGeneratorIgnoringStringsAndBufferSources(Lock& js, JsObject object, TypeWrapper* ptr)
       : inner(AsyncGenerator<T>(js, object, ptr)) {}
 
   AsyncGenerator<T> release() {
@@ -407,7 +410,7 @@ class GeneratorWrapper {
   }
 
   template <typename T>
-  static constexpr const char* getName(AsyncGeneratorIgnoringStrings<T>*) {
+  static constexpr const char* getName(AsyncGeneratorIgnoringStringsAndBufferSources<T>*) {
     return "AsyncGenerator";
   }
 
@@ -432,7 +435,7 @@ class GeneratorWrapper {
   v8::Local<v8::Object> wrap(Lock& js,
       v8::Local<v8::Context>,
       kj::Maybe<v8::Local<v8::Object>>,
-      AsyncGeneratorIgnoringStrings<T>&&) {
+      AsyncGeneratorIgnoringStringsAndBufferSources<T>&&) {
     KJ_FAIL_ASSERT("AsyncGenerator instances do not support wrap");
   }
 
@@ -562,17 +565,21 @@ class GeneratorWrapper {
   }
 
   template <typename T>
-  kj::Maybe<AsyncGeneratorIgnoringStrings<T>> tryUnwrap(Lock& js,
+  kj::Maybe<AsyncGeneratorIgnoringStringsAndBufferSources<T>> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
-      AsyncGeneratorIgnoringStrings<T>*,
+      AsyncGeneratorIgnoringStringsAndBufferSources<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // This variation of the wrapper is used in cases where Strings should not be treated
-    // as iterators. Specifically, for cases like `kj::OneOf<kj::String,AsyncGenerator<T>>`
-    // where we want to allow strings to be passed through as strings but also want to allow
-    // sync and async generators to be handled as well. Without this, the strings would be
-    // treated as sync iterables.
-    if (config.fetchIterableTypeSupport && handle->IsObject() && !handle->IsStringObject()) {
+    // This variation of the wrapper is used in cases where strings and buffer sources should
+    // not be treated as iterators. Specifically, for cases like
+    // `kj::OneOf<AsyncGeneratorIgnoringStringsAndBufferSources<T>, jsg::JsRef<jsg::JsValue>>`
+    // where we want strings and buffer sources to fall through to the later member and be
+    // consumed whole, but also want to allow sync and async generators to be handled as well.
+    // Without this, strings and typed arrays would be treated as sync iterables. The buffer
+    // sources skipped are those that JsBufferSource accepts: ArrayBuffers and ArrayBufferViews.
+    // They are rejected before any property lookup, so recognizing one runs no JavaScript.
+    if (config.fetchIterableTypeSupport && handle->IsObject() && !handle->IsStringObject() &&
+        !handle->IsArrayBuffer() && !handle->IsArrayBufferView()) {
       auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
 
@@ -619,7 +626,7 @@ class GeneratorWrapper {
         auto func = iter.As<v8::Function>();
         auto iterObj = check(func->Call(context, object, 0, nullptr));
         if (iterObj->IsObject()) {
-          return AsyncGeneratorIgnoringStrings<T>(
+          return AsyncGeneratorIgnoringStringsAndBufferSources<T>(
               js, JsObject(iterObj.As<v8::Object>()), static_cast<TypeWrapper*>(nullptr));
         }
       }

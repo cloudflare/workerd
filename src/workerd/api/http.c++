@@ -98,15 +98,29 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
           "This ReadableStream is locked to a reader, and cannot be used as a body.");
       return ExtractedBody(js, kj::mv(stream));
     }
-    KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
+    KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStringsAndBufferSources<jsg::Value>) {
       return ExtractedBody(js, JsReadableStream::from(js, gen.release()));
     }
-    KJ_CASE_ONEOF(text, kj::String) {
-      auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-      return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
-    }
-    KJ_CASE_ONEOF(bytesRef, jsg::JsRef<jsg::JsBufferSource>) {
-      return ExtractedBody(js, JsReadableStream(js, kj::mv(bytesRef)));
+    KJ_CASE_ONEOF(value, jsg::JsRef<jsg::JsValue>) {
+      auto handle = value.getHandle(js);
+      KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
+        // TODO (soon): Lazily consume the JS string...
+        auto text = str.toString(js);
+        auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
+        return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
+      } else KJ_IF_SOME(bufferSource, handle.tryCast<jsg::JsBufferSource>()) {
+        return ExtractedBody(js, JsReadableStream(js, bufferSource.addRef(js)));
+      } else {
+        // In this case we have to convert the value to a JS string now as the
+        // timing of the stringify call on the value is observable. The call
+        // cannot be deferred.
+        auto val = value.getHandle(js);
+        auto jsStr = val.toJsString(js);
+        // TODO (soon) Lazily consume the JS string...
+        auto text = jsStr.toString(js);
+        auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
+        return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
+      }
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       // Blobs always have a type, but it defaults to an empty string. We should NOT set
@@ -1235,16 +1249,17 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  auto json = any.toJson(js);
+  jsg::JsValue json = any.toJsJson(js);
   if (FeatureFlags::get(js).getPedanticWpt()) {
     // JSON.stringify() returns undefined for values that have no JSON representation, such as a
     // symbol, a function, undefined, or an object whose toJSON() returns one of these. V8's
     // JSON::Stringify() API converts that result to the string "undefined", which is never valid
     // JSON text, so it identifies these values unambiguously.
-    JSG_REQUIRE(json != "undefined"_kj, TypeError,
+    // TODO(perf): Cache the "undefined" string
+    JSG_REQUIRE(!json.strictEquals(js.strIntern("undefined"_kj)), TypeError,
         "Response.json() requires a value that can be serialized to JSON.");
   }
-  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
+  return constructor(js, kj::Maybe(json.addRef(js)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {

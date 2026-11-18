@@ -330,7 +330,11 @@ JS_IS_TYPES(V)
 #undef V
 
 kj::String JsValue::toJson(Lock& js) const {
-  return kj::str(check(v8::JSON::Stringify(js.v8Context(), inner)));
+  return toJsJson(js).toString(js);
+}
+
+jsg::JsString JsValue::toJsJson(Lock& js) const {
+  return jsg::JsString(check(v8::JSON::Stringify(js.v8Context(), inner)));
 }
 
 JsValue JsValue::fromJson(Lock& js, kj::ArrayPtr<const char> input) {

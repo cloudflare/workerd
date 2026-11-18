@@ -1244,10 +1244,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # iterables would be treated as regular objects and not iterated over at all. With this
   # flag enabled, sync and async iterables will be properly iterated over and their values
   # used as the body of the request or response.
-  # The actual compat flag enables the specific AsyncGeneratorIgnoringStrings type wrapper
-  # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
-  # included in kj::OneOf declarations safely with strings and other types. When enabled,
-  # strings are ignored but Arrays will be treated as iterables and not stringified as before.
+  # The actual compat flag enables the specific AsyncGeneratorIgnoringStringsAndBufferSources
+  # type wrapper that allows this behavior and allows sync Generator and AsyncGenerator objects
+  # to be included in kj::OneOf declarations safely with strings, buffer sources, and other
+  # types. When enabled, strings and buffer sources are ignored but Arrays will be treated as
+  # iterables and not stringified as before.
   # Also see fetchIterableTypeSupportOverrideAdjustment.
 
   envModuleNullableSupport @147 :Bool

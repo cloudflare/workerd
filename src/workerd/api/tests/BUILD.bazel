@@ -1725,6 +1725,12 @@ wd_test(
 )
 
 wd_test(
+    src = "fetch-iterable-buffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-iterable-buffer-test.js"],
+)
+
+wd_test(
     src = "fetch-test.wd-test",
     args = ["--experimental"],
     data = ["fetch-test.js"],

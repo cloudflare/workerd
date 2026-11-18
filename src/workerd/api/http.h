@@ -57,15 +57,16 @@ class Body: public jsg::Object {
   // from any of the other source types, Body can create a new stream from the buffer, and the POST
   // will successfully retransmit.
   using Initializer = kj::OneOf<JsReadableStream,
-      kj::String,
-      jsg::JsRef<jsg::JsBufferSource>,
       jsg::Ref<Blob>,
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
       // Before the async generator, which would take a URLSearchParams as an iterable.
       JsUrlSearchParams,
-      jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
+      jsg::AsyncGeneratorIgnoringStringsAndBufferSources<jsg::Value>,
+      // Must be the last one since JsUrlSearchParams and iterable
+      // matches must be identified first.
+      jsg::JsRef<jsg::JsValue>>;
 
   // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it
   // implies (if any). The stream carries its own retransmit buffer when the body was constructed
