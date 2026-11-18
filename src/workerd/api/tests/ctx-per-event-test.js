@@ -12,6 +12,8 @@ const seen = [];
 export default {
   fetch(request, env, ctx) {
     seen.push(ctx);
+    // ctx.props is the same object every time it is read, even when created on first read.
+    strictEqual(ctx.props, ctx.props);
     if (new URL(request.url).pathname === '/nested') {
       // This ctx stays in use while another event runs.
       return (async () => {
