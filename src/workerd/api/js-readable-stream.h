@@ -16,6 +16,7 @@
 namespace workerd::api {
 
 class Blob;
+class ByteChunker;
 class FormData;
 class JsWritableStream;
 struct JsReadableWritablePair;
@@ -83,9 +84,13 @@ class JsReadableStream final {
       jsg::Lock& js, kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
   static JsReadableStream create(jsg::Lock& js, kj::String data) KJ_WARN_UNUSED_RESULT;
 
-  // Create a stream that reads the given JS value. The value itself is never handed to
-  // JavaScript, transferred or detached, so several streams may read the same one; a caller
+  // Create a byte stream that reads the given JS value: its bytes, or for a string its UTF-8,
+  // copied into new chunks as they are pulled (see ByteChunker). Each chunk of a string is
+  // complete UTF-8, and a value of up to 128 KiB is one chunk. The value itself is never handed
+  // to JavaScript, transferred or detached, so several streams may read the same one; a caller
   // passing a BufferSource must ensure nothing else modifies or detaches it while it is read.
+  // The stream declares the value's length and drops the value once it has produced every byte
+  // or is canceled.
   static JsReadableStream create(jsg::Lock& js, jsg::JsString str) KJ_WARN_UNUSED_RESULT;
   static JsReadableStream create(jsg::Lock& js, jsg::JsBufferSource source) KJ_WARN_UNUSED_RESULT;
   static JsReadableStream create(jsg::Lock& js, jsg::Ref<Blob> blob) KJ_WARN_UNUSED_RESULT;
@@ -300,6 +305,9 @@ class JsReadableStream final {
 
  private:
   explicit JsReadableStream(Impl impl): impl(kj::mv(impl)) {}
+
+  // The JS-value overloads above: a byte stream whose pulls enqueue the chunker's chunks.
+  static JsReadableStream create(jsg::Lock& js, kj::Rc<ByteChunker> chunker);
 
   kj::Maybe<Impl> impl;
   // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS

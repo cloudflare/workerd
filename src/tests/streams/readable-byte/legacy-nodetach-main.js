@@ -7,4 +7,5 @@
 export {
   nodetachJsBackedStillDetaches,
   nodetachNativeKeepsCallerBuffer,
+  nodetachInMemoryBodyDetaches,
 } from 'legacy-nodetach';

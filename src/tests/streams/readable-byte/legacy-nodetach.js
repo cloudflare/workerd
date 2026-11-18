@@ -45,8 +45,7 @@ export const nodetachJsBackedStillDetaches = {
 // semantics.
 export const nodetachNativeKeepsCallerBuffer = {
   async test() {
-    const resp = new Response('hello');
-    const reader = resp.body.getReader({ mode: 'byob' });
+    const reader = new Blob(['hello']).stream().getReader({ mode: 'byob' });
     const view = new Uint8Array(8);
     const r = await reader.read(view);
     strictEqual(r.value.buffer, view.buffer);
@@ -54,5 +53,23 @@ export const nodetachNativeKeepsCallerBuffer = {
     const end = await reader.read(new Uint8Array(8));
     strictEqual(end.done, true);
     strictEqual(end.value, undefined);
+  },
+};
+
+// The body of a Request or Response made from a string, BufferSource or
+// Blob is a JS-backed byte stream, so its read(view) detaches in this
+// window too.
+export const nodetachInMemoryBodyDetaches = {
+  async test() {
+    const reader = new Response('hello').body.getReader({ mode: 'byob' });
+    const view = new Uint8Array(8);
+    const r = await reader.read(view);
+    strictEqual(view.byteLength, 0);
+    ok(r.value.buffer !== view.buffer);
+    strictEqual(new TextDecoder().decode(r.value), 'hello');
+    const end = await reader.read(new Uint8Array(8));
+    strictEqual(end.done, true);
+    ok(end.value instanceof Uint8Array);
+    strictEqual(end.value.byteLength, 0);
   },
 };

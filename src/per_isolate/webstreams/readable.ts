@@ -5156,15 +5156,21 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
 });
 
 // Captured controller operations for INTERNAL stream production (from() and
-// the C++ iterable-body arm via the cppExports below). The prototype is
-// user-reachable once the class is installed as a global, so internal
-// production must not dispatch through it -- per WHATWG, from() uses
+// the C++ iterable-body and in-memory-body arms via the cppExports below).
+// The prototype is user-reachable once the class is installed as a global, so
+// internal production must not dispatch through it -- per WHATWG, from() uses
 // internal controller operations, unaffected by prototype patching.
 const defaultControllerEnqueue = uncurryThis(
   ReadableStreamDefaultController.prototype.enqueue
 ) as (controller: object, chunk: unknown) => void;
 const defaultControllerClose = uncurryThis(
   ReadableStreamDefaultController.prototype.close
+) as (controller: object) => void;
+const byteControllerEnqueue = uncurryThis(
+  ReadableByteStreamController.prototype.enqueue
+) as (controller: object, chunk: ArrayBufferView) => void;
+const byteControllerClose = uncurryThis(
+  ReadableByteStreamController.prototype.close
 ) as (controller: object) => void;
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
   __proto__: kNullProtoObject,
@@ -5204,6 +5210,14 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
+  // The same for the byte streams of the C++ in-memory-body arm
+  // (JsReadableStream::create() over a string or buffer).
+  readableByteControllerEnqueue: (
+    controller: object,
+    chunk: ArrayBufferView
+  ): void => byteControllerEnqueue(controller, chunk),
+  readableByteControllerClose: (controller: object): void =>
+    byteControllerClose(controller),
   consumeReadableStreamAsArrayBufferRecord,
   extractNativeSourceForCollection,
   detachReadableStream,

@@ -27,8 +27,7 @@ export const legacyByteConstructorThrows = {
 
 export const legacyNativeByobNoDetach = {
   async test() {
-    const resp = new Response('hello');
-    const reader = resp.body.getReader({ mode: 'byob' });
+    const reader = new Blob(['hello']).stream().getReader({ mode: 'byob' });
     const view = new Uint8Array(8);
     const r = await reader.read(view);
     strictEqual(r.done, false);
@@ -45,8 +44,9 @@ export const legacyNativeByobNoDetach = {
 
 export const legacyNativeReadAtLeast = {
   async test() {
-    const resp = new Response('foobarbaz');
-    const reader = resp.body.getReader({ mode: 'byob' });
+    const reader = new Blob(['foobarbaz']).stream().getReader({
+      mode: 'byob',
+    });
     const r = await reader.readAtLeast(4, new Uint8Array(16));
     strictEqual(r.done, false);
     strictEqual(r.value.byteLength, 9);

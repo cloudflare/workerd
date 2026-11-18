@@ -228,9 +228,9 @@ export const closedOrderAtEndOfData = {
 export const closedOrderAtNativeEndOfData = {
   async test() {
     for (const mode of [undefined, 'byob']) {
-      const reader = new Response('abc').body.getReader(
-        mode ? { mode } : undefined
-      );
+      const reader = new Blob(['abc'])
+        .stream()
+        .getReader(mode ? { mode } : undefined);
       const read = () =>
         mode ? reader.read(new Uint8Array(8)) : reader.read();
       strictEqual((await read()).value.byteLength, 3);
@@ -252,7 +252,7 @@ export const closedOrderAtNativeEndOfData = {
       strictEqual(log.join(), 'closed,end', `mode ${mode}`);
     }
 
-    const reader = new Response('abc').body.getReader({ mode: 'byob' });
+    const reader = new Blob(['abc']).stream().getReader({ mode: 'byob' });
     const log = [];
     reader.closed.then(() => log.push('closed'));
     const partial = await reader.readAtLeast(4, new Uint8Array(8)).then((r) => {

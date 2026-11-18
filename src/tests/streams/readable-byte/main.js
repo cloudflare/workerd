@@ -7,6 +7,7 @@
 // integration tests (echo).
 
 import { compressedByteResponse } from 'expected-length';
+import { compressedInMemoryBodyResponse } from 'in-memory-body';
 
 // Set by a request to /fail-now: the /failing body errors once it is set.
 let failNow = false;
@@ -72,6 +73,9 @@ export default {
     }
     if (url.pathname === '/gzip') {
       return compressedByteResponse();
+    }
+    if (url.pathname === '/gzip-in-memory-body') {
+      return compressedInMemoryBodyResponse();
     }
     return new Response(request.body, {
       headers: {
@@ -326,3 +330,15 @@ export {
 } from 'expected-length';
 
 export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';
+
+export {
+  inMemoryBodySmallValueIsOneChunk,
+  inMemoryBodyEmptyValueClosesWithoutChunks,
+  inMemoryBodyChunksAreCompleteUtf8,
+  inMemoryBodyLongBufferInChunks,
+  inMemoryBodyWritesLoneSurrogatesAsReplacement,
+  inMemoryBodyReadsIntoByobViews,
+  inMemoryBodyIsCopiedAtConstruction,
+  inMemoryBodyDeclaresItsLength,
+  inMemoryBodyCompressedResponseDropsLength,
+} from 'in-memory-body';

@@ -67,7 +67,7 @@ export const pipeCancellationWinsOverLaterReadableCancel = {
     // operation.
     if (usingTsImpl) return;
 
-    const source = new Response(new Uint8Array([1])).body;
+    const source = new Blob([new Uint8Array([1])]).stream();
     const transform = new IdentityTransformStream();
     const abortController = new AbortController();
     const pipePromise = source.pipeTo(transform.writable, {

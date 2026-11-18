@@ -603,9 +603,9 @@ export const partialViewThenDefaultRead = {
 // byte source's close() mid-element does (spec).
 export const nativeByobMultiByteViews = {
   async test(ctrl, env) {
-    const aligned = new Response(new Uint8Array([1, 2, 3, 4])).body.getReader({
-      mode: 'byob',
-    });
+    const aligned = new Blob([new Uint8Array([1, 2, 3, 4])])
+      .stream()
+      .getReader({ mode: 'byob' });
     const first = await aligned.read(new Uint16Array(4));
     strictEqual(first.done, false);
     ok(first.value instanceof (usingTsImpl ? Uint16Array : Uint8Array));
@@ -650,9 +650,9 @@ export const nativeByobMultiByteViews = {
     // A partial element already in the stash when the next read arrives: the
     // Uint32 read takes 4 of the body's 7 bytes, then the Uint16 read is
     // served from the 3 left over, delivering 2 and carrying 1 to EOF.
-    const odd = new Response(
-      new Uint8Array([1, 2, 3, 4, 5, 6, 7])
-    ).body.getReader({ mode: 'byob' });
+    const odd = new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7])])
+      .stream()
+      .getReader({ mode: 'byob' });
     const word = await odd.read(new Uint32Array(2));
     strictEqual(word.done, false);
     if (usingTsImpl) {

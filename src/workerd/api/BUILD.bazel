@@ -17,6 +17,7 @@ filegroup(
         "blob.c++",
         "body-source.c++",
         "bootstrap-utils.c++",
+        "byte-chunker.c++",
         "cache.c++",
         "container.c++",
         "event-target-bootstrap.c++",
@@ -80,6 +81,7 @@ filegroup(
         "blob.h",
         "body-source.h",
         "bootstrap-utils.h",
+        "byte-chunker.h",
         "cache.h",
         "container.h",
         "event-target-bootstrap.h",
@@ -823,6 +825,14 @@ kj_test(
 
 kj_test(
     src = "blob-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "byte-chunker-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/blob.h>
+#include <workerd/api/byte-chunker.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
@@ -802,17 +803,86 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::String data) {
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsString str) {
-  return create(js, str.toString(js));
+  return create(js, kj::rc<ByteChunker>(js, str));
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsBufferSource source) {
-  return create(js, source.copy());
+  return create(js, kj::rc<ByteChunker>(js, source));
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::Ref<Blob> blob) {
-  // Blob contents live in a V8 ArrayBuffer. The stream is read on the kj event loop, where the
-  // isolate's MPK-protected sandbox pages are unreadable, so take a kj-heap copy.
-  return create(js, kj::heapArray(blob->getData(js)));
+  return create(js, kj::rc<ByteChunker>(kj::mv(blob)));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chunker) {
+  // Each pull enqueues one chunk, or closes the stream once there are none left. The stream pulls
+  // only for a waiting read (highWaterMark 0), so each chunk goes to a read whole, and a pull that
+  // closes the stream is the one after the last chunk, or the first for an empty value.
+  uint64_t length = chunker->getLength();
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSource source;
+    source.type = kj::str("bytes");
+    source.expectedLength = length;
+    // A default read of a byte stream reads into a buffer of this size, so every chunk fits.
+    source.autoAllocateChunkSize = static_cast<int>(kj::max(chunker->getMaxChunkSize(), size_t{1}));
+    source.pull = [chunker = chunker.addRef()](
+                      jsg::Lock& js, UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
+      auto& controller = KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableByteStreamController>>());
+      KJ_IF_SOME(chunk, chunker->next(js)) {
+        controller->enqueue(js, jsg::JsBufferSource(chunk));
+      }
+      if (!chunker->isDone()) {
+        return js.resolvedPromise();
+      }
+      // Closing clears the stream's algorithms, which would destroy this lambda while it runs, so
+      // close in a continuation. The pull is pending until then, so no other pull runs first.
+      return js.resolvedPromise().then(
+          js, [controller = controller.addRef()](jsg::Lock& js) mutable {
+        if (controller->canCloseOrEnqueue()) {
+          controller->close(js);
+        }
+      });
+    };
+    source.cancel = [chunker = chunker.addRef()](
+                        jsg::Lock& js, jsg::JsValue) mutable -> jsg::Promise<void> {
+      chunker->cancel();
+      return js.resolvedPromise();
+    };
+    auto controller = newReadableStreamJsController();
+    auto stream = js.allocAccounted<ReadableStream>(
+        sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+    stream->getController().setup(js, kj::mv(source), StreamQueuingStrategy{.highWaterMark = 0});
+    return JsReadableStream(kj::mv(stream));
+  }
+
+  // TypeScript arm: the same source, built as a JS object. A JS pull may close the stream itself.
+  auto pull = js.wrapSimpleFunction(js.v8Context(),
+      [chunker = chunker.addRef()](
+          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    auto controller = jsg::JsValue(info[0]);
+    KJ_IF_SOME(chunk, chunker->next(js)) {
+      webstreams::dispatchCall(
+          js, "readableByteControllerEnqueue", controller, jsg::JsValue(chunk));
+    }
+    if (chunker->isDone()) {
+      webstreams::dispatchCall(js, "readableByteControllerClose", controller);
+    }
+  });
+  auto cancel = js.wrapSimpleFunction(js.v8Context(),
+      [chunker = chunker.addRef()](
+          jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) mutable { chunker->cancel(); });
+
+  auto sourceObj = js.objNoProto();
+  sourceObj.set(js, "type"_kj, js.str("bytes"_kj));
+  sourceObj.set(js, "expectedLength"_kj, js.bigInt(length));
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
+  sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
+  auto strategyObj = js.objNoProto();
+  strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
+
+  auto constructor = webstreams::getCppExport(js, "ReadableStream");
+  return JsReadableStream(js,
+      constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
