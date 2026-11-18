@@ -5,5 +5,10 @@
 //! The `workerd` binary. See cli/lib.rs.
 
 fn main() -> std::process::ExitCode {
+    // Set when the binary is linked with tcmalloc, which happens only on Linux (see `:malloc`).
+    #[cfg(target_os = "linux")]
+    if option_env!("WORKERD_TCMALLOC").is_some() {
+        workerd_cli::reexec_without_glibc_rseq();
+    }
     workerd_cli::main()
 }

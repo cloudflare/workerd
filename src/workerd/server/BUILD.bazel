@@ -71,6 +71,11 @@ wd_rust_binary(
     srcs = ["workerd.rs"],
     exec_properties = link_exec_properties(),
     malloc = ":malloc",
+    # Tells main() it has tcmalloc, whose per-CPU caches it re-executes to enable.
+    rustc_env = select({
+        ":really_use_tcmalloc": {"WORKERD_TCMALLOC": "1"},
+        "//conditions:default": {},
+    }),
     test = False,
     tool = True,
     visibility = ["//visibility:public"],
