@@ -182,6 +182,17 @@ pub mod ffi {
         EvalError,
     }
 
+    /// How throwing an internal error logs its message.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum InternalErrorLog {
+        /// At `ERROR`, with the reference ID that JavaScript gets, as C++ `makeInternalError()`
+        /// logs it.
+        WithId,
+        /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
+        /// `worker_do_not_log` that it throws to JavaScript.
+        DoNotLog,
+    }
+
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum PromiseState {
@@ -958,6 +969,7 @@ pub mod ffi {
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
+            log: InternalErrorLog,
         ) -> Local;
         pub fn tunneled_exception_detail_id() -> u64;
         pub fn tunneled_exception_enhanced_detail_id() -> u64;
@@ -976,7 +988,11 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        pub unsafe fn isolate_throw_internal_error(
+            isolate: *mut Isolate,
+            internal_message: &str,
+            log: InternalErrorLog,
+        );
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         #[nothrow]

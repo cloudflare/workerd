@@ -124,6 +124,16 @@ mod ffi {
             callback: unsafe fn(usize /* callback */),
         );
 
+        /// Calls `callback` with KJ logging at every severity and returns what it logged, each
+        /// as `"<severity>: <text>"`. See `capture_kj_logs` in `ffi.h`.
+        pub unsafe fn capture_kj_logs(
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        ) -> Vec<String>;
+
+        /// Fails with a `FAILED` KJ exception with `description`.
+        pub fn fail_with_kj_exception(description: &str) -> Result<()>;
+
         /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
         /// global and traced handle nodes in use.
         #[expect(clippy::allow_attributes)]
@@ -1029,6 +1039,52 @@ pub fn isolates_share_group(a: &jsg::Isolate, b: &jsg::Isolate) -> bool {
     // SAFETY: both references keep their isolates alive; reading an isolate's group needs no
     // lock.
     unsafe { ffi::isolates_share_group(a.as_ffi(), b.as_ffi()) }
+}
+
+/// Runs `f` and returns what it returns, with what KJ logged on this thread while it ran.
+///
+/// Every severity from `info` up is captured, each message as `"<severity>: <text>"`, as C++
+/// tests observe logging with `KJ_EXPECT_LOG`. What is captured is not written to stderr.
+///
+/// # Panics
+///
+/// Panics if `f` panics, once logging is restored.
+pub fn capture_kj_logs<F: FnOnce() -> R, R>(f: F) -> (R, Vec<String>) {
+    struct Call<F, R> {
+        f: Option<F>,
+        result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+    }
+
+    fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+        // SAFETY: data was cast from &raw mut Call<F, R> in capture_kj_logs below.
+        let call = unsafe { &mut *(data as *mut Call<F, R>) };
+        let Some(f) = call.f.take() else {
+            return;
+        };
+        // A panic must not unwind into C++.
+        call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)));
+    }
+
+    let mut call = Call::<F, R> {
+        f: Some(f),
+        result: None,
+    };
+    // SAFETY: `call` is valid for the duration of capture_kj_logs.
+    let logs = unsafe { ffi::capture_kj_logs(&raw mut call as usize, trampoline::<F, R>) };
+    match call.result.expect("the callback ran") {
+        Ok(result) => (result, logs),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Fails with a `FAILED` KJ exception with `description`, as a C++ function that a cxx bridge
+/// calls fails.
+///
+/// # Errors
+///
+/// Always.
+pub fn fail_with_kj_exception(description: &str) -> Result<(), cxx::KjException> {
+    ffi::fail_with_kj_exception(description)
 }
 
 impl Default for Harness {

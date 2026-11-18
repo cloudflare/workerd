@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -1480,7 +1481,7 @@ void fast_api_throw_exception(FastApiCallbackOptions* options,
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
   v8::HandleScope scope(options->isolate);
-  isolate_throw_internal_error(options->isolate, internalMessage);
+  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::WithId);
 }
 
 void fast_api_terminate_execution(FastApiCallbackOptions* options) {
@@ -2062,20 +2063,50 @@ bool dom_exception_try_unwrap(Isolate* isolate,
 }
 
 namespace {
-// Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
-// the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
-// "internal error; reference = <id>" JS Error.
-v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalMessage) {
+// Logs the message of an internal error that is not created, as `log` says. With
+// InternalErrorLog::WithId there is no ID to log it with, since no error carries one.
+void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
+  switch (log) {
+    case InternalErrorLog::WithId:
+      KJ_LOG(ERROR, message);
+      return;
+    case InternalErrorLog::DoNotLog:
+      KJ_LOG(INFO, message);
+      return;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Generates a unique error ID and returns a generic "internal error; reference = <id>" JS Error.
+// With InternalErrorLog::WithId, this is makeInternalError() from util.c++, which it calls: the
+// internal message is logged with the ID to KJ_LOG(ERROR) for Sentry. With
+// InternalErrorLog::DoNotLog, the message is logged to KJ_LOG(INFO) without the ID, as
+// reportInternalException() in util.c++ logs an exception marked worker_do_not_log.
+v8::Local<v8::Value> createInternalError(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  return ::workerd::jsg::makeInternalError(isolate, message);
+  switch (log) {
+    case InternalErrorLog::WithId:
+      return ::workerd::jsg::makeInternalError(isolate, message);
+    case InternalErrorLog::DoNotLog: {
+      logInternalMessage(message, log);
+      // The text makeInternalError() gives the error.
+      auto text = kj::str("internal error; reference = ", ::workerd::makeInternalErrorId());
+      return v8::Exception::Error(
+          v8::String::NewFromUtf8(isolate, text.cStr(), v8::NewStringType::kNormal, text.size())
+              .ToLocalChecked());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
-Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
-  return to_ffi(createInternalError(isolate, internalMessage));
+Local exception_create_internal(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
+  return to_ffi(createInternalError(isolate, internalMessage, log));
 }
 
 uint64_t tunneled_exception_detail_id() {
@@ -2130,14 +2161,15 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
-void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
+void isolate_throw_internal_error(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   if (isolate->IsExecutionTerminating()) {
     // Logs the message, but creates no error, since it would not be thrown. See
     // createInternalError() for why the message is copied.
-    KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
+    logInternalMessage(kj::heapString(internalMessage.data(), internalMessage.size()), log);
     return;
   }
-  isolate->ThrowException(createInternalError(isolate, internalMessage));
+  isolate->ThrowException(createInternalError(isolate, internalMessage, log));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

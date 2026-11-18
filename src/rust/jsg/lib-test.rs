@@ -109,6 +109,62 @@ fn expected_prefix_without_tunneling_tag_is_redacted() {
     assert!(err.is_internal);
 }
 
+#[test]
+fn do_not_log_marker_is_kept() {
+    // The KJ exception C++ jsg::Deserializer throws for an unsupported header.
+    let err = from_description("worker_do_not_log; message = Unable to deserialize cloned data");
+    assert!(err.is_internal);
+    assert!(err.do_not_log);
+    assert_eq!(
+        err.internal_error_log(),
+        v8::ffi::InternalErrorLog::DoNotLog
+    );
+
+    let err = from_description("remote exception: worker_do_not_log; script exceeded time limit");
+    assert!(err.do_not_log);
+    let err = from_description("broken.outputGateBroken; worker_do_not_log; failed");
+    assert!(err.do_not_log);
+}
+
+#[test]
+fn do_not_log_marker_anywhere_is_kept_for_a_tunneled_error() {
+    let err = from_description("jsg.TypeError: worker_do_not_log boom");
+    assert_eq!(err.name, ExceptionType::TypeError);
+    assert!(err.do_not_log);
+    let err = from_description("expected x; worker_do_not_log; jsg.TypeError: boom");
+    assert_eq!(err.name, ExceptionType::TypeError);
+    assert!(err.do_not_log);
+}
+
+#[test]
+fn do_not_log_marker_is_looked_for_where_cpp_looks() {
+    // As C++ makeDefaultError() looks for it: for an untunneled "expected ..." description, only
+    // in what follows its last "; ".
+    let err = from_description("expected x; worker_do_not_log; failed");
+    assert!(err.is_internal);
+    assert!(!err.do_not_log);
+    let err = from_description("expected x; failed: worker_do_not_log");
+    assert!(err.do_not_log);
+}
+
+#[test]
+fn errors_without_the_marker_are_logged() {
+    for description in [
+        "some unrelated kj exception",
+        "expected someCondition; some message",
+        "jsg-internal.TypeError: boom",
+    ] {
+        let err = from_description(description);
+        assert!(!err.do_not_log, "{description}");
+        assert_eq!(
+            err.internal_error_log(),
+            v8::ffi::InternalErrorLog::WithId,
+            "{description}"
+        );
+    }
+    assert!(!Error::new_internal_error("worker_do_not_log").do_not_log);
+}
+
 // =============================================================================
 // error_message_for_v8 / utf8_prefix
 // =============================================================================
