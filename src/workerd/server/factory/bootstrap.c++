@@ -463,7 +463,7 @@ void run_with_logger(kj::Own<ThreadLogger> logger, ::rust::Box<ThreadBody> body)
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message) {
   auto json = buildJsonLogMessage(static_cast<kj::LogSeverity>(severity), kj::str(file).cStr(),
       static_cast<int>(line), 0, kj::str(message));
-  kj::FdOutputStream(STDERR_FILENO).write({json.asBytes(), "\n"_kj.asBytes()});
+  writeJsonLogLine(stderr, json);
 }
 
 void write_stderr_nonblocking(::rust::Str text) {
