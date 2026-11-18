@@ -14,6 +14,7 @@ use crate::FileOrDirectory;
 use crate::FsError;
 use crate::FsType;
 use crate::MemoryCharge;
+use crate::MemoryTracker;
 use crate::Node;
 use crate::Stat;
 use crate::VfsHost;
@@ -21,6 +22,7 @@ use crate::current_tmp_store;
 use crate::entries::EntryMap;
 use crate::file::unique_id;
 use crate::link::LinkGuard;
+use crate::memory::track;
 use crate::path;
 
 /// Options for [`Directory::try_open`].
@@ -452,10 +454,22 @@ impl Directory {
         size_of::<DirInner>()
     }
 
-    /// The files and directories heap snapshots attribute to this directory. Symbolic links are
-    /// left out, as are the contents of `/tmp`, which belong to a request, and those of a lazy
-    /// directory that has not been loaded.
-    pub fn memory_children(&self) -> Vec<FileOrDirectory> {
+    /// Reports the directory to a heap snapshot as a node of its own, with an edge named `edge`
+    /// from the current node, and everything in it; see [`MemoryTracker`].
+    pub fn track_memory(&self, tracker: &mut dyn MemoryTracker, edge: &'static CStr) {
+        track(tracker, edge, FileOrDirectory::Directory(self.clone()));
+    }
+
+    /// What identifies the directory in a heap snapshot: the address of the state its handles
+    /// share.
+    pub(crate) fn memory_id(&self) -> usize {
+        Rc::as_ptr(&self.0).addr()
+    }
+
+    /// The files and directories a heap snapshot reports inside this directory, in order.
+    /// Symbolic links are left out, as are the contents of `/tmp`, which belong to a request. A
+    /// lazy directory has those of its contents once they are loaded, and none before.
+    pub(crate) fn memory_children(&self) -> Vec<FileOrDirectory> {
         match &self.0.kind {
             DirKind::Memory { entries, .. } => entries
                 .borrow()

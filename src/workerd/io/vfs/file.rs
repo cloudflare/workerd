@@ -9,13 +9,16 @@ use std::ffi::CString;
 use std::rc::Rc;
 use std::rc::Weak;
 
+use crate::FileOrDirectory;
 use crate::FsError;
 use crate::FsType;
 use crate::HostError;
 use crate::MemoryCharge;
+use crate::MemoryTracker;
 use crate::Stat;
 use crate::Stdio;
 use crate::VfsHost;
+use crate::memory::track;
 
 /// The bytes of a read-only file, owned by the file or kept alive on its behalf.
 ///
@@ -470,6 +473,17 @@ impl File {
     /// The size of the file itself, without its contents.
     pub const fn memory_self_size(&self) -> usize {
         size_of::<FileInner>()
+    }
+
+    /// Reports the file to a heap snapshot as a node of its own, with an edge named `edge` from
+    /// the current node.
+    pub fn track_memory(&self, tracker: &mut dyn MemoryTracker, edge: &'static CStr) {
+        track(tracker, edge, FileOrDirectory::File(self.clone()));
+    }
+
+    /// What identifies the file in a heap snapshot: the address of the state its handles share.
+    pub(crate) fn memory_id(&self) -> usize {
+        Rc::as_ptr(&self.0).addr()
     }
 
     /// The bytes of contents that heap snapshots attribute to this file: those of a writable

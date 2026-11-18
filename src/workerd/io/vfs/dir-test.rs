@@ -282,7 +282,6 @@ fn builder() {
             .unwrap()
             .writable
     );
-    assert_eq!(root.memory_children().len(), 3);
 }
 
 #[test]
@@ -297,13 +296,11 @@ fn lazy_directories_load_once_on_first_use() {
         builder.finish()
     }));
     assert_eq!(lazy.memory_name(), c"LazyDirectory");
-    assert!(lazy.memory_children().is_empty());
     assert_eq!(loads.get(), 0);
     assert_eq!(names(&host, &lazy), ["f"]);
     open_file(&host, &lazy, "f");
     assert_eq!(lazy.count(&host, None), 1);
     assert_eq!(loads.get(), 1);
-    assert_eq!(lazy.memory_children().len(), 1);
     // The lazy directory has its contents' identifier, and the empty path opens the contents.
     let contents = open_dir(&host, &lazy, "");
     assert!(!contents.is_same_node(&lazy));
