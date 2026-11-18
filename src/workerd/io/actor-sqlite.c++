@@ -1144,6 +1144,9 @@ kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTim
     co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
     if (alarmVersion == version) break;
   }
+  // Shutdown doesn't break the output gate. A newer instance may have written its own alarm since,
+  // so this one must not request its stored alarm from the scheduler.
+  requireNotBroken();
 
   if (inAlarmHandler) {
     // The abandoned alarm's run has finished, so the running handler is another alarm's, e.g. one

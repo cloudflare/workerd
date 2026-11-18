@@ -3416,6 +3416,24 @@ KJ_TEST("ActorSqlite abandonAlarm waits for the commit that changes the stored a
   KJ_EXPECT_THROW_MESSAGE("a_failed_commit", promise.wait(test.ws));
 }
 
+KJ_TEST("ActorSqlite abandonAlarm fails without requesting the stored alarm after shutdown") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  auto promise = test.actor.abandonAlarm(oneMs);
+  auto commit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  test.actor.shutdown(kj::none);
+  commit->fulfill();
+  // Only the commit's own request to move the alarm later.
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  KJ_EXPECT_THROW_MESSAGE("Durable Object storage is no longer accessible", promise.wait(test.ws));
+}
+
 KJ_TEST("ActorSqlite abandonAlarm fails when the commit of a newer alarm fails") {
   // The commit rolls the newer alarm back, so it must not be reported.
   ActorSqliteTest test({.monitorOutputGate = false});

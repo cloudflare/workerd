@@ -1114,6 +1114,18 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   co_return result;
 }
 
+namespace {
+
+kj::Promise<kj::Maybe<kj::Date>> abandonActorAlarm(
+    Worker::Actor& actor, ActorCacheInterface& persistent, kj::Date scheduledTime) {
+  // Hold the input lock, so that no transaction is open and no event writes while the storage
+  // decides which alarm it has.
+  auto inputLock = co_await actor.getInputGate().wait(nullptr);
+  co_return co_await persistent.abandonAlarm(scheduledTime);
+}
+
+}  // namespace
+
 kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date scheduledTime) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::abandonAlarm()");
   // This does not require running the user's alarm handler -- it's a pure actor-state cleanup.
@@ -1124,10 +1136,13 @@ kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date schedul
       req->getContext().getActor(), "abandonAlarm() should only work with actors");
   auto& persistent = KJ_REQUIRE_NONNULL(
       actor.getPersistent(), "abandonAlarm() requires actor with persistent storage");
-  // Hold the input lock, so that no transaction is open and no event writes while the storage
-  // decides which alarm it has.
-  auto inputLock = co_await actor.getInputGate().wait(nullptr);
-  co_return co_await persistent.abandonAlarm(scheduledTime);
+  // An actor that shuts down, e.g. because it is evicted or aborted, can no longer tell which alarm
+  // it has. The scheduler then tells its next instance.
+  auto shutdown = actor.onShutdown().then([]() -> kj::Promise<kj::Maybe<kj::Date>> {
+    return KJ_EXCEPTION(DISCONNECTED, "actor shut down before its alarm could be abandoned");
+  });
+  co_return co_await abandonActorAlarm(actor, persistent, scheduledTime)
+      .exclusiveJoin(kj::mv(shutdown));
 }
 
 kj::Promise<void> WorkerEntrypoint::bench(
