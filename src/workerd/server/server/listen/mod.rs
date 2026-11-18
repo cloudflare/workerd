@@ -459,7 +459,7 @@ pub async fn listen_http(
                 .flatten();
             let hangup = hangup(&accepted);
             let io = transport(accepted, socket.tls.as_ref(), &context).await?;
-            let handler: Rc<dyn Handler> = Rc::new(HttpConnection {
+            let handler = Rc::new(HttpConnection {
                 context: Rc::clone(&context),
                 socket,
                 cf_blob,
@@ -496,7 +496,6 @@ impl HttpConnection {
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl Handler for HttpConnection {
     async fn request<'a>(
         &'a self,
