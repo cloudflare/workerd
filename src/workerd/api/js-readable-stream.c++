@@ -8,8 +8,6 @@
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/common.h>
 #include <workerd/api/streams/standard.h>
-#include <workerd/api/url-standard.h>
-#include <workerd/api/url.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
@@ -751,27 +749,10 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 }
 }  // namespace
 
-// The -Wdangling-field warnings below are false positives. view captures the heap buffer pointer
-// managed by data, not the address of the data parameter itself. Moving data into owned transfers
-// ownership of that heap buffer without changing its address, so view remains valid.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
-    : owned(kj::mv(data)),
-      view(owned) {}
-#pragma clang diagnostic pop
-
-// Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
-// kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
-// kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
-// branches alike.
-JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
-    : Buffer(kj::heapArray(data->getData(js))) {}
-
 namespace {
 
 // Constructs the stream backing a JsReadableStream over the given native data source. This
-// is the compatibility-flag dispatch point shared by create() and bufferBackedImpl(): when
+// is the compatibility-flag dispatch point behind create(): when
 // the typescript_implemented_streams compat flag is enabled, the source is wrapped in a
 // ReadableStreamNativeSource -- whose instances are born carrying the kNativeSource marker
 // (JSG_PRIVATE_SYMBOL) that the TypeScript ReadableStream constructor detects -- and the
@@ -793,22 +774,9 @@ JsReadableStream::StreamImpl newBackingStream(
 
 }  // namespace
 
-JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
-  // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
-  // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
-  // and tee branches alike -- shares the one allocation.
-  auto view = buffer->view;
-  auto source = newMemorySource(view, buffer.addRef().toOwn());
-  return Impl{
-    .stream = newBackingStream(js, IoContext::current(), kj::mv(source)),
-    .maybeOwnedBuffer = kj::mv(buffer),
-  };
-}
-
 JsReadableStream::JsReadableStream(jsg::Ref<ReadableStream> stream)
     : impl(Impl{
         .stream = StreamImpl(kj::mv(stream)),
-        .maybeOwnedBuffer = kj::none,
       }) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
@@ -823,7 +791,10 @@ JsReadableStream JsReadableStream::create(
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Array<const kj::byte> data) {
   // TODO (soon): Add memory accounting for this path
-  return JsReadableStream(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data))));
+  // newMemorySource() reads the bytes in place, keeping `data` alive as its backing. Unlike
+  // newSystemStream() over a memory input stream, it does not support deferred proxying.
+  auto bytes = data.asPtr();
+  return create(js, IoContext::current(), newMemorySource(bytes, kj::heap(kj::mv(data))));
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::String data) {
@@ -839,17 +810,9 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsBufferSource sou
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::Ref<Blob> blob) {
-  return JsReadableStream(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob))));
-}
-
-JsReadableStream JsReadableStream::create(
-    jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams) {
-  return create(js, urlSearchParams->toString());
-}
-
-JsReadableStream JsReadableStream::create(
-    jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams) {
-  return create(js, urlSearchParams->toString());
+  // Blob contents live in a V8 ArrayBuffer. The stream is read on the kj event loop, where the
+  // isolate's MPK-protected sandbox pages are unreadable, so take a kj-heap copy.
+  return create(js, kj::heapArray(blob->getData(js)));
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
@@ -1004,13 +967,11 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(stream.addRef()),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
         });
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
         return JsReadableStream(Impl{
           .stream = StreamImpl(obj.addRef(js)),
-          .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
         });
       }
     }
@@ -1022,13 +983,6 @@ JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
 
 bool JsReadableStream::isNull() const {
   return impl == kj::none;
-}
-
-bool JsReadableStream::isBufferBacked() const {
-  KJ_IF_SOME(i, impl) {
-    return i.maybeOwnedBuffer != kj::none;
-  }
-  return false;
 }
 
 bool JsReadableStream::isDisturbed(jsg::Lock& js) {
@@ -1453,9 +1407,6 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       auto branches = stream->tee(js);
-      // Both branches share the retransmit buffer (if any) so they remain independently rewindable.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
 
       // tee() consumes `this`: the original stream is now locked/disturbed and unusable, so
       // represent that by nullifying. Everything needed for the result has already been extracted
@@ -1465,11 +1416,9 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       return Tee{
         .branch1 = JsReadableStream(Impl{
           .stream = StreamImpl(kj::mv(branches[0])),
-          .maybeOwnedBuffer = kj::mv(buffer1),
         }),
         .branch2 = JsReadableStream(Impl{
           .stream = StreamImpl(kj::mv(branches[1])),
-          .maybeOwnedBuffer = kj::mv(buffer2),
         }),
       };
     }
@@ -1485,12 +1434,6 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       auto branch1 = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(branches.get(js, 0)));
       auto branch2 = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(branches.get(js, 1)));
 
-      // TS-backed streams cannot currently be buffer-backed (bufferBackedImpl always
-      // constructs the legacy arm; design-doc open question F), but carry the buffer
-      // through anyway so this arm stays correct if F ever changes that.
-      auto buffer1 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-      auto buffer2 = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); });
-
       // Same consumption contract as the legacy arm: the original JS stream object is
       // left locked by the tee (spec behavior); this wrapper drops its handle.
       impl = kj::none;
@@ -1498,11 +1441,9 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
       return Tee{
         .branch1 = JsReadableStream(Impl{
           .stream = StreamImpl(branch1.addRef(js)),
-          .maybeOwnedBuffer = kj::mv(buffer1),
         }),
         .branch2 = JsReadableStream(Impl{
           .stream = StreamImpl(branch2.addRef(js)),
-          .maybeOwnedBuffer = kj::mv(buffer2),
         }),
       };
     }
@@ -1510,28 +1451,15 @@ JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<JsReadableStream> JsReadableStream::tryClone(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    KJ_IF_SOME(buffer, i.maybeOwnedBuffer) {
-      // Non-mutating: build a fresh stream over the same buffer bytes, carrying the buffer forward
-      // so the clone is itself rewindable. `this` is left untouched.
-      return JsReadableStream(bufferBackedImpl(js, buffer.addRef()));
-    }
-  }
-  // Null or not buffer-backed: nothing to rewind.
-  return kj::none;
-}
-
 JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   auto& i = KJ_ASSERT_NONNULL(impl, "detach() called on a null JsReadableStream");
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       // ReadableStream::detach() takes over the internal state, leaving the original stream (i.e.
-      // `this`) locked and disturbed. `this` retains a reference to the retransmit buffer.
+      // `this`) locked and disturbed.
       auto detached = stream->detach(js, ignoreDisturbed == IgnoreDisturbed::YES);
       return JsReadableStream(Impl{
         .stream = StreamImpl(kj::mv(detached)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
       });
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
@@ -1544,7 +1472,6 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
           JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
       return JsReadableStream(Impl{
         .stream = StreamImpl(detachedObj.addRef(js)),
-        .maybeOwnedBuffer = i.maybeOwnedBuffer.map([](kj::Rc<Buffer>& b) { return b.addRef(); }),
       });
     }
   }
@@ -1597,8 +1524,6 @@ void JsReadableStream::visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(obj);
       }
     }
-    // Note: the retransmit Buffer's owned Blob reference is intentionally NOT traced here, matching
-    // the pre-refactor Body behavior (it is kept alive as a strong reference, not via GC tracing).
   }
 }
 
@@ -1613,9 +1538,6 @@ void JsReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         // (jsg::JsRef does not satisfy the MemoryRetainer concept, so it can't be passed to
         // trackField() directly.)
       }
-    }
-    KJ_IF_SOME(buffer, i.maybeOwnedBuffer) {
-      tracker.trackFieldWithSize("buffer", buffer->view.size());
     }
   }
 }

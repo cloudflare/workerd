@@ -85,11 +85,13 @@ Body::ExtractedBody::ExtractedBody(
       "be used as a body.");
 }
 
+Body::ExtractedBody::ExtractedBody(BodySource source, kj::Maybe<kj::String> contentType)
+    : source(kj::mv(source)),
+      contentType(kj::mv(contentType)) {}
+
 Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
-  // The buffer-like cases below construct buffer-backed (rewindable) JsReadableStreams. The
-  // buffer handling -- including copying JsBufferSource inputs (a Fetch spec requirement that
-  // also severs any dependency on a detachable V8 backing store) and the no-deferred-proxying
-  // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
+  // The buffer-like cases below produce a body with an in-memory source and no stream yet: the
+  // Body creates its stream from the source when it is first needed (see BodySource).
   KJ_SWITCH_ONEOF(init) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
       // ExtractedBody's constructor rejects a disturbed stream, and its message takes precedence
@@ -104,17 +106,17 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     KJ_CASE_ONEOF(value, jsg::JsRef<jsg::JsValue>) {
       auto handle = value.getHandle(js);
       KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
-        auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream::create(js, str), kj::mv(contentType));
+        return ExtractedBody(BodySource(js, str), kj::str(MimeType::PLAINTEXT_STRING));
       } else KJ_IF_SOME(bufferSource, handle.tryCast<jsg::JsBufferSource>()) {
-        return ExtractedBody(js, JsReadableStream::create(js, bufferSource));
+        // Per the spec, the body is a copy of the bytes, so that later changes to the buffer do
+        // not affect it. The copy is never handed to JavaScript.
+        return ExtractedBody(BodySource(js, bufferSource.copyJs(js)));
       } else {
         // In this case we have to convert the value to a JS string now as the
         // timing of the stringify call on the value is observable. The call
         // cannot be deferred.
         auto str = value.getHandle(js).toJsString(js);
-        auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream::create(js, str), kj::mv(contentType));
+        return ExtractedBody(BodySource(js, str), kj::str(MimeType::PLAINTEXT_STRING));
       }
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
@@ -125,7 +127,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       if (blobType != nullptr) {
         contentType = kj::str(blobType);
       }
-      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(blob)), kj::mv(contentType));
+      return ExtractedBody(BodySource(kj::mv(blob)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       // Make an array of characters containing random hexadecimal digits.
@@ -138,19 +140,18 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       workerd::getEntropy(boundaryBuffer);
       auto boundary = kj::encodeHex(boundaryBuffer);
       auto contentType = MimeType::formDataWithBoundary(boundary);
-      return ExtractedBody(
-          js, JsReadableStream::create(js, formData->serialize(js, boundary)), kj::mv(contentType));
+      return ExtractedBody(BodySource(formData->serialize(js, boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(searchParams)),
-          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+      return ExtractedBody(
+          BodySource(searchParams->toString()), MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
-      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(searchParams)),
-          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+      return ExtractedBody(
+          BodySource(searchParams->toString()), MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
-      return ExtractedBody(js, JsReadableStream::create(js, searchParams.serializeJs(js)),
+      return ExtractedBody(BodySource(js, searchParams.serializeJs(js)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
   }
@@ -177,25 +178,49 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers): head
       }
     }
     bodyStream = kj::mv(i.stream);
+    bodySource = kj::mv(i.source);
   }
 }
 
 bool Body::canRewindBody() {
-  // We can only rewind null or buffer-backed bodies.
-  return bodyStream.isNull() || bodyStream.isBufferBacked();
+  // We can only rewind null bodies and bodies with an in-memory source.
+  return bodySource != kj::none || bodyStream.isNull();
 }
 
-void Body::rewindBody(jsg::Lock& js) {
+void Body::rewindBody() {
   KJ_DASSERT(canRewindBody());
 
-  KJ_IF_SOME(rewound, bodyStream.tryClone(js)) {
-    bodyStream = kj::mv(rewound);
-  }
-  // A null body is trivially "rewound" (there is nothing to do).
+  // Drop the stream, which may already have been sent; the next use creates a new one from the
+  // source. A null body is trivially "rewound" (there is nothing to do).
+  bodyStream.nullify();
 }
 
 void Body::nullifyBody() {
   bodyStream.nullify();
+  bodySource = kj::none;
+}
+
+kj::Maybe<uint64_t> Body::tryGetBodyLength(jsg::Lock& js, StreamEncoding encoding) {
+  KJ_IF_SOME(source, bodySource) {
+    // Until the stream is read from, the source's length is the stream's.
+    if (!bodyStream.isDisturbed(js)) {
+      return source.tryGetLength(js, encoding);
+    }
+  }
+  return bodyStream.tryGetLength(js, encoding);
+}
+
+JsReadableStream& Body::getBodyStream(jsg::Lock& js) {
+  if (bodyStream.isNull()) {
+    KJ_IF_SOME(source, bodySource) {
+      bodyStream = source.createStream(js);
+    }
+  }
+  return bodyStream;
+}
+
+bool Body::isNullBody() const {
+  return bodyStream.isNull() && bodySource == kj::none;
 }
 
 uint64_t Body::bufferingLimit() {
@@ -203,10 +228,11 @@ uint64_t Body::bufferingLimit() {
 }
 
 kj::Maybe<JsReadableStream> Body::getBody(jsg::Lock& js) {
-  if (bodyStream.isNull()) {
+  auto& stream = getBodyStream(js);
+  if (stream.isNull()) {
     return kj::none;
   }
-  return bodyStream.addRef(js);
+  return stream.addRef(js);
 }
 bool Body::getBodyUsed(jsg::Lock& js) {
   return bodyStream.isDisturbed(js);
@@ -214,30 +240,31 @@ bool Body::getBodyUsed(jsg::Lock& js) {
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   // A null body yields an empty result without consulting the IoContext (see bufferingLimit()).
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  if (bodyStream.isNull()) {
+  if (isNullBody()) {
     return bodyStream.arrayBuffer(js, 0);
   }
-  return js.evalNow([&] { return bodyStream.arrayBuffer(js, bufferingLimit()); });
+  return js.evalNow([&] { return getBodyStream(js).arrayBuffer(js, bufferingLimit()); });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
-  if (bodyStream.isNull()) {
+  if (isNullBody()) {
     return bodyStream.bytes(js, 0);
   }
-  return js.evalNow([&] { return bodyStream.bytes(js, bufferingLimit()); });
+  return js.evalNow([&] { return getBodyStream(js).bytes(js, bufferingLimit()); });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
   // A null body yields an empty string without consulting the IoContext.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  if (bodyStream.isNull()) {
+  if (isNullBody()) {
     return bodyStream.text(js, 0);
   }
 
   return js.evalNow([&] {
-    // Check for a disturbed body before emitting the non-text warning below. (bodyStream.text()
+    auto& stream = getBodyStream(js);
+    // Check for a disturbed body before emitting the non-text warning below. (stream.text()
     // performs the same check with the same error message; this one just runs first.)
-    JSG_REQUIRE(!bodyStream.isDisturbed(js), TypeError,
+    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -251,7 +278,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       }
     }
 
-    return bodyStream.text(js, context.getLimitEnforcer().getBufferingLimit());
+    return stream.text(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
@@ -263,15 +290,16 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    KJ_ASSERT(!bodyStream.isDisturbed(js));
     auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
 
     // The body is read before the Content-Type is checked, so that an error from the body stream
     // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
     // application/x-www-form-urlencoded but not as multipart/form-data.
     // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-    auto limit = bodyStream.isNull() ? 0 : bufferingLimit();
-    return bodyStream.text(js, limit).then(js,
+    auto limit = isNullBody() ? 0 : bufferingLimit();
+    auto& stream = getBodyStream(js);
+    KJ_ASSERT(!stream.isDisturbed(js));
+    return stream.text(js, limit).then(js,
         [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
             auto& js, kj::String rawText) mutable {
       auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
@@ -310,14 +338,44 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
 
 kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
   if (bodyStream.isNull()) {
-    return kj::none;
+    // No stream has been created yet, so the clone just shares the source, if there is one, and
+    // creates its own stream when it needs one.
+    return bodySource.map([&](BodySource& source) { return ExtractedBody(source.clone(js)); });
   }
 
-  // tee() nullifies bodyStream and hands back two branches, each of which carries the retransmit
-  // buffer (if any). We keep one branch and give the other to the new Body.
+  // tee() nullifies bodyStream and hands back two branches. We keep one branch and give the other,
+  // along with the source, to the new Body.
   auto tee = bodyStream.tee(js);
   bodyStream = kj::mv(tee.branch1);
-  return ExtractedBody(js, kj::mv(tee.branch2));
+  ExtractedBody result(js, kj::mv(tee.branch2));
+  result.source = bodySource.map([&](BodySource& source) { return source.clone(js); });
+  return kj::mv(result);
+}
+
+kj::Maybe<Body::ExtractedBody> Body::takeBody(jsg::Lock& js) {
+  auto& stream = getBodyStream(js);
+  if (stream.isNull()) {
+    return kj::none;
+  }
+  // The stream spec says to "create a proxy" for the passed in readable, which it defines
+  // generically as creating a TransformStream and using pipeThrough to pass the input stream
+  // through, giving the TransformStream's readable to the extracted body. We don't need to do
+  // that. Instead, we create a new stream that takes over ownership of the internals of this one,
+  // which is left locked and disturbed so that it can no longer be used.
+  ExtractedBody result(js, stream.detach(js));
+  result.source = kj::mv(bodySource);
+  bodySource = kj::none;
+  return kj::mv(result);
+}
+
+kj::Maybe<Body::ExtractedBody> Body::shareBody(jsg::Lock& js) {
+  auto& stream = getBodyStream(js);
+  if (stream.isNull()) {
+    return kj::none;
+  }
+  ExtractedBody result(js, stream.addRef(js));
+  result.source = bodySource.map([&](BodySource& source) { return source.clone(js); });
+  return kj::mv(result);
 }
 
 // =======================================================================================
@@ -345,8 +403,8 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
-  // The body of an `input` Request, when `init` doesn't replace it.
-  kj::Maybe<JsReadableStream> inputBody;
+  // An `input` Request with a body, when `init` doesn't replace the body.
+  kj::Maybe<jsg::Ref<Request>> inputBodyOwner;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
@@ -405,7 +463,9 @@ jsg::Ref<Request> Request::constructor(
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        inputBody = oldRequest->getBody(js);
+        if (!oldRequest->isNullBody()) {
+          inputBodyOwner = oldRequest.addRef();
+        }
       }
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
@@ -513,7 +573,7 @@ jsg::Ref<Request> Request::constructor(
           // already represented a GET/HEAD method with a body, we allow that to pass through.
           // We support proxying such requests and rewriting their URL/headers/etc.)
           JSG_REQUIRE((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
-                  (body == kj::none && inputBody == kj::none),
+                  (body == kj::none && inputBodyOwner == kj::none),
               TypeError, "Request with a GET or HEAD method cannot have a body.");
         }
       }
@@ -526,12 +586,10 @@ jsg::Ref<Request> Request::constructor(
         signal = otherRequest->getSignal();
         headers = js.alloc<Headers>(js, *otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
-        KJ_IF_SOME(b, otherRequest->getBody(js)) {
-          // Note that unlike when `input` (Request ctor's 1st parameter) is a Request object, here
-          // we're NOT stealing the other request's body, because we're supposed to pretend that the
-          // other request is just a dictionary.
-          body = Body::ExtractedBody(js, kj::mv(b));
-        }
+        // Note that unlike when `input` (Request ctor's 1st parameter) is a Request object, here
+        // we're NOT stealing the other request's body, because we're supposed to pretend that the
+        // other request is just a dictionary.
+        body = otherRequest->shareBody(js);
       }
     }
   }
@@ -540,18 +598,10 @@ jsg::Ref<Request> Request::constructor(
     headers = js.alloc<Headers>();
   }
 
-  KJ_IF_SOME(oldJsBody, inputBody) {
+  KJ_IF_SOME(owner, inputBodyOwner) {
     // This runs after every check that can throw, so a failed construction leaves `input`
     // usable.
-    //
-    // The stream spec says to "create a proxy" for the passed in readable, which it
-    // defines generically as creating a TransformStream and using pipeThrough to pass
-    // the input stream through, giving the TransformStream's readable to the extracted
-    // body below. We don't need to do that. Instead, we just create a new stream that
-    // takes over ownership of the internals of the given stream (carrying the retransmit
-    // buffer forward, if any). The given stream is left in a locked/disturbed mode so
-    // that it can no longer be used.
-    body = Body::ExtractedBody(js, oldJsBody.detach(js));
+    body = owner->takeBody(js);
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
@@ -1125,14 +1175,14 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       //   with a zero-length buffer, but we give them a console warning. If we can ever verify that
       //   no one relies on this behavior, we should remove this non-conformity.
 
-      // Fail if the body is not backed by a buffer (i.e., it's an opaque ReadableStream).
+      // Fail if the body has no in-memory source (i.e., it's an opaque ReadableStream).
       auto& extractedBody = KJ_ASSERT_NONNULL(body);
-      JSG_REQUIRE(extractedBody.stream.isBufferBacked(), TypeError,
+      auto& source = JSG_REQUIRE_NONNULL(extractedBody.source, TypeError,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
-      // Fail if the body is backed by a non-zero-length buffer.
-      JSG_REQUIRE(KJ_ASSERT_NONNULL(extractedBody.stream.tryGetLength(js)) == 0, TypeError,
-          "Response with null body status (101, 204, 205, or 304) cannot have a body.");
+      // Fail if the source is not empty.
+      JSG_REQUIRE(KJ_ASSERT_NONNULL(source.tryGetLength(js, StreamEncoding::IDENTITY)) == 0,
+          TypeError, "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();
       if (context.hasWarningHandler()) {
@@ -1355,7 +1405,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
         }
       }
     }
-    auto maybeLength = jsBody.tryGetLength(js, encoding);
+    auto maybeLength = tryGetBodyLength(js, encoding);
     auto stream = newSystemStream(
         outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), encoding, context,
         flushAfterWrite);
@@ -1821,7 +1871,7 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
   fetcher->onActorCallRetry();
   auto& ioContext = IoContext::current();
-  jsRequest->rewindBody(js);
+  jsRequest->rewindBody();
 
   auto signal = jsRequest->getSignal();
   auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
@@ -1986,7 +2036,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       // Note that for requests, we do not automatically handle Content-Encoding, because the fetch()
       // standard does not say that we should. Hence, we always use StreamEncoding::IDENTITY.
       // https://github.com/whatwg/fetch/issues/589
-      auto maybeLength = jsBody.tryGetLength(js, StreamEncoding::IDENTITY);
+      auto maybeLength = jsRequest->tryGetBodyLength(js, StreamEncoding::IDENTITY);
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(length, maybeLength) {
           ctx.setTag("http.request.body.size"_kjc, static_cast<int64_t>(length));
@@ -2275,13 +2325,13 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     jsRequest->setMethodEnum(kj::HttpMethod::GET);
     jsRequest->nullifyBody();
   } else {
-    // Reconstruct the stream from our buffer. The spec does not specify that we should cancel the
+    // Start the body over from its source. The spec does not specify that we should cancel the
     // current body transmission in HTTP/1.1, so I'm not neutering the stream. (For HTTP/2 it asks
     // us to send a RST_STREAM frame if possible.)
     //
-    // We know `buffer` is non-null here because we checked `buffer`'s nullness when non-303, and
-    // nulled out `impl` when 303. Combined, they guarantee that we have a backing buffer.
-    jsRequest->rewindBody(js);
+    // The body can be rewound: we checked canRewindBody() for every status but 303, and a 303
+    // takes the branch above.
+    jsRequest->rewindBody();
   }
 
   // No need to wait for output locks again when following a redirect, because we didn't interact

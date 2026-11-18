@@ -15,6 +15,7 @@ filegroup(
         "basics.c++",
         "bench.c++",
         "blob.c++",
+        "body-source.c++",
         "bootstrap-utils.c++",
         "cache.c++",
         "container.c++",
@@ -77,6 +78,7 @@ filegroup(
         "basics.h",
         "bench.h",
         "blob.h",
+        "body-source.h",
         "bootstrap-utils.h",
         "cache.h",
         "container.h",
@@ -821,6 +823,14 @@ kj_test(
 
 kj_test(
     src = "blob-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "body-source-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

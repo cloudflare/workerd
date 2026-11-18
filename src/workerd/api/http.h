@@ -7,6 +7,7 @@
 #include "actor-call-retry.h"
 #include "basics.h"
 #include "blob.h"
+#include "body-source.h"
 #include "events.h"
 #include "form-data.h"
 #include "headers.h"
@@ -45,16 +46,15 @@ class Body: public jsg::Object {
   // The types of objects from which a Body can be created.
   //
   // If the object is a ReadableStream, Body will adopt it directly; otherwise the object is some
-  // sort of buffer-like source. In this case, Body will store a buffer-backed (rewindable)
-  // JsReadableStream that wraps a copy of / a reference to the source data. This allows Requests
-  // and Responses created from Strings, ArrayBuffers, FormDatas, Blobs, or URLSearchParams to be
-  // retransmitted.
+  // sort of buffer-like source. In this case, Body keeps the source (see BodySource) and creates
+  // the body's stream from it only when the stream is needed. This allows Requests and Responses
+  // created from Strings, ArrayBuffers, FormDatas, Blobs, or URLSearchParams to be retransmitted.
   //
   // For an example of where this is important, consider a POST Request in redirect-follow mode and
   // containing a body: if passed to a fetch() call that results in a 307 or 308 response, fetch()
   // will re-POST to the new URL. If the body was constructed from a ReadableStream, this re-POST
   // will fail, because there is no body source left. On the other hand, if the body was constructed
-  // from any of the other source types, Body can create a new stream from the buffer, and the POST
+  // from any of the other source types, Body can create a new stream from the source, and the POST
   // will successfully retransmit.
   using Initializer = kj::OneOf<JsReadableStream,
       jsg::Ref<Blob>,
@@ -68,14 +68,21 @@ class Body: public jsg::Object {
       // matches must be identified first.
       jsg::JsRef<jsg::JsValue>>;
 
-  // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it
-  // implies (if any). The stream carries its own retransmit buffer when the body was constructed
-  // from an in-memory source (see JsReadableStream::isBufferBacked()).
+  // The result of the "extract a body" algorithm: the body's stream or in-memory source (or
+  // both), plus the Content-Type it implies (if any).
   struct ExtractedBody {
     ExtractedBody(
         jsg::Lock& js, JsReadableStream stream, kj::Maybe<kj::String> contentType = kj::none);
+    explicit ExtractedBody(BodySource source, kj::Maybe<kj::String> contentType = kj::none);
 
+    // The body's stream. Null when the body has a source and no stream has been created from it
+    // yet.
     JsReadableStream stream;
+
+    // The in-memory source the body was extracted from, if any. When `stream` is also set, it was
+    // created from this source, or from one this source shares a value with.
+    kj::Maybe<BodySource> source;
+
     kj::Maybe<kj::String> contentType;
   };
 
@@ -88,14 +95,23 @@ class Body: public jsg::Object {
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
 
-  // True if this body is null or buffer-backed, false if this body is an opaque ReadableStream.
+  // True if this body is null or has an in-memory source, false if this body is an opaque
+  // ReadableStream.
   bool canRewindBody();
 
-  // Reconstruct this body from its backing buffer. Precondition: `canRewindBody() == true`.
-  void rewindBody(jsg::Lock& js);
+  // Start this body over from its source: the next use creates a new stream that reads the source
+  // from the start. Precondition: `canRewindBody() == true`.
+  void rewindBody();
 
   // Convert this body into a null body.
   void nullifyBody();
+
+  // The number of bytes the body produces in the given encoding, if known. A body with a source
+  // whose stream has not been read from answers from the source.
+  kj::Maybe<uint64_t> tryGetBodyLength(jsg::Lock& js, StreamEncoding encoding);
+
+  // True for a null body: no stream and no source.
+  bool isNullBody() const;
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -141,16 +157,35 @@ class Body: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     bodyStream.visitForMemoryInfo(tracker);
+    KJ_IF_SOME(source, bodySource) {
+      source.visitForMemoryInfo(tracker);
+    }
   }
 
  protected:
   // Helper to implement Request/Response::clone().
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
+  // Takes over this body for another Request, as `new Request(request)` does: the result has this
+  // body's stream, detached, and its source, leaving this body locked and disturbed.
+  kj::Maybe<ExtractedBody> takeBody(jsg::Lock& js);
+
+  // Returns an ExtractedBody with the same stream and source as this body, for a Request passed as
+  // the init dictionary of another.
+  kj::Maybe<ExtractedBody> shareBody(jsg::Lock& js);
+
  private:
-  // The body stream. The null state represents a null body ("no body"). Buffer-backed streams
-  // carry their own retransmit buffer, making the body rewindable for redirect handling.
+  // The body's stream. The null state represents a null body ("no body") when `bodySource` is
+  // also none; otherwise the stream has not been created from the source yet.
   JsReadableStream bodyStream;
+
+  // The in-memory source the body was extracted from, if any. It is kept to create the body's
+  // stream when the stream is first needed, and again when the body is rewound.
+  kj::Maybe<BodySource> bodySource;
+
+  // Returns the body's stream, first creating it from `bodySource` if there is a source but no
+  // stream yet. Returns a null stream for a null body.
+  JsReadableStream& getBodyStream(jsg::Lock& js);
 
   // Returns the buffering limit to apply when consuming the body. Deliberately not consulted for
   // null bodies: consuming a null body yields an empty result without any I/O, and must keep
@@ -163,7 +198,7 @@ class Body: public jsg::Object {
   Headers& headersRef;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(bodyStream);
+    visitor.visit(bodyStream, bodySource);
   }
 };
 
