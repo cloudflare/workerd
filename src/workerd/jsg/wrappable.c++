@@ -419,14 +419,24 @@ void HeapTracer::forEachLiveWrapper(
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
-  v8::HandleScope scope(isolate);
+  //
+  // V8 calls this for every wrapper a scavenge drops, so it works on the traced handle directly
+  // rather than opening a HandleScope to make a Local of it.
+  auto& object = handle.As<v8::Object>();
 
   // V8 only hands this polymorphic callback one of our wrappers. Resolve it through the exact
   // wrapper identity check all the same, like every other unwrap site.
-  auto object = handle.As<v8::Object>().Get(isolate);
-  auto& wrappable =
-      *JSGWrappable::unwrapFromShimInRangeOrAbort(isolate, object, kJsgWrappableTagRange);
-  auto& shim = KJ_ASSERT_NONNULL(wrappable.getShim());
+  auto* shim = static_cast<JSGWrappable::CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+  if (shim == nullptr) {
+    KJ_LOG(FATAL, "wrapper type mismatch: object's tag is outside the expected range");
+    abort();
+  }
+  auto& active = KJ_ASSERT_NONNULL(shim->state.tryGet<JSGWrappable::CppgcShim::Active>());
+  auto& wrapper = KJ_ASSERT_NONNULL(shim->wrapper);
+  if (wrapper != object) {
+    reportWrapperIdentityMismatch();
+  }
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
@@ -435,12 +445,12 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   //
   // Unlike the major-GC path, the node is definitely still live here: V8 is telling us it is
   // dropping a droppable root it has decided to reclaim, not reporting one it already zapped.
-  KJ_ASSERT_NONNULL(shim.wrapper).Reset();
+  wrapper.Reset();
 
   // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
   // if the wrappable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
-  detachLater.add(&wrappable);
+  detachLater.add(active.wrappable.get());
 }
 
 void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
