@@ -447,6 +447,30 @@ if (autogates['ts-url-pattern']) {
   });
 }
 
+// The TypeScript atob() and btoa() replace the C++ methods, which
+// global-scope.h then leaves out. Installed where JSG_METHOD installs those,
+// in its order and with the same attributes whatever the flags: on the global
+// scope's prototype, with all three true.
+if (autogates['ts-atob-btoa']) {
+  const { atob, btoa } = require('atob-btoa');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    btoa: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: btoa,
+    },
+    atob: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: atob,
+    },
+  });
+}
+
 // Internal-only: cloneable classes for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

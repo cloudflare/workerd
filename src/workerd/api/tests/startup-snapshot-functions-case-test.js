@@ -21,6 +21,28 @@ const require = MODE === 'create-require' ? createRequire('/worker.js') : null;
 // function and receiver, which cannot be copied.
 const bound = MODE === 'bind' ? AsyncLocalStorage.bind(() => 'bound') : null;
 
+// The globals atob() and btoa(), which the top level keeps, calls, and makes throw. They are C++
+// methods of the global scope, or under the TS_ATOB_BTOA autogate (in the @all-autogates variant)
+// functions of the per-isolate bootstrap that call into C++.
+function caught(fn, input) {
+  try {
+    fn(input);
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+const base64 =
+  MODE === 'atob-btoa'
+    ? {
+        atob,
+        btoa,
+        encoded: btoa('snapshot\xff'),
+        decoded: atob('c25hcHNob3T/'),
+        error: caught(atob, '!'),
+      }
+    : null;
+
 function checks() {
   switch (MODE) {
     case 'create-require': {
@@ -32,6 +54,27 @@ function checks() {
     }
     case 'bind':
       return { called: bound() === 'bound' };
+    case 'atob-btoa': {
+      // Called without a receiver: the functions accept only the global as one.
+      const { atob: keptAtob, btoa: keptBtoa } = base64;
+      const error = caught(keptBtoa, '\u0100');
+      return {
+        sameFunctions: keptAtob === atob && keptBtoa === btoa,
+        topLevelResults:
+          base64.encoded === 'c25hcHNob3T/' &&
+          base64.decoded === 'snapshot\xff',
+        decodes: keptAtob(' c25h cHNob3T/ ') === 'snapshot\xff',
+        encodes: keptBtoa('snapshot\xff') === 'c25hcHNob3T/',
+        topLevelError:
+          base64.error instanceof DOMException &&
+          base64.error.name === 'InvalidCharacterError',
+        throws:
+          error instanceof DOMException &&
+          error.name === 'InvalidCharacterError' &&
+          error.code === 5,
+        checksReceiver: caught(keptAtob.bind({}), '') instanceof TypeError,
+      };
+    }
   }
   return {};
 }

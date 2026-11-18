@@ -1,0 +1,17 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The atob() and btoa() benchmarks, against the C++ implementation and the
+# TypeScript one (TS_ATOB_BTOA). Enabling every autogate enables
+# TS_ATOB_BTOA, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables it itself.
+
+wd_bench(
+    src = "atob-btoa-cpp.wd-bench",
+    data = ["atob-btoa.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "atob-btoa-ts.wd-bench",
+    data = ["atob-btoa.js"],
+)
