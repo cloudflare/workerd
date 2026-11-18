@@ -1135,11 +1135,14 @@ kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTim
   KJ_REQUIRE(!currentTxn.is<ExplicitTxn*>(), "abandonAlarm() called inside a transaction");
 
   // Wait for the stored alarm to be committed, so that we don't schedule and report an alarm that a
-  // failed commit then rolls back, maybe to the abandoned one. Writes made while we wait start
-  // another commit, so wait for that too. A failed commit breaks the output gate, which rejects the
-  // wait.
-  while (isCommitScheduled() || metadata.getAlarm() != lastConfirmedAlarmDbState) {
+  // failed commit then rolls back, maybe to the abandoned one. The stored alarm can match the last
+  // one committed while commits that change it and change it back are still in flight, so we wait
+  // for the latest commit, which covers every write made before it started, and again if a write
+  // changes the alarm meanwhile. A failed commit breaks the output gate, which rejects the wait.
+  for (;;) {
+    auto version = alarmVersion;
     co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
+    if (alarmVersion == version) break;
   }
 
   if (inAlarmHandler) {

@@ -3390,6 +3390,32 @@ KJ_TEST("ActorSqlite abandonAlarm waits for a commit that starts while it waits"
   test.pollAndExpectCalls({});
 }
 
+KJ_TEST("ActorSqlite abandonAlarm waits for the commit that changes the stored alarm back") {
+  // The stored alarm matches the one last committed, but commits still in flight changed it and
+  // changed it back. If the last one fails, the earlier alarm is the durable one, which requesting
+  // the stored alarm would have replaced in the scheduler with a later one.
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  test.setAlarm(threeMs);
+  test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  auto earlierCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  test.setAlarm(threeMs);
+  auto laterCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+  auto promise = test.actor.abandonAlarm(oneMs);
+  earlierCommit->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  laterCommit->reject(KJ_EXCEPTION(FAILED, "a_failed_commit"));
+  KJ_EXPECT_THROW_MESSAGE("a_failed_commit", promise.wait(test.ws));
+}
+
 KJ_TEST("ActorSqlite abandonAlarm fails when the commit of a newer alarm fails") {
   // The commit rolls the newer alarm back, so it must not be reported.
   ActorSqliteTest test({.monitorOutputGate = false});
