@@ -14,15 +14,20 @@
 //!
 //! Not yet: `Vary` (such responses are not stored), `stale-while-revalidate`, `stale-if-error`,
 //! `invalidate`, callers' `cf.cacheKey` and `cache: "no-store"`, a cache per entrypoint and
-//! version, streaming a miss while it is stored, and in a cluster, a purge and one Worker run per
-//! key across the nodes.
+//! version, streaming a miss while it is stored, and one Worker run per key across a cluster's
+//! nodes.
 
+use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use http::HeaderMap;
@@ -39,6 +44,7 @@ use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::io_kj_error;
 use kj_rs::KjOwn;
+use tokio::sync::Notify;
 use tokio::sync::oneshot;
 use worker::AlarmResult;
 use worker::CustomEvent;
@@ -158,7 +164,7 @@ impl Channel for ReadThrough {
 
 /// What `ctx.cache.purge()` removes: entries with any of `tags` in their `Cache-Tag`, or whose
 /// path starts with any of `prefixes`, or every one.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Purge {
     tags: Vec<String>,
     prefixes: Vec<String>,
@@ -182,6 +188,21 @@ impl Purge {
         Ok(purge)
     }
 
+    /// The query [`Purge::parse`] reads back.
+    pub(super) fn query(&self) -> String {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        for tag in &self.tags {
+            query.append_pair("tag", tag);
+        }
+        for prefix in &self.prefixes {
+            query.append_pair("prefix", prefix);
+        }
+        if self.everything {
+            query.append_key_only("everything");
+        }
+        query.finish()
+    }
+
     /// Whether a record whose headers are `headers` goes.
     pub(super) fn matches(&self, headers: &HeaderMap) -> bool {
         let text = |name| headers.get(name).and_then(|v| v.to_str().ok());
@@ -193,6 +214,86 @@ impl Purge {
                     .any(|tag| tag.eq_ignore_ascii_case(t.trim()))
             })
             || self.prefixes.iter().any(|p| path.starts_with(p.as_str()))
+    }
+}
+
+/// How long a purge is remembered for the fills begun before it. One older stores nothing.
+const KEEP: Duration = Duration::from_secs(600);
+
+/// The purges begun on this node, which a fill begun before one checks before it stores, and the
+/// fills storing. So once [`Purges::fence`] returns, no fill begun before stores what it purges.
+#[derive(Default)]
+pub(super) struct Purges {
+    begun: Cell<u64>,
+    /// The purges begun within `KEEP`, by number.
+    recent: RefCell<VecDeque<(u64, Instant, Purge)>>,
+    /// The number of the latest purge no longer in `recent`.
+    forgot: Cell<u64>,
+    /// The fills storing, by how many purges had begun when each began.
+    storing: RefCell<BTreeMap<u64, usize>>,
+    stored: Notify,
+}
+
+/// When a fill began: after how many purges, and whether its node was active.
+pub(super) struct Ticket {
+    after: u64,
+    active: bool,
+}
+
+/// A fill storing, until dropped.
+pub(super) struct Storing(Rc<Purges>, u64);
+
+impl Purges {
+    pub(super) fn ticket(&self, active: bool) -> Ticket {
+        let after = self.begun.get();
+        Ticket { after, active }
+    }
+
+    /// Lets the fill of `ticket` store a record with `headers`, unless its node was not active
+    /// as it began, so may be in no purger's view, or a purge begun since matches them.
+    pub(super) fn store(self: &Rc<Self>, ticket: &Ticket, headers: &HeaderMap) -> Option<Storing> {
+        let after = ticket.after;
+        let recent = self.recent.borrow();
+        let mut since = recent.iter().filter(|(n, ..)| *n > after);
+        if !ticket.active || after < self.forgot.get() || since.any(|(.., p)| p.matches(headers)) {
+            return None;
+        }
+        *self.storing.borrow_mut().entry(after).or_default() += 1;
+        Some(Storing(Rc::clone(self), after))
+    }
+
+    /// Begins `purge`, and waits for the fills begun before it that are storing.
+    pub(super) async fn fence(&self, purge: &Purge) {
+        let n = self.begun.get() + 1;
+        self.begun.set(n);
+        {
+            let mut recent = self.recent.borrow_mut();
+            while let Some((old, ..)) = recent.pop_front_if(|(_, at, _)| at.elapsed() > KEEP) {
+                self.forgot.set(old);
+            }
+            recent.push_back((n, Instant::now(), purge.clone()));
+        }
+        loop {
+            let stored = self.stored.notified();
+            let storing = self.storing.borrow().first_key_value().map(|(after, _)| *after);
+            if storing.is_none_or(|after| after >= n) {
+                return;
+            }
+            stored.await;
+        }
+    }
+}
+
+impl Drop for Storing {
+    fn drop(&mut self) {
+        let mut storing = self.0.storing.borrow_mut();
+        if let Some(count) = storing.get_mut(&self.1) {
+            *count -= 1;
+            if *count == 0 {
+                storing.remove(&self.1);
+            }
+        }
+        self.0.stored.notify_waiters();
     }
 }
 
@@ -263,6 +364,7 @@ impl Request {
             .metadata
             .take()
             .ok_or_else(|| kj::failed!("read-through cache: the Worker was asked already"))?;
+        let ticket = self.cache.purges.ticket(self.cache.store.active());
         let interface = self.worker.start_request(metadata)?;
         let call = ffi::http_call(interface, Method::GET, url, request.as_ffi(), 0);
         let mut answer = ffi::http_call_response(call, "").await?;
@@ -322,7 +424,10 @@ impl Request {
             size += read as u64;
         }
         let copy = temp.open()?;
-        if size <= MAX_ENTRY && head.len() <= MAX_HEAD {
+        let storing = (size <= MAX_ENTRY && head.len() <= MAX_HEAD)
+            .then(|| self.cache.purges.store(&ticket, &stored))
+            .flatten();
+        if let Some(_storing) = storing {
             self.cache.store.put(key, temp, draft).await?;
         }
         drop(fill);

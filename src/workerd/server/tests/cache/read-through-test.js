@@ -117,3 +117,24 @@ export const ctxCachePurgeRemovesEntries = {
     assert.deepStrictEqual(await statuses(), Array(5).fill('MISS'));
   },
 };
+
+export const aFillBegunBeforeAPurgeStoresNothingItMatches = {
+  async test(ctrl, env) {
+    const during = async (path, tags) => {
+      const filling = get(env, path);
+      await scheduler.wait(50);
+      await purge(env, { tags });
+      return (await filling).body;
+    };
+    // The Worker ran before the purge: what it said may be what was purged.
+    const purged = await during('/slow?a', ['all']);
+    const after = await get(env, '/slow?a');
+    assert.strictEqual(after.status, 'MISS');
+    assert.notStrictEqual(after.body, purged);
+    const kept = await during('/slow?b', ['other']);
+    assert.deepStrictEqual(Object.values(await get(env, '/slow?b')).slice(0, 2), [
+      'HIT',
+      kept,
+    ]);
+  },
+};

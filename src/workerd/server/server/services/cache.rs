@@ -375,8 +375,13 @@ trait Store {
     /// Drops a record of `key` found expired or corrupt. Not a write: what any reader may do.
     async fn expire(&self, key: &str) -> Result<()>;
 
-    /// Removes the read-through entries `purge` matches.
+    /// Removes the read-through entries `purge` matches, once each node fenced it.
     async fn purge(&self, purge: &read_through::Purge) -> Result<()>;
+
+    /// Whether this node may store: one that may not is in no purge's view.
+    fn active(&self) -> bool {
+        true
+    }
 
     /// A message from cluster node `from`, a request that names it as `forwardedBy`.
     async fn message(
@@ -447,12 +452,7 @@ impl Store for Directory {
             let Some(mut file) = found(File::open(&path))? else {
                 continue;
             };
-            let head = read_head(&mut file)?;
-            let headers = head.as_deref().and_then(|head| {
-                let newline = head.iter().position(|&b| b == b'\n')?;
-                parse_head(&head[newline + 1..]).map(|(_, _, headers)| headers)
-            });
-            if headers.is_none_or(|headers| purge.matches(&headers)) {
+            if purged(&mut file, purge)? {
                 drop(file);
                 found(std::fs::remove_file(&path))?;
             }
@@ -461,12 +461,23 @@ impl Store for Directory {
     }
 }
 
+/// Whether `purge` removes the record in `file`, as it does one that is not a record.
+fn purged(file: &mut File, purge: &read_through::Purge) -> Result<bool> {
+    let head = read_head(file)?;
+    let headers = head.as_deref().and_then(|head| {
+        let newline = head.iter().position(|&b| b == b'\n')?;
+        parse_head(&head[newline + 1..]).map(|(_, _, headers)| headers)
+    });
+    Ok(headers.is_none_or(|headers| purge.matches(&headers)))
+}
+
 // =======================================================================================
 // The service
 
 struct Cache {
     factory: Rc<Factory>,
     store: Box<dyn Store>,
+    purges: Rc<read_through::Purges>,
 }
 
 /// A `cache` service: the Cache API's backend, its entries in a directory, or shared by the
@@ -505,12 +516,20 @@ pub fn make_cache_service(
             "Directory of cache \"{name}\" not found: {path}"
         ));
     }
+    let purges = Rc::new(read_through::Purges::default());
     let store: Box<dyn Store> = match cluster {
-        Some(node) => Box::new(clustered::store(name, &root, node, factory)?),
+        Some(node) => {
+            let purges = Rc::clone(&purges);
+            Box::new(clustered::store(name, &root, node, factory, purges)?)
+        }
         None => Box::new(Directory(root)),
     };
     let factory = Rc::clone(factory);
-    Ok(Rc::new(CacheService(Rc::new(Cache { factory, store }))))
+    Ok(Rc::new(CacheService(Rc::new(Cache {
+        factory,
+        store,
+        purges,
+    }))))
 }
 
 impl Channel for CacheService {
@@ -872,8 +891,14 @@ impl Service for CacheRequest {
             Method::PURGE => self.purge(&key, response).await,
             Method::POST => {
                 let purge = read_through::Purge::parse(url)?;
-                self.cache.store.purge(&purge).await?;
-                self.answer(response, 200, "OK")
+                self.cache.purges.fence(&purge).await;
+                match self.cache.store.purge(&purge).await {
+                    Ok(()) => self.answer(response, 200, "OK"),
+                    Err(e) => {
+                        tracing::warn!("cache purge: {}", e.description());
+                        self.answer(response, 500, "Internal Server Error")
+                    }
+                }
             }
             _ => self.refuse(body, response, 405, "Method Not Allowed").await,
         }

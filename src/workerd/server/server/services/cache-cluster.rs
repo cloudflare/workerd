@@ -25,6 +25,13 @@
 //! may hold for leases. A request that fails, or is answered otherwise, is lost (`Cache::lost`).
 //! A value is spooled whole before the protocol sees it. Messages to this node itself go
 //! straight to the protocol.
+//!
+//! A read-through purge is no protocol operation but deletes. Its node asks every node in its
+//! fresh view, which lists every active node, to fence it, then every one to scan the entries it
+//! holds as home, then deletes those. The fences come first: a fill's put on its way to a home
+//! when its node fenced lands before that home is scanned, and later fills see the fence. These
+//! two are `POST http://cache/?<purge>` with `cf-cache-purge: fence` or `scan`, answered with no
+//! body or the keys, one per line.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -42,6 +49,8 @@ use cluster_logic::cache::Done;
 use cluster_logic::cache::Hit;
 use cluster_logic::cache::Msg;
 use cluster_logic::cache::Reply;
+use futures::future::join_all;
+use futures::future::try_join_all;
 use http::HeaderMap;
 use kj::http::HeadersRef;
 use kj::http::Method;
@@ -53,6 +62,9 @@ use kj_rs::KjMaybe;
 use tokio::sync::oneshot;
 
 use super::Store;
+use super::read_through::PREFIX;
+use super::read_through::Purge;
+use super::read_through::Purges;
 use crate::Result;
 use crate::bridge::ffi;
 use crate::cluster::ClusterNode;
@@ -87,6 +99,7 @@ struct Shared {
     ops: Waiters<u64, Done<Value>>,
     /// Peers' messages, awaiting their replies, by sender and op.
     asked: Waiters<(String, u64), Msg<Value>>,
+    purges: Rc<Purges>,
 }
 
 pub struct Clustered(Rc<Shared>);
@@ -97,6 +110,7 @@ pub fn store(
     root: &Path,
     node: &Rc<ClusterNode>,
     factory: &Rc<Factory>,
+    purges: Rc<Purges>,
 ) -> Result<Clustered> {
     let me = node.cluster.node();
     let (dir, lock) = claim(root, me).map_err(|e| io_kj_error(&e))?;
@@ -111,6 +125,7 @@ pub fn store(
         cache: RefCell::new(Cache::new(me, node.cache_timing)),
         ops: RefCell::default(),
         asked: RefCell::default(),
+        purges,
     });
     let weak = Rc::downgrade(&shared);
     let mut tick = tokio::time::interval(TICK);
@@ -325,6 +340,75 @@ impl Shared {
         })
     }
 
+    /// The read-through entries `purge` matches that this node holds as home.
+    fn scan(&self, purge: &Purge) -> Vec<String> {
+        let cache = self.cache.borrow();
+        let matches = |value: &Value| {
+            let file = value.open();
+            file.and_then(|mut file| super::purged(&mut file, purge))
+        };
+        cache
+            .homed()
+            .filter(|(key, value)| key.starts_with(PREFIX) && matches(value).unwrap_or(true))
+            .map(|(key, _)| key.to_owned())
+            .collect()
+    }
+
+    /// Has node `to` fence or scan `purge`: the keys it answers.
+    async fn purge_call(&self, to: &str, phase: &str, purge: &Purge) -> Result<Vec<String>> {
+        let timeout = Duration::from_millis(self.node.cache_timing.timeout_ms);
+        let call = tokio::time::timeout(timeout, self.purge_ask(to, phase, purge));
+        call.await
+            .map_err(|_| kj::failed!("{to}: no answer to a purge {phase} in {timeout:?}"))?
+    }
+
+    async fn purge_ask(&self, to: &str, phase: &str, purge: &Purge) -> Result<Vec<String>> {
+        let channel = self.node.peer_service(to, &self.name).await?;
+        let mut metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+        ffi::request_metadata_set_forwarded_by(metadata.as_mut(), self.node.cluster.node());
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-cache-purge", header_value(phase)?);
+        let headers = kj_headers(header_table(&self.factory), &headers)?;
+        let url = format!("http://cache/?{}", purge.query());
+        let interface = channel.start_request(metadata)?;
+        let call = ffi::http_call(interface, Method::POST, &url, &headers, 0);
+        let mut answer = ffi::http_call_response(call, REPLY).await?;
+        let mut body = Vec::new();
+        let mut chunk = vec![0; 64 * 1024];
+        loop {
+            let read = answer.body.as_mut().try_read(&mut chunk, 1).await?;
+            if read == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..read]);
+        }
+        if answer.status != 200 {
+            return Err(kj::failed!("{to} answered a purge {phase} {}", answer.status));
+        }
+        let body = String::from_utf8(body).map_err(|_| kj::failed!("{to}: keys not UTF-8"))?;
+        Ok(body.lines().map(str::to_owned).collect())
+    }
+
+    /// Fences or scans the purge `url` names.
+    async fn purge_phase(&self, phase: &str, url: &[u8], response: ServiceResponse<'_>) -> Result<()> {
+        let purge = Purge::parse(url)?;
+        let keys = match phase {
+            "fence" => {
+                self.purges.fence(&purge).await;
+                String::new()
+            }
+            "scan" => self.scan(&purge).join("\n"),
+            _ => return Err(kj::failed!("cluster cache: no purge phase {phase}")),
+        };
+        let headers = kj_headers(header_table(&self.factory), &HeaderMap::new())?;
+        let length = keys.len() as u64;
+        let mut out = response.send(200, "OK", HeadersRef::from(&*headers), Some(length))?;
+        match keys.is_empty() {
+            true => Ok(()),
+            false => out.write(keys.as_bytes()).await,
+        }
+    }
+
     /// `body`, whole, in a file of its own.
     async fn spool(&self, mut body: Pin<&mut AsyncInputStream>) -> Result<Value> {
         let (temp, mut file) = Temporary::beside(&self.dir.join("value"))?;
@@ -374,10 +458,30 @@ impl Store for Clustered {
         Ok(())
     }
 
-    async fn purge(&self, _purge: &super::read_through::Purge) -> Result<()> {
-        Err(kj::failed!(
-            "cluster cache: a read-through purge is not implemented"
-        ))
+    async fn purge(&self, purge: &Purge) -> Result<()> {
+        let shared = &self.0;
+        let me = shared.node.cluster.node();
+        let timing = &shared.node.cache_timing;
+        let (view, fresh, _) = shared.node.cluster.cache_view(cluster::now_ms(), timing);
+        if !fresh {
+            return Err(kj::failed!("cluster cache: no fresh view to purge by"));
+        }
+        let peers = || view.iter().filter(|node| *node != me);
+        try_join_all(peers().map(|node| shared.purge_call(node, "fence", purge))).await?;
+        let scans = try_join_all(peers().map(|node| shared.purge_call(node, "scan", purge)));
+        let keys = scans.await?.into_iter().flatten().chain(shared.scan(purge));
+        let deletes = keys.map(|key| shared.run(move |cache| cache.delete(&key)));
+        for done in join_all(deletes).await {
+            if !matches!(done, Some(Done::Delete(Some(_)))) {
+                return Err(kj::failed!("cluster cache: a purge's delete failed"));
+            }
+        }
+        Ok(())
+    }
+
+    fn active(&self) -> bool {
+        let timing = &self.0.node.cache_timing;
+        self.0.node.cluster.cache_view(cluster::now_ms(), timing).2
     }
 
     async fn message(
@@ -392,6 +496,9 @@ impl Store for Clustered {
         let shared = &self.0;
         let bad = || kj::failed!("cluster cache: a malformed message from {from}");
         let text = |name| headers.get_by_name(name).map(std::str::from_utf8);
+        if let Some(phase) = text("cf-cache-purge") {
+            return shared.purge_phase(phase.map_err(|_| bad())?, url, response).await;
+        }
         let op = match text("cf-cache-op") {
             Some(Ok(op)) => op.parse().map_err(|_| bad())?,
             _ => return Err(bad()),

@@ -53,6 +53,9 @@
 //      over `ClusterNode::peer_service`): a write is seen at once on the
 //      other node, named caches are apart, a large value crosses, and a
 //      killed node's entries miss at once.
+//  17. Workers Caching is one cache across the nodes too: a node hits what
+//      another filled, and once a purge from either is done no node serves
+//      what it removed; with a node out of reach, a purge fails.
 //
 // A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
 // costs that much: one test per mechanism. The simulations in ../../cluster
@@ -1405,6 +1408,67 @@ test('cluster: the nodes share one Cache API cache', async () => {
       assert(0 < hits.length && hits.length < 16, `${hits.length} hits`);
     },
     { configName: 'cache', disk: 'cache' }
+  );
+});
+
+// Workers Caching on `node`: the cache status and body of `path`, or the result
+// of a purge of what `body` names.
+async function readThrough(node, path) {
+  const url = `http://127.0.0.1:${node.httpPort}${path}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  return [res.headers.get('cf-cache-status'), await res.text()];
+}
+async function purge(node, body) {
+  const url = `http://127.0.0.1:${node.httpPort}/purge`;
+  const init = { method: 'POST', body: JSON.stringify(body) };
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  return res.json();
+}
+
+test('cluster: a read-through purge is done on every node', async () => {
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      const [a, b] = nodes;
+      const paths = Array.from({ length: 16 }, (_, i) => `/t${i % 2}/k${i}`);
+      const each = (node) => Promise.all(paths.map((p) => readThrough(node, p)));
+      // A node stores once it has been registered for `join_ms`.
+      let filled;
+      await until(
+        async () => {
+          filled = (await each(a)).map(([, body]) => body);
+          const seen = await each(b);
+          return seen.every(([s, body], i) => s === 'HIT' && body === filled[i]);
+        },
+        20_000,
+        "b never hit a's fills"
+      );
+      // b serves copies of a's entries, and a of b's.
+      const ok = { success: true, errors: [] };
+      assert.deepStrictEqual(await purge(a, { tags: ['t0'] }), ok);
+      for (const node of [b, a]) {
+        (await each(node)).forEach(([status, body], i) => {
+          if (paths[i].startsWith('/t0/')) {
+            assert.notStrictEqual(body, filled[i], `${node.nodeId} ${paths[i]}`);
+          } else {
+            assert.deepStrictEqual([status, body], ['HIT', filled[i]]);
+          }
+        });
+      }
+      const before = (await each(a)).map(([, body]) => body);
+      assert.deepStrictEqual(await purge(b, { purgeEverything: true }), ok);
+      for (const node of [a, b]) {
+        (await each(node)).forEach(([, body], i) =>
+          assert.notStrictEqual(body, before[i], `${node.nodeId} ${paths[i]}`)
+        );
+      }
+
+      // b's record stays live for its lease: a cannot fence it.
+      await b.stop({ signal: 'SIGKILL' });
+      const failed = await purge(a, { purgeEverything: true });
+      assert.strictEqual(failed.success, false);
+    },
+    { configName: 'readThrough', disk: 'cache' }
   );
 });
 

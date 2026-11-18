@@ -62,6 +62,26 @@ const cache :Workerd.Config = (
   cluster = .cluster,
 );
 
+# As `cache`, with Workers Caching in front of `main`, which the socket goes to.
+const readThrough :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-read-through-worker.js",
+            esModule = embed "cluster-read-through-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        cacheApiOutbound = "cache",
+      )
+    ),
+    ( name = "cache", cache = () ),
+    ( name = "cached", readThrough = ( worker = "main", cache = "cache" ) ),
+  ],
+  sockets = [ ( name = "http", address = "*:0", http = (), service = "cached" ) ],
+  cluster = .cluster,
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (

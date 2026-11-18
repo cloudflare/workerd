@@ -18,6 +18,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
         ":cluster-deployment.wd-test",
         ":cluster-node.wd-test",
         ":cluster-on-hibernate-worker.js",
+        ":cluster-read-through-worker.js",
         ":cluster-router.js",
         ":cluster-test.wd-test",
         ":cluster-worker.js",
