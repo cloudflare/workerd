@@ -533,6 +533,91 @@ fn d1_databases_bind_the_d1_worker() {
 }
 
 #[test]
+fn secrets_store_secrets_read_the_environment() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+        "no_bundle": true, "secrets_store_secrets": [
+          { "binding": "A", "store_id": "s1", "secret_name": "api-key" },
+          { "binding": "B", "store_id": "s2", "secret_name": "api-key" },
+          { "binding": "C", "store_id": "s1", "secret_name": "Db_2" }] }"#;
+    let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("secrets_store_secrets"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("secrets_store_secrets"), "{error}");
+    let message = read(load(path.to_str().unwrap(), &process, true).unwrap());
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    assert_eq!(services.len(), 1);
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+    let bound: Vec<_> = w
+        .unwrap()
+        .get_bindings()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            let worker::binding::Which::Wrapped(w) = b.which().unwrap() else {
+                panic!("not wrapped");
+            };
+            let w = w.unwrap();
+            let inner = w.get_inner_bindings().unwrap();
+            let worker::binding::Which::Text(name) = inner.get(0).which().unwrap() else {
+                panic!("no name");
+            };
+            let worker::binding::Which::FromEnvironment(variable) = inner.get(1).which().unwrap()
+            else {
+                panic!("not from the environment");
+            };
+            (
+                text(b.get_name().unwrap()),
+                text(w.get_module_name().unwrap()),
+                text(name.unwrap()),
+                text(variable.unwrap()),
+            )
+        })
+        .collect();
+    let secret = |b: &str, name: &str, variable: &str| {
+        (
+            b.into(),
+            "cloudflare-internal:secrets-store-api".into(),
+            name.into(),
+            variable.into(),
+        )
+    };
+    assert_eq!(
+        bound,
+        [
+            secret("A", "api-key", "WORKERD_SECRET_API_KEY"),
+            secret("B", "api-key", "WORKERD_SECRET_API_KEY"),
+            secret("C", "Db_2", "WORKERD_SECRET_DB_2"),
+        ]
+    );
+
+    let error = load_project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+                 "secrets_store_secrets": [
+                   { "binding": "A", "store_id": "s", "secret_name": "api-key" },
+                   { "binding": "B", "store_id": "s", "secret_name": "API_KEY" }] }"#,
+        ),
+        ("index.js", ""),
+    ])
+    .err()
+    .unwrap();
+    assert!(error.contains("WORKERD_SECRET_API_KEY"), "{error}");
+}
+
+#[test]
 fn triggers_crons_require_experimental() {
     let dir = project(&[
         (

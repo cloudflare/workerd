@@ -10,8 +10,8 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `triggers` (`crons`), `queues`, `workflows`, `d1_databases`, `assets`, `no_bundle` and
-//! `$schema`. Any other field is an error rather than silently ignored.
+//! `triggers` (`crons`), `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`,
+//! `assets`, `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
@@ -32,7 +32,10 @@
 //! `--experimental`, are served by the Worker `<name>-d1` (the bundled module `/workerd/d1.js`):
 //! each binding is the D1 API over it, with the database's `preview_database_id`, else its
 //! `database_id`, else its binding name in its props, as `wrangler dev` names local databases;
-//! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`. `assets`, also
+//! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`.
+//! `secrets_store_secrets`, also `--experimental`, read the environment: each secret's value is
+//! the variable [`secret_variable`] names after its `secret_name`, read when the server starts;
+//! `store_id` is ignored, so a secret name means the same secret in every store. `assets`, also
 //! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
 //! `AssetWorker` entrypoint. Without `main` it serves only the files. The server listens on
@@ -43,7 +46,7 @@
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
 //! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`,
-//! `queues`, `workflows`, `d1_databases` or `assets` yet.
+//! `queues`, `workflows`, `d1_databases`, `secrets_store_secrets` or `assets` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -98,8 +101,19 @@ struct Wrangler {
     #[serde(default)]
     d1_databases: Vec<D1Database>,
     #[serde(default)]
+    secrets_store_secrets: Vec<SecretsStoreSecret>,
+    #[serde(default)]
     no_bundle: bool,
     assets: Option<Assets>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SecretsStoreSecret {
+    binding: String,
+    #[serde(rename = "store_id")]
+    _store_id: String,
+    secret_name: String,
 }
 
 #[derive(Deserialize)]
@@ -394,6 +408,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     check_experimental(&wrangler, target)?;
+    check_secrets(&wrangler.secrets_store_secrets)?;
     let root = file.parent().unwrap_or(&file);
 
     let name = match target {
@@ -496,6 +511,10 @@ fn assets_only(wrangler: &Wrangler) -> Result<(), String> {
         ("workflows", !wrangler.workflows.is_empty()),
         ("d1_databases", !wrangler.d1_databases.is_empty()),
         (
+            "secrets_store_secrets",
+            !wrangler.secrets_store_secrets.is_empty(),
+        ),
+        (
             "assets.binding",
             wrangler
                 .assets
@@ -554,8 +573,9 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces`, `triggers.crons`, `queues`, `workflows`, `d1_databases` and `assets` need
-/// `--experimental`, and a deployment cannot have them yet.
+/// `kv_namespaces`, `triggers.crons`, `queues`, `workflows`, `d1_databases`,
+/// `secrets_store_secrets` and `assets` need `--experimental`, and a deployment cannot have them
+/// yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
@@ -563,6 +583,10 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
         (!wrangler.queues.is_empty(), "queues"),
         (!wrangler.workflows.is_empty(), "workflows"),
         (!wrangler.d1_databases.is_empty(), "d1_databases"),
+        (
+            !wrangler.secrets_store_secrets.is_empty(),
+            "secrets_store_secrets",
+        ),
         (wrangler.assets.is_some(), "assets"),
     ] {
         match target {
@@ -577,6 +601,44 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
             Target::Deployment { .. } => {
                 return Err(format!("A deployment cannot have {field} yet."));
             }
+        }
+    }
+    Ok(())
+}
+
+/// The environment variable holding the secret `secret_name`: `WORKERD_SECRET_` and the name
+/// upper-cased, other characters than letters and digits as `_`. The prefix keeps every other
+/// variable, the node's own credentials included, out of a Worker's reach.
+fn secret_variable(secret_name: &str) -> String {
+    let name: String = (secret_name.chars())
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => c.to_ascii_uppercase(),
+            _ => '_',
+        })
+        .collect();
+    format!("WORKERD_SECRET_{name}")
+}
+
+/// Two secrets of different names cannot read the same variable. A secret whose variable is not
+/// set is not found; say so now, not only when the Worker asks for it.
+fn check_secrets(secrets: &[SecretsStoreSecret]) -> Result<(), String> {
+    let mut names = BTreeMap::new();
+    for s in secrets {
+        let variable = secret_variable(&s.secret_name);
+        if std::env::var_os(&variable).is_none() {
+            eprintln!(
+                "secrets_store_secrets: {variable} is not set; \"{}\" is not found",
+                s.secret_name
+            );
+        }
+        match names.insert(variable.clone(), &s.secret_name) {
+            Some(other) if *other != s.secret_name => {
+                return Err(format!(
+                    "secrets_store_secrets: \"{other}\" and \"{}\" would both read {variable}",
+                    s.secret_name
+                ));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -811,13 +873,14 @@ fn cron_services(
     Ok(())
 }
 
-/// The bindings of the worker `name`: `vars`, Durable Objects, and those to the bundled Workers
-/// [`bundled_services`] names after it.
+/// The bindings of the worker `name`: `vars`, Durable Objects, those to the bundled Workers
+/// [`bundled_services`] names after it, and Secrets Store secrets.
 fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let kv = &wrangler.kv_namespaces;
     let producers = &wrangler.queues.producers;
     let workflows = &wrangler.workflows;
     let d1 = &wrangler.d1_databases;
+    let secrets = &wrangler.secrets_store_secrets;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
@@ -825,7 +888,8 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let n = wrangler.vars.len() + do_bindings.len() + kv.len();
     let assets = wrangler.assets.as_ref().and_then(|a| a.binding.as_ref());
     let m = n + producers.len() + workflows.len();
-    let mut bs = worker.init_bindings((m + d1.len() + usize::from(assets.is_some())) as u32);
+    let at = m + d1.len();
+    let mut bs = worker.init_bindings((at + secrets.len() + usize::from(assets.is_some())) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -883,8 +947,21 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         let props = serde_json::json!({ "database": id });
         designator.init_props().set_json(props.to_string());
     }
+    for (i, secret) in secrets.iter().enumerate() {
+        let mut b = bs.reborrow().get((at + i) as u32);
+        b.set_name(&secret.binding);
+        let mut wrapped = b.init_wrapped();
+        wrapped.set_module_name("cloudflare-internal:secrets-store-api");
+        let mut inner = wrapped.init_inner_bindings(2);
+        let mut name = inner.reborrow().get(0);
+        name.set_name("name");
+        name.set_text(&secret.secret_name);
+        let mut value = inner.get(1);
+        value.set_name("value");
+        value.set_from_environment(secret_variable(&secret.secret_name));
+    }
     if let Some(binding) = assets {
-        let mut b = bs.get((m + d1.len()) as u32);
+        let mut b = bs.get((at + secrets.len()) as u32);
         b.set_name(binding);
         let mut designator = b.init_service();
         designator.set_name(format!("{name}-assets"));
