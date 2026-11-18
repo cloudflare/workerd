@@ -649,6 +649,58 @@ impl Error {
             pending: false,
         }
     }
+
+    /// The `TypeError` C++ JSG throws for a value in `context` that is not of type
+    /// `expected` (`typeErrorMessage()` in jsg/util.c++).
+    #[doc(hidden)]
+    #[cold]
+    #[must_use]
+    pub fn new_incorrect_type(context: TypeErrorContext<'_>, expected: &str) -> Self {
+        let message = match context {
+            TypeErrorContext::MethodArgument {
+                method,
+                class,
+                index,
+            } => format!(
+                "Failed to execute '{method}' on '{class}': parameter {} is not of type \
+                 '{expected}'.",
+                index + 1
+            ),
+            TypeErrorContext::StructField { field, class } => format!(
+                "Incorrect type for the '{field}' field on '{class}': the provided value is not \
+                 of type '{expected}'."
+            ),
+            TypeErrorContext::ArrayElement(index) => format!(
+                "Incorrect type for array element {index}: the provided value is not of type \
+                 '{expected}'."
+            ),
+            TypeErrorContext::DictField(name) => format!(
+                "Incorrect type for map entry '{name}': the provided value is not of type \
+                 '{expected}'."
+            ),
+        };
+        Self::new_type_error(message)
+    }
+}
+
+/// Where a value that is not of its type was, like C++ JSG's `TypeErrorContext`; see
+/// [`Error::new_incorrect_type`].
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub enum TypeErrorContext<'a> {
+    /// An argument of a `#[jsg_method]`, by the method's JavaScript name, the resource's class
+    /// name and the argument's index.
+    MethodArgument {
+        method: &'a str,
+        class: &'a str,
+        index: usize,
+    },
+    /// A `#[jsg_struct]` field, by its JavaScript name and the struct's class name.
+    StructField { field: &'a str, class: &'a str },
+    /// An element of a `Vec`, by its index.
+    ArrayElement(usize),
+    /// The value of a `Dict` entry, by its key.
+    DictField(&'a str),
 }
 
 /// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
