@@ -1,8 +1,8 @@
-//! The command line, as clap definitions.
+//! The command line, as clap definitions. The help pages are written by hand, in `help.rs`.
 //!
 //! Every option handler applied in argument order under `kj::MainBuilder`; here options are parsed
 //! up front and the C++ driver applies options before positional arguments, which is the order
-//! they depended on (e.g. `--watch` and `--binary` must take effect before `<config-file>` is
+//! they depended on (e.g. `--watch` and `--binary` must take effect before `<config>` is
 //! parsed).
 
 use clap::Args;
@@ -12,11 +12,10 @@ use clap::ValueEnum;
 use workerd_server::bench;
 use workerd_server::bridge::ffi as server;
 
-use crate::bridge::ffi;
+use crate::help;
 
-/// Runs the Workers JavaScript/Wasm runtime.
 #[derive(Parser, Debug)]
-#[command(name = "workerd", args_override_self = true)]
+#[command(name = "workerd", args_override_self = true, override_help = help::MAIN)]
 pub struct Main {
     #[command(flatten)]
     pub global: GlobalArgs,
@@ -25,13 +24,8 @@ pub struct Main {
     pub command: Command,
 }
 
-/// Serve requests based on the compiled config.
 #[derive(Parser, Debug)]
-#[command(
-    name = "workerd",
-    args_override_self = true,
-    after_help = "This binary has an embedded configuration."
-)]
+#[command(name = "workerd", args_override_self = true, override_help = help::COMPILED)]
 pub struct CompiledMain {
     #[command(flatten)]
     pub global: GlobalArgs,
@@ -45,27 +39,13 @@ pub struct CompiledMain {
 
 #[derive(Args, Debug)]
 pub struct GlobalArgs {
-    /// Log informational messages to stderr; useful for debugging.
     #[arg(long, global = true)]
     pub verbose: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// run the server
-    #[command(
-        long_about = "Serve requests based on a config.",
-        after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
-            Cluster mode (`Config.cluster`, with --experimental): instances that share an \
-            S3-compatible (s3://) or Google Cloud Storage (gs://) bucket serve Durable Objects \
-            together. For an s3:// bucket, each `cluster.bucketOptions` setting falls back to an \
-            environment variable: AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID, \
-            AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
-            takes no settings: its tokens come from the service account key \
-            GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
-            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
-            --cluster-addr."
-    )]
+    #[command(override_help = help::SERVE)]
     Serve {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -80,15 +60,7 @@ pub enum Command {
         serve: ServeArgs,
     },
 
-    /// create a self-contained binary
-    #[command(
-        long_about = "Builds a self-contained binary from a config.",
-        after_long_help = "This parses a config file in the same manner as the \"serve\" command, \
-            but instead of then running it, it outputs a new binary to stdout that embeds the \
-            config and all associated Worker code and data as one self-contained unit. This \
-            binary may then be executed on another system to run the config -- without any other \
-            files being present on that system."
-    )]
+    #[command(override_help = help::COMPILE)]
     Compile {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -96,19 +68,11 @@ pub enum Command {
         #[command(flatten)]
         const_name: ConstNameArg,
 
-        /// Only write the encoded binary config to stdout. Do not attach it to an executable. The
-        /// encoded config can be used as input to the "serve" command, without the need for any
-        /// other files to be present.
         #[arg(long)]
         config_only: bool,
     },
 
-    /// run reprl for fuzzing
-    #[command(
-        long_about = "Creates a custom signal handler and depending on the config leverages \
-            Stdin.reprl() to communicate with fuzzilli.",
-        hide = !ffi::fuzzilli_supported()
-    )]
+    #[command(override_help = help::FUZZILLI, hide = true)]
     Fuzzilli {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -117,11 +81,7 @@ pub enum Command {
         serve_or_test: ServeOrTestArgs,
     },
 
-    /// run unit tests
-    #[command(
-        long_about = "Runs tests based on a config.",
-        after_long_help = TEST_HELP,
-    )]
+    #[command(override_help = help::TEST)]
     Test {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -133,11 +93,7 @@ pub enum Command {
         test: TestArgs,
     },
 
-    /// run benchmarks
-    #[command(
-        long_about = "Runs benchmarks based on a config.",
-        after_long_help = BENCH_HELP,
-    )]
+    #[command(override_help = help::BENCH)]
     Bench {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -149,20 +105,12 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    /// publish an application to a cluster
-    #[command(
-        long_about = "Publishes an application as a deployment in a cluster bucket (experimental).",
-        after_long_help = DEPLOY_HELP,
-    )]
+    #[command(override_help = help::DEPLOY, hide = true)]
     Deploy {
-        /// A wrangler project directory, a `wrangler.json` or `wrangler.jsonc` file, or a Cap'n
-        /// Proto config that contains only services. A Cap'n Proto config requires --name.
         #[arg(value_name = "project", default_value = ".")]
         project: String,
 
-        /// For a Cap'n Proto <project>, the constant that contains the config. This works like the
-        /// value for `serve`.
-        #[arg(value_name = "const-name")]
+        #[arg(value_name = "const")]
         const_name: Option<String>,
 
         #[command(flatten)]
@@ -170,137 +118,21 @@ pub enum Command {
     },
 }
 
-const DEPLOY_HELP: &str = "\
-Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
-stored in that bucket. The catalog is the bucket record that selects the current version of \
-every deployment. This command uploads the deployment and updates the catalog.
-
-<project> can be:
-    - A wrangler project directory or a `wrangler.json` or `wrangler.jsonc` file. Translation \
-      works like `serve`. Esbuild bundles the project unless it sets \"no_bundle\".
-    - A Cap'n Proto config that contains only services. This form requires --name.
-
---name names the deployment. For a wrangler project, it defaults to the config's `name`. The \
-wrangler worker becomes a service with the deployment's name. The deployment contains no \
-socket. Its Durable Objects use the disk service named `do-storage`.
-
-An instance is one workerd process in the cluster. Every instance that serves a wrangler \
-deployment with Durable Objects must define the `do-storage` service in its own config.
-
-For a wrangler project, each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here, \
-`<name>` is the deployment name. `<key>` is the class's storage key from the project's migrations. \
-The storage key defaults to the class name and stays the same after a rename. Publishing the \
-project under another name creates a separate application with empty Durable Objects. A Cap'n \
-Proto deployment's Durable Object `uniqueKey`s and every Workflow namespace key are used as \
-written.
-
-The command checks the deployment before uploading it. The check includes the other deployments \
-in the catalog. The command repeats this check when it updates the catalog. At startup, each \
-instance checks deployments in catalog order against its own config and accepted deployments. It \
-skips and logs a deployment that is unreadable or does not compose. Errors in a deployment's \
-services are logged with the deployment's name, and the broken services fail their requests. \
-References from the instance's config to unavailable deployment services fail requests too. None \
-of these errors stops the instance; only a failure to reach or read the catalog does. See \
-`ClusterConfig` in workerd.capnp for the complete rules.
-
-Publishing the version already selected by the catalog leaves the catalog unchanged. Publishing \
-an earlier version rolls the deployment back to that version. The command prints the deployment \
-version and catalog revision.
-
-Bucket credentials use the same environment variables as the instances. For an s3:// bucket:
-    - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, plus AWS_SESSION_TOKEN for temporary credentials; or
-    - AWS_CREDENTIALS_FILE.
-For a gs:// bucket:
-    - GOOGLE_APPLICATION_CREDENTIALS, a service account key; or
-    - the metadata server of the GCE VM or GKE pod the command runs on.
-
-See `bucket` and `bucketOptions` in workerd.capnp for credential details. For an s3:// bucket, \
---endpoint uses AWS_ENDPOINT_URL when the flag is absent, and --region uses AWS_REGION, then \
-defaults to us-east-1. A gs:// bucket refuses --endpoint and --region.
-
-Instances read the catalog only at startup. Restart each instance to serve a published catalog \
-revision. See `ClusterConfig` in workerd.capnp.
-";
-
-const TEST_HELP: &str = "\
-Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
-tests to run. It has one of the following formats:
-    <service-pattern>
-    <service-pattern>:<entrypoint-pattern>
-    <const-name>:<service-pattern>:<entrypoint-pattern>
-<service-pattern> is a glob pattern matching names of services which should be tested. If not \
-specified, '*' is assumed (which matches all services). <entrypoint-pattern> is a glob pattern \
-matching entrypoints within each service which should be tested; again, the default is '*'. \
-<const-name> has the same meaning as for the `serve` command (this is rarely used).
-
-Tests can be defined by exporting a function called `test` instead of (or in addition to) \
-`fetch`. Example:
-    export default {
-      async test(ctrl, env, ctx) {
-        if (1 + 1 != 2) {
-          throw new Error('math is broken!');
-        }
-      }
-    }
-The test passes if the test function completes without throwing. Multiple tests can be exported \
-under different entrypoint names:
-    export let test1 = {
-      async test(ctrl, env, ctx) {
-        ...
-      }
-    }
-    export let test2 = {
-      async test(ctrl, env, ctx) {
-        ...
-      }
-    }
-";
-
-const BENCH_HELP: &str = "\
-Runs benchmarks for services defined in <config-file>. <filter>, if given, has the format of the \
-`test` command's, optionally followed by /<case-pattern>, a glob pattern matching case names:
-    <service-pattern>[/<case-pattern>]
-    <service-pattern>:<entrypoint-pattern>[/<case-pattern>]
-    <const-name>:<service-pattern>:<entrypoint-pattern>[/<case-pattern>]
-
-Benchmarks are defined by exporting a function called `bench`, which registers cases. Each case \
-is timed after `bench` returns:
-    export default {
-      bench(b, env, ctx) {
-        const encoder = new TextEncoder();
-        b.run('encode', () => b.blackBox(encoder.encode('hello')));
-        b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
-      }
-    }
-Then the startup of each of those services' workers is timed by starting copies of it in new \
-isolates, as a cold start does, unless --no-startup is given. The phases of starting are cases \
-named startup:isolate, startup:script, startup:worker and startup:total, which <case-pattern> \
-selects as it does other cases.
-Results are written to stdout as a table, or as JSON with --format=json.
-";
-
 #[derive(Args, Debug)]
 pub struct ConfigFileArgs {
-    /// Add <dir> to the list of directories searched for non-relative imports in the config file
-    /// (ones that start with a '/').
     #[arg(short = 'I', long = "import-path", value_name = "dir")]
     pub import_paths: Vec<String>,
 
-    /// Specifies that the configuration file is an encoded binary Cap'n Proto message, rather than
-    /// the usual text format. This is particularly useful when driving the server from
-    /// higher-level tooling that automatically generates a config.
     #[arg(short, long)]
     pub binary: bool,
 
-    /// A Cap'n Proto config (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, whose `main` is
-    /// bundled with esbuild as `wrangler` does.
-    #[arg(value_name = "config-file")]
+    #[arg(value_name = "config")]
     pub config_file: String,
 }
 
 #[derive(Args, Debug)]
 pub struct ConstNameArg {
-    #[arg(value_name = "const-name")]
+    #[arg(value_name = "const")]
     pub const_name: Option<String>,
 }
 
@@ -310,150 +142,94 @@ pub struct ConstNameArg {
     reason = "one bool per command-line flag"
 )]
 pub struct ServeOrTestArgs {
-    /// Override the directory named <name> to point to <path> instead of the path specified in the
-    /// config file.
-    #[arg(short = 'd', long = "directory-path", value_name = "name>=<path", value_parser = parse_override)]
+    #[arg(short = 'd', long = "directory-path", value_name = "name>=<dir", value_parser = parse_override)]
     pub directory_overrides: Vec<Override>,
 
-    /// Override the external service named <name> to connect to the address <addr> instead of the
-    /// address specified in the config file.
     #[arg(short = 'e', long = "external-addr", value_name = "name>=<addr", value_parser = parse_override)]
     pub external_overrides: Vec<Override>,
 
-    /// Enable the inspector protocol to connect to the address <addr>.
     #[arg(short = 'i', long, value_name = "addr")]
     pub inspector_addr: Option<String>,
 
-    /// Enable perfetto tracing output to the specified file.
     #[arg(
         long,
         value_name = "path>=<categories",
-        value_parser = parse_override,
-        hide = !ffi::perfetto_supported()
+        value_parser = parse_override
     )]
     pub perfetto_trace: Option<Override>,
 
-    /// Write an async activity trace to <path>: one JSON object per line, recording requests,
-    /// turns, timers, I/O and binding operations, and what caused what. The file is overwritten.
-    /// It includes request details such as URLs and storage keys (and, with
-    /// --async-trace-stacks, source locations), so treat it like a log.
     #[arg(long, value_name = "path")]
     pub async_trace: Option<String>,
 
-    /// Record up to <frames> frames of the JavaScript stack that created each async resource, in
-    /// the --async-trace file and in the workerd.async category of --perfetto-trace. Slows down
-    /// every resource creation.
-    #[arg(long, value_name = "frames", value_parser = clap::value_parser!(u32).range(1..=64))]
+    #[arg(long, value_name = "n", value_parser = clap::value_parser!(u32).range(1..=64))]
     pub async_trace_stacks: Option<u32>,
 
-    /// Also trace JavaScript promises, in every async trace output. Installs V8's promise hook,
-    /// which slows down every promise operation.
     #[arg(long)]
     pub async_trace_promises: bool,
 
-    /// Watch configuration files (and server binary) and reload if they change. Useful for
-    /// development, but not recommended in production.
     #[arg(short, long)]
     pub watch: bool,
 
-    /// Permit the use of experimental features which may break backwards compatibility in a
-    /// future release.
     #[arg(long)]
     pub experimental: bool,
 
-    /// Use <path> as a disk cache to avoid repeatedly fetching Pyodide bundles from the internet.
     #[arg(long, value_name = "path")]
     pub pyodide_bundle_disk_cache_dir: Option<String>,
 
-    /// Save a dedicated snapshot to the disk cache
     #[arg(long)]
     pub python_save_snapshot: bool,
 
-    /// Save a baseline snapshot to the disk cache
     #[arg(long)]
     pub python_save_baseline_snapshot: bool,
 
-    /// Load a snapshot from the python snapshot directory.
     #[arg(long, value_name = "path")]
     pub python_load_snapshot: Option<String>,
 
-    /// Set the snapshot snapshot directory.
     #[arg(long, value_name = "path")]
     pub python_snapshot_dir: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct ServeArgs {
-    /// Override the socket named <name> to bind to the address <addr> instead of the address
-    /// specified in the config file.
     #[arg(short = 's', long = "socket-addr", value_name = "name>=<addr", value_parser = parse_override)]
     pub socket_addr_overrides: Vec<Override>,
 
-    /// Override the socket named <name> to listen on the already-open socket descriptor <fd>
-    /// instead of the address specified in the config file.
     #[arg(short = 'S', long = "socket-fd", value_name = "name>=<fd", value_parser = parse_socket_fd)]
     pub socket_fd_overrides: Vec<SocketFd>,
 
-    /// Enable sending of control messages on descriptor <fd>. Currently this only reports the port
-    /// each socket is listening on when ready.
     #[arg(long, value_name = "fd", value_parser = parse_control_fd)]
     pub control_fd: Option<u32>,
 
-    /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. The
-    /// port gives full access to every service in the process to holders of the cluster key, and
-    /// its traffic is not encrypted: only the cluster's instances should reach it, on a private
-    /// network (a VPC or Tailscale). A public IP is refused unless the config sets
-    /// `cluster.unsafePublicAddress`; a wildcard (0.0.0.0) listens on every interface, so
-    /// firewall the port.
     #[arg(long = "cluster-addr", value_name = "addr")]
     pub cluster_address: Option<String>,
 
-    /// Advertise <addr> to the cluster's other instances instead of the config's
-    /// `cluster.advertise` or the bound address; a port of 0 is the port bound. A public IP is
-    /// refused unless the config sets `cluster.unsafePublicAddress`.
     #[arg(long = "cluster-advertise", value_name = "addr")]
     pub cluster_advertise: Option<String>,
 
-    /// Listen on the specified address for debug RPC connections. This exposes a privileged
-    /// interface that allows access to all services in the process. For use by miniflare and local
-    /// development only.
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct DeployArgs {
-    /// Name the deployment. Use 1 to 64 ASCII letters, digits, hyphens, or underscores. The first
-    /// character must be a letter or digit. The name defaults to the wrangler config's `name`.
     #[arg(long, value_name = "name")]
     pub name: Option<String>,
 
-    /// Store the deployment in this cluster bucket: s3://<bucket>[/<prefix>] or
-    /// gs://<bucket>[/<prefix>]. This value matches `cluster.bucket` in each instance's config.
     #[arg(long, value_name = "url", value_parser = parse_bucket)]
     pub bucket: String,
 
-    /// Use this S3-compatible endpoint for an s3:// bucket. This value matches the instances'
-    /// `aws_endpoint` setting.
     #[arg(long, value_name = "url", value_parser = parse_endpoint)]
     pub endpoint: Option<String>,
 
-    /// Use this region for an s3:// bucket. This value matches the instances' `aws_region`
-    /// setting.
     #[arg(long, value_name = "region")]
     pub region: Option<String>,
 
-    /// For a Cap'n Proto <project>, search <dir> for non-relative imports. This works like the
-    /// option for `serve`.
     #[arg(short = 'I', long = "import-path", value_name = "dir")]
     pub import_paths: Vec<String>,
 
-    /// Read <project> as an encoded binary Cap'n Proto config. `workerd compile --config-only`
-    /// writes this format. Use `-` to read it from stdin.
     #[arg(short, long)]
     pub binary: bool,
 
-    /// Enable experimental features. Cluster mode requires this flag.
     #[arg(long)]
     pub experimental: bool,
 }
@@ -522,34 +298,21 @@ fn parse_endpoint(param: &str) -> Result<String, &'static str> {
     reason = "one bool per command-line flag"
 )]
 pub struct TestArgs {
-    /// Disable INFO-level logging for this test. Otherwise, INFO logging is enabled by default for
-    /// tests in order to show uncaught exceptions, but it can be noisey.
     #[arg(long)]
     pub no_verbose: bool,
 
-    /// Enable predictable mode. This makes workerd behave more deterministically by using pre-set
-    /// values instead of random data or timestamps to facilitate testing.
     #[arg(long)]
     pub predictable: bool,
 
-    /// Force a full V8 GC at each awaitIo continuation. Detects KJ async objects on the JS heap
-    /// without `IoOwn` wrapping. Very slow.
     #[arg(long)]
     pub gc_stress: bool,
 
-    /// Enable all autogates. This is useful for testing code paths that are guarded by autogates.
     #[arg(long)]
     pub all_autogates: bool,
 
-    /// Set the compatibility date for all workers. When specified, workers must NOT specify
-    /// compatibilityDate in the config. Use '0000-00-00' for oldest behavior or '9999-12-31' for
-    /// newest behavior.
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 
-    /// Override the socket named <name> to bind to the address <addr> instead of the address
-    /// specified in the config file, as for `serve`. Lets a test listen on a port chosen when it
-    /// runs.
     #[arg(short = 's', long = "socket-addr", value_name = "name>=<addr", value_parser = parse_override)]
     pub socket_addr_overrides: Vec<Override>,
 
@@ -563,37 +326,27 @@ pub struct TestArgs {
     reason = "one bool per command-line flag"
 )]
 pub struct BenchArgs {
-    /// Disable INFO-level logging, which otherwise shows uncaught exceptions.
     #[arg(long)]
     pub no_verbose: bool,
 
-    /// Enable all autogates.
     #[arg(long)]
     pub all_autogates: bool,
 
-    /// Set the compatibility date for all workers, as for `test`. 'latest' is the newest date that
-    /// this build supports. Without this, workers that don't specify compatibilityDate get that
-    /// date.
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 
-    /// Use short time budgets, to check that benchmarks run rather than to measure them.
     #[arg(long)]
     pub quick: bool,
 
-    /// The format of the results.
     #[arg(long, value_enum, default_value_t = BenchFormat::Text)]
     pub format: BenchFormat,
 
-    /// Write the results to <path> instead of stdout.
     #[arg(long, value_name = "path")]
     pub output: Option<String>,
 
-    /// Run tail workers, which are otherwise skipped since they add their cost to every request.
     #[arg(long)]
     pub trace: bool,
 
-    /// Don't time starting the services' workers in new isolates.
     #[arg(long)]
     pub no_startup: bool,
 
@@ -603,9 +356,7 @@ pub struct BenchArgs {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum BenchFormat {
-    /// A table for people.
     Text,
-    /// The full report, including raw samples.
     Json,
 }
 
