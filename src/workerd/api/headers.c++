@@ -7,6 +7,8 @@
 #include <workerd/util/header-validation.h>
 #include <workerd/util/strings.h>
 
+#include <type_traits>
+
 namespace workerd::api {
 
 namespace {
@@ -363,21 +365,24 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
   }
 }
 
-Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard)
-    : unparsed(Unparsed(other)),
-      guard(guard) {}
+Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(guard) {
+  unparsed.emplace(other);
+}
 
 Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
   // One pass collects the headers, so that the copy can be sized exactly. Requests rarely have
-  // more headers than fit in `firstEntries`.
+  // more headers than fit in `firstEntries`, which is left uninitialized: an Entry needs no
+  // destruction, and only the ones collected are read.
   constexpr size_t STACK_ENTRIES = 32;
-  Entry firstEntries[STACK_ENTRIES];
+  static_assert(std::is_trivially_destructible_v<Entry>);
+  alignas(Entry) kj::byte firstStorage[STACK_ENTRIES * sizeof(Entry)];
+  auto firstEntries = reinterpret_cast<Entry*>(firstStorage);
   kj::Vector<Entry> moreEntries;
   size_t count = 0;
   size_t charCount = 0;
   headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
     if (count < STACK_ENTRIES) {
-      firstEntries[count] = Entry{.name = name, .value = value};
+      new (&firstEntries[count]) Entry{.name = name, .value = value};
     } else {
       moreEntries.add(Entry{.name = name, .value = value});
     }
