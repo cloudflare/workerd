@@ -96,7 +96,7 @@ Tracing:
       --async-trace <path>           Write async activity to path (JSONL)
       --async-trace-stacks <n>       Keep n (1-64) stack frames; slow
       --async-trace-promises         Also trace promises; slow
-      --perfetto-trace <path>=<cats> Write a Perfetto trace
+      --perfetto-trace <path>=<cats> Write a Perfetto trace, in Perfetto builds
 "
     };
 }
@@ -367,7 +367,7 @@ Options:
 ",
     socket_options!(),
     run_options!(),
-    "\n",
+    "  -V, --version                      Print the newest supported compat date\n\n",
     cluster_options!(),
     "\n",
     tool_options!(),

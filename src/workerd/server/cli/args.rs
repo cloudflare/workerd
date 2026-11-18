@@ -12,7 +12,6 @@ use clap::ValueEnum;
 use workerd_server::bench;
 use workerd_server::bridge::ffi as server;
 
-use crate::bridge::ffi;
 use crate::help;
 
 #[derive(Parser, Debug)]
@@ -164,8 +163,7 @@ pub struct ServeOrTestArgs {
     #[arg(
         long,
         value_name = "path>=<categories",
-        value_parser = parse_override,
-        hide = !ffi::perfetto_supported()
+        value_parser = parse_override
     )]
     pub perfetto_trace: Option<Override>,
 
