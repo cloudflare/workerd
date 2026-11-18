@@ -2075,10 +2075,7 @@ struct JsRpcCallResultTarget {
 };
 
 // Serializes `value` into the results of `target`'s call, setting the call's pipeline.
-void writeJsRpcCallResult(jsg::Lock& js,
-    jsg::JsValue value,
-    JsRpcCallResultTarget& target,
-    kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>>& callPipelineFulfiller) {
+void writeJsRpcCallResult(jsg::Lock& js, jsg::JsValue value, JsRpcCallResultTarget& target) {
   rpc::JsRpcTarget::CallResults::Builder results = nullptr;
   auto maybePipeline = serializeJsValueWithPipeline(js, value, [&](capnp::MessageSize hint) {
     hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
@@ -2108,10 +2105,6 @@ void writeJsRpcCallResult(jsg::Lock& js,
       results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
       // leave hasDisposer false
     }
-  }
-
-  KJ_IF_SOME(cpf, callPipelineFulfiller) {
-    cpf->fulfill(results.getCallPipeline());
   }
 }
 
@@ -2354,12 +2347,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         }
       }();
 
-      kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>> callPipelineFulfiller;
-
-      // We need another ref to this fulfiller for the error callback. It can rely on being
-      // destroyed at the same time as the success callback.
-      kj::Maybe<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>&> callPipelineFulfillerRef;
-
       // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the
       // backing object's lifetime is that of the RPC call, but in reality they are refcounted
       // under the hood. Since we'll be executing the call in the JS microtask queue, we have no
@@ -2393,13 +2380,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
                       // this continuation will still execute, sice it's a JS promise continuation.
                       // But `this` could have been destroyed in the meantime. So all our captures
                       // must take full ownership.
-                      [weakResultTarget = kj::mv(weakResultTarget), paramStubs = kj::mv(paramStubs),
-                          callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
+                      [weakResultTarget = kj::mv(weakResultTarget),
+                          paramStubs = kj::mv(paramStubs)](
                           jsg::Lock& js, jsg::Value value) mutable {
         jsg::JsValue resultValue(value.getHandle(js));
 
         KJ_IF_SOME(target, weakResultTarget.tryGet()) {
-          writeJsRpcCallResult(js, resultValue, target.get(), callPipelineFulfiller);
+          writeJsRpcCallResult(js, resultValue, target.get());
         } else {
           // The call was canceled, so nobody will receive the result. Dispose it as the
           // caller would have.
@@ -2409,16 +2396,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         // paramStubs will be destroyed when we return (or when this lambda is destroyed as a
         // result of the promise being rejected). This will implicitly dispose the param stubs.
       }),
-                  ctx.addFunctor(
-                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
-                          jsg::Lock& js, jsg::Value&& error) {
+                  ctx.addFunctor([durableObjectId = getCurrentDurableObjectId()](
+                                     jsg::Lock& js, jsg::Value&& error) {
         maybeAddDurableObjectId(
             js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
-        // If we set up a `callPipeline` early, we have to make sure it propagates the error.
-        // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
-        KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
-          cpf.reject(js.exceptionToKj(error.addRef(js)));
-        }
         js.throwException(kj::mv(error));
       })));
       result = awaitCancelableIncomingCall(

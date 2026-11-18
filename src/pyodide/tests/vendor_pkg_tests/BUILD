@@ -1,4 +1,4 @@
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "python_test_setup")
+load("//src/pyodide/tests:py_wd_test.bzl", "python_test_setup")
 load(":vendor_test.bzl", "vendored_py_wd_test")
 
 python_test_setup()

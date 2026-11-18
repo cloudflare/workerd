@@ -172,7 +172,7 @@ def _capnp_bundles_file_group():
         _capnp_bundle(**info)
 
 def _capnp_rules():
-    return ["//src/workerd/server/tests/python:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
+    return ["//src/pyodide/tests:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
 
 def python_test_setup():
     _capnp_bundles_file_group()
@@ -219,7 +219,7 @@ def py_wd_test(
     data += _capnp_rules()
     args = args + [
         "--pyodide-bundle-disk-cache-dir",
-        "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",
+        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
         "--experimental",
         "--python-snapshot-dir",
         ".",

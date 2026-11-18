@@ -1,7 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
-load("//src/workerd/server/tests/python/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "py_wd_test", "python_test_setup")
+load("//src/pyodide/tests/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
 
 python_test_setup()
 
@@ -13,7 +13,6 @@ python_test_setup()
 vendored_py_wd_test(
     "pytest-asyncio",
     data = glob(["pytest/tests/**"]),
-    level = 0,
     main_py_file = "pytest/main.py",
     test_template = "pytest/pytest.wd-test",
 )
@@ -110,7 +109,11 @@ py_wd_test("nodejs-compat")
 
 py_wd_test("pth-file")
 
-py_wd_test("metadata-read-overflow")
+py_wd_test(
+    "metadata-read-overflow",
+    # Needs a buffer of 2 GiB or more, which some downstream builds can't allocate.
+    tags = ["no-downstream"],
+)
 
 py_wd_test("stdlib-zip")
 
@@ -150,14 +153,14 @@ sh_test(
     args = [
         "$(location //src/workerd/server:workerd)",
         "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
-        "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)",
+        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)",
         "../+pyodide+all_pyodide_wheels_20250808",
     ],
     data = [
         "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
         "python-abort-isolate-on-fatal/worker.py",
+        "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
         "//src/workerd/server:workerd",
-        "//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule",
         "@all_pyodide_wheels_20250808//:whls",
     ],
     tags = [

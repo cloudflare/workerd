@@ -1,7 +1,7 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "compute_python_flags", "py_wd_test")
+load("//src/pyodide/tests:py_wd_test.bzl", "compute_python_flags", "py_wd_test")
 
-def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, level, data, **kwds):
+def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, data, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
     http_archive target containing the vendored sources should be specified in `vendored_srcs_target_prefix`.
 
@@ -22,19 +22,19 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         srcs = [
             test_template,
             vendored_srcs_target,
-            "//src/workerd/server/tests/python/vendor_pkg_tests:generate_modules.py",
+            "//src/pyodide/tests/vendor_pkg_tests:generate_modules.py",
         ],
         outs = [name + ".test.generated" + "_" + version],
         cmd = """
         # Create a file with all the file paths to avoid Windows command line length limits
         echo "$(locations %s)" > paths.txt
         $(PYTHON3) \
-            $(location //src/workerd/server/tests/python/vendor_pkg_tests:generate_modules.py) \
-            --level=%s \
+            $(location //src/pyodide/tests/vendor_pkg_tests:generate_modules.py) \
+            --package-depth=%s \
             --template=$(location %s) \
             --out=$@ \
             @paths.txt
-        """ % (vendored_srcs_target, level, test_template),
+        """ % (vendored_srcs_target, len(native.package_name().split("/")), test_template),
         # The toolchain as a tool brings the interpreter's whole runtime, not just its binary.
         toolchains = ["@rules_python//python:current_py_toolchain"],
         tools = ["@rules_python//python:current_py_toolchain"],
@@ -66,7 +66,6 @@ def vendored_py_wd_test(
         python_flags = "all",
         skip_python_flags = [],
         vendored_package_name = None,
-        level = 1,
         data = [],
         **kwds):
     python_flags = compute_python_flags(python_flags, skip_python_flags)
@@ -84,4 +83,4 @@ def vendored_py_wd_test(
         info = BUNDLE_VERSION_INFO[flag]
         if vendored_package_name not in info["vendored_packages_for_tests"]:
             fail("Not found", vendored_package_name, "in", info["vendored_packages_for_tests"])
-        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, level = level, data = data, **kwds)
+        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, data = data, **kwds)
