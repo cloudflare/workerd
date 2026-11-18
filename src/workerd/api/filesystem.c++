@@ -535,7 +535,7 @@ uint32_t FileSystemModule::write(
         auto stat = file->stat(js);
         return stat.size;
       }
-      auto pos = options.position.orDefault(opened->position);
+      auto pos = options.position.orDefault(opened->getPosition());
       if (pos > kMax) {
         node::THROW_ERR_UV_EINVAL(js, "write"_kj, "position out of range"_kj);
       }
@@ -560,7 +560,7 @@ uint32_t FileSystemModule::write(
         // We only update the position if the options.position is not set and
         // the file descriptor is not opened in append mode.
         if (options.position == kj::none && !opened->append) {
-          opened->position += total;
+          opened->setPosition(opened->getPosition() + total);
         }
         return total;
       }
@@ -589,7 +589,7 @@ uint32_t FileSystemModule::read(
 
     KJ_SWITCH_ONEOF(opened->node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        auto pos = options.position.orDefault(opened->position);
+        auto pos = options.position.orDefault(opened->getPosition());
         if (pos > kMax) {
           node::THROW_ERR_UV_EINVAL(js, "read"_kj, "position out of range"_kj);
         }
@@ -604,7 +604,7 @@ uint32_t FileSystemModule::read(
         }
         // We only update the position if the options.position is not set.
         if (options.position == kj::none) {
-          opened->position += total;
+          opened->setPosition(opened->getPosition() + total);
         }
         return total;
       }
@@ -667,7 +667,7 @@ jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
           // Move the opened.position to the end of the file.
           KJ_DEFER({
             auto stat = file->stat(js);
-            opened->position = stat.size;
+            opened->setPosition(stat.size);
           });
 
           KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
@@ -818,7 +818,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
           KJ_DEFER({
             // In either case, we need to update the position of the file descriptor.
             stat = file->stat(js);
-            opened->position = stat.size;
+            opened->setPosition(stat.size);
           });
 
           // If the file descriptor was opened in append mode, or if the append option
@@ -1241,9 +1241,9 @@ void readdirImpl(jsg::Lock& js,
     const kj::Path& path,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
-  for (auto& entry: *dir) {
-    auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
-    KJ_SWITCH_ONEOF(entry.value) {
+  for (auto& entry: dir->list(js)) {
+    auto name = options.recursive ? path.append(entry.name).toString(false) : kj::mv(entry.name);
+    KJ_SWITCH_ONEOF(entry.item) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
         entries.add(FileSystemModule::DirEntHandle{
@@ -1260,7 +1260,7 @@ void readdirImpl(jsg::Lock& js,
         });
 
         if (options.recursive) {
-          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+          readdirImpl(js, vfs, dir.addRef(), path.append(entry.name), options, entries);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1281,7 +1281,7 @@ void readdirImpl(jsg::Lock& js,
                 // Do nothing
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+                readdirImpl(js, vfs, dir.addRef(), path.append(entry.name), options, entries);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 throwFsError(js, err, "readdir"_kj);
@@ -1329,11 +1329,6 @@ namespace {
 
 using MaybeFsNode = kj::Maybe<
     kj::OneOf<kj::Rc<workerd::Directory>, kj::Rc<workerd::File>, kj::Rc<workerd::SymbolicLink>>>;
-
-struct CopyEntry final {
-  kj::String name;
-  workerd::Directory::Item item;
-};
 
 MaybeFsNode getNodeOrError(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
@@ -1522,30 +1517,15 @@ void handleCpDir(jsg::Lock& js,
   if (!stat.writable) {
     node::THROW_ERR_UV_EPERM(js, "cp"_kj, "Destination directory is not writable"_kj);
   }
-  if (src.get() == dest.get()) {
+  if (src->isSameNode(*dest)) {
     node::THROW_ERR_UV_EINVAL(js, "cp"_kj, "Source and destination directories are the same"_kj);
   }
 
-  // entries store the reference to the node and the name of the entry
-  // of all the entries in the source directory, to ensure they remain valid
-  // even if the source directory is mutated during copying.
-  // this can happen when the destination directory contains a
-  // symbolic link that points to the source directory.
-  kj::Vector<CopyEntry> entries;
-  entries.reserve(src->count(js));
-  for (auto& entry: *src) {
-    KJ_SWITCH_ONEOF(entry.value) {
-      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        entries.add(CopyEntry{.name = kj::str(entry.key), .item = file.addRef()});
-      }
-      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        entries.add(CopyEntry{.name = kj::str(entry.key), .item = dir.addRef()});
-      }
-      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        entries.add(CopyEntry{.name = kj::str(entry.key), .item = link.addRef()});
-      }
-    }
-  }
+  // The listing holds references to the entries of the source directory, so
+  // it remains valid even if the source directory is mutated during copying.
+  // This can happen when the destination directory contains a symbolic link
+  // that points to the source directory.
+  auto entries = src->list(js);
 
   // Here, we iterate through each of the entries in the source directory,
   // recursively copying them to the destination directory.
@@ -1564,7 +1544,7 @@ void handleCpDir(jsg::Lock& js,
           // The destination path already exists. Check to see if we can overwrite it.
           KJ_SWITCH_ONEOF(existing) {
             KJ_CASE_ONEOF(existingFile, kj::Rc<workerd::File>) {
-              if (existingFile.get() == file.get()) {
+              if (existingFile->isSameNode(*file)) {
                 // Do nothing
               } else if (options.force) {
                 KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
@@ -1718,7 +1698,7 @@ void handleCpDir(jsg::Lock& js,
                   js, "cp"_kj, kj::str("Cannot copy link to directory: ", name));
             }
             KJ_CASE_ONEOF(existingLink, kj::Rc<workerd::SymbolicLink>) {
-              if (existingLink.get() == link.get()) {
+              if (existingLink->isSameNode(*link)) {
                 // Do nothing
               } else if (options.force) {
                 KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
@@ -2466,17 +2446,17 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
     kj::Rc<workerd::Directory> inner,
     const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
-  for (auto& entry: *inner) {
-    KJ_SWITCH_ONEOF(entry.value) {
+  for (auto& entry: inner->list(js)) {
+    KJ_SWITCH_ONEOF(entry.item) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
+        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.name));
         entries.add(js.alloc<FileSystemFileHandle>(
-            vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
+            vfs, kj::mv(locator), jsg::USVString(kj::mv(entry.name))));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
+        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.name, "/")));
         entries.add(js.alloc<FileSystemDirectoryHandle>(
-            vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
+            vfs, kj::mv(locator), jsg::USVString(kj::mv(entry.name))));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         SymbolicLinkRecursionGuardScope guardScope;
@@ -2487,14 +2467,14 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
         KJ_IF_SOME(res, link->resolve(js)) {
           KJ_SWITCH_ONEOF(res) {
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
+              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.name));
               entries.add(js.alloc<FileSystemFileHandle>(
-                  vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
+                  vfs, kj::mv(locator), jsg::USVString(kj::mv(entry.name))));
             }
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
+              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.name, "/")));
               entries.add(js.alloc<FileSystemDirectoryHandle>(
-                  vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
+                  vfs, kj::mv(locator), jsg::USVString(kj::mv(entry.name))));
             }
             KJ_CASE_ONEOF(_, workerd::FsError) {
               JSG_FAIL_REQUIRE(DOMOperationError, "Symbolic link recursion detected"_kj);

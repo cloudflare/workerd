@@ -1,5 +1,7 @@
 #include "worker-fs.h"
 
+#include "worker-fs-rust.h"
+
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/uuid.h>
@@ -88,30 +90,9 @@ class TmpDirectory final: public Directory {
     return 0;
   }
 
-  Entry* begin() override {
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->begin();
-    }
-    return nullptr;
-  }
-
-  Entry* end() override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->end();
-    }
-    return nullptr;
-  }
-
-  const Entry* begin() const override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->begin();
-    }
-    return nullptr;
-  }
-
-  const Entry* end() const override {
-    KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->end();
+      return dir->list(js);
     }
     return nullptr;
   }
@@ -196,20 +177,8 @@ class LazyDirectory final: public Directory {
     return getDirectory()->count(js, typeFilter);
   }
 
-  Entry* begin() override {
-    return getDirectory()->begin();
-  }
-
-  Entry* end() override {
-    return getDirectory()->end();
-  }
-
-  const Entry* begin() const override {
-    return getDirectory()->begin();
-  }
-
-  const Entry* end() const override {
-    return getDirectory()->end();
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
+    return getDirectory()->list(js);
   }
 
   kj::Maybe<FsNodeWithError> tryOpen(
@@ -351,7 +320,7 @@ class DirectoryBase final: public Directory {
 
   size_t count(jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) override {
     KJ_IF_SOME(type, typeFilter) {
-      return std::count_if(begin(), end(), [type](const auto& entry) {
+      return std::count_if(entries.begin(), entries.end(), [type](const auto& entry) {
         KJ_SWITCH_ONEOF(entry.value) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
             return type == FsType::FILE;
@@ -369,20 +338,21 @@ class DirectoryBase final: public Directory {
     return entries.size();
   }
 
-  Entry* begin() override {
-    return entries.begin();
-  }
-
-  Entry* end() override {
-    return entries.end();
-  }
-
-  const Entry* begin() const override {
-    return entries.begin();
-  }
-
-  const Entry* end() const override {
-    return entries.end();
+  kj::Array<ListEntry> list(jsg::Lock& js) override {
+    return KJ_MAP(entry, entries) -> ListEntry {
+      KJ_SWITCH_ONEOF(entry.value) {
+        KJ_CASE_ONEOF(file, kj::Rc<File>) {
+          return {.name = kj::str(entry.key), .item = file.addRef()};
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+          return {.name = kj::str(entry.key), .item = dir.addRef()};
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+          return {.name = kj::str(entry.key), .item = link.addRef()};
+        }
+      }
+      KJ_UNREACHABLE;
+    };
   }
 
   kj::Maybe<FsNodeWithError> tryOpen(
@@ -1029,12 +999,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
               }
             }
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(file));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(file));
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
           if (opts.write) {
@@ -1042,12 +1007,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
             // directories for writing.
             return FsError::NOT_PERMITTED_ON_DIRECTORY;
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(dir));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(dir));
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
           // Symlinks are never directly writable so the write flag
@@ -1055,12 +1015,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
           if (opts.write) {
             return FsError::NOT_PERMITTED;
           }
-          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-          auto fd = nextFd++;
-          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(link));
-          openedFiles.insert(fd, opened.addRef());
-          return kj::mv(opened);
+          return addOpenedFile(opts, kj::mv(link));
         }
         KJ_CASE_ONEOF(err, FsError) {
           // If we got an error, we just return it.
@@ -1191,6 +1146,19 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     openedFiles.erase(fd);
     observer->onClose(openedFiles.size(), nextFd);
   }
+
+  // Gives node the next file descriptor and tells the observer. The descriptor stays open if the
+  // observer throws. The observer is called before the return rather than from a KJ_DEFER: an
+  // exception from a scope guard after the return value is constructed leaks that value, since
+  // Clang does not destroy it (CWG 2176).
+  kj::Rc<OpenedFile> addOpenedFile(const OpenOptions& opts, FsNode node) const {
+    KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+    auto fd = nextFd++;
+    auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(node));
+    openedFiles.insert(fd, opened.addRef());
+    observer->onOpen(openedFiles.size(), nextFd);
+    return kj::mv(opened);
+  }
 };
 
 FdHandle::~FdHandle() noexcept(false) {
@@ -1269,6 +1237,9 @@ void Directory::Builder::addPath(
 }
 
 kj::Rc<Directory> Directory::Builder::finish() {
+  if (vfs::isEnabled()) {
+    return vfs::finishBuilder(kj::mv(entries));
+  }
   auto map = kj::mv(entries);
   kj::HashMap<kj::String, Directory::Item> ret;
 
@@ -1294,6 +1265,9 @@ kj::Rc<Directory> Directory::Builder::finish() {
 }
 
 kj::Rc<Directory> Directory::newWritable() {
+  if (vfs::isEnabled()) {
+    return vfs::newWritableDirectory();
+  }
   return kj::rc<WritableDirectory>();
 }
 
@@ -1303,12 +1277,18 @@ kj::Rc<Directory> Directory::newEmptyReadonly() {
 }
 
 kj::Rc<Directory> Directory::newWritable(jsg::Lock& js) {
+  if (vfs::isEnabled()) {
+    return vfs::newWritableDirectory(js);
+  }
   auto dir = kj::rc<WritableDirectory>();
   dir->countTowardsIsolateLimit(js);
   return kj::mv(dir);
 }
 
 kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
+  if (vfs::isEnabled()) {
+    return vfs::newWritableFile(js, size);
+  }
   // We will cap the maximum size of the file.
   auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
   auto actualSize = kj::min(size.orDefault(0), maxSize);
@@ -1320,15 +1300,24 @@ kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
 }
 
 kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
+  if (vfs::isEnabled()) {
+    return vfs::newReadableFile(data);
+  }
   return kj::rc<FileImpl>(data);
 }
 
 kj::Rc<File> File::newReadable(kj::Array<const kj::byte> data) {
+  if (vfs::isEnabled()) {
+    return vfs::newReadableFile(kj::mv(data));
+  }
   return kj::rc<FileImpl>(kj::mv(data));
 }
 
 kj::Own<VirtualFileSystem> newVirtualFileSystem(
     kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root, kj::Own<VirtualFileSystem::Observer> observer) {
+  if (vfs::isEnabled()) {
+    return vfs::newVirtualFileSystem(kj::mv(fsMap), kj::mv(root), kj::mv(observer));
+  }
   return kj::heap<VirtualFileSystemImpl>(kj::mv(fsMap), kj::mv(root), kj::mv(observer));
 }
 
@@ -1344,6 +1333,9 @@ kj::Own<VirtualFileSystem> newWorkerFileSystem(kj::Own<FsMap> fsMap,
 }
 
 kj::Rc<Directory> getTmpDirectoryImpl() {
+  if (vfs::isEnabled()) {
+    return vfs::newTmpDirectory();
+  }
   return kj::rc<TmpDirectory>();
 }
 
@@ -1356,14 +1348,33 @@ TmpDirStoreScope& TmpDirStoreScope::current() {
   return *tmpDirStorageScope;
 }
 
+namespace {
+
+kj::Maybe<kj::Own<RustTmpStore>> newRustTmpStore(vfs::MakeCurrent makeCurrent) {
+  if (vfs::isEnabled()) {
+    return vfs::newTmpStore(makeCurrent);
+  }
+  return kj::none;
+}
+
+kj::Rc<Directory> getTmpStoreDirectory(kj::Maybe<kj::Own<RustTmpStore>>& rust) {
+  KJ_IF_SOME(store, rust) {
+    return vfs::getTmpStoreDirectory(*store);
+  }
+  return Directory::newWritable();
+}
+
+}  // namespace
+
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
-    : dir(Directory::newWritable()),
+    : onStack(guard == kj::none),
+      rust(newRustTmpStore(vfs::MakeCurrent(onStack))),
+      dir(getTmpStoreDirectory(rust)),
       // we use the /bundle cwd for the isolate vfs
       // and the /tmp cwd for the iocontext vfs
       cwd({"bundle"}) {
-  if (guard == kj::none) {
+  if (onStack) {
     kj::requireOnStack(this, "must be created on the stack");
-    onStack = true;
     KJ_ASSERT(!hasCurrent(), "TmpDirStoreScope already exists on this thread");
     tmpDirStorageScope = this;
   }
@@ -1382,6 +1393,33 @@ kj::Own<TmpDirStoreScope> TmpDirStoreScope::create() {
   return kj::heap<TmpDirStoreScope>(kj::Badge<TmpDirStoreScope>());
 }
 
+SymbolicLink::SymbolicLink(
+    kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget)
+    : rust(vfs::tryNewSymbolicLink(
+          *root, targetPath, rawTarget.map([](kj::String& raw) -> kj::StringPtr { return raw; }))),
+      targetPath(kj::mv(targetPath)) {
+  if (rust == kj::none) {
+    this->root = kj::mv(root);
+    this->rawTarget = kj::mv(rawTarget);
+  }
+}
+
+SymbolicLink::SymbolicLink(kj::Own<RustSymbolicLink> rust, kj::Path targetPath)
+    : rust(kj::mv(rust)),
+      targetPath(kj::mv(targetPath)) {}
+
+SymbolicLink::~SymbolicLink() noexcept(false) {}
+
+bool SymbolicLink::isSameNode(const SymbolicLink& other) const {
+  KJ_IF_SOME(link, rust) {
+    KJ_IF_SOME(otherLink, other.rust) {
+      return vfs::isSameLink(*link, *otherLink);
+    }
+    return false;
+  }
+  return this == &other;
+}
+
 Stat SymbolicLink::stat(jsg::Lock& js) {
   return Stat{
     .type = FsType::SYMLINK,
@@ -1397,6 +1435,9 @@ jsg::Url SymbolicLink::getTargetUrl() const {
 }
 
 kj::String SymbolicLink::getRawTarget() const {
+  KJ_IF_SOME(link, rust) {
+    return vfs::getLinkRawTarget(*link).orDefault([&] { return targetPath.toString(true); });
+  }
   KJ_IF_SOME(raw, rawTarget) {
     return kj::str(raw);
   }
@@ -1405,7 +1446,10 @@ kj::String SymbolicLink::getRawTarget() const {
 
 kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(
     jsg::Lock& js) {
-  KJ_IF_SOME(ret, root->tryOpen(js, getTargetPath())) {
+  KJ_IF_SOME(link, rust) {
+    return vfs::resolveLink(js, *link);
+  }
+  KJ_IF_SOME(ret, KJ_ASSERT_NONNULL(root)->tryOpen(js, getTargetPath())) {
     KJ_SWITCH_ONEOF(ret) {
       KJ_CASE_ONEOF(file, kj::Rc<File>) {
         return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
@@ -1429,7 +1473,10 @@ kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::res
   return kj::none;
 }
 
-kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock&) const {
+kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock& js) const {
+  KJ_IF_SOME(link, rust) {
+    return vfs::getLinkUniqueId(js, *link);
+  }
   KJ_IF_SOME(id, maybeUniqueId) {
     return id;
   }
@@ -1441,12 +1488,19 @@ kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock&) const {
 }
 
 void SymbolicLink::countTowardsIsolateLimit(jsg::Lock& js) const {
+  KJ_IF_SOME(link, rust) {
+    vfs::countLinkTowardsIsolateLimit(js, *link);
+    return;
+  }
   if (maybeMemoryAdjustment == kj::none) {
     maybeMemoryAdjustment = js.getExternalMemoryAdjustment(sizeof(SymbolicLink));
   }
 }
 
 kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
+  if (vfs::isEnabled()) {
+    return vfs::newLazyDirectory(kj::mv(func));
+  }
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
 
@@ -1509,6 +1563,12 @@ kj::Maybe<FsError> SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link
     return kj::none;
   }
   auto& guard = *symbolicLinkGuard;
+  KJ_IF_SOME(rustLink, link->tryGetRust()) {
+    if (guard.rustGuard == kj::none) {
+      guard.rustGuard = vfs::newLinkGuard();
+    }
+    return vfs::checkLink(*KJ_ASSERT_NONNULL(guard.rustGuard), rustLink);
+  }
   if (guard.linksSeen.find(link) != kj::none) {
     return FsError::SYMLINK_DEPTH_EXCEEDED;
   }
@@ -1834,6 +1894,8 @@ class DevRandomFile final: public File {
 // heap backing store). We MUST copy the bytes into an owned kj::String before any JS
 // property access, because property getters on globalThis.console / console.log can run
 // arbitrary user code that may re-enter StdioFile::write and invalidate the buffer.
+}  // namespace
+
 void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
   auto chars = bytes.asChars();
   size_t endPos = chars.size();
@@ -1864,6 +1926,8 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
   }
   KJ_LOG(WARNING, "No console.log implementation available for stdio logging");
 }
+
+namespace {
 
 // An StdioFile is a special file implementation used to represent stdin,
 // stdout, and stderr outputs. Writes are always forwarded to the underlying
@@ -2050,18 +2114,30 @@ class StdioFile final: public File {
 }  // namespace
 
 kj::Rc<File> getDevNull() {
+  if (vfs::isEnabled()) {
+    return vfs::newDevNull();
+  }
   return kj::rc<DevNullFile>();
 }
 
 kj::Rc<File> getDevZero() {
+  if (vfs::isEnabled()) {
+    return vfs::newDevZero();
+  }
   return kj::rc<DevZeroFile>();
 }
 
 kj::Rc<File> getDevFull() {
+  if (vfs::isEnabled()) {
+    return vfs::newDevFull();
+  }
   return kj::rc<DevFullFile>();
 }
 
 kj::Rc<File> getDevRandom() {
+  if (vfs::isEnabled()) {
+    return vfs::newDevRandom();
+  }
   return kj::rc<DevRandomFile>();
 }
 

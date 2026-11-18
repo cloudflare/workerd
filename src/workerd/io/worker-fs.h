@@ -175,6 +175,14 @@ struct Stat final {
 
 class SymbolicLink;
 
+// The nodes and state of the Rust implementation (io/vfs), which worker-fs-rust.c++ defines. The
+// RUST_VFS autogate chooses it in the factory functions below.
+class RustFile;
+class RustDirectory;
+class RustSymbolicLink;
+class RustLinkGuard;
+class RustTmpStore;
+
 enum class FsError {
   // Path segment is not a directory
   NOT_DIRECTORY,
@@ -317,11 +325,22 @@ class File: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  virtual bool isSameNode(const File& other) const {
+    return this == &other;
+  }
+
   // Ensures that the symlink instance itself is counted towards the isolate
   // memory limit.
   virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
     // Non-op by default.
   };
+
+  // The file of the Rust implementation, if this is one.
+  virtual kj::Maybe<const RustFile&> tryGetRust() const {
+    return kj::none;
+  }
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -341,18 +360,20 @@ class Directory: public kj::Refcounted {
   virtual size_t count(
       jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
-  // Provides a simple iterator iterface over the directory entries. It is important
-  // to only use these iterators while holding the isolate lock as entries may have
-  // their refcounts incremented and decremented while iterating. To avoid issues using
-  // the iterators using idiomatic C++ syntax, we don't require passing the jsg::Lock&
-  // to the begin() and end() methods so it is important to ensure they are only called
-  // while holding the lock.
   using Item = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
-  using Entry = kj::HashMap<kj::String, Item>::Entry;
-  virtual Entry* begin() = 0;
-  virtual Entry* end() = 0;
-  virtual const Entry* begin() const = 0;
-  virtual const Entry* end() const = 0;
+
+  // One entry of a directory listing.
+  struct ListEntry {
+    kj::String name;
+    Item item;
+  };
+
+  // Returns the entries of this directory in iteration order. The order is the
+  // order in which entries were added, except that removing an entry moves the
+  // last entry into its place. readdir() reports entries in this order, so it is
+  // observable by Workers. The listing holds its own references to the entries,
+  // so it stays valid if the directory is changed while the listing is used.
+  virtual kj::Array<ListEntry> list(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   struct OpenOptions {
     // When set, if the path does not exist, we will attempt to create the
@@ -482,11 +503,22 @@ class Directory: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  virtual bool isSameNode(const Directory& other) const {
+    return this == &other;
+  }
+
   // Ensures that the directory instance itself is counted towards the isolate
   // memory limit. Not every directory needs to be counted so we don't do this
   // by default automatically for every Directory instance.
   virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
     // Non-op by default.
+  }
+
+  // The directory of the Rust implementation, if this is one.
+  virtual kj::Maybe<const RustDirectory&> tryGetRust() const {
+    return kj::none;
   }
 };
 
@@ -501,10 +533,12 @@ class Directory: public kj::Refcounted {
 // cp copies of relative links, have none.
 class SymbolicLink final: public kj::Refcounted {
  public:
-  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget)
-      : root(kj::mv(root)),
-        targetPath(kj::mv(targetPath)),
-        rawTarget(kj::mv(rawTarget)) {}
+  // A link to targetPath within root, with the target as written, if kept. If root belongs to the
+  // Rust implementation, so does the link.
+  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget);
+  // A link of the Rust implementation, which keeps the target as written itself.
+  SymbolicLink(kj::Own<RustSymbolicLink> rust, kj::Path targetPath);
+  ~SymbolicLink() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SymbolicLink);
 
   // Gets the stat for the symbolic link itself.
@@ -531,13 +565,28 @@ class SymbolicLink final: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   kj::StringPtr getUniqueId(jsg::Lock&) const;
 
+  // Returns true if this and the other refer to the same fs node. Compare nodes
+  // with this rather than by comparing pointers.
+  bool isSameNode(const SymbolicLink& other) const;
+
   // Ensures that the symlink instance itself is counted towards the isolate
   // memory limit.
   void countTowardsIsolateLimit(jsg::Lock& js) const;
 
+  // The link of the Rust implementation, if this is one.
+  kj::Maybe<const RustSymbolicLink&> tryGetRust() const {
+    KJ_IF_SOME(link, rust) {
+      return *link;
+    }
+    return kj::none;
+  }
+
  private:
-  kj::Rc<Directory> root;
+  // Exactly one of root and rust is set.
+  kj::Maybe<kj::Rc<Directory>> root;
+  kj::Maybe<kj::Own<RustSymbolicLink>> rust;
   kj::Path targetPath;
+  // The target as written, for a link of the C++ implementation.
   kj::Maybe<kj::String> rawTarget;
   mutable kj::Maybe<kj::String> maybeUniqueId;
   mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
@@ -667,6 +716,14 @@ class VirtualFileSystem {
     // When reading from or writing to the file, if an offset is not
     // explicitly given then the offset will be set to the current
     // position in the file.
+    virtual uint32_t getPosition() const {
+      return position;
+    }
+    virtual void setPosition(uint32_t newPosition) {
+      position = newPosition;
+    }
+
+   private:
     uint32_t position = 0;
   };
 
@@ -797,10 +854,21 @@ class TmpDirStoreScope final {
     cwd = kj::mv(newCwd);
   }
 
+  // The store of the Rust implementation's /tmp, if the RUST_VFS autogate chose it.
+  kj::Maybe<const RustTmpStore&> tryGetRust() const {
+    KJ_IF_SOME(store, rust) {
+      return *store;
+    }
+    return kj::none;
+  }
+
  private:
+  bool onStack = false;
+  // Declared before dir, which is the store's directory, so that the directory is released
+  // first.
+  kj::Maybe<kj::Own<RustTmpStore>> rust;
   mutable kj::Rc<Directory> dir;
   kj::Path cwd;
-  bool onStack = false;
 };
 
 // A scope utility that is used to guard against infinite recursion when
@@ -820,6 +888,9 @@ class SymbolicLinkRecursionGuardScope final {
 
  private:
   kj::HashSet<SymbolicLink*> linksSeen;
+  // Counts the links of the Rust implementation, whose C++ objects are made per use, so they
+  // can't be told apart by address.
+  kj::Maybe<kj::Own<RustLinkGuard>> rustGuard;
 };
 
 // Every Worker instance has its own virtual filesystem. At a minimum, this

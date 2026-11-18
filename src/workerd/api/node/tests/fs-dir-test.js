@@ -665,6 +665,37 @@ export const readdirSyncTest = {
   },
 };
 
+// readdir() lists entries in the order they were added, except that removing
+// an entry moves the last entry into its place.
+export const readdirOrderTest = {
+  test() {
+    const dir = mkdtempSync('/tmp/readdir-order-');
+    for (const name of ['a', 'b', 'c', 'd', 'e']) {
+      writeFileSync(`${dir}/${name}`, name);
+    }
+    deepStrictEqual(readdirSync(dir), ['a', 'b', 'c', 'd', 'e']);
+
+    // Removing a middle entry moves the last entry into its place.
+    rmSync(`${dir}/b`);
+    deepStrictEqual(readdirSync(dir), ['a', 'e', 'c', 'd']);
+
+    // Removing the last entry leaves the others in place.
+    rmSync(`${dir}/d`);
+    deepStrictEqual(readdirSync(dir), ['a', 'e', 'c']);
+
+    // A new entry is added at the end, whatever its kind.
+    mkdirSync(`${dir}/f`);
+    writeFileSync(`${dir}/b`, 'b');
+    deepStrictEqual(readdirSync(dir), ['a', 'e', 'c', 'f', 'b']);
+
+    // Removing the first entry moves the last entry to the front.
+    rmSync(`${dir}/a`);
+    deepStrictEqual(readdirSync(dir), ['b', 'e', 'c', 'f']);
+
+    rmSync(dir, { recursive: true });
+  },
+};
+
 export const readdirAsyncCallbackTest = {
   async test() {
     deepStrictEqual(

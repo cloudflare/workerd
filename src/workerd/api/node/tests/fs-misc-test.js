@@ -27,6 +27,15 @@ import {
   X_OK,
   writeFileSync,
   writeSync,
+  close,
+  fchmodSync,
+  fstatSync,
+  ftruncateSync,
+  futimesSync,
+  readFileSync,
+  readSync,
+  readvSync,
+  writevSync,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -236,5 +245,37 @@ export const oobWriteTest = {
     );
 
     strictEqual(writeSync(fd, v3, 10, 10, 134217718), 10);
+  },
+};
+
+// Negative file descriptors are rejected before they reach the file system,
+// which treats only 0, 1 and 2 as the stdio descriptors. -0 is descriptor 0.
+export const negativeFdTest = {
+  test() {
+    const kOutOfRange = { code: 'ERR_OUT_OF_RANGE' };
+    const buffer = new Uint8Array(1);
+    const uses = {
+      closeSync: (fd) => closeSync(fd),
+      close: (fd) => close(fd, () => {}),
+      fchmodSync: (fd) => fchmodSync(fd, 0o644),
+      fdatasyncSync: (fd) => fdatasyncSync(fd),
+      fstatSync: (fd) => fstatSync(fd),
+      fsyncSync: (fd) => fsyncSync(fd),
+      ftruncateSync: (fd) => ftruncateSync(fd),
+      futimesSync: (fd) => futimesSync(fd, 0, 0),
+      readFileSync: (fd) => readFileSync(fd),
+      readSync: (fd) => readSync(fd, buffer),
+      readvSync: (fd) => readvSync(fd, [buffer]),
+      writeSync: (fd) => writeSync(fd, buffer),
+      writevSync: (fd) => writevSync(fd, [buffer]),
+    };
+    for (const [name, use] of Object.entries(uses)) {
+      for (const fd of [-1, -2, -3, -2147483648]) {
+        throws(() => use(fd), kOutOfRange, `${name}(${fd})`);
+      }
+    }
+    // -0 is stdin, which is always open and reads as empty.
+    strictEqual(fstatSync(-0).isFile(), true);
+    strictEqual(readSync(-0, buffer), 0);
   },
 };

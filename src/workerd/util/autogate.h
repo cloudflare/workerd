@@ -133,7 +133,11 @@ namespace workerd::util {
   V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
-  V(WRAPPABLE_EXTERNAL_MEMORY)
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* The virtual file system of a Worker (io/worker-fs.h) is the Rust implementation (io/vfs)      \
+     rather than the C++ one in io/worker-fs.c++. The gate is read wherever a file, directory or   \
+     file system is created, so a file system never mixes the two. */                              \
+  V(RUST_VFS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -1,0 +1,7 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+wd_bench(
+    src = "fs-readdir.wd-bench",
+    args = ["--experimental"],
+    data = ["fs-readdir.js"],
+)
