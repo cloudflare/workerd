@@ -5,7 +5,7 @@
 //!
 //! Style: minimal. Sentence-case headings, lowercase `<placeholders>`, at most 80 columns. Option
 //! and command descriptions start at column 37, short labels' at column 17, and fit one line.
-//! `args-test.rs` checks the width, the option column, that no row wraps, that each page lists
+//! `args-test.rs` checks the width, that no row wraps, that each page lists
 //! its command's options, and that `workerd -h` names every visible command.
 //!
 //! A block whose first line is indented starts on the line of its opening quote: `\` at the end
@@ -46,8 +46,9 @@ Cluster (experimental):
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
-  SIGTERM an instance hands its objects to its peers and exits, within 8 s.
-  GET /ready on the cluster address answers OK once serving.
+  SIGTERM an instance hands its objects to its peers and exits within
+  stopTimeoutMs (8 s by default). GET /ready on the cluster address
+  answers OK once serving.
 "
     };
 }
@@ -394,15 +395,3 @@ Usage:
     "\n",
     capnp_options!(),
 );
-
-pub const BASELINE_SNAPSHOT: &str = "\
-workerd make-pyodide-baseline-snapshot: write a Pyodide baseline memory
-snapshot for <python-version> to <output-dir>.
-
-Usage:
-  workerd make-pyodide-baseline-snapshot <python-version> <output-dir>
-
-Options:
-      --verbose                      Log to stderr
-  -h, --help                         Print this help
-";

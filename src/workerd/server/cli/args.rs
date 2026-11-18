@@ -73,7 +73,7 @@ pub enum Command {
         config_only: bool,
     },
 
-    #[command(override_help = help::FUZZILLI, hide = !ffi::fuzzilli_supported())]
+    #[command(override_help = help::FUZZILLI, hide = true)]
     Fuzzilli {
         #[command(flatten)]
         config: ConfigFileArgs,
@@ -106,7 +106,7 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    #[command(override_help = help::BASELINE_SNAPSHOT, hide = true)]
+    #[command(hide = true)]
     MakePyodideBaselineSnapshot {
         #[arg(value_name = "python-version")]
         python_version: String,
