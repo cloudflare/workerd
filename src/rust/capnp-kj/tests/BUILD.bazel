@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_capnp_library(src = "test.capnp")
@@ -40,5 +41,18 @@ kj_test(
         "//src/workerd/io:container_capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
+    ],
+)
+
+# How much the bridge adds to a call, and what copying a message costs on its own.
+wd_cc_benchmark(
+    name = "bench-capnp-kj",
+    srcs = ["bench-capnp-kj.c++"],
+    deps = [
+        ":capnp-kj-test-rust",
+        ":test_capnp",
+        "//src/rust/capnp-kj:ffi",
+        "//src/workerd/io:worker-interface_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )

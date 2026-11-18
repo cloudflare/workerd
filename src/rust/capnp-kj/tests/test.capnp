@@ -28,4 +28,7 @@ interface TestEcho {
 
   hang @6 () -> ();
   # Never completes. For cancellation.
+
+  bounce @7 (data :Data) -> (data :Data);
+  # Returns `data`. For benchmarks: no work besides moving the bytes each way.
 }

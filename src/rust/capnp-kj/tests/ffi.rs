@@ -8,6 +8,7 @@ use crate::hang_starts;
 use crate::new_cancelable_echo_server;
 use crate::new_echo_server;
 use crate::new_per_method_echo_server;
+use crate::rust_bounce_n;
 use crate::rust_call_back;
 use crate::rust_child_echo;
 use crate::rust_echo;
@@ -54,5 +55,7 @@ pub mod bridge {
         async fn rust_write_awaited_in_reverse(echo: KjOwn<ClientHook>) -> Result<String>;
         async fn rust_fail(echo: KjOwn<ClientHook>, description: String) -> Result<()>;
         async fn rust_hang(echo: KjOwn<ClientHook>) -> Result<()>;
+        /// Calls `echo.bounce()` `count` times with `size` bytes; see lib.rs.
+        async fn rust_bounce_n(echo: KjOwn<ClientHook>, size: usize, count: u32) -> Result<()>;
     }
 }
