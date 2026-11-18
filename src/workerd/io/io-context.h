@@ -278,6 +278,11 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // The user trace scope value for rootUserTraceSpan, made the first time
+  // IoContext::getRootUserTraceScope() needs it. For an unobserved stateless request, which runs
+  // without a trace frame, tracing.getActiveSpan() caches the request's no-op span on it.
+  kj::Maybe<jsg::Value> rootUserTraceScope;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
@@ -1340,8 +1345,34 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Captures the request's internal and user tracing contexts in a single async frame.
-  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
-      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  //
+  // A stateless request that starts in the root frame and observes neither span gets no frame:
+  // with no entry, readers fall back to the current request's spans, and its IoContext runs no
+  // other request. Actors still get a frame, so that a continuation of an unobserved request keeps
+  // masking the spans of a newer, observed request in the same IoContext. So does a request that
+  // starts inside another frame, whose entries it would otherwise inherit.
+  class RequestTraceScope {
+   public:
+    RequestTraceScope(Worker::Lock& lock, IoContext& context);
+    KJ_DISALLOW_COPY_AND_MOVE(RequestTraceScope);
+
+   private:
+    kj::Maybe<jsg::AsyncContextFrame::StorageScope> scope;
+  };
+  [[nodiscard]] RequestTraceScope makeRequestTraceScope(Worker::Lock& lock) {
+    return RequestTraceScope(lock, *this);
+  }
+
+  // True if the IoContext is stateless and its current request observes neither its span nor its
+  // user span. Such a request that starts in the root frame runs without a trace frame (see
+  // makeRequestTraceScope()).
+  bool isUnobservedStatelessRequest();
+
+  // For code that runs outside any trace frame while an unobserved stateless request is current,
+  // the user trace scope value of that request's root user span, made once per request. Returns
+  // nothing otherwise: outside any trace frame, an observed request's code was bound outside every
+  // request.
+  kj::Maybe<v8::Local<v8::Object>> getRootUserTraceScope(Worker::Lock& lock);
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.

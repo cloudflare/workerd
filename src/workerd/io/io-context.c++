@@ -1584,12 +1584,33 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+IoContext::RequestTraceScope::RequestTraceScope(Worker::Lock& lock, IoContext& context) {
+  jsg::Lock& js = lock;
+  if (context.isUnobservedStatelessRequest() && jsg::AsyncContextFrame::current(js) == kj::none) {
+    return;
+  }
   jsg::AsyncContextFrame::StorageEntry entries[] = {
-    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
-    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+    {lock.getTraceAsyncContextKey(), context.makeTraceScopeValue(lock, kj::none)},
+    {lock.getUserTraceAsyncContextKey(), context.makeUserTraceScopeValue(lock, kj::none)},
   };
-  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+  scope.emplace(js, entries);
+}
+
+bool IoContext::isUnobservedStatelessRequest() {
+  return actor == kj::none && !incomingRequests.empty() && !getMetrics().getSpan().isObserved() &&
+      !getRootUserTraceSpan().isObserved();
+}
+
+kj::Maybe<v8::Local<v8::Object>> IoContext::getRootUserTraceScope(Worker::Lock& lock) {
+  if (!isUnobservedStatelessRequest()) return kj::none;
+  jsg::Lock& js = lock;
+  auto& request = getCurrentIncomingRequest();
+  KJ_IF_SOME(value, request.rootUserTraceScope) {
+    return value.getHandle(js).As<v8::Object>();
+  }
+  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none))
+      .getHandle(js)
+      .As<v8::Object>();
 }
 
 jsg::Value IoContext::makeTraceScopeValue(
@@ -1669,6 +1690,9 @@ SpanParent IoContext::getCurrentTraceSpan() {
 
   // If async context is unavailable (unset, from another request, or JS lock is not held), fall
   // back to heuristic of using the trace info from the most recent active request.
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  }
   return getMetrics().getSpan();
 }
 
