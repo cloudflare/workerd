@@ -52,3 +52,34 @@ The profile isn't checked in. To make one:
 
 Functions changed since the profile was trained no longer match it, and compile as if the profile
 didn't cover them, so retrain after large changes to the hot code.
+
+## BOLT
+
+BOLT rearranges the linked binary's code using a profile of that binary, which the compiler's
+profile can't fully do: it places basic blocks and functions across the whole binary, and moves
+cold code out of the hot pages. On top of the PGO build it gave about 2-3% more requests per
+second on hello-world benchmarks, with about 10% fewer front-end stall cycles. BOLT's own
+instrumentation is used, so this works on machines without LBR. `llvm-bolt` and `merge-fdata` are
+in the same toolchain directory as `llvm-profdata`.
+
+1. Add `--config=bolt` to the step 4 build, which keeps the relocations BOLT needs.
+
+2. Instrument the binary. V8 finds its embedded builtins by offsets into the embedded blob, so
+   they have to stay where they are:
+
+   ```
+   llvm-bolt workerd -skip-funcs='Builtins_.*' -instrument -o workerd.inst \
+       -instrumentation-file=/tmp/bolt/workerd.fdata -instrumentation-file-append-pid
+   ```
+
+3. Run `workerd.inst` on the same Workers as step 2 above, with `KJ_CLEAN_SHUTDOWN=1`, and stop it
+   with SIGTERM. Each process writes `/tmp/bolt/workerd.fdata.<pid>.fdata` as it exits.
+
+4. Merge the profiles and lay the binary out:
+
+   ```
+   merge-fdata /tmp/bolt/workerd.fdata.*.fdata > workerd.fdata
+   llvm-bolt workerd -skip-funcs='Builtins_.*' -o workerd.bolt -data=workerd.fdata \
+       -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold \
+       -split-eh -icf=1 -use-gnu-stack
+   ```
