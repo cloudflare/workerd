@@ -384,9 +384,8 @@ pub fn headers_from_block<'t>(
 
 /// `kj::HttpHeaders` over a table that outlives `'t`, made once and refilled for each block.
 ///
-/// Each packed block ([`crate::body::HeaderBlock`]) is one the headers point into. A table's
-/// headers have a slot for each of its ids, which a server's table has many of; refilling clears
-/// only the set ones.
+/// Each packed block ([`crate::body::HeaderBlock`]) is one the headers point into, so a request's
+/// headers are not an allocation of their own.
 #[derive(Default)]
 pub struct ReusedHeaders<'t> {
     /// Points into the arena of the last [`ReusedHeaders::over`], which may have changed since:
