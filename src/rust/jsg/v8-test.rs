@@ -38,7 +38,7 @@ impl GarbageCollected for Stateless {
     }
 
     fn snapshot_recreate(&self) -> Option<crate::SnapshotRecreated> {
-        Some(crate::snapshot_recreate_leak(Stateless))
+        Some(crate::snapshot_recreate_leak(Self))
     }
 }
 
