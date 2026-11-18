@@ -2887,6 +2887,13 @@ static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
 }
 
+// The props to give an event's ExecutionContext: none for an event without props, so that its
+// empty `ctx.props` object is only created if read.
+static kj::Maybe<jsg::JsValue> propsToJs(jsg::Lock& js, Frankenvalue& props) {
+  if (props.empty()) return kj::none;
+  return props.toJs(js);
+}
+
 // Lends `handler`, a clone of a named handler, to a request. If the request gives it back while
 // holding the isolate lock, as a fetch handler's does, it becomes the handler's `spare`, with the
 // request's `ctx` dropped. `worker` is kept alive meanwhile, so that `spare` stays valid.
@@ -2924,8 +2931,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
         js.alloc<api::ExecutionContext>(js,
-            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
-            kj::mv(versionInfo)),
+            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)),
+            propsToJs(js, props), kj::mv(versionInfo)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
@@ -2944,8 +2951,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     auto& h = entry.handler;
     if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
       auto ctx = js.alloc<api::ExecutionContext>(js,
-          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
-          kj::mv(versionInfo));
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)),
+          propsToJs(js, props), kj::mv(versionInfo));
       kj::Own<api::ExportedHandler> constructedHandler;
       KJ_IF_SOME(spare, entry.spare) {
         constructedHandler = kj::mv(spare);
