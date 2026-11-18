@@ -1216,8 +1216,7 @@ class WeakV8Ref final {
 template <V8Value T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const V8Ref<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
-  // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
-  trackField(edgeName, value.handle.Get(isolate_).template As<v8::Value>(), nodeName);
+  trackField(edgeName, value.handle.Get(isolate_), nodeName);
 }
 
 // A value of type T, or `undefined`.
