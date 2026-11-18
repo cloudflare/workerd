@@ -109,15 +109,39 @@ fn an_upload_id_begin_could_not_have_made_is_no_upload() {
 }
 
 #[test]
-fn a_directory_is_one_stores() {
-    let dir = dir();
-    let first = Local::open(&dir, MIN_PART).unwrap();
-    let second = Local::open(&dir, MIN_PART);
-    assert!(
-        matches!(second, Err(Error::Config(_))),
-        "{:?}",
-        second.err()
-    );
-    drop(first);
-    Local::open(&dir, MIN_PART).unwrap();
+fn stores_of_one_directory_share_it() {
+    block_on(async {
+        let dir = dir();
+        let (a, b) = (local(&dir, MIN_PART), local(&dir, MIN_PART));
+        a.put("k", b"one".to_vec(), &[]).await.unwrap();
+        let (body, seen) = b.get("k").await.unwrap().unwrap();
+        assert_eq!(body, b"one");
+        // A read under way keeps the bytes it began with.
+        let (_, reading) = a.read("k", None).await.unwrap().unwrap();
+        b.put("k", b"two".to_vec(), &[]).await.unwrap();
+        let read: Vec<_> = reading.collect::<Vec<_>>().await;
+        assert_eq!(
+            read.into_iter()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+                .concat(),
+            b"one"
+        );
+        // Each sees the other's writes, guards included.
+        assert_eq!(a.get("k").await.unwrap().unwrap().0, b"two");
+        let stale = a.put_if("k", b"three".to_vec(), Guard::Match(seen)).await;
+        assert_eq!(stale.unwrap(), None);
+        assert_eq!(b.put_if("k", vec![], Guard::Absent).await.unwrap(), None);
+        b.put("l", vec![], &[]).await.unwrap();
+        let keys: Vec<_> = a
+            .list("")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.key)
+            .collect();
+        assert_eq!(keys, ["k", "l"]);
+        b.delete("k").await.unwrap();
+        assert!(a.get("k").await.unwrap().is_none());
+    });
 }

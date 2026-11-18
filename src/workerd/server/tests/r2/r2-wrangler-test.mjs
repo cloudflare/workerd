@@ -122,6 +122,5 @@ test('r2_buckets in a wrangler.jsonc', async () => {
   assert.strictEqual(await get('/B/k'), 'in b');
   await server.stop();
   const storage = join(dir, '.wrangler/state/workerd/r2');
-  assert.ok((await stat(join(storage, 'a/objects'))).isDirectory());
-  assert.ok((await stat(join(storage, 'b/objects'))).isDirectory());
+  assert.ok((await stat(join(storage, 'objects'))).isDirectory());
 });

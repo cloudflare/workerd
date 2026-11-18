@@ -463,30 +463,34 @@ struct Service {
 }
 
 struct ClusterBucket {
-  # GET, PUT and DELETE on `/<file>` read, write and remove the object `<file>`: in a cluster
-  # (`Config.cluster`), `<cluster prefix>services/<path>/<file>` in the cluster's bucket, so
-  # that every instance sees the same files; without one, in `localDisk`. The cluster keeps its
-  # own state outside `services/`, where this service cannot reach it. A binding to this
-  # service grants only its directory, as a writable `disk` does. Experimental: requires
-  # `--experimental`.
+  # A directory of objects served over a small HTTP API (the one workerd's R2 Worker
+  # uses): `/<key>` is the object `<key>`, the path percent-decoded whole, so keys may hold `/`,
+  # empty segments and dot segments. HEAD, GET (with one `Range`), PUT (content headers,
+  # `x-meta-<name>` user metadata, `If-Match: <x-version>`, `If-None-Match: *`) and DELETE;
+  # `GET /?list&prefix=&start-after=&delimiter=&max=&token=`; multipart uploads with
+  # `POST /<key>?uploads`, `PUT /<key>?part=<n>&upload=<id>`, and `GET` (parts), `POST`
+  # (complete) and `DELETE` (abort) on `/<key>?upload=<id>`. Errors answer `{code, message}`
+  # JSON with the object store's error code, such as `NoSuchKey`.
+  #
+  # In a cluster (`Config.cluster`) the objects are `<cluster prefix>services/<path>/<key>` in
+  # the cluster's bucket, so that every instance sees the same ones. The cluster keeps its own
+  # state outside `services/`, where this service cannot reach it. Without a cluster they are
+  # in `localDisk`. A binding to this service grants only its directory, as a writable `disk`
+  # does. Experimental: requires `--experimental`.
 
   path @0 :Text;
   # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 
   localDisk @1 :Text;
   # Without `Config.cluster`, the name of a writable `disk` service whose directory
-  # `<disk>/<path>/` holds the objects: a JSON file per object under `objects/`, read into an
-  # index in memory at startup, and its bytes under `blobs/`. For development and tests; one
-  # workerd at a time may use it. Ignored in a cluster.
+  # `<disk>/<path>/` holds the objects: a JSON file per object under `objects/`, and its bytes
+  # under `blobs/`. Processes may share it, as `wrangler dev` and `wrangler r2 object put
+  # --local` do. Ignored in a cluster.
 
   minPartSize @2 :UInt64 = 5242880;
-  # The least size of a multipart upload's part but the last; for tests, which use small parts.
-  # In a cluster, the store also has its own rule.
-
-  r2 @3 :Bool;
-  # Serve the directory as an R2 bucket, the service an `r2Bucket` binding names, instead:
-  # each R2 object is the object of its key, with no index, so the directory's listing is the
-  # bucket's.
+  # The least size of a multipart upload's part but the last, checked at completion by the
+  # `localDisk` store; for tests, which use small parts. Ignored in a cluster, whose store has
+  # its own rule.
 }
 
 struct AssetsService {
@@ -666,9 +670,10 @@ struct Worker {
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
-      # `/workerd/workflows.js`, a Workflows engine, or `/workerd/d1.js`, D1 databases (see each
-      # one's header for the config it takes). Unlike built-in modules such as `node:` ones, user
-      # code cannot import it; it is a Worker's source. Experimental.
+      # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine, or
+      # `/workerd/d1.js`, D1 databases (see each one's header for the config it takes). Unlike
+      # built-in modules such as `node:` ones, user code cannot import it; it is a Worker's
+      # source. Experimental.
     }
 
     namedExports @10 :List(Text);

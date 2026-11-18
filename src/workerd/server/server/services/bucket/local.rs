@@ -10,8 +10,8 @@
 //! - `objects/<md5 of key>`: an object's key, size, `ETag`, version, time,
 //!   content headers, user metadata and blobs, as JSON. Named by digest: a
 //!   key may be longer than a file name, and S3 holds `a` and `a/b` at
-//!   once, which a file tree cannot. All are read into an index when the
-//!   store opens, so a listing reads no files.
+//!   once, which a file tree cannot. Read on each call, so processes may
+//!   share the directory; a listing reads them all.
 //! - `uploads/<id>`: a multipart upload's key, headers, metadata and parts.
 //! - `blobs/<id>`: an object's or a part's bytes. A blob is never rewritten:
 //!   a write takes a new one and removes the old. A multipart object is its
@@ -21,12 +21,13 @@
 //! sees a partial one. A version is random, so a guard naming an object's
 //! version fails once it is rewritten, even with the same bytes.
 //!
-//! Disk I/O is synchronous, as in the `disk` service, so each call is atomic
-//! on the loop thread, and a large write holds the loop while it lands. One
-//! process holds a directory (`lock`). That suits `workerd serve` and tests;
-//! a production store is the cluster's bucket.
+//! A call that reads before it writes (a guarded write, a delete, a part)
+//! holds `lock` meanwhile, so it is atomic across processes. A read that
+//! finds a blob gone, its object rewritten meanwhile, reads the object again.
+//! Disk I/O is synchronous, as in the `disk` service, and a large write holds
+//! the loop while it lands. That suits `workerd serve` and tests; a
+//! production store is the cluster's bucket.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::io::Read;
@@ -81,13 +82,10 @@ struct Upload {
 
 pub struct Local {
     root: PathBuf,
-    /// The objects, by key.
-    index: RefCell<BTreeMap<String, Meta>>,
     /// The least size of a part but the last, at completion.
     min_part: u64,
-    /// Held while open: the index is this process's alone, so a second
-    /// store of the directory would serve stale objects and drop live blobs.
-    _lock: std::fs::File,
+    /// Locked around each read-then-write, against other processes.
+    lock: std::fs::File,
 }
 
 fn random() -> String {
@@ -177,28 +175,49 @@ impl Local {
         for dir in ["objects", "uploads", "blobs", "tmp"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
-        let lock = std::fs::File::create(root.join("lock"))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => {
-                let held = "in use by another process; one workerd may use a local store at a time";
-                return Err(Error::Config(held.into()));
-            }
-            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
-        }
+        Ok(Self {
+            root: root.to_owned(),
+            min_part,
+            lock: std::fs::File::create(root.join("lock"))?,
+        })
+    }
+
+    /// `f`, with no other process's between its reads and its writes. `f`
+    /// never awaits, so no other call of this process's comes between either.
+    fn locked<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.lock.lock()?;
+        let out = f();
+        self.lock.unlock()?;
+        out
+    }
+
+    /// The object `key`, as its file holds it now.
+    fn meta(&self, key: &str) -> Result<Option<Meta>> {
+        let json = match std::fs::read(self.path("objects", &Self::object_file(key))) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            json => json?,
+        };
+        let meta = serde_json::from_slice(&json).ok();
+        Ok(meta.as_ref().and_then(Meta::of).filter(|m| m.key == key))
+    }
+
+    /// Every object, by key.
+    fn index(&self) -> Result<BTreeMap<String, Meta>> {
         let mut index = BTreeMap::new();
-        for file in std::fs::read_dir(root.join("objects"))? {
-            let json = serde_json::from_slice(&std::fs::read(file?.path())?);
-            if let Some(meta) = json.ok().as_ref().and_then(Meta::of) {
+        for file in std::fs::read_dir(self.root.join("objects"))? {
+            // A file gone since the listing is an object deleted meanwhile.
+            let Ok(json) = std::fs::read(file?.path()) else {
+                continue;
+            };
+            if let Some(meta) = serde_json::from_slice(&json)
+                .ok()
+                .as_ref()
+                .and_then(Meta::of)
+            {
                 index.insert(meta.key.clone(), meta);
             }
         }
-        Ok(Self {
-            root: root.to_owned(),
-            index: RefCell::new(index),
-            min_part,
-            _lock: lock,
-        })
+        Ok(index)
     }
 
     fn path(&self, dir: &str, name: &str) -> PathBuf {
@@ -242,33 +261,31 @@ impl Local {
         blobs: Vec<(String, u64)>,
         guard: Option<&Guard>,
     ) -> Result<Option<Object>> {
-        let current = self.index.borrow().get(key).cloned();
-        let holds = match (guard, &current) {
-            (None, _) | (Some(Guard::Absent), None) => true,
-            (Some(Guard::Match(version)), Some(meta)) => *version == meta.object.version,
-            _ => false,
-        };
-        if !holds {
-            self.drop_blobs(&blobs);
-            return Ok(None);
-        }
-        object.version = Version::new(random());
-        object.modified_ms = cluster::now_ms();
-        let meta = Meta {
-            key: key.to_owned(),
-            object: object.clone(),
-            blobs,
-        };
-        self.save(
-            "objects",
-            &Self::object_file(key),
-            meta.to_json().to_string().as_bytes(),
-        )?;
-        self.index.borrow_mut().insert(key.to_owned(), meta);
-        if let Some(old) = current {
-            self.drop_blobs(&old.blobs);
-        }
-        Ok(Some(object))
+        self.locked(|| {
+            let current = self.meta(key)?;
+            let holds = match (guard, &current) {
+                (None, _) | (Some(Guard::Absent), None) => true,
+                (Some(Guard::Match(version)), Some(meta)) => *version == meta.object.version,
+                _ => false,
+            };
+            if !holds {
+                self.drop_blobs(&blobs);
+                return Ok(None);
+            }
+            object.version = Version::new(random());
+            object.modified_ms = cluster::now_ms();
+            let meta = Meta {
+                key: key.to_owned(),
+                object: object.clone(),
+                blobs,
+            };
+            let json = meta.to_json().to_string();
+            self.save("objects", &Self::object_file(key), json.as_bytes())?;
+            if let Some(old) = current {
+                self.drop_blobs(&old.blobs);
+            }
+            Ok(Some(object))
+        })
     }
 
     /// Upload `id` of `key`. An ID is user input (`resumeMultipartUpload`),
@@ -281,6 +298,35 @@ impl Local {
         let json: Option<Json> = json.and_then(|j| serde_json::from_slice(&j).ok());
         let upload = json.as_ref().and_then(Upload::of).filter(|u| u.key == key);
         upload.ok_or_else(|| refused(format!("UPLOAD {key}"), 404, "NoSuchUpload"))
+    }
+
+    /// The object `key` and its bytes in `range`, the blobs opened now, so a
+    /// write that replaces the object meanwhile doesn't change what they hold.
+    fn snapshot(&self, key: &str, range: Option<Range>) -> Result<Option<(Object, Body)>> {
+        let Some(Meta {
+            mut object, blobs, ..
+        }) = self.meta(key)?
+        else {
+            return Ok(None);
+        };
+        let (offset, length) = match range {
+            None => (0, object.size),
+            Some(range) => range
+                .of(object.size)
+                .ok_or_else(|| refused(format!("GET {key}"), 416, "InvalidRange"))?,
+        };
+        object.range = range.map(|_| (offset, length));
+        let (mut files, mut at, end) = (Vec::new(), 0, offset + length);
+        for (id, size) in blobs {
+            let (from, to) = (offset.max(at), end.min(at + size));
+            if from < to {
+                let mut file = std::fs::File::open(self.path("blobs", &id))?;
+                file.seek(std::io::SeekFrom::Start(from - at))?;
+                files.push((file, to - from));
+            }
+            at += size;
+        }
+        Ok(Some((object, chunks(files))))
     }
 
     fn save_upload(&self, id: &str, upload: &Upload) -> Result<()> {
@@ -330,17 +376,19 @@ fn new_object(size: u64, etag: String, headers: &Headers, metadata: &[(String, S
 #[async_trait::async_trait(?Send)]
 impl Store for Local {
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
-        let Some(meta) = self.index.borrow().get(key).cloned() else {
+        let Some((object, body)) = self.read(key, None).await? else {
             return Ok(None);
         };
-        let mut body = Vec::new();
-        for (id, _) in &meta.blobs {
-            body.extend(std::fs::read(self.path("blobs", id))?);
-        }
+        let body: Vec<Bytes> = body
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<_>>()?;
+        let mut body = body.concat();
         if let Some(to) = to {
             std::fs::write(to, std::mem::take(&mut body))?;
         }
-        Ok(Some((body, meta.object.version)))
+        Ok(Some((body, object.version)))
     }
 
     async fn put(
@@ -368,44 +416,31 @@ impl Store for Local {
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        if let Some(meta) = self.index.borrow_mut().remove(key) {
-            let _ = std::fs::remove_file(self.path("objects", &Self::object_file(key)));
-            self.drop_blobs(&meta.blobs);
-        }
-        Ok(())
+        self.locked(|| {
+            if let Some(meta) = self.meta(key)? {
+                std::fs::remove_file(self.path("objects", &Self::object_file(key)))?;
+                self.drop_blobs(&meta.blobs);
+            }
+            Ok(())
+        })
     }
 
     async fn head(&self, key: &str) -> Result<Option<Object>> {
-        Ok(self.index.borrow().get(key).map(|meta| meta.object.clone()))
+        Ok(self.meta(key)?.map(|meta| meta.object))
     }
 
     async fn read(&self, key: &str, range: Option<Range>) -> Result<Option<(Object, Body)>> {
-        let Some(Meta {
-            mut object, blobs, ..
-        }) = self.index.borrow().get(key).cloned()
-        else {
-            return Ok(None);
-        };
-        let (offset, length) = match range {
-            None => (0, object.size),
-            Some(range) => range
-                .of(object.size)
-                .ok_or_else(|| refused(format!("GET {key}"), 416, "InvalidRange"))?,
-        };
-        object.range = range.map(|_| (offset, length));
-        // The blobs the range spans, opened now, so a write that replaces
-        // the object meanwhile does not change what this read answers.
-        let (mut files, mut at, end) = (Vec::new(), 0, offset + length);
-        for (id, size) in blobs {
-            let (from, to) = (offset.max(at), end.min(at + size));
-            if from < to {
-                let mut file = std::fs::File::open(self.path("blobs", &id))?;
-                file.seek(std::io::SeekFrom::Start(from - at))?;
-                files.push((file, to - from));
+        // A blob gone is most likely an object rewritten since its file was
+        // read; reading it again finds the new one.
+        let gone = |r: &Result<_>| matches!(r, Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound);
+        let mut read = self.snapshot(key, range);
+        for _ in 0..2 {
+            if !gone(&read) {
+                break;
             }
-            at += size;
+            read = self.snapshot(key, range);
         }
-        Ok(Some((object, chunks(files))))
+        read
     }
 
     /// A token is the last key or common prefix of its page.
@@ -418,7 +453,7 @@ impl Store for Local {
         token: Option<&str>,
     ) -> Result<Page> {
         let after = start_after.max(token).unwrap_or("");
-        let index = self.index.borrow();
+        let index = self.index()?;
         let from = if after >= prefix && !after.is_empty() {
             Bound::Excluded(after)
         } else {
@@ -500,13 +535,15 @@ impl Store for Local {
         if !(1..=10_000).contains(&n) {
             return Err(refused(format!("PART {key}"), 400, "InvalidArgument"));
         }
-        let mut state = self.upload(key, upload)?;
         let etag = hex(&md5(&body));
         let blob = self.put_blob(&body)?;
-        let old = state
-            .parts
-            .insert(n, (etag.clone(), body.len() as u64, blob));
-        self.save_upload(upload, &state)?;
+        let part = (etag.clone(), body.len() as u64, blob);
+        let old = self.locked(|| {
+            let mut state = self.upload(key, upload)?;
+            let old = state.parts.insert(n, part);
+            self.save_upload(upload, &state)?;
+            Ok(old)
+        })?;
         if let Some((_, _, old)) = old {
             self.drop_blob(&old);
         }

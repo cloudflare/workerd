@@ -19,9 +19,10 @@
 //! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
 //! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `r2_buckets`, also
-//! `--experimental`, are bindings to one R2 `bucket` service per bucket, `<name>-r2-<bucket>`,
-//! the bucket its `bucket_name`, else its binding name; `preview_bucket_name`, `jurisdiction`
-//! and `remote` are ignored. Its objects are in `.wrangler/state/workerd/r2/<bucket>/`. `triggers.crons`,
+//! `--experimental`, are bindings to the Worker `<name>-r2` (the bundled module `/workerd/r2.js`)
+//! in the same way, with the bucket's `bucket_name` (else its binding name) in its props;
+//! `preview_bucket_name`, `jurisdiction` and `remote` are ignored. Its objects are in
+//! `.wrangler/state/workerd/r2/`, one store object per R2 object. `triggers.crons`,
 //! also `--experimental`, are the schedule of the Worker `<name>-cron` (the bundled module
 //! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. `queues`, also
 //! `--experimental`, are served by the Worker `<name>-queues` (the bundled module
@@ -450,7 +451,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         workers
             + do_storage
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
-            + r2_count(&wrangler)
+            + 3 * u32::from(!wrangler.r2_buckets.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
             + 2 * u32::from(!wrangler.workflows.is_empty())
@@ -620,8 +621,8 @@ fn bundled_services(
         at += 3;
     }
     if !wrangler.r2_buckets.is_empty() {
-        r2_services(services, at, name, storage, wrangler)?;
-        at += r2_count(wrangler);
+        r2_services(services, at, &format!("{name}-r2"), storage)?;
+        at += 3;
     }
     let crons = &wrangler.triggers.crons;
     if !crons.is_empty() {
@@ -754,45 +755,26 @@ fn kv_services(
     Ok(())
 }
 
-/// Each bucket `r2_buckets` names, once.
-fn r2_names(wrangler: &Wrangler) -> Vec<&str> {
-    let mut names = Vec::new();
-    for r in &wrangler.r2_buckets {
-        let name = r.bucket_name.as_ref().unwrap_or(&r.binding);
-        if !names.contains(&&name[..]) {
-            names.push(name);
-        }
-    }
-    names
-}
-
-/// The services [`r2_services`] adds.
-fn r2_count(wrangler: &Wrangler) -> u32 {
-    let n = r2_names(wrangler).len() as u32;
-    n + u32::from(n > 0)
-}
-
-/// At `services[at]`, the disk `storage` the buckets share, then an R2 `bucket` service for each
-/// bucket, `<name>-r2-<bucket>`, storing its objects in `storage/r2/<bucket>/`.
+/// The R2 Worker `name` at `services[at]`, then its disk, `storage`, and its `BLOBS`, a bucket
+/// service storing the objects in `storage/r2/`.
 fn r2_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     at: u32,
     name: &str,
     storage: &Path,
-    wrangler: &Wrangler,
 ) -> Result<(), String> {
     fs::create_dir_all(storage).map_err(|e| format!("{}: {e}", storage.display()))?;
-    // `:` is in no bucket name, so no bucket's service is this.
-    let disk = format!("{name}-r2:storage");
-    disk_service(services.reborrow().get(at), &disk, storage);
-    for (i, bucket) in r2_names(wrangler).into_iter().enumerate() {
-        let mut service = services.reborrow().get(at + 1 + i as u32);
-        service.set_name(format!("{name}-r2-{bucket}"));
-        let mut conf = service.init_bucket();
-        conf.set_path(format!("r2/{bucket}"));
-        conf.set_local_disk(&disk);
-        conf.set_r2(true);
-    }
+    let disk = format!("{name}-storage");
+    disk_service(services.reborrow().get(at + 1), &disk, storage);
+    let mut service = services.reborrow().get(at + 2);
+    service.set_name(format!("{name}-blobs"));
+    let mut bucket = service.init_bucket();
+    bucket.set_path("r2");
+    bucket.set_local_disk(disk);
+    let service = services.reborrow().get(at);
+    let mut blobs = bundled_worker(service, name, "r2.js", &[], None, 1).get(0);
+    blobs.set_name("BLOBS");
+    blobs.init_service().set_name(format!("{name}-blobs"));
     Ok(())
 }
 
@@ -924,7 +906,10 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         let mut b = bs.reborrow().get(at as u32);
         b.set_name(&r.binding);
         let bucket = r.bucket_name.as_ref().unwrap_or(&r.binding);
-        b.init_r2_bucket().set_name(format!("{name}-r2-{bucket}"));
+        let mut designator = b.init_r2_bucket();
+        designator.set_name(format!("{name}-r2"));
+        let props = serde_json::json!({ "bucket": bucket });
+        designator.init_props().set_json(props.to_string());
     }
     for (i, p) in producers.iter().enumerate() {
         let mut b = bs.reborrow().get((n + i) as u32);

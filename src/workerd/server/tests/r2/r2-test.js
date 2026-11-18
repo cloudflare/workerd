@@ -6,8 +6,8 @@ import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 
-// Miniflare's R2 tests, in workers-sdk, run the binding against the R2
-// bucket service; these cover what they don't. Sizes are in units of 16 KiB.
+// Miniflare's R2 tests, in workers-sdk, run the binding against r2.js;
+// these cover what they don't. Sizes are in units of 16 KiB.
 const CHUNK = 16 * 1024;
 
 // `size` bytes, each its index mod 251, so any range is checkable.
@@ -119,19 +119,19 @@ export const checksums = {
   },
 };
 
-// The service refuses requests it cannot serve.
+// The Worker refuses requests it cannot serve.
 export const badRequests = {
   async test(ctrl, env) {
-    const r = await env.R2.fetch('http://r2/');
+    const r = await env.R2_WORKER.fetch('http://r2/');
     assert.strictEqual(r.status, 400);
     assert.match(r.headers.get('cf-r2-error'), /10029/);
-    const negative = await env.R2.fetch('http://r2/', {
+    const negative = await env.R2_WORKER.fetch('http://r2/', {
       method: 'PUT',
       headers: { 'cf-r2-metadata-size': '-1' },
     });
     assert.strictEqual(negative.status, 400);
     assert.match(negative.headers.get('cf-r2-error'), /10029/);
-    const garbled = await env.R2.fetch('http://r2/', {
+    const garbled = await env.R2_WORKER.fetch('http://r2/', {
       method: 'PUT',
       headers: { 'cf-r2-metadata-size': '2' },
       body: new Uint8Array([0x7b, 0xff]),
@@ -140,7 +140,7 @@ export const badRequests = {
     assert.match(garbled.headers.get('cf-r2-error'), /10029/);
     // A put needs its length.
     const meta = JSON.stringify({ method: 'put', object: 'k' });
-    const unsized = await env.R2.fetch('http://r2/', {
+    const unsized = await env.R2_WORKER.fetch('http://r2/', {
       method: 'PUT',
       headers: { 'cf-r2-metadata-size': String(meta.length) },
       body: new ReadableStream({
@@ -154,7 +154,7 @@ export const badRequests = {
     assert.match(unsized.headers.get('cf-r2-error'), /10029/);
     // Anything else is R2's InternalError, not a bare 500.
     const bucket = JSON.stringify({ method: 'createBucket', bucket: 'b' });
-    const unknown = await env.R2.fetch('http://r2/', {
+    const unknown = await env.R2_WORKER.fetch('http://r2/', {
       method: 'PUT',
       headers: { 'cf-r2-metadata-size': String(bucket.length) },
       body: bucket,

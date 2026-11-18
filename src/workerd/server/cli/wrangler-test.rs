@@ -457,15 +457,14 @@ fn kv_namespaces_bind_the_kv_worker() {
 }
 
 #[test]
-fn r2_buckets_bind_r2_bucket_services() {
+fn r2_buckets_bind_the_r2_worker() {
     let dir = project(&[
         (
             "wrangler.jsonc",
             r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
                  "no_bundle": true,
                  "r2_buckets": [{ "binding": "A", "bucket_name": "a", "jurisdiction": "eu" },
-                                { "binding": "B", "remote": true },
-                                { "binding": "C", "bucket_name": "a" }] }"#,
+                                { "binding": "B", "remote": true }] }"#,
         ),
         ("index.js", ""),
     ]);
@@ -482,13 +481,7 @@ fn r2_buckets_bind_r2_bucket_services() {
         .iter()
         .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, ["app", "app-r2:storage", "app-r2-a", "app-r2-B"]);
-    let service::Which::Bucket(bucket) = services.get(2).which().unwrap() else {
-        panic!("not a bucket");
-    };
-    let bucket = bucket.unwrap();
-    assert_eq!(bucket.get_path().unwrap().to_str().unwrap(), "r2/a");
-    assert!(bucket.get_r2());
+    assert_eq!(names, ["app", "app-r2", "app-r2-storage", "app-r2-blobs"]);
     assert!(dir.join(".wrangler/state/workerd").is_dir());
     let service::Which::Worker(w) = services.get(0).which().unwrap() else {
         panic!("not a worker");
@@ -502,15 +495,27 @@ fn r2_buckets_bind_r2_bucket_services() {
             let worker::binding::Which::R2Bucket(d) = b.which().unwrap() else {
                 panic!("not an r2Bucket");
             };
+            let d = d.unwrap();
+            let service_designator::props::Which::Json(props) = d.get_props().which().unwrap()
+            else {
+                panic!("no JSON props");
+            };
             let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
             (
                 text(b.get_name().unwrap()),
-                text(d.unwrap().get_name().unwrap()),
+                text(d.get_name().unwrap()),
+                text(props.unwrap()),
             )
         })
         .collect();
-    let r2 = |b: &str, name: &str| (b.into(), format!("app-r2-{name}"));
-    assert_eq!(bound, [r2("A", "a"), r2("B", "B"), r2("C", "a")]);
+    let r2 = |b: &str, name: &str| {
+        (
+            b.into(),
+            "app-r2".into(),
+            format!(r#"{{"bucket":"{name}"}}"#),
+        )
+    };
+    assert_eq!(bound, [r2("A", "a"), r2("B", "B")]);
 }
 
 #[test]
