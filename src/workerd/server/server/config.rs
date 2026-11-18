@@ -1469,6 +1469,8 @@ impl Server {
                 .insert("internet".to_owned(), Service::Leaf(internet));
         }
 
+        add_native_services(&factory, &mut services)?;
+
         let cluster = match cluster_address {
             Some(address) if config.has_cluster() => {
                 make_cluster(&factory, config, address, &report)?
@@ -1741,6 +1743,20 @@ fn invalid_on_error(name: &str, report: &Reporter, service: Result<Service>) -> 
             Service::Leaf(Rc::new(InvalidConfigChannel))
         }
     }
+}
+
+/// Adds the services the binary registered in code (`crate::native`), each able to refer to
+/// what exists so far. A config service of the same name stays.
+fn add_native_services(factory: &Rc<Factory>, services: &mut Services) -> Result<()> {
+    for (name, make) in crate::native::take() {
+        if services.0.contains_key(&name) {
+            continue;
+        }
+        let lookup = |name: &str| services.0.get(name).map(Service::channel);
+        let service = make(factory, &lookup)?;
+        services.0.insert(name, Service::Leaf(service));
+    }
+    Ok(())
 }
 
 /// The second pass for one service: what its config says it serves.
