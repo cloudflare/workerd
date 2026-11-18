@@ -90,6 +90,11 @@ crate.annotation(
 # connection out of the pool until the response body is consumed, as kj's HttpClient does. And the
 # response a server generates for a request it cannot parse (400, 414, 431) explains the error in
 # a text/plain body, as kj's HttpServer does and RFC 9110 section 15.5 asks; upstream sends none.
+# And a head is parsed against hyper's default limit of 100 headers on the stack first, and against
+# kj-hyper's larger limit (MAX_HEADERS) only when it has more than that; upstream allocates the
+# whole limit for every head, a large allocation per request at kj-hyper's limit. And
+# preserve_header_case records a spelling only where it is not the lowercase name, so a request
+# whose names are all lowercase, as many clients send them, carries no HeaderCaseMap.
 crate.annotation(
     crate = "hyper",
     patch_args = ["-p1"],
@@ -98,6 +103,8 @@ crate.annotation(
         "//:patches/rust/crates/hyper/graceful-shutdown-partial-request.patch",
         "//:patches/rust/crates/hyper/client-lazy-response-body.patch",
         "//:patches/rust/crates/hyper/parse-error-explanation.patch",
+        "//:patches/rust/crates/hyper/stack-headers-first.patch",
+        "//:patches/rust/crates/hyper/unrecorded-lowercase-spellings.patch",
     ],
 )
 crate.annotation(
