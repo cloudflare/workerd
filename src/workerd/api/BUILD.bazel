@@ -238,6 +238,7 @@ wd_cc_library(
         "crypto/crc-impl.h",
     ],
     visibility = ["//visibility:public"],
+    deps = ["//src/rust/crc"],
 )
 
 wd_cc_library(

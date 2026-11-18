@@ -44,6 +44,9 @@ flate2 = "1"
 # zlib_rs_-prefixed symbols by src/rust/zlib-rs. rust-allocator only:
 # zalloc/zfree left NULL use Rust's global allocator.
 libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
+# CRC-64/NVME for crypto.DigestStream('crc64nvme'), by carry-less multiplication where the CPU
+# supports it. `std` for runtime CPU feature detection; the C FFI and panic handler are unused.
+crc-fast = { version = "1", default-features = false, features = ["std"] }
 futures = "0"
 http = "1"
 http-body = "1"

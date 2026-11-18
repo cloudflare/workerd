@@ -4,6 +4,8 @@
 
 #include "crc-impl.h"
 
+#include <workerd/rust/crc/ffi.rs.h>
+
 #include <array>
 #include <type_traits>
 
@@ -60,9 +62,6 @@ constexpr std::array<T, crcTableSize> gen_crc_table(T polynomial, bool reflectIn
 // https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-32-iscsi
 constexpr auto crc32c_table = gen_crc_table(static_cast<uint32_t>(0x1edc6f41), true, true);
 #endif
-// https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-64-nvme
-constexpr auto crc64nvme_table =
-    gen_crc_table(static_cast<uint64_t>(0xad93d23594c93659), true, true);
 }  // namespace
 
 uint32_t crc32c(uint32_t crc, const uint8_t *data, unsigned int length) {
@@ -102,9 +101,7 @@ uint64_t crc64nvme(uint64_t crc, const uint8_t *data, unsigned int length) {
   if (data == nullptr) {
     return 0;
   }
-  crc ^= 0xffffffffffffffff;
-  while (length--) {
-    crc = crc64nvme_table[(crc ^ *data++) & 0xffL] ^ (crc >> 8);
-  }
-  return crc ^ 0xffffffffffffffff;
+  // The crc-fast crate folds the input with carry-less multiplication (PCLMULQDQ on x86-64, PMULL
+  // on aarch64) where the CPU supports it, and uses tables otherwise.
+  return workerd::rust::crc::crc64nvme(crc, ::rust::Slice<const uint8_t>(data, length));
 }
