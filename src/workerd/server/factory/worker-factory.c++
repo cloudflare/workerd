@@ -187,9 +187,7 @@ WorkerFactory::~WorkerFactory() noexcept(false) {
   KJ_IF_SOME(executor, kj::tryGetCurrentThreadExecutor()) {
     onItsLoop = &executor == &impl->executor;
   }
-  KJ_ASSERT(onItsLoop, "a worker factory must be destroyed on the loop it was constructed on") {
-    break;
-  }
+  KJ_DTOR_ASSERT(onItsLoop, "a worker factory must be destroyed on the loop it was constructed on");
 }
 
 kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory) {

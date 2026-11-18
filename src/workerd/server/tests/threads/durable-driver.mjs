@@ -31,6 +31,15 @@ assert(
 const THREADS = 4;
 const UUID = /^[0-9a-f-]{36}$/;
 
+// Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
+// there.
+const SIGTERM_DRAINS = {
+  skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
+};
+// How the server ends on SIGTERM, as `[code, signal]`.
+const SIGTERM_EXIT =
+  process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
+
 // Starts `workerd serve` on `threads` threads with a new directory for the objects. `log` is
 // what the server has written so far.
 async function serve(threads) {
@@ -79,7 +88,7 @@ async function serve(threads) {
   return server;
 }
 
-// Runs `body` with a server on `threads` threads, which then stops cleanly on SIGTERM.
+// Runs `body` with a server on `threads` threads, which then stops on SIGTERM.
 async function withServer(threads, body) {
   const server = await serve(threads);
   try {
@@ -89,7 +98,7 @@ async function withServer(threads, body) {
     await server.closed();
     throw error;
   }
-  assert.deepStrictEqual(await server.stop(), [0, null]);
+  assert.deepStrictEqual(await server.stop(), SIGTERM_EXIT);
 }
 
 // One connection to the server, kept open: every request on it is served by the thread that
@@ -457,26 +466,32 @@ for (const threads of [THREADS, 1]) {
       connections.close();
     }));
 
-  test(`SIGTERM completes the object calls in flight ${on}`, async () => {
-    const server = await serve(threads);
-    const connections = await connect(server, threads);
-    // Each connection has a request in its object when the server is told to stop, and the
-    // object answers after that.
-    const slow = connections.all.map((c) => c.get('/slow?name=drain&ms=1500'));
-    await scheduler.wait(500);
-    server.child.kill('SIGTERM');
-    const answers = await Promise.all(slow);
-    assert.deepStrictEqual(
-      answers.map((a) => a.front),
-      connections.all.map((c) => c.front)
-    );
-    assert.deepStrictEqual(
-      answers.map((a) => a.count).sort((a, b) => a - b),
-      answers.map((_, i) => i + 1)
-    );
-    connections.close();
-    assert.deepStrictEqual(await server.closed(), [0, null]);
-  });
+  test(
+    `SIGTERM completes the object calls in flight ${on}`,
+    SIGTERM_DRAINS,
+    async () => {
+      const server = await serve(threads);
+      const connections = await connect(server, threads);
+      // Each connection has a request in its object when the server is told to stop, and the
+      // object answers after that.
+      const slow = connections.all.map((c) =>
+        c.get('/slow?name=drain&ms=1500')
+      );
+      await scheduler.wait(500);
+      server.child.kill('SIGTERM');
+      const answers = await Promise.all(slow);
+      assert.deepStrictEqual(
+        answers.map((a) => a.front),
+        connections.all.map((c) => c.front)
+      );
+      assert.deepStrictEqual(
+        answers.map((a) => a.count).sort((a, b) => a - b),
+        answers.map((_, i) => i + 1)
+      );
+      connections.close();
+      assert.deepStrictEqual(await server.closed(), [0, null]);
+    }
+  );
 }
 
 test('an idle object is shut down and a hibernating WebSocket wakes it', () =>

@@ -21,6 +21,15 @@ assert(
 
 const THREADS = 4;
 
+// Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
+// there.
+const SIGTERM_DRAINS = {
+  skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
+};
+// How the server ends on SIGTERM, as `[code, signal]`.
+const SIGTERM_EXIT =
+  process.platform === 'win32' ? [null, 'SIGTERM'] : [0, null];
+
 // Starts `workerd serve` with `extraArgs` and returns the harness and the port it listens on.
 async function serve(extraArgs) {
   const workerd = new WorkerdServerHarness({
@@ -135,28 +144,34 @@ test('every thread serves its own copy of the Workers', async () => {
     assert.strictEqual(new Set(backOf.values()).size, backOf.size);
   } finally {
     const [code, signal] = await workerd.stop();
-    assert.deepStrictEqual([code, signal], [0, null]);
+    assert.deepStrictEqual([code, signal], SIGTERM_EXIT);
   }
 });
 
-test('SIGTERM drains the requests in flight on every thread', async () => {
-  const { workerd, port } = await serve([
-    '--experimental',
-    `--threads=${THREADS}`,
-  ]);
-  const requests = Array.from({ length: 64 }, () => request(port));
-  // The server has the requests, and waits for their bodies.
-  await scheduler.wait(500);
-  workerd.kill('SIGTERM');
-  // A draining server accepts no connection, and still serves the ones it has.
-  await scheduler.wait(500);
-  for (const { finish } of requests) finish();
-  const responses = await Promise.all(requests.map(({ response }) => response));
-  assert.strictEqual(responses.length, 64);
-  assert.deepStrictEqual(await workerd.closed(), [0, null]);
-  await assert.rejects(request(port).response);
-  await workerd.stop();
-});
+test(
+  'SIGTERM drains the requests in flight on every thread',
+  SIGTERM_DRAINS,
+  async () => {
+    const { workerd, port } = await serve([
+      '--experimental',
+      `--threads=${THREADS}`,
+    ]);
+    const requests = Array.from({ length: 64 }, () => request(port));
+    // The server has the requests, and waits for their bodies.
+    await scheduler.wait(500);
+    workerd.kill('SIGTERM');
+    // A draining server accepts no connection, and still serves the ones it has.
+    await scheduler.wait(500);
+    for (const { finish } of requests) finish();
+    const responses = await Promise.all(
+      requests.map(({ response }) => response)
+    );
+    assert.strictEqual(responses.length, 64);
+    assert.deepStrictEqual(await workerd.closed(), [0, null]);
+    await assert.rejects(request(port).response);
+    await workerd.stop();
+  }
+);
 
 for (const extraArgs of [[], ['--threads=1']]) {
   test(`one thread serves alone: ${JSON.stringify(extraArgs)}`, async () => {
@@ -175,63 +190,70 @@ for (const extraArgs of [[], ['--threads=1']]) {
       assert.strictEqual(fronts.size, 1);
     } finally {
       const [code, signal] = await workerd.stop();
-      assert.deepStrictEqual([code, signal], [0, null]);
+      assert.deepStrictEqual([code, signal], SIGTERM_EXIT);
     }
   });
 }
 
-test('every thread accepts from an inherited socket', async () => {
-  // The server gets its listening socket from this process, as descriptor 4 (`--socket-fd`),
-  // and writes its events to descriptor 3.
-  const listening = net.createServer();
-  await new Promise((resolve) => listening.listen(0, '127.0.0.1', resolve));
-  const { port } = listening.address();
-  const child = spawn(
-    env.WORKERD_BINARY,
-    [
-      'serve',
-      env.WORKERD_CONFIG,
-      '--experimental',
-      `--threads=${THREADS}`,
-      '--control-fd=3',
-      '--socket-fd=http=4',
-    ],
-    { stdio: ['ignore', 'inherit', 'inherit', 'pipe', listening._handle.fd] }
-  );
-  const closed = new Promise((resolve) => {
-    child.on('close', (code, signal) => resolve([code, signal]));
-  });
-  try {
-    // This process only lends the socket: it accepts nothing from it.
-    await new Promise((resolve) => listening.close(resolve));
-    const control = child.stdio[3];
-    control.setEncoding('utf8');
-    let events = '';
-    for await (const chunk of control) {
-      events += chunk;
-      if (events.includes('\n')) break;
-    }
-    assert.deepStrictEqual(JSON.parse(events.split('\n')[0]), {
-      event: 'listen',
-      socket: 'http',
-      port,
+test(
+  'every thread accepts from an inherited socket',
+  {
+    // `--socket-fd` names a socket handle there, which Node.js cannot pass to a child.
+    skip: process.platform === 'win32' && 'Node.js passes no socket on Windows',
+  },
+  async () => {
+    // The server gets its listening socket from this process, as descriptor 4 (`--socket-fd`),
+    // and writes its events to descriptor 3.
+    const listening = net.createServer();
+    await new Promise((resolve) => listening.listen(0, '127.0.0.1', resolve));
+    const { port } = listening.address();
+    const child = spawn(
+      env.WORKERD_BINARY,
+      [
+        'serve',
+        env.WORKERD_CONFIG,
+        '--experimental',
+        `--threads=${THREADS}`,
+        '--control-fd=3',
+        '--socket-fd=http=4',
+      ],
+      { stdio: ['ignore', 'inherit', 'inherit', 'pipe', listening._handle.fd] }
+    );
+    const closed = new Promise((resolve) => {
+      child.on('close', (code, signal) => resolve([code, signal]));
     });
-
-    const fronts = new Set();
-    for (let attempt = 0; attempt < 20 && fronts.size < 2; attempt++) {
-      for (const { front } of await concurrentRequests(port, 64)) {
-        fronts.add(front);
+    try {
+      // This process only lends the socket: it accepts nothing from it.
+      await new Promise((resolve) => listening.close(resolve));
+      const control = child.stdio[3];
+      control.setEncoding('utf8');
+      let events = '';
+      for await (const chunk of control) {
+        events += chunk;
+        if (events.includes('\n')) break;
       }
-      const { spun, answered, overlapped } = await requestDuringSpin(port);
-      fronts.add(spun.front).add(answered.front);
-      if (overlapped) assert.notStrictEqual(spun.front, answered.front);
+      assert.deepStrictEqual(JSON.parse(events.split('\n')[0]), {
+        event: 'listen',
+        socket: 'http',
+        port,
+      });
+
+      const fronts = new Set();
+      for (let attempt = 0; attempt < 20 && fronts.size < 2; attempt++) {
+        for (const { front } of await concurrentRequests(port, 64)) {
+          fronts.add(front);
+        }
+        const { spun, answered, overlapped } = await requestDuringSpin(port);
+        fronts.add(spun.front).add(answered.front);
+        if (overlapped) assert.notStrictEqual(spun.front, answered.front);
+      }
+      assert(fronts.size > 1, 'only one thread served requests');
+    } finally {
+      child.kill('SIGTERM');
+      assert.deepStrictEqual(await closed, [0, null]);
     }
-    assert(fronts.size > 1, 'only one thread served requests');
-  } finally {
-    child.kill('SIGTERM');
-    assert.deepStrictEqual(await closed, [0, null]);
   }
-});
+);
 
 // Runs `workerd serve` with `args` to its end; its exit code and what it wrote to stderr.
 async function serveToExit(args) {
