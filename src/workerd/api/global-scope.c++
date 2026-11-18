@@ -420,7 +420,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
-    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
+    kj::Maybe<jsg::Ref<IncomingRequestSignal>> signal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // Set only if the request has a body. See neuterBodyAfterSend() for why it is wrapped.
   kj::Maybe<kj::Own<NeuterableInputStream>> ownRequestBody;
@@ -506,8 +506,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       KJ_ASSERT_NONNULL(defaultFetcher).addRef(),
-      /* signal */ kj::mv(abortSignal), kj::mv(cf), kj::mv(body),
+      /* signal */ kj::none, kj::mv(cf), kj::mv(body),
       /* thisSignal */ kj::none, Request::CacheMode::NONE);
+  KJ_IF_SOME(s, signal) {
+    jsRequest->setIncomingSignal(kj::mv(s));
+  }
 
   // signal vs thisSignal
   // --------------------

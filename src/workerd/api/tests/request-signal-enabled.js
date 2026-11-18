@@ -119,6 +119,28 @@ export class Server extends WorkerEntrypoint {
   }
 }
 
+// Reads the signals of requests derived from the incoming one before its own signal.
+export class DerivedSignalServer extends WorkerEntrypoint {
+  async fetch(req) {
+    const copy = new Request(req);
+    const clone = req.clone();
+    const dropped = new Request(req, { signal: null });
+    assert.strictEqual(clone.signal, copy.signal);
+    assert.strictEqual(req.signal, copy.signal);
+    assert.strictEqual(req.signal, req.signal);
+    assert.strictEqual(req.signal.aborted, false);
+    assert.notStrictEqual(dropped.signal, req.signal);
+    return new Response('ok');
+  }
+}
+
+export const derivedRequestsShareSignal = {
+  async test(ctrl, env, ctx) {
+    const res = await env.DerivedSignalServer.fetch('http://example.com/');
+    assert.strictEqual(await res.text(), 'ok');
+  },
+};
+
 export const noAbortOnSimpleResponse = {
   async test(ctrl, env, ctx) {
     let abortTracker = env.AbortTracker.get(
