@@ -1768,7 +1768,7 @@ wd_test(
 )
 
 # Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+# on average. Tagged `python` like the tests under //src/pyodide/tests.
 wd_test(
     size = "enormous",
     src = "worker-loader-python-test.wd-test",
