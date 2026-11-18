@@ -239,6 +239,9 @@ mod bridge {
         fn body_length(body: &RustBody) -> KjMaybe<u64>;
 
         type BodySink;
+        /// Queues `data` if the body has room for it, as it nearly always does; false when
+        /// `write()` must wait for room instead.
+        fn try_write(self: &BodySink, data: &[u8]) -> Result<bool>;
         async fn write(self: &BodySink, data: &[u8]) -> Result<()>;
         async fn when_write_disconnected(self: &BodySink);
 
