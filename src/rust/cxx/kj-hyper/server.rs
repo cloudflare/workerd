@@ -43,6 +43,7 @@
 //! that responds without reading the body sends no `100 Continue`, and unless the body has
 //! already arrived, the connection closes after the response. kj ignored `Expect`.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::error::Error;
@@ -426,7 +427,15 @@ async fn handle(
             );
             return;
         }
-        let url = parts.uri.to_string();
+        // An origin-form target, as nearly every request has, is its path and query.
+        let url = match (
+            parts.uri.scheme(),
+            parts.uri.authority(),
+            parts.uri.path_and_query(),
+        ) {
+            (None, None, Some(target)) => Cow::Borrowed(target.as_str()),
+            _ => Cow::Owned(parts.uri.to_string()),
+        };
         let mut body = new_body_stream(Box::new(RustBody::new(body)));
         let mut response = new_server_response(
             Box::new(ServerResponse(Rc::clone(&sender))),
