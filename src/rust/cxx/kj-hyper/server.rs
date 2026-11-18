@@ -104,6 +104,7 @@ use crate::body::RustBody;
 use crate::body::channel_in;
 use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
+use crate::ffi::ReusedHeaders;
 use crate::ffi::WebSocketCompression;
 use crate::ffi::WebSocketErrorHandler;
 use crate::ffi::new_body_stream;
@@ -219,18 +220,25 @@ struct Connection<'t, H> {
     /// The kj ids of the header names the requests carry, borrowed only to fill a block.
     ids: RefCell<HeaderIds<'t>>,
     /// Header blocks a finished call left, for the next request's headers.
-    blocks: RefCell<Vec<HeaderBlock>>,
+    blocks: RefCell<Vec<ServerBlock<'t>>>,
+}
+
+/// A request's packed headers and the kj headers over them, reused together.
+#[derive(Default)]
+struct ServerBlock<'t> {
+    block: HeaderBlock,
+    headers: ReusedHeaders<'t>,
 }
 
 /// How many header blocks a connection keeps: one per call, which hyper starts only once the
 /// last response is written, though the call may still be finishing.
 const KEPT_BLOCKS: usize = 2;
 
-impl<H> Connection<'_, H> {
+impl<'t, H> Connection<'t, H> {
     /// A header block filled with a request's headers, back to the connection when dropped.
-    fn header_block(&self, parts: &Parts) -> PooledBlock<'_> {
+    fn header_block(&self, parts: &Parts) -> PooledBlock<'_, 't> {
         let mut block = self.blocks.borrow_mut().pop().unwrap_or_default();
-        block.fill(
+        block.block.fill(
             &parts.headers,
             &parts.extensions,
             Some(&mut self.ids.borrow_mut()),
@@ -242,16 +250,16 @@ impl<H> Connection<'_, H> {
     }
 }
 
-/// A [`HeaderBlock`] that returns to its connection's pool.
-struct PooledBlock<'c> {
-    blocks: &'c RefCell<Vec<HeaderBlock>>,
-    block: HeaderBlock,
+/// A [`ServerBlock`] that returns to its connection's pool.
+struct PooledBlock<'c, 't> {
+    blocks: &'c RefCell<Vec<ServerBlock<'t>>>,
+    block: ServerBlock<'t>,
 }
 
-impl Drop for PooledBlock<'_> {
+impl Drop for PooledBlock<'_, '_> {
     fn drop(&mut self) {
         let mut blocks = self.blocks.borrow_mut();
-        if blocks.len() < KEPT_BLOCKS && self.block.reusable() {
+        if blocks.len() < KEPT_BLOCKS && self.block.block.reusable() {
             blocks.push(mem::take(&mut self.block));
         }
     }
@@ -492,12 +500,16 @@ async fn handle<H: Handler>(
 ) {
     // However the call ends, hyper stops waiting for a head it did not send.
     let _abandon = AbandonHead(&sender);
-    let block = conn.header_block(&parts);
+    let mut block = conn.header_block(&parts);
     // The block has the headers now.
     conn.state
         .scratch
         .keep_headers(mem::take(&mut parts.headers));
-    let headers = match block.block.as_kj(&conn.ids.borrow()) {
+    let ServerBlock {
+        block: packed,
+        headers,
+    } = &mut block.block;
+    let headers = match packed.as_kj(&conn.ids.borrow(), headers) {
         Ok(headers) => headers,
         Err(e) => {
             let _ = sender.send_error(400, b"Bad Request", format!("ERROR: {}", e.description()));
@@ -518,7 +530,7 @@ async fn handle<H: Handler>(
             tunnel,
         };
         conn.handler
-            .connect(host.as_bytes(), HeadersRef::from(&*headers), connect)
+            .connect(host.as_bytes(), HeadersRef::from(headers), connect)
             .await
     } else {
         let mut method = Method::GET;
@@ -543,7 +555,7 @@ async fn handle<H: Handler>(
         let mut response = new_server_response(
             Box::new(ServerResponse(Rc::clone(&sender))),
             method,
-            &headers,
+            headers,
             conn.settings.websocket_compression,
             conn.settings.websocket_errors(),
         );
@@ -551,7 +563,7 @@ async fn handle<H: Handler>(
             .request(
                 method,
                 url.as_bytes(),
-                HeadersRef::from(&*headers),
+                HeadersRef::from(headers),
                 body.as_mut(),
                 ServiceResponse::from(response.as_mut()),
             )

@@ -369,9 +369,18 @@ kj::Own<kj::HttpHeaders> headers_over_block(const HeaderIds& ids,
     ::rust::Slice<const uint8_t> arena,
     ::rust::Slice<const uint32_t> fields) {
   auto headers = kj::heap<kj::HttpHeaders>(ids.getTable());
-  addBlock(*headers, ids, kj::arrayPtr(reinterpret_cast<const char*>(arena.data()), arena.size()),
-      fields);
+  refill_headers_over_block(*headers, ids, arena, fields);
   return headers;
+}
+
+void refill_headers_over_block(kj::HttpHeaders& headers,
+    const HeaderIds& ids,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  // Nulls the set slots and empties the rest without reading what they point to.
+  headers.clear();
+  addBlock(headers, ids, kj::arrayPtr(reinterpret_cast<const char*>(arena.data()), arena.size()),
+      fields);
 }
 
 kj::Own<kj::AsyncIoStream> new_rust_io_stream(::rust::Box<RustIo> io) {

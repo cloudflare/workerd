@@ -159,13 +159,26 @@ mod bridge {
         /// # Safety
         ///
         /// The headers keep references to the table behind `ids` and into `arena`, which the
-        /// `KjOwn` does not carry: the caller keeps both alive and the arena unchanged for as
-        /// long as they exist ([`Borrowing`] does).
+        /// `KjOwn` does not carry: the caller keeps the table alive for as long as they exist,
+        /// and the arena alive and unchanged for as long as they are read ([`ReusedHeaders`]).
+        /// Refilling or dropping them reads none of the old values.
         unsafe fn headers_over_block(
             ids: &HeaderIds,
             arena: &[u8],
             fields: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
+        /// [`headers_over_block`], refilling `headers` (made over the same table) in place of
+        /// whatever they held.
+        ///
+        /// # Safety
+        ///
+        /// As [`headers_over_block`].
+        unsafe fn refill_headers_over_block(
+            headers: Pin<&mut HttpHeaders>,
+            ids: &HeaderIds,
+            arena: &[u8],
+            fields: &[u32],
+        ) -> Result<()>;
         /// kj's parse of a request method; false for one kj has no name for.
         fn parse_method(name: &[u8], method: &mut HttpMethod) -> bool;
         /// `BoringSSL`'s check of a DER `signature` over `message` by `public_key`, an encoded
@@ -370,24 +383,45 @@ pub fn headers_from_block<'t>(
     })
 }
 
-/// `kj::HttpHeaders` over the table behind `ids`, pointing into a packed block
-/// ([`crate::body::HeaderBlock`]) whose slots `ids` resolved.
+/// `kj::HttpHeaders` over a table that outlives `'t`, made once and refilled for each block.
 ///
-/// # Errors
-///
-/// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
-pub fn headers_over_block<'a>(
-    ids: &Borrowing<'a, HeaderIds>,
-    arena: &'a [u8],
-    fields: &[u32],
-) -> Result<Borrowing<'a, HttpHeaders>> {
-    // SAFETY: the result is bounded by `'a`, within both the borrow of the table `ids` keeps
-    // and the shared borrow of `arena`, which keeps the bytes unchanged.
-    let own = unsafe { bridge::headers_over_block(ids, arena, fields) }?;
-    Ok(Borrowing {
-        own,
-        borrow: PhantomData,
-    })
+/// Each packed block ([`crate::body::HeaderBlock`]) is one the headers point into. A table's
+/// headers have a slot for each of its ids, which a server's table has many of; refilling clears
+/// only the set ones.
+#[derive(Default)]
+pub struct ReusedHeaders<'t> {
+    /// Points into the arena of the last [`ReusedHeaders::over`], which may have changed since:
+    /// read only within the borrow `over` returns.
+    own: Option<KjOwn<HttpHeaders>>,
+    table: PhantomData<&'t HttpHeaderTable>,
+}
+
+impl<'t> ReusedHeaders<'t> {
+    /// The headers of a packed block whose slots `ids` resolved, in place of the last ones.
+    ///
+    /// # Errors
+    ///
+    /// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
+    pub fn over<'a>(
+        &'a mut self,
+        ids: &Borrowing<'t, HeaderIds>,
+        arena: &'a [u8],
+        fields: &[u32],
+    ) -> Result<&'a HttpHeaders> {
+        let own = match self.own.take() {
+            Some(mut own) => {
+                // SAFETY: the headers are over the table behind `ids`, which outlives `'t` and
+                // so them; they are read only through the result, whose borrow of `arena` keeps
+                // the bytes unchanged.
+                unsafe { bridge::refill_headers_over_block(own.as_mut(), ids, arena, fields) }?;
+                own
+            }
+            // SAFETY: as above.
+            None => unsafe { bridge::headers_over_block(ids, arena, fields) }?,
+        };
+        let headers: &HttpHeaders = self.own.insert(own);
+        Ok(headers)
+    }
 }
 
 /// `kj::HttpService::Response` for a request of `method` with `headers`.
