@@ -4129,6 +4129,10 @@ void Worker::Isolate::flushDeferredConsoleOutput() {
   }
 }
 
+void Worker::Isolate::retainThreadStateBetweenLocks() {
+  jsg::IsolateBase::from(impl->v8Isolate).retainThreadStateBetweenLocks();
+}
+
 void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
   impl->errorOnceDescriptions.findOrCreate(description, [&] {
     KJ_LOG(ERROR, description);
