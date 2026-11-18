@@ -499,6 +499,23 @@ build:release_unix --config=release
 build:release_linux --config=release_unix
 build:release_linux --linkopt="-Wl,-O2"
 
+# Profile-guided optimization of the Linux release build with ThinLTO (build/pgo/README.md).
+# pgo-instrument builds the binary that is run to train the profile, and pgo-use builds with it.
+# V8 is compiled in this build, so the same profile covers it. Rust isn't instrumented: stable rustc
+# can't use clang's profile runtime (-Zno-profiler-runtime is unstable).
+build:pgo-instrument --config=release_linux --config=thin-lto
+build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
+build:pgo-use --config=release_linux --config=thin-lto
+# rules_cc's fdo_optimize feature adds -fprofile-use and silences Clang's warnings about files the
+# profile doesn't cover.
+build:pgo-use --fdo_optimize=//build/pgo:profile
+# Functions changed since the profile was trained compile without profile data. Don't warn about
+# each of them.
+build:pgo-use --copt=-mllvm=-no-pgo-warn-mismatch
+# Under PGO, LoopIdiomRecognize can take the address of a coroutine frame variable before
+# coro.begin, which CoroSplit doesn't rewrite (https://github.com/llvm/llvm-project/pull/240036).
+build:pgo-use --copt=-mllvm=-disable-loop-idiom-all --linkopt=-Wl,-mllvm,-disable-loop-idiom-all
+
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
 # of macOS debug info. These sections are largely undocumented, but are used by LLDB to improve

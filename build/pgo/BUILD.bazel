@@ -1,0 +1,11 @@
+load("@rules_cc//cc/toolchains:fdo_profile.bzl", "fdo_profile")
+
+# The profile that --config=pgo-use optimizes with. It isn't checked in: build/pgo/README.md says how
+# to train it with --config=pgo-instrument and merge it into build/pgo/workerd.profdata.
+# --fdo_optimize takes this target rather than the file because it doesn't resolve labels the way
+# label-valued flags do.
+fdo_profile(
+    name = "profile",
+    profile = "workerd.profdata",
+    visibility = ["//visibility:public"],
+)
