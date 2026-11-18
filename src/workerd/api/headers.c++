@@ -366,11 +366,12 @@ Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guar
   // TODO(perf): Once kj::HttpHeaders supports an API for getting the CommonHeaderName directly
   // from the headers, we can optimize this to avoid looking up the common header IDs again,
   // making this constructor more efficient when copying common headers from kj::HttpHeaders.
-  other.forEach([this, &js](auto name, auto value) {
-    // We have to copy the strings here but we can avoid normalizing and validating since
+  other.forEach([this](kj::StringPtr name, kj::StringPtr value) {
+    // We have to copy the values here but we can avoid normalizing and validating since
     // they presumably already went through that process when they were added to the
-    // kj::HttpHeader instance.
-    appendUnguarded(js, kj::str(name), kj::str(value));
+    // kj::HttpHeader instance. A name is copied only if it isn't a common header's own
+    // lower-case spelling.
+    appendUnguardedImpl(name, kj::str(value));
   });
 }
 
@@ -655,6 +656,18 @@ void Headers::append(jsg::Lock& js, kj::String name, kj::String value) {
 }
 
 void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
+  appendUnguardedImpl(kj::mv(name), kj::mv(value));
+}
+
+template <typename Name>
+void Headers::appendUnguardedImpl(Name&& name, kj::String value) {
+  auto ownName = [&]() -> kj::String {
+    if constexpr (kj::isSameType<kj::Decay<Name>, kj::String>()) {
+      return kj::mv(name);
+    } else {
+      return kj::str(name);
+    }
+  };
   KJ_SWITCH_ONEOF(getHeaderKeyFor(name)) {
     KJ_CASE_ONEOF(id, kj::uint) {
       KJ_IF_SOME(existing, commonHeaders[id]) {
@@ -662,7 +675,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
       } else {
         auto& created = commonHeaders[id].emplace(kj::heap(Header()));
         if (name != getCommonHeaderName(id)) {
-          created->name = kj::mv(name);
+          created->name = ownName();
         }
         created->values.resize(1);
         created->values[0] = kj::mv(value);
@@ -677,7 +690,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
         auto& header = uncommonHeaders.findOrCreate(n, [&] -> Ret {
           kj::Maybe<kj::String> maybeName;
           if (name != n) {
-            maybeName = kj::mv(name);
+            maybeName = ownName();
           }
           return Ret{
             .key = kj::mv(n),
