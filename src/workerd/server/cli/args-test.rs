@@ -392,6 +392,10 @@ fn compiled_binary_has_no_config_arguments() {
 /// names every command, so the hand-written pages in help.rs cannot drift from the parser.
 #[test]
 fn help_pages_are_complete() {
+    // `flag` as a whole word, so that `-d` is not found in `--directory-path`.
+    fn has(page: &str, flag: &str) -> bool {
+        page.split([' ', ',', '\n']).any(|word| word == flag)
+    }
     fn check(cmd: &mut clap::Command, path: &str) {
         let page = cmd.render_help().to_string();
         for line in page.lines() {
@@ -420,9 +424,9 @@ fn help_pages_are_complete() {
             let long = arg.get_long().map(|l| format!("--{l}"));
             let short = arg.get_short().map(|s| format!("-{s}"));
             for flag in long.iter().chain(short.iter()) {
-                let shared = page.contains(crate::help::SHARED_NOTE)
-                    && crate::help::SHARED.contains(flag.as_str());
-                assert!(shared || page.contains(flag.as_str()), "{path}: no {flag}");
+                let shared =
+                    page.contains(crate::help::SHARED_NOTE) && has(crate::help::SHARED, flag);
+                assert!(shared || has(&page, flag), "{path}: no {flag}");
             }
         }
     }

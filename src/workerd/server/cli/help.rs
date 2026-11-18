@@ -147,7 +147,7 @@ Usage:
   workerd test <config> [filter]     Run its test handlers
   workerd bench <config> [filter]    Run its bench handlers
   workerd compile <config> > app     Build a self-contained binary
-  workerd <command> --help           Everything else about a command
+  workerd <command> -h               Its options, as in workerd serve -h
 
 Quick start:
   index.js       export default { fetch: () => new Response(\"hello\") };
@@ -163,7 +163,7 @@ Cluster (experimental):
 
 Config:
   A wrangler.json or wrangler.jsonc, as for wrangler dev, with fields:
-    name, main, compatibility_date, compatibility_flags, vars,
+    $schema, name, main, compatibility_date, compatibility_flags, vars,
     durable_objects, exports, migrations, no_bundle
     with --experimental: kv_namespaces, queues, triggers, workflows,
     d1_databases, assets
@@ -179,12 +179,6 @@ Options:
       --verbose                      Log to stderr
   -h, --help                         Print this help
   -V, --version                      Print the newest supported compat date
-
-More, in each command's --help:
-  serve          sockets, cluster, --debug-port, tracing, Python
-  test           filters, --predictable, --compat-date
-  bench          writing benchmarks, filters, JSON output
-  compile        --config-only
 
 workerd is not a hardened sandbox; run untrusted code in a VM.
 
@@ -284,7 +278,7 @@ a table.
 case names: <service>[:<entrypoint>][/<case>].
 
 Options:
-      --compat-date <date>           As for test; newest by default
+      --compat-date <date>           Date/latest for all; else newest if unset
       --format text|json             A table, or JSON with raw samples
       --output <path>                Write results to path
       --quick                        Check benchmarks run; don't measure
