@@ -100,22 +100,20 @@ use crate::body::HeaderBlock;
 use crate::body::HeaderIds;
 use crate::body::MAX_HEADERS;
 use crate::body::Protocol;
-use crate::body::RustBody;
 use crate::body::channel_in;
 use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::ReusedHeaders;
 use crate::ffi::WebSocketCompression;
 use crate::ffi::WebSocketErrorHandler;
-use crate::ffi::new_body_stream;
 use crate::ffi::new_connect_response;
-use crate::ffi::new_server_response;
 use crate::ffi::parse_method;
 use crate::handshake::accept_key;
 use crate::io::Hangup;
 use crate::io::RustIo;
 pub use crate::io::Upgrading;
 use crate::io::io_kj_error;
+use crate::scratch::CallParts;
 use crate::scratch::Scratch;
 use crate::wakes::Wakes;
 
@@ -551,23 +549,32 @@ async fn handle<H: Handler>(
             (None, None, Some(target)) => Cow::Borrowed(target.as_str()),
             _ => Cow::Owned(parts.uri.to_string()),
         };
-        let mut body = new_body_stream(Box::new(RustBody::new(body)));
-        let mut response = new_server_response(
-            Box::new(ServerResponse(Rc::clone(&sender))),
-            method,
-            headers,
-            conn.settings.websocket_compression,
-            conn.settings.websocket_errors(),
-        );
-        conn.handler
-            .request(
+        let responder = ServerResponse(Rc::clone(&sender));
+        let mut parts = conn.state.scratch.take_call(body);
+        let result = {
+            let CallParts { call, body } = &mut parts;
+            let mut started = call.start(
+                body,
+                &responder,
                 method,
-                url.as_bytes(),
-                HeadersRef::from(headers),
-                body.as_mut(),
-                ServiceResponse::from(response.as_mut()),
-            )
-            .await
+                headers,
+                conn.settings.websocket_compression,
+                conn.settings.websocket_errors(),
+            );
+            let (body, response) = started.parts();
+            conn.handler
+                .request(
+                    method,
+                    url.as_bytes(),
+                    HeadersRef::from(headers),
+                    body,
+                    ServiceResponse::from(response),
+                )
+                .await
+        };
+        // A call cancelled before here leaves nothing for the next one.
+        conn.state.scratch.keep_call(parts);
+        result
     };
     match result {
         Ok(()) if sender.sent() => {}
