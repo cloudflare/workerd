@@ -377,12 +377,17 @@ impl Protocol {
 ///
 /// `http::HeaderName` lowercases, so the spellings ride along in hyper's `HeaderCaseMap`
 /// extension, which its encoder honors (made public by
-/// patches/rust/crates/hyper/public-header-case-map.patch).
+/// patches/rust/crates/hyper/public-header-case-map.patch). hyper title-cases a name it has no
+/// spelling for (kj-hyper sets `title_case_headers`), so a message whose names are all spelled as
+/// hyper title-cases them, as most are, and whose values are not empty carries no extension.
+/// hyper pairs a name's spellings with its values in order and title-cases the values past its
+/// last spelling, so a name with a spelling for any of its values has one for each.
 pub struct Head {
     builtin: [Option<http::HeaderValue>; BUILTIN.len()],
     /// Every other header, in kj's order.
     map: http::HeaderMap,
-    spellings: HeaderCaseMap,
+    /// None until a name is spelled other than as hyper title-cases it.
+    spellings: Option<HeaderCaseMap>,
 }
 
 impl Head {
@@ -398,7 +403,7 @@ impl Head {
         Self {
             builtin: Default::default(),
             map: http::HeaderMap::new(),
-            spellings: HeaderCaseMap::default(),
+            spellings: None,
         }
     }
 
@@ -413,9 +418,27 @@ impl Head {
         if let Some(builtin) = builtin {
             self.builtin[builtin] = Some(value);
         } else if let Ok(header) = http::HeaderName::from_bytes(name) {
-            self.spellings.append(&header, Bytes::copy_from_slice(name));
+            self.spell(&header, name);
             self.map.append(header, value);
         }
+    }
+
+    /// Records the spelling of the value of `name` about to be appended, if hyper would write it
+    /// otherwise or the name's earlier values have spellings.
+    fn spell(&mut self, name: &http::HeaderName, spelling: &[u8]) {
+        let spelled = self
+            .spellings
+            .as_ref()
+            .map_or(0, |spellings| spellings.get_all_internal(name).count());
+        if spelled == 0 && is_title_case(spelling) {
+            return;
+        }
+        let spellings = self.spellings.get_or_insert_with(HeaderCaseMap::default);
+        // The name's earlier values went unspelled, as hyper would write them.
+        for _ in spelled..self.map.get_all(name).iter().count() {
+            spellings.append(name, title_case(name));
+        }
+        spellings.append(name, Bytes::copy_from_slice(spelling));
     }
 
     /// Drops the application's values of the headers that are `protocol`'s to set.
@@ -451,15 +474,61 @@ impl Head {
             if let (Some(value), Ok(name)) =
                 (value, http::HeaderName::from_bytes(spelling.as_bytes()))
             {
-                self.spellings
-                    .append(&name, Bytes::from_static(spelling.as_bytes()));
+                // A builtin header has one value, and no spelling yet.
+                if !is_title_case(spelling.as_bytes()) {
+                    self.spellings
+                        .get_or_insert_with(HeaderCaseMap::default)
+                        .append(&name, Bytes::from_static(spelling.as_bytes()));
+                }
                 map.append(name, value);
             }
         }
         map.extend(self.map);
+        // hyper's client writes an empty value as `Name:` only through the extension.
+        let spellings = self.spellings.or_else(|| {
+            map.values()
+                .any(http::HeaderValue::is_empty)
+                .then(HeaderCaseMap::default)
+        });
         *headers = map;
-        extensions.insert(self.spellings);
+        if let Some(spellings) = spellings {
+            extensions.insert(spellings);
+        }
     }
+}
+
+/// Whether hyper's title-casing of the lowercased `spelling` gives `spelling` back: a letter at
+/// the start or after a `-` is uppercase, and every other letter is lowercase.
+fn is_title_case(spelling: &[u8]) -> bool {
+    let mut after_dash = true;
+    spelling.iter().all(|&c| {
+        let cased = if after_dash {
+            !c.is_ascii_lowercase()
+        } else {
+            !c.is_ascii_uppercase()
+        };
+        after_dash = c == b'-';
+        cased
+    })
+}
+
+/// `name` as hyper title-cases it.
+fn title_case(name: &http::HeaderName) -> Bytes {
+    let mut after_dash = true;
+    let cased: Vec<u8> = name
+        .as_str()
+        .bytes()
+        .map(|c| {
+            let c = if after_dash {
+                c.to_ascii_uppercase()
+            } else {
+                c
+            };
+            after_dash = c == b'-';
+            c
+        })
+        .collect();
+    cased.into()
 }
 
 /// Incoming headers packed for C++ to build `kj::HttpHeaders` from in one allocation.
