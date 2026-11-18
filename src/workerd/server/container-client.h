@@ -72,6 +72,12 @@ void configureContainerPrivileges(
     docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
     const ContainerPrivileges& privileges);
 
+// Opens UDP flows to `containerPort` through the proxy-everything sidecar's ingress listener at
+// 127.0.0.1:<ingressHostPort>, read at connect time. Declared here so the unit test can drive it
+// against a fake sidecar.
+rpc::Container::UdpPort::Client newDockerUdpPort(
+    kj::Network& network, const kj::Maybe<uint16_t>& ingressHostPort, uint16_t containerPort);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::refcounted<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -111,6 +117,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> signal(SignalContext context) override;
   kj::Promise<void> exec(ExecContext context) override;
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
+  kj::Promise<void> getUdpPort(GetUdpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;

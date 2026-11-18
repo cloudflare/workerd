@@ -13,6 +13,7 @@
 
 #include "container-client.h"
 
+#include <kj/async-io.h>
 #include <kj/test.h>
 
 namespace workerd::server {
@@ -301,6 +302,310 @@ KJ_TEST("ContainerCreateRequest omits empty container privileges") {
   KJ_EXPECT(decodedHostConfig.getCapAdd().size() == 0);
   KJ_EXPECT(decodedHostConfig.getDevices().size() == 0);
   KJ_EXPECT(decodedHostConfig.getSecurityOpt().size() == 0);
+}
+
+// The UDP flow tests below run a fake proxy-everything sidecar on a loopback listener.
+
+constexpr kj::StringPtr CONNECT_ACCEPTED = "HTTP/1.1 200 OK\r\n\r\n"_kj;
+
+struct DownEvent {
+  kj::StringPtr kind;
+  kj::String payload;
+};
+
+struct DownRecording {
+  kj::Vector<DownEvent> events;
+  size_t consumed = 0;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> waiter;
+
+  void add(kj::StringPtr kind, kj::String payload = kj::str()) {
+    events.add(DownEvent{kind, kj::mv(payload)});
+
+    KJ_IF_SOME(fulfiller, waiter) {
+      fulfiller->fulfill();
+      waiter = kj::none;
+    }
+  }
+
+  DownEvent next(kj::WaitScope& waitScope) {
+    while (consumed == events.size()) {
+      auto paf = kj::newPromiseAndFulfiller<void>();
+      waiter = kj::mv(paf.fulfiller);
+      paf.promise.wait(waitScope);
+    }
+
+    return kj::mv(events[consumed++]);
+  }
+};
+
+class RecordingDatagramStream final: public rpc::DatagramStream::Server {
+ public:
+  explicit RecordingDatagramStream(DownRecording& recording): recording(recording) {}
+
+ private:
+  DownRecording& recording;
+
+  kj::Promise<void> send(SendContext context) override {
+    recording.add("datagram"_kj, kj::heapString(context.getParams().getDatagram().asChars()));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> end(EndContext) override {
+    recording.add("end"_kj);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> abort(AbortContext) override {
+    recording.add("abort"_kj);
+    return kj::READY_NOW;
+  }
+};
+
+struct UdpFlowTest {
+  kj::AsyncIoContext io = kj::setupAsyncIo();
+  kj::WaitScope& waitScope = io.waitScope;
+  kj::Network& network = io.provider->getNetwork();
+  kj::Own<kj::ConnectionReceiver> sidecar =
+      network.parseAddress("127.0.0.1", 0).wait(waitScope)->listen();
+  kj::Maybe<uint16_t> ingressHostPort = static_cast<uint16_t>(sidecar->getPort());
+  DownRecording down;
+  rpc::Container::UdpPort::Client port = newDockerUdpPort(network, ingressHostPort, 5353);
+
+  capnp::RemotePromise<rpc::Container::UdpPort::ConnectResults> connect() {
+    auto request = port.connectRequest();
+    request.setDown(kj::heap<RecordingDatagramStream>(down));
+    return request.send();
+  }
+
+  // Accepts the tunnel and checks the request head.
+  kj::Own<kj::AsyncIoStream> accept() {
+    auto conn = sidecar->accept().wait(waitScope);
+    kj::Vector<char> head;
+
+    while (head.size() < 4 || memcmp(head.end() - 4, "\r\n\r\n", 4) != 0) {
+      char next;
+      KJ_REQUIRE(conn->tryRead(&next, 1, 1).wait(waitScope) == 1);
+      head.add(next);
+    }
+
+    auto text = kj::heapString(head.asPtr());
+    KJ_EXPECT(text.startsWith("CONNECT 127.0.0.1:5353 HTTP/1.1\r\n"), text);
+    KJ_EXPECT(text.contains("\r\nX-Dst-Addr: 127.0.0.1:5353\r\n"), text);
+    KJ_EXPECT(text.contains("\r\nX-Dst-Protocol: udp\r\n"), text);
+    return conn;
+  }
+
+  // Reads one frame and returns its datagram.
+  kj::String readDatagram(kj::AsyncIoStream& conn) {
+    kj::byte length[2];
+    KJ_REQUIRE(conn.tryRead(length, 2, 2).wait(waitScope) == 2);
+    auto datagram = kj::heapArray<char>(size_t(length[0]) << 8 | length[1]);
+    auto size = conn.tryRead(datagram.begin(), datagram.size(), datagram.size()).wait(waitScope);
+    KJ_REQUIRE(size == datagram.size());
+    return kj::heapString(datagram);
+  }
+};
+
+void appendLength(kj::Vector<kj::byte>& out, uint16_t length) {
+  out.add(static_cast<kj::byte>(length >> 8));
+  out.add(static_cast<kj::byte>(length));
+}
+
+void appendDatagram(kj::Vector<kj::byte>& out, kj::StringPtr payload) {
+  appendLength(out, static_cast<uint16_t>(payload.size()));
+  out.addAll(payload.asBytes());
+}
+
+kj::Promise<void> sendUp(rpc::DatagramStream::Client& up, kj::StringPtr payload) {
+  auto request = up.sendRequest();
+  request.setDatagram(payload.asBytes());
+  return request.send();
+}
+
+KJ_TEST("UDP flow sends early datagrams after the request head and round trips payloads") {
+  UdpFlowTest test;
+  auto connect = test.connect();
+  auto up = connect.getUp();
+  auto largest = kj::str(kj::repeat('b', 1500));
+
+  kj::Vector<kj::Promise<void>> sends;
+  sends.add(sendUp(up, ""_kj));
+  sends.add(sendUp(up, "x"_kj));
+  sends.add(sendUp(up, largest));
+  sends.add(sendUp(up, kj::str(kj::repeat('c', 1501))));
+  sends.add(sendUp(up, "z"_kj));
+
+  auto conn = test.accept();
+  KJ_EXPECT(test.readDatagram(*conn) == ""_kj);
+  KJ_EXPECT(test.readDatagram(*conn) == "x"_kj);
+  KJ_EXPECT(test.readDatagram(*conn) == largest);
+  // The oversized datagram is dropped.
+  KJ_EXPECT(test.readDatagram(*conn) == "z"_kj);
+
+  kj::Vector<kj::byte> reply;
+  reply.addAll(CONNECT_ACCEPTED.asBytes());
+  appendDatagram(reply, ""_kj);
+  appendDatagram(reply, "x"_kj);
+  appendDatagram(reply, largest);
+  conn->write(reply.asPtr()).wait(test.waitScope);
+
+  connect.wait(test.waitScope);
+  kj::joinPromises(sends.releaseAsArray()).wait(test.waitScope);
+
+  for (kj::StringPtr expected: {""_kj, "x"_kj, largest.asPtr()}) {
+    auto event = test.down.next(test.waitScope);
+    KJ_EXPECT(event.kind == "datagram"_kj);
+    KJ_EXPECT(event.payload == expected);
+  }
+
+  sendUp(up, "after"_kj).wait(test.waitScope);
+  KJ_EXPECT(test.readDatagram(*conn) == "after"_kj);
+}
+
+KJ_TEST("UDP flow fails connect with the sidecar's status when it refuses the flow") {
+  UdpFlowTest test;
+  auto connect = test.connect();
+  auto up = connect.getUp();
+  auto early = sendUp(up, "early"_kj).eagerlyEvaluate([](kj::Exception&&) {});
+  auto conn = test.accept();
+  KJ_EXPECT(test.readDatagram(*conn) == "early"_kj);
+
+  // The sidecar closes the tunnel after the status. The early datagram was read first, so the
+  // close is a FIN and does not reset the status away.
+  conn->write("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad target."_kj.asBytes())
+      .wait(test.waitScope);
+  conn = nullptr;
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "Connecting to container UDP port through proxy-everything failed: [400] Bad Request bad "
+      "target.",
+      connect.wait(test.waitScope));
+}
+
+KJ_TEST("UDP flow decodes frames split across reads") {
+  UdpFlowTest test;
+  auto connect = test.connect();
+  auto conn = test.accept();
+
+  // Each write ends inside a frame and waits until the datagram before the cut arrives, so the
+  // flow reads the cut separately: first between the two length bytes, then inside a datagram.
+  kj::Vector<kj::byte> frames;
+  appendDatagram(frames, "a"_kj);
+  appendDatagram(frames, "bb"_kj);
+  auto betweenLengthBytes = frames.size() - 3;
+  appendDatagram(frames, "ccc"_kj);
+  appendDatagram(frames, "dddd"_kj);
+  auto insideDatagram = frames.size() - 2;
+
+  kj::Vector<kj::byte> reply;
+  reply.addAll(CONNECT_ACCEPTED.asBytes());
+  reply.addAll(frames.asPtr().first(betweenLengthBytes));
+  conn->write(reply.asPtr()).wait(test.waitScope);
+  connect.wait(test.waitScope);
+  KJ_EXPECT(test.down.next(test.waitScope).payload == "a"_kj);
+
+  conn->write(frames.asPtr().slice(betweenLengthBytes, insideDatagram)).wait(test.waitScope);
+  KJ_EXPECT(test.down.next(test.waitScope).payload == "bb"_kj);
+  KJ_EXPECT(test.down.next(test.waitScope).payload == "ccc"_kj);
+
+  conn->write(frames.asPtr().slice(insideDatagram, frames.size())).wait(test.waitScope);
+  auto last = test.down.next(test.waitScope);
+  KJ_EXPECT(last.kind == "datagram"_kj);
+  KJ_EXPECT(last.payload == "dddd"_kj);
+}
+
+KJ_TEST("UDP flow ends down and closes the tunnel on FLOW_END") {
+  UdpFlowTest test;
+  auto connect = test.connect();
+  auto conn = test.accept();
+
+  kj::Vector<kj::byte> reply;
+  reply.addAll(CONNECT_ACCEPTED.asBytes());
+  appendDatagram(reply, "last"_kj);
+  appendLength(reply, 0xffff);
+  reply.add(0);
+  conn->write(reply.asPtr()).wait(test.waitScope);
+  connect.wait(test.waitScope);
+
+  KJ_EXPECT(test.down.next(test.waitScope).payload == "last"_kj);
+  KJ_EXPECT(test.down.next(test.waitScope).kind == "end"_kj);
+
+  kj::byte unused;
+  KJ_EXPECT(conn->tryRead(&unused, 1, 1).wait(test.waitScope) == 0);
+}
+
+KJ_TEST("UDP flow skips frames above 1500 bytes and stays open") {
+  // A 0xFFFE-byte frame is larger than the flow's read buffer, so skipping it spans reads.
+  for (uint16_t length: {1501, 0xfffe}) {
+    UdpFlowTest test;
+    auto connect = test.connect();
+    auto up = connect.getUp();
+    auto conn = test.accept();
+
+    kj::Vector<kj::byte> reply;
+    reply.addAll(CONNECT_ACCEPTED.asBytes());
+    appendLength(reply, length);
+    auto oversized = kj::heapArray<kj::byte>(length);
+    oversized.asPtr().fill('x');
+    reply.addAll(oversized);
+    appendDatagram(reply, "next"_kj);
+
+    // Written in pieces, so the oversized frame also arrives over several writes.
+    for (size_t offset = 0; offset < reply.size(); offset += 10000) {
+      auto end = kj::min(offset + 10000, reply.size());
+      conn->write(reply.asPtr().slice(offset, end)).wait(test.waitScope);
+    }
+
+    connect.wait(test.waitScope);
+
+    auto datagram = test.down.next(test.waitScope);
+    KJ_EXPECT(datagram.kind == "datagram"_kj, length);
+    KJ_EXPECT(datagram.payload == "next"_kj, length);
+
+    sendUp(up, "still open"_kj).wait(test.waitScope);
+    KJ_EXPECT(test.readDatagram(*conn) == "still open"_kj, length);
+    KJ_EXPECT(test.down.events.size() == 1, length);
+  }
+}
+
+KJ_TEST("UDP flow keeps receiving after end() and ends down when the sidecar closes") {
+  UdpFlowTest test;
+  auto connect = test.connect();
+  auto up = connect.getUp();
+  auto conn = test.accept();
+
+  conn->write(CONNECT_ACCEPTED.asBytes()).wait(test.waitScope);
+  connect.wait(test.waitScope);
+
+  up.endRequest().send().wait(test.waitScope);
+  KJ_EXPECT_THROW_MESSAGE("send() after end()", sendUp(up, "late"_kj).wait(test.waitScope));
+
+  kj::Vector<kj::byte> reply;
+  appendDatagram(reply, "still flowing"_kj);
+  conn->write(reply.asPtr()).wait(test.waitScope);
+
+  auto datagram = test.down.next(test.waitScope);
+  KJ_EXPECT(datagram.kind == "datagram"_kj);
+  KJ_EXPECT(datagram.payload == "still flowing"_kj);
+
+  conn->shutdownWrite();
+  KJ_EXPECT(test.down.next(test.waitScope).kind == "end"_kj);
+}
+
+KJ_TEST("UDP flow closes the tunnel when up is released") {
+  UdpFlowTest test;
+  kj::Own<kj::AsyncIoStream> conn;
+
+  {
+    auto connect = test.connect();
+    conn = test.accept();
+    conn->write(CONNECT_ACCEPTED.asBytes()).wait(test.waitScope);
+    connect.wait(test.waitScope);
+  }
+
+  kj::byte unused;
+  KJ_EXPECT(conn->tryRead(&unused, 1, 1).wait(test.waitScope) == 0);
+  KJ_EXPECT(test.down.events.size() == 0);
 }
 
 }  // namespace

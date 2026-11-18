@@ -124,6 +124,52 @@ export class DurableObjectExample extends DurableObject {
     const info = await container.inspect();
     assert.match(info.image, /container-client-test(?::latest)?$/);
 
+    // The image echoes UDP datagrams on port 8080.
+    {
+      const socket = container.getUdpPort(8080).connect('foo:8080');
+      const writer = socket.writable.getWriter();
+      const reader = socket.readable.getReader();
+      const deadline = Date.now() + DEFAULT_TIMEOUT_DURATION;
+      let pending = reader.read();
+
+      // UDP may drop a datagram or its echo, so resend until the echo arrives. Each size is
+      // different, so a late echo of an earlier resend is not mistaken for this one.
+      const echo = async (sent) => {
+        while (Date.now() < deadline) {
+          await writer.write(sent);
+          const result = await Promise.race([pending, scheduler.wait(500)]);
+          if (result === undefined) {
+            continue;
+          }
+
+          pending = reader.read();
+          if (result.value.byteLength === sent.byteLength) {
+            return result.value;
+          }
+        }
+
+        assert.fail(`no echo of a ${sent.byteLength}-byte datagram`);
+      };
+
+      for (const size of [0, 1, 1500]) {
+        const sent = new Uint8Array(size).fill(size % 251);
+        assert.deepStrictEqual(await echo(sent), sent);
+      }
+
+      await assert.rejects(writer.write(new Uint8Array(1501)), {
+        name: 'RangeError',
+        message: 'UDP payload exceeds the 1500-byte limit.',
+      });
+
+      await socket.close();
+
+      assert.throws(
+        () =>
+          container.getUdpPort(8080).connect('foo:8080', { protocol: 'tcp' }),
+        { name: 'TypeError', message: 'This port only supports UDP.' }
+      );
+    }
+
     await container.destroy();
 
     await monitor;

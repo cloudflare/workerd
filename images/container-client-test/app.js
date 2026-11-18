@@ -1,3 +1,4 @@
+const dgram = require('dgram');
 const { createServer } = require('http');
 const net = require('net');
 
@@ -204,6 +205,13 @@ if (webSocketEnabled) {
     }
   });
 }
+
+// UDP echo used by the getUdpPort tests.
+const udpServer = dgram.createSocket('udp4');
+udpServer.on('message', (msg, rinfo) =>
+  udpServer.send(msg, rinfo.port, rinfo.address)
+);
+udpServer.bind(8080);
 
 server.listen(8080, function () {
   console.log('Server listening on port 8080');
