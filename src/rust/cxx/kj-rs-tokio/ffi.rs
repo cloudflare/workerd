@@ -149,6 +149,14 @@ mod bridge {
         /// turns. Never sleeps. Returns the wake latch.
         fn poll(&self) -> bool;
 
+        /// `poll()` that yields to the scheduler once, giving ready tasks and the drivers an
+        /// opportunity to run.
+        fn poll_once(&self) -> bool;
+
+        /// Consume the wake latch without running tokio: returns `true` iff `wake()` was called
+        /// since the latch was last consumed. Loop thread only.
+        fn take_wake_latch(&self) -> bool;
+
         /// Set the wake latch and unblock a concurrent `wait_*`. Callable from any thread.
         fn wake(&self);
 

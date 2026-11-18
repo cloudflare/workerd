@@ -11,8 +11,8 @@
 //! sees its actor break before the failed request's reply reaches the caller. They also end
 //! with the server (its drop clears them; `Factory::settle_tasks` ends the ones the drop
 //! spawned), before V8 goes away. Neither holds for tasks on the tokio `LocalSet`
-//! (`kj_rs_tokio::spawn`), which run only once the KJ loop idles and live until the event port is
-//! torn down.
+//! (`kj_rs_tokio::spawn`), which run when the KJ loop idles or between its turns, and live
+//! until the event port is torn down.
 
 use std::future::Future;
 

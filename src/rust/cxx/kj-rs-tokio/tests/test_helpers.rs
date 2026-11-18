@@ -200,6 +200,23 @@ pub fn spawn_detached_completing_task() {
     }));
 }
 
+static YIELDING_STEPS: AtomicU64 = AtomicU64::new(0);
+
+/// See the bridge doc (lib.rs).
+pub fn spawn_detached_yielding_task(yields: u32) {
+    drop(kj_rs_tokio::spawn(async move {
+        for _ in 0..yields {
+            YIELDING_STEPS.fetch_add(1, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+        }
+        COMPLETED_TASKS.fetch_add(1, Ordering::SeqCst);
+    }));
+}
+
+pub fn yielding_task_steps() -> u64 {
+    YIELDING_STEPS.load(Ordering::SeqCst)
+}
+
 /// See the bridge doc on `task_fulfills_kj_fulfiller` (lib.rs).
 pub fn task_fulfills_kj_fulfiller(delay_ms: u64, value: i32) {
     drop(kj_rs_tokio::spawn(async move {

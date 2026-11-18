@@ -10,6 +10,7 @@ use test_helpers::has_loop_runtime_handle;
 use test_helpers::nested_wait_from_task;
 use test_helpers::runtime_context_waits_after_block_on;
 use test_helpers::spawn_detached_completing_task;
+use test_helpers::spawn_detached_yielding_task;
 use test_helpers::spawn_panicking_task;
 use test_helpers::spawn_pending_task;
 use test_helpers::spawn_task_awaiting_kj_never_promise;
@@ -24,6 +25,7 @@ use test_helpers::task_fulfills_kj_fulfiller;
 use test_helpers::threaded_wake_future;
 use test_helpers::tokio_sleep_on_runtime;
 use test_helpers::wake_stashed_waker;
+use test_helpers::yielding_task_steps;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
@@ -34,7 +36,7 @@ mod ffi {
         /// Spawns a task on this thread's KJ-loop tokio runtime which sleeps `delay_ms` (real
         /// tokio time) and then produces `value`; awaits its `JoinHandle`. The returned future is
         /// bridged to a `kj::Promise` by kj-rs and polled by the KJ event loop; the spawned task
-        /// itself only runs while the loop sleeps inside `TokioEventPort::wait()`/`poll()`.
+        /// itself only runs inside `TokioEventPort::wait()`/`poll()`.
         async fn spawn_task_on_runtime(delay_ms: u64, value: u32) -> Result<u32>;
 
         /// Spawns a `tokio::time::sleep` on the loop runtime and awaits it (via the task's
@@ -76,6 +78,11 @@ mod ffi {
         /// Detaches a task (drops its JoinHandle) that still runs to completion, bumping
         /// completed_task_count().
         fn spawn_detached_completing_task();
+        /// Detaches a task that yields `yields` times, counting each step before its yield in
+        /// `yielding_task_steps()`, then bumps completed_task_count().
+        fn spawn_detached_yielding_task(yields: u32);
+        /// How many yields `spawn_detached_yielding_task`'s tasks have taken (process-wide).
+        fn yielding_task_steps() -> u64;
 
         /// Spawns a task that sleeps `delay_ms` (tokio time, i.e. while the KJ loop is parked
         /// inside the port) and then fulfills the test fulfiller installed by C++

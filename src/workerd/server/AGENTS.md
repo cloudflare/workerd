@@ -113,7 +113,8 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
 - One thread, one loop: `server/entry.rs` creates a `kj_rs_tokio::Runtime` (the KJ event loop
   on kj-rs-tokio's port, with its tokio `current_thread` runtime) and `block_on`s the command,
   which runs as a task on the loop's `LocalSet` while the main thread is blocked in
-  `promise.wait()`: the KJ loop schedules the thread, and tokio runs whenever it sleeps. The
+  `promise.wait()`: the KJ loop schedules the thread, and tokio runs whenever it sleeps, and
+  about every 20 ms while it stays busy. The
   factory takes its `kj::Timer` from the Runtime's context and its `kj::Network` from a kj-rs-io
   provider the bootstrap builds over it, so the C++ side (actor storage, alarms, RPC, containers)
   sees KJ I/O interfaces over tokio. The Rust server binds its sockets and dials external
