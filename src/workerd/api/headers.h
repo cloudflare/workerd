@@ -175,6 +175,11 @@ public:
   using HeaderKey = kj::OneOf<uint, kj::String>;
 
 private:
+  // Appends a header without checking it. `name` is a kj::String to keep or a kj::StringPtr to
+  // copy, which is copied only if the header keeps its own spelling of the name.
+  template <typename Name>
+  void appendUnguardedImpl(Name&& name, kj::String value);
+
   struct Header final {
     // The name is only set when the casing of the name differs from the lower-cased key.
     kj::Maybe<kj::String> name;
