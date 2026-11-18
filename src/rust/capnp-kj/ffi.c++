@@ -22,7 +22,8 @@ capnp::ReaderOptions unlimitedReaderOptions() {
 // Copies a message Rust built into `dest`, moving its capabilities into `dest`'s message.
 void copyFromRust(capnp::AnyPointer::Builder dest, RustMessage& message) {
   auto segmentCount = message.segment_count();
-  auto segments = kj::heapArray<kj::ArrayPtr<const capnp::word>>(segmentCount);
+  // Usually one segment, so kept off the heap.
+  KJ_STACK_ARRAY(kj::ArrayPtr<const capnp::word>, segments, segmentCount, 4, 32);
   for (auto i: kj::zeroTo(segmentCount)) {
     auto bytes = message.segment(i);
     KJ_REQUIRE(bytes.size() % sizeof(capnp::word) == 0);
@@ -75,7 +76,9 @@ class RustServerAdapter final: public capnp::Capability::Server {
 
 }  // namespace
 
-CxxMessage::CxxMessage(capnp::AnyPointer::Reader root) {
+// Sized so that the copy fits in one segment. MallocMessageBuilder's default first segment is 1024
+// zeroed words, which costs as much as the copy itself for a small message.
+CxxMessage::CxxMessage(capnp::AnyPointer::Reader root): builder(root.targetSize().wordCount + 1) {
   caps.imbue(builder.getRoot<capnp::AnyPointer>()).set(root);
   segments = builder.getSegmentsForOutput();
 }
