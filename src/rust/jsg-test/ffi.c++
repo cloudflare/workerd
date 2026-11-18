@@ -457,6 +457,16 @@ void set_javascript_execution_disallowed(Isolate* isolate, bool disallowed) {
   ::workerd::jsg::Lock::from(isolate).setDisallowJavascriptExecution(disallowed);
 }
 
+void set_allow_eval(Isolate* isolate, bool allow) {
+  ::workerd::jsg::Lock::from(isolate).setAllowEval(allow);
+}
+
+::workerd::rust::jsg::Local wasm_module_object_from_compiled_module(
+    Isolate* isolate, kj::Own<::workerd::rust::jsg::CompiledWasmModule> module) {
+  return ::workerd::rust::jsg::to_ffi(
+      ::workerd::jsg::check(v8::WasmModuleObject::FromCompiledModule(isolate, *module)));
+}
+
 void set_error_slots(
     Isolate* isolate, ::workerd::rust::jsg::Local object, ::rust::Str name, ::rust::Str message) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
