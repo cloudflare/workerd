@@ -36,7 +36,7 @@ namespace _ {  // private
 template <typename Resource>
 class AsyncLockWaiter: public kj::Refcounted {
  public:
-  using WaiterList = typename AsyncLockQueue<Resource>::WaiterList;
+  using WaiterList = AsyncLockQueue<Resource>::WaiterList;
 
   // Joins the back of the queue, whose list `lockedList` is, locked by the caller.
   AsyncLockWaiter(const AsyncLockQueue<Resource>& queue,
