@@ -22,6 +22,25 @@ fn host_of_address_strips_the_port_only() {
 }
 
 #[test]
+fn url_shows_a_wildcard_as_localhost() {
+    assert_eq!(
+        url_of("http", "*:8787", 8787).unwrap(),
+        "http://localhost:8787"
+    );
+    assert_eq!(
+        url_of("http", "0.0.0.0:0", 4123).unwrap(),
+        "http://localhost:4123"
+    );
+    assert_eq!(
+        url_of("https", "[::1]:443", 443).unwrap(),
+        "https://[::1]:443"
+    );
+    assert_eq!(url_of("tcp", "::1", 80).unwrap(), "tcp://[::1]:80");
+    assert!(url_of("http", "unix:/tmp/sock", 0).is_none());
+    assert!(url_of("http", "", 8080).is_none());
+}
+
+#[test]
 fn the_peer_cf_blob_names_the_client() {
     runtime().block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

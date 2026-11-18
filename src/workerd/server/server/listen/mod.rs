@@ -86,6 +86,30 @@ pub fn host_of_address(address: &str) -> String {
     address.to_owned()
 }
 
+/// The URL to open for `sock`, listening at `address` on `port`, as `serve` prints it: a wildcard
+/// host is localhost. None for a Unix, loopback or inherited socket.
+#[must_use]
+pub fn url(sock: socket::Reader<'_>, address: &str, port: u16) -> Option<String> {
+    let scheme = match sock.which() {
+        Ok(socket::Which::Http(_)) => "http",
+        Ok(socket::Which::Https(_)) => "https",
+        Ok(socket::Which::Tcp(_)) => "tcp",
+        _ => "udp",
+    };
+    url_of(scheme, address, port)
+}
+
+fn url_of(scheme: &str, address: &str, port: u16) -> Option<String> {
+    let host = match host_of_address(address).as_str() {
+        "" => return None,
+        h if h.starts_with("unix:") || h.starts_with("loopback:") => return None,
+        "*" | "0.0.0.0" | "::" | "[::]" => "localhost".to_owned(),
+        h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
+        h => h.to_owned(),
+    };
+    Some(format!("{scheme}://{host}:{port}"))
+}
+
 fn default_port_for(sock: socket::Reader<'_>) -> u16 {
     match sock.which() {
         Ok(socket::Which::Http(_)) => 80,
