@@ -24,6 +24,7 @@ mod ffi {
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
+        type CompiledWasmModule = jsg::v8::ffi::CompiledWasmModule;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -207,6 +208,20 @@ mod ffi {
             isolate: *mut Isolate,
             disallowed: bool,
         ) -> Result<()>;
+
+        /// Allows or disallows dynamic code evaluation, WebAssembly compilation included.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn set_allow_eval(isolate: *mut Isolate, allow: bool);
+
+        /// Makes a `WebAssembly.Module` from `module` without recompiling it, as C++ code
+        /// that the module is handed to does. Fails if V8 creates none.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn wasm_module_object_from_compiled_module(
+            isolate: *mut Isolate,
+            module: KjOwn<CompiledWasmModule>,
+        ) -> Result<Local>;
 
         /// Gives `object` `name` and `message` as an error implemented in the per-isolate
         /// bootstrap holds them. Fails if it is not an object.
@@ -770,6 +785,39 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked.
         unsafe { ffi::set_javascript_execution_disallowed(lock.isolate().as_ffi(), disallowed) }
             .expect("JavaScript execution should have been disallowed");
+    }
+
+    /// Allows or disallows dynamic code evaluation (`eval()`, `new Function()` and WebAssembly
+    /// compilation), as C++ JSG's `jsg::Lock::setAllowEval()` does. The harness disallows it.
+    pub fn set_allow_eval(lock: &mut jsg::Lock<'_>, allow: bool) {
+        // SAFETY: `lock` proves the isolate is locked.
+        unsafe { ffi::set_allow_eval(lock.isolate().as_ffi(), allow) }
+    }
+
+    /// Makes a `WebAssembly.Module` from `module` in C++, without recompiling it, as C++ code
+    /// that Rust hands a [`v8::CompiledWasmModule`] to does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 creates no module object.
+    pub fn wasm_module_object_from_compiled_module<'s>(
+        lock: &mut jsg::Lock<'s>,
+        module: v8::CompiledWasmModule,
+    ) -> v8::Local<'s, v8::WasmModuleObject> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which the result belongs to.
+        let local = unsafe {
+            v8::Local::<v8::Value>::from_ffi(
+                ffi::wasm_module_object_from_compiled_module(
+                    lock.isolate().as_ffi(),
+                    module.into_ffi(),
+                )
+                .expect("V8 should create the module object"),
+            )
+        };
+        local
+            .try_into()
+            .expect("the result should be a WebAssembly.Module")
     }
 
     /// Gives `object` `name` and `message` as an error implemented in the per-isolate bootstrap,

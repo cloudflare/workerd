@@ -33,6 +33,10 @@ using PropertyQueryCallbackInfo = v8::PropertyCallbackInfo<v8::Integer>;
 using FastApiCallbackOptions = v8::FastApiCallbackOptions;
 // Const, as IsolateBase hands it out: every member that the shims call is const and thread-safe.
 using ExternalMemoryTarget = const ::workerd::jsg::ExternalMemoryTarget;
+// The compiled code of a WebAssembly.Module, which V8 shares between every module object made
+// from it, in any isolate. It is not on the V8 heap, and may be read and destroyed on any thread;
+// making a module object from it needs the lock of the isolate it is made in.
+using CompiledWasmModule = v8::CompiledWasmModule;
 struct ModuleRegistry;
 struct Local;
 struct ArrayElement;
@@ -253,6 +257,7 @@ bool local_is_symbol(const Local& val);
 bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
+bool local_is_wasm_module_object(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
 MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val);
 // Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
@@ -477,6 +482,15 @@ uint8_t* local_array_buffer_data(const Local& buffer);
 // its byte length.
 uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
+
+// Local<WasmModuleObject>
+kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module);
+
+// CompiledWasmModule
+// Returns the address of the bytes the module was compiled from, which the module owns, and sets
+// `length` to how many there are.
+const uint8_t* compiled_wasm_module_get_wire_bytes(
+    const CompiledWasmModule& module, size_t& length);
 
 // Local<ArrayBufferView>
 size_t local_array_buffer_view_byte_offset(const Local& view);
