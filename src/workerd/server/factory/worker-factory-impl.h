@@ -316,17 +316,20 @@ class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
   class EventDispatcherImpl;
 };
 
-// The debug port: every service's entrypoints and actors, looked up through the server.
+// The debug port: every service's entrypoints and actors, looked up through the server. It is
+// also what a cluster peer and another loop thread of the process (`localCaller`) see.
 class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
-  WorkerdDebugPortImpl(
-      ::rust::Box<ServerHandle> server, capnp::HttpOverCapnpFactory& httpOverCapnpFactory);
+  WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      LocalCaller localCaller);
   kj::Promise<void> getEntrypoint(GetEntrypointContext context) override;
   kj::Promise<void> getActor(GetActorContext context) override;
 
  private:
   ::rust::Box<ServerHandle> server;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  LocalCaller localCaller;
 };
 
 // Trims the name off a durable id longer than production keeps (1024 bytes).

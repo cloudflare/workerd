@@ -14,6 +14,11 @@
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
+//! This thread is the process's first loop thread. `workerd serve --threads=<N>` has it start
+//! the others once its own server is built (`threads.rs`), each inside `with_loop_thread_context`
+//! with a loop and a factory of its own; they have ended, their loops and factories gone, by the
+//! time `run::run` returns, so this thread's factory is the last and V8 is torn down here.
+//!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
 //! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
 //! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
@@ -117,8 +122,8 @@ pub fn run_pending_command(
     (command.0)(config, structured_logging)
 }
 
-/// The body of a loop thread other than the first, for the C++ frame that sets up the process's
-/// logging on that thread around it (`with_loop_thread_context`).
+/// The body of a loop thread other than the first (`threads.rs`), for the C++ frame that sets up
+/// the process's logging on that thread around it (`with_loop_thread_context`).
 pub struct LoopThread(Box<dyn FnOnce() -> Result<()>>);
 
 impl LoopThread {

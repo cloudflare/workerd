@@ -17,7 +17,9 @@
 //! since every factory made from it holds a reference. `bootstrap_loop` makes a thread's own
 //! `WorkerFactory` from one, on that thread's loop; the thread then compiles its own copy of each
 //! worker and drops the factory before its loop. The thread that drops the last reference to a
-//! `SharedFactory` tears down V8 and the rest of the process's state.
+//! `SharedFactory` tears down V8 and the rest of the process's state: `workerd serve
+//! --threads` (threads.rs) joins every other loop thread before the first drops its factory, so
+//! that is the main thread.
 
 #![allow(
     unsafe_code,
@@ -50,6 +52,7 @@ pub use crate::listen::udp::UdpFlow;
 pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
+pub use crate::threads::SessionEnd;
 
 #[cxx::bridge(namespace = "workerd::server")]
 #[expect(
@@ -548,7 +551,9 @@ pub mod ffi {
         fn actor_id_key(id: &ActorIdHandle) -> String;
         fn actor_id_from_name(name: &str) -> KjOwn<ActorIdHandle>;
         /// The id of a durable namespace, from its hex text (a debug-port request).
-        fn actor_id_from_hex(hex: &str) -> Result<KjOwn<ActorIdHandle>>;
+        fn actor_id_from_hex(hex: &str, name: KjMaybe<&str>) -> Result<KjOwn<ActorIdHandle>>;
+        /// The name a durable actor's id was derived from, if it carries one.
+        fn actor_id_name(id: &ActorIdHandle) -> KjMaybe<String>;
 
         /// The storage of one actor namespace: its directory on disk (or none for in-memory
         /// storage), the SQLite VFS over it, and its alarm scheduler.
@@ -697,21 +702,34 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<()>;
+        /// Serves, on the first loop thread, the session another loop thread keeps with it
+        /// (threads.rs): the debug port's interface, whose actors are resolved as for a caller
+        /// on this thread.
+        async fn factory_accept_loop_session(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+        ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
         fn new_rpc_client(
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
-        /// An actor on a cluster peer, by `WorkerdDebugPort.getActor` over `session`, a peer
-        /// session from `new_rpc_client`. Pipelined: no round trip until its first event. It
-        /// keeps the session alive.
+        /// An actor on a cluster peer or on the first loop thread, by
+        /// `WorkerdDebugPort.getActor` over `session`, a session from `new_rpc_client`.
+        /// Pipelined: no round trip until its first event. It keeps the session alive, and the
+        /// other side holds the actor's channel for as long as it lives.
         fn rpc_client_debug_actor(
             session: &RpcClient,
             service: &str,
             class_name: &str,
             actor_id: &str,
+            actor_name: KjMaybe<&str>,
         ) -> KjOwn<RpcClient>;
+        /// The service `service` on the other side of `session`, by
+        /// `WorkerdDebugPort.getEntrypoint`: a worker's default entrypoint, or a service that is
+        /// not a worker. Pipelined like `rpc_client_debug_actor`.
+        fn rpc_client_debug_entrypoint(session: &RpcClient, service: &str) -> KjOwn<RpcClient>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -874,6 +892,14 @@ pub mod ffi {
             self: &'a InProcessServer,
             name: &'a str,
         ) -> Result<KjOwn<AsyncIoStream>>;
+        /// One end of the pipe of a session between a loop thread and the first (threads.rs),
+        /// which may go to the thread that uses it. `accept_loop_session` serves one on a
+        /// running server of the first loop thread and returns the other end, with which
+        /// `forward_to_first_thread` makes a server of another thread, before it runs, a
+        /// replica's: its actors are the first thread's.
+        type SessionEnd;
+        fn accept_loop_session(self: &InProcessServer) -> Box<SessionEnd>;
+        fn forward_to_first_thread(self: &InProcessServer, end: Box<SessionEnd>);
         /// Ends the server's tasks and drops the factory, logging an error if a service still
         /// holds it.
         async fn close_in_process_server(server: Box<InProcessServer>) -> Result<()>;
@@ -929,12 +955,16 @@ pub mod ffi {
             props: KjMaybe<KjOwn<Frankenvalue>>,
         ) -> Result<Box<SubrequestChannel>>;
         /// The debug port's `getActor`: an actor of `class_name` in the service, by its id (hex
-        /// for a durable namespace, the name for an ephemeral one).
+        /// for a durable namespace, with the name it was derived from if known; the name for an
+        /// ephemeral one). `local_caller` is set for another loop thread's session, whose
+        /// requests are routed as this thread's own.
         fn resolve_debug_actor(
             self: &ServerHandle,
             service_name: &str,
             class_name: &str,
             actor_id: &str,
+            actor_name: KjMaybe<&str>,
+            local_caller: bool,
         ) -> Result<Box<SubrequestChannel>>;
 
         /// A worker's I/O channel table for one request: what its bindings reach.

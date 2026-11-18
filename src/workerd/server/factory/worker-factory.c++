@@ -974,7 +974,7 @@ class RustIoChannelFactory final: public IoChannelFactory {
     requireDebugPort();
     auto& factory = worker->factory.getImpl();
     return kj::heap<WorkerdDebugPortImpl>(
-        factory.getServer().server_clone(), factory.httpOverCapnpFactory);
+        factory.getServer().server_clone(), factory.httpOverCapnpFactory, LocalCaller::NO);
   }
 
   kj::Rc<SubrequestChannel> subrequestChannelFromToken(
@@ -1431,12 +1431,19 @@ kj::Own<ActorIdHandle> actor_id_clone(const ActorIdHandle& id) {
 kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name) {
   return kj::heap<ActorIdHandle>(kj::str(name));
 }
-kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex) {
+kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex, kj::Maybe<::rust::Str> name) {
   auto decoded = kj::decodeHex(kj::str(hex));
   KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
       "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
-  return kj::heap<ActorIdHandle>(kj::Own<ActorIdFactory::ActorId>(
-      kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none)));
+  return kj::heap<ActorIdHandle>(
+      kj::Own<ActorIdFactory::ActorId>(kj::heap<ActorIdFactoryImpl::ActorIdImpl>(
+          decoded.begin(), name.map([](::rust::Str n) { return kj::str(n); }))));
+}
+kj::Maybe<::rust::String> actor_id_name(const ActorIdHandle& id) {
+  KJ_IF_SOME(obj, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+    return obj->getName().map([](kj::StringPtr name) { return toRustString(name); });
+  }
+  return kj::none;
 }
 
 // =======================================================================================

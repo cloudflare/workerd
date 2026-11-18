@@ -596,8 +596,9 @@ fn check_serve_or_test<T: CommandFactory>(serve_or_test: &args::ServeOrTestArgs)
 }
 
 /// The `serve` options for the server, taking ownership of every `--socket-fd` socket (the
-/// server gets a duplicate). A socket given both an address and a descriptor, or a descriptor that
-/// is not a listening socket, is a usage error.
+/// server gets a duplicate). A socket given both an address and a descriptor, a descriptor that
+/// is not a listening socket, or `--threads` with an option several threads do not support, is a
+/// usage error.
 fn serve_options<T: CommandFactory>(
     serve: args::ServeArgs,
     serve_or_test: &args::ServeOrTestArgs,
@@ -606,6 +607,9 @@ fn serve_options<T: CommandFactory>(
         usage_error::<T>(format!(
             "socket '{name}' is given both --socket-addr and --socket-fd; use one"
         ));
+    }
+    if let Some(message) = args::threads_refused(&serve, serve_or_test) {
+        usage_error::<T>(message);
     }
     let mut inherited = Vec::with_capacity(serve.socket_fd_overrides.len());
     let mut socket_fds = std::collections::HashMap::new();
@@ -636,6 +640,7 @@ fn serve_options<T: CommandFactory>(
         debug_port: serve.debug_port,
         cluster_address: serve.cluster_address,
         cluster_advertise: serve.cluster_advertise,
+        replicas: serve.threads.saturating_sub(1) as usize,
         ..run_options(serve_or_test)
     };
     (options, inherited)

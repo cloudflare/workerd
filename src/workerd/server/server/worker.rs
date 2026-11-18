@@ -1124,6 +1124,12 @@ impl ChannelFactory {
     pub(crate) fn abort_all_actors(&self, reason: KjMaybe<&ffi::Exception>) {
         let reason = Option::<&ffi::Exception>::from(reason).map(crate::Error::from);
         if let Some(server) = self.0.server.upgrade() {
+            if server.factory().first_thread().is_some() {
+                tracing::warn!(
+                    "abortAllDurableObjects() was called on a thread other than the server's \
+                     first, which has the Durable Objects: it aborted none"
+                );
+            }
             server.abort_all_actors(reason.as_ref());
         }
     }

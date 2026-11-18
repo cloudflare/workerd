@@ -113,8 +113,13 @@ inline kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> word
 // =======================================================================================
 
 // Whether a per-loop factory is the one of the process's first loop thread, which owns what a
-// process has one of: the inspector and the Durable Object storage of every namespace.
+// process has one of: the inspector and the Durable Object storage of every namespace, and with
+// it every actor, which the other loops reach over their sessions with this one.
 WD_STRONG_BOOL(PrimaryLoop);
+
+// Whether a capnp session's requests are those of a caller in this process (another loop thread)
+// rather than a peer's or the debug port's.
+WD_STRONG_BOOL(LocalCaller);
 
 // What the loop threads of one run share, which outlives every loop: the config and the options,
 // V8, the HTTP header table, the memory caches, the channel token key and the inspector's
@@ -333,7 +338,10 @@ kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start);
 kj::Own<ActorIdHandle> actor_id_clone(const ActorIdHandle& id);
 ::rust::String actor_id_key(const ActorIdHandle& id);
 kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name);
-kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex);
+// The id of a durable actor from its hex form, with the name it was derived from, if known.
+kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex, kj::Maybe<::rust::Str> name);
+// The name a durable actor's id was derived from, if it carries one.
+kj::Maybe<::rust::String> actor_id_name(const ActorIdHandle& id);
 
 // The storage of one Durable Object namespace: its directory (or none, for in-memory storage),
 // the SQLite VFS over it, and the alarm scheduler.
@@ -453,6 +461,10 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> target);
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+// Serves the session another loop thread of the process keeps with this one, the first: the
+// debug port's interface, whose actors are resolved as for a caller on this thread.
+kj::Promise<void> factory_accept_loop_session(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {
@@ -471,8 +483,12 @@ class RpcClient final {
 void actor_close_storage(const ActorHandle& actor);
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
-kj::Own<RpcClient> rpc_client_debug_actor(
-    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
+kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
+    ::rust::Str service,
+    ::rust::Str className,
+    ::rust::Str actorId,
+    kj::Maybe<::rust::Str> actorName);
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
