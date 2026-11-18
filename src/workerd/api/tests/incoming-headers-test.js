@@ -117,6 +117,22 @@ export const immutable = {
   },
 };
 
+export const manyHeaders = {
+  async test(ctrl, env) {
+    // More headers than the copy collects on the stack.
+    const many = Array.from({ length: 50 }, (_, i) => [`x-many-${i}`, `${i}`]);
+    for (const path of ['/echo', '/copies', '/forward']) {
+      const response = await get(env, path, { headers: many });
+      const result = await response.json();
+      deepStrictEqual(
+        path === '/copies' ? result.cloned : result,
+        [...new Headers(many)],
+        path
+      );
+    }
+  },
+};
+
 export const responseHeaders = {
   async test(ctrl, env) {
     for (const path of ['/cookies', '/proxy-cookies']) {

@@ -215,15 +215,19 @@ private:
       kj::StringPtr name;
       kj::StringPtr value;
     };
-    // Each name and value, NUL-terminated, in order.
-    kj::Array<char> chars;
-    kj::Array<Entry> entries;
+    // One allocation: the entries, then each name and value, NUL-terminated, in order.
+    kj::Array<kj::byte> storage;
+    kj::ArrayPtr<Entry> entries;
 
     explicit Unparsed(const kj::HttpHeaders& headers);
-    Unparsed(kj::Array<char> chars, kj::Array<Entry> entries)
-        : chars(kj::mv(chars)),
-          entries(kj::mv(entries)) {}
+    // The number of bytes `storage` uses.
+    size_t size() const {
+      return storage.size();
+    }
     Unparsed clone() const;
+
+   private:
+    Unparsed() = default;
   };
 
   kj::Maybe<Unparsed> unparsed;
