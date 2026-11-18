@@ -148,19 +148,9 @@ const concat = (a, b) => {
   return out;
 };
 
-// `buf` and what `reader` reads after it, until it is `n` bytes or more.
-async function fill(reader, buf, n) {
-  while (buf.byteLength < n) {
-    const { value, done } = await reader.read();
-    if (done) throw new Error('Unexpected end of stream.');
-    buf = concat(buf, value);
-  }
-  return buf;
-}
-
-// `first`, then the rest of `reader`, as a stream. `check(n, error, done)`
-// sees the running total after each chunk and at the end, or the reader's
-// error, and throws to fail the stream.
+// `first`, then the rest of `reader`, as a stream. `check(n, error)` sees
+// the running total after each chunk, or the reader's error, and throws to
+// fail the stream.
 function rest(first, reader, check = () => {}) {
   let n = 0;
   return new ReadableStream({
@@ -172,7 +162,7 @@ function rest(first, reader, check = () => {}) {
       const { value, done } = await reader.read().catch((e) => {
         throw (check(n, e), e);
       });
-      if (done) return check(n, null, true), c.close();
+      if (done) return c.close();
       check((n += value.byteLength));
       c.enqueue(value);
     },
@@ -186,20 +176,28 @@ async function load(env, at) {
   const r = await env.STORE.fetch(at);
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`Reading the entry failed: ${r.status}.`);
-  const reader = r.body.getReader();
-  const record = async () => {
-    let buf = await fill(reader, new Uint8Array(0), 4);
-    const n = new DataView(buf.buffer, buf.byteOffset).getUint32(0);
-    if (n > MAX_HEAD) throw new Error('Not a record.');
-    buf = await fill(reader, buf, 4 + n);
-    const head = JSON.parse(dec.decode(buf.subarray(4, 4 + n)));
-    new Headers(head.headers);
-    return { head, n, first: buf.subarray(4 + n) };
+  const reader = r.body.getReader({ mode: 'byob' });
+  // `n` bytes, or null at the end.
+  const read = async (n) => {
+    const { value } = await reader.readAtLeast(n, new Uint8Array(n));
+    return value?.byteLength === n ? value : null;
   };
-  const got = await record().catch(() => null);
-  if (got?.head.expires > clock()) {
-    const size = Number(r.headers.get('Content-Length')) - 4 - got.n;
-    return { head: got.head, body: rest(got.first, reader), size };
+  const prefix = await read(4);
+  const n = prefix && new DataView(prefix.buffer).getUint32(0);
+  const json = n > 0 && n <= MAX_HEAD ? await read(n) : null;
+  let head = null;
+  try {
+    head = JSON.parse(dec.decode(json ?? new Uint8Array(0)));
+    new Headers(head.headers);
+  } catch {
+    head = null;
+  }
+  if (head?.expires > clock()) {
+    reader.releaseLock();
+    const size = Number(r.headers.get('Content-Length')) - 4 - n;
+    // workerd pumps it: a stream read from cannot be a body itself.
+    const body = r.body.pipeThrough(new IdentityTransformStream());
+    return { head, body, size };
   }
   await reader.cancel().catch(() => {});
   await remove(env, at).catch(() => {});
@@ -265,7 +263,12 @@ async function match(request, env, at) {
     await body.cancel();
     body = null;
   }
-  return new Response(body, { status, statusText, headers });
+  return new Response(body, {
+    status,
+    statusText,
+    headers,
+    encodeBody: 'manual',
+  });
 }
 
 // Bytes `start` to `end`, inclusive, of `body`.
@@ -341,11 +344,16 @@ async function put(request, env, at) {
   const drain = async () => {
     while (!(await reader.read()).done);
   };
+  const refuse = async (status, text) => {
+    await drain();
+    throw new Fail(status, text);
+  };
   let buf = new Uint8Array(0);
   let end;
   while ((end = blankLine(buf)) < 0) {
+    if (buf.byteLength > MAX_HEAD) await refuse(400, 'Bad Request');
     const { value, done } = await reader.read();
-    if (done || buf.byteLength > MAX_HEAD) throw new Fail(400, 'Bad Request');
+    if (done) throw new Fail(400, 'Bad Request');
     buf = concat(buf, value);
   }
   const [line, ...lines] = dec.decode(buf.subarray(0, end)).split('\r\n');
@@ -355,7 +363,7 @@ async function put(request, env, at) {
     return [i < 0 ? '' : h.slice(0, i), h.slice(i + 1).trim()];
   });
   if (m === null || parsed.some(([k]) => !TOKEN.test(k))) {
-    throw new Fail(400, 'Bad Request');
+    await refuse(400, 'Bad Request');
   }
   const status = parseInt(m[1]);
   const policy = lifetime(status, parsed, request.headers);
@@ -363,8 +371,13 @@ async function put(request, env, at) {
     parsed.find(([k]) => k.toLowerCase() === 'content-length')?.[1] ?? NaN
   );
   if (policy === null || length > MAX_ENTRY) {
-    await drain();
-    throw new Fail(413, 'Payload Too Large');
+    await refuse(413, 'Payload Too Large');
+  }
+  // A body with a length, in a request with one, must match it.
+  const outer = request.headers.get('Content-Length');
+  const known = length >= 0 && outer !== null;
+  if (known && Number(outer) !== end + 4 + length) {
+    await refuse(400, 'Bad Request');
   }
   const { ms, headers } = policy;
   if (ms <= 0) {
@@ -378,31 +391,51 @@ async function put(request, env, at) {
   const json = enc.encode(
     JSON.stringify({ status, statusText: m[2] ?? '', headers, expires })
   );
+  if (json.byteLength > MAX_HEAD) await refuse(400, 'Bad Request');
   const prefix = new Uint8Array(4);
   new DataView(prefix.buffer).setUint32(0, json.byteLength);
   const skip = 4 + json.byteLength;
   // A failed body may still reach the store as a clean end: in workerd, a
   // service binding's request body ends rather than fails when its stream
   // errors, unless it has a length. So a put with a length sends one, and
-  // the store keeps what it had; one without is deleted if it fails.
+  // the store keeps what it had; one without is deleted if it fails. When
+  // both lengths are known workerd pumps the body; else it streams through
+  // here, counted.
   let failed = null;
+  let pumped;
+  let body;
   const first = concat(concat(prefix, json), buf.subarray(end + 4));
-  let body = rest(first, reader, (n, error, done) => {
-    if (error) failed = error;
-    const size = n - skip;
-    if (size > MAX_ENTRY) throw (failed = new Fail(413, 'Payload Too Large'));
-    if (size > length || (done && size < length)) {
-      throw (failed = new Fail(400, 'Bad Request'));
+  if (known) {
+    const fixed = new FixedLengthStream(skip + length);
+    const writer = fixed.writable.getWriter();
+    reader.releaseLock();
+    pumped = writer
+      .write(first)
+      .then(async () => {
+        writer.releaseLock();
+        await request.body.pipeTo(fixed.writable);
+      })
+      .catch((e) => {
+        failed = e;
+      });
+    body = fixed.readable;
+  } else {
+    body = rest(first, reader, (n, error) => {
+      if (error) failed = error;
+      if (n - skip > MAX_ENTRY) {
+        throw (failed = new Fail(413, 'Payload Too Large'));
+      }
+    });
+    if (length >= 0) {
+      body = body.pipeThrough(new FixedLengthStream(skip + length));
     }
-  });
-  if (length >= 0) {
-    body = body.pipeThrough(new FixedLengthStream(skip + length));
   }
   const r = await env.STORE.fetch(at, {
     method: 'PUT',
     headers: { 'X-Expires': `${expires}` },
     body,
   }).catch((e) => ({ error: e }));
+  await pumped;
   if (failed !== null) {
     if (r.ok) await remove(env, at).catch(() => {});
     await drain().catch(() => {});

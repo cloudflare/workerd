@@ -458,3 +458,15 @@ export const storeKey = {
     assert.strictEqual((await env.DISK.fetch(`http://d/${hex}`)).status, 404);
   },
 };
+
+// A content-encoded body is stored encoded, and matches as it was put.
+export const contentEncoding = {
+  async test() {
+    const key = url('content-encoding');
+    const headers = { ...HOUR, 'Content-Encoding': 'gzip' };
+    await caches.default.put(key, new Response('text', { headers }));
+    const res = await caches.default.match(key);
+    assert.strictEqual(res.headers.get('Content-Encoding'), 'gzip');
+    assert.strictEqual(await res.text(), 'text');
+  },
+};

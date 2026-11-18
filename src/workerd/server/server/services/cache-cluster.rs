@@ -16,9 +16,9 @@
 //! names its sender as `forwardedBy`, which only a peer sets:
 //!
 //! - `Get`: `GET http://cache/<key>`, with `cf-cache-have: <node> <count>` for the version of a
-//!   near copy, answered `cf-cache-reply: value <node> <count>` with the record as the body,
+//!   near copy, answered `cf-cache-reply: value <node> <count>` with the value as the body,
 //!   `same` or `miss`.
-//! - `Put`: `PUT`, the record as the body; `Delete`: `POST`. Answered `cf-cache-reply: applied
+//! - `Put`: `PUT`, the value as the body; `Delete`: `POST`. Answered `cf-cache-reply: applied
 //!   true`, `applied false`, `not-home` or `inactive`.
 //!
 //! Each request carries `cf-cache-op: <op>`. Its answer waits for the protocol's reply, which it
