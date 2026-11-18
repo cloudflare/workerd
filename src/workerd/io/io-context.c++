@@ -281,7 +281,9 @@ IoContext::IoContext(ThreadContext& thread,
   }
 
   // Arrange to abort when limits expire.
-  abortWhen(makeLimitsPromise());
+  if (limitEnforcer->canExceedLimits()) {
+    abortWhen(makeLimitsPromise());
+  }
 
   KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
