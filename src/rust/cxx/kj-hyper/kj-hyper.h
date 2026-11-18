@@ -96,12 +96,28 @@ inline bool parse_method(::rust::Slice<const uint8_t> name, kj::HttpMethod& meth
 // --- Rust objects behind kj interfaces.
 
 kj::Own<kj::AsyncIoStream> new_rust_io_stream(::rust::Box<RustIo> io);
-kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body);
-kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
-    const kj::HttpHeaders& headers,
-    WebSocketCompression compression,
-    kj::Maybe<const kj::WebSocketErrorHandler&> errors);
+
+// A request's body stream and response, which a connection makes once and its calls take in
+// turn (ffi.rs's `ServerCall`). Each call points them at a Rust body and response of its own.
+class ServerCall {
+ public:
+  virtual ~ServerCall() noexcept(false) = default;
+
+  // Points the stream at `body` and the response at `response` until `finish()`, for a request
+  // of `method` with `headers`, which decide whether it is a WebSocket handshake and whether that
+  // handshake is acceptable.
+  virtual void start(const RustBody& body,
+      const ServerResponse& response,
+      kj::HttpMethod method,
+      const kj::HttpHeaders& headers,
+      WebSocketCompression compression,
+      kj::Maybe<const kj::WebSocketErrorHandler&> errors) = 0;
+  virtual void finish() = 0;
+  virtual kj::AsyncInputStream& body() = 0;
+  virtual kj::HttpService::Response& response() = 0;
+};
+
+kj::Own<ServerCall> new_server_call();
 kj::Own<kj::HttpService::ConnectResponse> new_connect_response(
     ::rust::Box<ConnectResponder> response);
 kj::Own<kj::WebSocket> new_client_websocket(kj::Own<kj::AsyncIoStream> stream,
