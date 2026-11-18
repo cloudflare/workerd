@@ -219,6 +219,10 @@ use bridge::AsyncTraceListener;
 // its sinks, on the owning thread. Moving the `KjOwn` between threads is all that `Send` permits
 // here.
 unsafe impl Send for AsyncTraceListener {}
+// SAFETY: whatever the listener's disposer, it runs where `Send` above says the listener is
+// destroyed: on its tracker's thread, which is the thread that collected the listener into the
+// `AsyncTraceSinks` the tracker was created from.
+unsafe impl kj_rs::DisposableOnAnyThread for AsyncTraceListener {}
 
 /// A sink forwarding to a C++ `AsyncTraceListener`.
 struct CppSink {

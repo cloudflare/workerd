@@ -88,8 +88,7 @@ struct RustFuture {
   // (exactly like calling a KJ coroutine, which runs to its first co_await), and continues
   // on the event loop from there. KJ code universally assumes promises are "hot" (a stored
   // promise still makes progress), so this is the right default for every bridged
-  // `async fn`; before this conversion was eager, every consumer had to remember a manual
-  // `.eagerlyEvaluate(nullptr)`.
+  // `async fn`.
   //
   // Requires a current kj::EventLoop on this thread (same requirement as awaiting the
   // promise, just enforced at creation). Cancellation is unchanged: dropping the promise

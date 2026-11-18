@@ -56,6 +56,9 @@ pub struct InspectorConnection {
 // would destroy the session after the V8 inspector it belongs to. Nothing keeps one; `Send` is
 // not what allows it, since a `jsg::Rc` on the isolate's own thread can outlive it the same way.
 unsafe impl Send for ffi::InspectorSession {}
+// SAFETY: `inspector_session_connect()` allocates it with `kj::heap()`, whose disposer only runs
+// the destructor, which `Send` above covers.
+unsafe impl kj_rs::DisposableOnAnyThread for ffi::InspectorSession {}
 
 impl jsg::Traced for InspectorConnection {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {

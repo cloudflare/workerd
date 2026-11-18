@@ -586,21 +586,34 @@ pub async fn new_stash_wakers_future_void(clones: u32) {
     .await
 }
 
-/// Spawn `threads` foreign threads, each waking every stashed waker `iterations` times. The
-/// threads run concurrently with whatever the C++ driver does next — including destroying the
-/// future the wakers belong to.
+/// Spawn `threads` foreign threads, each waking every stashed waker `iterations` times, and
+/// return once one of them has finished its first round of wakes. The threads run concurrently
+/// with whatever the C++ driver does next — including destroying the future the wakers belong
+/// to — and the wait ensures the storm has begun before the driver does so.
 pub fn start_wake_storm(threads: u32, iterations: u32) {
+    let (started, first_wake) = std::sync::mpsc::channel();
     let mut handles = STORM_HANDLES.lock().expect("handles poisoned");
     for _ in 0..threads {
+        let started = started.clone();
         handles.push(std::thread::spawn(move || {
-            for _ in 0..iterations {
+            for i in 0..iterations {
                 let stash = STASHED_WAKERS.lock().expect("stash poisoned");
                 for waker in stash.iter() {
                     waker.wake_by_ref();
                 }
+                drop(stash);
+                if i == 0 {
+                    // Fails once the driver has stopped listening, which is fine.
+                    let _ = started.send(());
+                }
             }
         }));
     }
+    drop(handles);
+    drop(started);
+    first_wake
+        .recv()
+        .expect("wake storm threads exited without waking");
 }
 
 /// Join every thread started by [`start_wake_storm`].
@@ -646,6 +659,9 @@ impl Future for SharedStashWakerFuture {
 /// Stash a waker clone into the shared (cross-thread-visible) slot; completes after
 /// [`wake_shared_stashed_waker`] runs.
 pub async fn new_shared_stash_waker_future_void() {
+    // A test whose wake found its loop gone leaves the flag set, and possibly a waker in the slot.
+    SHARED_STASH_WOKEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    *SHARED_STASHED_WAKER.lock().expect("stash poisoned") = None;
     SharedStashWakerFuture.await
 }
 

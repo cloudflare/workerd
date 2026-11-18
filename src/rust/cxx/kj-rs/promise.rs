@@ -211,21 +211,9 @@ impl<T> KjPromise for CallbacksFuture<T> {
 // `CallbacksFuture` is only ever wrapped in `PromiseFuture<Self>`, whose `PromiseAwaiter` holds an
 // `Option<OwnPromiseNode>` (a raw pointer, hence `!Send`), so the composed future is `!Send`
 // regardless. The bridged async machinery is confined to the KJ event-loop thread and `spawn` is
-// `spawn_local`-backed (no `Send` requirement), so nothing needs a `Send` impl. Asserting the
-// wrapper stays `!Send` locks that in.
+// `spawn_local`-backed (no `Send` requirement), so nothing needs a `Send` impl. `promise-test.rs`
+// asserts that the wrapper stays `!Send`.
+
 #[cfg(test)]
-mod send_guards {
-    use static_assertions::assert_not_impl_any;
-
-    use super::CallbacksFuture;
-    use super::PromiseFuture;
-
-    // The raw `*mut c_void` node makes this `!Send`/`!Sync` on its own; guard against a future
-    // hand-written impl silently introducing cross-thread transfer of a KJ promise node.
-    assert_not_impl_any!(CallbacksFuture<u32>: Send, Sync);
-
-    // After its first poll, `PromiseFuture`'s embedded awaiter memory is self-referential and
-    // event-loop-linked (see `PromiseAwaiter::_pinned`); it must stay `!Unpin` so safe code
-    // cannot move it between polls (`&mut`-based awaits require `Unpin`).
-    assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Unpin);
-}
+#[path = "promise-test.rs"]
+mod tests;

@@ -51,7 +51,7 @@ struct RustWaker;
 // `node->onReady(this)` mechanism, to discover when our wrapped Promise is ready (exactly as a KJ
 // coroutine registers its own Event on the promise it `co_await`s). Our Event fire() implementation
 // records the fact that we are done, then wakes our Waker or arms the FuturePollEvent, if we have
-// one. We hold a weak reference to the FuturePollEvent that last polled us (see maybePollEvent
+// one. We hold a weak reference to the FuturePollEvent that last polled us (see weakPollEvent
 // below), so a fired Promise can arm that poll event directly.
 //
 // Cancellation: Dropping the RustPromiseAwaiter destroys its OwnPromiseNode, cancelling the

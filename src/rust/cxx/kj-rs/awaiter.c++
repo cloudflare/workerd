@@ -10,13 +10,13 @@ namespace kj_rs {
 // RustPromiseAwaiter
 
 // To own RustPromiseAwaiters, Rust needs to know the size and alignment of RustPromiseAwaiter. To
-// that end, we use bindgen to generate an opaque FFI type of known size for RustPromiseAwaiter in
-// awaiter.h.rs.
+// that end, we use bindgen to generate an opaque FFI type of known size for RustPromiseAwaiter,
+// `GuardedRustPromiseAwaiterRepr` in ffi.rs.
 //
 static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(GuardedRustPromiseAwaiterRepr),
-    "GuardedRustPromiseAwaiter size changed, you must update lib.rs ffi");
+    "GuardedRustPromiseAwaiter size changed, you must update GuardedRustPromiseAwaiterRepr in ffi.rs");
 static_assert(alignof(GuardedRustPromiseAwaiter) == alignof(GuardedRustPromiseAwaiterRepr),
-    "GuardedRustPromiseAwaiter alignment changed, you must update lib.rs ffi");
+    "GuardedRustPromiseAwaiter alignment changed, you must update GuardedRustPromiseAwaiterRepr in ffi.rs");
 
 RustPromiseAwaiter::RustPromiseAwaiter(OwnPromiseNode nodeParam, kj::SourceLocation location)
     : Event(location),

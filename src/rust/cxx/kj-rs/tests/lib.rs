@@ -477,10 +477,12 @@ unsafe impl Sync for ffi::OpaqueAtomicRefcountedClass {}
 
 // Compile-time thread-safety contracts (kj-rs/own.rs, kj-rs/refcount.rs):
 //
-// KjOwn is never Send/Sync: its type-erased kj disposer (kj::Rc, arena, ...) may not be
-// thread-safe, regardless of T.
-static_assertions::assert_not_impl_any!(KjOwn<u64>: Send, Sync);
-static_assertions::assert_not_impl_any!(KjOwn<ffi::OpaqueCxxClass>: Send, Sync);
+// KjOwn is Send only when T is DisposableOnAnyThread: its type-erased kj disposer (kj::Rc,
+// arena, ...) may not be thread-safe, regardless of T. A shared KjOwn cannot run the disposer, so
+// it is Sync whenever T is.
+static_assertions::assert_not_impl_any!(KjOwn<u64>: Send);
+static_assertions::assert_not_impl_any!(KjOwn<ffi::OpaqueCxxClass>: Send);
+static_assertions::assert_impl_all!(KjOwn<ffi::OpaqueCxxClass>: Sync);
 // KjArc matches std::sync::Arc: Send/Sync require T: Send + Sync...
 static_assertions::assert_impl_all!(kj_rs::KjArc<ffi::OpaqueAtomicRefcountedClass>: Send, Sync);
 // ...so a Send + !Sync payload (Cell) must make KjArc neither Send nor Sync (clones would

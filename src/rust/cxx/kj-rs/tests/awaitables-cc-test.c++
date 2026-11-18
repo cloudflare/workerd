@@ -6,10 +6,16 @@
 
 #include <sys/types.h>
 
+#include <kj/io.h>
 #include <kj/test.h>
 #include <kj/thread.h>
 
+#if !_WIN32
+#include <unistd.h>
+#endif
+
 #include <csignal>
+#include <cstdio>
 #include <thread>
 
 // Raw-RustFuture test helpers, defined in tests/lib.rs and tests/test_futures.rs. The
@@ -651,7 +657,8 @@ KJ_TEST("Wake storm racing future destruction") {
     auto promise = new_stash_wakers_future_void(4);
     KJ_EXPECT(!promise.poll(waitScope));
 
-    // Foreign threads hammer those clones with wakes...
+    // Foreign threads hammer those clones with wakes. This returns once one of them has woken
+    // them all, so the storm is under way...
     start_wake_storm(4, 2000);
 
     // ...give the storm real overlap with a live event (some wakes arm it; we keep polling)...
@@ -892,17 +899,39 @@ KJ_TEST("Same-thread wake storm inside a single poll coalesces into one re-poll"
 }
 
 #if !_WIN32
+// Runs `body` as KJ_EXPECT_SIGNAL does, in a forked child expected to die of `signal`, and returns
+// what the child wrote to stderr. A file rather than a pipe holds it, so that a long backtrace
+// cannot block the child before the parent reads.
+template <typename Func>
+kj::String expectSignalWithStderr(int signal, Func&& body) {
+  FILE* file = tmpfile();
+  KJ_ASSERT(file != nullptr);
+  KJ_DEFER(fclose(file));
+  int fd = fileno(file);
+  KJ_EXPECT_SIGNAL(signal, {
+    dup2(fd, STDERR_FILENO);
+    body();
+  });
+  KJ_SYSCALL(lseek(fd, 0, SEEK_SET));
+  kj::FdInputStream stderrOutput(fd);
+  return stderrOutput.readAllText();
+}
+
 KJ_TEST("a panic in a bridged future's Drop aborts deterministically (no unwind into C++)") {
-  // RustFuture::drop_in_place has no error channel -- it runs from C++ destructors and
-  // cancellation paths -- so a panicking Drop is converted into a labeled abort via
-  // cxx::private::prevent_unwind rather than unwinding across the FFI frame. Forked death test.
-  KJ_EXPECT_SIGNAL(SIGABRT, {
+  // RustInfallibleFuture::drop_in_place, like RustFuture's, has no error channel -- it runs from
+  // C++ destructors and cancellation paths -- so a panicking Drop is converted into a labeled
+  // abort via cxx::private::prevent_unwind rather than unwinding across the FFI frame. An
+  // unlabeled abort, such as an `extern "C"` function's refusal to unwind, would not name it.
+  auto output = expectSignalWithStderr(SIGABRT, []() {
     kj::EventLoop loop;
     kj::WaitScope waitScope(loop);
     auto promise = new_panic_on_drop_future_void();
     KJ_EXPECT(!promise.poll(waitScope));
     promise = nullptr;  // cancels: drops the Rust future, whose Drop panics
   });
+  KJ_EXPECT(
+      output.contains("panic in ffi function kj_rs::repr::RustInfallibleFuture::drop_in_place"_kj),
+      output);
 }
 #endif
 

@@ -47,6 +47,19 @@ pub unsafe trait OwnTarget: Sized {
     unsafe fn __drop(own: *mut KjOwn<Self>);
 }
 
+/// Makes `KjOwn<Self>` `Send`, by asserting that a `kj::Own<Self>` may be destroyed on any thread.
+///
+/// `Self: Send` says that the object may move to another thread, which covers running its
+/// destructor there. Dropping a `KjOwn` also runs its `kj::Disposer` on the dropping thread, and
+/// nothing about `Self` says that the disposer is safe there: the one `kj::Rc::toOwn()` installs
+/// decrements a non-atomic refcount, and an arena's frees into the arena.
+///
+/// # Safety
+///
+/// Every `kj::Own<Self>` that reaches Rust must have a disposer that is safe to run on any
+/// thread, such as `kj::heap()`'s, which only runs the destructor `Self: Send` already covers.
+pub unsafe trait DisposableOnAnyThread: OwnTarget + Send {}
+
 /// Implements [`OwnTarget`] for the primitive types a bridge accepts in a `KjOwn`. They share one
 /// untyped drop (`own.c++`): a primitive is never polymorphic, so `kj::Own<T>::~Own()` hands the
 /// disposer the pointer unchanged, the same as `kj::Own<void>::~Own()`.
@@ -115,6 +128,7 @@ pub mod repr {
     use std::ops::DerefMut;
     use std::pin::Pin;
 
+    use super::DisposableOnAnyThread;
     use super::NonNullExceptMaybe;
     use super::OwnTarget;
 
@@ -182,19 +196,13 @@ pub mod repr {
         }
     }
 
-    // NO `Send`/`Sync` impls, deliberately.
-    //
-    // A `KjOwn<T>` carries a type-erased `kj::Disposer*` alongside the object pointer, and
-    // dropping the `KjOwn` runs that disposer on whichever thread the drop happens on. A
-    // bound on `T` alone (e.g. `T: Send`) says nothing about the disposer: `kj::Own`s minted
-    // from `kj::Rc::toOwn()`/`kj::refcounted` (non-atomic refcount decrement), arena-backed
-    // objects, or any other custom disposer are NOT safe to destroy from another thread, and
-    // nothing at the bridge boundary guarantees disposer thread-safety.
-    //
-    // All current consumers keep `KjOwn`s on the KJ event-loop thread that created them, so
-    // no impls are needed. If a genuine cross-thread use case appears, it must come with an
-    // explicit opt-in mechanism that asserts the *disposer* is thread-safe (not just `T`);
-    // do not re-add blanket impls here.
+    // SAFETY: moving a `KjOwn` to another thread moves the object, which `T: Send` allows, and
+    // moves where its disposer will run, which `DisposableOnAnyThread` allows.
+    unsafe impl<T: DisposableOnAnyThread> Send for KjOwn<T> {}
+
+    // SAFETY: a shared `KjOwn` reaches the object only through `&T`, which `T: Sync` allows to
+    // be shared, and cannot run the disposer, which takes ownership.
+    unsafe impl<T: OwnTarget + Sync> Sync for KjOwn<T> {}
 
     impl<T: OwnTarget> Deref for KjOwn<T> {
         type Target = T;
@@ -259,3 +267,7 @@ pub mod repr {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "own-test.rs"]
+mod tests;

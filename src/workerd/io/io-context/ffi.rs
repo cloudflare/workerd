@@ -218,6 +218,9 @@ pub mod bridge {
 // strong reference to the `kj::AtomicRefcounted` `Worker::Isolate`, and calls a `const` method of
 // its `IsolateLimitEnforcer`, which needs no isolate lock (see its declaration).
 unsafe impl Send for bridge::IsolateWeakRef {}
+// SAFETY: `io_context_isolate_weak_ref()` allocates it with `kj::heap()`, whose disposer only runs
+// the destructor, which `Send` above allows on any thread.
+unsafe impl kj_rs::DisposableOnAnyThread for bridge::IsolateWeakRef {}
 
 // SAFETY: an `AsyncResource` holds only a `kj::Arc<AsyncTracker>` and an id. `AsyncTracker`'s
 // methods, which `settle()` and the destructor call, are `const` and may be called on any thread:
@@ -227,6 +230,9 @@ unsafe impl Send for bridge::IsolateWeakRef {}
 // sinks are gone: the IoContext holds a reference until `OwnedAsyncTracker` closes the tracker
 // on its own thread.
 unsafe impl Send for bridge::AsyncResource {}
+// SAFETY: `io_context_make_await_js_resource()` allocates it with `kj::heap()`, whose disposer only
+// runs the destructor, which `Send` above allows on any thread.
+unsafe impl kj_rs::DisposableOnAnyThread for bridge::AsyncResource {}
 
 /// The exception `watcher`'s request was aborted with, if it was aborted after the watcher
 /// started; see `abort_watcher_has_pending_abort()`.
@@ -327,6 +333,10 @@ unsafe impl Send for bridge::IoOwnedObject {}
 // SAFETY: Rust has no method on it, so a shared reference to it can do nothing; it is only
 // dropped, through the `KjOwn` that holds it.
 unsafe impl Sync for bridge::IoOwnedObject {}
+
+// SAFETY: `io_context_add_object()` allocates it with `kj::heap()`, whose disposer only runs the
+// destructor, which `Send` above allows on any thread.
+unsafe impl kj_rs::DisposableOnAnyThread for bridge::IoOwnedObject {}
 
 /// A value that `IoContext::add_object()` hands to C++, which drops it with the `IoContext`.
 /// Dropping it drops the value it holds, unless Rust took the value first.
