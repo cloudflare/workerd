@@ -53,7 +53,6 @@ namespace workerd::jsg {
 void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
 
 WD_STRONG_BOOL(IsContextGlobal);
-WD_STRONG_BOOL(ReleasesStrongRef);
 
 // The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
 // storing pointers to various important objects.
@@ -332,16 +331,11 @@ class Wrappable: public kj::Refcounted {
   // (context->Global()) and `tag` must be kContextGlobalWrappableTag; the cppgc wrappable is then
   // set via v8::Object::WrapGlobal() on both the proxy and its hidden prototype (the
   // JSGlobalObject).
-  //
-  // If `releasesStrongRef` is YES, the caller gives up one strong reference as the wrapper is
-  // attached, as Ref<T>::attachWrapperReleasingStrongRef() does. If that was the last one, the
-  // wrapper isn't held in `strongWrapper` only to be released when the caller's Ref goes away.
   void attachWrapper(v8::Isolate* isolate,
       v8::Local<v8::Object> object,
       bool needsGcTracing,
       v8::CppHeapPointerTag tag,
-      IsContextGlobal isContextGlobal = IsContextGlobal::NO,
-      ReleasesStrongRef releasesStrongRef = ReleasesStrongRef::NO);
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO);
 
   // If `object` is a live context global (the JSGlobalProxy or its hidden JSGlobalObject) that
   // was attached via attachWrapper(..., IsContextGlobal::YES), returns the attached Wrappable.
