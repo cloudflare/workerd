@@ -403,7 +403,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "xrMQmrStrueR0w0uwmELEMgm68O+gE0GEzsLEEf8Fv8=",
+        "usagesDigest": "mmQ1DaflAUlSlfSouQKMAEK3qI6m1mLbdXO/NhYmNwE=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -422,9 +422,11 @@
               "patch_args": [],
               "patch_cmds": [],
               "patch_cmds_win": [],
-              "patch_strip": 0,
+              "patch_strip": 1,
               "patch_tool": "",
-              "patches": [],
+              "patches": [
+                "@@//:patches/capnp-cpp/0001-Make-the-stack-trace-symbolizer-s-pipes-close-on-exec.patch"
+              ],
               "remote_file_integrity": {},
               "remote_file_urls": {},
               "remote_module_file_integrity": "",

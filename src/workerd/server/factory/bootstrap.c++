@@ -127,26 +127,22 @@ kj::StringPtr buildMode() {
 #endif
 }
 
-bool structuredLogging(const ::rust::Vec<uint64_t>& configWords) {
-  capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
+bool structuredLogging(kj::ArrayPtr<const uint64_t> configWords) {
+  capnp::FlatArrayMessageReader reader(asWords(configWords), CONFIG_READER_OPTIONS);
   auto config = reader.getRoot<config::Config>();
   return config.hasLogging() ? config.getLogging().getStructuredLogging()
                              : config.getStructuredLogging();
 }
 
-// What the process needs around the Rust server (see the bridge), attached to the factory it
-// builds. Members are declared in construction order, which is the reverse of destruction: V8 goes
-// before the providers.
-class Bootstrap {
+// What the process needs around the Rust server (see the bridge), set up once and attached to the
+// `SharedFactory` it builds, so that it outlives every loop's factory. Members are declared in
+// construction order, which is the reverse of destruction.
+class ProcessBootstrap {
  public:
-  Bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
-      const ::rust::Vec<uint64_t>& configWords,
+  ProcessBootstrap(kj::ArrayPtr<const uint64_t> configWords,
       const ServeOrTestOptions& serveOrTest,
       kj::Maybe<const TestOptions&> test,
-      kj::Maybe<const BenchOptions&> bench)
-      : timer(loop.getTimer()),
-        monotonicClock(kj::systemPreciseMonotonicClock()),
-        provider(loop.getTimer()) {
+      kj::Maybe<const BenchOptions&> bench) {
     KJ_IF_SOME(path, serveOrTest.perfetto_trace_path) {
 #ifdef WORKERD_USE_PERFETTO
       perfettoSession = PerfettoSession(kj::str(path),
@@ -165,8 +161,7 @@ class Bootstrap {
 
     // The process is set up for this config and these options: autogates, the test and bench
     // modes, and V8 with its flags (V8 reads the test modes as it starts).
-    capnp::FlatArrayMessageReader reader(
-        asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
+    capnp::FlatArrayMessageReader reader(asWords(configWords), CONFIG_READER_OPTIONS);
     auto config = reader.getRoot<config::Config>();
     util::Autogate::initAutogate(config.getAutogates());
     KJ_IF_SOME(t, test) {
@@ -182,48 +177,47 @@ class Bootstrap {
         KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
   }
 
-  // Ends the --async-trace file. The factory is destroyed first, ending every context, so the exit
-  // line follows their ends.
-  ~Bootstrap() noexcept(false) {
+  // Ends the --async-trace file. Every factory is destroyed first, ending every context, so the
+  // exit line follows their ends.
+  ~ProcessBootstrap() noexcept(false) {
     KJ_IF_SOME(writer, asyncTraceWriter) {
       writer->finish();
     }
   }
 
-  KJ_DISALLOW_COPY_AND_MOVE(Bootstrap);
+  KJ_DISALLOW_COPY_AND_MOVE(ProcessBootstrap);
 
-  // A factory over `configWords`, which it owns for its run.
-  kj::Own<WorkerFactory> makeFactory(::rust::Vec<uint64_t> configWords,
+  // The shared factory over `configWords`, which it owns for the run, and over `self`.
+  static kj::Arc<SharedFactory> makeShared(kj::Own<ProcessBootstrap> self,
+      ::rust::Vec<uint64_t> configWords,
       const ServeOrTestOptions& serveOrTest,
       kj::Maybe<const TestOptions&> test,
       kj::Maybe<const BenchOptions&> bench) {
     auto options = kj::heap<WorkerFactory::Options>();
     options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
-    applyServeOrTestOptions(*options, serveOrTest);
+    self->applyServeOrTestOptions(*options, serveOrTest);
     KJ_IF_SOME(t, test) {
       applyTestOptions(*options, t);
     }
     KJ_IF_SOME(b, bench) {
       applyBenchOptions(*options, b);
     }
-    return kj::heap<WorkerFactory>(*v8System, timer, monotonicClock, provider.getNetwork(),
-        entropySource, *fs, kj::mv(options), kj::mv(configWords));
+    auto& v8System = *self->v8System;
+    auto& entropySource = self->entropySource;
+    auto& fs = *self->fs;
+    return kj::arc<SharedFactory>(
+        v8System, entropySource, fs, kj::mv(options), kj::mv(configWords), kj::mv(self));
   }
 
  private:
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   EntropySourceImpl entropySource;
-  kj::Timer& timer;
-  // The loop's monotonic clock, consistent with `timer`.
-  const kj::MonotonicClock& monotonicClock;
-  // The tokio-backed kj::Network over the Runtime's loop, for the factory.
-  kj_rs_io::TokioAsyncIoProvider provider;
 
 #ifdef WORKERD_USE_PERFETTO
   kj::Maybe<PerfettoSession> perfettoSession;
 #endif
 
-  // Set by --async-trace. The factory's isolates write to it, so it outlives them.
+  // Set by --async-trace. The factories' isolates write to it, so it outlives them.
   kj::Maybe<kj::Own<AsyncTraceWriter>> asyncTraceWriter;
 
   kj::Own<v8::Platform> platform;
@@ -319,6 +313,22 @@ class Bootstrap {
   }
 };
 
+// What one loop thread's factory needs of its loop: the tokio-backed `kj::Network` over the
+// loop's timer. Attached to the factory, so destroyed after it.
+struct LoopBootstrap {
+  explicit LoopBootstrap(kj_rs_tokio::TokioAsyncIoContext& loop): provider(loop.getTimer()) {}
+  kj_rs_io::TokioAsyncIoProvider provider;
+};
+
+// A factory on `loop`, which is the current thread's.
+kj::Own<WorkerFactory> newLoopFactory(
+    kj::Arc<SharedFactory> shared, kj_rs_tokio::TokioAsyncIoContext& loop, PrimaryLoop primary) {
+  auto loopBootstrap = kj::heap<LoopBootstrap>(loop);
+  auto factory = kj::heap<WorkerFactory>(kj::mv(shared), loop.getTimer(),
+      kj::systemPreciseMonotonicClock(), loopBootstrap->provider.getNetwork(), primary);
+  return factory.attach(kj::mv(loopBootstrap));
+}
+
 }  // namespace
 
 ::rust::Slice<const uint8_t> release_version() {
@@ -351,11 +361,34 @@ int32_t with_process_context(
     kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
   }
   kj::Maybe<JsonLogger> jsonLogger;
-  bool structured = structuredLogging(config);
+  bool structured = structuredLogging(kj::from<Rust>(config));
   if (structured) {
     jsonLogger.emplace();
   }
   return run_pending_command(kj::mv(command), kj::mv(config), structured);
+}
+
+void with_loop_thread_context(const SharedFactory& shared, ::rust::Box<LoopThread> thread) {
+  // An exception callback belongs to the thread whose stack it is on, so a loop thread gets a
+  // JSON logger of its own.
+  kj::Maybe<JsonLogger> jsonLogger;
+  if (structuredLogging(shared.getConfigWords())) {
+    jsonLogger.emplace();
+  }
+  run_loop_thread(kj::mv(thread));
+}
+
+kj::Arc<SharedFactory> bootstrap_process(::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& options,
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench) {
+  auto process = kj::heap<ProcessBootstrap>(kj::from<Rust>(config), options, test, bench);
+  return ProcessBootstrap::makeShared(kj::mv(process), kj::mv(config), options, test, bench);
+}
+
+kj::Own<WorkerFactory> bootstrap_loop(
+    const SharedFactory& shared, kj_rs_tokio::TokioAsyncIoContext& loop) {
+  return newLoopFactory(shared.addRef(), loop, PrimaryLoop::NO);
 }
 
 kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
@@ -363,9 +396,8 @@ kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     const ServeOrTestOptions& options,
     kj::Maybe<const TestOptions&> test,
     kj::Maybe<const BenchOptions&> bench) {
-  auto bootstrap = kj::heap<Bootstrap>(loop, config, options, test, bench);
-  auto factory = bootstrap->makeFactory(kj::mv(config), options, test, bench);
-  return factory.attach(kj::mv(bootstrap));
+  return newLoopFactory(
+      bootstrap_process(kj::mv(config), options, test, bench), loop, PrimaryLoop::YES);
 }
 
 BuildInfo build_info() {
@@ -395,7 +427,7 @@ void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str messa
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message) {
   auto json = buildJsonLogMessage(static_cast<kj::LogSeverity>(severity), kj::str(file).cStr(),
       static_cast<int>(line), 0, kj::str(message));
-  kj::FdOutputStream(STDERR_FILENO).write({json.asBytes(), "\n"_kj.asBytes()});
+  writeJsonLogLine(stderr, json);
 }
 
 }  // namespace workerd::server::cli

@@ -14,6 +14,7 @@ export class WorkerdServerHarness {
   #workerdConfig = null;
   #listenPortNames = null;
   #extraArgs = null;
+  #inspector = null;
   #startupTimeoutMs = null;
 
   // Properties set by `start()` and cleared by `stop()`.
@@ -29,12 +30,15 @@ export class WorkerdServerHarness {
     workerdConfig,
     listenPortNames,
     extraArgs = [],
+    // Whether to start the inspector, which not every way of serving supports.
+    inspector = true,
     startupTimeoutMs = 30000,
   }) {
     this.#workerdBinary = workerdBinary;
     this.#workerdConfig = workerdConfig;
     this.#listenPortNames = listenPortNames;
     this.#extraArgs = extraArgs;
+    this.#inspector = inspector;
     this.#startupTimeoutMs = startupTimeoutMs;
   }
 
@@ -49,7 +53,7 @@ export class WorkerdServerHarness {
       'serve',
       this.#workerdConfig,
       '--verbose',
-      '--inspector-addr=127.0.0.1:0',
+      ...(this.#inspector ? ['--inspector-addr=127.0.0.1:0'] : []),
       `--control-fd=${CONTROL_FD}`,
       ...this.#extraArgs,
     ];
@@ -75,7 +79,9 @@ export class WorkerdServerHarness {
         this.#expectReadiness(`listen:${name}`),
       ])
     );
-    this.#listenInspectorPort = this.#expectReadiness('listen-inspector');
+    this.#listenInspectorPort = this.#inspector
+      ? this.#expectReadiness('listen-inspector')
+      : null;
     const spawned = this.#expectReadiness('spawn');
 
     this.#closed = new Promise((resolve) => {
@@ -94,7 +100,7 @@ export class WorkerdServerHarness {
     // rejection. Callers receive readiness failures when they await their requested listen port.
     Promise.all([
       spawned,
-      this.#listenInspectorPort,
+      ...(this.#inspector ? [this.#listenInspectorPort] : []),
       ...this.#listenPorts.values(),
     ]).then(
       () => clearTimeout(timeout),
@@ -182,6 +188,18 @@ export class WorkerdServerHarness {
     assert.notEqual(this.#listenPorts, null);
     assert.notEqual(this.#listenPorts.get(name), undefined);
     return await this.#listenPorts.get(name);
+  }
+
+  // Send `signal` to workerd without waiting for it to finish.
+  kill(signal = 'SIGTERM') {
+    assert.notEqual(this.#child, null);
+    this.#child.kill(signal);
+  }
+
+  // Return a promise for workerd's exit: its exit code and the signal that ended it.
+  async closed() {
+    assert.notEqual(this.#closed, null);
+    return await this.#closed;
   }
 
   // Send SIGTERM to workerd and wait for it to completely finish.

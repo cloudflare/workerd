@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bert Belder <bertbelder@gmail.com>
+Date: Tue, 17 Nov 2026 00:00:00 +0000
+Subject: Make the stack trace symbolizer's pipes close-on-exec
+
+Two threads that stringify a stack trace at the same time each fork an
+llvm-symbolizer. A subprocess forked while the other thread's pipes
+exist inherits them, and holds the write end of the other subprocess's
+stdin open. That subprocess never sees EOF, so its thread blocks in
+fgets() forever; when both subprocesses hold each other's pipe, both
+threads do.
+
+diff --git a/src/kj/exception.c++ b/src/kj/exception.c++
+--- a/src/kj/exception.c++
++++ b/src/kj/exception.c++
+@@ -46,6 +46,7 @@
+ #include <signal.h>
+ #include <stdint.h>
+ #ifndef _WIN32
++#include <fcntl.h>
+ #include <sys/mman.h>
+ #endif
+ #include "io.h"
+@@ -267,8 +268,18 @@
+ };
+ 
+ PipePair raiiPipe() {
++  // Close-on-exec, so that a subprocess another thread starts at the same time does not inherit
++  // the pipe. One that did would hold the write end of this subprocess's stdin open, so this
++  // subprocess would never see EOF, and two threads symbolizing at once would each wait forever
++  // for the output of a subprocess that waits for the other thread's.
+   int fds[2]{};
++#if __linux__
++  KJ_SYSCALL(pipe2(fds, O_CLOEXEC));
++#else
+   KJ_SYSCALL(pipe(fds));
++  KJ_SYSCALL(fcntl(fds[0], F_SETFD, FD_CLOEXEC));
++  KJ_SYSCALL(fcntl(fds[1], F_SETFD, FD_CLOEXEC));
++#endif
+   return PipePair { OwnFd(fds[0]), OwnFd(fds[1]) };
+ }
+ 
+@@ -295,6 +306,9 @@
+       // redirect stdin & stdout
+       KJ_SYSCALL(dup2(in.readEnd, 0));
+       KJ_SYSCALL(dup2(out.writeEnd, 1));
++      // dup2() leaves a descriptor that already has the target number as it is: close-on-exec.
++      KJ_SYSCALL(fcntl(0, F_SETFD, 0));
++      KJ_SYSCALL(fcntl(1, F_SETFD, 0));
+ 
+       KJ_SYSCALL_HANDLE_ERRORS(execvp(argv[0], const_cast<char**>(argv))) {
+         case ENOENT:

@@ -24,7 +24,14 @@
 namespace workerd::server {
 
 ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey)
-    : resolver(resolver) {
+    : resolver(resolver),
+      key(clusterKey) {}
+
+ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver, const Key& key)
+    : resolver(resolver),
+      key(key) {}
+
+ChannelTokenHandler::Key::Key(kj::Maybe<kj::StringPtr> clusterKey) {
   KJ_IF_SOME(key, clusterKey) {
     // Labeled so this key never equals another one derived from the cluster key.
     auto label = "workerd channel token v1"_kj;
@@ -172,13 +179,13 @@ kj::Array<byte> ChannelTokenHandler::serializeTokenImpl(
 
       header.magic = ChannelToken::RPC_TOKEN_MAGIC;
       getEntropy(header.iv);
-      kj::arrayPtr(header.keyId).copyFrom(keyId);
+      kj::arrayPtr(header.keyId).copyFrom(key.keyId);
 
       EVP_CIPHER_CTX* aesCtx = EVP_CIPHER_CTX_new();
       KJ_ASSERT(aesCtx != nullptr);
       KJ_DEFER(EVP_CIPHER_CTX_free(aesCtx));
 
-      KJ_ASSERT(EVP_EncryptInit(aesCtx, EVP_aes_256_gcm(), tokenKey, header.iv));
+      KJ_ASSERT(EVP_EncryptInit(aesCtx, EVP_aes_256_gcm(), key.tokenKey, header.iv));
 
       // Add header as AAD first.
       {
@@ -636,7 +643,7 @@ kj::Rc<IoChannelFactory::TokenizableChannel> ChannelTokenHandler::decodeChannelT
       KJ_ASSERT(aesCtx != nullptr);
       KJ_DEFER(EVP_CIPHER_CTX_free(aesCtx));
 
-      KJ_ASSERT(EVP_DecryptInit(aesCtx, EVP_aes_256_gcm(), tokenKey, header.iv));
+      KJ_ASSERT(EVP_DecryptInit(aesCtx, EVP_aes_256_gcm(), key.tokenKey, header.iv));
 
       // Add header as AAD first.
       {
@@ -749,12 +756,11 @@ kj::Rc<IoChannelFactory::TokenizableChannel> ChannelTokenHandler::decodeChannelT
 
       switch (type) {
         case ChannelToken::Type::SUBREQUEST:
-          return kj::rc<RestoredSubrequestChannel>(
-              *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          return restoredSubrequestChannel(kj::mv(vendor), kj::mv(restoreArg), persistent);
         case ChannelToken::Type::ACTOR_CLASS:
           KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
         case ChannelToken::Type::RPC:
-          return kj::rc<RestoredRpcChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          return restoredRpcChannel(kj::mv(vendor), kj::mv(restoreArg), persistent);
       }
     }
   }
@@ -793,6 +799,32 @@ Frankenvalue ChannelTokenHandler::decodeFrankenvalue(
   }
 
   return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+}
+
+void ChannelTokenHandler::frankenvalueToCapnp(
+    Frankenvalue& value, rpc::Frankenvalue::Builder builder) {
+  kj::Vector<kj::Promise<void>> promises;
+  encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, value, builder, promises);
+  JSG_REQUIRE(promises.empty(), Error,
+      "A capability in this value cannot be sent yet: its channel token is still being resolved.");
+}
+
+Frankenvalue ChannelTokenHandler::frankenvalueFromCapnp(rpc::Frankenvalue::Reader reader) {
+  return decodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, reader);
+}
+
+kj::Rc<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::restoredSubrequestChannel(
+    kj::Rc<IoChannelFactory::SubrequestChannel> vendor,
+    Frankenvalue restoreArg,
+    Persistent persistent) {
+  return kj::rc<RestoredSubrequestChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+}
+
+kj::Rc<IoChannelFactory::RpcChannel> ChannelTokenHandler::restoredRpcChannel(
+    kj::Rc<IoChannelFactory::SubrequestChannel> vendor,
+    Frankenvalue restoreArg,
+    Persistent persistent) {
+  return kj::rc<RestoredRpcChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
 }
 
 kj::Rc<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::decodeSubrequestChannelToken(

@@ -12,6 +12,7 @@ use super::*;
 assert_impl_all!(TokioListener: Send, Sync);
 assert_impl_all!(TokioAddress: Send, Sync);
 assert_impl_all!(TokioDatagram: Send, Sync);
+assert_impl_all!(ListenerDuplicate: Send, Sync);
 
 fn parse_once(text: &[u8], port_hint: u16) -> Option<Result<TokioAddress>> {
     let mut fut = std::pin::pin!(TokioAddress::parse(text, port_hint));
@@ -458,10 +459,9 @@ fn accept_on_a_different_port_is_refused() {
     assert!(err.description().contains("different TokioEventPort"));
 }
 
-#[test]
-fn listen_binds_every_resolved_address_or_fails_as_a_whole() {
-    let _port = kj_rs_tokio::TokioPort::new();
-    let (v4, v6) = (0..16)
+/// The IPv4 and IPv6 loopback addresses of a port that is free on both.
+fn loopback_on_both_families() -> (SocketAddr, SocketAddr) {
+    (0..16)
         .find_map(|_| {
             let probe = std::net::TcpListener::bind("127.0.0.1:0").ok()?;
             let port = probe.local_addr().ok()?.port();
@@ -473,7 +473,13 @@ fn listen_binds_every_resolved_address_or_fails_as_a_whole() {
                 (v4, v6)
             })
         })
-        .expect("a port free on both loopback families");
+        .expect("a port free on both loopback families")
+}
+
+#[test]
+fn listen_binds_every_resolved_address_or_fails_as_a_whole() {
+    let _port = kj_rs_tokio::TokioPort::new();
+    let (v4, v6) = loopback_on_both_families();
 
     let listener = TokioAddress::from_socket_addrs(vec![v6, v4])
         .listen()
@@ -511,4 +517,120 @@ fn listen_binds_every_resolved_address_or_fails_as_a_whole() {
             "reported as the bind failure"
         );
     }
+}
+
+/// The next connection of `listener`, on the loop of `runtime`; none if none arrives in `wait`.
+fn accept_within(
+    runtime: &mut kj_rs_tokio::Runtime,
+    listener: &TokioListener,
+    wait: std::time::Duration,
+) -> Option<(Socket, Option<SocketAddr>)> {
+    let listener = listener_clone(listener);
+    let accepted = runtime
+        .block_on(async move { tokio::time::timeout(wait, listener.accept()).await })
+        .unwrap();
+    accepted
+        .ok()
+        .map(|result| result.map_err(KjError::from).unwrap())
+}
+
+/// The next connection of `listener`, which a connected client's soon is.
+fn accept(
+    runtime: &mut kj_rs_tokio::Runtime,
+    listener: &TokioListener,
+) -> (Socket, Option<SocketAddr>) {
+    accept_within(runtime, listener, std::time::Duration::from_secs(30))
+        .expect("no connection arrived")
+}
+
+/// A duplicate goes to another loop thread, which accepts from the same socket: the port is the
+/// one bound (here chosen by the system), and a connection goes to whichever listener accepts.
+#[test]
+fn a_duplicate_accepts_on_another_loop_thread() {
+    let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
+    let listener = TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
+        .listen()
+        .unwrap();
+    let port = listener.port().unwrap();
+    assert_ne!(port, 0);
+    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
+
+    let other = std::thread::spawn(move || {
+        let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
+        let listener = duplicate.listen().map_err(KjError::from).unwrap();
+        assert_eq!(listener.port().unwrap(), port);
+        let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (_, peer) = accept(&mut runtime, &listener);
+        assert_eq!(peer, Some(client.local_addr().unwrap()));
+    });
+    other.join().unwrap();
+
+    // The original still accepts, on its own loop, and the queue is one: the connection the
+    // other thread's listener took is not this one's too.
+    let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let (_, peer) = accept(&mut runtime, &listener);
+    assert_eq!(peer, Some(client.local_addr().unwrap()));
+    let brief = std::time::Duration::from_millis(50);
+    assert!(accept_within(&mut runtime, &listener, brief).is_none());
+}
+
+/// A duplicate carries every socket of the listener, and outlives it: the sockets stay bound
+/// while any descriptor for them is open.
+#[test]
+fn a_duplicate_has_every_socket_and_outlives_the_listener() {
+    let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
+    let (v4, v6) = loopback_on_both_families();
+    let addrs = [v6, v4];
+    let port = v6.port();
+    let listener = TokioAddress::from_socket_addrs(addrs.to_vec())
+        .listen()
+        .unwrap();
+    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
+    drop(listener);
+
+    let listener = duplicate.listen().map_err(KjError::from).unwrap();
+    assert_eq!(socket_count(&listener), 2);
+    assert_eq!(listener.port().unwrap(), port);
+    for addr in addrs {
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (_, peer) = accept(&mut runtime, &listener);
+        assert_eq!(peer, Some(client.local_addr().unwrap()));
+    }
+}
+
+/// A Unix listener duplicates like a TCP one.
+#[cfg(unix)]
+#[test]
+fn a_unix_listener_duplicates() {
+    let mut runtime = kj_rs_tokio::Runtime::new().unwrap();
+    // Not `TEST_TMPDIR`, whose path is longer than a socket address holds.
+    let name = format!("kj-rs-io-duplicate-{}.sock", std::process::id());
+    let path = PathBuf::from("/tmp").join(name);
+    let _ = std::fs::remove_file(&path);
+    let listener = parse_ok(&format!("unix:{}", path.display()), 0)
+        .listen()
+        .unwrap();
+    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
+    drop(listener);
+
+    let listener = duplicate.listen().map_err(KjError::from).unwrap();
+    let _client = std::os::unix::net::UnixStream::connect(&path).unwrap();
+    let (socket, peer) = accept(&mut runtime, &listener);
+    assert!(matches!(socket, Socket::Unix(_)));
+    assert_eq!(peer, None);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Making a listener of a duplicate registers its sockets, so it needs a loop thread.
+#[test]
+fn a_duplicate_listens_only_on_a_loop_thread() {
+    let _port = kj_rs_tokio::TokioPort::new();
+    let listener = TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
+        .listen()
+        .unwrap();
+    let duplicate = listener.duplicate().map_err(KjError::from).unwrap();
+    let err = std::thread::spawn(move || err_of(duplicate.listen()))
+        .join()
+        .unwrap();
+    assert!(err.description().contains("no TokioEventPort"));
 }

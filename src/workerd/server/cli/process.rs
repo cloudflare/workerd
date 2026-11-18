@@ -103,7 +103,8 @@ impl Process {
         loop {
             if let Err(error) = self.exec_self() {
                 eprintln!("failed to re-execute the server: {error}");
-                std::process::exit(1);
+                // The server's loop threads may be running.
+                workerd_server::entry::exit_now(1);
             }
             if !missing_binary {
                 eprint!("The server executable is missing! Waiting for it to reappear...\r");

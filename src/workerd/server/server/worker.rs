@@ -1121,10 +1121,11 @@ impl ChannelFactory {
         self.0.access_binding_channel.into()
     }
 
-    pub(crate) fn abort_all_actors(&self, reason: KjMaybe<&ffi::Exception>) {
+    pub(crate) fn abort_all_actors(&self, reason: KjMaybe<&ffi::Exception>) -> Result<()> {
         let reason = Option::<&ffi::Exception>::from(reason).map(crate::Error::from);
-        if let Some(server) = self.0.server.upgrade() {
-            server.abort_all_actors(reason.as_ref());
+        match self.0.server.upgrade() {
+            Some(server) => server.abort_all_actors_on_request(reason.as_ref()),
+            None => Ok(()),
         }
     }
 

@@ -26,11 +26,13 @@ use worker::ScheduledResult;
 use workerd_capnp::cluster_bucket;
 
 use crate::Result;
+use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::channels::PendingToken;
 use crate::channels::RequestMetadata;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
+use crate::channels::attach;
 use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::text;
@@ -68,6 +70,30 @@ pub fn make_bucket_service(
 impl Channel for BucketService {
     fn start_request(&self, _metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
         Ok(BucketRequest(Rc::clone(&self.0)).into_kj())
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(not_transferable("Bucket services"))
+    }
+}
+
+/// A `bucket` service on a replica (threads.rs): the first loop thread's service of that name.
+///
+/// The first thread has the cluster and so the bucket's client; requests and their bodies cross
+/// the replica's session with it.
+pub struct ForwardedBucket(Rc<KjOwn<ffi::RpcClient>>);
+
+impl ForwardedBucket {
+    #[must_use]
+    pub fn new(service: KjOwn<ffi::RpcClient>) -> Self {
+        Self(Rc::new(service))
+    }
+}
+
+impl Channel for ForwardedBucket {
+    fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        let interface = ffi::rpc_client_start_request(&self.0, metadata);
+        Ok(attach(interface, Rc::clone(&self.0)))
     }
 
     fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {

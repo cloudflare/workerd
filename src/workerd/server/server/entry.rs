@@ -14,6 +14,11 @@
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
+//! This thread is the process's first loop thread. `workerd serve --threads=<N>` has it start
+//! the others once its own server is built (`threads.rs`), each inside `with_loop_thread_context`
+//! with a loop and a factory of its own; they have ended, their loops and factories gone, by the
+//! time `run::run` returns, so this thread's factory is the last and V8 is torn down here.
+//!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
 //! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
 //! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
@@ -117,6 +122,25 @@ pub fn run_pending_command(
     (command.0)(config, structured_logging)
 }
 
+/// The body of a loop thread other than the first (`threads.rs`), for the C++ frame that sets up
+/// the process's logging on that thread around it (`with_loop_thread_context`).
+pub struct LoopThread(Box<dyn FnOnce() -> Result<()>>);
+
+impl LoopThread {
+    #[must_use]
+    pub fn new(body: impl FnOnce() -> Result<()> + 'static) -> Box<Self> {
+        Box::new(Self(Box::new(body)))
+    }
+}
+
+#[expect(
+    clippy::boxed_local,
+    reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
+)]
+pub fn run_loop_thread(thread: Box<LoopThread>) -> Result<()> {
+    (thread.0)()
+}
+
 /// The process's schedule (see the module doc): the logging, the loop, the bootstrap, the
 /// command, the exit. `test` and `bench` are the bootstrap's options for those commands.
 fn run<Fut: Future<Output = Result<()>> + 'static>(
@@ -153,6 +177,18 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     };
     let command = Box::new(PendingCommand(Box::new(command)));
     Ok(ffi::with_process_context(verbose, config, command)?)
+}
+
+/// Ends the process with `code` at once, from any thread.
+///
+/// Other loop threads may still be running: this runs none of the atexit handlers and static
+/// destructors that `std::process::exit` runs on this thread under the others' feet. What Rust
+/// buffered for stdout is written first, as `std::process::exit` would; stderr and the log lines
+/// (`kj_log`) are not buffered.
+pub fn exit_now(code: i32) -> ! {
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    ffi::cli_exit(code);
+    unreachable!("cli_exit returned")
 }
 
 /// Reports an error -- a config error, failed tests, the run's failure -- and makes the exit

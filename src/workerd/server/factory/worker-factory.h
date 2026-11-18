@@ -27,6 +27,7 @@
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/server/channel-token.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj-rs/kj-rs.h>
 
@@ -35,6 +36,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
+#include <kj/refcount.h>
 
 namespace workerd::jsg {
 class V8System;
@@ -86,6 +88,7 @@ using FacetStart = kj::Function<kj::Promise<Worker::Actor::FacetManager::StartIn
 // is destroyed.
 using ActorBroken = kj::Promise<void>;
 
+class WorkerFactory;
 class CompiledWorker;
 class ActorHandle;
 class ActorStorage;
@@ -109,8 +112,23 @@ inline kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> word
 
 // =======================================================================================
 
-// Everything the workers of one run share.
-class WorkerFactory final: private ChannelTokenHandler::Resolver {
+// Whether a per-loop factory is the one of the process's first loop thread, which owns what a
+// process has one of: the inspector and the Durable Object storage of every namespace, and with
+// it every actor, which the other loops reach over their sessions with this one.
+WD_STRONG_BOOL(PrimaryLoop);
+
+// Whether a capnp session's requests are those of a caller in this process (another loop thread)
+// rather than a peer's or the debug port's.
+WD_STRONG_BOOL(LocalCaller);
+
+// What the loop threads of one run share, which outlives every loop: the config and the options,
+// V8, the HTTP header table, the memory caches, the channel token key and the inspector's
+// registrar. Every loop thread has a `WorkerFactory` of its own over it.
+//
+// Thread-safe: any thread may hold a reference and drop it, and the state is immutable or guards
+// itself. Whatever is attached at construction is destroyed with the object, on the thread that
+// drops the last reference.
+class SharedFactory final: public kj::AtomicRefcounted {
  public:
   struct Options {
     bool experimental = false;
@@ -143,18 +161,48 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool asyncTracePromises = false;
   };
 
-  // `config` is the encoded config message; the factory owns it for the run and reads it with an
-  // unlimited traversal limit, as the server does. `options` is owned rather than moved because
-  // `PythonConfig` cannot be moved.
-  // `monotonicClock` must read consistently with `timer` whenever the timer is advanced.
-  WorkerFactory(jsg::V8System& v8System,
-      kj::Timer& timer,
-      const kj::MonotonicClock& monotonicClock,
-      kj::Network& network,
+  // `config` is the encoded config message; the object owns it for the run. `options` is owned
+  // rather than moved because `PythonConfig` cannot be moved. Every loop thread draws from
+  // `entropySource`, so it must be thread-safe. `attachment` is destroyed after everything else
+  // here: what `v8System`, `entropySource` and `fs` need to stay alive.
+  SharedFactory(jsg::V8System& v8System,
       kj::EntropySource& entropySource,
       kj::Filesystem& fs,
       kj::Own<Options> options,
-      ::rust::Vec<uint64_t> config);
+      ::rust::Vec<uint64_t> config,
+      kj::Own<void> attachment = {});
+  ~SharedFactory() noexcept(false);
+
+  // The words of the config message.
+  kj::ArrayPtr<const uint64_t> getConfigWords() const;
+
+  kj::Arc<SharedFactory> addRef() const {
+    return addRefToThis();
+  }
+
+  class Impl;
+  const Impl& getImpl() const;
+
+ private:
+  // Declared first, so that it is destroyed last.
+  kj::Own<void> attachment;
+  kj::Own<Impl> impl;
+};
+
+// Everything the workers of one loop thread share: the loop's timer and network, the capnp
+// factories, the background tasks, and the Rust server of that thread, which resolves channel
+// tokens. Bound to the loop it was constructed on, where it must also be destroyed.
+class WorkerFactory final: private ChannelTokenHandler::Resolver {
+ public:
+  using Options = SharedFactory::Options;
+
+  // A factory on the current thread's loop, whose `timer` and `network` these are.
+  // `monotonicClock` must read consistently with `timer` whenever the timer is advanced.
+  WorkerFactory(kj::Arc<SharedFactory> shared,
+      kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
+      kj::Network& network,
+      PrimaryLoop primary);
   ~WorkerFactory() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerFactory);
 
@@ -179,6 +227,7 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
       Persistent persistent) override;
 };
 
+kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory);
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory);
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory);
 bool factory_experimental(const WorkerFactory& factory);
@@ -201,7 +250,8 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
 
 // =======================================================================================
 
-// A compiled worker: its isolate, script and `Worker`, and what compiling them revealed.
+// A compiled worker: its isolate, script and `Worker`, and what compiling them revealed. Bound to
+// the loop of the factory that compiled it: each loop thread compiles its own copy of a worker.
 class CompiledWorker final {
  public:
   class Impl;
@@ -288,7 +338,10 @@ kj::Promise<FacetStartInfo> facet_start_resolve(kj::Own<FacetStart> start);
 kj::Own<ActorIdHandle> actor_id_clone(const ActorIdHandle& id);
 ::rust::String actor_id_key(const ActorIdHandle& id);
 kj::Own<ActorIdHandle> actor_id_from_name(::rust::Str name);
-kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex);
+// The id of a durable actor from its hex form, with the name it was derived from, if known.
+kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex, kj::Maybe<::rust::Str> name);
+// The name a durable actor's id was derived from, if it carries one.
+kj::Maybe<::rust::String> actor_id_name(const ActorIdHandle& id);
 
 // The storage of one Durable Object namespace: its directory (or none, for in-memory storage),
 // the SQLite VFS over it, and the alarm scheduler.
@@ -408,6 +461,10 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> target);
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+// Serves the session another loop thread of the process keeps with this one, the first: the
+// debug port's interface, whose actors are resolved as for a caller on this thread.
+kj::Promise<void> factory_accept_loop_session(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {
@@ -426,8 +483,14 @@ class RpcClient final {
 void actor_close_storage(const ActorHandle& actor);
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
-kj::Own<RpcClient> rpc_client_debug_actor(
-    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
+kj::Own<RpcClient> new_loop_session_client(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
+    ::rust::Str service,
+    ::rust::Str className,
+    ::rust::Str actorId,
+    kj::Maybe<::rust::Str> actorName);
+kj::Own<RpcClient> rpc_client_debug_entrypoint(const RpcClient& session, ::rust::Str service);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
@@ -481,5 +544,9 @@ kj::Own<PendingToken> factory_encode_actor_token(const WorkerFactory& factory,
     const ActorIdHandle& id,
     bool persistent,
     TokenUsage usage);
+// The channel a subrequest token names, which the factory's server resolves. Every factory of a
+// `SharedFactory` decodes the tokens the others encode.
+kj::Rc<IoChannelFactory::SubrequestChannel> factory_decode_subrequest_token(
+    const WorkerFactory& factory, TokenUsage usage, kj::ArrayPtr<const kj::byte> token);
 
 }  // namespace workerd::server

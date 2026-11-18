@@ -46,7 +46,11 @@ void PyodideBundleManager::setPyodideBundleData(
       wordArray, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue})
                            .attach(kj::mv(data));
   auto bundle = messageReader->getRoot<jsg::Bundle>();
-  bundles.lockExclusive()->insert(kj::mv(version),
+  auto lock = bundles.lockExclusive();
+  // Threads that load the same bundle at once each get here; the first one's data stays, as
+  // isolates may already refer to it.
+  if (lock->find(version) != kj::none) return;
+  lock->insert(kj::mv(version),
       {.messageReader = kj::mv(messageReader),
         .bundle = bundle,
         .wasmModuleHolder = kj::heap<jsg::CompiledWasmModuleHolder>()});
