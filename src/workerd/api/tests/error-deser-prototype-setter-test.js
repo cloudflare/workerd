@@ -61,8 +61,11 @@ export const errorDeserPrototypeSetterRegression = {
   },
 };
 
-// Also verify the serialization side: when the serializer copies own
-// properties into a temporary plain object, it can safely use Set()
+// Also verify the serialization side, where the serializer copies own
+// properties into a temporary plain object. With
+// error_serialization_own_data_properties it defines them as data properties,
+// so no Object.prototype setter runs and each property is kept. Without it,
+// it assigns them, so the setter runs instead and the property is lost.
 export const errorSerPrototypeSetterRegression = {
   test() {
     let setterInvoked = false;
@@ -85,14 +88,33 @@ export const errorSerPrototypeSetterRegression = {
         configurable: true,
       });
 
-      // This exercises the serialization path (ser.c++:286) where own
-      // properties are copied to a temporary plain object.
-      const _clone = structuredClone(err);
+      // This exercises the serialization path where own properties are
+      // copied to a temporary plain object.
+      const clone = structuredClone(err);
 
-      ok(
-        setterInvoked,
-        'Object.prototype setter must be invoked during serialization'
-      );
+      if (
+        Cloudflare.compatibilityFlags.error_serialization_own_data_properties
+      ) {
+        strictEqual(
+          Object.getOwnPropertyDescriptor(clone, 'serprop')?.value,
+          99,
+          'own data property serprop should round-trip with value 99'
+        );
+        ok(
+          !setterInvoked,
+          'Object.prototype setter must not be invoked during serialization'
+        );
+      } else {
+        strictEqual(
+          Object.getOwnPropertyDescriptor(clone, 'serprop'),
+          undefined,
+          'serprop should be assigned through the setter, not copied'
+        );
+        ok(
+          setterInvoked,
+          'Object.prototype setter must be invoked during serialization'
+        );
+      }
     } finally {
       delete Object.prototype.serprop;
     }

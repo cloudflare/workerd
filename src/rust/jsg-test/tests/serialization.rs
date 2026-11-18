@@ -63,6 +63,42 @@ fn assert_read(lock: &mut jsg::Lock<'_>, ctx: &EvalContext<'_>, data: &[u8], che
     );
 }
 
+/// Serializes the value of `expr` with `options`, and checks that the bytes are those C++ JSG
+/// writes with them, and that what Rust JSG and C++ JSG read from them with `read` satisfies
+/// `check`, a JavaScript expression of `v`.
+fn assert_round_trip_with<'s>(
+    lock: &mut jsg::Lock<'s>,
+    ctx: &EvalContext<'_>,
+    expr: &str,
+    options: jsg::ser::SerializeOptions<'_, 's>,
+    read: jsg::ser::DeserializeOptions,
+    check: &str,
+) {
+    let value = eval(lock, ctx, expr);
+    let data = jsg::ser::serialize_with_options(lock, value, options)
+        .unwrap()
+        .into_data();
+    assert_eq!(
+        data,
+        Harness::cpp_serialize_with(lock, value, options).into_data(),
+        "{expr}: {options:?}"
+    );
+
+    let copy = jsg::ser::deserialize_with(lock, &data, read).unwrap();
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {read:?}: Rust JSG read: {check}"
+    );
+
+    let copy = Harness::cpp_deserialize_with(lock, &data, read);
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {read:?}: C++ JSG read: {check}"
+    );
+}
+
 /// Serializes the value of `expr`, which must throw, and returns the exception.
 fn serialize_exception<'s>(
     lock: &mut jsg::Lock<'s>,
@@ -190,6 +226,7 @@ fn errors_without_their_stacks() {
         let data = jsg::ser::serialize(lock, value)?;
         let options = jsg::ser::DeserializeOptions {
             preserve_stack_in_errors: false,
+            ..Default::default()
         };
         let copy = jsg::ser::deserialize_with(lock, &data, options)?;
         ctx.set_global(lock, "v", copy);
@@ -220,8 +257,17 @@ fn errors_lose_what_cpp_jsg_loses() {
             "v.name === 'Error' && !Object.hasOwn(v, 'name') && v.message === 'm'",
         );
 
-        // The other own properties are copied with an assignment, which runs a setter that
-        // `Object.prototype` has for the property instead of copying it.
+        Ok(())
+    });
+}
+
+/// Without `error_serialization_own_data_properties`, an error's other own properties are
+/// assigned, which runs a setter that `Object.prototype` has for one instead of copying it, and
+/// sets the prototype of the copy for an own `__proto__`, which is lost.
+#[test]
+fn error_properties_are_assigned_without_own_data_properties() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(
             lock,
             "globalThis.setterRuns = 0;
@@ -241,12 +287,80 @@ fn errors_lose_what_cpp_jsg_loses() {
         assert!(ctx.eval::<bool>(lock, "globalThis.setterRuns === 2").unwrap());
         ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
 
-        // An own `__proto__` sets the prototype of the object it is copied to, and is lost.
+        // A setter that throws makes both serializers throw.
+        ctx.eval_raw(
+            lock,
+            "Object.defineProperty(Object.prototype, 'x', {
+               set(value) { throw new Error('setter'); },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        let value = eval(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), 'x', { value: 1, enumerable: true })",
+        );
+        for cpp in [false, true] {
+            let caught = lock
+                .try_catch(|lock| {
+                    let result = if cpp {
+                        Harness::cpp_try_serialize(lock, value)
+                    } else {
+                        jsg::ser::serialize(lock, value)
+                    };
+                    assert!(result.as_ref().is_err_and(jsg::Error::is_pending), "{cpp}");
+                    result
+                })
+                .unwrap();
+            assert_error(lock, ctx, caught.expect_err("setter"), "Error", "setter");
+        }
+        ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
+
         assert_round_trip(
             lock,
             ctx,
             "Object.defineProperty(new Error('e'), '__proto__', { value: { y: 1 }, enumerable: true })",
             "!Object.hasOwn(v, '__proto__') && v.y === undefined && v.message === 'e'",
+        );
+        Ok(())
+    });
+}
+
+/// With `error_serialization_own_data_properties`, an error's other own properties are copied as
+/// data properties, so no setter that `Object.prototype` has for one runs, and an own `__proto__`
+/// is copied like any other property.
+#[test]
+fn error_properties_are_copied_as_data_properties() {
+    let harness = Harness::with_flags(|mut flags| {
+        flags.set_enhanced_error_serialization(true);
+        flags.set_error_serialization_own_data_properties(true);
+    });
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.setterRuns = 0;
+             Object.defineProperty(Object.prototype, 'x', {
+               set(value) { globalThis.setterRuns++; throw new Error('setter'); },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), 'x', { value: 1, enumerable: true })",
+            "Object.hasOwn(v, 'x') && v.x === 1",
+        );
+        assert!(ctx.eval::<bool>(lock, "globalThis.setterRuns === 0").unwrap());
+        ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
+
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), '__proto__', { value: { y: 1 }, enumerable: true })",
+            "Object.getOwnPropertyDescriptor(v, '__proto__').value.y === 1 && \
+             Object.getPrototypeOf(v) === Error.prototype && v.message === 'e'",
         );
         Ok(())
     });
@@ -464,19 +578,49 @@ fn missing_or_unsupported_header_is_an_internal_error() {
 }
 
 #[test]
-fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
+fn shared_array_buffers_are_shared_with_the_deserializer() {
     Harness::new().run_in_context(|lock, ctx| {
-        for expr in [
-            "(() => { const b = new SharedArrayBuffer(1); return [b, new SharedArrayBuffer(2), b]; })()",
+        for (expr, check) in [
+            (
+                "globalThis.b = new SharedArrayBuffer(1); [b, new SharedArrayBuffer(2), b]",
+                "v[0] === v[2] && v[0] !== b && v[1].byteLength === 2 && \
+                 (new Uint8Array(b)[0] = 5, new Uint8Array(v[0])[0] === 5)",
+            ),
             // V8 hands the serializer each buffer in a handle scope that ends with the array that
             // holds it, and the second buffer's handle takes the slot the first's had.
-            "[[0, new SharedArrayBuffer(1)], [new SharedArrayBuffer(2)]]",
+            (
+                "globalThis.b = new SharedArrayBuffer(1); [[0, b], [new SharedArrayBuffer(2)]]",
+                "v[0][1] !== v[1][0] && v[1][0].byteLength === 2 && \
+                 (new Uint8Array(b)[0] = 6, new Uint8Array(v[0][1])[0] === 6)",
+            ),
         ] {
             let value = eval(lock, ctx, expr);
-            let data = jsg::ser::serialize(lock, value).unwrap();
-            assert_eq!(data, Harness::cpp_serialize(lock, value), "{expr}");
-            // No deserializer is given the buffers.
-            deserialize_exception(lock, &data);
+            let options = jsg::ser::SerializeOptions::default();
+            let serialized = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+            let cpp = Harness::cpp_serialize_with(lock, value, options);
+            assert_eq!(serialized.data(), cpp.data(), "{expr}");
+            let (transferred, shared) = serialized.backing_store_addresses();
+            assert!(transferred.is_empty());
+            assert_eq!(shared.len(), 2);
+            assert_eq!(cpp.backing_store_addresses().1.len(), 2);
+
+            // Without the backing stores, the data can't be read.
+            deserialize_exception(lock, serialized.data());
+
+            // Each reader reads the other's data with its backing stores, and shares the buffers.
+            let read = jsg::ser::DeserializeOptions::default();
+            let copy = Harness::cpp_deserialize_serialized(lock, &serialized, read);
+            ctx.set_global(lock, "v", copy);
+            assert!(
+                ctx.eval::<bool>(lock, check).unwrap(),
+                "{expr}: C++ JSG read"
+            );
+            let copy = cpp.deserialize(lock, read).unwrap();
+            ctx.set_global(lock, "v", copy);
+            assert!(
+                ctx.eval::<bool>(lock, check).unwrap(),
+                "{expr}: Rust JSG read"
+            );
         }
         Ok(())
     });
@@ -526,8 +670,13 @@ fn an_older_version_is_written_and_read_back() {
         let check = "v instanceof Uint8Array && v[2] === 3";
         let value = eval(lock, ctx, expr);
         let latest = jsg::ser::serialize(lock, value).unwrap();
-        let options = jsg::ser::SerializeOptions { version: Some(13) };
-        let data = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        let options = jsg::ser::SerializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        let data = jsg::ser::serialize_with_options(lock, value, options)
+            .unwrap()
+            .into_data();
         assert_eq!(data[..2], [0xff, 13]);
         // Version 14 added the flags of an ArrayBufferView.
         assert!(data.len() < latest.len());
@@ -548,7 +697,10 @@ fn a_version_v8_cannot_write_throws_data_clone_error() {
         let value = eval(lock, ctx, "1");
         let caught = lock
             .try_catch(|lock| {
-                let options = jsg::ser::SerializeOptions { version: Some(12) };
+                let options = jsg::ser::SerializeOptions {
+                    version: Some(12),
+                    ..Default::default()
+                };
                 let result = jsg::ser::serialize_with_options(lock, value, options);
                 assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
                 result
@@ -559,6 +711,521 @@ fn a_version_v8_cannot_write_throws_data_clone_error() {
             ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
                 .unwrap()
         );
+        Ok(())
+    });
+}
+
+#[test]
+fn versions_and_headers_are_written_and_read_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr =
+            "({ a: [1, 'x'], m: new Map([[1, 2]]), d: new Date(7), u: new Uint8Array([3]) })";
+        let check = "v.a[1] === 'x' && v.m.get(1) === 2 && v.d.getTime() === 7 && v.u[0] === 3";
+        let latest = header(lock)[1].into();
+        for version in [None, Some(13), Some(14), Some(latest)] {
+            let options = jsg::ser::SerializeOptions {
+                version,
+                ..Default::default()
+            };
+            let read = jsg::ser::DeserializeOptions::default();
+            assert_round_trip_with(lock, ctx, expr, options, read, check);
+
+            // Without a header, the reader is told the version.
+            let options = jsg::ser::SerializeOptions {
+                version: Some(version.unwrap_or(latest)),
+                omit_header: true,
+                ..Default::default()
+            };
+            let read = jsg::ser::DeserializeOptions {
+                version: options.version,
+                read_header: false,
+                ..Default::default()
+            };
+            assert_round_trip_with(lock, ctx, expr, options, read, check);
+        }
+
+        // The version given overrides the header's.
+        let options = jsg::ser::SerializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        assert_round_trip_with(lock, ctx, expr, options, read, check);
+        Ok(())
+    });
+}
+
+#[test]
+fn a_version_v8_cannot_read_throws_data_clone_error() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let latest = u32::from(header(lock)[1]);
+        for version in [0, 12, latest + 1] {
+            let caught = lock
+                .try_catch(|lock| {
+                    let read = jsg::ser::DeserializeOptions {
+                        version: Some(version),
+                        read_header: false,
+                        ..Default::default()
+                    };
+                    let result = jsg::ser::deserialize_with(lock, b"_", read);
+                    assert!(
+                        result.as_ref().is_err_and(jsg::Error::is_pending),
+                        "{version}"
+                    );
+                    result
+                })
+                .unwrap();
+            let exception = caught.expect_err("deserialization should throw");
+            assert_error(
+                lock,
+                ctx,
+                exception,
+                "DataCloneError",
+                &format!("Deserialization version {version} is not supported."),
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn errors_without_their_stacks_are_read_as_cpp_jsg_reads_them() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+            ..Default::default()
+        };
+        assert_round_trip_with(
+            lock,
+            ctx,
+            "Object.assign(new TypeError('t'), { stack: 'original', code: 1 })",
+            jsg::ser::SerializeOptions::default(),
+            read,
+            "v instanceof TypeError && v.code === 1 && typeof v.stack === 'string' && \
+             v.stack !== 'original'",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn header_errors_name_the_diagnostic_context() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            diagnostic_context: Some("RPC result"),
+            ..Default::default()
+        };
+        let err = jsg::ser::deserialize_with(lock, b"\x49\x02", read).unwrap_err();
+        assert!(!err.is_pending());
+        assert!(
+            err.message
+                .contains("[context=RPC result; bytes=2; header=missing;"),
+            "{}",
+            err.message
+        );
+
+        // Without a context, the label is C++ JSG's default.
+        let err =
+            jsg::ser::deserialize_with(lock, b"\x49\x02", jsg::ser::DeserializeOptions::default())
+                .unwrap_err();
+        assert!(!err.is_pending());
+        assert!(
+            err.message
+                .contains("[context=unknown; bytes=2; header=missing;"),
+            "{}",
+            err.message
+        );
+
+        // Without a header to read, the same bytes are a value.
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(15),
+            read_header: false,
+            ..Default::default()
+        };
+        let value = jsg::ser::deserialize_with(lock, b"\x49\x02", read).unwrap();
+        ctx.set_global(lock, "v", value);
+        assert!(ctx.eval::<bool>(lock, "v === 1").unwrap());
+        Ok(())
+    });
+}
+
+#[test]
+fn class_instances_are_plain_objects_or_rejected() {
+    let reject = jsg::ser::SerializeOptions {
+        class_instances: jsg::ser::ClassInstances::Reject,
+        ..Default::default()
+    };
+    let read = jsg::ser::DeserializeOptions::default();
+    for enhanced_errors in [false, true] {
+        let harness = Harness::with_flags(|mut flags| {
+            flags.set_enhanced_error_serialization(enhanced_errors);
+        });
+        harness.run_in_context(|lock, ctx| {
+            ctx.eval_raw(
+                lock,
+                "globalThis.Point = class Point { constructor() { this.x = 1; } }",
+            )
+            .unwrap();
+
+            // By default a class instance is written as a plain object.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "new Point()",
+                jsg::ser::SerializeOptions::default(),
+                read,
+                "Object.getPrototypeOf(v) === Object.prototype && v.x === 1",
+            );
+
+            // Rejecting class instances leaves plain objects, built-in types, errors and
+            // DOMExceptions alone.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "({ a: [1], m: new Map([[1, 2]]), d: new Date(3), e: new RangeError('r') })",
+                reject,
+                read,
+                "v.a[0] === 1 && v.m.get(1) === 2 && v.d.getTime() === 3 && \
+                 v.e instanceof RangeError",
+            );
+            let exception = serialize_exception(lock, ctx, "() => 1");
+            ctx.set_global(lock, "exception", exception);
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "[exception]",
+                reject,
+                read,
+                "v[0].name === 'DataCloneError'",
+            );
+            // The bootstrap's DOMException, whose prototype isn't Object.prototype, is recognized
+            // by its brand before it could be taken for a class instance.
+            let prototype = eval(lock, ctx, "Object.create(Error.prototype)");
+            let exception =
+                Harness::new_bootstrap_dom_exception(lock, prototype, "AbortError", "m", "S");
+            ctx.set_global(lock, "bootstrapException", exception);
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "[bootstrapException]",
+                reject,
+                read,
+                "v[0].name === 'AbortError' && v[0].message === 'm' && v[0].code === 20",
+            );
+
+            // V8 writes an instance of a subclass of a built-in type as the built-in type.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "new (class extends Map {})([[1, 2]])",
+                reject,
+                read,
+                "Object.getPrototypeOf(v) === Map.prototype && v.get(1) === 2",
+            );
+
+            // Both throw the DataCloneError jsg::Serializer throws for an object it can't write.
+            for (expr, type_name) in [
+                ("({ p: new Point() })", "Point"),
+                ("[Object.create(null)]", "Object"),
+            ] {
+                let value = eval(lock, ctx, expr);
+                for cpp in [false, true] {
+                    let caught = lock
+                        .try_catch(|lock| {
+                            let result = if cpp {
+                                Harness::cpp_try_serialize_with(lock, value, reject)
+                            } else {
+                                jsg::ser::serialize_with_options(lock, value, reject)
+                            };
+                            assert!(result.as_ref().is_err_and(jsg::Error::is_pending), "{expr}");
+                            result
+                        })
+                        .unwrap();
+                    assert_error(
+                        lock,
+                        ctx,
+                        caught.expect_err(expr),
+                        "DataCloneError",
+                        &format!(
+                            "Could not serialize object of type \"{type_name}\". This type does \
+                             not support serialization."
+                        ),
+                    );
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Runs `setup`, which sets the globals `value` and `transfer`, an array of `count` values, and
+/// returns them.
+fn transfer_setup<'s>(
+    lock: &mut jsg::Lock<'s>,
+    ctx: &EvalContext<'_>,
+    setup: &str,
+    count: usize,
+) -> (v8::Local<'s, v8::Value>, Vec<v8::Local<'s, v8::Value>>) {
+    ctx.eval_raw(lock, setup).unwrap();
+    let value = eval(lock, ctx, "value");
+    let transfer = (0..count)
+        .map(|i| eval(lock, ctx, &format!("transfer[{i}]")))
+        .collect();
+    (value, transfer)
+}
+
+/// Serializes with each serializer what `setup` sets up, transferring `count` values, and checks
+/// that the bytes are the same, that each transferred `transferred` buffers, that `detached`
+/// holds after each, and that each reader reads with the other's buffers a value for which
+/// `check` holds.
+fn assert_transfer(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    setup: &str,
+    count: usize,
+    transferred: usize,
+    detached: &str,
+    check: &str,
+) {
+    let (value, transfer) = transfer_setup(lock, ctx, setup, count);
+    let options = jsg::ser::SerializeOptions {
+        transfer: &transfer,
+        ..Default::default()
+    };
+    let serialized = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+    assert!(
+        ctx.eval::<bool>(lock, detached).unwrap(),
+        "{setup}: Rust JSG detached"
+    );
+
+    let (value, transfer) = transfer_setup(lock, ctx, setup, count);
+    let options = jsg::ser::SerializeOptions {
+        transfer: &transfer,
+        ..Default::default()
+    };
+    let cpp = Harness::cpp_serialize_with(lock, value, options);
+    assert!(
+        ctx.eval::<bool>(lock, detached).unwrap(),
+        "{setup}: C++ JSG detached"
+    );
+    assert_eq!(serialized.data(), cpp.data(), "{setup}");
+    assert_eq!(
+        serialized.backing_store_addresses().0.len(),
+        transferred,
+        "{setup}"
+    );
+    assert_eq!(
+        cpp.backing_store_addresses().0.len(),
+        transferred,
+        "{setup}"
+    );
+
+    let read = jsg::ser::DeserializeOptions::default();
+    let copy = Harness::cpp_deserialize_serialized(lock, &serialized, read);
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{setup}: C++ JSG read: {check}"
+    );
+    let copy = cpp.deserialize(lock, read).unwrap();
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{setup}: Rust JSG read: {check}"
+    );
+}
+
+#[test]
+fn transferred_array_buffers_move_to_the_deserializer() {
+    Harness::new().run_in_context(|lock, ctx| {
+        // A buffer and a view of it written after it.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(4); new Uint8Array(b)[1] = 9;
+             globalThis.value = { b, v: new Uint8Array(b, 1) }; globalThis.transfer = [b];",
+            1,
+            1,
+            "b.byteLength === 0",
+            "v.b.byteLength === 4 && v.v.buffer === v.b && v.v[0] === 9",
+        );
+        // A view given for its buffer, and a value given twice, which is transferred once.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(2); globalThis.u = new Uint8Array(b); u[0] = 3;
+             globalThis.value = [u]; globalThis.transfer = [u, u];",
+            2,
+            1,
+            "b.byteLength === 0 && u.length === 0",
+            "v[0][0] === 3 && v[0].buffer.byteLength === 2",
+        );
+        // A view and its buffer, and two views of one buffer, transfer the buffer once.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); globalThis.u = new Uint8Array(b, 4); u[0] = 7;
+             globalThis.w = new Uint8Array(b);
+             globalThis.value = { u, b }; globalThis.transfer = [u, b, w];",
+            3,
+            1,
+            "b.byteLength === 0 && u.length === 0 && w.length === 0",
+            "v.u[0] === 7 && v.u.buffer === v.b && v.b.byteLength === 8",
+        );
+        // A getter that serialization runs sees the buffer intact: it is detached afterwards.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8);
+             globalThis.value = { get size() { return b.byteLength; }, b };
+             globalThis.transfer = [b];",
+            1,
+            1,
+            "b.byteLength === 0",
+            "v.size === 8 && v.b.byteLength === 8",
+        );
+        // A getter that serialization runs can detach a transferred buffer itself, as a nested
+        // structuredClone() that transfers it does. release() doesn't detach it again, which V8
+        // happens to allow today, and passes on the backing store it took in transfer(). The
+        // HTML standard throws a DataCloneError for a buffer detached by then; both serializers
+        // differ from it alike, so this checks only that they agree and don't crash.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); new Uint8Array(b)[0] = 42;
+             globalThis.value = { get moved() { return new Uint8Array(b.transfer()); } };
+             globalThis.transfer = [b];",
+            1,
+            1,
+            "b.detached",
+            "v.moved[0] === 42 && v.moved.length === 8",
+        );
+        // A buffer that the value doesn't hold is still detached, and passed on.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(1); globalThis.value = 1; globalThis.transfer = [b];",
+            1,
+            1,
+            "b.byteLength === 0",
+            "v === 1",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn values_that_cannot_be_transferred_throw() {
+    Harness::new().run_in_context(|lock, ctx| {
+        for (setup, name, message) in [
+            (
+                "globalThis.b = new ArrayBuffer(1); globalThis.transfer = [b, {}];",
+                "TypeError",
+                "Object is not transferable",
+            ),
+            (
+                "globalThis.b = new ArrayBuffer(1);
+                 globalThis.transfer = [b, new Uint8Array(new SharedArrayBuffer(1))];",
+                "DataCloneError",
+                "Object is not transferable.",
+            ),
+            (
+                "globalThis.b = new ArrayBuffer(1);
+                 globalThis.transfer = [b, new SharedArrayBuffer(1)];",
+                "TypeError",
+                "Object is not transferable",
+            ),
+        ] {
+            for cpp in [false, true] {
+                let (value, transfer) =
+                    transfer_setup(lock, ctx, &format!("{setup} globalThis.value = b;"), 2);
+                let caught = lock
+                    .try_catch(|lock| {
+                        let options = jsg::ser::SerializeOptions {
+                            transfer: &transfer,
+                            ..Default::default()
+                        };
+                        let result = if cpp {
+                            Harness::cpp_try_serialize_with(lock, value, options)
+                        } else {
+                            jsg::ser::serialize_with_options(lock, value, options)
+                        };
+                        assert!(
+                            result.as_ref().is_err_and(jsg::Error::is_pending),
+                            "{setup}"
+                        );
+                        result
+                    })
+                    .unwrap();
+                assert_error(lock, ctx, caught.expect_err(setup), name, message);
+                // Nothing is detached.
+                assert!(
+                    ctx.eval::<bool>(lock, "b.byteLength === 1").unwrap(),
+                    "{setup}"
+                );
+            }
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn buffers_are_read_only_with_their_data() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let (value, transfer) = transfer_setup(
+            lock,
+            ctx,
+            "globalThis.value = new ArrayBuffer(1); globalThis.transfer = [value];",
+            1,
+        );
+        let options = jsg::ser::SerializeOptions {
+            transfer: &transfer,
+            ..Default::default()
+        };
+        let transferred = jsg::ser::serialize_with_options(lock, value, options).unwrap();
+        let value = eval(lock, ctx, "new SharedArrayBuffer(1)");
+        let shared =
+            jsg::ser::serialize_with_options(lock, value, jsg::ser::SerializeOptions::default())
+                .unwrap();
+
+        // The bytes alone don't carry the buffers, for either reader.
+        for data in [transferred.data(), shared.data()] {
+            let rust = deserialize_exception(lock, data);
+            let caught = lock
+                .try_catch(|lock| Harness::cpp_try_deserialize(lock, data))
+                .unwrap();
+            let cpp = caught.expect_err("C++ JSG should throw");
+            ctx.set_global(lock, "rust", rust);
+            ctx.set_global(lock, "cpp", cpp);
+            assert!(
+                ctx.eval::<bool>(
+                    lock,
+                    "rust.name === cpp.name && rust.message === cpp.message"
+                )
+                .unwrap()
+            );
+        }
+
+        // Data that names a SharedArrayBuffer beyond the list it came with is malformed, as
+        // jsg::Deserializer reads it.
+        let bare = jsg::v8::ffi::Serialized {
+            data: shared.into_data(),
+            ..Default::default()
+        };
+        // SAFETY: there are no backing stores to own.
+        let bare = unsafe { jsg::ser::Serialized::from_ffi(bare) };
+        let caught = lock
+            .try_catch(|lock| {
+                let result = bare.deserialize(lock, jsg::ser::DeserializeOptions::default());
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        caught.expect_err("deserialization should throw");
         Ok(())
     });
 }

@@ -128,6 +128,41 @@ pub mod ffi {
         ptr: usize,
     }
 
+    /// The options of `ser::serialize_with_options` that the C++ shim applies, as
+    /// `jsg::Serializer::Options`.
+    #[derive(Debug, Clone, Copy)]
+    struct SerializeOptions {
+        /// Whether to write `version` rather than V8's latest version.
+        has_version: bool,
+        version: u32,
+        omit_header: bool,
+        /// `jsg::Serializer::Options::treatClassInstancesAsPlainObjects`.
+        class_instances_as_plain_objects: bool,
+        /// `jsg::Lock::isUsingEnhancedErrorSerialization()`.
+        errors_are_host_objects: bool,
+    }
+
+    /// The options of `ser::deserialize_with` that the C++ shim applies, as
+    /// `jsg::Deserializer::Options`.
+    #[derive(Debug, Clone, Copy)]
+    struct DeserializeOptions {
+        /// Whether to read in `version` rather than the header's version.
+        has_version: bool,
+        version: u32,
+        read_header: bool,
+        preserve_stack_in_errors: bool,
+    }
+
+    /// What `ser::serialize_with_options` writes, as `jsg::Serializer::Released`. Each backing
+    /// store is the address of a heap-allocated `std::shared_ptr<v8::BackingStore>` that the
+    /// receiver owns.
+    #[derive(Debug, Default)]
+    struct Serialized {
+        data: Vec<u8>,
+        shared_array_buffers: Vec<usize>,
+        transferred_array_buffers: Vec<usize>,
+    }
+
     /// Mirrors `v8::BackingStoreInitializationMode`. Must be kept in sync with
     /// the V8-defined enum in `v8-array-buffer.h`.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -892,16 +927,20 @@ pub mod ffi {
         pub unsafe fn local_serialize(
             isolate: *mut Isolate,
             value: &Local,
-            errors_are_host_objects: bool,
-            version: KjMaybe<u32>,
-            result: &mut Vec<u8>,
+            options: &SerializeOptions,
+            transfer: &[Local],
+            result: &mut Serialized,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
         // throws.
         pub unsafe fn value_deserialize(
             isolate: *mut Isolate,
             data: &[u8],
-            preserve_stack_in_errors: bool,
+            options: &DeserializeOptions,
+            diagnostic_context: &str,
+            // Borrowed `BackingStore` addresses, as `Serialized` holds them.
+            transferred_array_buffers: &[usize],
+            shared_array_buffers: &[usize],
         ) -> Result<MaybeLocal>;
 
         // JSON
@@ -1580,10 +1619,19 @@ pub struct BackingStore {
     ptr: NonZeroUsize,
 }
 
+impl std::fmt::Debug for BackingStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackingStore")
+            .field("byte_length", &self.byte_length())
+            .field("is_shared", &self.is_shared())
+            .finish()
+    }
+}
+
 impl Drop for BackingStore {
     fn drop(&mut self) {
-        // SAFETY: ptr was obtained from a `local_*_get_backing_store` FFI call
-        // and is uniquely owned by self.
+        // SAFETY: ptr is the address of a heap-allocated `std::shared_ptr<v8::BackingStore>`
+        // that self uniquely owns, as `from_raw` requires.
         unsafe { ffi::backing_store_drop(self.ptr.get()) }
     }
 }
@@ -1601,17 +1649,34 @@ impl BackingStore {
         unsafe { Self::from_raw(ptr) }
     }
 
-    /// Wraps a `usize` address returned by a `local_*_get_backing_store` FFI call.
+    /// Wraps the address of a heap-allocated `std::shared_ptr<v8::BackingStore>`, such as one a
+    /// `local_*_get_backing_store` FFI call returns.
     ///
     /// # Safety
-    /// `ptr` must be a non-zero value returned by one of the
-    /// `local_*_get_backing_store` FFI functions, and the caller must transfer
-    /// unique ownership to this `BackingStore`.
+    /// `ptr` must be the non-zero address of a heap-allocated `std::shared_ptr<v8::BackingStore>`,
+    /// and the caller must transfer unique ownership of it to this `BackingStore`.
     #[expect(clippy::expect_used, reason = "the caller guarantees a non-zero `ptr`")]
     unsafe fn from_raw(ptr: usize) -> Self {
         Self {
             ptr: NonZeroUsize::new(ptr).expect("backing_store pointer must be non-null"),
         }
+    }
+
+    /// The address of the `std::shared_ptr<v8::BackingStore>` this owns, for C++ to borrow.
+    #[doc(hidden)]
+    pub fn as_ffi(&self) -> usize {
+        self.ptr.get()
+    }
+
+    /// Takes ownership of the heap-allocated `std::shared_ptr<v8::BackingStore>` at `ptr`.
+    ///
+    /// # Safety
+    /// `ptr` must be the non-zero address of a heap-allocated `std::shared_ptr<v8::BackingStore>`
+    /// that nothing else owns or frees.
+    #[doc(hidden)]
+    pub unsafe fn from_ffi(ptr: usize) -> Self {
+        // SAFETY: the caller guarantees what `from_raw` requires.
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Returns a raw pointer to the backing store's data.
@@ -1838,7 +1903,7 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// Views `locals` as the FFI handles C++ functions take, without copying.
-    fn raw_slice(locals: &[Self]) -> &[ffi::Local] {
+    pub(crate) fn raw_slice(locals: &[Self]) -> &[ffi::Local] {
         // SAFETY: as for `raw`, element by element.
         unsafe { std::slice::from_raw_parts(locals.as_ptr().cast::<ffi::Local>(), locals.len()) }
     }

@@ -265,14 +265,15 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
-`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
-their serializers are written against C++ JSG, and the deserializer finds classes implemented in
-JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
-in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
-depending on how DOMException is implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through
-which Rust describes a value as `kj::str()` of a handle does, including an error implemented in
-JavaScript by the name and message it holds. These hooks take and return only V8 and KJ types.
+`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `writeNativeError`, `readNativeError`,
+`readHeader`, `JsSerializableWriter`, `JsSerializableReader` and `newDataCloneError`), through
+which workerd's API objects, DOMExceptions, native errors and instances of classes implemented in
+JavaScript serialize, since their serializers are written against C++ JSG and give each one format;
+`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
+through which Rust creates and reads DOMExceptions without depending on how DOMException is
+implemented; and `toDetailString` in `workerd/jsg/jsg.h`, through which Rust describes a value as
+`kj::str()` of a handle does, including an error implemented in JavaScript by the name and message
+it holds. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -1058,7 +1059,7 @@ error, as C++ JSG fails with a `KJ_ASSERT`.
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the object is created from a `v8::DictionaryTemplate` cached for the struct type, as C++ JSG creates it, so the fields are data properties, an absent optional field is `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` and `ser::serialize_with_options` (a getter or Proxy trap, a `DataCloneError`, or for a value that can't be transferred a `TypeError` or `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the object is created from a `v8::DictionaryTemplate` cached for the struct type, as C++ JSG creates it, so the fields are data properties, an absent optional field is `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
 A `#[jsg_method]`, property getter or wildcard property that returns `()`, `bool` or one of the numeric types a Fast API callback returns, directly or as the `Ok` type of a `Result`, sets its result directly in V8: a `bool` with `set_return_boolean`, a number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return value converts with `ToJS::to_js_with_creator`. Instance members pass the resource's wrapper as the creator, and static members pass `None`. As in C++ JSG's `wrap()`, a `jsg::Promise` keeps its creator resource alive until it settles. Containers pass the creator on; a `ToJS` impl that holds such values should forward it too.
 
@@ -1088,14 +1089,16 @@ and the rest, for which `ExceptionType::is_dom_exception()` is true) are shortha
 `DOMException`, as in `jsg_require!(..., AbortError, ...)`; `Error::new_dom_exception` takes any
 name, including `SyntaxError` and names that are no `ExceptionType`, such as `QuotaExceededError`.
 A C++ error that reaches Rust as a `kj::Exception` keeps its DOMException name, whatever it is, and
-`FromJS` for `Error` reads a JavaScript error as its class, even one whose `name` is a DOMException
-name. An `ErrorName` compares equal to the `ExceptionType` that is thrown the same way, so
-`err.name == ExceptionType::TypeError` works. `Lock::dom_exception` creates a `DOMException` with
-any name, as C++ `jsg::Lock::domException()` does. Both create it through `jsg::newDOMException()`
-(Safety rules, rule 3), which needs the current context: while an exception or a termination is
-pending, or if creating it throws, `Lock::dom_exception` and `Lock::exception` fail with a pending
-error, and `Lock::throw_exception` throws nothing, so the pending exception propagates. A fast
-callback never throws a `DOMException`, since only a method that returns no `Result` has one.
+`FromJS` for `Error` reads a `DOMException`, whichever implementation made it, with the name and
+message it was created with, and a JavaScript error as its class, even one whose `name` is a
+DOMException name. An `ErrorName` compares equal to the `ExceptionType` that is thrown the same
+way, so `err.name == ExceptionType::TypeError` works. `Lock::dom_exception` creates a
+`DOMException` with any name, as C++ `jsg::Lock::domException()` does. Both create it through
+`jsg::newDOMException()` (Safety rules, rule 3), which needs the current context: while an
+exception or a termination is pending, or if creating it throws, `Lock::dom_exception` and
+`Lock::exception` fail with a pending error, and `Lock::throw_exception` throws nothing, so the
+pending exception propagates. A fast callback never throws a `DOMException`, since only a method
+that returns no `Result` has one.
 
 ## Serialization
 
@@ -1111,16 +1114,31 @@ that the class's `clone` function returns follows the value. Reading one makes t
 class's prototype, which it finds among the bootstrap's loaded modules, and passes it the data
 with the class's `deserialize` function once the whole value is read. That function is the only
 JavaScript deserialization runs, and where C++ code has disallowed JavaScript execution, reading
-such an instance throws `DataCloneError`. A `SharedArrayBuffer` is written as a reference to a
-buffer that is not part of the bytes, which neither `ser::deserialize` nor a `jsg::Deserializer`
-given only the bytes can resolve, so data containing one can't be read back.
+such an instance throws `DataCloneError`.
 
-Two options of C++ JSG's are supported as well. `jsg::ser::serialize_with_options` takes
-`SerializeOptions::version`, the version of V8's format to write rather than the latest, as
-`jsg::Serializer::Options::version` does; a version V8 can't write throws `DataCloneError`.
-`jsg::ser::deserialize_with` takes `DeserializeOptions::preserve_stack_in_errors`, as
-`jsg::Deserializer::Options::preserveStackInErrors` does. Transfer lists, externals and the other
-options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+`jsg::ser::serialize_with_options` and `jsg::ser::deserialize_with` take the options of
+`jsg::Serializer::Options` and `jsg::Deserializer::Options` that don't concern externals, as
+`SerializeOptions` and `DeserializeOptions`: the version of V8's format to write or read rather
+than the latest or the header's, whether there is a header, whether class instances are written
+as plain objects or rejected (as RPC rejects them), whether errors get back their `stack`, and the
+label of the internal error for a missing or unsupported header. A version V8 can't write or read
+throws `DataCloneError`.
+
+`serialize_with_options` returns `ser::Serialized`, as `jsg::Serializer::release()` returns
+`Released`: the bytes, and the backing stores of the value's `SharedArrayBuffer`s and of the
+`ArrayBuffer`s in `SerializeOptions::transfer`, which are detached once the value is written. A
+value that can't be transferred throws a `TypeError` or `DataCloneError`, as in C++, before
+anything is detached. The data refers to these buffers by number, so only
+`Serialized::deserialize` reads it with them, as `jsg::Deserializer` reads a `Released`. Safe code
+has no other way to hand a reader backing stores (the hidden hooks for C++ comparison tests give
+their addresses, which only `unsafe` code can use), so a reader can't be given another
+serialization's buffers. `Serialized` is neither `Send` nor `Sync`: as with `Released`, its
+buffers are read in the isolate that wrote them. `Serialized::data()` and `into_data()` give the bytes
+alone, which `ser::deserialize_with` reads when they refer to no buffer.
+
+Externals are not supported: without a `jsg::Serializer::ExternalHandler`, functions, `Proxy`s
+and API objects that serialize only for RPC (stubs, streams, sockets) throw a `DataCloneError`,
+as they do in `jsg::Serializer` without one. The C++ side is `src/rust/jsg/ser.c++`.
 
 ## JSON
 

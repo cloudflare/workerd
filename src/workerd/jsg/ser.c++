@@ -14,10 +14,6 @@
 
 namespace workerd::jsg {
 namespace {
-// Keep in sync with the nativeError serialization tag defined in
-// worker-interface.capnp
-constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
-
 // The error tag is serialized as a uint32_t immediately following
 // the SERIALIZATION_TAG_NATIVE_ERROR tag in order to more efficiently
 // determine the type of error when deserializing so that we can
@@ -216,7 +212,10 @@ Serializer::Serializer(Lock& js, Options options)
 }
 
 Serializer::Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed)
-    : treatClassInstancesAsPlainObjects(true),
+    : writeDepth(1),
+      treatClassInstancesAsPlainObjects(true),
+      treatErrorsAsHostObjects(js.isUsingEnhancedErrorSerialization()),
+      domExceptionBrandKey(IsolateBase::getDomExceptionBrandKey(js.v8Isolate)),
       ser(ser) {}
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
@@ -325,50 +324,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     }
 
     if (object->IsNativeError()) {
-      auto nameStr = js.str("name"_kj);
-      auto messageStr = js.str("message"_kj);
-
-      // Get the standard name, message, stack, cause, error, errors properties from
-      // the error object.
-      writeRawUint32(SERIALIZATION_TAG_NATIVE_ERROR);
-
-      // A mix of ad-hoc and regular serialization. We first serialize
-      // the error tag, which is an enum that identifies the type of error
-      // for faster/easier deserialization. Then we serialize the message which
-      // usually come from the prototype. Then we grab the own properties,
-      // serializing the number of them followed by each name and value in
-      // sequence.
-
-      jsg::JsObject errorObj(object);
-      auto name = errorObj.get(js, nameStr);
-      auto nameKjStr = name.toString(js);
-      auto tag = getErrorTagFromName(js, nameKjStr);
-      writeRawUint32(static_cast<uint32_t>(tag));
-      // We only write the name if it is not one of the known error types.
-      if (tag == ErrorTag::UNKNOWN) {
-        write(js, name);
-      }
-
-      write(js, errorObj.get(js, messageStr));
-
-      auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
-          PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
-
-      auto obj = js.obj();
-      for (size_t n = 0; n < names.size(); n++) {
-        auto name = names.get(js, n);
-        // The name typically comes from the prototype and therefore
-        // do not show up in the own properties of the error object, and the
-        // message we want to treat specially since we need it early in the
-        // deserialization.
-        // Since we already have them serialized above, we can filter them
-        // out here.
-        if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
-
-        obj.set(js, name, errorObj.get(js, name));
-      }
-      write(js, obj);
-
+      writeNativeError(js, object);
       return v8::Just(true);
     }
 
@@ -380,6 +336,61 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return v8::Nothing<bool>();
   }
+}
+
+void Serializer::writeNativeError(Lock& js, v8::Local<v8::Object> error) {
+  auto nameStr = js.str("name"_kj);
+  auto messageStr = js.str("message"_kj);
+
+  // Get the standard name, message, stack, cause, error, errors properties from
+  // the error object.
+  writeRawUint32(SERIALIZATION_TAG_NATIVE_ERROR);
+
+  // A mix of ad-hoc and regular serialization. We first serialize
+  // the error tag, which is an enum that identifies the type of error
+  // for faster/easier deserialization. Then we serialize the message which
+  // usually come from the prototype. Then we grab the own properties,
+  // serializing the number of them followed by each name and value in
+  // sequence.
+
+  jsg::JsObject errorObj(error);
+  auto name = errorObj.get(js, nameStr);
+  auto nameKjStr = name.toString(js);
+  auto tag = getErrorTagFromName(js, nameKjStr);
+  writeRawUint32(static_cast<uint32_t>(tag));
+  // We only write the name if it is not one of the known error types.
+  if (tag == ErrorTag::UNKNOWN) {
+    write(js, name);
+  }
+
+  write(js, errorObj.get(js, messageStr));
+
+  auto names = errorObj.getPropertyNames(
+      js, KeyCollectionFilter::OWN_ONLY, PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+
+  auto obj = js.obj();
+  auto ownDataProperties = js.isUsingErrorSerializationOwnDataProperties();
+  for (size_t n = 0; n < names.size(); n++) {
+    auto name = names.get(js, n);
+    // The name typically comes from the prototype and therefore
+    // do not show up in the own properties of the error object, and the
+    // message we want to treat specially since we need it early in the
+    // deserialization.
+    // Since we already have them serialized above, we can filter them
+    // out here.
+    if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
+
+    // A data property, as when reading, copies the value without running a setter. set() runs a
+    // setter that Object.prototype has for the name instead, and an own `__proto__` replaces the
+    // object's prototype; it is kept for Workers without error_serialization_own_data_properties.
+    auto value = errorObj.get(js, name);
+    if (ownDataProperties) {
+      obj.createDataProperty(js, name, value);
+    } else {
+      obj.set(js, name, value);
+    }
+  }
+  write(js, obj);
 }
 
 void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
@@ -537,9 +548,9 @@ Serializer::Released Serializer::release() {
 
   // Now that serialization is complete, detach the ArrayBuffers that were transferred. We
   // intentionally defer this until after write() -- see transfer() for details.
-  if (!arrayBuffersToDetach.empty()) {
+  if (!arrayBuffers.empty()) {
     auto& js = jsg::Lock::current();
-    for (auto& arrayBuffer: arrayBuffersToDetach) {
+    for (auto& arrayBuffer: arrayBuffers) {
       auto handle = arrayBuffer.getHandle(js);
       // JS run during write() (e.g. an accessor getter performing a nested structuredClone that
       // transfers the same buffer, or calling ArrayBuffer.prototype.transfer()) may have already
@@ -554,7 +565,6 @@ Serializer::Released Serializer::release() {
 
   sharedArrayBuffers.clear();
   arrayBuffers.clear();
-  arrayBuffersToDetach.clear();
   auto pair = ser.Release();
   return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
@@ -584,13 +594,14 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   JSG_REQUIRE(arrayBuffer->IsDetachable(), DOMDataCloneError, "Object is not transferable.");
 
   uint32_t n;
+  // Each buffer is transferred once, however many times it or views of it are listed: V8 must
+  // be told about a buffer only once.
   for (n = 0; n < arrayBuffers.size(); n++) {
-    // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n].getHandle(js) == value) {
+    if (arrayBuffers[n].getHandle(js) == arrayBuffer) {
       return;
     }
   }
-  arrayBuffers.add(jsg::JsRef(js, value));
+  arrayBuffers.add(js.v8Ref(arrayBuffer));
 
   backingStores.add(arrayBuffer->GetBackingStore());
   ser.TransferArrayBuffer(n, arrayBuffer);
@@ -615,9 +626,6 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   //    that is in the transfer list while serialization is still running. Detaching up front (as we
   //    used to) would show such a getter a prematurely-detached buffer; deferring matches the spec
   //    (the buffer is still detached by the time structuredClone() returns, in release()).
-  //
-  // A vector is required because the transfer list may contain multiple ArrayBuffers.
-  arrayBuffersToDetach.add(js.v8Ref(arrayBuffer));
 }
 
 void Serializer::write(Lock& js, const JsValue& value) {
@@ -627,15 +635,17 @@ void Serializer::write(Lock& js, const JsValue& value) {
   KJ_ON_SCOPE_FAILURE(if (writeDepth == 1) pendingJsSerializableData.clear());
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
 
+  if (writeDepth == 1) writePendingJsSerializableData(js);
+}
+
+void Serializer::writePendingJsSerializableData(Lock& js) {
   // A top-level value is followed by the data of the instances of classes implemented in
   // JavaScript that it contains, in the order they were written. Writing one's data may add more.
-  if (writeDepth == 1) {
-    for (size_t i = 0; i < pendingJsSerializableData.size(); i++) {
-      auto data = pendingJsSerializableData[i].getHandle(js);
-      KJ_ASSERT(check(ser.WriteValue(js.v8Context(), data)));
-    }
-    pendingJsSerializableData.clear();
+  for (size_t i = 0; i < pendingJsSerializableData.size(); i++) {
+    auto data = pendingJsSerializableData[i].getHandle(js);
+    KJ_ASSERT(check(ser.WriteValue(js.v8Context(), data)));
   }
+  pendingJsSerializableData.clear();
 }
 
 Deserializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
@@ -665,9 +675,36 @@ Deserializer::Deserializer(
           released.sharedArrayBuffers.asPtr(),
           kj::mv(maybeOptions)) {}
 
-Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed)
+Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed borrowed)
     : totalInputSize(0),
-      deser(deser) {}
+      deser(deser),
+      preserveStackInErrors(borrowed.preserveStackInErrors),
+      readDepth(1) {}
+
+void Deserializer::readHeaderOrFail(Lock& js,
+    v8::ValueDeserializer& deser,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<kj::StringPtr> diagnosticContext) {
+  JSG_TRY(js) {
+    check(deser.ReadHeader(js.v8Context()));
+  }
+  JSG_CATCH(exception) {
+    (void)exception;
+    // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
+    // version at zero if the header is absent or its version could not be decoded.
+    auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
+    auto message = kj::str(
+        "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
+        diagnosticContext.orDefault("unknown"), "; bytes=", data.size(), "; header=", header,
+        "; wireVersion=", deser.GetWireFormatVersion(),
+        "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
+        "; v8=", v8::V8::GetVersion(), "]");
+    LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
+    // Header failures are internal faults. Suppress duplicate reporting when this exception
+    // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
+    kj::throwException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
+  }
+}
 
 void Deserializer::init(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
@@ -676,25 +713,7 @@ void Deserializer::init(Lock& js,
   auto options = kj::mv(maybeOptions).orDefault({});
   externalHandler = options.externalHandler;
   if (options.readHeader) {
-    JSG_TRY(js) {
-      check(deser.ReadHeader(js.v8Context()));
-    }
-    JSG_CATCH(exception) {
-      (void)exception;
-      // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
-      // version at zero if the header is absent or its version could not be decoded.
-      auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
-      auto message = kj::str(
-          "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
-          options.diagnosticContext.orDefault("unknown"), "; bytes=", data.size(),
-          "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
-          "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
-          "; v8=", v8::V8::GetVersion(), "]");
-      LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
-      // Header failures are internal faults. Suppress duplicate reporting when this exception
-      // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
-      kj::throwException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
-    }
+    readHeaderOrFail(js, deser, data, options.diagnosticContext);
   }
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {
@@ -770,64 +789,7 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
     uint tag = readRawUint32();
 
     if (tag == SERIALIZATION_TAG_NATIVE_ERROR) {
-      auto& js = Lock::from(isolate);
-      auto stack = js.str("stack"_kj);
-
-      // The first uint32_t is the error tag, which identifies the type of error.
-      auto errorTag = static_cast<ErrorTag>(readRawUint32());
-      // If The error tag is UNKNOWN, we will read the name of the error next.
-      // If the error is known, we don't both serializing the name.
-      kj::Maybe<JsValue> maybeName;
-      if (errorTag == ErrorTag::UNKNOWN) {
-        maybeName = readValue(js);
-      }
-
-      // The next value is the message, which is always present.
-      auto messageValue = readValue(js);
-      auto messageStr = KJ_UNWRAP_OR(messageValue.tryCast<JsString>(), {
-        JSG_FAIL_REQUIRE(
-            DOMDataCloneError, "Deserialization failed: error message is not a string");
-      });
-      // Now let's create the error object based on the tag and message.
-      auto obj = toJsError(js, errorTag, messageStr);
-
-      // If we have a name, we set it on the error object. This is not
-      // perfect but it gets close enough. Specifically, when the error
-      // was serialized, if the user has modified the name or created
-      // their own subclass, then we end up having to create just a
-      // regular error here and change the name. It is not possible
-      // for us here to clone the exact error class that was used,
-      // so instanceof checks will not work as expected. But, that's ok.
-      KJ_IF_SOME(name, maybeName) {
-        // We use defineProperty here since the name is not typically
-        // modifiable with set() on error objects.
-        obj.defineProperty(js, "name"_kj, name);
-      }
-
-      // Now let's read the remaining properties... They were serialized as
-      // a plain object with some own properties.
-      KJ_IF_SOME(serObj, readValue(js).tryCast<JsObject>()) {
-        auto names = serObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
-            PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
-        for (size_t n = 0; n < names.size(); n++) {
-          auto name = names.get(js, n);
-          // If the preserveStackInErrors option is false, then we will not
-          // restore the serialized stack property if it is included in the
-          // serialized output.
-          if (!preserveStackInErrors && name.strictEquals(stack)) continue;
-          auto value = serObj.get(js, name);
-          // Use createDataProperty instead of ordinary set to avoid
-          // invoking prototype-chain setters. This code runs inside V8's
-          // DisallowJavascriptExecution scope; an ordinary Set() that hits
-          // a tenant-installed Error.prototype setter would trigger
-          // V8_Fatal -> abort(). CreateDataProperty defines an own data
-          // property directly, matching the HTML structured-clone spec.
-          obj.createDataProperty(js, name, value);
-        }
-      }
-
-      v8::Local<v8::Object> ret = obj;
-      return ret;
+      return readNativeError(Lock::from(isolate));
     }
 
     if (tag == SERIALIZATION_TAG_JS_SERIALIZABLE) {
@@ -841,6 +803,64 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return {};
   }
+}
+
+v8::Local<v8::Object> Deserializer::readNativeError(Lock& js) {
+  auto stack = js.str("stack"_kj);
+
+  // The first uint32_t is the error tag, which identifies the type of error.
+  auto errorTag = static_cast<ErrorTag>(readRawUint32());
+  // If The error tag is UNKNOWN, we will read the name of the error next.
+  // If the error is known, we don't both serializing the name.
+  kj::Maybe<JsValue> maybeName;
+  if (errorTag == ErrorTag::UNKNOWN) {
+    maybeName = readValue(js);
+  }
+
+  // The next value is the message, which is always present.
+  auto messageValue = readValue(js);
+  auto messageStr = KJ_UNWRAP_OR(messageValue.tryCast<JsString>(), {
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: error message is not a string");
+  });
+  // Now let's create the error object based on the tag and message.
+  auto obj = toJsError(js, errorTag, messageStr);
+
+  // If we have a name, we set it on the error object. This is not
+  // perfect but it gets close enough. Specifically, when the error
+  // was serialized, if the user has modified the name or created
+  // their own subclass, then we end up having to create just a
+  // regular error here and change the name. It is not possible
+  // for us here to clone the exact error class that was used,
+  // so instanceof checks will not work as expected. But, that's ok.
+  KJ_IF_SOME(name, maybeName) {
+    // We use defineProperty here since the name is not typically
+    // modifiable with set() on error objects.
+    obj.defineProperty(js, "name"_kj, name);
+  }
+
+  // Now let's read the remaining properties... They were serialized as
+  // a plain object with some own properties.
+  KJ_IF_SOME(serObj, readValue(js).tryCast<JsObject>()) {
+    auto names = serObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
+        PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+    for (size_t n = 0; n < names.size(); n++) {
+      auto name = names.get(js, n);
+      // If the preserveStackInErrors option is false, then we will not
+      // restore the serialized stack property if it is included in the
+      // serialized output.
+      if (!preserveStackInErrors && name.strictEquals(stack)) continue;
+      auto value = serObj.get(js, name);
+      // Use createDataProperty instead of ordinary set to avoid
+      // invoking prototype-chain setters. This code runs inside V8's
+      // DisallowJavascriptExecution scope; an ordinary Set() that hits
+      // a tenant-installed Error.prototype setter would trigger
+      // V8_Fatal -> abort(). CreateDataProperty defines an own data
+      // property directly, matching the HTML structured-clone spec.
+      obj.createDataProperty(js, name, value);
+    }
+  }
+
+  return obj;
 }
 
 v8::Local<v8::Object> Deserializer::readApiObject(Lock& js, uint32_t tag) {
@@ -1035,6 +1055,48 @@ v8::Maybe<bool> writeApiObject(
   }
 }
 
+v8::Maybe<bool> writeNativeError(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error) {
+  try {
+    auto& js = Lock::from(isolate);
+    Serializer serializer(js, ser, Serializer::Borrowed{});
+    serializer.writeNativeError(js, error);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::Maybe<bool> readHeader(v8::Isolate* isolate,
+    v8::ValueDeserializer& deser,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<kj::StringPtr> diagnosticContext) {
+  try {
+    Deserializer::readHeaderOrFail(Lock::from(isolate), deser, data, diagnosticContext);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::MaybeLocal<v8::Object> readNativeError(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack) {
+  try {
+    auto& js = Lock::from(isolate);
+    Deserializer deserializer(
+        js, deser, Deserializer::Borrowed{.preserveStackInErrors = bool(preserveStack)});
+    return deserializer.readNativeError(js);
+  } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
 v8::MaybeLocal<v8::Object> readApiObject(
     v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag) {
   try {
@@ -1051,13 +1113,64 @@ v8::MaybeLocal<v8::Object> readApiObject(
   }
 }
 
-kj::Maybe<v8::Local<v8::Value>> tryGetBootstrapExports(
-    v8::Isolate* isolate, kj::StringPtr specifier) {
-  auto& js = Lock::from(isolate);
-  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return kj::none);
-  return modules.tryGetLoadedExports(js, specifier).map([](JsValue exports) {
-    return v8::Local<v8::Value>(exports);
-  });
+JsSerializableWriter::JsSerializableWriter(v8::Isolate* isolate, v8::ValueSerializer& ser)
+    : isolate(isolate),
+      serializer(Lock::from(isolate), ser, Serializer::Borrowed{}) {}
+
+v8::Maybe<bool> JsSerializableWriter::write(
+    v8::Local<v8::Object> object, v8::Local<v8::Value> mark) {
+  try {
+    serializer.writeJsSerializable(Lock::from(isolate), object, mark);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::Maybe<bool> JsSerializableWriter::writePendingData() {
+  try {
+    serializer.writePendingJsSerializableData(Lock::from(isolate));
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+JsSerializableReader::JsSerializableReader(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack)
+    : isolate(isolate),
+      deserializer(Lock::from(isolate),
+          deser,
+          Deserializer::Borrowed{.preserveStackInErrors = bool(preserveStack)}) {}
+
+v8::MaybeLocal<v8::Object> JsSerializableReader::read() {
+  try {
+    return deserializer.readJsSerializable(Lock::from(isolate));
+  } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
+v8::Maybe<bool> JsSerializableReader::finish() {
+  if (deserializer.pendingJsSerializables.empty()) return v8::Just(true);
+  try {
+    deserializer.finishJsSerializables(Lock::from(isolate));
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {

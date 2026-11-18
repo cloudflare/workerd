@@ -372,28 +372,83 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
-bool cpp_serialize(
-    Isolate* isolate, ::workerd::rust::jsg::Local value, ::rust::Vec<uint8_t>& result) {
+namespace {
+
+void releaseBackingStores(
+    kj::Array<std::shared_ptr<v8::BackingStore>>& stores, ::rust::Vec<size_t>& addresses) {
+  for (auto& store: stores) {
+    addresses.push_back(
+        reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(kj::mv(store))));
+  }
+}
+
+kj::Array<std::shared_ptr<v8::BackingStore>> copyBackingStores(
+    ::rust::Slice<const size_t> addresses) {
+  return KJ_MAP(address, addresses) {
+    return *reinterpret_cast<const std::shared_ptr<v8::BackingStore>*>(address);
+  };
+}
+
+}  // namespace
+
+bool cpp_serialize(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    const ::workerd::rust::jsg::SerializeOptions& options,
+    ::rust::Slice<const ::workerd::rust::jsg::Local> transfer,
+    ::workerd::rust::jsg::Serialized& result) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   try {
-    ::workerd::jsg::Serializer serializer(js);
-    serializer.write(js,
-        ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
-    for (auto byte: serializer.release().data) {
-      result.push_back(byte);
+    JSG_TRY(js) {
+      ::workerd::jsg::Serializer serializer(js,
+          ::workerd::jsg::Serializer::Options{
+            .version = options.has_version ? kj::Maybe<uint32_t>(options.version) : kj::none,
+            .omitHeader = options.omit_header,
+            .treatClassInstancesAsPlainObjects = options.class_instances_as_plain_objects,
+          });
+      for (auto& item: transfer) {
+        serializer.transfer(js,
+            ::workerd::jsg::JsValue(::workerd::rust::jsg::local_as_ref_from_ffi<v8::Value>(item)));
+      }
+      serializer.write(js,
+          ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+      auto released = serializer.release();
+      for (auto byte: released.data) {
+        result.data.push_back(byte);
+      }
+      releaseBackingStores(released.sharedArrayBuffers, result.shared_array_buffers);
+      releaseBackingStores(released.transferredArrayBuffers, result.transferred_array_buffers);
+      return true;
     }
-    return true;
+    JSG_CATCH(exception) {
+      // Throws a KJ exception as a JSG method's glue does, such as the TypeError that transfer()
+      // throws for a value it can't transfer.
+      js.throwException(kj::mv(exception));
+    }
   } catch (::workerd::jsg::JsExceptionThrown&) {
     return false;
   }
 }
 
-::workerd::rust::jsg::MaybeLocal cpp_deserialize(
-    Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+::workerd::rust::jsg::MaybeLocal cpp_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const ::workerd::rust::jsg::DeserializeOptions& options,
+    ::rust::Str diagnostic_context,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = kj::heapString(diagnostic_context.data(), diagnostic_context.size());
+  auto transferred = copyBackingStores(transferred_array_buffers);
+  auto shared = copyBackingStores(shared_array_buffers);
   try {
     JSG_TRY(js) {
-      ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+      ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()),
+          transferred.asPtr(), shared.asPtr(),
+          ::workerd::jsg::Deserializer::Options{
+            .version = options.has_version ? kj::Maybe<uint32_t>(options.version) : kj::none,
+            .readHeader = options.read_header,
+            .preserveStackInErrors = options.preserve_stack_in_errors,
+            .diagnosticContext = context.asPtr(),
+          });
       v8::Local<v8::Value> result = deserializer.readValue(js);
       return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(result));
     }

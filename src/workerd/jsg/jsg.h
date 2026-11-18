@@ -3284,6 +3284,10 @@ class Lock {
   void setUsingFastJsgStruct();
   bool isUsingFastJsgStruct() const;
   bool isUsingEnhancedErrorSerialization() const;
+  // Whether serializing an error defines its own properties as data properties of the object
+  // written in their place, rather than assigning them; see Serializer::writeNativeError().
+  void setUsingErrorSerializationOwnDataProperties();
+  bool isUsingErrorSerializationOwnDataProperties() const;
 
   void setNodeJsCompatEnabled();
   void setNodeJsProcessV2Enabled();

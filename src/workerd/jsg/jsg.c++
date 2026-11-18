@@ -315,6 +315,14 @@ bool Lock::isUsingEnhancedErrorSerialization() const {
   return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }
 
+void Lock::setUsingErrorSerializationOwnDataProperties() {
+  IsolateBase::from(v8Isolate).setUsingErrorSerializationOwnDataProperties();
+}
+
+bool Lock::isUsingErrorSerializationOwnDataProperties() const {
+  return IsolateBase::from(v8Isolate).getUsingErrorSerializationOwnDataProperties();
+}
+
 void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
 }

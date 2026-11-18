@@ -369,16 +369,23 @@ impl<'s> FromJS<'s> for Error {
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
-    /// If the value is a native error, extracts the name and message properties.
-    /// Otherwise, converts the value to a string for the message.
+    /// A `DOMException`, whichever implementation made it, becomes an [`ErrorName::DomException`]
+    /// with the name and message it was created with, which own properties that shadow them don't
+    /// change, as [`try_unwrap_dom_exception`] reads them; this runs no JavaScript. A native error
+    /// becomes the [`ErrorName::Class`] its `name` names, or `Error` for any other name, with its
+    /// `message`. Anything else fails with a `TypeError`.
     ///
-    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or an exception or a termination is already pending, this fails with an
-    /// error for which [`Error::is_pending`] is true.
+    /// While an exception or a termination is pending, any value fails, with an error for which
+    /// [`Error::is_pending`] is true, since checking for a `DOMException` calls into V8. Reading a
+    /// native error's `name` and `message` can run JavaScript (a getter, a Proxy trap, or
+    /// `toString`); if it throws, this fails the same way.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
+        if let Some((name, message)) = try_unwrap_dom_exception(lock, value)? {
+            return Ok(Self::new_dom_exception(name, message));
+        }
         if value.is_native_error()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
         {
@@ -397,7 +404,7 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                // A `DOMException` is not a native error, so `name` names a class.
+                // `DOMException`s are read above, so `name` names a class.
                 name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
                     ErrorName::class_named(&n)
                 }),
@@ -1301,10 +1308,12 @@ impl<'s> Lock<'s> {
         let mut details = Vec::new();
         let options = ser::SerializeOptions {
             version: Some(v8::ffi::tunneled_exception_serialization_version()),
+            ..Default::default()
         };
-        if let Ok(data) =
-            self.try_catch(|lock| ser::serialize_with_options(lock, exception, options))?
-        {
+        // C++ JSG keeps only the bytes too.
+        if let Ok(data) = self.try_catch(|lock| {
+            ser::serialize_with_options(lock, exception, options).map(ser::Serialized::into_data)
+        })? {
             details.push((v8::ffi::tunneled_exception_detail_id(), data));
             if self.feature_flags().get_enhanced_error_serialization() {
                 details.push((v8::ffi::tunneled_exception_enhanced_detail_id(), vec![1]));

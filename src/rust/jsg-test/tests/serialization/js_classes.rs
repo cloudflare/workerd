@@ -12,6 +12,7 @@ use super::assert_deserialization_throws;
 use super::assert_error;
 use super::assert_read;
 use super::assert_round_trip;
+use super::assert_round_trip_with;
 use super::deserialize_exception;
 use super::eval;
 use super::header;
@@ -351,6 +352,27 @@ fn instances_round_trip() {
 }
 
 #[test]
+fn instances_are_written_when_class_instances_are_rejected() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_up_classes(lock, ctx);
+        // An instance's mark is found before it could be taken for a class instance.
+        let reject = jsg::ser::SerializeOptions {
+            class_instances: jsg::ser::ClassInstances::Reject,
+            ..Default::default()
+        };
+        assert_round_trip_with(
+            lock,
+            ctx,
+            "[new Point(1)]",
+            reject,
+            jsg::ser::DeserializeOptions::default(),
+            "Object.getPrototypeOf(v[0]) === Point.prototype && v[0].x === 2",
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn errors_round_trip() {
     for enhanced in [false, true] {
         let harness = Harness::with_flags(move |mut flags| {
@@ -458,6 +480,7 @@ fn errors_keep_their_stacks_as_native_errors_do() {
             assert_eq!(data, Harness::cpp_serialize(lock, value));
             let options = jsg::ser::DeserializeOptions {
                 preserve_stack_in_errors: false,
+                ..Default::default()
             };
             let copy = jsg::ser::deserialize_with(lock, &data, options)?;
             ctx.set_global(lock, "v", copy);
@@ -522,6 +545,7 @@ fn records_are_read_as_their_flags_say() {
             bytes.extend_from_slice(&data);
             let options = jsg::ser::DeserializeOptions {
                 preserve_stack_in_errors: false,
+                ..Default::default()
             };
             let copy = jsg::ser::deserialize_with(lock, &bytes, options)?;
             ctx.set_global(lock, "v", copy);

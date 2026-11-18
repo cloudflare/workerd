@@ -53,6 +53,9 @@ inline void configureJsgIsolate(jsg::Lock& js, CompatibilityFlags::Reader flags)
   if (flags.getEnhancedErrorSerialization()) {
     js.setUsingEnhancedErrorSerialization();
   }
+  if (flags.getErrorSerializationOwnDataProperties()) {
+    js.setUsingErrorSerializationOwnDataProperties();
+  }
   if (flags.getFastJsgStruct()) {
     js.setUsingFastJsgStruct();
   }

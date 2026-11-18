@@ -1841,4 +1841,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  errorSerializationOwnDataProperties @207 :Bool
+      $compatEnableFlag("error_serialization_own_data_properties")
+      $compatDisableFlag("no_error_serialization_own_data_properties")
+      $compatEnableDate("2027-01-12");
+  # With enhanced_error_serialization, serializing an error copies its own properties other than
+  # `name` and `message` to a plain object, which is written in their place. With this flag they
+  # are defined on that object as data properties, as deserialization defines them on the error it
+  # creates, so no setter runs and an own `__proto__` is copied like any other property. Without it
+  # they are assigned, so a setter that `Object.prototype` has for a property's name runs instead
+  # and the property is missing from the clone (a setter that throws makes serialization throw),
+  # and an own `__proto__` property replaces the plain object's prototype and is lost. Either way,
+  # each property's value is read from the error, which runs an own getter.
 }

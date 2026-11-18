@@ -582,6 +582,14 @@ class IsolateBase {
     usingFastJsgStruct = true;
   }
 
+  void setUsingErrorSerializationOwnDataProperties() {
+    errorSerializationOwnDataProperties = true;
+  }
+
+  bool getUsingErrorSerializationOwnDataProperties() const {
+    return errorSerializationOwnDataProperties;
+  }
+
   void setWasmEsmIntegrationBuiltinsEnabled() {
     wasmEsmIntegrationBuiltinsEnabled = true;
   }
@@ -917,6 +925,7 @@ class IsolateBase {
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool errorSerializationOwnDataProperties = false;
   bool wasmEsmIntegrationBuiltinsEnabled = false;
   bool wasmSourceUrlSupportEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;

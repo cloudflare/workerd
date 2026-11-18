@@ -34,6 +34,7 @@ constexpr FlagSetter FLAG_SETTERS[] = {
   &CompatibilityFlags::Builder::setThrowOnUnrecognizedImportAssertion,
   &CompatibilityFlags::Builder::setNoTopLevelAwaitInRequire,
   &CompatibilityFlags::Builder::setEnhancedErrorSerialization,
+  &CompatibilityFlags::Builder::setErrorSerializationOwnDataProperties,
   &CompatibilityFlags::Builder::setFastJsgStruct,
   &CompatibilityFlags::Builder::setWasmEsmIntegrationBuiltins,
   &CompatibilityFlags::Builder::setWasmSourceUrlSupport,
@@ -59,6 +60,8 @@ void checkSettings(CompatibilityFlags::Reader flags) {
         flags.getThrowOnUnrecognizedImportAssertion());
     KJ_EXPECT(base.isTopLevelAwaitEnabled() == !flags.getNoTopLevelAwaitInRequire());
     KJ_EXPECT(js.isUsingEnhancedErrorSerialization() == flags.getEnhancedErrorSerialization());
+    KJ_EXPECT(js.isUsingErrorSerializationOwnDataProperties() ==
+        flags.getErrorSerializationOwnDataProperties());
     KJ_EXPECT(js.isUsingFastJsgStruct() == flags.getFastJsgStruct());
     KJ_EXPECT(js.isWasmEsmIntegrationBuiltinsEnabled() == flags.getWasmEsmIntegrationBuiltins());
     KJ_EXPECT(js.isWasmSourceUrlSupportEnabled() == flags.getWasmSourceUrlSupport());
