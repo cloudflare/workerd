@@ -33,8 +33,11 @@ export default {
         const obj = { message: "I'm alive!" };
         const ref = new WeakRef(obj);
 
-        // Store the WeakRef for later testing
+        // Store the WeakRef for later testing. V8 may collect a WeakRef's target at any GC once
+        // the job that created it ends, so a strong reference keeps the object alive until the
+        // `gc` request drops it.
         weakRefState.ref = ref;
+        weakRefState.strong = obj;
         weakRefState.isDereferenced = false;
         weakRefState.value = ref.deref()?.message || null;
 
@@ -45,6 +48,7 @@ export default {
       }
       if (url.searchParams.has('gc')) {
         // Force garbage collection and check if the WeakRef has been cleared
+        weakRefState.strong = null;
         gc();
         await scheduler.wait(10); // Give GC time to clean up
       }

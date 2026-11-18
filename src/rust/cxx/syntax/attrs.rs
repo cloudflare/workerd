@@ -50,6 +50,7 @@ pub struct Parser<'a> {
     pub cxx_name: Option<&'a mut Option<ForeignName>>,
     pub rust_name: Option<&'a mut Option<Ident>>,
     pub variants_from_header: Option<&'a mut Option<Attribute>>,
+    pub nothrow: Option<&'a mut bool>,
     pub ignore_unrecognized: bool,
 
     // Suppress clippy needless_update lint ("struct update has no effect, all
@@ -149,6 +150,19 @@ pub fn parse(cx: &mut Errors, attrs: Vec<Attribute>, mut parser: Parser) -> Othe
                     if let Some(cfg) = &mut parser.cfg {
                         cfg.merge(cfg_expr);
                         passthrough_attrs.push(attr);
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    cx.push(err);
+                    break;
+                }
+            }
+        } else if attr_path.is_ident("nothrow") {
+            match attr.meta.require_path_only() {
+                Ok(_) => {
+                    if let Some(nothrow) = &mut parser.nothrow {
+                        **nothrow = true;
                         continue;
                     }
                 }

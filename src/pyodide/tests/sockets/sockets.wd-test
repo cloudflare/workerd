@@ -24,7 +24,7 @@ const unitTests :Workerd.Config = (
         allow = ["private"],
         tlsOptions = (
           trustedCertificates = [
-            embed "../../../../api/tests/starttls-server.pem",
+            embed "../../../workerd/api/tests/starttls-server.pem",
           ],
         ),
       )
