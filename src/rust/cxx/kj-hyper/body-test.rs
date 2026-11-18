@@ -116,7 +116,7 @@ fn title_case_is_hypers() {
 
 #[test]
 fn builtin_names_are_the_builtin_spellings_lowercased() {
-    for (spelling, name) in BUILTIN.iter().zip(BUILTIN_NAMES) {
+    for (spelling, name) in BUILTIN.iter().zip(&BUILTIN_NAMES) {
         assert_eq!(name.as_str(), spelling.to_ascii_lowercase());
     }
 }
