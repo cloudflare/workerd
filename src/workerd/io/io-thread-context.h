@@ -83,7 +83,10 @@ class ThreadContext {
     bool waiting = false;
   };
   HangChecks& getHangChecks() {
-    return hangChecks;
+    return *hangChecks;
+  }
+  kj::Weak<HangChecks> getWeakHangChecks() {
+    return hangChecks.addWeak();
   }
 
  private:
@@ -93,7 +96,7 @@ class ThreadContext {
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
-  HangChecks hangChecks;
+  kj::Pin<HangChecks> hangChecks;
 };
 
 }  // namespace workerd
