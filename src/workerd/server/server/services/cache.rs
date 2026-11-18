@@ -7,18 +7,25 @@
 //! In a cluster it is one across the nodes, by the protocol in `cache-cluster.rs`; on one
 //! machine that Worker stores to a writable `disk` instead. A record is opaque, with an expiry:
 //!
-//! - `GET <url>`: 200 with the record and its `Content-Length`, or 404, as once it expired.
+//! - `GET <url>`: 200 with the record and its `Content-Length`, or 404, as once it expired,
+//!   with an `X-Ticket` for a fill.
 //! - `PUT <url>` with `X-Expires: <ms since the epoch>`: 204 stored, 413 refused, 500 if the
-//!   outcome is unknown.
+//!   outcome is unknown. Workers Caching's also name the entry for purges, by
+//!   `X-Purge-Namespace`, `X-Purge-Path` and `X-Purge-Tags`, and return the miss's `X-Ticket`:
+//!   412 if a purge since stores nothing (`cache-purge.rs`).
 //! - `DELETE <url>`: 204 had an unexpired record, 404 did not, 500 if unknown.
+//! - `POST /?ns=..&tag=..&prefix=..&everything`: purges what matches, on every node. 200, or
+//!   500 if a node did not answer.
 //!
-//! The URL's last segment is the key. A value is a file: its expiry and a newline, then the
-//! record. A put writes a draft that the store takes once the whole body was read; a request
+//! The URL's last segment is the key. A value is a file: its expiry, a space, the length of its
+//! purge names and a newline, the names, then the record. A put writes a draft that the store takes once the whole body was read; a request
 //! cancelled first stores nothing. From a worker in this process, a body without a length that
 //! fails ends instead, so the worker cancels. Disk I/O is synchronous, as in `disk`.
 
 use std::fs::File;
 use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::io::Write;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -54,27 +61,43 @@ use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::text;
 use crate::services::disk::copy_file;
+use crate::services::disk::header_value;
 use crate::services::disk::kj_headers;
 use crate::services::header_table;
 use crate::services::not_transferable;
 use crate::services::unsupported;
 
-/// A value's expiry, in ms since the epoch, and where its record starts.
-fn expiry(file: &mut File) -> Result<Option<(u64, u64)>> {
-    let mut line = [0; 24];
+/// A value's expiry, in ms since the epoch, the length of its purge names, and where its record
+/// starts.
+fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64)>> {
+    let mut line = [0; 48];
     let read = file.read(&mut line).map_err(|e| io_kj_error(&e))?;
     let Some(end) = line[..read].iter().position(|&b| b == b'\n') else {
         return Ok(None);
     };
-    let expires = std::str::from_utf8(&line[..end]).ok();
-    Ok(expires
-        .and_then(|e| e.parse().ok())
-        .map(|e| (e, end as u64 + 1)))
+    let text = std::str::from_utf8(&line[..end]).ok();
+    let parsed = text.and_then(|t| {
+        let (expires, n) = t.split_once(' ')?;
+        Some((expires.parse().ok()?, n.parse::<u64>().ok()?))
+    });
+    Ok(parsed.map(|(e, n)| (e, n, end as u64 + 1 + n)))
+}
+
+/// The purge names of the value in `file`, if it has them.
+fn meta(file: &mut File) -> Result<Option<Meta>> {
+    let Some((_, n, start)) = expiry(file)? else {
+        return Ok(None);
+    };
+    let mut bytes = vec![0; usize::try_from(n).unwrap()];
+    file.seek(SeekFrom::Start(start - n))
+        .and_then(|_| file.read_exact(&mut bytes))
+        .map_err(|e| io_kj_error(&e))?;
+    Ok(Meta::parse(&bytes).filter(|_| n > 0))
 }
 
 /// Whether the value in `file` is unexpired at `now`.
 fn fresh(file: &mut File, now: u64) -> Result<bool> {
-    Ok(expiry(file)?.is_some_and(|(e, _)| e > now))
+    Ok(expiry(file)?.is_some_and(|(e, ..)| e > now))
 }
 
 fn now_ms() -> u64 {
@@ -86,6 +109,7 @@ fn now_ms() -> u64 {
 struct Cache {
     factory: Rc<Factory>,
     store: clustered::Clustered,
+    purges: Rc<Purges>,
 }
 
 /// A `cache` service: the nodes' store of `/workerd/cache.js`.
@@ -129,9 +153,15 @@ pub fn make_cache_service(
             "Directory of cache \"{name}\" not found: {path}"
         ));
     }
-    let store = clustered::store(name, &root, node, factory)?;
+    let purges = Rc::new(Purges::default());
+    let store = clustered::store(name, &root, node, factory, Rc::clone(&purges))?;
     let factory = Rc::clone(factory);
-    Ok(Rc::new(CacheService(Rc::new(Cache { factory, store }))))
+    let cache = Cache {
+        factory,
+        store,
+        purges,
+    };
+    Ok(Rc::new(CacheService(Rc::new(cache))))
 }
 
 impl Channel for CacheService {
@@ -194,13 +224,16 @@ impl CacheRequest {
 
     async fn get(&self, key: &str, response: ServiceResponse<'_>) -> Result<()> {
         let store = &self.cache.store;
+        let ticket = self.cache.purges.ticket(store.active());
+        let mut miss = HeaderMap::new();
+        miss.insert("X-Ticket", header_value(ticket.text())?);
         let Some(mut file) = store.get(key).await? else {
-            return self.answer(response, 404, "Not Found");
+            return self.send(response, 404, "Not Found", &miss, 0).map(drop);
         };
         // A near copy, leased, may expire before its home drops it.
-        let Some((_, start)) = expiry(&mut file)?.filter(|&(e, _)| e > now_ms()) else {
+        let Some((.., start)) = expiry(&mut file)?.filter(|&(e, ..)| e > now_ms()) else {
             store.expire(key);
-            return self.answer(response, 404, "Not Found");
+            return self.send(response, 404, "Not Found", &miss, 0).map(drop);
         };
         let size = file.metadata().map_err(|e| io_kj_error(&e))?.len() - start;
         let mut headers = HeaderMap::new();
@@ -223,9 +256,17 @@ impl CacheRequest {
             drain(body).await?;
             return self.answer(response, 400, "Bad Request");
         };
+        let text = |name: &str| {
+            let value = headers.get_by_name(name)?;
+            Some(String::from_utf8_lossy(value).into_owned())
+        };
+        let ticket = text("X-Ticket").map(|t| Ticket::parse(&t));
+        let meta = Meta::from(text);
+        let names = meta.as_ref().map(Meta::bytes).unwrap_or_default();
         let (temp, mut file) = self.cache.store.draft()?;
         let mut write = |bytes: &[u8]| file.write_all(bytes).map_err(|e| io_kj_error(&e));
-        write(format!("{expires}\n").as_bytes())?;
+        write(format!("{expires} {}\n", names.len()).as_bytes())?;
+        write(&names)?;
         let mut chunk = vec![0; 64 * 1024];
         loop {
             let read = body.as_mut().try_read(&mut chunk, 1).await?;
@@ -234,8 +275,31 @@ impl CacheRequest {
             }
             write(&chunk[..read])?;
         }
+        let storing = match &ticket {
+            Some(ticket) => {
+                let meta = meta.unwrap_or_default();
+                let Some(storing) = self.cache.purges.store(ticket, &meta) else {
+                    return self.answer(response, 412, "Precondition Failed");
+                };
+                Some(storing)
+            }
+            None => None,
+        };
         let stored = self.cache.store.put(key, temp, file).await;
+        drop(storing);
         self.wrote(response, stored, (413, "Payload Too Large"))
+    }
+
+    async fn purge(&self, url: &[u8], response: ServiceResponse<'_>) -> Result<()> {
+        let purge = Purge::parse(url)?;
+        self.cache.purges.fence(&purge).await;
+        match self.cache.store.purge(&purge).await {
+            Ok(()) => self.answer(response, 200, "OK"),
+            Err(e) => {
+                tracing::warn!("cache purge: {}", e.description());
+                self.answer(response, 500, "Internal Server Error")
+            }
+        }
     }
 }
 
@@ -254,6 +318,10 @@ impl Service for CacheRequest {
             return store
                 .message(from, method, url, headers, body, response)
                 .await;
+        }
+        if matches!(method, Method::POST) {
+            drain(body).await?;
+            return self.purge(url, response).await;
         }
         let url = String::from_utf8_lossy(url);
         let key = url.rsplit('/').next().unwrap_or_default();
@@ -293,6 +361,14 @@ impl Interface for CacheRequest {
 
 #[path = "cache-cluster.rs"]
 mod clustered;
+
+#[path = "cache-purge.rs"]
+mod purge;
+
+use purge::Meta;
+use purge::Purge;
+use purge::Purges;
+use purge::Ticket;
 
 #[cfg(test)]
 #[path = "cache-test.rs"]

@@ -287,6 +287,42 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
 }
 
+jsg::Promise<api::CachePurgeResult> ServerCacheContext::purge(jsg::Lock& js,
+    api::CachePurgeOptions options,
+    const jsg::TypeHandler<api::CachePurgeOptions>&,
+    const jsg::TypeHandler<api::CachePurgeResult>&,
+    const jsg::TypeHandler<jsg::Ref<api::JsRpcProperty>>&) {
+  kj::Vector<kj::String> query;
+  KJ_IF_SOME(tags, options.tags) {
+    for (auto& tag: tags) query.add(kj::str("tag=", kj::encodeUriComponent(tag)));
+  }
+  KJ_IF_SOME(prefixes, options.pathPrefixes) {
+    for (auto& prefix: prefixes) query.add(kj::str("prefix=", kj::encodeUriComponent(prefix)));
+  }
+  if (options.purgeEverything.orDefault(false)) query.add(kj::str("everything"));
+  auto url = kj::str("http://workers-cache/purge?", kj::strArray(query, "&"));
+  auto& context = IoContext::current();
+  auto client = context.getCacheClient()->getDefault({.parentSpan = nullptr});
+  kj::HttpHeaders headers(context.getHeaderTable());
+  auto request = client->request(kj::HttpMethod::POST, url, headers, uint64_t(0));
+  request.body = nullptr;
+  auto status = request.response
+                    .then([](kj::HttpClient::Response&& response) -> uint {
+    return response.statusCode;
+  }).attach(kj::mv(client));
+  return context.awaitIo(js, kj::mv(status), [](jsg::Lock&, uint status) {
+    if (status == 200) return api::CachePurgeResult{.success = true, .errors = nullptr};
+    auto errors = kj::heapArrayBuilder<api::CachePurgeError>(1);
+    errors.add(api::CachePurgeError{
+      .code = static_cast<int>(status), .message = kj::str("purge answered ", status)});
+    return api::CachePurgeResult{.success = false, .errors = errors.finish()};
+  });
+}
+
+jsg::Optional<jsg::Ref<api::CacheContext>> WorkerdApi::getCtxCacheProperty(jsg::Lock& js) const {
+  return js.alloc<ServerCacheContext>();
+}
+
 const jsg::IsolateObserver& WorkerdApi::getObserver() const {
   return *impl->observer;
 }

@@ -69,6 +69,40 @@ const cache :Workerd.Config = (
   cluster = .cluster,
 );
 
+# As `cache`, with Workers Caching in front of `main`: /workerd/cache.js's `ReadThrough`, which
+# the socket goes to, its entries in `cache`. `main`'s `cacheApiOutbound` is the same module, for
+# `ctx.cache.purge()`.
+const readThrough :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-read-through-worker.js",
+            esModule = embed "cluster-read-through-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        cacheApiOutbound = "cached",
+      )
+    ),
+    ( name = "cached",
+      worker = (
+        modules = [ ( name = "cache.js", bundled = "/workerd/cache.js" ) ],
+        compatibilityDate = "2026-01-01",
+        bindings = [
+          ( name = "STORE", service = "cache" ),
+          ( name = "ORIGIN", service = "main" ),
+        ],
+      )
+    ),
+    ( name = "cache", cache = () ),
+  ],
+  sockets = [
+    ( name = "http", address = "*:0", http = (),
+      service = ( name = "cached", entrypoint = "ReadThrough" ) ),
+  ],
+  cluster = .cluster,
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (

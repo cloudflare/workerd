@@ -97,19 +97,28 @@ class Fail extends Error {
 let skew = 0;
 const clock = () => Date.now() + skew;
 
+const failed = (e) => {
+  const statusText = String(e.message ?? e).replace(/[\r\n]/g, ' ');
+  const { status = 500, headers } = e;
+  return new Response(null, { status, statusText, headers });
+};
+
 export default {
   async fetch(request, env) {
-    try {
-      return await serve(request, env);
-    } catch (e) {
-      const statusText = String(e.message ?? e).replace(/[\r\n]/g, ' ');
-      const { status = 500, headers } = e;
-      return new Response(null, { status, statusText, headers });
-    }
+    return serve(request, env).catch(failed);
+  },
+};
+
+export const ReadThrough = {
+  async fetch(request, env, ctx) {
+    return readThrough(request, env, ctx).catch(failed);
   },
 };
 
 async function serve(request, env) {
+  if (request.method === 'POST' && new URL(request.url).pathname === '/purge') {
+    return purge(request, env);
+  }
   if (request.method === 'POST' && env.TEST_CLOCK) {
     const url = new URL(request.url);
     const advance = Number(url.searchParams.get('advance'));
@@ -121,11 +130,7 @@ async function serve(request, env) {
   }
   const ns = request.headers.get('CF-Cache-Namespace') ?? '';
   const key = request.cf?.cacheKey ? String(request.cf.cacheKey) : request.url;
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    enc.encode(`${ns}\0${key}`)
-  );
-  const at = `http://store/${hex(new Uint8Array(digest))}`;
+  const at = await storeUrl(`${ns}\0${key}`);
   switch (request.method) {
     case 'GET':
       return match(request, env, at);
@@ -141,6 +146,11 @@ async function serve(request, env) {
 
 const hex = (bytes) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+const storeUrl = async (name) => {
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(name));
+  return `http://store/${hex(new Uint8Array(digest))}`;
+};
 
 const concat = (a, b) => {
   const out = new Uint8Array(a.byteLength + b.byteLength);
@@ -171,11 +181,15 @@ function rest(first, reader, check = () => {}) {
   });
 }
 
-// `{head, body, size}` of the unexpired entry at `at`, or null. One that
-// expired, or is not a record, is deleted.
-async function load(env, at) {
+// `{head, body, size}` of the unexpired entry at `at`, or null, after
+// which `miss.ticket` is the store's for a fill. One that expired, or is
+// not a record, is deleted.
+async function load(env, at, miss = {}) {
   const r = await env.STORE.fetch(at);
-  if (r.status === 404) return null;
+  if (r.status === 404) {
+    miss.ticket = r.headers.get('X-Ticket');
+    return null;
+  }
   if (!r.ok) throw new Error(`Reading the entry failed: ${r.status}.`);
   const reader = r.body.getReader({ mode: 'byob' });
   // `n` bytes, or null at the end.
@@ -220,10 +234,16 @@ async function match(request, env, at) {
   if (entry === null) {
     throw new Fail(504, 'Gateway Timeout', { 'CF-Cache-Status': 'MISS' });
   }
+  return answer(request, entry, 'HIT');
+}
+
+// `entry` as `request` asks: whole, by ranges, or a 304. `cacheStatus` is
+// its CF-Cache-Status.
+async function answer(request, entry, cacheStatus) {
   const { head, size } = entry;
   let body = entry.body;
   const headers = new Headers(head.headers);
-  headers.set('CF-Cache-Status', 'HIT');
+  headers.set('CF-Cache-Status', cacheStatus);
   const range = request.headers.get('Range');
   const ranges = range === null ? [] : parseRanges(range, size);
   headers.delete('Content-Length');
@@ -527,4 +547,212 @@ function lifetime(status, headers, req) {
     return fresh(Math.max(min, (served - modified) / 10000));
   }
   return fresh(min);
+}
+
+// =======================================================================
+// Workers Caching: the `ReadThrough` entrypoint, in front of a Worker.
+//
+// Its bindings: ORIGIN, the Worker; STORE, a store that purges (a
+// cluster's `cache`); NAMESPACE (optional), its entries' among others in
+// STORE. The Worker's `cacheApiOutbound` is this module's default export
+// with the same bindings, so that `ctx.cache.purge()`, a POST /purge,
+// reaches them.
+//
+// A GET or HEAD is answered from a fresh entry of its path and query
+// (`HIT`). Else a GET runs the Worker, and misses of the same key on this
+// node join it (`MISS`). A response the headers allow is stored by
+// `Cloudflare-CDN-Cache-Control`, else `CDN-Cache-Control`, else as the
+// Cache API stores it; 206, 304, 520-526 and any `Vary` never are. Other
+// responses stream through (`BYPASS`), as do other requests, upgrades and
+// ones with `Authorization`. A fill serves its response while it stores
+// it; joiners are served from its body if that is at most SPOOL bytes,
+// else look again once it is stored. The entry's `Cache-Tag` and path go
+// to the store for purges; neither `Cache-Tag` nor
+// `Cloudflare-CDN-Cache-Control` is served.
+//
+// The store hands a miss a ticket, and refuses the fill's put (412) if a
+// purge that matches it began since. Without a ticket nothing is stored.
+//
+// TODO(soon): `Vary`, stale-while-revalidate, stale-if-error,
+// `invalidate`, `cf.cacheKey`, a cache per entrypoint and version, a disk
+// STORE (purges there), one Worker run per key across a cluster.
+
+const SPOOL = 1024 * 1024;
+const UNSERVED = ['cache-tag', 'cloudflare-cdn-cache-control'];
+// The misses running the Worker, by key.
+const fills = new Map();
+
+async function readThrough(request, env, ctx) {
+  const h = request.headers;
+  if (
+    !['GET', 'HEAD'].includes(request.method) ||
+    h.has('Upgrade') ||
+    h.has('Authorization')
+  ) {
+    return env.ORIGIN.fetch(request);
+  }
+  const url = new URL(request.url);
+  const path = url.pathname + url.search;
+  const ns = env.NAMESPACE ?? '';
+  const at = await storeUrl(`\0rt\0${ns}\0${path}`);
+  for (;;) {
+    const miss = {};
+    const entry = await load(env, at, miss);
+    if (entry !== null) return answer(request, entry, 'HIT');
+    if (request.method === 'HEAD') return env.ORIGIN.fetch(request);
+    const fill = fills.get(at);
+    if (fill === undefined) {
+      const ticket = miss.ticket ?? null;
+      return run(request, env, ctx, { at, ns, path, ticket });
+    }
+    const joined = await join(fill);
+    if (joined !== null) return answer(request, joined, 'MISS');
+  }
+}
+
+// The fill's entry once it has one in memory, or null to look again.
+// Called in the joiner's request: streams cannot cross requests.
+async function join(fill) {
+  if (fill.bytes === null && !fill.over) {
+    await new Promise((resolve) => fill.waiting.push(resolve));
+  }
+  const { head, bytes } = fill;
+  if (bytes === null) return null;
+  return { head, body: new Response(bytes).body, size: bytes.byteLength };
+}
+
+// Runs the Worker for a miss of `at`, and answers with its response.
+async function run(request, env, ctx, { at, ns, path, ticket }) {
+  const fill = { head: null, bytes: null, waiting: [], over: false };
+  const wake = () => fill.waiting.splice(0).forEach((resolve) => resolve());
+  const release = () => {
+    fill.over = true;
+    if (fills.get(at) === fill) fills.delete(at);
+    wake();
+  };
+  fills.set(at, fill);
+  let res;
+  try {
+    res = await env.ORIGIN.fetch(request, { encodeResponseBody: 'manual' });
+  } catch (e) {
+    release();
+    throw e;
+  }
+  const { status, statusText } = res;
+  const policy = cdnLifetime(status, [...res.headers]);
+  if (policy === null) {
+    release();
+    const headers = new Headers(res.headers);
+    UNSERVED.forEach((name) => headers.delete(name));
+    headers.set('CF-Cache-Status', 'BYPASS');
+    return new Response(res.body, {
+      status,
+      statusText,
+      headers,
+      encodeBody: 'manual',
+    });
+  }
+  const expires = Math.min(
+    Math.floor(clock() + policy.ms),
+    Number.MAX_SAFE_INTEGER
+  );
+  const head = { status, statusText, headers: policy.headers, expires };
+  const names = {
+    'X-Expires': `${expires}`,
+    'X-Purge-Namespace': ns,
+    'X-Purge-Path': path,
+    'X-Purge-Tags': res.headers.get('Cache-Tag') ?? '',
+  };
+  const stores = ticket !== null && ticket !== 'none';
+  if (stores) names['X-Ticket'] = ticket;
+  const json = enc.encode(JSON.stringify(head));
+  const prefix = new Uint8Array(4);
+  new DataView(prefix.buffer).setUint32(0, json.byteLength);
+  const first = concat(prefix, json);
+  const read = await spool(res.body);
+  const store = (body, signal) =>
+    !stores
+      ? Promise.resolve()
+      : env.STORE.fetch(at, { method: 'PUT', headers: names, body, signal })
+          .then((r) => r.body?.cancel())
+          .catch(() => {});
+  if (read.bytes !== undefined) {
+    fill.head = head;
+    fill.bytes = read.bytes;
+    wake();
+    ctx.waitUntil(store(concat(first, read.bytes)).finally(release));
+    const body = new Response(read.bytes).body;
+    return answer(request, { head, body, size: read.bytes.byteLength }, 'MISS');
+  }
+  // A body that fails must not be stored, but the store may see one
+  // without a length that fails as one that ends: so it is cancelled.
+  const abort = new AbortController();
+  const [mine, theirs] = rest(read.first, read.reader, (_, error) => {
+    if (error) abort.abort(error);
+  }).tee();
+  ctx.waitUntil(
+    store(rest(first, theirs.getReader()), abort.signal).finally(release)
+  );
+  const headers = new Headers(head.headers);
+  headers.set('CF-Cache-Status', 'MISS');
+  return new Response(mine, {
+    status,
+    statusText,
+    headers,
+    encodeBody: 'manual',
+  });
+}
+
+// `{bytes}`, `body` whole if it is at most SPOOL bytes, else `{first,
+// reader}`: what was read, and the rest.
+async function spool(body) {
+  if (body === null) return { bytes: new Uint8Array(0) };
+  const reader = body.getReader();
+  let bytes = new Uint8Array(0);
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return { bytes };
+    bytes = concat(bytes, value);
+    if (bytes.byteLength > SPOOL) return { first: bytes, reader };
+  }
+}
+
+// `{ms, headers}` for Workers Caching: as `lifetime`, by
+// `Cloudflare-CDN-Cache-Control`, else `CDN-Cache-Control`, else
+// `Cache-Control`; null if not stored. `headers` are lowercase.
+function cdnLifetime(status, headers) {
+  const get = (name) => headers.find(([k]) => k === name)?.[1];
+  const never = [206, 304].includes(status) || (status >= 520 && status <= 526);
+  if (never || get('vary') !== undefined) return null;
+  const cdn = get('cloudflare-cdn-cache-control') ?? get('cdn-cache-control');
+  const own = headers.filter(([k]) => k === 'cache-control');
+  const asked =
+    cdn === undefined
+      ? headers
+      : [
+          ...headers.filter(([k]) => k !== 'cache-control'),
+          ['cache-control', cdn],
+        ];
+  const policy = lifetime(status, asked, new Headers());
+  if (policy === null || policy.ms <= 0) return null;
+  const served = ([k]) =>
+    !UNSERVED.includes(k) && (cdn === undefined || k !== 'cache-control');
+  const kept = policy.headers.filter(served);
+  return {
+    ms: policy.ms,
+    headers: cdn === undefined ? kept : [...kept, ...own],
+  };
+}
+
+// `ctx.cache.purge()`: POST /purge?tag=..&prefix=..&everything, from
+// src/workerd/server/workerd-api.c++, passed to the store with this
+// module's NAMESPACE.
+async function purge(request, env) {
+  const url = new URL(request.url);
+  url.searchParams.set('ns', env.NAMESPACE ?? '');
+  const r = await env.STORE.fetch(`http://store/?${url.searchParams}`, {
+    method: 'POST',
+  });
+  await r.body?.cancel();
+  return new Response(null, { status: r.status === 200 ? 200 : 500 });
 }

@@ -62,6 +62,22 @@
 
 namespace workerd::server {
 
+// `ctx.cache`: a purge is a POST /purge to the Worker's `cacheApiOutbound`, `/workerd/cache.js`,
+// which has its store remove the matching entries of its `ReadThrough`.
+// TODO(soon): present only for a Worker behind a read-through cache; `invalidate`.
+class ServerCacheContext final: public api::CacheContext {
+ public:
+  jsg::Promise<api::CachePurgeResult> purge(jsg::Lock& js,
+      api::CachePurgeOptions options,
+      const jsg::TypeHandler<api::CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<api::CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<api::JsRpcProperty>>& rpcPropHandler) override;
+
+  JSG_RESOURCE_TYPE(ServerCacheContext) {
+    JSG_INHERIT(api::CacheContext);
+  }
+};
+
 // Declares the listing of host object types and structs that the jsg
 // automatic type mapping will understand. Each of the various
 // NNNN_ISOLATE_TYPES macros are defined in different header files
@@ -127,6 +143,7 @@ namespace workerd::server {
   EW_TRACING_ISOLATE_TYPES,                             \
   EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,           \
   EW_WRAPPED_BINDING_ISOLATE_TYPES,                     \
+  ServerCacheContext,                                   \
   workerd::api::EnvModule,                              \
   jsg::TypeWrapperExtension<PromiseWrapper>,            \
   jsg::InjectConfiguration<CompatibilityFlags::Reader>, \
