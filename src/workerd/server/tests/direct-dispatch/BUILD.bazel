@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# `workerd serve` answering the same requests with WORKERD_DIRECT_DISPATCH unset, "1" and
+# "batched".
+js_test(
+    name = "direct-dispatch-test",
+    size = "small",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "direct-dispatch-test.mjs",
+    env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
+    tags = ["js-test"],
+)

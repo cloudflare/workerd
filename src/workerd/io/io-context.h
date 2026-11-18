@@ -581,6 +581,53 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     }
   }
 
+  // Like run(), but runs `func` now, under the isolate lock the caller already holds as
+  // `asyncLock` (from Worker::tryTakeAsyncLockNow()), and returns its result rather than a promise
+  // for it. What run() would reject with, this throws. Only for a context without an actor, which
+  // needs no input lock.
+  template <typename Func>
+  auto runNow(Worker::AsyncLock& asyncLock, Func&& func) {
+    KJ_REQUIRE(actor == kj::none, "runNow() is for contexts without an actor");
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwException(ex.clone());
+    }
+    requireCurrentIncomingRequestForRun(ReportRunWithoutRequest::YES);
+    auto bound = [this, &func](Worker::Lock& lock) -> decltype(auto) {
+      if constexpr (runFuncAcceptsIoContext<Func>) {
+        return func(lock, *this);
+      } else {
+        return func(lock);
+      }
+    };
+    using Result = decltype(bound(kj::instance<Worker::Lock&>()));
+    if constexpr (kj::isSameType<Result, void>()) {
+      struct RunnableImpl: public Runnable {
+        decltype(bound)& f;
+        explicit RunnableImpl(decltype(bound)& f): f(f) {}
+        void run(Worker::Lock& lock) override {
+          f(lock);
+        }
+      };
+      RunnableImpl runnable(bound);
+      runImpl(runnable, asyncLock, kj::none, Runnable::Exceptional(false));
+    } else {
+      struct RunnableImpl: public Runnable {
+        decltype(bound)& f;
+        kj::Maybe<Result> result;
+        explicit RunnableImpl(decltype(bound)& f): f(f) {}
+        void run(Worker::Lock& lock) override {
+          result = f(lock);
+        }
+      };
+      RunnableImpl runnable(bound);
+      runImpl(runnable, asyncLock, kj::none, Runnable::Exceptional(false));
+      KJ_IF_SOME(r, runnable.result) {
+        return kj::mv(r);
+      }
+      KJ_UNREACHABLE;
+    }
+  }
+
   // Like run() but executes within the given critical section, if it is non-null. If
   // `criticalSection` is null, then this just forwards to the other run() (with null inputLock).
   template <typename Func>

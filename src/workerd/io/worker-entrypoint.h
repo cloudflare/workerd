@@ -64,4 +64,19 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // Address of the client as IP:port on whose behalf this event is being delivered.
     kj::Maybe<kj::String> clientAddress = kj::none);
 
+// Calls `entrypoint.request()` with the request dispatched directly, for a caller that serves
+// HTTP on the thread's own event loop and can use a response at once. If the isolate's lock is
+// free, the handler runs before this returns, rather than in a later turn of the event loop. If
+// the handler's response is then sent in full, so is the rest of the request: `completed` is set
+// and the returned promise is already resolved, so the caller may drop it. Otherwise the promise
+// goes on as request()'s does. `entrypoint` must come from newWorkerEntrypoint(); a request to an
+// actor is dispatched as by request().
+kj::Promise<void> requestDirectly(WorkerInterface& entrypoint,
+    kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    bool& completed);
+
 }  // namespace workerd

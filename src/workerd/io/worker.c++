@@ -3385,6 +3385,20 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
   return takeAsyncLockSlow(kj::mv(lockTiming));
 }
 
+kj::Maybe<Worker::AsyncLock> Worker::Isolate::tryTakeAsyncLockNow(RequestObserver& request) const {
+  auto lockTiming = getMetrics().tryCreateLockTiming(kj::Maybe<RequestObserver&>(request));
+  kj::Maybe<AsyncLockHooks> hooks;
+  kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
+  KJ_IF_SOME(lt, lockTiming) {
+    hooksRef = hooks.emplace(*lt);
+  }
+  auto self = kj::atomicAddRef(*this);
+  KJ_IF_SOME(lock, asyncLockQueue.tryLockNow(self, hooksRef)) {
+    return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
+  }
+  return kj::none;
+}
+
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockSlow(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
   // Held on the coroutine frame so it outlives the wait below.
@@ -3404,6 +3418,10 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWithoutRequest(SpanParent pa
 
 kj::Promise<Worker::AsyncLock> Worker::takeAsyncLock(RequestObserver& request) const {
   return script->getIsolate().takeAsyncLock(request);
+}
+
+kj::Maybe<Worker::AsyncLock> Worker::tryTakeAsyncLockNow(RequestObserver& request) const {
+  return script->getIsolate().tryTakeAsyncLockNow(request);
 }
 
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {

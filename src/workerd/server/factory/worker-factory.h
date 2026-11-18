@@ -227,6 +227,16 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
+// Like `worker_request()` (rust/worker/ffi.h), with the request dispatched directly
+// (`requestDirectly()` in io/worker-entrypoint.h): sets `*completed` if the request is done before
+// this returns, in which case the returned promise is already resolved and may be dropped.
+kj::Promise<void> worker_request_directly(WorkerInterface& worker,
+    kj::HttpMethod method,
+    ::rust::Slice<const kj::byte> url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    bool* completed);
 kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
     const ActorHandle& actor,
     ::rust::Str className,

@@ -53,6 +53,8 @@ pub use crate::tasks::task_run;
 pub mod ffi {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
+        type AsyncInputStream = kj::io::ffi::AsyncInputStream;
+        type HttpMethod = kj::http::ffi::HttpMethod;
         type AsyncIoStream = kj::io::ffi::AsyncIoStream;
         type HttpHeaderTable = kj::http::ffi::HttpHeaderTable;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
@@ -415,6 +417,19 @@ pub mod ffi {
             metadata: KjOwn<RequestMetadata>,
             tails: Box<WorkerInterfaceList>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// `worker::ffi::bridge::worker_request`, with the request dispatched directly
+        /// (`requestDirectly()` in io/worker-entrypoint.h): the handler runs in this call if the
+        /// isolate is free. Sets `*completed` if the request is done when this returns, in which
+        /// case the future need not be polled.
+        async unsafe fn worker_request_directly<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            method: HttpMethod,
+            url: &'a [u8],
+            headers: &'a HttpHeaders,
+            request_body: Pin<&'a mut AsyncInputStream>,
+            response: Pin<&'a mut HttpServiceResponse>,
+            completed: *mut bool,
+        ) -> Result<()>;
         /// Runs an idle actor's captured hook and flushes its writes, without starting a request
         /// through the container's retirement gate or counting the actor as active. `tails`
         /// receive the hook's trace, as they would a request's on `class_name`. Only
@@ -1127,6 +1142,37 @@ pub fn edit_headers<'a>(
         headers,
         _source: std::marker::PhantomData,
     })
+}
+
+/// Calls `request()` on `worker` with the request dispatched directly (see
+/// `ffi::worker_request_directly`). Returns `None` if the request completed in this call, or else
+/// the future that finishes it.
+pub fn request_directly<'a>(
+    worker: std::pin::Pin<&'a mut ffi::WorkerInterface>,
+    method: kj::http::Method,
+    url: &'a [u8],
+    headers: kj::http::HeadersRef<'a>,
+    body: std::pin::Pin<&'a mut ffi::AsyncInputStream>,
+    response: kj::http::ServiceResponse<'a>,
+) -> Option<impl std::future::Future<Output = crate::Result<()>> + 'a> {
+    let mut completed = false;
+    // SAFETY: the future borrows the worker and the arguments for as long as it lives, and
+    // `completed` is written only during this call.
+    let call = unsafe {
+        ffi::worker_request_directly(
+            worker,
+            method,
+            url,
+            headers.as_ffi(),
+            body,
+            response.into_ffi(),
+            &raw mut completed,
+        )
+    };
+    if completed {
+        return None;
+    }
+    Some(async move { Ok(call.await?) })
 }
 
 /// See `ffi::new_image_filter_response`.

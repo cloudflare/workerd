@@ -453,8 +453,15 @@ async fn dispatch<'t>(
         body_abort: RefCell::new(None),
         closing: Cell::new(false),
     });
-    let call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, Rc::clone(&sender)));
-    calls.borrow_mut().push(call);
+    let mut call: LocalBoxFuture<'t, ()> = Box::pin(handle(conn, parts, body, Rc::clone(&sender)));
+    // A call that finishes in its first poll, as one whose handler responds without waiting does,
+    // is done here, and hyper takes its head in this same poll.
+    if poll_fn(|cx| Poll::Ready(call.as_mut().poll(cx)))
+        .await
+        .is_pending()
+    {
+        calls.borrow_mut().push(call);
+    }
     poll_fn(|cx| sender.poll_head(cx)).await
 }
 

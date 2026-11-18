@@ -1178,9 +1178,22 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   // get theirs from the server instead (the token names the actor, not the class), and nothing
   // could reload a dynamic worker from a token.
   if (!impl.isDynamic && actor == kj::none) {
-    meta.restoredSelfTokenFactory = kj::rc<StaticServiceSelfTokenFactory>(
-        impl.factory.getImpl().channelTokenHandler, kj::str(impl.name), entrypointName.clone(),
-        Persistent(impl.info.persistent_self_tokens), propsValue.clone());
+    auto makeFactory = [&]() -> kj::Rc<IoChannelFactory::SelfTokenFactory> {
+      return kj::rc<StaticServiceSelfTokenFactory>(impl.factory.getImpl().channelTokenHandler,
+          kj::str(impl.name), entrypointName.clone(), Persistent(impl.info.persistent_self_tokens),
+          propsValue.clone());
+    };
+    if (entrypointName == kj::none && propsValue.empty()) {
+      // The factory only reads what it was made with, so requests can share it.
+      KJ_IF_SOME(f, impl.defaultSelfTokenFactory) {
+        meta.restoredSelfTokenFactory = f.addRef();
+      } else {
+        meta.restoredSelfTokenFactory =
+            impl.defaultSelfTokenFactory.emplace(makeFactory()).addRef();
+      }
+    } else {
+      meta.restoredSelfTokenFactory = makeFactory();
+    }
   }
   auto actorRef = actor.map([](const ActorHandle& a) { return a.addRef(); });
 
@@ -1196,6 +1209,38 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   }
   return createEntrypoint(impl, kj::mv(meta), entrypointName, kj::mv(propsValue), kj::mv(actorRef),
       kj::mv(channels), kj::mv(tails), kj::none);
+}
+
+kj::Promise<void> worker_request_directly(WorkerInterface& worker,
+    kj::HttpMethod method,
+    ::rust::Slice<const kj::byte> url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    bool* completed) {
+  auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
+  // Prototype: WORKERD_DIRECT_DISPATCH=batched runs the request from a turn of the event loop, as
+  // the default dispatch does, so that the handlers of the requests that arrived together run one
+  // after another, but without the default dispatch's coroutines and lock promise.
+  static const bool batched = [] {
+    const char* mode = getenv("WORKERD_DIRECT_DISPATCH");
+    return mode != nullptr && kj::StringPtr(mode) == "batched";
+  }();
+  if (batched) {
+    *completed = false;
+    return kj::evalLater(
+        [&worker, method, urlStr = kj::mv(urlStr), &headers, &requestBody, &response]() mutable {
+      bool done = false;
+      auto promise = requestDirectly(worker, method, urlStr, headers, requestBody, response, done);
+      return promise.attach(kj::mv(urlStr));
+    });
+  }
+  auto promise =
+      requestDirectly(worker, method, urlStr, headers, requestBody, response, *completed);
+  if (*completed) {
+    return promise;
+  }
+  return promise.attach(kj::mv(urlStr));
 }
 
 kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,

@@ -489,11 +489,21 @@ struct HttpConnection {
 
 impl HttpConnection {
     fn start_request(&self, cf_blob: Option<&str>) -> Result<CxxWorkerInterface> {
-        let metadata = ffi::new_request_metadata(cf_blob.into(), KjMaybe::None);
-        Ok(CxxWorkerInterface::new(
-            self.socket.channel.start_request(metadata)?,
-        ))
+        Ok(CxxWorkerInterface::new(self.start_kj_request(cf_blob)?))
     }
+
+    fn start_kj_request(&self, cf_blob: Option<&str>) -> Result<KjOwn<ffi::WorkerInterface>> {
+        let metadata = ffi::new_request_metadata(cf_blob.into(), KjMaybe::None);
+        self.socket.channel.start_request(metadata)
+    }
+}
+
+/// Whether HTTP requests are dispatched directly (`bridge::request_directly`), so that a handler
+/// that responds at once is served within the connection's own poll. A prototype, on when the
+/// `WORKERD_DIRECT_DISPATCH` environment variable is set.
+fn direct_dispatch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("WORKERD_DIRECT_DISPATCH").is_some())
 }
 
 #[async_trait::async_trait(?Send)]
@@ -521,13 +531,32 @@ impl Handler for HttpConnection {
                 return send_error(response, 400, "Bad Request", &Headers::new(table)).await;
             };
             let cf_blob = cf_blob.as_deref().or(self.cf_blob.as_deref());
+            let edits = rewriter.response_edits();
+            if edits.is_empty() && direct_dispatch() {
+                let mut worker = self.start_kj_request(cf_blob)?;
+                let headers = rewritten
+                    .headers
+                    .as_deref()
+                    .map_or(headers, HeadersRef::from);
+                let url = rewritten.url.as_bytes();
+                return match bridge::request_directly(
+                    worker.as_mut(),
+                    method,
+                    url,
+                    headers,
+                    body,
+                    response,
+                ) {
+                    None => Ok(()),
+                    Some(call) => call.await,
+                };
+            }
             let mut worker = self.start_request(cf_blob)?;
             let headers = rewritten
                 .headers
                 .as_deref()
                 .map_or(headers, HeadersRef::from);
             let url = rewritten.url.as_bytes();
-            let edits = rewriter.response_edits();
             if edits.is_empty() {
                 return worker.request(method, url, headers, body, response).await;
             }

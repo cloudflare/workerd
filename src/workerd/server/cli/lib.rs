@@ -18,9 +18,13 @@ mod bridge;
 mod config;
 mod deploy;
 mod deployments;
+#[cfg(target_os = "linux")]
+mod hugetext;
 mod process;
 #[cfg(target_os = "linux")]
 mod rseq;
+#[cfg(target_os = "linux")]
+pub use hugetext::remap_text_to_huge_pages;
 #[cfg(target_os = "linux")]
 pub use rseq::reexec_without_glibc_rseq;
 mod socket_fd;

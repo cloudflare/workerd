@@ -194,6 +194,9 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   kj::Vector<kj::Rc<IoChannelFactory::RpcChannel>> rpcChannels;
   kj::Maybe<kj::String> accessBlobHeader;
   bool isDynamic = false;
+  // The self-token factory of the default entrypoint without props, which every request to it
+  // would otherwise build anew. Made on the first such request.
+  kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> defaultSelfTokenFactory;
 
   kj::Maybe<kj::Own<const Worker>> worker;
   // Held from compilation until `worker_set_ctx_exports()` fills the object in; none for a worker

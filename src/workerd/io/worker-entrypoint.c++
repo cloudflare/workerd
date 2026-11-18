@@ -31,6 +31,40 @@ kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
   return value.map([](kj::String& text) -> kj::StringPtr { return text; });
 }
 
+// Takes the result of `promise` if it is an immediate promise, already resolved to a value, so
+// that the caller can go on without a turn of the event loop. Leaves `promise` alone otherwise,
+// including when it is an immediate exception.
+template <typename T>
+kj::Maybe<T> tryTakeImmediate(kj::Promise<T>& promise) {
+  auto& node = kj::_::PromiseNode::from(promise);
+  if (dynamic_cast<kj::_::ImmediatePromiseNodeBase*>(&node) == nullptr) {
+    return kj::none;
+  }
+  kj::_::ExceptionOr<T> result;
+  node.get(result);
+  KJ_IF_SOME(exception, result.exception) {
+    promise = kj::mv(exception);
+    return kj::none;
+  }
+  return kj::mv(result.value);
+}
+
+// As above, for a promise for nothing: true if `promise` has resolved successfully already.
+bool tryTakeImmediate(kj::Promise<void>& promise) {
+  auto& node = kj::_::PromiseNode::from(promise);
+  if (dynamic_cast<kj::_::ImmediatePromiseNodeBase*>(&node) == nullptr) {
+    return false;
+  }
+  kj::_::ExceptionOr<kj::_::Void> result;
+  node.get(result);
+  KJ_IF_SOME(exception, result.exception) {
+    promise = kj::mv(exception);
+    return false;
+  }
+  promise = kj::READY_NOW;
+  return true;
+}
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -78,6 +112,14 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
+
+  // See requestDirectly() in the header.
+  kj::Promise<void> requestDirect(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response,
+      bool& completed);
   kj::Promise<void> connect(kj::StringPtr host,
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
@@ -114,6 +156,11 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
   // See gory details in WorkerEntrypoint::request().
 
   kj::Maybe<kj::Promise<void>> proxyTask;
+  // Set by requestDirect(): the handler runs at once if it can (see requestDirectly()).
+  bool directDispatch = false;
+  // Set while requestDirect() calls requestImpl(), which sets it to true if it completes without
+  // suspending.
+  kj::Maybe<bool&> completedNow;
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
   kj::Maybe<jsg::Ref<api::IncomingRequestSignal>> requestSignal;
@@ -421,6 +468,19 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   return wrapWithCanceler(requestImpl(method, url, headers, requestBody, response));
 }
 
+kj::Promise<void> WorkerEntrypoint::requestDirect(kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    Response& response,
+    bool& completed) {
+  completed = false;
+  directDispatch = true;
+  completedNow = completed;
+  KJ_DEFER(completedNow = kj::none);
+  return wrapWithCanceler(requestImpl(method, url, headers, requestBody, response));
+}
+
 kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
@@ -499,11 +559,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       });
 
       KJ_TRY {
-        api::DeferredProxy<void> deferredProxy = co_await context.run(
-            [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
-                entrypointName = entrypointName.clone(),
-                metrics = kj::addRef(incomingRequest->getMetrics())](
-                Worker::Lock& lock, IoContext& context) mutable {
+        auto runHandler = [this, method, url, &headers, &requestBody,
+                              &wrappedResponse = *wrappedResponse,
+                              entrypointName = entrypointName.clone(),
+                              metrics = kj::addRef(incomingRequest->getMetrics())](
+                              Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
@@ -535,7 +595,30 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
           metrics->claimRetryTokenBeforeUserCode(retryable);
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
               cfBlobJson, lock, handler, kj::mv(signal));
-        });
+        };
+
+        // Directly dispatched, the handler runs now if the isolate is free, and a response it
+        // sent at once is taken without a turn of the event loop. Otherwise it waits its turn.
+        kj::Maybe<api::DeferredProxy<void>> ranNow;
+        kj::Maybe<kj::Promise<api::DeferredProxy<void>>> running;
+        kj::Maybe<Worker::AsyncLock> asyncLockNow;
+        if (directDispatch && !isActor) {
+          asyncLockNow = context.getWorker().tryTakeAsyncLockNow(incomingRequest->getMetrics());
+        }
+        KJ_IF_SOME(asyncLock, asyncLockNow) {
+          auto sent = context.runNow(asyncLock, runHandler);
+          asyncLockNow = kj::none;
+          ranNow = tryTakeImmediate(sent);
+          if (ranNow == kj::none) {
+            running = kj::mv(sent);
+          }
+        } else {
+          running = context.run(kj::mv(runHandler));
+        }
+        KJ_IF_SOME(promise, running) {
+          ranNow = co_await promise;
+        }
+        auto deferredProxy = kj::mv(KJ_ASSERT_NONNULL(ranNow));
 
         // Record the proxy task and the tracer return time on the success path.
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
@@ -606,6 +689,12 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     // ----- Stage 3: Wait for the deferred-proxy task (if any). -----
 
     KJ_IF_SOME(p, proxyTask) {
+      if (directDispatch && tryTakeImmediate(p)) {
+        // The response was sent in full already: there is nothing left to proxy.
+        proxyTask = kj::none;
+      }
+    }
+    KJ_IF_SOME(p, proxyTask) {
       TRACE_EVENT("workerd", "WorkerEntrypoint::request() finish proxying",
           PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
       // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
@@ -622,6 +711,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         co_await kj::yield();
         kj::throwException(kj::mv(e));
       }
+    }
+
+    // Reached without suspending, the request is done by the time request() returns.
+    KJ_IF_SOME(c, completedNow) {
+      c = true;
     }
   }
   KJ_CATCH(exception) {
@@ -1232,6 +1326,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
 }
 
 }  // namespace
+
+kj::Promise<void> requestDirectly(WorkerInterface& entrypoint,
+    kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    bool& completed) {
+  KJ_IF_SOME(direct, kj::dynamicDowncastIfAvailable<WorkerEntrypoint>(entrypoint)) {
+    return direct.requestDirect(method, url, headers, requestBody, response, completed);
+  }
+  completed = false;
+  return entrypoint.request(method, url, headers, requestBody, response);
+}
 
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<const Worker> worker,

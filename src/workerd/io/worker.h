@@ -214,6 +214,11 @@ class Worker: public kj::AtomicRefcounted {
   // data via `request`'s trace span.
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver& request) const;
 
+  // Like takeAsyncLock(), but only if it is this thread's turn right now, so that the caller can
+  // run JavaScript without a turn of the event loop. Returns none if another holder or waiter is
+  // ahead of this thread.
+  kj::Maybe<AsyncLock> tryTakeAsyncLockNow(RequestObserver& request) const;
+
   class Actor;
 
   // Like takeAsyncLock(), but also takes care of actor cache time-based eviction and backpressure.
@@ -502,6 +507,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
+
+  // See Worker::tryTakeAsyncLockNow().
+  kj::Maybe<AsyncLock> tryTakeAsyncLockNow(RequestObserver&) const;
 
   // Enters the isolate under `lockType` and runs `callback` with the resulting `jsg::Lock`. Unlike
   // `Worker::runInLockScope`, this does not require a `Worker` -- it locks the isolate directly,

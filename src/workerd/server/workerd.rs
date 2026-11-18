@@ -10,5 +10,7 @@ fn main() -> std::process::ExitCode {
     if option_env!("WORKERD_TCMALLOC").is_some() {
         workerd_cli::reexec_without_glibc_rseq();
     }
+    #[cfg(target_os = "linux")]
+    workerd_cli::remap_text_to_huge_pages();
     workerd_cli::main()
 }
