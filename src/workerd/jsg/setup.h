@@ -233,6 +233,10 @@ class IsolateBase {
   // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
   static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
+  // The template that newInternalFunction() instantiates for `callback`, created on first use:
+  // an object V8 can call, with one internal field for the function's data.
+  v8::Local<v8::ObjectTemplate> getInternalFunctionTemplate(v8::FunctionCallback callback);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -964,6 +968,9 @@ class IsolateBase {
 
   // FunctionTemplate returned by getDomExceptionTemplate().
   v8::Global<v8::FunctionTemplate> domExceptionTemplate;
+
+  // Templates returned by getInternalFunctionTemplate(), keyed by callback address.
+  kj::HashMap<uintptr_t, v8::Global<v8::ObjectTemplate>> internalFunctionTemplates;
 
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;
