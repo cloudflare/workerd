@@ -1191,12 +1191,23 @@ void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Cont
   }
 }
 
+void IsolateBase::retainThreadStateBetweenLocks() {
+  KJ_REQUIRE(!v8::Locker::IsLocked(ptr), "retainThreadStateBetweenLocks() called under the lock");
+  if (retainedThreadState == kj::none) {
+    // Locking may set up the thread's state, which records where the V8 stack starts.
+    jsg::runInV8Stack(
+        [&](jsg::V8StackScope&) { retainedThreadState = kj::heap<RetainedThreadState>(ptr); });
+  }
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
   externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // Relocks the isolate and frees the retained thread state, before disposal.
+    retainedThreadState = kj::none;
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     // When preparing a snapshot the v8::SnapshotCreator keeps the isolate "entered" by the current

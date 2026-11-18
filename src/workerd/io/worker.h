@@ -485,6 +485,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Writes the deferred lines to stdout/stderr in order and clears them.
   void flushDeferredConsoleOutput();
 
+  // Makes later locks from the calling thread cheaper; see
+  // jsg::IsolateBase::retainThreadStateBetweenLocks(). Call it with the isolate unlocked, for an
+  // isolate that the calling thread mostly locks.
+  void retainThreadStateBetweenLocks();
+
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
 

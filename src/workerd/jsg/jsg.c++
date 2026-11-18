@@ -206,6 +206,11 @@ Lock::Lock(v8::Isolate* v8Isolate)
     // Then we can stop storing `previousData`.
     KJ_LOG(ERROR, "took recursive isolate lock", kj::getStackTrace());
 #endif
+  } else if (IsolateBase::from(v8Isolate).retainsThreadStateBetweenLocks()) {
+    // Without the retained state, V8 would build this thread's state afresh now, dropping a
+    // termination that was requested but not acted on before the last unlock, say by an aborted
+    // request. Drop it here too, so that it does not terminate whatever runs under this lock.
+    v8Isolate->CancelTerminateExecution();
   }
   v8Isolate->SetData(SET_DATA_LOCK, this);
 }

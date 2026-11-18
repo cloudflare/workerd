@@ -1835,6 +1835,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   auto isolateStart = bench_clock_now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = since(isolateStart);
+  if (!inspectorConfigured) {
+    // This thread serves the Worker's requests. With an inspector, its thread locks the isolate
+    // too, and would take the thread state from this one on each message.
+    isolate->retainThreadStateBetweenLocks();
+  }
   KJ_IF_SOME(r, registrar) {
     r.registerIsolate(impl->name, *isolate);
   }

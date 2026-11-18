@@ -574,6 +574,22 @@ class IsolateBase {
     return throwOnUnrecognizedImportAssertion;
   }
 
+  // Makes each later lock on this isolate from the calling thread cheaper to take and release.
+  // By default, V8 builds the thread's isolate state (handle scopes, stack guard) on every lock
+  // and frees it on unlock. This keeps that state between locks instead, by holding an outer
+  // v8::Locker that is permanently unlocked by a v8::Unlocker, so that every lock nests in it.
+  // The lock is still released between locks, so other threads can take it as before; they only
+  // pay to archive this thread's state the first time they do.
+  //
+  // Call it with the isolate unlocked, from the thread that will usually lock it, on that thread's
+  // own stack: V8 sets this thread's stack limit from the calling frame now, rather than at each
+  // lock. The state is kept until the isolate is destroyed, so this suits an isolate that one
+  // thread mostly uses.
+  void retainThreadStateBetweenLocks();
+  bool retainsThreadStateBetweenLocks() const {
+    return retainedThreadState != kj::none;
+  }
+
   void setUsingEnhancedErrorSerialization() {
     usingEnhancedErrorSerialization = true;
   }
@@ -879,6 +895,15 @@ class IsolateBase {
   std::unique_ptr<class v8::CppHeap> cppHeap;
 
   kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
+
+  // See retainThreadStateBetweenLocks(). Destroyed first in ~IsolateBase(), which relocks the
+  // isolate and frees the thread's state.
+  struct RetainedThreadState {
+    explicit RetainedThreadState(v8::Isolate* isolate): locker(isolate), unlocker(isolate) {}
+    v8::Locker locker;
+    v8::Unlocker unlocker;
+  };
+  kj::Maybe<kj::Own<RetainedThreadState>> retainedThreadState;
 
   v8::Isolate* ptr;
   // Determines how the isolate was created:
