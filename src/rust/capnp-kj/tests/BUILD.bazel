@@ -15,6 +15,8 @@ wd_rust_crate(
     deps = [
         ":test_capnp_rust",
         "//src/rust/capnp-kj",
+        "//src/workerd/io:container_capnp_rust",
+        "@capnp-cpp//src/capnp/compat:byte-stream_capnp_rust",
         "@crates_vendor//capnp",
         "@crates_vendor//futures",
     ],
@@ -27,5 +29,16 @@ kj_test(
         ":test_capnp",
         "//src/rust/capnp-kj:ffi",
         "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
+
+kj_test(
+    src = "container-test.c++",
+    deps = [
+        ":capnp-kj-test-rust",
+        "//src/rust/capnp-kj:ffi",
+        "//src/workerd/io:container_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
 )

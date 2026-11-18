@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use crate::container::new_container_server;
 use crate::hang_drops;
 use crate::hang_starts;
 use crate::new_cancelable_echo_server;
@@ -27,6 +28,8 @@ pub mod bridge {
         fn new_echo_server(prefix: &str) -> KjOwn<ClientHook>;
         /// Like `new_echo_server`, but canceling a call drops the server's future.
         fn new_cancelable_echo_server(prefix: &str) -> KjOwn<ClientHook>;
+        /// A Rust `rpc::Container` server; see container.rs.
+        fn new_container_server() -> KjOwn<ClientHook>;
         /// How many Rust `hang()` calls have started.
         fn hang_starts() -> u32;
         /// How many Rust `hang()` calls have been dropped.

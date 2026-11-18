@@ -5,6 +5,7 @@
 //! The Rust half of capnp-kj-test: a Rust `TestEcho` server, and Rust clients of any `TestEcho`,
 //! which capnp-kj-test.c++ calls.
 
+mod container;
 mod ffi;
 
 use std::cell::Cell;
