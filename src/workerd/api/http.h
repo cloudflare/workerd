@@ -585,6 +585,15 @@ class Fetcher: public JsRpcClientProvider {
     return registeredConnectOverride;
   }
 
+  // Marks this Fetcher as a container's UDP port: connect() opens a UDP socket without a
+  // `protocol` option and refuses TCP.
+  void markContainerUdpPort() {
+    containerUdpPort = true;
+  }
+  bool isContainerUdpPort() const {
+    return containerUdpPort;
+  }
+
  protected:
   // The connection string override is lazily initialized (when ctx.mapVirtualHost is invoked for
   // the fetcher or when host is accessed for ExtendedFetcher), so the host/port may be none.
@@ -631,6 +640,7 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+  bool containerUdpPort = false;
 
   // Generic stubs use the receiving isolate's compat flags. Wrapped bindings explicitly bypass
   // the gate while rebuilding their private inner fetcher.

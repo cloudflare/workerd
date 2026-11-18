@@ -339,6 +339,7 @@ class Container: public jsg::Object {
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
+  jsg::Ref<Fetcher> getUdpPort(jsg::Lock& js, int port);
   jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
   jsg::Promise<void> interceptOutboundHttp(
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
@@ -379,6 +380,16 @@ class Container: public jsg::Object {
       JSG_METHOD(interceptOutboundTcp);
       JSG_METHOD(snapshotDirectory);
       JSG_METHOD(setLabels);
+
+      // Requires outbound_udp_sockets so that UDP sockets have a single chunk type, Uint8Array.
+      if (flags.getOutboundUdpSockets()) {
+        JSG_METHOD(getUdpPort);
+
+        JSG_TS_OVERRIDE({ getUdpPort(port: number): ContainerUdpPort; });
+        JSG_TS_DEFINE(interface ContainerUdpPort {
+          connect(address: SocketAddress | string): Socket;
+        });
+      }
     }
   }
 
@@ -428,6 +439,8 @@ class Container: public jsg::Object {
 
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
+  class UdpPortWorkerInterface;
+  class UdpPortOutgoingFactory;
 
   // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort(). Held
   // via IoOwn because it holds KJ I/O objects (Cap'n Proto capabilities, kj streams) that must

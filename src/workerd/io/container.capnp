@@ -7,6 +7,7 @@ $Cxx.allowCancellation;
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using CompatibilityFlags = import "/workerd/io/compatibility-date.capnp".CompatibilityFlags;
 using SpanContext = import "/workerd/io/worker-interface.capnp".SpanContext;
+using DatagramStream = import "/workerd/io/worker-interface.capnp".DatagramStream;
 
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
@@ -228,6 +229,20 @@ interface Container @0x9aaceefc06523bca {
     # Note that when the Durable Object application uses the HTTP-oriented APIs, workerd will
     # take care of speaking the HTTP protocol on top of the raw socket. So, the container engine
     # need only implement raw connections.
+  }
+
+  getUdpPort @16 (port :UInt16, spanContext :SpanContext) -> (port :UdpPort);
+  # Obtains an object which can be used to exchange UDP datagrams with the application inside the
+  # container on the given UDP port. No datagram is sent until UdpPort.connect() is called.
+
+  interface UdpPort {
+    # Represents a UDP port to which flows can be opened.
+
+    connect @0 (down :DatagramStream) -> (up :DatagramStream);
+    # Opens one UDP flow to the port. Each flow has its own source address and port as seen by the
+    # application. `down` carries datagrams from the container to the caller and `up` carries
+    # datagrams from the caller to the container. One send() is one datagram. Datagrams carry no
+    # addresses.
   }
 
   listenTcp @6 (filter :IpFilter, handler :TcpHandler) -> (handle :Capability);

@@ -3773,6 +3773,9 @@ export interface ExecProcess {
   kill(signal?: number): void;
   resize(cols: number, rows: number): void;
 }
+export interface ContainerUdpPort {
+  connect(address: SocketAddress | string): Socket;
+}
 export interface Container {
   get running(): boolean;
   get images(): Record<string, string>;
@@ -3795,6 +3798,7 @@ export interface Container {
     options: ContainerDirectorySnapshotOptions,
   ): Promise<ContainerDirectorySnapshot>;
   setLabels(labels: Record<string, string>): Promise<void>;
+  getUdpPort(port: number): ContainerUdpPort;
 }
 export interface ContainerDirectorySnapshot {
   id: string;

@@ -6,6 +6,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/observer.h>
+#include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/stream-utils.h>
 
@@ -1861,6 +1862,372 @@ KJ_TEST("Container request errors do not wait for open tunnel pumps") {
 
   KJ_EXPECT(rejected);
   KJ_EXPECT(connectCount == 1);
+}
+
+// What the Worker sent on one UDP flow to TestUdpPort.
+struct UdpFlowRecording {
+  kj::Vector<kj::String> datagrams;
+  bool ended = false;
+  bool released = false;
+
+  // When set, UdpPort.connect() returns only once three datagrams have arrived on `up`.
+  bool holdConnect = false;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> thirdDatagramReceived;
+  size_t receivedBeforeConnectReturned = 0;
+};
+
+kj::Promise<void> yieldTurns(uint count) {
+  for (uint i = 0; i < count; i++) {
+    co_await kj::evalLater([]() {});
+  }
+}
+
+// The container's end of a flow. It echoes every datagram, except the commands "end" and "abort",
+// which end or fail the container's direction of the flow.
+class TestUdpUp final: public rpc::DatagramStream::Server {
+ public:
+  TestUdpUp(UdpFlowRecording& recording, rpc::DatagramStream::Client down)
+      : recording(recording),
+        down(kj::mv(down)) {}
+
+  ~TestUdpUp() noexcept(false) {
+    recording.released = true;
+  }
+
+ private:
+  kj::Promise<void> send(SendContext context) override {
+    auto datagram = context.getParams().getDatagram();
+    recording.datagrams.add(kj::heapString(datagram.asChars()));
+
+    if (recording.datagrams.size() == 3) {
+      KJ_IF_SOME(fulfiller, recording.thirdDatagramReceived) {
+        fulfiller->fulfill();
+      }
+    }
+
+    // The final call is detached because aborting releases this object, and `replies` with it.
+    if (datagram == "end"_kjb) {
+      downEnded = true;
+      reply([](rpc::DatagramStream::Client& down) {
+        down.endRequest().sendIgnoringResult().detach([](kj::Exception&&) {});
+        return kj::READY_NOW;
+      });
+    } else if (datagram == "abort"_kjb) {
+      downEnded = true;
+      reply([](rpc::DatagramStream::Client& down) {
+        down.abortRequest().sendIgnoringResult().detach([](kj::Exception&&) {});
+        return kj::READY_NOW;
+      });
+    } else {
+      sendDown(kj::heapArray<kj::byte>(datagram));
+    }
+
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> end(EndContext context) override {
+    recording.ended = true;
+
+    // The container's direction keeps flowing after the Worker ends its own.
+    if (!downEnded) {
+      sendDown(kj::heapArray<kj::byte>("after end"_kjb));
+    }
+
+    return kj::READY_NOW;
+  }
+
+  void sendDown(kj::Array<kj::byte> datagram) {
+    reply([datagram = kj::mv(datagram)](rpc::DatagramStream::Client& down) {
+      auto req = down.sendRequest();
+      req.setDatagram(datagram);
+      return req.send();
+    });
+  }
+
+  // Replies go out in order without holding up the Worker's next datagram.
+  void reply(kj::Function<kj::Promise<void>(rpc::DatagramStream::Client&)> step) {
+    replies = replies.then([down = down, step = kj::mv(step)]() mutable {
+      return step(down);
+    }).eagerlyEvaluate(nullptr);
+  }
+
+  UdpFlowRecording& recording;
+  rpc::DatagramStream::Client down;
+  bool downEnded = false;
+  kj::Promise<void> replies = kj::READY_NOW;
+};
+
+class TestUdpPort final: public rpc::Container::UdpPort::Server {
+ public:
+  TestUdpPort(UdpFlowRecording& recording, kj::Maybe<kj::Exception> connectError)
+      : recording(recording),
+        connectError(kj::mv(connectError)) {}
+
+ private:
+  kj::Promise<void> connect(ConnectContext context) override {
+    KJ_IF_SOME(exception, connectError) {
+      return exception.clone();
+    }
+
+    rpc::DatagramStream::Client up = kj::heap<TestUdpUp>(recording, context.getParams().getDown());
+    capnp::PipelineBuilder<rpc::Container::UdpPort::ConnectResults> pipeline;
+    pipeline.setUp(kj::cp(up));
+    context.setPipeline(pipeline.build());
+    context.getResults(capnp::MessageSize{4, 1}).setUp(kj::mv(up));
+
+    if (!recording.holdConnect) {
+      return kj::READY_NOW;
+    }
+
+    // The turn limit ends the wait if datagrams cannot arrive before connect() returns.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    recording.thirdDatagramReceived = kj::mv(paf.fulfiller);
+    return paf.promise.exclusiveJoin(yieldTurns(1000)).then([&recording = recording]() {
+      recording.receivedBeforeConnectReturned = recording.datagrams.size();
+    });
+  }
+
+  UdpFlowRecording& recording;
+  kj::Maybe<kj::Exception> connectError;
+};
+
+class TestUdpContainerServer final: public rpc::Container::Server {
+ public:
+  explicit TestUdpContainerServer(
+      UdpFlowRecording& recording, kj::Maybe<kj::Exception> connectError = kj::none)
+      : recording(recording),
+        connectError(kj::mv(connectError)) {}
+
+ private:
+  kj::Promise<void> getUdpPort(GetUdpPortContext context) override {
+    KJ_EXPECT(context.getParams().getPort() == 9000);
+    kj::Maybe<kj::Exception> error;
+    KJ_IF_SOME(exception, connectError) {
+      error = exception.clone();
+    }
+    context.getResults().setPort(kj::heap<TestUdpPort>(recording, kj::mv(error)));
+    return kj::READY_NOW;
+  }
+
+  UdpFlowRecording& recording;
+  kj::Maybe<kj::Exception> connectError;
+};
+
+// A container runtime that predates UDP ports.
+class TcpOnlyContainerServer final: public rpc::Container::Server {};
+
+struct UdpTestFlags {
+  bool experimental = true;
+  bool outboundUdpSockets = true;
+  bool typeScriptStreams = false;
+};
+
+// Runs `body` as an async function of `container` and `released` and returns what it resolved to,
+// as a string. `released()` tells whether the flow's `up` capability has been released.
+kj::String runUdpScript(rpc::Container::Client client,
+    UdpFlowRecording& recording,
+    kj::StringPtr body,
+    UdpTestFlags testFlags = {}) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  flags.setWorkerdExperimental(testFlags.experimental);
+  flags.setOutboundUdpSockets(testFlags.outboundUdpSockets);
+  flags.setTypeScriptImplementedStreams(testFlags.typeScriptStreams);
+  TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
+
+  kj::String result;
+  kj::Vector<kj::String> steps;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto& handler = KJ_REQUIRE_NONNULL(js.tryGetTypeHandler<jsg::Ref<Container>>());
+    auto container = handler.wrap(js, js.alloc<Container>(kj::mv(client), true));
+    auto released = js.wrapReturningFunction(js.v8Context(),
+        [&recording](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&)
+            -> v8::Local<v8::Value> { return js.boolean(recording.released); });
+    auto step = js.wrapReturningFunction(js.v8Context(),
+        [&steps](jsg::Lock& js,
+            const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
+      steps.add(jsg::JsValue(args[0]).toString(js));
+      return js.undefined();
+    });
+
+    auto code = kj::str("(async (container, released, step) => {", body, "})");
+    auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "container-udp-test.js"_kj)
+                                    .runAndReturn(js)
+                                    .tryCast<jsg::JsFunction>());
+    auto promise = fn.call(
+        js, js.undefined(), jsg::JsValue(container), jsg::JsValue(released), jsg::JsValue(step));
+    auto script = env.context.awaitJs(
+        js, js.toPromise(promise).then(js, [&result](jsg::Lock& js, jsg::Value value) {
+      result = jsg::JsValue(value.getHandle(js)).toString(js);
+    }));
+
+    // A script that can no longer make progress fails the test instead of hanging the binary.
+    return script.exclusiveJoin(yieldTurns(100000).then(
+        [&steps]() { KJ_FAIL_EXPECT("the script did not finish", kj::strArray(steps, ", ")); }));
+  });
+
+  return result;
+}
+
+KJ_TEST("Container UDP port round-trips datagrams and keeps reading after the writer closes") {
+  for (bool tsStreams: {false, true}) {
+    UdpFlowRecording recording;
+    auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+      const socket = container.getUdpPort(9000).connect('container:9000');
+      const out = [socket.protocol];
+      const writer = socket.writable.getWriter();
+      const reader = socket.readable.getReader();
+      for (const size of [0, 1, 1500]) {
+        await writer.write(new Uint8Array(size).fill(7));
+        step(`wrote ${size}`);
+        const { value } = await reader.read();
+        step(`read ${size}`);
+        out.push(`${value.byteLength}:${value.every((byte) => byte === 7)}`);
+      }
+      await writer.close();
+      step('writer closed');
+      out.push(new TextDecoder().decode((await reader.read()).value), released());
+      step('read after end');
+      await socket.close();
+      out.push(released());
+      return out.join();
+    )",
+        {.typeScriptStreams = tsStreams});
+
+    KJ_EXPECT(result == "udp,0:true,1:true,1500:true,after end,false,true", result, tsStreams);
+    KJ_EXPECT(recording.datagrams.size() == 3, tsStreams);
+    KJ_EXPECT(recording.ended, tsStreams);
+  }
+}
+
+KJ_TEST("Container UDP port rejects a payload over 1500 bytes and errors the writable") {
+  for (bool tsStreams: {false, true}) {
+    UdpFlowRecording recording;
+    auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+      const writer = container.getUdpPort(9000).connect('container:9000').writable.getWriter();
+      const out = [];
+      for (const size of [1501, 1]) {
+        await writer.write(new Uint8Array(size)).catch((e) => out.push(`${e.name}: ${e.message}`));
+      }
+      return out.join('|');
+    )",
+        {.typeScriptStreams = tsStreams});
+
+    KJ_EXPECT(result ==
+            "RangeError: UDP payload exceeds the 1500-byte limit.|"
+            "RangeError: UDP payload exceeds the 1500-byte limit.",
+        result, tsStreams);
+    KJ_EXPECT(recording.datagrams.size() == 0, tsStreams);
+  }
+}
+
+KJ_TEST("Container UDP port refuses TCP and fetch()") {
+  UdpFlowRecording recording;
+  auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+    const port = container.getUdpPort(9000);
+    const out = [];
+    try {
+      port.connect('container:9000', { protocol: 'tcp' });
+    } catch (e) {
+      out.push(`${e.name}: ${e.message}`);
+    }
+    await port.fetch('http://container/').catch((e) => out.push(`${e.name}: ${e.message}`));
+    return out.join('|');
+  )");
+
+  KJ_EXPECT(result ==
+          "TypeError: This port only supports UDP.|"
+          "TypeError: fetch() is not supported on a UDP port; use connect() instead.",
+      result);
+}
+
+KJ_TEST("Container UDP port requires the experimental and outbound_udp_sockets flags") {
+  auto typeOfGetUdpPort = [](UdpTestFlags flags) {
+    UdpFlowRecording recording;
+    return runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording,
+        "return typeof container.getUdpPort;", flags);
+  };
+
+  KJ_EXPECT(typeOfGetUdpPort({.experimental = false}) == "undefined");
+  KJ_EXPECT(typeOfGetUdpPort({.outboundUdpSockets = false}) == "undefined");
+  KJ_EXPECT(typeOfGetUdpPort({}) == "function");
+}
+
+KJ_TEST("Container UDP port ends the readable when the container ends the flow") {
+  UdpFlowRecording recording;
+  auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+    const socket = container.getUdpPort(9000).connect('container:9000');
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
+    await writer.write(new TextEncoder().encode('end'));
+    step('wrote end');
+    const { done } = await reader.read();
+    step(`read done=${done}`);
+    await socket.closed;
+    step('closed');
+    const write = await writer.write(new Uint8Array(1)).then(() => 'written', (e) => e.name);
+    return `${done},${write}`;
+  )");
+
+  KJ_EXPECT(result == "true,TypeError", result);
+  KJ_EXPECT(recording.datagrams.size() == 1);
+  KJ_EXPECT(recording.ended);
+}
+
+KJ_TEST("Container UDP port errors reads when the container aborts the flow") {
+  UdpFlowRecording recording;
+  auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+    const socket = container.getUdpPort(9000).connect('container:9000');
+    await socket.writable.getWriter().write(new TextEncoder().encode('abort'));
+    return await socket.readable.getReader().read().then(() => 'read', (e) => e.message);
+  )");
+
+  KJ_EXPECT(result == "UDP session failed.", result);
+}
+
+KJ_TEST("Container UDP port rejects opened with the container's connect error") {
+  auto openedOutcome = [](rpc::Container::Client client, UdpFlowRecording& recording) {
+    return runUdpScript(kj::mv(client), recording, R"(
+      const socket = container.getUdpPort(9000).connect('container:9000');
+      return await socket.opened.then(() => 'opened', (e) => `${e.name}: ${e.message}`);
+    )");
+  };
+
+  UdpFlowRecording recording;
+  KJ_EXPECT(openedOutcome(kj::heap<TcpOnlyContainerServer>(), recording) ==
+      "Error: This container runtime does not support UDP ports.");
+
+  auto notRunning = JSG_KJ_EXCEPTION(FAILED, Error, "The container is not running.");
+  KJ_EXPECT(openedOutcome(kj::heap<TestUdpContainerServer>(recording, kj::mv(notRunning)),
+                recording) == "Error: The container is not running.");
+}
+
+KJ_TEST("Container UDP port delivers writes in order before UdpPort.connect() returns") {
+  UdpFlowRecording recording;
+  recording.holdConnect = true;
+  auto result = runUdpScript(kj::heap<TestUdpContainerServer>(recording), recording, R"(
+    const socket = container.getUdpPort(9000).connect('container:9000');
+    const writer = socket.writable.getWriter();
+    for (const text of ['a', 'b', 'c']) {
+      await writer.write(new TextEncoder().encode(text));
+    }
+    await socket.opened;
+    const reader = socket.readable.getReader();
+    const echoes = [];
+    for (let i = 0; i < 3; i++) {
+      echoes.push(new TextDecoder().decode((await reader.read()).value));
+    }
+    return echoes.join();
+  )");
+
+  KJ_EXPECT(result == "a,b,c", result);
+  KJ_EXPECT(recording.receivedBeforeConnectReturned == 3);
+  KJ_ASSERT(recording.datagrams.size() == 3);
+  KJ_EXPECT(recording.datagrams[0] == "a");
+  KJ_EXPECT(recording.datagrams[1] == "b");
+  KJ_EXPECT(recording.datagrams[2] == "c");
 }
 
 }  // namespace

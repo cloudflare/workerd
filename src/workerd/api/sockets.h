@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/refcount.h>
 
@@ -50,6 +51,11 @@ enum class SocketProtocol {
   // A datagram socket (UDP).
   UDP,
 };
+
+// Whether a UDP Socket is a flow to a container's UDP port. Such a socket limits payloads to 1500
+// bytes, ends its outgoing direction without releasing the flow when the writable closes, and
+// rejects `opened` with the container's own error, as TCP container ports surface theirs.
+WD_STRONG_BOOL(ContainerUdpPort);
 
 struct SocketAddress {
   kj::String hostname;
@@ -267,7 +273,9 @@ class Socket: public jsg::Object {
   // The first variant is useful for connections established using HTTP connect. The latter is for
   // connections established any other way, where the lack of an exception indicates we connected
   // successfully.
-  void handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exception>> status);
+  void handleProxyStatus(jsg::Lock& js,
+      kj::Promise<kj::Maybe<kj::Exception>> status,
+      ContainerUdpPort containerUdpPort = ContainerUdpPort::NO);
 
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
@@ -461,7 +469,15 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
     kj::Own<DatagramChannel> channel,
     kj::Maybe<kj::String> remoteAddress,
     kj::Maybe<kj::String> localAddress,
-    kj::Promise<kj::Maybe<kj::Exception>> status = kj::Maybe<kj::Exception>(kj::none));
+    kj::Promise<kj::Maybe<kj::Exception>> status = kj::Maybe<kj::Exception>(kj::none),
+    ContainerUdpPort containerUdpPort = ContainerUdpPort::NO);
+
+// Opens a channel over a pair of DatagramStream capabilities. `connect` receives the local `down`
+// capability, which the peer sends datagrams to, and returns the peer's `up` capability, usually
+// pipelined so that datagrams can be sent before the peer has answered. send() streams on `up` and
+// end() sends `end()` on it; only close() or destruction of the channel releases `up`.
+kj::Own<DatagramChannel> newRpcDatagramChannel(
+    kj::FunctionParam<rpc::DatagramStream::Client(rpc::DatagramStream::Client down)> connect);
 
 // An outbound UDP open, routed through the same channel as other subrequests. The target
 // fulfills `connected` only after its network policy and socket/session setup have succeeded.

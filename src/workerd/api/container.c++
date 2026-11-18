@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/streams/writable.h>
 #include <workerd/api/system-streams.h>
@@ -1588,6 +1589,117 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
 
   return js.alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+}
+
+// `getUdpPort()` returns a `Fetcher` marked as a UDP port. connect() on it reaches this
+// `WorkerInterface` as a `UdpEgressCustomEvent`, and each event opens one flow.
+class Container::UdpPortWorkerInterface final: public WorkerInterface {
+ public:
+  explicit UdpPortWorkerInterface(rpc::Container::UdpPort::Client port): port(kj::mv(port)) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    return JSG_KJ_EXCEPTION(
+        FAILED, TypeError, "fetch() is not supported on a UDP port; use connect() instead.");
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return JSG_KJ_EXCEPTION(FAILED, TypeError, "This port only supports UDP.");
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    if (event->getType() != UdpEgressCustomEvent::EVENT_TYPE) {
+      co_return co_await event->notSupported();
+    }
+
+    kj::Promise<void> connected = nullptr;
+    auto channel = newRpcDatagramChannel([&](rpc::DatagramStream::Client down) {
+      auto req = port.connectRequest(capnp::MessageSize{4, 1});
+      req.setDown(kj::mv(down));
+      auto response = req.send();
+      auto up = response.getUp();
+      connected = response.ignoreResult();
+      return up;
+    });
+
+    // The channel is handed out before UdpPort.connect() returns, so early writes ride the
+    // pipelined `up` capability. Only `opened` waits for the container's answer.
+    auto result = co_await static_cast<UdpEgressCustomEvent&>(*event).complete(kj::mv(channel));
+
+    KJ_TRY {
+      co_await connected;
+    }
+    KJ_CATCH(exception) {
+      // A container runtime that predates UDP ports does not implement getUdpPort().
+      if (exception.getType() == kj::Exception::Type::UNIMPLEMENTED) {
+        JSG_FAIL_REQUIRE(Error, "This container runtime does not support UDP ports.");
+      }
+      throw kj::mv(exception);
+    }
+
+    co_return result;
+  }
+
+  // There's no way to invoke the remaining event types via `Fetcher`.
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  rpc::Container::UdpPort::Client port;
+};
+
+class Container::UdpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  explicit UdpPortOutgoingFactory(rpc::Container::UdpPort::Client port): port(kj::mv(port)) {}
+
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    auto client = IoContext::current().getSubrequestNoChecks(
+        [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      makeUserSpanParent(tracing);
+      return kj::heap<UdpPortWorkerInterface>(port);
+    }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
+    return {.client = kj::mv(client), .spanParents = kj::none};
+  }
+
+ private:
+  rpc::Container::UdpPort::Client port;
+};
+
+jsg::Ref<Fetcher> Container::getUdpPort(jsg::Lock& js, int port) {
+  JSG_REQUIRE(port > 0 && port < 65536, TypeError, "Invalid port number: ", port);
+
+  auto& ioctx = IoContext::current();
+  auto req = rpcClient->getUdpPortRequest(
+      capnp::MessageSize{4 + capnp::sizeInWords<rpc::SpanContext>(), 0});
+  req.setPort(port);
+  KJ_IF_SOME(spanContext, ioctx.getCurrentTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
+
+  kj::Own<Fetcher::OutgoingFactory> factory =
+      kj::heap<UdpPortOutgoingFactory>(req.send().getPort());
+  auto fetcher = js.alloc<Fetcher>(
+      ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+  fetcher->markContainerUdpPort();
+  return fetcher;
 }
 
 }  // namespace workerd::api
