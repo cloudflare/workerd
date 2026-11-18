@@ -592,8 +592,8 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void clearWrappers();
 
   // Calls `fn` for every Wrappable in `wrappers`, i.e. every one that currently has a V8 wrapper
-  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. Startup-snapshot
-  // preparation only: the one caller is WrappablesSerializeMetadata::recordLiveWrappables().
+  // in this isolate, with its CppgcShim and the shim's CppHeapPointerTag. For startup-snapshot
+  // preparation, by WrappablesSerializeMetadata::recordLiveWrappables(), and for tests.
   //
   // The caller holds the isolate lock. The references are valid only for the duration of the
   // call: `fn` must not attach or detach wrappers (the list is being iterated) and must not
