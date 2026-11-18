@@ -148,3 +148,35 @@ fn signals_follow_the_phase_and_take_a_lost_first_thread_for_a_stop() {
     drop(phase);
     assert_eq!(poll(&mut stopping), Poll::Ready(Phase::Stopping));
 }
+
+#[test]
+fn a_thread_that_ended_behind_the_last_ready_fails_the_start() {
+    let (events, received) = mpsc::unbounded_channel();
+    let phase = watch::Sender::new(Phase::Starting);
+    events.send(Event::Ready).unwrap();
+    events.send(Event::Ready).unwrap();
+    let failure = kj::failed!("out of memory");
+    events.send(Event::Exited(1, Err(failure))).unwrap();
+    let mut starting = Box::pin(await_ready(received, phase.subscribe(), 2));
+    let Poll::Ready(Err(error)) = poll(&mut starting) else {
+        panic!("expected the thread's failure");
+    };
+    assert_eq!(error.description(), "loop thread 1: out of memory");
+}
+
+#[test]
+fn a_thread_that_ends_after_the_start_fails_the_check() {
+    let (events, received) = mpsc::unbounded_channel();
+    let phase = watch::Sender::new(Phase::Starting);
+    events.send(Event::Ready).unwrap();
+    let mut starting = Box::pin(await_ready(received, phase.subscribe(), 1));
+    let Poll::Ready(Ok(mut started)) = poll(&mut starting) else {
+        panic!("expected the start to succeed");
+    };
+    assert!(started.check().is_ok());
+    events.send(Event::Exited(1, Ok(()))).unwrap();
+    let Err(error) = started.check() else {
+        panic!("expected a failure");
+    };
+    assert_eq!(error.description(), "loop thread 1 ended while starting");
+}

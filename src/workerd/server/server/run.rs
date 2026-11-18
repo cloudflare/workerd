@@ -133,7 +133,7 @@ impl Control {
 struct Running {
     server: Rc<Server>,
     /// The listener futures; each ends when the server has drained, or fails fatally. The
-    /// replicas, if any, are one of them (`Replicas::start`).
+    /// replicas, if any, are one of them (`threads::Started::watch`).
     listeners: FuturesUnordered<LocalBoxFuture<'static, Result<()>>>,
     drain: watch::Sender<bool>,
     /// The other loop threads of the run, which end with it.
@@ -226,15 +226,28 @@ async fn start(
     let serves_streams = |sockets: &DuplicateSockets| sockets.iter().any(Option::is_some);
     let replicas =
         replicas.filter(|_| !server.report().had_errors() && duplicates.iter().any(serves_streams));
-    if let Some(replicas) = &replicas {
-        let deployments = server.report().replica_deployments();
-        let started = replicas.start(&factory, duplicates, &options.overrides, &deployments);
-        listeners.push(started.await?);
-    }
+    let mut started = match &replicas {
+        Some(replicas) => {
+            let deployments = server.report().replica_deployments();
+            Some(
+                replicas
+                    .start(&factory, duplicates, &options.overrides, &deployments)
+                    .await?,
+            )
+        }
+        None => None,
+    };
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        if let Some(started) = &mut started {
+            started.check()?;
+        }
         start_cluster(&factory, node, listener, &mut control).await?;
+    }
+    if let Some(mut started) = started {
+        started.check()?;
+        listeners.push(started.watch());
     }
     for (name, port) in ports {
         control.listen(&name, port);
@@ -379,7 +392,7 @@ async fn start_cluster(
         // Peers may take this instance's objects over once its lease lapses: it must stop
         // serving first.
         tracing::error!("leaving the cluster: {reason}");
-        std::process::exit(1);
+        crate::entry::exit_now(1);
     });
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move { cluster.tier_loop().await });

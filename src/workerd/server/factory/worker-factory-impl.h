@@ -87,9 +87,8 @@ class SharedFactory::Impl final {
   jsg::V8System& v8System;
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
-  // Not changed once the constructor returns, except for what guards itself (the Pyodide bundle
-  // manager).
-  kj::Own<Options> options;
+  // The Pyodide bundle manager in `pythonConfig` is const too: it guards what it loads.
+  kj::Own<const Options> options;
 
   // The config message. Each loop's factory reads it through a reader of its own, since a
   // reader counts what it traverses.

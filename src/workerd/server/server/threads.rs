@@ -15,7 +15,10 @@
 //! `WorkerFactory` over the process's `SharedFactory` (`bootstrap_loop`), and its own copy of the
 //! service graph, built from the same config by the same code (`run::run_replica`): every Worker
 //! is compiled once per thread, so a Worker's global scope runs on each and its global state is
-//! per thread, and a service binding reaches the Worker of the same thread. It accepts
+//! per thread, and a service binding reaches the Worker of the same thread. So are the dynamic
+//! Workers of a `workerLoader`: each thread loads its own, and under one name the code its
+//! `getCode` callback returned on that thread, so if the callback can return different code for
+//! one name, threads can run different code under it. It accepts
 //! connections from duplicates of the first thread's stream sockets, which share their accept
 //! queues, so a connection is served by whichever thread accepts it.
 //!
@@ -42,8 +45,10 @@
 //!   serves.) Once every replica is ready the first thread writes its `listen` events and
 //!   [`Replicas::serve`] lets the replicas accept, as it then does itself.
 //! - **Failure.** A replica that fails, or stops serving before the server drains, fails the
-//!   future `Replicas::start` returned, which the first thread serves as one of its listeners:
-//!   the process ends with that error as it does with a listener's. Its pipe closes with its
+//!   future [`Started::watch`] makes, which the first thread serves as one of its listeners:
+//!   the process ends with that error as it does with a listener's. One that has ended before
+//!   the first thread advertises its cluster lease or writes its `listen` events fails the
+//!   start instead ([`Started::check`]). Its pipe closes with its
 //!   loop, which cancels what it had in flight on the first thread, as a client hanging up
 //!   does. A replica whose session ends while it serves fails the same way.
 //! - **Drain.** [`Replicas::drain`] has every replica stop accepting and finish its connections
@@ -98,6 +103,12 @@ enum Event {
     Exited(usize, Result<()>),
 }
 
+/// The stack of a replica's thread: the 8 MiB a main thread usually gets (Linux's default
+/// `ulimit -s`), not the 2 MiB of a thread Rust spawns, so that what runs on the first thread runs
+/// on a replica too. V8 keeps JavaScript within its own limit, below either; the rest of the stack
+/// is for native code that recurses, such as parsers and SQLite.
+const REPLICA_STACK_SIZE: usize = 8 * 1024 * 1024;
+
 /// A replica's end of what the threads share.
 pub struct Signals {
     phase: watch::Receiver<Phase>,
@@ -148,18 +159,17 @@ impl Replicas {
     }
 
     /// Starts the threads, one for each of `sockets`, and waits until each has built its graph.
-    /// A thread that fails to is the error.
+    /// A thread that fails to, or has ended by then, is the error.
     ///
-    /// The future returned watches the threads from then on: it fails when one fails or stops
-    /// serving before the server drains, and resolves once every one has ended.
+    /// What it returns watches the threads from then on ([`Started`]).
     pub async fn start(
         &self,
         factory: &Rc<Factory>,
         sockets: Vec<DuplicateSockets>,
         overrides: &Overrides,
         deployments: &Deployments,
-    ) -> Result<LocalBoxFuture<'static, Result<()>>> {
-        let (events, mut received) = mpsc::unbounded_channel();
+    ) -> Result<Started> {
+        let (events, received) = mpsc::unbounded_channel();
         let count = sockets.len();
         for (index, sockets) in (1..).zip(sockets) {
             let (ours, theirs) = session_pipe();
@@ -182,27 +192,13 @@ impl Replicas {
             };
             let thread = std::thread::Builder::new()
                 .name(format!("loop-{index}"))
+                .stack_size(REPLICA_STACK_SIZE)
                 .spawn(move || replica.run_thread(exit))
                 .map_err(|e| kj::failed!("starting loop thread {index}: {e}"))?;
             self.threads.borrow_mut().push(thread);
         }
         drop(events);
-
-        let mut ready = 0;
-        while ready < count {
-            match received.recv().await {
-                Some(Event::Ready) => ready += 1,
-                Some(Event::Exited(index, result)) => {
-                    return Err(exit_error(index, result, "ended while starting"));
-                }
-                None => return Err(lost_thread()),
-            }
-        }
-        Ok(Box::pin(watch_threads(
-            received,
-            self.phase.subscribe(),
-            count,
-        )))
+        await_ready(received, self.phase.subscribe(), count).await
     }
 
     /// Lets the replicas accept connections.
@@ -258,7 +254,66 @@ fn lost_thread() -> crate::Error {
     kj::failed!("a loop thread ended without reporting how")
 }
 
-/// Watches `running` threads through their events: see [`Replicas::start`].
+/// The replicas once each has built its graph, as [`Replicas::start`] returns them.
+pub struct Started {
+    events: mpsc::UnboundedReceiver<Event>,
+    phase: watch::Receiver<Phase>,
+    count: usize,
+}
+
+impl Started {
+    /// Fails with the error of a replica that has ended since, if one has. The first thread
+    /// checks before it tells anyone that it serves: before it advertises its cluster lease, and
+    /// before it writes its `listen` events.
+    pub fn check(&mut self) -> Result<()> {
+        loop {
+            match self.events.try_recv() {
+                Ok(Event::Ready) => {}
+                Ok(Event::Exited(index, result)) => {
+                    return Err(exit_error(index, result, "ended while starting"));
+                }
+                Err(mpsc::error::TryRecvError::Empty) => return Ok(()),
+                Err(mpsc::error::TryRecvError::Disconnected) => return Err(lost_thread()),
+            }
+        }
+    }
+
+    /// Watches the threads for the rest of the run: fails when one fails or stops serving before
+    /// the server drains, and resolves once every one has ended. The first thread serves it as one
+    /// of its listeners.
+    #[must_use]
+    pub fn watch(self) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(watch_threads(self.events, self.phase, self.count))
+    }
+}
+
+/// Waits through `events` until `count` threads are ready; a thread that ended first, or has
+/// ended by then, is the error.
+async fn await_ready(
+    mut events: mpsc::UnboundedReceiver<Event>,
+    phase: watch::Receiver<Phase>,
+    count: usize,
+) -> Result<Started> {
+    let mut ready = 0;
+    while ready < count {
+        match events.recv().await {
+            Some(Event::Ready) => ready += 1,
+            Some(Event::Exited(index, result)) => {
+                return Err(exit_error(index, result, "ended while starting"));
+            }
+            None => return Err(lost_thread()),
+        }
+    }
+    let mut started = Started {
+        events,
+        phase,
+        count,
+    };
+    started.check()?;
+    Ok(started)
+}
+
+/// Watches `running` threads through their events: see [`Started::watch`].
 async fn watch_threads(
     mut events: mpsc::UnboundedReceiver<Event>,
     phase: watch::Receiver<Phase>,

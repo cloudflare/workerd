@@ -437,7 +437,9 @@ pub struct ServeArgs {
     ///
     /// Every thread accepts connections from the config's sockets and runs its own copy of every
     /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
-    /// a service binding reaches the Worker of the same thread. Durable Objects all run on one
+    /// a service binding reaches the Worker of the same thread. Each thread loads its own dynamic
+    /// Workers too, so threads can run different code under one name if a Worker Loader's
+    /// getCode callback returns different code for it. Durable Objects all run on one
     /// thread, where the other threads call them, and a cluster instance is a member of its
     /// cluster on that thread. A Durable Object does not see the trace span of a caller on
     /// another thread. --inspector-addr and the options that save a Python snapshot are not

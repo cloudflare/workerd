@@ -9456,6 +9456,9 @@ KJ_TEST("Server: debug port RPC calls") {
                 `      await this.state.storage.put("count", count);
                 `      return new Response("Count: " + count);
                 `    }
+                `    if (url.pathname === "/name") {
+                `      return new Response("Name: " + (this.state.id.name ?? "none"));
+                `    }
                 `    return new Response("Actor: " + this.state.id.toString());
                 `  }
                 `}
@@ -9642,6 +9645,20 @@ KJ_TEST("Server: debug port RPC calls") {
       kj::String expectedResponse = kj::str("Actor: ", expectedId);
       KJ_EXPECT(bodyText == expectedResponse, bodyText, expectedResponse);
     }
+  }
+
+  // Test 5b: A debug-port client cannot name an actor: the name it sends is not the actor's.
+  {
+    kj::byte actorIdBytes[32];
+    for (auto& byte: actorIdBytes) byte = 0xab;
+    auto req = debugPort.getActorRequest();
+    req.setService("actor-service");
+    req.setEntrypoint("MyActor");
+    req.setActorId(kj::encodeHex(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes))));
+    req.setActorName("not-the-name-of-this-id");
+    auto resp = req.send().wait(test.ws);
+    auto bodyText = makeHttpRequestFromBootstrap(resp.getActor(), "/name");
+    KJ_EXPECT(bodyText == "Name: none", bodyText);
   }
 
   // Test 6: Call RPC methods using jsRpcSession with V8-serialized arguments

@@ -7,6 +7,7 @@ import {
   WorkerEntrypoint,
   restore,
 } from 'cloudflare:workers';
+import unsafe from 'workerd:unsafe';
 
 // The identity of this isolate: global state, so each loop thread's copy of the Worker has its
 // own. The Durable Objects are classes of this Worker and run in the copy of the thread that has
@@ -363,6 +364,20 @@ export default {
         return Response.json({ front });
       case '/alarms':
         return Response.json({ front, alarms: await counter.alarms() });
+      case '/abort-all':
+      case '/delete-all': {
+        // The test hooks of `workerd:unsafe`, which act on the objects of this thread.
+        const hook =
+          url.pathname === '/abort-all'
+            ? unsafe.abortAllDurableObjects
+            : unsafe.deleteAllDurableObjects;
+        try {
+          await hook.call(unsafe);
+          return Response.json({ front, error: null });
+        } catch (error) {
+          return Response.json({ front, error: error.message });
+        }
+      }
       case '/echo': {
         const response = await counter.fetch('http://object/echo', {
           method: 'POST',

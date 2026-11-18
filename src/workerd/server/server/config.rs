@@ -654,6 +654,21 @@ impl Server {
         }
     }
 
+    /// Aborts every evictable actor, for a Worker that asked (`abortAllDurableObjects()`). Fails
+    /// on a replica (threads.rs) that has an evictable namespace: its actors are the first
+    /// thread's.
+    pub fn abort_all_actors_on_request(&self, reason: Option<&crate::Error>) -> Result<()> {
+        for (_, worker) in self.workers() {
+            for (_, namespace) in worker.namespaces() {
+                if namespace.is_evictable() {
+                    namespace.require_actors_here("abort Durable Objects")?;
+                }
+            }
+        }
+        self.abort_all_actors(reason);
+        Ok(())
+    }
+
     /// Aborts every evictable actor and deletes its storage.
     pub fn delete_all_actors(&self, reason: Option<&crate::Error>) -> Result<()> {
         for (_, worker) in self.workers() {
@@ -2017,6 +2032,14 @@ impl ServerHandle {
                 namespace.channel_by_name(actor_id, false),
             ));
         }
+        // Only another loop thread of this process derived the id from the name it sends; from
+        // anyone else, a name would be the actor's `ctx.id.name` whether or not it hashes to the
+        // id.
+        let actor_name = if local_caller {
+            actor_name
+        } else {
+            KjMaybe::None
+        };
         let id = ffi::actor_id_from_hex(actor_id, actor_name)?;
         // Another loop thread's stub is a stub of this process: its channel is the one a stub on
         // this thread gets, which a draining cluster node routes for as for its own. Whether
