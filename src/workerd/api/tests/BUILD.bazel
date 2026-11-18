@@ -312,6 +312,11 @@ wd_test(
 )
 
 wd_test(
+    src = "incoming-headers-test.wd-test",
+    data = ["incoming-headers-test.js"],
+)
+
+wd_test(
     src = "connect-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["connect-half-open-test.js"],

@@ -510,8 +510,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
-  if (body != kj::none && !jsHeaders->hasCommon(capnp::CommonHeaderName::CONTENT_LENGTH) &&
-      !jsHeaders->hasCommon(capnp::CommonHeaderName::TRANSFER_ENCODING)) {
+  // `headers` is checked rather than `jsHeaders`, which parses its headers only once read.
+  if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
       jsHeaders->setCommon(capnp::CommonHeaderName::CONTENT_LENGTH, kj::str(l));
     } else {
