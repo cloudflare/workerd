@@ -8,7 +8,9 @@
 //! locks its directory, and as it starts removes every `cluster-*` directory no node has locked.
 //!
 //! The protocol runs on a monotonic clock in ms. Its view, `fresh` and `active` come from the
-//! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms.
+//! registry by wall time (`Cluster::cache_view`), set before every call and every 20 ms. A
+//! draining node is not active but stays in views until it leaves: the keys it is home to, about
+//! 1/N, miss meanwhile, and their puts are not stored.
 //!
 //! A message is HTTP to this service on node `to` (`ClusterNode::peer_service`), whose metadata
 //! names its sender as `forwardedBy`, which only a peer sets:

@@ -513,7 +513,8 @@ struct CacheDirectory {
   # file in the directory, so entries survive a restart. With `Config.cluster`, the instances
   # share one cache instead, which every instance must name the same: an entry lives on one
   # instance, and the directory holds this instance's in `cluster-<instance>/`, emptied as it
-  # starts. Experimental: requires `--experimental`.
+  # starts. While an instance drains, the keys it is home to, about 1/N, miss, and puts to them
+  # are not stored. Experimental: requires `--experimental`.
 
   path @0 :Text;
   # The directory, as in `DiskDirectory`: relative to the current directory, and if not
