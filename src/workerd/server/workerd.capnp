@@ -289,6 +289,11 @@ struct ClusterConfig {
   # itself that way ends only with the requests in flight. Stopping an object's Docker container
   # takes one of the few handoffs that run at once.
   #
+  # A request to a Durable Object stays in flight until the body of its response is read, so a
+  # caller that checks `res.ok` and drops the response keeps the object busy, and its handoff waits
+  # for half of this timeout before it cancels the request. Read or cancel a body you don't use
+  # (`await res.body?.cancel()`).
+  #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
   # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
