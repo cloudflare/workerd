@@ -106,7 +106,7 @@ struct TlsOptions {
 // (https://sockets-api.proposal.wintertc.org/), which only covers TCP.
 //
 // The value type of the older ingress experiment. The outbound_udp_sockets experiment uses
-// Uint8Array values directly while retaining value-mode streams and packet boundaries.
+// ArrayBufferView writes and Uint8Array reads, retaining value-mode streams and packet boundaries.
 class Datagram: public jsg::Object {
  public:
   Datagram(jsg::Lock& js, jsg::JsUint8Array data): data(js, data) {}

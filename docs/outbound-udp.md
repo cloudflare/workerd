@@ -2,7 +2,8 @@
 
 Implementation draft: enable `outbound_udp_sockets` and run workerd with `--experimental`.
 This adds outbound UDP to `cloudflare:sockets` using the same Socket object as ingress.
-UDP streams carry Uint8Array values; no Datagram wrapper is required.
+UDP streams accept ArrayBufferView writes and return Uint8Array reads; no Datagram wrapper
+is required.
 
 ```js
 import { connect } from 'cloudflare:sockets';
@@ -11,18 +12,21 @@ const socket = connect(
   { hostname: 'metrics.example.com', port: 8125 },
   { protocol: 'udp' },
 );
+const encoder = new TextEncoder();
 const writer = socket.writable.getWriter();
 try {
-  await writer.write(new TextEncoder().encode('requests:1|c'));
+  await writer.write(encoder.encode('requests:1|c'));
 } finally {
   writer.releaseLock();
-  await socket.close().catch(() => {});
+  await socket.close();
 }
 ```
 
-Each write sends one packet, including a zero-length Uint8Array. Sliced arrays send only
-their visible bytes. Bytes are copied before leaving the isolate lock. Writes may be
-issued before `opened` resolves; transport use waits for setup and the DO output gate.
+Each write sends one packet, including a zero-length view. Any TypedArray or DataView
+is accepted: its visible bytes are sent unchanged, without converting elements or byte
+order. Sliced views send only their visible bytes. Bytes are copied before leaving the
+isolate lock. Writes may be issued before `opened` resolves; transport use waits for
+setup and the DO output gate.
 The draft rejects payloads larger than 65,507 bytes before copying them. The path and
 destination can impose smaller limits or drop fragmented packets.
 
@@ -31,7 +35,7 @@ destination can impose smaller limits or drop fragmented packets.
 The 65,507-byte limit applies to standalone workerd's native backend. An embedding
 runtime may enforce a smaller payload limit. Check the limit for the deployment where
 the code runs; a successful standalone test does not establish the embedding's limit.
-Limits count `Uint8Array.byteLength`, including only the visible bytes of a slice.
+Limits count the view's `byteLength`, including only the visible bytes of a slice.
 Each datagram is checked independently. For text, measure the encoded bytes, not the
 JavaScript string's length.
 
@@ -39,9 +43,8 @@ Await `writer.write(packet)` to observe a size or transport error. A rejected wr
 errors the writable stream: `writer.closed` and subsequent writes reject with that
 error. Close the socket and create a new one before sending more packets. Validate
 packet sizes before writing if the application needs to keep using the same stream.
-Cleanup should not replace the original write error, hence the caught close rejection
-in the example. Packets are never automatically split into smaller datagrams or
-silently truncated to the payload limit.
+Packets are never automatically split into smaller datagrams or silently truncated
+to the payload limit.
 
 ## Socket behavior
 
@@ -61,8 +64,9 @@ listener, local bind option, multicast, broadcast option, DTLS, or hibernation s
 TCP remains the default. Enable the compatibility flag explicitly: without it the new
 protocol option is not interpreted and existing TCP behavior applies.
 
-With this flag, ingress UDP sockets also use Uint8Array stream values. The older
-Datagram-based ingress experiment remains available when this flag is disabled.
+With this flag, ingress UDP sockets also accept ArrayBufferView writes and return
+Uint8Array reads. The older Datagram-based ingress experiment remains available when
+this flag is disabled.
 
 ## Routing and lifetime
 

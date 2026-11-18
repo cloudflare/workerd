@@ -454,7 +454,7 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
 
 // Builds a value-mode WritableStream whose write() sends exactly one outbound datagram per call.
 // Unlike a byte-stream sink, chunks are never merged or split: each write() call becomes exactly
-// one DatagramChannel::send() call. The new experiment accepts Uint8Array values; the older
+// one DatagramChannel::send() call. The new experiment accepts ArrayBufferView values; the older
 // ingress experiment accepts Datagram instances.
 JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<kj::Rc<DatagramChannel>> channel) {
   return JsWritableStream::fromWrite(js,
@@ -462,8 +462,8 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<kj::Rc<DatagramC
     // Copy under the isolate lock. The send may outlive the JS buffer or its backing store.
     auto bytes = [&]() {
       if (FeatureFlags::get(js).getOutboundUdpSockets()) {
-        auto data = JSG_REQUIRE_NONNULL(chunk.tryCast<jsg::JsUint8Array>(), TypeError,
-            "This socket's writable stream only accepts Uint8Array values.");
+        const auto data = JSG_REQUIRE_NONNULL(chunk.tryCast<jsg::JsArrayBufferView>(), TypeError,
+            "This socket's writable stream only accepts ArrayBufferView values (TypedArray or DataView).");
         JSG_REQUIRE(
             data.asArrayPtr().size() <= 65507, RangeError, "UDP payload exceeds 65507 bytes.");
         return kj::heapArray<kj::byte>(data.asArrayPtr());

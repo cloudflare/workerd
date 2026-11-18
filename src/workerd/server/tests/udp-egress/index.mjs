@@ -45,6 +45,27 @@ async function send(request) {
       await writer.write(new Uint8Array([0, 32, 255]));
       const backing = new Uint8Array([99, 1, 2, 3, 99]);
       await writer.write(backing.subarray(1, 4));
+      // Typed-array elements are not converted: only the view's raw byte range is sent.
+      for (const View of [
+        Int8Array,
+        Uint8ClampedArray,
+        Int16Array,
+        Uint16Array,
+        Int32Array,
+        Uint32Array,
+        BigInt64Array,
+        BigUint64Array,
+        Float32Array,
+        Float64Array,
+      ]) {
+        const width = View.BYTES_PER_ELEMENT;
+        const bytes = new Uint8Array(4 * width).fill(99);
+        bytes.fill(42, width, 3 * width);
+        await writer.write(new View(bytes.buffer, width, 2));
+      }
+      await writer.write(
+        new DataView(new Uint8Array([99, 42, 42, 42, 99]).buffer, 1, 3)
+      );
       // close() must drain this queued packet even before its write promise is awaited.
       lastWrite = writer.write(
         new Uint8Array(Number(url.searchParams.get('size') ?? 9000)).fill(42)

@@ -37,16 +37,20 @@ for (const path of ['/worker', '/object', '/echo', '/denied']) {
       assert.deepEqual(packets, [Buffer.from([0, 32, 255])]);
     } else {
       // Receipt at the independent collector is the assertion; write completion alone is not.
-      const deadline = Date.now() + 5000;
-      while (packets.length < 4 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert.deepEqual(packets, [
+      const expected = [
         Buffer.alloc(0),
         Buffer.from([0, 32, 255]),
         Buffer.from([1, 2, 3]),
+        ...[1, 1, 2, 2, 4, 4, 8, 8, 4, 8].map((width) =>
+          Buffer.alloc(2 * width, 42)
+        ),
+        Buffer.alloc(3, 42),
         Buffer.alloc(9000, 42),
-      ]);
+      ];
+      while (packets.length < expected.length) {
+        await once(collector, 'message', { signal: AbortSignal.timeout(5000) });
+      }
+      assert.deepEqual(packets, expected);
     }
   });
 }
