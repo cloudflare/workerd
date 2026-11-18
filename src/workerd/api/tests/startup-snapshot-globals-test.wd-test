@@ -63,6 +63,7 @@ const unitTests :Workerd.Config = (
           (name = "buffer-assign", service = "buffer-assign"),
           (name = "process-env", service = "process-env"),
           (name = "process-stdout", service = "process-stdout"),
+          (name = "empty-typed-array", service = "empty-typed-array"),
         ],
       )
     ),
@@ -279,6 +280,15 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .nodeCompatV2Flags,
         bindings = [
           (name = "MODE", json = "\"process-env\""),
+        ],
+      )
+    ),
+    ( name = "empty-typed-array",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"empty-typed-array\""),
         ],
       )
     ),
