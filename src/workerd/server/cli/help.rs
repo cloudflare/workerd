@@ -105,10 +105,10 @@ macro_rules! python_options {
     () => {
         "\
 Python:
-  --pyodide-package-disk-cache-dir and --pyodide-bundle-disk-cache-dir
-  <dir> cache downloads; --python-snapshot-dir <dir>,
-  --python-save-snapshot, --python-save-baseline-snapshot and
-  --python-load-snapshot <path> manage snapshots.
+  --pyodide-bundle-disk-cache-dir <dir> caches downloads;
+  --python-snapshot-dir <dir>, --python-save-snapshot,
+  --python-save-baseline-snapshot and --python-load-snapshot <path>
+  manage snapshots.
 "
     };
 }

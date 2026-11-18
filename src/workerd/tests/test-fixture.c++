@@ -357,8 +357,7 @@ kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
 
 using api::pyodide::PythonConfig;
 
-const PythonConfig defaultPythonConfig{
-  .packageDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false};
+const PythonConfig defaultPythonConfig{.createSnapshot = false, .createBaselineSnapshot = false};
 
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),

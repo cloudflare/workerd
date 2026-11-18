@@ -431,8 +431,7 @@ fn help_pages_are_complete() {
                 "workerd -h: no {name}"
             );
         }
-        // make-pyodide-baseline-snapshot has clap's page; it is to be removed.
-        if name != "help" && name != "make-pyodide-baseline-snapshot" {
+        if name != "help" {
             check(sub, &format!("workerd {name}"));
         }
     }

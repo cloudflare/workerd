@@ -105,15 +105,6 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    #[command(hide = true)]
-    MakePyodideBaselineSnapshot {
-        #[arg(value_name = "python-version")]
-        python_version: String,
-
-        #[arg(value_name = "output-dir")]
-        output_directory: String,
-    },
-
     #[command(override_help = help::DEPLOY, hide = true)]
     Deploy {
         #[arg(value_name = "project", default_value = ".")]
@@ -181,9 +172,6 @@ pub struct ServeOrTestArgs {
 
     #[arg(long)]
     pub experimental: bool,
-
-    #[arg(long, value_name = "path")]
-    pub pyodide_package_disk_cache_dir: Option<String>,
 
     #[arg(long, value_name = "path")]
     pub pyodide_bundle_disk_cache_dir: Option<String>,
@@ -479,7 +467,6 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             async_trace_stacks: args.async_trace_stacks.into(),
             async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
-            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.clone().into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),
             python_save_snapshot: args.python_save_snapshot,
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
