@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "eb9ab79751c275672f5b39535545a7891464446ef52bbffe2e1e34e60eb284e5",
+  "checksum": "d5a68a5f67e46fdb5553aa5982b40f7698c58ef96170f86162f7015f8dbb0c02",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -5113,7 +5113,9 @@
             "@@//:patches/rust/crates/hyper/client-lazy-response-body.patch",
             "@@//:patches/rust/crates/hyper/graceful-shutdown-partial-request.patch",
             "@@//:patches/rust/crates/hyper/parse-error-explanation.patch",
-            "@@//:patches/rust/crates/hyper/public-header-case-map.patch"
+            "@@//:patches/rust/crates/hyper/public-header-case-map.patch",
+            "@@//:patches/rust/crates/hyper/stack-headers-first.patch",
+            "@@//:patches/rust/crates/hyper/unrecorded-lowercase-spellings.patch"
           ],
           "sha256": "2c3e324da4c95177d6291d4c8730197c0d1822f8a9766814a4a44fa5ab797c9c",
           "url": "https://static.crates.io/crates/hyper/1.12.0/download"
