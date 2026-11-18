@@ -909,6 +909,11 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
     format!("Value out of range. Must be between {min} and {max} (inclusive).")
 }
 
+/// 2^63, the smallest `f64` above `i64::MAX`, which rounds up to it as an `f64`.
+const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
+/// 2^64, the smallest `f64` above `u64::MAX`, which rounds up to it as an `f64`.
+const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
+
 impl_integer!(
     u8 => "octet", new_from_unsigned, not_an_integer(), unsigned_range(u8::MAX);
     u16 => "unsigned short integer", new_from_unsigned, not_an_integer(), unsigned_range(u16::MAX);
@@ -951,9 +956,7 @@ impl<'s> FromJS<'s> for i64 {
 
     #[expect(
         clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        reason = "like C++ JSG, the range is checked in doubles, where i64::MAX rounds up to 2^63, \
-                  which then saturates"
+        reason = "the number is checked to be in range, and truncates toward zero"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
         if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
@@ -967,7 +970,7 @@ impl<'s> FromJS<'s> for i64 {
         if !num.is_finite() {
             return not_an_integer();
         }
-        if num < Self::MIN as f64 || num > Self::MAX as f64 {
+        if !(-TWO_POW_63..TWO_POW_63).contains(&num) {
             return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
         }
         Ok(num as Self)
@@ -1007,10 +1010,8 @@ impl<'s> FromJS<'s> for u64 {
 
     #[expect(
         clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
         clippy::cast_sign_loss,
-        reason = "like C++ JSG, the range is checked in doubles, where u64::MAX rounds up to 2^64, \
-                  which then saturates"
+        reason = "the number is checked to be in range, and truncates toward zero"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
         if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
@@ -1031,7 +1032,7 @@ impl<'s> FromJS<'s> for u64 {
                  positive bigint.",
             ));
         }
-        if num > Self::MAX as f64 {
+        if num >= TWO_POW_64 {
             return Err(Error::new_type_error(unsigned_range(Self::MAX)));
         }
         Ok(num as Self)
