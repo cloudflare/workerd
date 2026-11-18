@@ -204,7 +204,6 @@ private:
     }
   };
 
-  // This wastes one slot, but it is a fixed array for fast access.
   // Headers copied from a kj::HttpHeaders, kept in one buffer until something reads or changes
   // them, since many Workers never look at most of a request's or a subrequest response's headers.
   // parse() adds them to `commonHeaders` and `uncommonHeaders` in their original order, exactly as
@@ -230,7 +229,20 @@ private:
   // Every method that reads or changes the parsed tables calls this first.
   void parse();
 
-  kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
+  struct CommonHeader {
+    kj::uint id;
+    kj::Own<Header> header;
+  };
+
+  // The common headers present, in increasing order of ID. A request or response carries few of
+  // the ~90 common headers, so this is smaller, and quicker to create, scan and destroy, than a
+  // slot for each.
+  kj::Vector<CommonHeader> commonHeaders;
+
+  kj::Maybe<kj::Own<Header>&> findCommon(kj::uint id);
+  // Adds the common header `id`, which must not be present yet.
+  kj::Own<Header>& addCommon(kj::uint id, kj::Own<Header> header);
+  void eraseCommon(kj::uint id);
 
   // The key is always lower-case.
   kj::HashMap<kj::String, kj::Own<Header>> uncommonHeaders;
