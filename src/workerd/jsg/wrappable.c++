@@ -658,7 +658,8 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
     v8::Local<v8::Object> object,
     bool needsGcTracing,
     v8::CppHeapPointerTag tag,
-    IsContextGlobal isContextGlobal) {
+    IsContextGlobal isContextGlobal,
+    ReleasesStrongRef releasesStrongRef) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
   KJ_REQUIRE(!hasWrapper());
@@ -743,9 +744,15 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // isCondemned() looks for.
   tracer.addWrapper({}, *this);
 
+  bool hadStrongRefs = strongRefcount > 0;
+  if (releasesStrongRef) {
+    KJ_ASSERT(strongRefcount > 0);
+    --strongRefcount;
+  }
   if (strongRefcount > 0) {
     strongWrapper.Reset(isolate, object);
-
+  }
+  if (hadStrongRefs) {
     // This object has untraced references, but didn't have a wrapper. That means that any refs
     // transitively reachable through the reference are strong. Now that a wrapper exists, the
     // refs will be traced when the wrapper is traced, so they should be converted to traced
