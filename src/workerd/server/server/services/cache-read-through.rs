@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The `readThrough` service (`ReadThroughCache` in workerd.capnp): Cloudflare's Workers Caching
-//! in front of a Worker, its entries in a cache service's [`Store`] under keys of their own.
+//! A cache service's `ReadThrough` entrypoint (`CacheDirectory.userWorker` in workerd.capnp):
+//! Cloudflare's Workers Caching in front of a Worker, its entries in the service's [`Store`] under
+//! keys of their own.
 //!
 //! A GET or HEAD is answered from a fresh entry of its path and query if there is one
 //! (`Cf-Cache-Status: HIT`). Else a GET runs the Worker, and misses of the same key wait for it,
@@ -52,11 +53,10 @@ use worker::CustomEventResult;
 use worker::CxxWorkerInterface;
 use worker::Interface;
 use worker::ScheduledResult;
-use workerd_capnp::read_through_cache;
+use workerd_capnp::cache_directory;
 
 use super::Cache;
 use super::CacheRequest;
-use super::CacheService;
 use super::Entry;
 use super::MAX_ENTRY;
 use super::MAX_HEAD;
@@ -73,9 +73,7 @@ use crate::channels::PendingToken;
 use crate::channels::RequestMetadata;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
-use crate::config::Factory;
 use crate::config::capnp_error;
-use crate::config::text;
 use crate::services::disk::header_value;
 use crate::services::disk::kj_headers;
 use crate::services::header_table;
@@ -90,59 +88,50 @@ const UNSERVED: [&str; 3] = ["cache-tag", PATH, "cloudflare-cdn-cache-control"];
 
 struct Inner {
     worker: Designator,
-    cache: String,
-    linked: OnceCell<(Rc<dyn Channel>, Rc<Cache>)>,
+    cache: Rc<Cache>,
+    linked: OnceCell<Rc<dyn Channel>>,
     /// The keys whose miss is running the Worker, and what waits for it.
     fills: RefCell<HashMap<String, Vec<oneshot::Sender<()>>>>,
 }
 
-/// A `readThrough` service.
-pub struct ReadThrough(Rc<Inner>);
-
-pub fn make_read_through(
-    name: &str,
-    conf: capnp::Result<read_through_cache::Reader<'_>>,
-    factory: &Factory,
-) -> Result<ReadThrough> {
-    if !factory.experimental() {
-        return Err(kj::failed!(
-            "Read-through caches are an experimental feature which may change or go away in the \
-             future. You must run workerd with `--experimental` to use this feature."
-        ));
-    }
-    let conf = conf.map_err(capnp_error)?;
-    let mut errors = Vec::new();
-    let reader = conf.get_worker().map_err(capnp_error)?;
-    let context = format!("Read-through cache \"{name}\"'s worker");
-    let worker = Designator::from_reader(reader, context, &mut errors).map_err(capnp_error)?;
-    if let Some(error) = errors.into_iter().next() {
-        return Err(kj::failed!("{error}"));
-    }
-    Ok(ReadThrough(Rc::new(Inner {
-        worker,
-        cache: text(conf.get_cache())?,
-        linked: OnceCell::new(),
-        fills: RefCell::default(),
-    })))
-}
+/// The `ReadThrough` entrypoint of a cache service with a user Worker.
+pub(super) struct ReadThrough(Rc<Inner>);
 
 impl ReadThrough {
-    /// The name of the cache service whose store holds the entries.
-    #[must_use]
-    pub fn cache_name(&self) -> &str {
-        &self.0.cache
+    /// The entrypoint of cache `name`, over `cache`'s store, if `conf` has a user Worker.
+    pub(super) fn new(
+        name: &str,
+        conf: cache_directory::Reader<'_>,
+        cache: &Rc<Cache>,
+    ) -> Result<Option<Self>> {
+        if !conf.has_user_worker() {
+            return Ok(None);
+        }
+        let mut errors = Vec::new();
+        let reader = conf.get_user_worker().map_err(capnp_error)?;
+        let context = format!("Cache \"{name}\"'s userWorker");
+        let worker = Designator::from_reader(reader, context, &mut errors).map_err(capnp_error)?;
+        if let Some(error) = errors.into_iter().next() {
+            return Err(kj::failed!("{error}"));
+        }
+        Ok(Some(Self(Rc::new(Inner {
+            worker,
+            cache: Rc::clone(cache),
+            linked: OnceCell::new(),
+            fills: RefCell::default(),
+        }))))
     }
 
-    /// Resolves the Worker and the cache service, once every service exists.
-    pub fn link(&self, lookup: impl FnOnce(&Designator) -> Rc<dyn Channel>, cache: &CacheService) {
+    /// Resolves the user Worker, once every service exists.
+    pub(super) fn link(&self, lookup: impl FnOnce(&Designator) -> Rc<dyn Channel>) {
         let worker = lookup(&self.0.worker);
-        self.0.linked.get_or_init(|| (worker, Rc::clone(&cache.0)));
+        self.0.linked.get_or_init(|| worker);
     }
 }
 
 impl Channel for ReadThrough {
     fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
-        let (worker, cache) = self
+        let worker = self
             .0
             .linked
             .get()
@@ -150,7 +139,7 @@ impl Channel for ReadThrough {
         Ok(Request {
             inner: Rc::clone(&self.0),
             worker: Rc::clone(worker),
-            cache: Rc::clone(cache),
+            cache: Rc::clone(&self.0.cache),
             metadata: Some(metadata),
             started: None,
         }

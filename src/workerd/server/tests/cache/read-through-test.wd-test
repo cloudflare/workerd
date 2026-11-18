@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [ ( name = "worker", esModule = embed "read-through-test.js" ) ],
         compatibilityFlags = ["nodejs_compat"],
         bindings = [
-          ( name = "CACHED", service = "cached" ),
+          ( name = "CACHED", service = ( name = "TEST_TMPDIR", entrypoint = "ReadThrough" ) ),
           ( name = "ORIGIN", service = "origin" ),
         ],
       )
@@ -20,8 +20,8 @@ const unitTests :Workerd.Config = (
         cacheApiOutbound = "TEST_TMPDIR",
       )
     ),
-    ( name = "cached", readThrough = ( worker = "origin", cache = "TEST_TMPDIR" ) ),
-    # The entries, in the directory the runner gives as -dTEST_TMPDIR.
-    ( name = "TEST_TMPDIR", cache = () ),
+    # The entries, in the directory the runner gives as -dTEST_TMPDIR, and Workers Caching in
+    # front of `origin`.
+    ( name = "TEST_TMPDIR", cache = ( userWorker = "origin" ) ),
   ],
 );

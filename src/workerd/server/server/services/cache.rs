@@ -60,6 +60,7 @@ use worker::ScheduledResult;
 use workerd_capnp::cache_directory;
 
 use crate::Result;
+use crate::bindings::Designator;
 use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::channels::PendingToken;
@@ -481,8 +482,11 @@ struct Cache {
 }
 
 /// A `cache` service: the Cache API's backend, its entries in a directory, or shared by the
-/// nodes of a cluster.
-pub struct CacheService(Rc<Cache>);
+/// nodes of a cluster; with a user Worker, also Workers Caching in front of it.
+pub struct CacheService {
+    cache: Rc<Cache>,
+    read_through: Option<Rc<ReadThrough>>,
+}
 
 /// `path_override` is the CLI's `--directory-path` for this service.
 pub fn make_cache_service(
@@ -525,18 +529,39 @@ pub fn make_cache_service(
         None => Box::new(Directory(root)),
     };
     let factory = Rc::clone(factory);
-    Ok(Rc::new(CacheService(Rc::new(Cache {
+    let cache = Rc::new(Cache {
         factory,
         store,
         purges,
-    }))))
+    });
+    let read_through = ReadThrough::new(name, conf, &cache)?.map(Rc::new);
+    Ok(Rc::new(CacheService {
+        cache,
+        read_through,
+    }))
+}
+
+impl CacheService {
+    /// The `ReadThrough` entrypoint, if the service has a user Worker.
+    #[must_use]
+    pub fn read_through(&self) -> Option<Rc<dyn Channel>> {
+        let read_through = self.read_through.as_ref()?;
+        Some(Rc::clone(read_through) as Rc<dyn Channel>)
+    }
+
+    /// Resolves the user Worker, once every service exists.
+    pub fn link(&self, lookup: impl FnOnce(&Designator) -> Rc<dyn Channel>) {
+        if let Some(read_through) = &self.read_through {
+            read_through.link(lookup);
+        }
+    }
 }
 
 impl Channel for CacheService {
     fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
         let key = cf_blob_json(&metadata).and_then(|cf| cache_key(&cf));
         let from = ffi::request_metadata_forwarded_by(&metadata).into();
-        let cache = Rc::clone(&self.0);
+        let cache = Rc::clone(&self.cache);
         Ok(CacheRequest { cache, key, from }.into_kj())
     }
 
@@ -933,8 +958,7 @@ mod clustered;
 #[path = "cache-read-through.rs"]
 mod read_through;
 
-pub use read_through::ReadThrough;
-pub use read_through::make_read_through;
+use read_through::ReadThrough;
 
 #[cfg(test)]
 #[path = "cache-test.rs"]

@@ -342,7 +342,9 @@ impl<V: Clone> Cache<V> {
 
     /// The entries this node holds as their home.
     pub fn homed(&self) -> impl Iterator<Item = (&str, &V)> {
-        self.home.iter().map(|(key, (value, _))| (key.as_str(), value))
+        self.home
+            .iter()
+            .map(|(key, (value, _))| (key.as_str(), value))
     }
 
     /// Drops an entry or near copy, to make room.

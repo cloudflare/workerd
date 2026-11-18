@@ -62,7 +62,8 @@ const cache :Workerd.Config = (
   cluster = .cluster,
 );
 
-# As `cache`, with Workers Caching in front of `main`, which the socket goes to.
+# As `cache`, with Workers Caching in front of `main`: the cache's `ReadThrough`, which the
+# socket goes to.
 const readThrough :Workerd.Config = (
   services = [
     ( name = "main",
@@ -75,10 +76,12 @@ const readThrough :Workerd.Config = (
         cacheApiOutbound = "cache",
       )
     ),
-    ( name = "cache", cache = () ),
-    ( name = "cached", readThrough = ( worker = "main", cache = "cache" ) ),
+    ( name = "cache", cache = ( userWorker = "main" ) ),
   ],
-  sockets = [ ( name = "http", address = "*:0", http = (), service = "cached" ) ],
+  sockets = [
+    ( name = "http", address = "*:0", http = (),
+      service = ( name = "cache", entrypoint = "ReadThrough" ) ),
+  ],
   cluster = .cluster,
 );
 

@@ -60,7 +60,6 @@ use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::cache::CacheService;
-use crate::services::cache::ReadThrough;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -430,7 +429,6 @@ pub enum Service {
     Disk(Rc<DiskDirectoryService>),
     Assets(Rc<Assets>),
     Cache(Rc<CacheService>),
-    ReadThrough(Rc<ReadThrough>),
 }
 
 impl Service {
@@ -443,7 +441,6 @@ impl Service {
             Self::Disk(disk) => Rc::clone(disk) as Rc<dyn Channel>,
             Self::Assets(assets) => assets.channel(false),
             Self::Cache(cache) => Rc::clone(cache) as Rc<dyn Channel>,
-            Self::ReadThrough(read_through) => Rc::clone(read_through) as Rc<dyn Channel>,
         }
     }
 
@@ -1282,6 +1279,18 @@ pub fn lookup_service(
     {
         return assets.channel(entrypoint.is_some());
     }
+    if let Service::Cache(cache) = service
+        && entrypoint.as_deref() == Some("ReadThrough")
+    {
+        return cache.read_through().unwrap_or_else(|| {
+            let error = format!(
+                "{context} refers to the entrypoint \"ReadThrough\" of cache \"{target}\", \
+                 which has no userWorker."
+            );
+            report.reference_error(referrer, target, error);
+            Rc::new(InvalidConfigChannel)
+        });
+    }
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
             report.reference_error(
@@ -1535,24 +1544,14 @@ impl Server {
     }
 
     /// Resolves everything `worker`'s config names into its channel table.
-    /// Links the services that name others: assets to their user Worker, and read-through
-    /// caches to their Worker and cache.
+    /// Links the services that name others to them: assets and caches to their user Worker.
     fn link_services(&self) {
         let services = &self.services.0;
         for (name, service) in services {
             let lookup = |d: &_| lookup_service(services, &self.report, Some(name), d);
             match service {
                 Service::Assets(assets) => assets.link(lookup),
-                Service::ReadThrough(read_through) => {
-                    let cache = read_through.cache_name();
-                    let Some(Service::Cache(cache)) = services.get(cache) else {
-                        let error =
-                            format!("Read-through cache \"{name}\" names no cache \"{cache}\".");
-                        self.report.service_error(name, error);
-                        continue;
-                    };
-                    read_through.link(lookup, cache);
-                }
+                Service::Cache(cache) => cache.link(lookup),
                 _ => {}
             }
         }
@@ -1859,11 +1858,6 @@ async fn make_service(
                 crate::services::assets::make_assets_service(name, index, assets, factory, report)
                     .map(Service::Assets),
             ))
-        }
-        Ok(service::Which::ReadThrough(conf)) => {
-            let made = crate::services::cache::make_read_through(name, conf, factory);
-            let made = made.map(|r| Service::ReadThrough(Rc::new(r)));
-            Ok(invalid_on_error(name, report, made))
         }
         // Made once the cluster, if any, is joined (`cluster_services`).
         Ok(service::Which::Bucket(_) | service::Which::Cache(_)) => {

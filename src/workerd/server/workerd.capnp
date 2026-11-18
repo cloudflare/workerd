@@ -455,9 +455,7 @@ struct Service {
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
     cache @8 :CacheDirectory;
     # The Cache API's backend, which a Worker's `cacheApiOutbound` names, its entries in a
-    # directory on disk.
-    readThrough @9 :ReadThroughCache;
-    # A cache in front of a Worker, as Cloudflare's Workers Caching.
+    # directory on disk, and with a user Worker, the Workers Caching in front of it.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -517,24 +515,22 @@ struct CacheDirectory {
   # instance, and the directory holds this instance's in `cluster-<instance>/`, emptied as it
   # starts. While an instance drains, the keys it is home to, about 1/N, miss, and puts to them
   # are not stored. Experimental: requires `--experimental`.
+  #
+  # With `userWorker`, a designator naming this service with the entrypoint `ReadThrough` serves
+  # requests for it as Cloudflare's Workers Caching serves a Worker with `cache.enabled`: a GET
+  # or HEAD whose response is stored and fresh is answered without running the Worker; otherwise
+  # the Worker answers, and a GET's response is stored for as long as its
+  # `Cloudflare-CDN-Cache-Control`, `CDN-Cache-Control` or `Cache-Control` allows, keyed by path
+  # and query. Concurrent misses of one key run the Worker once. These entries are apart from
+  # the Cache API's; `ctx.cache.purge()` in a Worker whose `cacheApiOutbound` names this service
+  # removes them by `Cache-Tag`, path prefix, or all.
 
   path @0 :Text;
   # The directory, as in `DiskDirectory`: relative to the current directory, and if not
   # specified, given on the command line with `--directory-path <service-name>=<path>`.
-}
 
-struct ReadThroughCache {
-  # Serves requests for `worker` as Cloudflare's Workers Caching serves a Worker with
-  # `cache.enabled`: a GET or HEAD whose response is stored and fresh is answered without running
-  # the Worker; otherwise the Worker answers, and a GET's response is stored for as long as its
-  # `Cloudflare-CDN-Cache-Control`, `CDN-Cache-Control` or `Cache-Control` allows, keyed by path
-  # and query. Concurrent misses of one key run the Worker once. Entries live in the store of the
-  # cache service `cache`, apart from its Cache API entries; `ctx.cache.purge()` in a Worker whose
-  # `cacheApiOutbound` names that service removes them by `Cache-Tag`, path prefix, or all.
-  # Experimental: requires `--experimental`.
-
-  worker @0 :ServiceDesignator;
-  cache @1 :Text;
+  userWorker @1 :ServiceDesignator;
+  # The Worker the `ReadThrough` entrypoint serves in front of, if any.
 }
 
 struct ServiceDesignator {
