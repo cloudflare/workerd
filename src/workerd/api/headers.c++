@@ -351,6 +351,7 @@ Headers::Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict): guard(G
 }
 
 Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
+  unparsed = other.unparsed.map([](const Unparsed& u) { return u.clone(); });
   for (kj::uint i = 1; i < other.commonHeaders.size(); i++) {
     commonHeaders[i] =
         other.commonHeaders[i].map([](const kj::Own<Header>& h) { return h->clone(); });
@@ -362,20 +363,65 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
   }
 }
 
-Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(guard) {
-  // TODO(perf): Once kj::HttpHeaders supports an API for getting the CommonHeaderName directly
-  // from the headers, we can optimize this to avoid looking up the common header IDs again,
-  // making this constructor more efficient when copying common headers from kj::HttpHeaders.
-  other.forEach([this](kj::StringPtr name, kj::StringPtr value) {
-    // We have to copy the values here but we can avoid normalizing and validating since
-    // they presumably already went through that process when they were added to the
-    // kj::HttpHeader instance. A name is copied only if it isn't a common header's own
-    // lower-case spelling.
-    appendUnguardedImpl(name, kj::str(value));
+Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard)
+    : unparsed(Unparsed(other)),
+      guard(guard) {}
+
+Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
+  size_t count = 0;
+  size_t size = 0;
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    ++count;
+    size += name.size() + value.size() + 2;
   });
+
+  chars = kj::heapArray<char>(size);
+  auto builder = kj::heapArrayBuilder<Entry>(count);
+  char* pos = chars.begin();
+  auto copy = [&](kj::StringPtr str) {
+    memcpy(pos, str.begin(), str.size());
+    pos[str.size()] = '\0';
+    kj::StringPtr result(pos, str.size());
+    pos += str.size() + 1;
+    return result;
+  };
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    // Copy the name first: argument evaluation order is unspecified.
+    auto nameCopy = copy(name);
+    builder.add(Entry{.name = nameCopy, .value = copy(value)});
+  });
+  entries = builder.finish();
+}
+
+Headers::Unparsed Headers::Unparsed::clone() const {
+  auto newChars = kj::heapArray<char>(chars.asPtr());
+  auto rebase = [&](kj::StringPtr str) {
+    return kj::StringPtr(newChars.begin() + (str.begin() - chars.begin()), str.size());
+  };
+  auto newEntries = KJ_MAP(entry, entries) {
+    return Entry{.name = rebase(entry.name), .value = rebase(entry.value)};
+  };
+  return Unparsed(kj::mv(newChars), kj::mv(newEntries));
+}
+
+void Headers::parse() {
+  KJ_IF_SOME(u, unparsed) {
+    auto taken = kj::mv(u);
+    unparsed = kj::none;
+    for (auto& entry: taken.entries) {
+      // TODO(perf): Once kj::HttpHeaders supports an API for getting the CommonHeaderName directly
+      // from the headers, we can optimize this to avoid looking up the common header IDs again.
+      // We have to copy the values here but we can avoid normalizing and validating since
+      // they presumably already went through that process when they were added to the
+      // kj::HttpHeader instance. A name is copied only if it isn't a common header's own
+      // lower-case spelling.
+      appendUnguardedImpl(entry.name, kj::str(entry.value));
+    }
+  }
 }
 
 kj::Maybe<Headers::Header&> Headers::tryGetHeader(const HeaderKey& key) {
+  parse();
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(idx, kj::uint) {
       return commonHeaders[idx].map([](kj::Own<Header>& header) -> Header& { return *header; });
@@ -397,6 +443,7 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 kj::Maybe<kj::Own<jsg::Wrappable>> Headers::snapshotClone() const {
   auto clone = kj::refcounted<Headers>();
   clone->guard = guard;
+  clone->unparsed = unparsed.map([](const Unparsed& u) { return u.clone(); });
   for (auto i: kj::indices(commonHeaders)) {
     KJ_IF_SOME(header, commonHeaders[i]) {
       clone->commonHeaders[i] = header->clone();
@@ -411,6 +458,7 @@ kj::Maybe<kj::Own<jsg::Wrappable>> Headers::snapshotClone() const {
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
+  parse();
   for (kj::uint i = 1; i < commonHeaders.size(); i++) {
     KJ_IF_SOME(header, commonHeaders[i]) {
       KJ_IF_SOME(name, header->name) {
@@ -455,6 +503,7 @@ void Headers::shallowCopyTo(kj::HttpHeaders& out) {
 }
 
 kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
+  parse();
   auto getSetCookie = FeatureFlags::get(js).getHttpHeadersGetSetCookie();
 
   size_t reserved = 0;
@@ -560,12 +609,14 @@ kj::Maybe<kj::String> Headers::getPtr(jsg::Lock& js, kj::StringPtr name) {
 }
 
 kj::Maybe<kj::String> Headers::getCommon(jsg::Lock& js, capnp::CommonHeaderName idx) {
+  parse();
   kj::uint index = static_cast<kj::uint>(idx);
   KJ_DASSERT(index <= Headers::MAX_COMMON_HEADER_ID);
   return commonHeaders[index].map([](auto& header) { return kj::strArray(header->values, ", "); });
 }
 
 kj::Array<kj::StringPtr> Headers::getSetCookie() {
+  parse();
   auto& header = commonHeaders[static_cast<kj::uint>(capnp::CommonHeaderName::SET_COOKIE)];
   KJ_IF_SOME(h, header) {
     return KJ_MAP(value, h->values) { return value.asPtr(); };
@@ -589,6 +640,7 @@ bool Headers::has(kj::String name) {
 }
 
 bool Headers::hasCommon(capnp::CommonHeaderName idx) {
+  parse();
   kj::uint index = static_cast<kj::uint>(idx);
   KJ_DASSERT(index <= Headers::MAX_COMMON_HEADER_ID);
   return commonHeaders[index] != kj::none;
@@ -601,6 +653,7 @@ void Headers::set(jsg::Lock& js, kj::String name, kj::String value) {
 }
 
 void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
+  parse();
   KJ_SWITCH_ONEOF(getHeaderKeyFor(name)) {
     KJ_CASE_ONEOF(id, kj::uint) {
       KJ_IF_SOME(existing, commonHeaders[id]) {
@@ -637,6 +690,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
 }
 
 void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
+  parse();
   kj::uint index = static_cast<kj::uint>(idx);
   value = normalizeHeaderValue(getCommonHeaderName(index), kj::mv(value));
   KJ_IF_SOME(existing, commonHeaders[index]) {
@@ -661,6 +715,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
 
 template <typename Name>
 void Headers::appendUnguardedImpl(Name&& name, kj::String value) {
+  parse();
   auto ownName = [&]() -> kj::String {
     if constexpr (kj::isSameType<kj::Decay<Name>, kj::String>()) {
       return kj::mv(name);
@@ -707,6 +762,7 @@ void Headers::appendUnguardedImpl(Name&& name, kj::String value) {
 
 void Headers::delete_(kj::String name) {
   checkGuard();
+  parse();
   KJ_SWITCH_ONEOF(getHeaderKeyFor(name)) {
     KJ_CASE_ONEOF(id, kj::uint) {
       commonHeaders[id] = kj::none;
@@ -721,6 +777,7 @@ void Headers::delete_(kj::String name) {
 }
 
 void Headers::deleteCommon(capnp::CommonHeaderName idx) {
+  parse();
   kj::uint index = static_cast<kj::uint>(idx);
   KJ_DASSERT(index <= Headers::MAX_COMMON_HEADER_ID);
   commonHeaders[index] = kj::none;
@@ -798,6 +855,10 @@ bool Headers::inspectImmutable() {
 }
 
 void Headers::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_IF_SOME(u, unparsed) {
+    tracker.trackFieldWithSize(
+        "unparsed", u.chars.size() + u.entries.size() * sizeof(Unparsed::Entry));
+  }
   for (const auto& header: commonHeaders) {
     tracker.trackField("header", header);
   }
@@ -821,6 +882,7 @@ void Headers::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 // across serialization.
 
 void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  parse();
   // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
   // is a common header ID, or the value zero to indicate an uncommon header, which is then
   // followed by a length-delimited name.
