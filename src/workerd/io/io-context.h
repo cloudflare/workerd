@@ -1450,6 +1450,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Maybe<PendingEvent&> pendingEvent;
   kj::Maybe<kj::Promise<void>> abortFromHangTask;
+  // Linked into the thread's hang checks while this context has no PendingEvent and waits for the
+  // thread to go idle. See scheduleHangCheck().
+  ThreadContext::HangCheckWaiter hangCheckWaiter{*this};
 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
@@ -1563,6 +1566,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::PromiseForResult<Func, void, true> blockConcurrencyWhileImpl(jsg::Lock& js, Func&& callback);
 
   void abortFromHang(Worker::AsyncLock& asyncLock);
+
+  // Arranges for this context to be aborted as hung once the thread goes idle, unless a
+  // PendingEvent is registered first. All contexts on the thread share one wait for idleness.
+  void scheduleHangCheck();
+  void cancelHangCheck();
+  static void runHangChecks(ThreadContext::HangChecks& checks);
 
   template <typename T>
   struct IdentityFunc {
