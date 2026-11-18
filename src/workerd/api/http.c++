@@ -1459,7 +1459,8 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       KJ_IF_SOME(buffer, jsBody.tryTakeUnstreamedBuffer()) {
         auto size = buffer->view.size();
         return DeferredProxy<void>{writeBufferToResponse(
-            outer.send(statusCode, getReasonPhrase(), outHeaders, uint64_t(size)), kj::mv(buffer))};
+            outer.send(statusCode, getReasonPhrase(), outHeaders, static_cast<uint64_t>(size)),
+            kj::mv(buffer))};
       }
     }
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
