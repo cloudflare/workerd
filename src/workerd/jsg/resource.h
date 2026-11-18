@@ -122,7 +122,7 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
-      ptr.attachWrapperReleasingStrongRef(isolate, obj, TypeWrapper::template wrappableTag<T>());
+      ptr.attachWrapper(isolate, obj, TypeWrapper::template wrappableTag<T>());
     });
   }
 };
@@ -152,7 +152,7 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
-      ptr.attachWrapperReleasingStrongRef(isolate, obj, TypeWrapper::template wrappableTag<T>());
+      ptr.attachWrapper(isolate, obj, TypeWrapper::template wrappableTag<T>());
     });
   }
 };
@@ -186,7 +186,7 @@ struct ConstructorCallback<TypeWrapper,
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
-      ptr.attachWrapperReleasingStrongRef(isolate, obj, TypeWrapper::template wrappableTag<T>());
+      ptr.attachWrapper(isolate, obj, TypeWrapper::template wrappableTag<T>());
     });
   }
 };
@@ -1865,7 +1865,7 @@ class ResourceWrapper {
         }
       }
       v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
-      value.attachWrapperReleasingStrongRef(isolate, object, tag);
+      value.attachWrapper(isolate, object, tag);
       return object;
     }
   }
@@ -2162,7 +2162,7 @@ class ObjectWrapper {
         i(*value, wrapper);
       }
       v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
-      value.attachWrapperReleasingStrongRef(isolate, object, info.tag);
+      value.attachWrapper(isolate, object, info.tag);
       return object;
     }
   }
