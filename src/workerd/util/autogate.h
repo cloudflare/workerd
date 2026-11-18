@@ -133,7 +133,10 @@ namespace workerd::util {
   V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
   /* Reports each JSG object's shallow size, which is always counted, to V8 as external memory,  \
      so that garbage made of API objects triggers major GCs. See HeapTracer::chargeWrappable(). */ \
-  V(WRAPPABLE_EXTERNAL_MEMORY)
+  V(WRAPPABLE_EXTERNAL_MEMORY)                                                                     \
+  /* Compatibility dates and flags are compiled by the Rust compiler (io/compat-date/) rather      \
+     than the C++ one (io/compatibility-date-legacy.c++). See io/compatibility-date.c++. */        \
+  V(RUST_COMPAT_DATE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -3,6 +3,7 @@ load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 load("//:build/wd_test.bzl", "wd_test")
 
 # TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
@@ -149,10 +150,20 @@ wd_cc_library(
 
 wd_cc_library(
     name = "compatibility-date",
-    srcs = ["compatibility-date.c++"],
+    srcs = [
+        "compatibility-date.c++",
+        # The C++ compiler, used unless the RUST_COMPAT_DATE autogate is on.
+        "compatibility-date-legacy.c++",
+    ],
     hdrs = [
         "compatibility-date.h",
+        "compatibility-date-legacy.h",
         "validation.h",
+    ],
+    implementation_deps = [
+        ":compat-date",
+        ":compat-date/bridge.rs@cxx",
+        "//src/workerd/util:autogate",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -163,6 +174,30 @@ wd_cc_library(
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
+)
+
+# The Rust compiler behind compatibility-date.h, under the RUST_COMPAT_DATE autogate.
+wd_rust_crate(
+    name = "compat-date",
+    srcs = glob(["compat-date/**/*.rs"]) + [":compat-date/maximum_date.rs"],
+    crate_root = "compat-date/lib.rs",
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "compat-date/bridge.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date_capnp_rust",
+        "@crates_vendor//capnp",
+        "@crates_vendor//thiserror",
+    ],
+)
+
+# maximum-compatibility-date.txt as a Rust string literal, which compat-date/compile.rs include!s.
+genrule(
+    name = "compat-date-maximum-date-rs",
+    srcs = [":trimmed-maximum-compatibility-date.txt"],
+    outs = ["compat-date/maximum_date.rs"],
+    cmd = "echo \"\\\"$$(cat $<)\\\"\" > $@",
+    cmd_ps = "'\"' + (Get-Content $< -Raw -Encoding Ascii) + '\"' | Set-Content $@ -Encoding Ascii",
 )
 
 wd_cc_library(
@@ -623,6 +658,17 @@ kj_test(
         ":compatibility-date",
         ":io",
         "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+# Checks that the Rust compiler agrees with the C++ one in compatibility-date-legacy.c++.
+kj_test(
+    size = "large",
+    src = "compatibility-date-legacy-test.c++",
+    deps = [
+        ":compatibility-date",
+        ":maximum-compatibility-date",
+        "//src/workerd/util:autogate",
     ],
 )
 
