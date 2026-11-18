@@ -204,7 +204,6 @@ private:
     }
   };
 
-  // This wastes one slot, but it is a fixed array for fast access.
   // Headers copied from a kj::HttpHeaders, kept in one buffer until something reads or changes
   // them, since many Workers never look at most of a request's or a subrequest response's headers.
   // parse() adds them to `commonHeaders` and `uncommonHeaders` in their original order, exactly as
