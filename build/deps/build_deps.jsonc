@@ -19,7 +19,11 @@
     // protobuf builds the OTLP schemas in src/opentelemetry for tests. Perfetto depends on it too.
     {
       "name": "protobuf",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      // 37.0 is the first release whose EpsCopyInputStream::PopLimit() takes its LimitToken by
+      // reference (protocolbuffers/protobuf#28619). Before it, ASan + UBSan builds abort while
+      // registering any generated descriptor. Unfreeze once 37.0 is out.
+      "freeze_version": "37.0-rc3"
     },
     // abseil is used by protobuf and tcmalloc.
     {

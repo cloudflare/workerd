@@ -86,7 +86,7 @@ git_repository(
 bazel_dep(name = "platforms", version = "1.1.0")
 
 # protobuf
-bazel_dep(name = "protobuf", version = "35.0")
+bazel_dep(name = "protobuf", version = "37.0-rc3")
 
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.28")
