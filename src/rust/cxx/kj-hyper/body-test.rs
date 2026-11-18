@@ -125,3 +125,10 @@ fn title_case_is_hypers() {
     let name = http::HeaderName::from_static("sec-websocket-key");
     assert_eq!(title_case(&name), "Sec-Websocket-Key");
 }
+
+#[test]
+fn builtin_names_are_the_builtin_spellings_lowercased() {
+    for (spelling, name) in BUILTIN.iter().zip(BUILTIN_NAMES) {
+        assert_eq!(name.as_str(), spelling.to_ascii_lowercase());
+    }
+}
