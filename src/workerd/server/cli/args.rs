@@ -149,15 +149,6 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    /// Make a Pyodide baseline memory snapshot
-    MakePyodideBaselineSnapshot {
-        #[arg(value_name = "python-version")]
-        python_version: String,
-
-        #[arg(value_name = "output-directory")]
-        output_directory: String,
-    },
-
     /// publish an application to a cluster
     #[command(
         long_about = "Publishes an application as a deployment in a cluster bucket (experimental).",
@@ -369,10 +360,6 @@ pub struct ServeOrTestArgs {
     /// future release.
     #[arg(long)]
     pub experimental: bool,
-
-    /// Use <path> as a disk cache to avoid repeatedly fetching packages from the internet.
-    #[arg(long, value_name = "path")]
-    pub pyodide_package_disk_cache_dir: Option<String>,
 
     /// Use <path> as a disk cache to avoid repeatedly fetching Pyodide bundles from the internet.
     #[arg(long, value_name = "path")]
@@ -729,7 +716,6 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             async_trace_stacks: args.async_trace_stacks.into(),
             async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
-            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.clone().into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),
             python_save_snapshot: args.python_save_snapshot,
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,

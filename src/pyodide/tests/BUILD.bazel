@@ -154,14 +154,12 @@ sh_test(
         "$(location //src/workerd/server:workerd)",
         "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
         "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)",
-        "../+pyodide+all_pyodide_wheels_20250808",
     ],
     data = [
         "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
         "python-abort-isolate-on-fatal/worker.py",
         "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
         "//src/workerd/server:workerd",
-        "@all_pyodide_wheels_20250808//:whls",
     ],
     tags = [
         "no-coverage",

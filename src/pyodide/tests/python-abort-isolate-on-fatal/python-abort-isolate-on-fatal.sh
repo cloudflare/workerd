@@ -6,7 +6,6 @@ set -uo pipefail
 WORKERD=$1
 CONFIG=$2
 PYODIDE_BUNDLE=$3
-WHEELS_DIR=$4
 
 TEST_TMPDIR="${TEST_TMPDIR:-/tmp}"
 
@@ -18,7 +17,6 @@ output=$("$WORKERD" test \
   --experimental \
   --compat-date=2000-01-01 \
   --pyodide-bundle-disk-cache-dir "$BUNDLE_DIR" \
-  --pyodide-package-disk-cache-dir "$WHEELS_DIR" \
   -dTEST_TMPDIR="$TEST_TMPDIR" 2>&1)
 exit_code=$?
 
