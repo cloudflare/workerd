@@ -175,6 +175,14 @@ struct Stat final {
 
 class SymbolicLink;
 
+// The nodes and state of the Rust implementation (io/vfs), which worker-fs-rust.c++ defines. The
+// RUST_VFS autogate chooses it in the factory functions below.
+class RustFile;
+class RustDirectory;
+class RustSymbolicLink;
+class RustLinkGuard;
+class RustTmpStore;
+
 enum class FsError {
   // Path segment is not a directory
   NOT_DIRECTORY,
@@ -328,6 +336,11 @@ class File: public kj::Refcounted {
   virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
     // Non-op by default.
   };
+
+  // The file of the Rust implementation, if this is one.
+  virtual kj::Maybe<const RustFile&> tryGetRust() const {
+    return kj::none;
+  }
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -502,6 +515,11 @@ class Directory: public kj::Refcounted {
   virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
     // Non-op by default.
   }
+
+  // The directory of the Rust implementation, if this is one.
+  virtual kj::Maybe<const RustDirectory&> tryGetRust() const {
+    return kj::none;
+  }
 };
 
 // The equivalent to a symbolic link. A symlink holds a reference to the
@@ -515,10 +533,12 @@ class Directory: public kj::Refcounted {
 // cp copies of relative links, have none.
 class SymbolicLink final: public kj::Refcounted {
  public:
-  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget)
-      : root(kj::mv(root)),
-        targetPath(kj::mv(targetPath)),
-        rawTarget(kj::mv(rawTarget)) {}
+  // A link to targetPath within root, with the target as written, if kept. If root belongs to the
+  // Rust implementation, so does the link.
+  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget);
+  // A link of the Rust implementation, which keeps the target as written itself.
+  SymbolicLink(kj::Own<RustSymbolicLink> rust, kj::Path targetPath);
+  ~SymbolicLink() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SymbolicLink);
 
   // Gets the stat for the symbolic link itself.
@@ -547,17 +567,26 @@ class SymbolicLink final: public kj::Refcounted {
 
   // Returns true if this and the other refer to the same fs node. Compare nodes
   // with this rather than by comparing pointers.
-  bool isSameNode(const SymbolicLink& other) const {
-    return this == &other;
-  }
+  bool isSameNode(const SymbolicLink& other) const;
 
   // Ensures that the symlink instance itself is counted towards the isolate
   // memory limit.
   void countTowardsIsolateLimit(jsg::Lock& js) const;
 
+  // The link of the Rust implementation, if this is one.
+  kj::Maybe<const RustSymbolicLink&> tryGetRust() const {
+    KJ_IF_SOME(link, rust) {
+      return *link;
+    }
+    return kj::none;
+  }
+
  private:
-  kj::Rc<Directory> root;
+  // Exactly one of root and rust is set.
+  kj::Maybe<kj::Rc<Directory>> root;
+  kj::Maybe<kj::Own<RustSymbolicLink>> rust;
   kj::Path targetPath;
+  // The target as written, for a link of the C++ implementation.
   kj::Maybe<kj::String> rawTarget;
   mutable kj::Maybe<kj::String> maybeUniqueId;
   mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
@@ -825,10 +854,21 @@ class TmpDirStoreScope final {
     cwd = kj::mv(newCwd);
   }
 
+  // The store of the Rust implementation's /tmp, if the RUST_VFS autogate chose it.
+  kj::Maybe<const RustTmpStore&> tryGetRust() const {
+    KJ_IF_SOME(store, rust) {
+      return *store;
+    }
+    return kj::none;
+  }
+
  private:
+  bool onStack = false;
+  // Declared before dir, which is the store's directory, so that the directory is released
+  // first.
+  kj::Maybe<kj::Own<RustTmpStore>> rust;
   mutable kj::Rc<Directory> dir;
   kj::Path cwd;
-  bool onStack = false;
 };
 
 // A scope utility that is used to guard against infinite recursion when
@@ -848,6 +888,9 @@ class SymbolicLinkRecursionGuardScope final {
 
  private:
   kj::HashSet<SymbolicLink*> linksSeen;
+  // Counts the links of the Rust implementation, whose C++ objects are made per use, so they
+  // can't be told apart by address.
+  kj::Maybe<kj::Own<RustLinkGuard>> rustGuard;
 };
 
 // Every Worker instance has its own virtual filesystem. At a minimum, this

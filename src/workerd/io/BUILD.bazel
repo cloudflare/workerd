@@ -50,6 +50,8 @@ wd_cc_library(
         "tracer.c++",
         "worker.c++",
         "worker-fs.c++",
+        "worker-fs-rust.c++",
+        "worker-fs-rust.h",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "access-info.h",
@@ -78,6 +80,7 @@ wd_cc_library(
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
+        "//src/workerd/io/vfs/ffi:vfs-ffi",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
         "//src/workerd/util:perfetto",

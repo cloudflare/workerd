@@ -737,12 +737,19 @@ wd_test(
     data = ["fs-access-test.js"],
 )
 
-# The stdio suite runs the same module under a C++ and a TypeScript cell. The
-# C++ cell disables the @all-autogates variant: enabling every autogate enables
-# TS_STDIO, which swaps in the TypeScript implementation under a cell whose
-# USING_TS_IMPL binding says C++.
+# The stdio suite runs the same module under a C++, a Rust and a TypeScript
+# cell. The C++ and Rust cells disable the @all-autogates variant: enabling
+# every autogate enables TS_STDIO, which swaps in the TypeScript implementation
+# under a cell whose USING_TS_IMPL binding says otherwise.
 wd_test(
     src = "fs-stdio-cpp.wd-test",
+    args = ["--experimental"],
+    data = ["fs-stdio-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "fs-stdio-rust.wd-test",
     args = ["--experimental"],
     data = ["fs-stdio-test.js"],
     generate_all_autogates_variant = False,
