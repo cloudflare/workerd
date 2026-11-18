@@ -167,7 +167,8 @@ class DeleteQueue: public kj::AtomicRefcounted {
 
   // Installs a fresh cross-thread signal and returns a promise that resolves once an action is
   // scheduled, or never once the queue is defunct. Scheduling requires an installed signal, so the
-  // owner arms one up front and re-arms after each wake; the previous one must have fired.
+  // owner arms one before it makes the first executor and re-arms after each wake; the previous
+  // one must have fired.
   kj::Promise<void> resetCrossThreadSignal() const;
 
   // Moves the queued actions out of the queue, so they can run without its lock held.
