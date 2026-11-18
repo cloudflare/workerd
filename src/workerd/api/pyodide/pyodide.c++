@@ -108,43 +108,6 @@ void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
   });
 }
 
-kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
-  auto builder = kj::Vector<kj::String>(names.size());
-  for (auto i: kj::zeroTo(names.size())) {
-    if (names[i].endsWith(".py")) {
-      builder.add(kj::str(contents[i].asChars()));
-    }
-  }
-  return builder.releaseAsArray();
-}
-
-kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
-  auto result = kj::HashSet<kj::String>();
-  const auto vendor = "python_modules/"_kj;
-  const auto dotPy = ".py"_kj;
-  const auto dotSo = ".so"_kj;
-  for (auto& item: names) {
-    kj::StringPtr name = item;
-    if (name.startsWith(vendor)) {
-      name = name.slice(vendor.size());
-    }
-    auto firstSlash = name.findFirst('/');
-    KJ_IF_SOME(idx, firstSlash) {
-      result.upsert(kj::str(name.slice(0, idx)), [](auto&&, auto&&) {});
-      continue;
-    }
-    if (name.endsWith(dotPy)) {
-      result.upsert(kj::str(name.slice(0, name.size() - dotPy.size())), [](auto&&, auto&&) {});
-      continue;
-    }
-    if (name.endsWith(dotSo)) {
-      result.upsert(kj::str(name.slice(0, name.size() - dotSo.size())), [](auto&&, auto&&) {});
-      continue;
-    }
-  }
-  return result;
-}
-
 kj::Array<uint32_t> PyodideMetadataReader::getSizes(jsg::Lock& js) {
   auto builder = kj::heapArrayBuilder<uint32_t>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
@@ -264,37 +227,7 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
   }
 }
 
-const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
-
-jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key) {
-  KJ_IF_SOME(root, cacheRoot) {
-    kj::Path path(key);
-    auto file = root->tryOpenFile(path);
-
-    KJ_IF_SOME(f, file) {
-      return f->readAllBytes();
-    } else {
-      return kj::none;
-    }
-  } else {
-    return kj::none;
-  }
-}
-
-void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
-  KJ_IF_SOME(root, cacheRoot) {
-    kj::Path path(key);
-    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-
-    KJ_IF_SOME(f, file) {
-      f->writeAll(data);
-    } else {
-      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
-    }
-  } else {
-    return;
-  }
-}
+const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_SNAPSHOT_ROOT = kj::none;
 
 void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, snapshotRoot) {

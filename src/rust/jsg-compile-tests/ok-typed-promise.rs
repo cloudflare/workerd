@@ -13,7 +13,7 @@ pub struct Carried {
     pub count: usize,
 }
 
-jsg::jsg_traced!(Carried);
+jsg::jsg_traced_unchecked!(Carried);
 
 #[jsg_resource]
 pub struct Waiter {

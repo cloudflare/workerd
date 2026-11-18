@@ -1396,6 +1396,13 @@ jsg::Url SymbolicLink::getTargetUrl() const {
   return KJ_ASSERT_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
 }
 
+kj::String SymbolicLink::getRawTarget() const {
+  KJ_IF_SOME(raw, rawTarget) {
+    return kj::str(raw);
+  }
+  return targetPath.toString(true);
+}
+
 kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(
     jsg::Lock& js) {
   KJ_IF_SOME(ret, root->tryOpen(js, getTargetPath())) {
@@ -1478,11 +1485,12 @@ kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
   return getRoot(js)->stat(js, root.eval(path));
 }
 
-kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(jsg::Lock& js, const jsg::Url& url) const {
+kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(
+    jsg::Lock& js, const jsg::Url& url, kj::Maybe<kj::String> rawTarget) const {
   KJ_REQUIRE(url.getProtocol() == "file:"_kj);
   auto path = kj::str(url.getPathname().slice(1));
   kj::Path root{};
-  return kj::rc<SymbolicLink>(getRoot(js), root.eval(path));
+  return kj::rc<SymbolicLink>(getRoot(js), root.eval(path), kj::mv(rawTarget));
 }
 
 SymbolicLinkRecursionGuardScope::SymbolicLinkRecursionGuardScope() {

@@ -67,7 +67,8 @@ class FileSystemModule final: public jsg::Object {
   struct ReadLinkOptions {
     // The readLink method is used for both realpath and readlink. The readlink
     // API will throw an error if the path is not a symlink. The realpath API
-    // will return the resolved path either way.
+    // will return the resolved path either way. For a symlink, readlink gets
+    // the target as written and realpath gets the absolute target path.
     bool failIfNotSymlink = false;
     JSG_STRUCT(failIfNotSymlink);
   };
@@ -78,7 +79,12 @@ class FileSystemModule final: public jsg::Object {
     JSG_STRUCT(symbolic);
   };
 
-  void link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options);
+  // For a symbolic link, rawTarget is the target as written.
+  void link(jsg::Lock& js,
+      FilePath from,
+      FilePath to,
+      LinkOptions options,
+      jsg::Optional<kj::String> rawTarget = kj::none);
 
   void unlink(jsg::Lock& js, FilePath path);
 

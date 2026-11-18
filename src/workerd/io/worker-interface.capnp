@@ -334,6 +334,16 @@ struct Trace @0x8e8d911203762d34 {
     }
   }
 
+  struct SpanLink {
+    context @0 :SpanContext;
+    attributes @1 :List(Attribute);
+    droppedAttributesCount @2 :UInt32;
+  }
+
+  struct SpanLinks {
+    links @0 :List(SpanLink);
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -402,6 +412,7 @@ struct Trace @0x8e8d911203762d34 {
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
       spanUpdate @14 :SpanUpdate;
+      spanLinks @15 :SpanLinks;
     }
   }
 }
@@ -787,8 +798,14 @@ struct JsValue {
     # resolves the earlier promise to the result.
 
     interface DelayedChannelToken {
-      # No methods. This can be unwrapped by the recipient to obtain the channel token passed to
+      # The recipient normally unwraps this to obtain the channel token passed to
       # `pushDelayedChannelToken()`.
+
+      getToken @0 () -> (token :Data);
+      # Returns the token. The recipient calls this when the capability does not unwrap to an
+      # object of its own, which happens when the capability reaches it by a path that does not
+      # lead back to the object it pushed. The token is no more trusted than one sent inline in
+      # `subrequestChannelToken`, since the recipient validates it the same way.
     }
 
     # TODO(soon):

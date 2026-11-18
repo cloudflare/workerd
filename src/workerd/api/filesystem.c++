@@ -350,6 +350,9 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
         return path.toString(true);
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        if (options.failIfNotSymlink) {
+          return link->getRawTarget();
+        }
         return link->getTargetPath().toString(true);
       }
       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -364,7 +367,11 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
   }
 }
 
-void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options) {
+void FileSystemModule::link(jsg::Lock& js,
+    FilePath from,
+    FilePath to,
+    LinkOptions options,
+    jsg::Optional<kj::String> rawTarget) {
   // The from argument is where we are creating the link, while the to is the target.
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedFrom(js, kj::mv(from));
@@ -397,7 +404,8 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
 
       // If we are creating a symbolic link, we do not need to check if the target exists.
       if (options.symbolic) {
-        KJ_IF_SOME(err, dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl))) {
+        KJ_IF_SOME(err,
+            dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl, kj::mv(rawTarget)))) {
           throwFsError(js, err, "link"_kj);
         }
         return;
@@ -1360,9 +1368,11 @@ void handleCpLink(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::SymbolicLink> srcLink,
     const jsg::Url& destUrl) {
-  // Here, we are going to essentially create a hard link (new refcount)
-  // of srcLink and destUrl, if we are allowed to do so.
-  // We need to check if the destination exists and is writable.
+  // Here, we are going to create a new symbolic link at destUrl to the
+  // absolute target of srcLink, if we are allowed to do so. Like Node.js
+  // without verbatimSymlinks, a relative target is not kept, since the copy
+  // can live in a different directory. We need to check if the destination
+  // exists and is writable.
   auto relative = destUrl.getRelative();
   // relative.base is the parent directory path.
   // relative.name is the name of the link we are creating in the parent.
@@ -1400,7 +1410,13 @@ void handleCpLink(jsg::Lock& js,
           }
         }
         // Now, we can add the symbolic link to the directory.
-        KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(srcLink))) {
+        auto rawTarget = srcLink->getRawTarget();
+        kj::Maybe<kj::String> keptTarget;
+        if (rawTarget.startsWith("/"_kj)) {
+          keptTarget = kj::mv(rawTarget);
+        }
+        auto copy = vfs.newSymbolicLink(js, srcLink->getTargetUrl(), kj::mv(keptTarget));
+        KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(copy))) {
           // If we got here, an error was reported
           throwFsError(js, err, "cp"_kj);
         }

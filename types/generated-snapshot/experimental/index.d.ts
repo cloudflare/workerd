@@ -1163,6 +1163,7 @@ declare class Blob {
 }
 interface BlobOptions {
   type?: string;
+  endings?: "transparent" | "native";
 }
 /**
  * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
@@ -1191,6 +1192,7 @@ declare class File extends Blob {
 interface FileOptions {
   type?: string;
   lastModified?: number;
+  endings?: "transparent" | "native";
 }
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
@@ -4558,6 +4560,11 @@ interface Tracing {
   ): T;
   Span: typeof Span;
 }
+interface TracingSpanLink {
+  context: TracingSpanContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4590,6 +4597,8 @@ declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 type TracingSpanStatusCode = "unset" | "ok" | "error";
 interface TracingSpanStatus {
@@ -17805,6 +17814,22 @@ declare namespace TailStream {
     readonly type: "spanUpdate";
     readonly info: SpanUpdateInfo;
   }
+  /** A causal relationship to a span, including spans in another trace. */
+  interface SpanLink {
+    readonly context: {
+      readonly traceId: string;
+      readonly spanId: string;
+      readonly traceFlags: number;
+    };
+    readonly attributes: readonly Attribute[];
+    /** Attributes dropped before this link was recorded. */
+    readonly droppedAttributesCount: number;
+  }
+  /** Links added to the receiver identified by the event's spanContext. */
+  interface SpanLinks {
+    readonly type: "spanLinks";
+    readonly links: readonly SpanLink[];
+  }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
     readonly channel: string;
@@ -17875,6 +17900,7 @@ declare namespace TailStream {
     | SpanOpen
     | SpanClose
     | SpanUpdate
+    | SpanLinks
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17918,6 +17944,7 @@ declare namespace TailStream {
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
+    spanLinks?: TailEventHandler<SpanLinks>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

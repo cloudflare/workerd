@@ -15,8 +15,16 @@ import { default as entropyImportContext } from 'pyodide-internal:topLevelEntrop
 import { default as entropyImportContextPackages } from 'pyodide-internal:topLevelEntropy/entropy_import_context_packages.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
 import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
-import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
-import { CHECK_RNG_STATE, PROCESS_PTH_FILES } from 'pyodide-internal:metadata';
+import {
+  simpleRunPython,
+  PythonUserError,
+  PythonWorkersInternalError,
+} from 'pyodide-internal:util';
+import {
+  CHECK_RNG_STATE,
+  IS_CREATING_SNAPSHOT,
+  PROCESS_PTH_FILES,
+} from 'pyodide-internal:metadata';
 
 let allowed_entropy_calls_addr: number;
 
@@ -102,13 +110,43 @@ export function entropyModuleFiles(): [string, ArrayBuffer][] {
 }
 
 /**
+ * The address of the byte that shouldAllowBadEntropy reads. collectSnapshot() stores it in the
+ * snapshot so that restoring one doesn't need to run Python to find it again.
+ */
+export function getBadEntropyFlagAddr(): number {
+  return allowed_entropy_calls_addr;
+}
+
+/**
  * This prepares us to execute the top level scope. It changes JS state so it
  * needs to be called whether restoring snapshot or not. We have to call this
  * after the runtime is ready, so after restoring the snapshot in the snapshot
  * branch and after mountCloudflarePackage in the no-snapshot branch.
+ *
+ * `snapshotFlagAddr` is the address recorded in the restored snapshot. The flag lives in linear
+ * memory, so it is at the same address after a restore. Snapshots made before the address was
+ * recorded don't have it, and then we ask Python.
+ *
+ * When creating a snapshot on top of a restored one, we ask Python anyway and check that it
+ * agrees: a wrong address would make shouldAllowBadEntropy() decrement an unrelated byte.
  */
-export function entropyAfterRuntimeInit(Module: Module): void {
+export function entropyAfterRuntimeInit(
+  Module: Module,
+  snapshotFlagAddr: number | undefined
+): void {
+  if (snapshotFlagAddr !== undefined && !IS_CREATING_SNAPSHOT) {
+    allowed_entropy_calls_addr = snapshotFlagAddr;
+    return;
+  }
   setupShouldAllowBadEntropy(Module);
+  if (
+    snapshotFlagAddr !== undefined &&
+    snapshotFlagAddr !== allowed_entropy_calls_addr
+  ) {
+    throw new PythonWorkersInternalError(
+      `Snapshot recorded bad entropy flag address ${snapshotFlagAddr}, but Python reports ${allowed_entropy_calls_addr}`
+    );
+  }
 }
 
 /**

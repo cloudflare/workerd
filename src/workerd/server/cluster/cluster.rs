@@ -491,10 +491,24 @@ impl Cluster {
         !self.ownership.may_claim.get()
     }
 
-    /// The first renewal, before the node serves.
+    /// The first renewal, before the node links its services: their
+    /// storage opens only under a lease.
     pub async fn join(&self) -> Result<()> {
         let probe = format!("nodes/{}.probe", self.node());
         check_conditional_writes(&self.bucket, &probe).await?;
+        self.take_lease().await
+    }
+
+    /// Renews the lease once more as the node starts serving, so that its
+    /// first maintenance round finds the lease held. Linking, after `join`,
+    /// opens every namespace's storage, which on a slow disk takes most of
+    /// a lease. A lease that lapsed meanwhile is renewed, not fenced on:
+    /// the node has run no actor and claimed nothing a peer could take over.
+    pub async fn renew_to_serve(&self) -> Result<()> {
+        self.take_lease().await
+    }
+
+    async fn take_lease(&self) -> Result<()> {
         let until = self.renew(now_ms()).await?;
         self.lease.borrow_mut().renewed(now_ms(), Ok(until));
         Ok(())

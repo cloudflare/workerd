@@ -7,6 +7,7 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <cppgc/allocation.h>
@@ -94,6 +95,8 @@ void HeapTracer::unbind(Wrappable& wrappable) {
   if (wrappable.link.isLinked()) {
     (wrappable.linkedInWrappers ? wrappers : unwrapped).remove(wrappable);
     wrappable.linkedInWrappers = false;
+    // Its charge goes with this isolate, so a later isolate does not release it.
+    wrappable.accountedBytes = 0;
   }
   wrappable.isolate = nullptr;
 }
@@ -108,7 +111,37 @@ void Wrappable::unlinkFromTracer() {
     abort();
   }
   auto& tracer = HeapTracer::getTracer(isolate);
+  tracer.releaseWrappable(*this);
   (linkedInWrappers ? tracer.wrappers : tracer.unwrapped).remove(*this);
+}
+
+void HeapTracer::chargeWrappable(Wrappable& wrappable) {
+  if (wrappable.accountedBytes != 0) return;
+  size_t size = wrappable.jsgGetMemorySelfSize();
+  wrappable.accountedBytes = static_cast<uint16_t>(kj::min(size, size_t{UINT16_MAX}));
+  unreportedWrappableBytes += wrappable.accountedBytes;
+}
+
+void HeapTracer::releaseWrappable(Wrappable& wrappable) {
+  unreportedWrappableBytes -= wrappable.accountedBytes;
+  wrappable.accountedBytes = 0;
+}
+
+void HeapTracer::flushExternalMemory() {
+  if (isolate == nullptr ||
+      !util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY)) {
+    return;
+  }
+  if (unreportedWrappableBytes < kExternalMemoryFlushBytes &&
+      unreportedWrappableBytes > -kExternalMemoryFlushBytes) {
+    return;
+  }
+  // Taken before the call: V8 may run a GC inside it, and what that GC charges or releases must
+  // stay pending for the next flush.
+  int64_t delta = unreportedWrappableBytes;
+  unreportedWrappableBytes = 0;
+  reportedWrappableBytes += delta;
+  isolate->AdjustAmountOfExternalAllocatedMemoryImpl(delta);
 }
 
 void HeapTracer::destroyLiveWrappableInstances() {
@@ -378,6 +411,7 @@ void HeapTracer::linkRestoredWrapper(
   shim.state = JSGWrappable::CppgcShim::Active{kj::mv(own)};
   wrappable.isolate = isolate;
   wrappable.weakShim = &shim;
+  chargeWrappable(wrappable);
 
   {
     // Same invariant as in attachWrapper.
@@ -670,6 +704,10 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
   auto* shim = tracer.allocateShim(*this, tag);
 
+  // Nothing below throws, so `this` is always linked, and therefore released, by the end of this
+  // function.
+  tracer.chargeWrappable(*this);
+
   // No garbage collection may run from here to the end of this function. Between creating the
   // TracedReference below and linking `object` to its CppgcShim, the traced node exists but
   // nothing in the cppgc object graph reaches it, so a major GC's ResetDeadNodes() would free the
@@ -820,20 +858,33 @@ void Wrappable::jsgVisitForGc(GcVisitor& visitor) {
 }
 
 void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, bool& refStrong) {
+  if (visitor.isMakingStrong()) {
+    // The Ref has left the object that visited it, so it has no parent until another visits it.
+    refParent = kj::none;
+    if (!refStrong) {
+      addStrongRef();
+      refStrong = true;
+    }
+    return;
+  }
+  auto& parent = *visitor.parent;
+
   KJ_IF_SOME(p, refParent) {
-    KJ_ASSERT(&p == &visitor.parent);
+    KJ_ASSERT(&p == &parent);
   } else {
-    refParent = visitor.parent;
+    refParent = parent;
   }
 
-  if (isolate == nullptr && visitor.parent.isolate != nullptr) {
+  if (isolate == nullptr && parent.isolate != nullptr) {
     // A Ref<T> to an unbound Wrappable implies it has no wrapper.
-    isolate = visitor.parent.isolate;
-    HeapTracer::getTracer(isolate).addUnwrapped({}, *this);
+    isolate = parent.isolate;
+    auto& tracer = HeapTracer::getTracer(isolate);
+    tracer.addUnwrapped({}, *this);
+    tracer.chargeWrappable(*this);
   }
 
   // Make ref strength match the parent.
-  if (visitor.parent.strongRefcount > 0 && !visitor.parent.hasWrapper()) {
+  if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
     // This reference should be strong, because the parent has strong refs and does not have its
     // own wrapper that will be traced.
 
@@ -881,8 +932,10 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
 void GcVisitor::visit(Data& value) {
   if (!value.handle.IsEmpty()) {
     // Make ref strength match the parent.
-    if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
-      // This is directly reachable by a strong ref, so mark the handle strong.
+    if (keepsHandlesStrong()) {
+      // This is directly reachable by a strong ref, or is being made strong, so mark the handle
+      // strong.
+      KJ_DASSERT(!isMakingStrong() || v8::Locker::IsLocked(strengtheningIsolate));
       if (value.tracedHandle != kj::none) {
         // Convert the handle back to strong and discard the traced reference.
         value.handle.ClearWeak<void>();
@@ -893,9 +946,9 @@ void GcVisitor::visit(Data& value) {
       // hold a TracedReference alongside it.
       if (value.tracedHandle == kj::none) {
         // Create the TracedReference.
-        v8::HandleScope scope(parent.isolate);
+        v8::HandleScope scope(parent->isolate);
         value.tracedHandle =
-            v8::TracedReference<v8::Data>(parent.isolate, value.handle.Get(parent.isolate));
+            v8::TracedReference<v8::Data>(parent->isolate, value.handle.Get(parent->isolate));
 
         // Set the handle weak.
         value.handle.SetWeak();
@@ -914,7 +967,6 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
   if (strong.IsEmpty()) {
     return;
   }
-
   // Mirror visit(Data&): make handle strength match the parent.
   //
   // The `parent.wrapper == kj::none` check mirrors the same condition in
@@ -922,9 +974,10 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
   // exists we must keep the handle in traced mode so cppgc can follow edges
   // from it.  Only when there is no wrapper yet (object not yet exported to JS)
   // does a positive strongRefcount alone justify keeping the handle strong.
-  if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
-    // Parent has strong Rust refs and no JS wrapper — keep handle strong,
-    // discard any traced ref.
+  if (keepsHandlesStrong()) {
+    // Parent has strong Rust refs and no JS wrapper, or the handle is being made strong — keep
+    // handle strong, discard any traced ref.
+    KJ_DASSERT(!isMakingStrong() || v8::Locker::IsLocked(strengtheningIsolate));
     if (!traced.IsEmpty()) {
       strong.ClearWeak<void>();
       traced.Reset();
@@ -932,8 +985,8 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
   } else {
     // Parent is only reachable via GC tracing — downgrade to a TracedReference.
     if (traced.IsEmpty()) {
-      v8::HandleScope scope(parent.isolate);
-      traced.Reset(parent.isolate, strong.Get(parent.isolate));
+      v8::HandleScope scope(parent->isolate);
+      traced.Reset(parent->isolate, strong.Get(parent->isolate));
       strong.SetWeak();
     }
   }

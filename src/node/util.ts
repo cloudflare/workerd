@@ -44,7 +44,11 @@ import {
   stripVTControlCharacters,
 } from 'node-internal:internal_inspect';
 
-import { callbackify, parseEnv } from 'node-internal:internal_utils';
+import {
+  callbackify,
+  kNullProtoObject,
+  parseEnv,
+} from 'node-internal:internal_utils';
 import { diff } from 'node-internal:internal_util_diff';
 import {
   isReadableStream,
@@ -132,6 +136,8 @@ export function promisify(original: Function): Function {
     validateFunction(fn, 'util.promisify.custom');
 
     return Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+      // @ts-expect-error TS2353 Required for __proto__
+      __proto__: kNullProtoObject,
       value: fn,
       enumerable: false,
       writable: false,
@@ -165,6 +171,8 @@ export function promisify(original: Function): Function {
   Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
 
   Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     value: fn,
     enumerable: false,
     writable: false,
@@ -201,6 +209,8 @@ export function inherits(
     );
   }
   Object.defineProperty(ctor, 'super_', {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     value: superCtor,
     writable: true,
     configurable: true,

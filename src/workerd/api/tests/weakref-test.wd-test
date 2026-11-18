@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# FinalizationRegistry callbacks run, if scheduled, across I/O boundaries, so the test drives a
+# separate target worker through several requests rather than checking within one handler. Each
+# case gets its own target, so neither sees the other's heap.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "weakref-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "weakref-test.js")],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "frTarget", service = "weakref-fr-target"),
+          (name = "weakRefTarget", service = "weakref-weak-ref-target"),
+        ],
+      ),
+    ),
+    ( name = "weakref-fr-target", worker = .target ),
+    ( name = "weakref-weak-ref-target", worker = .target ),
+  ],
+  v8Flags = ["--expose-gc"],
+);
+
+const target :Workerd.Worker = (
+  modules = [(name = "worker", esModule = embed "weakref-target.js")],
+  compatibilityFlags = ["enable_weak_ref"],
+);
