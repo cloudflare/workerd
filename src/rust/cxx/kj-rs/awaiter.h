@@ -79,11 +79,12 @@ class RustPromiseAwaiter final: public kj::_::Event {
 
   // Poll this Promise for readiness.
   //
-  // The two-argument overload is for polls driven by a PollWaker (i.e. a `co_await`ed Future's
-  // poll): it may optimize the wake by arming a KJ Event directly when the wrapped Promise
-  // becomes ready. Polls driven by any other Waker use the one-argument overload.
+  // The two-argument overload is for polls driven by a Waker over a FutureWakerCell (a
+  // `co_await`ed Future's poll, or a clone of its waker): it may optimize the wake by arming
+  // the cell's KJ Event directly when the wrapped Promise becomes ready. Polls driven by any
+  // other Waker use the one-argument overload.
   bool poll(const WakerRef& waker);
-  bool poll(const WakerRef& waker, const PollWaker& pollWaker);
+  bool poll(const WakerRef& waker, const FutureWakerCell& wakerCell);
 
   // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready; that
   // is, `poll()` must have returned true prior to calling `take_own_promise_node()`.
@@ -136,8 +137,8 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   bool poll(const WakerRef& waker) {
     return get().poll(waker);
   }
-  bool pollWithPollWaker(const WakerRef& waker, const PollWaker& pollWaker) {
-    return get().poll(waker, pollWaker);
+  bool pollWithWakerCell(const WakerRef& waker, const FutureWakerCell& wakerCell) {
+    return get().poll(waker, wakerCell);
   }
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
@@ -154,7 +155,7 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 // `Event::fire()` override which actually polls the Future; this class implements all other base
 // class virtual functions.
 //
-// A FuturePollEvent owns an optional FutureWakerCell (handed out to Rust by PollWaker::cloneCell())
+// A FuturePollEvent owns an optional FutureWakerCell (lent to Rust through each poll's PollWaker)
 // and a list of zero or more RustPromiseAwaiters. These "sub-Promise awaiters" all wrap a KJ
 // Promise of some sort, and arrange to arm the FuturePollEvent when their Promises become ready; a
 // woken FutureWakerCell arms it the same way.

@@ -954,10 +954,23 @@ KJ_TEST("KJ promise polled with a cloned KJ waker as Context completes via the c
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  // The Context is built from a clone of the KJ waker rather than the borrowed PollWaker, so the
-  // awaiter takes the generic path and stores a KJ cell waker; firing it must arm our own
-  // event through the cell and complete the future.
+  // The Context is built from a clone of the KJ waker rather than the poll's own waker. Both are
+  // the same cell, so the awaiter links to our event; firing must re-poll the future to
+  // completion.
   auto promise = new_cloned_kj_waker_context_future_void();
+  KJ_EXPECT(!promise.poll(waitScope));
+  fulfill_stored_promise();
+  promise.wait(waitScope);
+}
+
+KJ_TEST("A waker parked as hyper's want::Giver parks it lets the loop go idle") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // The future replaces (and wakes) its parked waker clone whenever the clone does not
+  // will_wake the current poll's waker. Only if a poll's waker is will_wake-equal to its
+  // clones does that stop, letting the loop run out of events before the promise is fulfilled.
+  auto promise = new_parking_future_void();
   KJ_EXPECT(!promise.poll(waitScope));
   fulfill_stored_promise();
   promise.wait(waitScope);

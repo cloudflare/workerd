@@ -121,8 +121,8 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker) {
   return false;
 }
 
-bool RustPromiseAwaiter::poll(const WakerRef& waker, const PollWaker& pollWaker) {
-  KJ_IF_SOME(futurePollEvent, pollWaker.tryGetFuturePollEvent()) {
+bool RustPromiseAwaiter::poll(const WakerRef& waker, const FutureWakerCell& wakerCell) {
+  KJ_IF_SOME(futurePollEvent, wakerCell.tryGetFuturePollEvent()) {
     if (done) {
       // Our Promise is ready.
       return true;
@@ -146,8 +146,8 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const PollWaker& pollWaker)
 
     return false;
   }
-  // The PollWaker exposes no FuturePollEvent (its owning thread's kj::Executor is not ours --
-  // cannot normally happen in the single-thread world). Fall back to the generic path.
+  // The cell exposes no FuturePollEvent: its event is gone, or belongs to another thread's loop
+  // (a waker cloned there and used to poll here). Fall back to the generic path.
   return poll(waker);
 }
 

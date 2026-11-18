@@ -40,6 +40,7 @@ use test_futures::new_panic_on_drop_future_void;
 use test_futures::new_panicking_after_await_future_void;
 use test_futures::new_panicking_future_void;
 use test_futures::new_panicking_infallible_future_void;
+use test_futures::new_parking_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_ping_pong_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
@@ -385,8 +386,11 @@ pub mod ffi {
         // waker) and generic -> optimized (the stored clone is dropped).
         async fn new_optimized_then_generic_future_void();
         async fn new_generic_then_optimized_drops_clone_future_void() -> Result<()>;
-        // Generic path storing a clone of a KJ cell waker (a Context built from a cloned waker).
+        // A Context built from a clone of the KJ waker, which is a KJ cell waker too.
         async fn new_cloned_kj_waker_context_future_void();
+        // Parks a waker clone as hyper's `want::Giver` does, replacing it (and waking the one
+        // replaced) whenever it does not `will_wake` the current poll's waker.
+        async fn new_parking_future_void() -> Result<()>;
         // Two loops on two threads waking each other for N rounds.
         fn reset_ping_pong();
         async fn new_ping_pong_future_void(side: u32, rounds: u32);

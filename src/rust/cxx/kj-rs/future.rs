@@ -37,7 +37,6 @@ pub mod repr {
     use std::pin::Pin;
     use std::task::Context;
     use std::task::Poll;
-    use std::task::Waker;
 
     use static_assertions::assert_eq_size;
 
@@ -152,7 +151,7 @@ pub mod repr {
             // the `&mut` reborrow is sound.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let waker = Waker::from(waker);
+                let waker = crate::waker::lend(waker);
                 let mut context = Context::from_waker(&waker);
                 fut.poll(&mut context)
             })) {
@@ -221,7 +220,7 @@ pub mod repr {
             // SAFETY: the boxed future is never moved out of its allocation, so pinning is sound.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let waker = Waker::from(waker);
+                let waker = crate::waker::lend(waker);
                 let mut context = Context::from_waker(&waker);
                 fut.poll(&mut context)
             })) {

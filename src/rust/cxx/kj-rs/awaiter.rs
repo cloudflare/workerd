@@ -15,7 +15,7 @@ use crate::OwnPromiseNode;
 // Await syntax for OwnPromiseNode
 use crate::ffi::GuardedRustPromiseAwaiter;
 use crate::ffi::GuardedRustPromiseAwaiterRepr;
-use crate::waker::try_poll_waker;
+use crate::waker::try_waker_cell;
 
 pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     node: Option<OwnPromiseNode>,
@@ -89,14 +89,14 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
     }
 
     pub fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
-        // If the Waker driving this poll lends out a C++ PollWaker, take the optimized entry
-        // point, which may arm the enclosing `co_await`'s KJ Event directly. Both borrows live
-        // off `cx` for the duration of the call.
-        match try_poll_waker(cx.waker()) {
-            Some(poll_waker) => self
+        // If the Waker driving this poll is a KJ `FutureWakerCell`, take the optimized entry
+        // point, which may arm the cell's KJ Event directly. Both borrows live off `cx` for the
+        // duration of the call.
+        match try_waker_cell(cx.waker()) {
+            Some(cell) => self
                 .as_mut()
                 .get_awaiter()
-                .poll_with_poll_waker(&WakerRef(cx.waker()), poll_waker),
+                .poll_with_waker_cell(&WakerRef(cx.waker()), cell),
             None => self.as_mut().get_awaiter().poll(&WakerRef(cx.waker())),
         }
     }

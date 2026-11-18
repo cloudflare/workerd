@@ -150,23 +150,8 @@ PollWaker::PollWaker(FuturePollEvent& futurePollEvent): cell(futurePollEvent.clo
 
 PollWaker::~PollWaker() noexcept(false) {}
 
-void PollWaker::wakeByRef() const {
-  // Delegate to the cell, which handles both threads: on the owning thread this is a synchronous
-  // same-turn wake (armDepthFirst() is idempotent and safe from within the event's own fire(),
-  // so it works whether we were reached from onReady() or fire(), and causes an immediate
-  // re-poll); from a foreign thread it goes through the cross-thread fulfiller — `&Waker` is
-  // Sync, so even this borrowed waker may legally be woken from another thread during the poll.
-  cell->wakeByRef();
-}
-
 kj::Arc<FutureWakerCell> PollWaker::cloneCell() const {
-  // Rust wants a waker it can retain and wake later: hand out a strong reference to the event's
-  // FutureWakerCell. Atomic refcount, safe from any thread.
   return cell->addRef();
-}
-
-kj::Maybe<FuturePollEvent&> PollWaker::tryGetFuturePollEvent() const {
-  return cell->tryGetFuturePollEvent();
 }
 
 }  // namespace kj_rs

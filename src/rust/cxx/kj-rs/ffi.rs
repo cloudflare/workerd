@@ -69,15 +69,12 @@ mod bridge {
     unsafe extern "C++" {
         include!("kj-rs/waker.h");
 
-        /// The stack-owned waker C++ passes to `Future::poll()`. Rust only ever borrows it; the
-        /// `Waker` built from it (waker.rs) has a no-op drop and clones by taking a real strong
-        /// reference to the event's `FutureWakerCell` via `clone_cell()`. Both operations are
-        /// safe from any thread (`&Waker` is `Sync`).
+        /// The stack-owned object C++ passes to `Future::poll()`, holding a strong reference to
+        /// the event's `FutureWakerCell` for the poll's duration. Rust only ever borrows it, and
+        /// lends the poll a `Waker` over its cell (waker.rs).
         type PollWaker;
-        #[cxx_name = "wakeByRef"]
-        fn wake_by_ref(self: &PollWaker);
-        #[cxx_name = "cloneCell"]
-        fn clone_cell(self: &PollWaker) -> KjArc<FutureWakerCell>;
+        #[cxx_name = "getCell"]
+        fn cell<'a>(self: &'a PollWaker) -> &'a FutureWakerCell;
 
         /// The atomically-refcounted, thread-safe cell behind every retained waker; waking
         /// it arms the owning FuturePollEvent — directly on the owning loop's thread, through a
@@ -140,11 +137,11 @@ mod bridge {
         unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: *mut GuardedRustPromiseAwaiter);
 
         fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &WakerRef) -> bool;
-        #[cxx_name = "pollWithPollWaker"]
-        fn poll_with_poll_waker(
+        #[cxx_name = "pollWithWakerCell"]
+        fn poll_with_waker_cell(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
             waker: &WakerRef,
-            poll_waker: &PollWaker,
+            waker_cell: &FutureWakerCell,
         ) -> bool;
 
         #[must_use]

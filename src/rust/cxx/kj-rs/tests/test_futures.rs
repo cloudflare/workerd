@@ -1213,11 +1213,10 @@ pub async fn new_generic_then_optimized_drops_clone_future_void() -> Result<()> 
     Ok(())
 }
 
-/// Polls a fulfillable KJ promise with a Context built from a CLONE of the KJ waker (a
-/// `FutureWakerCell`-backed `Waker`, not the borrowed `PollWaker`). `try_poll_waker` cannot see a
-/// `PollWaker` behind it, so the awaiter takes the generic path and stores a clone of a KJ cell
-/// waker; when the promise fires, waking that clone arms our own `FuturePollEvent` through the
-/// cell (same-thread), which re-polls us to completion.
+/// Polls a fulfillable KJ promise with a Context built from a CLONE of the KJ waker: an owning
+/// `FutureWakerCell` `Waker` rather than the poll's lent view of the same cell. The awaiter finds
+/// the cell behind it all the same and links to the cell's `FuturePollEvent`, which is ours, so
+/// when the promise fires it re-polls us to completion.
 struct ClonedKjWakerContextFuture {
     promise: Pin<Box<dyn Future<Output = std::result::Result<(), cxx::KjException>>>>,
     started: bool,
@@ -1247,6 +1246,63 @@ pub async fn new_cloned_kj_waker_context_future_void() {
     ClonedKjWakerContextFuture {
         promise: Box::pin(crate::ffi::new_fulfillable_promise_void().into_future()),
         started: false,
+    }
+    .await
+}
+
+/// Parks a clone of its waker the way hyper's `want::Giver::poll_want` does: it keeps the parked
+/// clone while that `will_wake` the current poll's waker, and otherwise replaces it and wakes the
+/// clone it replaced. Its first poll also wakes itself once, so it is polled again before the
+/// C++ test fulfills the promise it then awaits.
+///
+/// That second poll is only quiet if the poll's waker is `will_wake`-equal to the clone parked by
+/// the first. If it is not, every poll wakes the previous poll's clone, re-arming this future's
+/// own event, and the loop never goes idle; the future then fails after `MAX_POLLS` rather than
+/// spinning until the test times out.
+struct ParkingFuture {
+    promise: Pin<Box<dyn Future<Output = std::result::Result<(), cxx::KjException>>>>,
+    parked: Option<Waker>,
+    polls: usize,
+}
+
+impl ParkingFuture {
+    /// Two polls before the promise is fulfilled and one after, with room to spare.
+    const MAX_POLLS: usize = 10;
+}
+
+impl Future for ParkingFuture {
+    type Output = Result<()>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        self.polls += 1;
+        if self.polls > Self::MAX_POLLS {
+            return Poll::Ready(Err(Error::other(
+                "the parked waker was replaced on every poll: the poll's waker is not \
+                 will_wake-equal to its clones",
+            )));
+        }
+        let keep = self
+            .parked
+            .as_ref()
+            .is_some_and(|parked| parked.will_wake(cx.waker()));
+        if !keep && let Some(replaced) = self.parked.replace(cx.waker().clone()) {
+            replaced.wake();
+        }
+        if self.polls == 1 {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        self.promise
+            .as_mut()
+            .poll(cx)
+            .map(|result| result.map_err(io_error))
+    }
+}
+
+pub async fn new_parking_future_void() -> Result<()> {
+    ParkingFuture {
+        promise: Box::pin(crate::ffi::new_fulfillable_promise_void().into_future()),
+        parked: None,
+        polls: 0,
     }
     .await
 }

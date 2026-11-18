@@ -241,18 +241,22 @@ class FutureWakerCell final: public kj::AtomicRefcounted {
 // =======================================================================================
 // PollWaker
 
-// PollWaker is the waker C++ passes to `Future::poll()`. It lives on the stack / in a coroutine
-// frame for the duration of a single poll, and Rust only ever borrows it (waker.rs wraps it in a
-// Waker whose drop is a no-op).
+// PollWaker is what C++ passes to `Future::poll()`. It lives on the stack / in a coroutine frame
+// for the duration of a single poll and holds a strong reference to the event's FutureWakerCell
+// for that long. Rust lends the poll a `&Waker` built directly over that cell (waker.rs): the
+// same vtable and data pointer as every clone of it, so `Waker::will_wake` holds between the
+// poll's waker and the clones Rust retained from earlier polls. Futures depend on that to keep
+// a parked waker rather than replace it on every poll; hyper's `want::Giver`, for one, wakes
+// the waker it replaces, so a poll waker unequal to its clones would re-arm its own event on
+// every poll and starve the loop.
 //
-//   - wakeByRef() delegates to the event's FutureWakerCell, which handles both the same-thread
-//     (synchronous same-turn re-poll) and foreign-thread (sink) cases — `&Waker` is Sync, so even
-//     the borrowed waker may legally be woken from another thread during the poll.
-//   - cloneCell() is how Rust retains a waker past the poll: it hands out a strong reference to
-//     the event's FutureWakerCell, so a later wake from any thread arms the same event.
-//   - tryGetFuturePollEvent() lets RustPromiseAwaiter (which helps Rust `.await` KJ Promises)
-//     arm the event directly instead of going through a waker, when possible (owning thread
-//     only).
+//   - Waking it (from any thread: `&Waker` is Sync) wakes the cell, which handles both the
+//     same-thread (synchronous same-turn re-poll) and foreign-thread (sink) cases.
+//   - Cloning it takes another strong reference to the same cell, so a later wake from any
+//     thread arms the same event.
+//   - RustPromiseAwaiter (which helps Rust `.await` KJ Promises) asks the cell behind a waker
+//     for its FuturePollEvent to arm the event directly instead of going through a waker, when
+//     possible (owning thread only).
 class PollWaker final {
  public:
   // `futurePollEvent` is the FuturePollEvent responsible for calling `Future::poll()`, and must
@@ -261,24 +265,23 @@ class PollWaker final {
   ~PollWaker() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PollWaker);
 
-  // Wake from any thread: arm the associated FuturePollEvent so it (re-)polls.
-  void wakeByRef() const;
+  // The event's cell, borrowed for no longer than this PollWaker lives. waker.rs lends Rust a
+  // `Waker` over it that owns no reference, which is sound because this PollWaker holds one
+  // for the whole poll.
+  const FutureWakerCell& getCell() const {
+    return *cell;
+  }
 
-  // Hand out a new strong reference to the event's FutureWakerCell, for Rust to retain and wake
-  // later. Safe from any thread (atomic refcount).
+  // Hand out a new strong reference to the event's FutureWakerCell. Safe from any thread
+  // (atomic refcount).
   kj::Arc<FutureWakerCell> cloneCell() const;
-
-  // The FuturePollEvent whose poll() this waker was created for, if the current thread's
-  // kj::Executor is the one which owns it. Delegates to the cell's weak, neutralize-on-drop
-  // event link.
-  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const;
 
  private:
   // A strong reference to the event's cell — the PollWaker's only state. The cell handles every
-  // operation: wakes route by thread through it, cloneCell() hands out more references to it, and
-  // its weak event link answers tryGetFuturePollEvent(). It works from any thread and cannot
-  // dangle no matter how long this PollWaker lives. (In practice a PollWaker is a stack object
-  // scoped to a single poll; the atomic refcount pair per poll is noise next to the poll itself.)
+  // operation: wakes route by thread through it, clones are more references to it, and its weak
+  // event link answers tryGetFuturePollEvent(). It works from any thread and cannot dangle no
+  // matter how long this PollWaker lives. (In practice a PollWaker is a stack object scoped to a
+  // single poll; the atomic refcount pair per poll is noise next to the poll itself.)
   kj::Arc<FutureWakerCell> cell;
 };
 
