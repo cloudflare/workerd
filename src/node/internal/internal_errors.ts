@@ -1049,13 +1049,19 @@ export class ERR_EINVAL extends NodeSyscallError {
 
 export class ERR_EEXIST extends NodeSyscallError {
   path?: string;
-  constructor(options: { syscall: string; path?: string }) {
-    const message = options.path
-      ? `file already exists, ${options.syscall} '${options.path}'`
-      : 'file already exists';
+  dest?: string;
+  constructor(options: { syscall: string; path?: string; dest?: string }) {
+    let message = 'file already exists';
+    if (options.path !== undefined) {
+      message += `, ${options.syscall} '${options.path}'`;
+      if (options.dest !== undefined) message += ` -> '${options.dest}'`;
+    }
     super('EEXIST', message, options.syscall);
     if (options.path !== undefined) {
       this.path = options.path;
+    }
+    if (options.dest !== undefined) {
+      this.dest = options.dest;
     }
     this.errno = -17; // EEXIST
   }

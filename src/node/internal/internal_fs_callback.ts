@@ -268,7 +268,8 @@ export function copyFile(
   if (mode & COPYFILE_EXCL && fssync.existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
-      path: normalizedDest.pathname,
+      path: normalizedSrc.pathname,
+      dest: normalizedDest.pathname,
     });
   }
 
