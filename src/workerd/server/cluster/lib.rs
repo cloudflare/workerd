@@ -76,6 +76,7 @@ pub use log::facet_path;
 pub use log::facet_prefix;
 pub use owner::Layout;
 pub use owner::Owners;
+pub use owner::Removal;
 pub use ownership::Claim;
 pub use ownership::Ownership;
 pub use registry::NodeRecord;

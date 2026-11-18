@@ -28,6 +28,7 @@ pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
+pub use crate::cluster::PeerSession;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
@@ -556,6 +557,9 @@ pub mod ffi {
         ) -> Result<KjMaybe<u32>>;
         /// Removes the root actor `root_key`'s databases, its facets', and their index.
         fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
+        /// `actor_storage_clear` on the namespace directory at `directory`, which it opens
+        /// itself: callable from any thread.
+        fn actor_storage_clear_at(directory: &str, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
@@ -651,6 +655,16 @@ pub mod ffi {
         async fn factory_accept_debug_port(
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
+        ) -> Result<()>;
+        /// Serves a cluster peer's session: the debug port's interface with only `getActor`,
+        /// for clustered namespaces (`resolve_peer_actor`). Once `closing` fails, the session
+        /// disconnects with its error, which fails every call the peer still has out on it; it
+        /// resolves once the peer shut its side of the connection too.
+        async fn factory_accept_cluster_peer(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+            session: Box<PeerSession>,
+            closing: Box<ResultTask>,
         ) -> Result<()>;
         /// The client side of a capnp-over-HTTP-CONNECT connection to an external server.
         type RpcClient;
@@ -887,6 +901,17 @@ pub mod ffi {
             class_name: &str,
             actor_id: &str,
         ) -> Result<Box<SubrequestChannel>>;
+        /// A cluster peer's `getActor`: an actor of a clustered namespace, by its hex id, whose
+        /// requests `session` counts.
+        fn resolve_peer_actor(
+            self: &ServerHandle,
+            session: &PeerSession,
+            service_name: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> Result<Box<SubrequestChannel>>;
+        /// A session a cluster peer has open here (`ClusterNode`).
+        type PeerSession;
 
         /// A worker's I/O channel table for one request: what its bindings reach.
         type ChannelFactory;
@@ -982,8 +1007,8 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerInterface>>;
         /// Whether the cluster replicates the namespace's actors.
         fn replicated(self: &ActorNamespaceHandle) -> bool;
-        /// Called as SQLite opens one of the namespace's files: fails once this instance's
-        /// cluster lease has lapsed.
+        /// Called as SQLite opens one of the namespace's files: fails once this instance serves
+        /// and its cluster lease has lapsed.
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
         /// A write SQLite made to one of the namespace's WAL files.
         fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);

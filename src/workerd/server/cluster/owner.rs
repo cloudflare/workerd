@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream;
@@ -47,9 +48,13 @@ pub trait Layout {
     /// The database file of lane `lane`, its facet numbered if new.
     fn place(&self, lane: &str) -> Result<PathBuf>;
     /// Removes every local file of the object: databases, WALs, and
-    /// whatever numbers its facets.
-    fn clear(&self) -> Result<()>;
+    /// whatever numbers its facets. Answers the removal, which runs on the
+    /// blocking pool; what must happen on this thread happens first.
+    fn clear(&self) -> Result<Removal>;
 }
+
+/// File system work that runs off the event loop.
+pub type Removal = Box<dyn FnOnce() -> Result<()> + Send>;
 
 /// An owned object, its capture, and how far its commits are acknowledged.
 struct Slot {
@@ -137,6 +142,78 @@ pub struct Owners {
     dormant: RefCell<HashMap<String, Object>>,
     /// Objects whose compaction is in flight.
     compacting: RefCell<HashSet<String>>,
+    /// Per object, the lock of `Hold`.
+    holds: Arc<Holds>,
+    /// The restores begun, each with a spool of its own (`open_spool`).
+    restores: Cell<u64>,
+}
+
+/// Each object's `Hold` lock, while anything holds or awaits it.
+type Holds = std::sync::Mutex<HashMap<String, std::sync::Weak<HoldLock>>>;
+
+type HoldLock = tokio::sync::Mutex<HoldEntry>;
+
+/// What a `Hold` lock guards: its entry in `Holds`, which goes with the
+/// lock's last reference, on whichever thread drops it, a blocking task's
+/// included.
+struct HoldEntry {
+    holds: Arc<Holds>,
+    key: String,
+}
+
+impl Drop for HoldEntry {
+    fn drop(&mut self) {
+        let mut holds = self
+            .holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Unless a holder made the object a new lock since.
+        if holds.get(&self.key).is_some_and(|w| w.strong_count() == 0) {
+            holds.remove(&self.key);
+        }
+    }
+}
+
+/// A hold on an object's local files, for a takeover or the sync of an
+/// eviction. Each task the holder starts on the blocking pool shares it, so
+/// that a holder dropped meanwhile, a takeover cancelled, holds the object
+/// until the last such task has finished: the next holder waits, and never
+/// removes, moves or reads the files beside a task of the last. The files'
+/// paths are the object's whatever the epoch, so an epoch cannot tell them
+/// apart.
+struct Hold(Arc<tokio::sync::OwnedMutexGuard<HoldEntry>>);
+
+impl Hold {
+    async fn new(owners: &Owners, key: &str) -> Self {
+        let lock = {
+            let mut holds = owners
+                .holds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let held = holds.get(key).and_then(std::sync::Weak::upgrade);
+            held.unwrap_or_else(|| {
+                let lock = Arc::new(HoldLock::new(HoldEntry {
+                    holds: Arc::clone(&owners.holds),
+                    key: key.to_owned(),
+                }));
+                holds.insert(key.to_owned(), Arc::downgrade(&lock));
+                lock
+            })
+        };
+        Self(Arc::new(lock.lock_owned().await))
+    }
+
+    /// A share of the hold, for a task the holder starts.
+    fn share(&self) -> Share {
+        Arc::clone(&self.0) as Share
+    }
+
+    async fn blocking<T: Send + 'static>(
+        &self,
+        f: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        blocking_sharing(&self.share(), f).await
+    }
 }
 
 /// An object's compaction in flight, until this is dropped.
@@ -165,6 +242,8 @@ impl Owners {
             evictions: tokio::sync::Semaphore::new(EVICT_CONCURRENCY),
             dormant: RefCell::new(HashMap::new()),
             compacting: RefCell::new(HashSet::new()),
+            holds: Arc::default(),
+            restores: Cell::new(0),
         }
     }
 
@@ -186,6 +265,20 @@ impl Owners {
         actor: &str,
         owned: &Owned,
         layout: &dyn Layout,
+    ) -> Result<()> {
+        let hold = Hold::new(self, &object_key(ns, actor)).await;
+        self.take_over_held(ownership, ns, actor, owned, layout, &hold)
+            .await
+    }
+
+    async fn take_over_held(
+        &self,
+        ownership: &Ownership,
+        ns: &str,
+        actor: &str,
+        owned: &Owned,
+        layout: &dyn Layout,
+        hold: &Hold,
     ) -> Result<()> {
         let key = object_key(ns, actor);
         let path = &layout.place(DB)?;
@@ -228,18 +321,35 @@ impl Owners {
             // longer describes dormant.
             self.retiring.borrow_mut().remove(&key);
             self.dormant.borrow_mut().remove(&key);
-            layout.clear()?;
-            remove_dir(&cache_root(path))?;
+            hold.blocking(layout.clear()?).await?;
             if let Some(recover) = recover {
                 // Nothing in the bucket: an object that committed nothing.
                 let log = self.client(ns, actor);
-                let spool = crate::log::with_suffix(path, ".restore");
-                let restored = crate::log::restore(&log, recover as u32, &spool).await;
-                let placed = restored.and_then(|(end, lanes)| {
-                    databases = place(layout, lanes)?;
-                    Ok(end)
-                });
-                remove_dir(&spool)?;
+                let spools = crate::log::with_suffix(path, ".restore");
+                let spool = {
+                    let restore = self.restores.get();
+                    self.restores.set(restore + 1);
+                    let spools = spools.clone();
+                    hold.blocking(move || Ok(open_spool(&spools, restore)?))
+                        .await?
+                };
+                let restored =
+                    crate::log::restore(&log, recover as u32, &spool, &hold.share()).await;
+                let placed = match restored {
+                    Ok((end, lanes)) => place(layout, lanes, hold).await.map(|placed| {
+                        databases = placed;
+                        end
+                    }),
+                    Err(e) => Err(e),
+                };
+                // As `open_spool` would: the restore may have left downloads
+                // behind if it failed.
+                hold.blocking(move || {
+                    let _ = std::fs::remove_dir_all(&spool);
+                    let _ = std::fs::remove_dir(&spools);
+                    Ok(())
+                })
+                .await?;
                 let end = placed?;
                 tracing::info!(
                     "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket up to {end}, \
@@ -252,13 +362,18 @@ impl Owners {
         // The state the epoch inherits is its session's snapshot at frame
         // 0, written from the files on the blocking pool; a new object has
         // none.
-        let cache = open_cache(path, owned.epoch)?;
+        let cache = {
+            let (root, epoch) = (cache_root(path), owned.epoch);
+            hold.blocking(move || Ok(open_epoch_dir(&root, epoch)?))
+                .await?
+        };
         let session = owned.epoch as u32;
         let (snapshot, lanes) = if self.opened.borrow().contains_key(&key) {
             (None, Vec::new())
         } else {
             let (databases, cache) = (databases.clone(), cache.clone());
-            blocking(move || crate::log::snapshot_file(&databases, &cache, session)).await?
+            hold.blocking(move || crate::log::snapshot_file(&databases, &cache, session))
+                .await?
         };
         let cursor = Cursor {
             session,
@@ -569,19 +684,35 @@ impl Owners {
     /// lacks, and remember that this node's file holds the epoch. The record
     /// still names this node, so other nodes route here, and the next
     /// request wakes it without a restore.
+    ///
+    /// Its files are synced first. Workerd writes a clustered object's files
+    /// without syncing them, the bucket holding each commit, so a write the
+    /// OS failed to write back would surface nowhere: the wake would read
+    /// what the OS kept in its stead. The sync reports it, and the object
+    /// is not kept; the next request restores it from the bucket.
     pub async fn evict(&self, ns: &str, actor: &str, epoch: Epoch) {
         let _permit = self.evictions.acquire().await;
         let key = object_key(ns, actor);
         let Some(slot) = self.retiring.borrow().get(&key).cloned() else {
             return;
         };
+        // Not held: an upload can take long, and a takeover here, at the next
+        // epoch, need not wait for it (`open_epoch_dir`).
         self.tier_one(&slot).await;
+        let databases = slot.capture.borrow().databases();
+        let synced = Hold::new(self, &key)
+            .await
+            .blocking(move || sync_object(&databases))
+            .await;
         // Still retiring: no takeover here cleared its files meanwhile.
         let current = self.retiring.borrow().get(&key).cloned();
         if !current.is_some_and(|r| Rc::ptr_eq(&r, &slot)) {
             return;
         }
         self.retiring.borrow_mut().remove(&key);
+        if let Err(e) = synced {
+            return tracing::warn!("cluster: {key} is not kept, its files failed to sync: {e}");
+        }
         let mut guard = slot.object.lock().await;
         let last = slot.capture.borrow().last();
         guard.cursor = slot.capture.borrow().cursor();
@@ -710,6 +841,22 @@ fn tmp_path(path: &Path) -> PathBuf {
     tmp.into()
 }
 
+/// What a task keeps while it runs: a share of a hold on its files.
+pub type Share = Arc<dyn std::any::Any + Send + Sync>;
+
+/// `blocking`, keeping a clone of `share` until `f` returns.
+pub async fn blocking_sharing<T: Send + 'static>(
+    share: &Share,
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let share = Arc::clone(share);
+    blocking(move || {
+        let _share = share;
+        f()
+    })
+    .await
+}
+
 pub async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
@@ -731,14 +878,78 @@ struct Replica {
     session: u32,
 }
 
-/// The copies' directory for `epoch` of the database at `path`, created
-/// empty. Other epochs' copies are removed.
-fn open_cache(path: &Path, epoch: Epoch) -> Result<PathBuf> {
-    let root = cache_root(path);
-    remove_dir(&root)?;
-    let cache = root.join(format!("e{epoch}"));
-    std::fs::create_dir_all(&cache)?;
-    Ok(cache)
+/// `root`'s directory for `epoch`, created empty: a database's copies,
+/// `<database>.log/e<epoch>`. Later epochs' are kept. Earlier epochs' are
+/// removed if they can be, and anything else there: what a takeover holds
+/// (`Hold`) writes only its own epoch's, but an earlier epoch's eviction may
+/// still be uploading from its copies or its compaction writing them, and
+/// on Windows a file open there cannot be removed. Nothing reads an earlier
+/// epoch's, so what is left is only garbage. This epoch's must go: a
+/// compaction trusts a copy it finds there.
+fn open_epoch_dir(root: &Path, epoch: Epoch) -> std::io::Result<PathBuf> {
+    let name = format!("e{epoch}");
+    let later = |name: &std::ffi::OsStr| {
+        let n = name.to_str().and_then(|n| n.strip_prefix('e'));
+        n.and_then(|n| n.parse::<Epoch>().ok())
+            .is_some_and(|n| n > epoch)
+    };
+    let entries = match std::fs::read_dir(root) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        entries => Some(entries?),
+    };
+    for entry in entries.into_iter().flatten() {
+        let entry = entry?;
+        if later(&entry.file_name()) {
+            continue;
+        }
+        let removed = if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())
+        } else {
+            std::fs::remove_file(entry.path())
+        };
+        match removed {
+            Err(e) if entry.file_name() == *name && e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(e);
+            }
+            _ => {}
+        }
+    }
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Sync an object's files to disk: each database, its WAL, and the root's
+/// facet index, `<key>.facets` beside `<key>.sqlite`.
+fn sync_object(databases: &[(String, PathBuf)]) -> Result<()> {
+    for (lane, path) in databases {
+        let wal = crate::log::with_suffix(path, "-wal");
+        let index = (lane == DB).then(|| path.with_extension("facets"));
+        for file in [Some(path.clone()), Some(wal), index].into_iter().flatten() {
+            // Written to, for Windows to flush it.
+            match std::fs::OpenOptions::new().write(true).open(&file) {
+                Ok(file) => file.sync_data()?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Restore `restore`'s spool, `<database>.restore/<restore>`, created
+/// empty. A restore's tasks share its takeover's hold (`Hold::share`), but
+/// for its downloads' writers, which the bucket client starts and nothing
+/// awaits once a takeover is cancelled; such a writer writes only its own
+/// restore's spool. The others are removed if they can be: nothing reads
+/// them, and on Windows a file open there cannot be removed.
+fn open_spool(spools: &Path, restore: u64) -> std::io::Result<PathBuf> {
+    for entry in std::fs::read_dir(spools).into_iter().flatten().flatten() {
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
+    let spool = spools.join(restore.to_string());
+    std::fs::create_dir_all(&spool)?;
+    Ok(spool)
 }
 
 fn cache_root(path: &Path) -> PathBuf {
@@ -806,18 +1017,32 @@ async fn put(replica: &Replica, to: Sequence, staged: Option<Vec<u8>>) -> Result
     upload(replica, file).await.map(Some)
 }
 
-/// Moves restored `lanes` to where `layout` places them. Returns each
-/// lane's name and database.
-fn place(layout: &dyn Layout, lanes: Vec<(String, PathBuf)>) -> Result<Vec<(String, PathBuf)>> {
+/// Moves restored `lanes` to where `layout` places them, the moves on the
+/// blocking pool. Placing stays on this thread: it numbers new facets in
+/// the namespace's storage, which lives here, with a write but no sync in a
+/// cluster. Returns each lane's name and database.
+async fn place(
+    layout: &dyn Layout,
+    lanes: Vec<(String, PathBuf)>,
+    hold: &Hold,
+) -> Result<Vec<(String, PathBuf)>> {
     let mut databases = Vec::new();
+    let mut moves = Vec::new();
     for (lane, file) in lanes {
         let path = layout.place(&lane)?;
-        std::fs::rename(&file, &path)?;
+        moves.push((file, path.clone()));
         databases.push((lane, path));
     }
     if !databases.iter().any(|(lane, _)| lane == DB) {
         databases.push((DB.to_owned(), layout.place(DB)?));
     }
+    hold.blocking(move || {
+        for (file, path) in &moves {
+            std::fs::rename(file, path)?;
+        }
+        Ok(())
+    })
+    .await?;
     Ok(databases)
 }
 
@@ -836,6 +1061,78 @@ mod tests {
             frame,
             size,
         }
+    }
+
+    #[test]
+    fn a_hold_is_forgotten_once_its_last_task_is_done() {
+        let owners = Owners::new(crate::dst::Harness::new(0).bucket);
+        let hold = futures::executor::block_on(Hold::new(&owners, "ns/a"));
+        // A takeover cancelled while its blocking task, which shares the
+        // hold, runs on.
+        let task = hold.share();
+        drop(hold);
+        assert_eq!(owners.holds.lock().unwrap().len(), 1);
+        std::thread::spawn(move || drop(task)).join().unwrap();
+        assert!(owners.holds.lock().unwrap().is_empty());
+        // The next holder makes it anew, and forgets it in turn.
+        drop(futures::executor::block_on(Hold::new(&owners, "ns/a")));
+        assert!(owners.holds.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_task_sharing_a_hold_keeps_the_object_held() {
+        use futures::FutureExt;
+        let owners = Owners::new(crate::dst::Harness::new(0).bucket);
+        let hold = futures::executor::block_on(Hold::new(&owners, "ns/a"));
+        // A restore's replay, still running when its takeover is cancelled.
+        let replay = hold.share();
+        drop(hold);
+        let mut next = std::pin::pin!(Hold::new(&owners, "ns/a"));
+        assert!(next.as_mut().now_or_never().is_none());
+        drop(replay);
+        assert!(next.now_or_never().is_some());
+    }
+
+    #[test]
+    fn a_restore_spool_is_its_own() {
+        let tmp = std::env::var_os("TEST_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let spools = tmp.join(format!("spools-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&spools);
+        // An earlier restore's, cancelled with its downloads in flight.
+        std::fs::create_dir_all(spools.join("3/files")).unwrap();
+        std::fs::write(spools.join("3/files/0"), "x").unwrap();
+        let spool = open_spool(&spools, 4).unwrap();
+        assert_eq!(spool, spools.join("4"));
+        let left: Vec<_> = std::fs::read_dir(&spools)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(left, ["4"]);
+        assert_eq!(std::fs::read_dir(&spool).unwrap().count(), 0);
+        std::fs::remove_dir_all(&spools).unwrap();
+    }
+
+    #[test]
+    fn an_epoch_dir_starts_empty_and_keeps_later_epochs() {
+        let tmp = std::env::var_os("TEST_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let root = tmp.join(format!("epoch-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, file) in [("e3", "a"), ("e5", "b"), ("e7", "c")] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join(file), "x").unwrap();
+        }
+        std::fs::write(root.join("junk"), "x").unwrap();
+        let dir = open_epoch_dir(&root, 5).unwrap();
+        assert_eq!(dir, root.join("e5"));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let mut left: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["e5", "e7"]);
+        assert!(root.join("e7/c").exists());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

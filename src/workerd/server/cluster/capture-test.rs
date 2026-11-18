@@ -408,8 +408,13 @@ impl Sim {
             return Err(format!("{} is live but not captured", d.lane));
         }
         let spool = self.dir.join(format!("restore-{}", self.session));
-        let (end, lanes) = block(crate::log::restore(&self.log, self.session, &spool))
-            .map_err(|e| format!("restore: {e}"))?;
+        let (end, lanes) = block(crate::log::restore(
+            &self.log,
+            self.session,
+            &spool,
+            &(std::sync::Arc::new(()) as crate::owner::Share),
+        ))
+        .map_err(|e| format!("restore: {e}"))?;
         let got: BTreeMap<_, _> = lanes
             .iter()
             .map(|(lane, path)| (lane.clone(), std::fs::read(path).unwrap()))

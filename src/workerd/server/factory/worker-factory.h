@@ -57,6 +57,7 @@ struct ActorNamespaceHandle;
 struct ActorHooks;
 struct Committer;
 struct ResultTask;
+struct PeerSession;
 struct KeepAlive;
 struct MovedHook;
 struct WorkerInterfaceList;
@@ -329,6 +330,7 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
     kj::Maybe<uint32_t> parentFacetId,
     ::rust::Str name);
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
+void actor_storage_clear_at(::rust::Str directory, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
 kj::Promise<void> factory_stop_container(
@@ -408,6 +410,10 @@ kj::Promise<void> factory_accept_bootstrap(const WorkerFactory& factory,
     ::rust::Box<SubrequestChannel> target);
 kj::Promise<void> factory_accept_debug_port(
     const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Promise<void> factory_accept_cluster_peer(const WorkerFactory& factory,
+    kj::Own<kj::AsyncIoStream> stream,
+    ::rust::Box<PeerSession> session,
+    ::rust::Box<ResultTask> closing);
 
 // The client side of a capnp-over-HTTP-CONNECT connection.
 class RpcClient final {

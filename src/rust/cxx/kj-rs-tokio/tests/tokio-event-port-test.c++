@@ -698,6 +698,30 @@ KJ_TEST("a task that yields forever keeps poll() bounded and does not starve the
   // The spinning task is cancelled at teardown (LocalSet cancellation, above).
 }
 
+KJ_TEST("spawned tasks and tokio timers run while the KJ loop stays busy") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+
+  uint64_t before = completed_task_count();
+  // Sleeps 5 ms in tokio, then counts itself completed.
+  spawn_detached_completing_task();
+  // A chain of events, one per turn, that keeps the KJ queue from emptying, so that the loop
+  // never waits, until the task completed or 2 s passed. (A coroutine awaiting evalLater() would
+  // resume at once, in a single turn.)
+  auto start = sysClock.now();
+  kj::Function<kj::Promise<void>()> spin = [&]() -> kj::Promise<void> {
+    if (completed_task_count() != before || sysClock.now() - start >= 2 * kj::SECONDS) {
+      return kj::READY_NOW;
+    }
+    return kj::evalLater([&]() { return spin(); });
+  };
+  spin().wait(ws);
+  auto took = sysClock.now() - start;
+  KJ_EXPECT(completed_task_count() == before + 1);
+  KJ_EXPECT(took < 500 * kj::MILLISECONDS, took);
+}
+
 KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an abort") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();

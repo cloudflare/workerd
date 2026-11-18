@@ -457,7 +457,8 @@ pub async fn run(
             // `preventEviction` or not, while it serves on: a request for one waits for it and
             // then goes where it runs next. Then it leaves the cluster, so peers take over what
             // it did not hand off, accepts requests until the grace period ends, as load
-            // balancers may still send some, and lets its connections, peers' among them, finish.
+            // balancers may still send some, and lets its connections finish, its peers' sessions
+            // last (`ClusterNode::stop_peer_sessions`).
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
@@ -510,7 +511,7 @@ pub async fn run(
                     if !serving.is_terminated() {
                         serving.as_mut().await?;
                     }
-                    node.peer_requests_done().await;
+                    node.stop_peer_sessions().await;
                     Ok::<_, crate::Error>(())
                 };
                 let finished = tokio::time::timeout_at(deadlines.connections, finished);
@@ -610,7 +611,8 @@ impl Running {
     ///
     /// `handlers` runs as a task of the KJ loop: each handler starts in the turn after the one
     /// before it returned, ahead of the events that one left queued (its tail workers'
-    /// deliveries), where this future would resume only once the loop is idle. The task should
+    /// deliveries), where this future, on tokio, would resume only once tokio next runs: once
+    /// the loop is idle, or at a busy poll after them. The task should
     /// hold the channels, not the server, whose drop clears the tasks.
     async fn alongside<T: 'static>(
         &mut self,

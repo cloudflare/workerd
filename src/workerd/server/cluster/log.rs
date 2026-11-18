@@ -45,6 +45,8 @@ use crate::Bucket;
 use crate::Error;
 use crate::Result;
 use crate::Sequence;
+use crate::owner::Share;
+use crate::owner::blocking_sharing;
 
 /// A database's lane, after its facet's prefix.
 pub const DB: &str = "db";
@@ -765,18 +767,21 @@ impl Log {
 /// Restores `session` of the log into `spool`, created empty: the plan's
 /// files downloaded, then replayed on the blocking pool. The frame the log
 /// continues from, 0 for an empty log, and each live lane's name and
-/// database, under `spool`.
+/// database, under `spool`. Each task it starts on the blocking pool keeps
+/// a clone of `share` until it ends, but for the downloads' writers.
 pub async fn restore(
     log: &Log,
     session: u32,
     spool: &Path,
+    share: &Share,
 ) -> Result<(Sequence, Vec<(String, PathBuf)>)> {
     let plan = plan(&log.files(session).await?);
     if plan.is_empty() {
         return Ok((0, Vec::new()));
     }
     let downloads = spool.join("files");
-    std::fs::create_dir_all(&downloads)?;
+    let created = downloads.clone();
+    blocking_sharing(share, move || Ok(std::fs::create_dir_all(&created)?)).await?;
     let files: Vec<_> = (0..plan.len())
         .map(|i| (plan[i], downloads.join(i.to_string())))
         .collect();
@@ -786,7 +791,7 @@ pub async fn restore(
         .try_collect::<()>()
         .await?;
     let lanes = spool.join("lanes");
-    let restored = crate::owner::blocking(move || {
+    let restored = blocking_sharing(share, move || {
         let mut replay = Replay::new(&lanes)?;
         for (f, path) in &files {
             replay.apply(f, path)?;
@@ -794,7 +799,7 @@ pub async fn restore(
         replay.finish()
     })
     .await;
-    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = blocking_sharing(share, move || Ok(std::fs::remove_dir_all(&downloads)?)).await;
     restored
 }
 

@@ -34,7 +34,7 @@ mod ffi {
         /// Spawns a task on this thread's KJ-loop tokio runtime which sleeps `delay_ms` (real
         /// tokio time) and then produces `value`; awaits its `JoinHandle`. The returned future is
         /// bridged to a `kj::Promise` by kj-rs and polled by the KJ event loop; the spawned task
-        /// itself only runs while the loop sleeps inside `TokioEventPort::wait()`/`poll()`.
+        /// itself only runs inside `TokioEventPort::wait()`/`poll()`.
         async fn spawn_task_on_runtime(delay_ms: u64, value: u32) -> Result<u32>;
 
         /// Spawns a `tokio::time::sleep` on the loop runtime and awaits it (via the task's

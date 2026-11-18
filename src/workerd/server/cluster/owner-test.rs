@@ -158,11 +158,14 @@ impl Layout for Files {
         Ok(path.clone())
     }
 
-    fn clear(&self) -> crate::Result<()> {
+    fn clear(&self) -> crate::Result<crate::owner::Removal> {
         self.placed.borrow_mut().clear();
-        std::fs::remove_dir_all(&self.dir)?;
-        std::fs::create_dir_all(&self.dir)?;
-        Ok(())
+        let dir = self.dir.clone();
+        Ok(Box::new(move || {
+            std::fs::remove_dir_all(&dir)?;
+            std::fs::create_dir_all(&dir)?;
+            Ok(())
+        }))
     }
 }
 

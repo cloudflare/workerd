@@ -59,7 +59,8 @@ fn current_local_set() -> Option<Rc<LocalSet>> {
 /// Spawns a future onto this thread's KJ-loop tokio runtime.
 ///
 /// The task runs whenever the KJ event loop sleeps (i.e. whenever C++ is blocked in
-/// `promise.wait(waitScope)` or pumping via `poll()`), driven by the port's [`LocalSet`].
+/// `promise.wait(waitScope)` or pumping via `poll()`), and every 20 ms or so between the
+/// turns of a loop that stays busy, driven by the port's [`LocalSet`].
 ///
 /// The future is spawned with [`LocalSet::spawn_local`], so it is pinned to this (the loop)
 /// thread and does **not** need to be `Send`: the per-thread `current_thread` runtime never
@@ -168,7 +169,8 @@ impl TokioPort {
             .enable_time()
             // The I/O driver dispatches readiness for tokio sockets (used by kj-rs-io's
             // tokio-backed KJ streams). It is only *driven* while this runtime is inside
-            // `block_on` (i.e. in `wait_*`/`poll`), which is exactly when the KJ loop sleeps.
+            // `block_on` (i.e. in `wait_*`/`poll`): when the KJ loop sleeps, and at its busy
+            // polls.
             .enable_io()
             .build()
             .expect("failed to build current_thread tokio runtime");
@@ -283,6 +285,15 @@ impl TokioPort {
     }
 
     pub(crate) fn poll(&self) -> bool {
+        self.pump(POLL_YIELD_BUDGET)
+    }
+
+    /// `poll()` with a budget of one yield: tokio's ready tasks and its drivers run once.
+    pub(crate) fn poll_once(&self) -> bool {
+        self.pump(1)
+    }
+
+    fn pump(&self, yields: u32) -> bool {
         // Bounded, non-blocking pump: each yield gives ready LocalSet and runtime work an
         // opportunity to run. Tokio does not guarantee exact scheduling order or driver-poll
         // counts here, so only the number of yield attempts is part of this implementation.
@@ -293,7 +304,7 @@ impl TokioPort {
         let local =
             current_local_set().expect("TokioPort is driving without a registered LocalSet");
         local.block_on(&self.runtime, async {
-            for _ in 0..POLL_YIELD_BUDGET {
+            for _ in 0..yields {
                 tokio::task::yield_now().await;
             }
         });

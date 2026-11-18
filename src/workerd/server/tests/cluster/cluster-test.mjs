@@ -22,7 +22,8 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO. One whose
 //      owner drains follows the DO to its next owner, also once that owner
 //      exited, and a request that may have run on the drained owner is not
-//      replayed there.
+//      replayed there, while one that reached it as it stopped, not started,
+//      is sent again.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
 //  11. A fresh cluster serves its bucket's deployment, Durable Objects
@@ -513,7 +514,8 @@ class FakeS3 {
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
 // the bucket, of `dialect` ("s3" or "gcs", FakeS3.fresh). `nodeEnv` answers
-// what a node adds to its environment.
+// what a node adds to its environment, and `prepare` fills a node's directory
+// before it starts.
 async function withCluster(
   numNodes,
   fn,
@@ -525,6 +527,7 @@ async function withCluster(
     before = async () => {},
     dialect = 's3',
     nodeEnv = () => ({}),
+    prepare = async () => {},
   } = {}
 ) {
   // Each test run gets its own bucket and disks, so state doesn't leak
@@ -538,6 +541,7 @@ async function withCluster(
     for (let i = 0; i < numNodes; i++) {
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
+      await prepare(localPath);
       nodes.push(
         new ClusterNode({
           binary: env.WORKERD_BINARY,
@@ -702,17 +706,16 @@ test('cluster: killing the owner allows another node to take over', async () => 
     // Hit the survivor repeatedly. Requests fail until the dead owner's lease
     // expires; then the survivor takes ownership. The persisted count must be
     // preserved. Each request is bounded: one that hung once held this test
-    // for nine minutes.
+    // for nine minutes. The probe only reads, as a request that timed out
+    // here may still run on the new owner.
     let response = null;
     let lastErr = null;
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       try {
-        response = await fetchJson(
-          survivor.httpPort,
-          '/increment?name=takeover',
-          { timeoutMs: 10_000 }
-        );
+        response = await fetchJson(survivor.httpPort, '/get?name=takeover', {
+          timeoutMs: 10_000,
+        });
         if (response.status === 200) break;
       } catch (err) {
         lastErr = err;
@@ -730,18 +733,20 @@ test('cluster: killing the owner allows another node to take over', async () => 
     );
     assert.strictEqual(
       response.body.count,
-      2,
+      1,
       `persisted state must be preserved across takeover`
     );
 
-    // Further requests to the survivor continue to work and increment.
-    const followup = await fetchJson(
-      survivor.httpPort,
-      '/increment?name=takeover'
-    );
-    assert.strictEqual(followup.status, 200);
-    assert.strictEqual(followup.body.count, 3);
-    assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    // Requests to the survivor continue to work and increment.
+    for (const count of [2, 3]) {
+      const followup = await fetchJson(
+        survivor.httpPort,
+        '/increment?name=takeover'
+      );
+      assert.strictEqual(followup.status, 200);
+      assert.strictEqual(followup.body.count, count);
+      assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+    }
 
     const p = survivor.httpPort;
     assert.strictEqual(await facetAdd(p, 'takeover', 'a'), 3);
@@ -1418,6 +1423,68 @@ test("cluster: an alarm runs once on its object's owner", async () => {
   });
 });
 
+test('cluster: a node starts over the torn files of an earlier process', async () => {
+  // A cluster writes its files with no syncs, so a crash of the machine can
+  // leave any of them torn: the next process starts without them. First the
+  // name of the object's files, its id.
+  let id;
+  await withCluster(1, async ({ nodes: [node] }) => {
+    ({ id } = (
+      await fetchJson(node.httpPort, '/alarms?name=over-garbage')
+    ).body);
+  });
+  const garbage = Buffer.concat([
+    Buffer.from('SQLite format 3\0'),
+    Buffer.alloc(8192, 0xa5),
+  ]);
+  const prepare = async (localPath) => {
+    for (const ns of ['counter-test-namespace', 'kv']) {
+      const dir = join(localPath, ns);
+      await mkdir(dir);
+      await writeFile(join(dir, '.cluster'), '');
+      await writeFile(join(dir, 'metadata.sqlite'), garbage);
+      await writeFile(join(dir, 'metadata.sqlite-wal'), 'not a WAL');
+    }
+    // The object's: a facet index a takeover cannot read, a facet's database
+    // it would not name, and the copies of an epoch.
+    const dir = join(localPath, 'counter-test-namespace');
+    await writeFile(join(dir, `${id}.sqlite`), garbage);
+    await writeFile(join(dir, `${id}.facets`), Buffer.alloc(100, 0xa5));
+    await writeFile(join(dir, `${id}.3.sqlite`), garbage);
+    await mkdir(join(dir, `${id}.sqlite.log`, 'e7'), { recursive: true });
+    await writeFile(join(dir, `${id}.sqlite.log`, 'e7', '1'), garbage);
+  };
+  await withCluster(
+    1,
+    async ({ nodes: [node] }) => {
+      // Only the marker is left, and the scheduler's new database.
+      for (const ns of ['counter-test-namespace', 'kv']) {
+        const entries = await readdir(join(node.localPath, ns));
+        const left = entries.filter(
+          (name) => name !== '.cluster' && !name.startsWith('metadata.sqlite')
+        );
+        assert.deepStrictEqual(left, [], ns);
+      }
+      const set = await fetchJson(
+        node.httpPort,
+        '/set-alarm?name=over-garbage&ms=200'
+      );
+      assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+      assert.strictEqual(set.body.id, id);
+      assert.strictEqual(await facetAdd(node.httpPort, 'over-garbage', 'a'), 1);
+      // The scheduler's new database holds the alarm, which runs.
+      const deadline = Date.now() + 10_000;
+      let res;
+      do {
+        await sleep(100);
+        res = await fetchJson(node.httpPort, '/alarms?name=over-garbage');
+      } while (res.body.fired?.length !== 1 && Date.now() < deadline);
+      assert.deepStrictEqual(res.body.fired, [node.nodeId]);
+    },
+    { prepare }
+  );
+});
+
 test("cluster: a killed owner's alarm runs once on a survivor", async () => {
   await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
     const set = await fetchJson(
@@ -1930,6 +1997,105 @@ test(
   }
 );
 
+test(
+  'cluster: calls a peer has on the way to a node that stops are sent again',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes, nodeKeys }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=late');
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      assert.strictEqual(first.body.count, 1);
+      const n = 256;
+      const held = await fetchJson(
+        nodes[1].httpPort,
+        `/hold-stubs?name=holder&target=late&n=${n}`
+      );
+      assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+      assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
+      assert.deepStrictEqual(held.body.reached, Array(n).fill(nodes[0].nodeId));
+
+      // A session node 0 holds nothing of: a peer's CONNECT that sends
+      // nothing. As node 0 closes it, it still tells the peer why, and waits
+      // for the peer to close its side.
+      const idle = connect(nodes[0].clusterPort, '127.0.0.1');
+      await new Promise((resolve) => idle.once('connect', resolve));
+      const auth = clusterAuth(
+        nodeKeys.get(nodes[0].nodeId),
+        `127.0.0.1:${nodes[0].clusterPort}`
+      );
+      idle.write(
+        `CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\ncf-cluster-auth: ${auth}\r\n\r\n`
+      );
+      let told = '';
+      let answered;
+      const answer = new Promise((resolve) => (answered = resolve));
+      const closed = new Promise((resolve) => {
+        idle.on('data', (data) => {
+          told += data.toString('latin1');
+          if (told.includes('\r\n\r\n')) answered();
+          if (told.includes('this instance stopped')) idle.end();
+        });
+        idle.on('end', () => idle.end());
+        idle.on('close', resolve);
+        idle.on('error', resolve);
+      }).finally(() => answered());
+      await answer;
+      assert.match(told, /^HTTP\/1\.1 200 /);
+
+      // From shortly before node 0's grace period ends until it has exited,
+      // two lanes of increments, a call at a time in each, each on a stub that
+      // reached node 0, so that each goes to node 0 whatever node 0 is doing.
+      // Node 0 stops once no call is in flight there, and the next call lands
+      // as it stops. Node 0 finishes the calls it started, and each it did not
+      // is sent again, and finds the DO on node 1: each call applies once.
+      let exited = false;
+      const exit = nodes[0]
+        .stop({ signal: 'SIGTERM', timeoutMs: 10_000 })
+        .finally(() => (exited = true));
+      await sleep(GRACE_MS - 250);
+      const call = (i) =>
+        fetchJson(
+          nodes[1].httpPort,
+          `/call-stub-n?name=holder&i=${i}&path=/increment`,
+          { timeoutMs: HANG_TIMEOUT_MS }
+        );
+      const lanes = [[], []];
+      let next = 0;
+      const lane = async (calls) => {
+        // Until it made two calls since node 0 exited.
+        for (let since = 0; next < n && since < 2; ) {
+          if (exited) since++;
+          calls.push(await call(next++));
+        }
+      };
+      await Promise.all([lane(lanes[0]), sleep(5).then(() => lane(lanes[1]))]);
+      assert(exited, `node 0 still ran after ${n} calls`);
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      await closed;
+      assert(told.includes('this instance stopped'), JSON.stringify(told));
+
+      const counts = [];
+      for (const calls of lanes) {
+        for (const { status, body } of calls) {
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.target.count);
+        }
+        const own = calls.map(({ body }) => body.target.count);
+        assert.deepStrictEqual(own, [...own].sort((x, y) => x - y));
+      }
+      const all = counts.length;
+      assert.deepStrictEqual(
+        [...counts].sort((x, y) => x - y),
+        Array.from({ length: all }, (_, i) => i + 2)
+      );
+      const state = await fetchJson(nodes[1].httpPort, '/get?name=late', {
+        timeoutMs: HANG_TIMEOUT_MS,
+      });
+      assert.strictEqual(state.body.count, all + 1);
+    });
+  }
+);
+
 // Load on the DOs `names`: for each, one `/increment` at a time, each sent to
 // the next of the nodes `serving()` lists (indices into `nodes`), until
 // `finish()`. It resolves to the counts each DO's responses carried, in order,
@@ -2033,6 +2199,27 @@ test(
     );
   }
 );
+
+test('cluster: a node opening many DOs at once keeps its lease', async () => {
+  await withCluster(1, async ({ nodes: [node] }) => {
+    // Opening this many at once keeps the node's event loop busy for seconds
+    // in a slow build: its lease is renewed meanwhile.
+    const names = Array.from({ length: 64 }, (_, i) => `many-${i}`);
+    const responses = await Promise.all(
+      names.map((name) =>
+        fetchJson(node.httpPort, `/increment?name=${name}`, {
+          timeoutMs: 20_000,
+        }).catch((e) => ({ status: 0, body: { error: String(e) } }))
+      )
+    );
+    for (const response of responses) {
+      assert.strictEqual(response.status, 200, JSON.stringify(response));
+    }
+    // A renewal round past the burst.
+    await sleep(1000);
+    assert.doesNotMatch(node.stderr, /leaving the cluster/);
+  });
+});
 
 test(
   'cluster: requests to a DO of a stopping node wait for its handoff and follow it',

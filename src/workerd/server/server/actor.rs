@@ -63,6 +63,7 @@ use crate::channels::WorkerInterface;
 use crate::channels::attach;
 use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
+use crate::cluster::Count;
 use crate::cluster::Deadlines;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
@@ -300,13 +301,14 @@ impl ActorNamespace {
         }
     }
 
-    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
-    /// have been taken over: running its actors, even to read their databases, could act on stale
-    /// data.
+    /// Fails in a cluster once this instance serves and its lease has lapsed. A node stalled past
+    /// its lease may have been taken over: running its actors, even to read their databases, could
+    /// act on stale data. Before it serves, linking opens the namespace's storage under no lease
+    /// (`Cluster::actors_may_run`).
     fn require_lease(&self) -> Result<()> {
         if self
             .cluster()
-            .is_some_and(|node| !node.cluster.lease_holds())
+            .is_some_and(|node| !node.cluster.actors_may_run())
         {
             return Err(kj::failed!(
                 "this instance's cluster lease in the bucket has lapsed"
@@ -426,12 +428,17 @@ impl ActorNamespace {
     /// The channel of the actor with `id`, started on first use. `persistent` is recorded on the
     /// channel: whether stubs to it may be stored.
     pub fn channel(&self, id: KjOwn<ActorIdHandle>, persistent: Persistent) -> Rc<dyn Channel> {
-        self.channel_for(id, persistent, false)
+        self.channel_for(id, persistent, false, None)
     }
 
-    /// The channel of the actor with `id` for a peer's or the debug port's request.
-    pub fn peer_channel(&self, id: KjOwn<ActorIdHandle>) -> Rc<dyn Channel> {
-        self.channel_for(id, false, true)
+    /// The channel of the actor with `id` for the debug port's request, or with `session` a
+    /// peer's, which counts the requests started on it.
+    pub fn peer_channel(
+        &self,
+        id: KjOwn<ActorIdHandle>,
+        session: Option<Rc<Count>>,
+    ) -> Rc<dyn Channel> {
+        self.channel_for(id, false, true, session)
     }
 
     fn channel_for(
@@ -439,6 +446,7 @@ impl ActorNamespace {
         id: KjOwn<ActorIdHandle>,
         persistent: Persistent,
         remote: bool,
+        session: Option<Rc<Count>>,
     ) -> Rc<dyn Channel> {
         if self.cluster().is_some() {
             return Rc::new(RoutedChannel {
@@ -446,6 +454,7 @@ impl ActorNamespace {
                 id,
                 persistent,
                 remote,
+                session,
                 bound: Rc::default(),
             });
         }
@@ -589,6 +598,7 @@ impl ActorNamespace {
                     ));
                 }
                 claim_directory(&directory)?;
+                clear_directory(&directory)?;
             }
             let _ = self.directory.set(directory);
         }
@@ -598,11 +608,6 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
-        if self.cluster().is_some() {
-            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
-            // its alarms from the bucket.
-            ffi::actor_storage_delete_all(&storage)?;
-        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -656,6 +661,35 @@ impl ActorNamespace {
                 .await;
         }
     }
+}
+
+/// Empties a cluster namespace's `directory` but for its `.cluster` marker, as the process starts.
+/// What an earlier process left there goes unread: the bucket holds the objects, a takeover
+/// restores each from it, and peers adopt the earlier process's alarms from it. Those files were
+/// written with no syncs, so after a crash of the machine any of them may be torn, a facet index
+/// or the alarm scheduler's database included, and none can be trusted to clean up the rest. The
+/// files this process writes it reads only while the OS has kept them for it.
+fn clear_directory(directory: &str) -> Result<()> {
+    let entries = std::fs::read_dir(directory).map_err(|e| kj::failed!("{directory}: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| kj::failed!("{directory}: {e}"))?;
+        if entry.file_name() == ".cluster" {
+            continue;
+        }
+        let path = entry.path();
+        let removed = match entry.file_type() {
+            Ok(kind) if kind.is_dir() => std::fs::remove_dir_all(&path),
+            Ok(_) => std::fs::remove_file(&path),
+            Err(e) => Err(e),
+        };
+        match removed {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(kj::failed!("{}: {e}", path.display()));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Marks a namespace's `directory` as the cluster's. The cluster replaces an
@@ -826,6 +860,8 @@ struct RoutedChannel {
     persistent: Persistent,
     /// Whether its requests come from a peer (or the debug port).
     remote: bool,
+    /// The peer's session, which counts the requests started on it.
+    session: Option<Rc<Count>>,
     bound: Rc<RefCell<Option<Rc<Resolved>>>>,
 }
 
@@ -855,7 +891,10 @@ impl Channel for RoutedChannel {
             ffi::stamp_current_actor_cause(metadata.as_mut());
         }
         let cause = Cause::of_request(&metadata);
-        let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
+        let counted = match namespace.cluster() {
+            Some(node) if remote => Some(node.peer_request(self.session.as_ref())?),
+            _ => None,
+        };
         Ok(PromisedInterface::new(async move {
             // A peer's request that waited for a handoff is sent on to where the object went, so
             // that it does not outlast its caller's retries. It binds nothing, so that the peer's
@@ -2174,10 +2213,16 @@ impl cluster::Layout for Databases {
         Ok(path.into())
     }
 
-    fn clear(&self) -> cluster::Result<()> {
-        let storage = self.ns.storage().map_err(|e| layout_error(&e))?;
-        ffi::actor_storage_clear(storage, &self.root_key)
-            .map_err(|e| layout_error(&crate::Error::from(e)))
+    fn clear(&self) -> cluster::Result<cluster::Removal> {
+        // Storage in memory, with no directory, keeps no object's files.
+        let Some(directory) = self.ns.directory.get().cloned() else {
+            return Ok(Box::new(|| Ok(())));
+        };
+        let root_key = self.root_key.clone();
+        Ok(Box::new(move || {
+            ffi::actor_storage_clear_at(&directory, &root_key)
+                .map_err(|e| layout_error(&crate::Error::from(e)))
+        }))
     }
 }
 

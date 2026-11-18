@@ -25,10 +25,10 @@ pub async fn block_on_task_join(task: Box<BlockOnTask>) {
 /// A thread's KJ event loop on the tokio-backed port (tokio-event-port.h), with its tokio
 /// `current_thread` runtime, for a Rust `main` to own and block on.
 ///
-/// One per thread. The KJ loop schedules the thread, and tokio runs whenever that loop sleeps;
-/// the thread stays inside the tokio runtime's context for the Runtime's whole life, so tokio
-/// resources created anywhere on it -- including by C++ inside KJ turns -- register with its
-/// drivers.
+/// One per thread. The KJ loop schedules the thread, and tokio runs whenever that loop sleeps,
+/// and about every 20 ms while it stays busy; the thread stays inside the tokio runtime's context
+/// for the Runtime's whole life, so tokio resources created anywhere on it -- including by C++
+/// inside KJ turns -- register with its drivers.
 pub struct Runtime {
     context: KjOwn<TokioAsyncIoContext>,
 }

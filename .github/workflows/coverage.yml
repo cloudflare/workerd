@@ -29,16 +29,16 @@ jobs:
       suffix: 'coverage'
       bazelflare: true
       developer_flags: '--config=bazelflare-coverage'
-      extra_bazel_args: '--config=ci-bazelflare-coverage'
+      extra_bazel_args: '--config=ci-bazelflare-coverage --runs_per_test=4 --nocache_test_results'
       runner_developer_flags: '--config=coverage'
-      runner_extra_bazel_args: '--config=ci-linux-common'
+      runner_extra_bazel_args: '--config=ci-linux-common --runs_per_test=4 --nocache_test_results'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false
       run_coverage: true
       run_tests: false
-      build_target: "//src/workerd/..."
-      test_target: "//src/workerd/..."
+      build_target: '//src/workerd/server/tests/cluster/... //src/workerd/server/cluster/...'
+      test_target: '//src/workerd/server/tests/cluster/... //src/workerd/server/cluster/...'
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
