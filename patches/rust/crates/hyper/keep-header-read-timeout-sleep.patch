@@ -1,0 +1,15 @@
+diff --git a/src/proto/h1/conn.rs b/src/proto/h1/conn.rs
+--- a/src/proto/h1/conn.rs
++++ b/src/proto/h1/conn.rs
+@@ -291,8 +291,10 @@
+ 
+         #[cfg(feature = "server")]
+         {
++            // workerd: the sleep stays for the next head, whose timeout resets it. Moving a
++            // registered deadline later is an atomic store in tokio, where dropping the sleep
++            // and making a new one is an allocation and two trips through the timer wheel.
+             self.state.h1_header_read_timeout_running = false;
+-            self.state.h1_header_read_timeout_fut = None;
+         }
+ 
+         // Note: don't deconstruct `msg` into local variables, it appears
