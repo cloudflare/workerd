@@ -328,14 +328,16 @@ class AccessContext: public jsg::Object {
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
-      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), /*versionInfo=*/kj::none) {}
+      : ExecutionContext(js, kj::mv(exports), /*props=*/kj::none, /*versionInfo=*/kj::none) {}
 
+  // `props` is none for an event without props, whose `ctx.props` is an empty object that is only
+  // created if read.
   ExecutionContext(jsg::Lock& js,
       jsg::JsValue exports,
-      jsg::JsValue props,
+      kj::Maybe<jsg::JsValue> props,
       kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, props) {
+        props(props.map([&](jsg::JsValue p) { return jsg::JsRef(js, p); })) {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableVersionApi()) {
       version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
@@ -359,7 +361,12 @@ class ExecutionContext: public jsg::Object {
   }
 
   jsg::JsValue getProps(jsg::Lock& js) {
-    return props.getHandle(js);
+    KJ_IF_SOME(p, props) {
+      return p.getHandle(js);
+    }
+    auto empty = js.obj();
+    props = jsg::JsRef<jsg::JsValue>(js, empty);
+    return empty;
   }
 
   // Call the `[restore]()` method of the current entrypoint with the given params object and
@@ -473,7 +480,7 @@ class ExecutionContext: public jsg::Object {
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
-  jsg::JsRef<jsg::JsValue> props;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> props;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
