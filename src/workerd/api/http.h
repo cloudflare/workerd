@@ -853,10 +853,14 @@ class IncomingRequestSignal final: public jsg::Object {
     tracker.trackField("signal", signal);
   }
   void jsgVisitForGc(jsg::GcVisitor& visitor) override {
-    visitor.visit(signal);
+    visitForGc(visitor);
   }
 
  private:
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(signal);
+  }
+
   AbortSignal::Flag flag;
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
   // Set if the request was aborted before the signal was created.
