@@ -52,6 +52,7 @@ use std::io;
 use std::pin::Pin;
 use std::pin::pin;
 use std::rc::Rc;
+use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -111,8 +112,14 @@ use crate::io::Hangup;
 use crate::io::RustIo;
 pub use crate::io::Upgrading;
 use crate::io::io_kj_error;
+use crate::wakes::Wakes;
 
 type Response = http::Response<ChannelBody>;
+
+/// The futures [`serve_connection`] drives besides the calls, as [`Wakes`] names them.
+const SERVING: u8 = 1;
+const HANGUP: u8 = 2;
+const DRAINED: u8 = 4;
 
 fn failed(what: impl Into<String>) -> KjError {
     KjError::new(KjExceptionType::Failed, what.into())
@@ -256,75 +263,77 @@ where
             dispatch(Rc::clone(&conn), Rc::clone(&calls), request).boxed_local()
         })
     };
-    let mut builder = http1::Builder::new();
-    builder
-        .timer(TokioTimer::new())
-        .header_read_timeout(conn.settings.header_timeout)
-        // A client may shut down its side once its request is sent.
-        .half_close(true)
-        .title_case_headers(true)
-        .preserve_header_case(true)
-        .max_headers(MAX_HEADERS)
-        .auto_date_header(false);
     let mut serving = pin!(
-        builder
+        http1_builder(conn.settings.header_timeout)
             .serve_connection(TokioIo::new(io), service)
             .with_upgrades()
     );
-    let mut drain = conn.draining.clone();
-    let mut drained = pin!(async move {
-        match drain.as_mut() {
-            Some(drain) => drop(drain.wait_for(|draining| *draining).await),
-            None => pending().await,
-        }
-    });
+    let mut drained = pin!(drained(conn.draining.clone()));
     let mut hangup = pin!(hangup);
     let mut draining = false;
     let mut served: Option<hyper::Result<()>> = None;
+    // hyper's connection, the hang-up and the drain are each polled only when they woke the task;
+    // the calls have their own wakers in `FuturesUnordered`.
+    let wakes = Wakes::new();
+    let serving_waker = wakes.waker(SERVING);
+    let hangup_waker = wakes.waker(HANGUP);
+    let drained_waker = wakes.waker(DRAINED);
     poll_fn(|cx| {
+        let woken = wakes.begin(cx);
         // Only while hyper serves: hyper shuts down its side once it is done, so a hang-up after
         // that is the close it started, not a peer going away mid-call.
-        if served.is_none()
+        if woken & HANGUP != 0
+            && served.is_none()
             && !conn.upgraded.get()
-            && let Poll::Ready(hung_up) = hangup.as_mut().poll(cx)
+            && let Poll::Ready(hung_up) = hangup
+                .as_mut()
+                .poll(&mut Context::from_waker(&hangup_waker))
         {
             // A failure to watch the transport fails the serve, as under kj's `exclusiveJoin`.
-            hung_up?;
+            if let Err(e) = hung_up {
+                wakes.end(cx);
+                return Poll::Ready(Err(e));
+            }
             // The peer is gone: nothing a call does can reach it.
             served = Some(Ok(()));
             calls.borrow_mut().clear();
         }
-        if !draining && drained.as_mut().poll(cx).is_ready() {
+        let mut poll_serving = woken & SERVING != 0;
+        if woken & DRAINED != 0
+            && !draining
+            && drained
+                .as_mut()
+                .poll(&mut Context::from_waker(&drained_waker))
+                .is_ready()
+        {
             draining = true;
             if served.is_none() {
                 serving.as_mut().graceful_shutdown();
+                poll_serving = true;
             }
         }
         // One fixed point per wake: polling the connection may start a handler call (hyper runs
-        // the service), which then gets its first poll in this same turn.
+        // the service), which then gets its first poll in this same turn, and a call may send
+        // its response head, which the connection then writes in this same turn.
         loop {
-            let mut progressed = false;
-            while calls.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {
-                progressed = true;
+            while calls.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {}
+            poll_serving |= wakes.take(SERVING);
+            if !poll_serving || served.is_some() {
+                break;
             }
-            let before = calls.borrow().len();
-            if served.is_none()
-                && let Poll::Ready(result) = serving.as_mut().poll(cx)
+            poll_serving = false;
+            if let Poll::Ready(result) = serving
+                .as_mut()
+                .poll(&mut Context::from_waker(&serving_waker))
             {
                 if result.is_err() && !conn.upgraded.get() {
                     // The connection failed: nothing a call does can reach the peer.
                     calls.borrow_mut().clear();
                 }
                 served = Some(result);
-                progressed = true;
-            }
-            if calls.borrow().len() != before {
-                progressed = true;
-            }
-            if !progressed {
-                break;
             }
         }
+        wakes.end(cx);
         if served.is_some() && calls.borrow().is_empty() {
             Poll::Ready(Result::<()>::Ok(()))
         } else {
@@ -340,6 +349,29 @@ where
             _ => Ok(()),
         },
         _ => Ok(()),
+    }
+}
+
+/// hyper's settings for a served connection.
+fn http1_builder(header_timeout: Duration) -> http1::Builder {
+    let mut builder = http1::Builder::new();
+    builder
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_timeout)
+        // A client may shut down its side once its request is sent.
+        .half_close(true)
+        .title_case_headers(true)
+        .preserve_header_case(true)
+        .max_headers(MAX_HEADERS)
+        .auto_date_header(false);
+    builder
+}
+
+/// Resolves once the server drains, or never without a [`Shutdown`].
+async fn drained(mut draining: Option<watch::Receiver<bool>>) {
+    match draining.as_mut() {
+        Some(draining) => drop(draining.wait_for(|draining| *draining).await),
+        None => pending().await,
     }
 }
 
