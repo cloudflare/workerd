@@ -756,12 +756,11 @@ kj::Rc<IoChannelFactory::TokenizableChannel> ChannelTokenHandler::decodeChannelT
 
       switch (type) {
         case ChannelToken::Type::SUBREQUEST:
-          return kj::rc<RestoredSubrequestChannel>(
-              *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          return restoredSubrequestChannel(kj::mv(vendor), kj::mv(restoreArg), persistent);
         case ChannelToken::Type::ACTOR_CLASS:
           KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
         case ChannelToken::Type::RPC:
-          return kj::rc<RestoredRpcChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          return restoredRpcChannel(kj::mv(vendor), kj::mv(restoreArg), persistent);
       }
     }
   }
@@ -800,6 +799,32 @@ Frankenvalue ChannelTokenHandler::decodeFrankenvalue(
   }
 
   return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+}
+
+void ChannelTokenHandler::frankenvalueToCapnp(
+    Frankenvalue& value, rpc::Frankenvalue::Builder builder) {
+  kj::Vector<kj::Promise<void>> promises;
+  encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, value, builder, promises);
+  JSG_REQUIRE(promises.empty(), Error,
+      "A capability in this value cannot be sent yet: its channel token is still being resolved.");
+}
+
+Frankenvalue ChannelTokenHandler::frankenvalueFromCapnp(rpc::Frankenvalue::Reader reader) {
+  return decodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, reader);
+}
+
+kj::Rc<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::restoredSubrequestChannel(
+    kj::Rc<IoChannelFactory::SubrequestChannel> vendor,
+    Frankenvalue restoreArg,
+    Persistent persistent) {
+  return kj::rc<RestoredSubrequestChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+}
+
+kj::Rc<IoChannelFactory::RpcChannel> ChannelTokenHandler::restoredRpcChannel(
+    kj::Rc<IoChannelFactory::SubrequestChannel> vendor,
+    Frankenvalue restoreArg,
+    Persistent persistent) {
+  return kj::rc<RestoredRpcChannel>(*this, kj::mv(vendor), kj::mv(restoreArg), persistent);
 }
 
 kj::Rc<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::decodeSubrequestChannelToken(

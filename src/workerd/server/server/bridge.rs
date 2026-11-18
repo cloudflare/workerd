@@ -776,8 +776,17 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
+        /// The client side of a replica's session with the first loop thread
+        /// (`factory_accept_loop_session`), on the replica's factory. Unlike a session with
+        /// another instance, it carries the `restore()` of a stub: the capabilities of the
+        /// parameters cross as channel tokens.
+        fn new_loop_session_client(
+            factory: &WorkerFactory,
+            stream: KjOwn<AsyncIoStream>,
+        ) -> KjOwn<RpcClient>;
         /// An actor on a cluster peer or on the first loop thread, by
-        /// `WorkerdDebugPort.getActor` over `session`, a session from `new_rpc_client`.
+        /// `WorkerdDebugPort.getActor` over `session`, a session from `new_rpc_client` or
+        /// `new_loop_session_client`.
         /// Pipelined: no round trip until its first event. It keeps the session alive, and the
         /// other side holds the actor's channel for as long as it lives.
         fn rpc_client_debug_actor(

@@ -28,7 +28,9 @@
 //! (`actor::ForwardedChannel`). A `bucket` or `cache` service is forwarded the same way. HTTP
 //! with its bodies, WebSockets and JS RPC cross the session as capnp; a stub or a service binding
 //! passed in a JS RPC call crosses as a channel token, which every thread decodes with the
-//! process's key and resolves in its own graph.
+//! process's key and resolves in its own graph. A stub whose source is an object is restored
+//! (`restore()`) from a replica by an event of the same session, whose parameters carry their
+//! capabilities as channel tokens too; the object's `[restore]()` runs on the first thread.
 //!
 //! What the threads share besides is [`Phase`], which the first thread sets and the replicas
 //! follow, and the events a replica sends back: that it is ready, and how it ended.
@@ -389,6 +391,8 @@ pub async fn serve_session(factory: Rc<Factory>, index: usize, end: SessionEnd) 
 /// A replica has no actors: each stub it makes is a capability of this session for the actor's
 /// channel on the first thread, and each request on it an event started there
 /// (`actor::ForwardedChannel`). Calls made over one stub arrive in the order they were made.
+/// Unlike a session with another instance, it carries `restore()` events
+/// (`new_loop_session_client`).
 pub struct FirstThread {
     client: KjOwn<ffi::RpcClient>,
 }
@@ -397,7 +401,7 @@ impl FirstThread {
     /// The session over `end`, on the loop of `factory`, this replica's.
     pub fn connect(factory: &ffi::WorkerFactory, end: SessionEnd) -> Self {
         Self {
-            client: ffi::new_rpc_client(factory, kj_hyper::into_kj_stream(end.0)),
+            client: ffi::new_loop_session_client(factory, kj_hyper::into_kj_stream(end.0)),
         }
     }
 
