@@ -38,6 +38,7 @@ fn url_shows_a_wildcard_as_localhost() {
     assert_eq!(url_of("tcp", "::1", 80).unwrap(), "tcp://[::1]:80");
     assert!(url_of("http", "unix:/tmp/sock", 0).is_none());
     assert!(url_of("http", "", 8080).is_none());
+    assert!(url_of("http", "loopback:0", 0).is_none());
 }
 
 #[test]

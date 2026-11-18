@@ -100,9 +100,10 @@ pub fn url(sock: socket::Reader<'_>, address: &str, port: u16) -> Option<String>
 }
 
 fn url_of(scheme: &str, address: &str, port: u16) -> Option<String> {
+    if address.is_empty() || address.starts_with("unix:") || address.starts_with("loopback:") {
+        return None;
+    }
     let host = match host_of_address(address).as_str() {
-        "" => return None,
-        h if h.starts_with("unix:") || h.starts_with("loopback:") => return None,
         "*" | "0.0.0.0" | "::" | "[::]" => "localhost".to_owned(),
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
         h => h.to_owned(),

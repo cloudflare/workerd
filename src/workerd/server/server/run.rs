@@ -52,6 +52,9 @@ use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
 use crate::worker::WorkerService;
 
+/// Where `serve` tells a person a line such as a socket's URL.
+pub type Announce = Box<dyn Fn(&str)>;
+
 /// The command line's choices for a run.
 #[derive(Default)]
 pub struct RunOptions {
@@ -68,6 +71,8 @@ pub struct RunOptions {
     pub control: Option<std::fs::File>,
     /// `--debug-port`.
     pub debug_port: Option<String>,
+    /// Where `serve` tells a person each socket's URL, unless a tool reads `--control-fd`.
+    pub announce: Option<Announce>,
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
@@ -81,15 +86,14 @@ pub struct RunOptions {
 /// include shell scripts that cut the port off the end of the line.
 struct Control {
     file: Option<std::fs::File>,
-    /// Print each socket's URL to stderr: for a person running `serve`, as a tool reads the
-    /// control channel instead.
-    print: bool,
+    /// `RunOptions::announce`, without a control channel.
+    announce: Option<Announce>,
 }
 
 impl Control {
-    fn new(file: Option<std::fs::File>, for_test: bool) -> Self {
-        let print = file.is_none() && !for_test;
-        Self { file, print }
+    fn new(file: Option<std::fs::File>, announce: Option<Announce>) -> Self {
+        let announce = announce.filter(|_| file.is_none());
+        Self { file, announce }
     }
 
     fn write(&mut self, line: &str) {
@@ -101,10 +105,8 @@ impl Control {
     }
 
     fn listen(&mut self, socket: &str, port: u16, url: Option<String>) {
-        if self.print
-            && let Some(url) = url
-        {
-            eprintln!("Listening on {url}");
+        if let (Some(announce), Some(url)) = (&self.announce, url) {
+            announce(&format!("Listening on {url}"));
         }
         let socket = serde_json::Value::from(socket);
         self.write(&format!(
@@ -151,7 +153,7 @@ async fn start(
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
-    let mut control = Control::new(options.control.take(), for_test);
+    let mut control = Control::new(options.control.take(), options.announce.take());
 
     let bound = listen::bind_sockets(
         config,
