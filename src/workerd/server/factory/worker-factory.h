@@ -27,6 +27,7 @@
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/server/channel-token.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj-rs/kj-rs.h>
 
@@ -35,6 +36,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/filesystem.h>
+#include <kj/refcount.h>
 
 namespace workerd::jsg {
 class V8System;
@@ -86,6 +88,7 @@ using FacetStart = kj::Function<kj::Promise<Worker::Actor::FacetManager::StartIn
 // is destroyed.
 using ActorBroken = kj::Promise<void>;
 
+class WorkerFactory;
 class CompiledWorker;
 class ActorHandle;
 class ActorStorage;
@@ -109,8 +112,18 @@ inline kj::ArrayPtr<const capnp::word> asWords(kj::ArrayPtr<const uint64_t> word
 
 // =======================================================================================
 
-// Everything the workers of one run share.
-class WorkerFactory final: private ChannelTokenHandler::Resolver {
+// Whether a per-loop factory is the one of the process's first loop thread, which owns what a
+// process has one of: the inspector and the Durable Object storage of every namespace.
+WD_STRONG_BOOL(PrimaryLoop);
+
+// What the loop threads of one run share, which outlives every loop: the config and the options,
+// V8, the HTTP header table, the memory caches, the channel token key and the inspector's
+// registrar. Every loop thread has a `WorkerFactory` of its own over it.
+//
+// Thread-safe: any thread may hold a reference and drop it, and the state is immutable or guards
+// itself. Whatever is attached at construction is destroyed with the object, on the thread that
+// drops the last reference.
+class SharedFactory final: public kj::AtomicRefcounted {
  public:
   struct Options {
     bool experimental = false;
@@ -143,18 +156,48 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool asyncTracePromises = false;
   };
 
-  // `config` is the encoded config message; the factory owns it for the run and reads it with an
-  // unlimited traversal limit, as the server does. `options` is owned rather than moved because
-  // `PythonConfig` cannot be moved.
-  // `monotonicClock` must read consistently with `timer` whenever the timer is advanced.
-  WorkerFactory(jsg::V8System& v8System,
-      kj::Timer& timer,
-      const kj::MonotonicClock& monotonicClock,
-      kj::Network& network,
+  // `config` is the encoded config message; the object owns it for the run. `options` is owned
+  // rather than moved because `PythonConfig` cannot be moved. Every loop thread draws from
+  // `entropySource`, so it must be thread-safe. `attachment` is destroyed after everything else
+  // here: what `v8System`, `entropySource` and `fs` need to stay alive.
+  SharedFactory(jsg::V8System& v8System,
       kj::EntropySource& entropySource,
       kj::Filesystem& fs,
       kj::Own<Options> options,
-      ::rust::Vec<uint64_t> config);
+      ::rust::Vec<uint64_t> config,
+      kj::Own<void> attachment = {});
+  ~SharedFactory() noexcept(false);
+
+  // The words of the config message.
+  kj::ArrayPtr<const uint64_t> getConfigWords() const;
+
+  kj::Arc<SharedFactory> addRef() const {
+    return addRefToThis();
+  }
+
+  class Impl;
+  const Impl& getImpl() const;
+
+ private:
+  // Declared first, so that it is destroyed last.
+  kj::Own<void> attachment;
+  kj::Own<Impl> impl;
+};
+
+// Everything the workers of one loop thread share: the loop's timer and network, the capnp
+// factories, the background tasks, and the Rust server of that thread, which resolves channel
+// tokens. Bound to the loop it was constructed on, where it must also be destroyed.
+class WorkerFactory final: private ChannelTokenHandler::Resolver {
+ public:
+  using Options = SharedFactory::Options;
+
+  // A factory on the current thread's loop, whose `timer` and `network` these are.
+  // `monotonicClock` must read consistently with `timer` whenever the timer is advanced.
+  WorkerFactory(kj::Arc<SharedFactory> shared,
+      kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
+      kj::Network& network,
+      PrimaryLoop primary);
   ~WorkerFactory() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerFactory);
 
@@ -179,6 +222,7 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
       Persistent persistent) override;
 };
 
+kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory);
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory);
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory);
 bool factory_experimental(const WorkerFactory& factory);
@@ -201,7 +245,8 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
 
 // =======================================================================================
 
-// A compiled worker: its isolate, script and `Worker`, and what compiling them revealed.
+// A compiled worker: its isolate, script and `Worker`, and what compiling them revealed. Bound to
+// the loop of the factory that compiled it: each loop thread compiles its own copy of a worker.
 class CompiledWorker final {
  public:
   class Impl;
@@ -481,5 +526,9 @@ kj::Own<PendingToken> factory_encode_actor_token(const WorkerFactory& factory,
     const ActorIdHandle& id,
     bool persistent,
     TokenUsage usage);
+// The channel a subrequest token names, which the factory's server resolves. Every factory of a
+// `SharedFactory` decodes the tokens the others encode.
+kj::Rc<IoChannelFactory::SubrequestChannel> factory_decode_subrequest_token(
+    const WorkerFactory& factory, TokenUsage usage, kj::ArrayPtr<const kj::byte> token);
 
 }  // namespace workerd::server

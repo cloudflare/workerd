@@ -117,6 +117,25 @@ pub fn run_pending_command(
     (command.0)(config, structured_logging)
 }
 
+/// The body of a loop thread other than the first, for the C++ frame that sets up the process's
+/// logging on that thread around it (`with_loop_thread_context`).
+pub struct LoopThread(Box<dyn FnOnce() -> Result<()>>);
+
+impl LoopThread {
+    #[must_use]
+    pub fn new(body: impl FnOnce() -> Result<()> + 'static) -> Box<Self> {
+        Box::new(Self(Box::new(body)))
+    }
+}
+
+#[expect(
+    clippy::boxed_local,
+    reason = "the bridge hands an opaque Rust type to C++ and back as a Box"
+)]
+pub fn run_loop_thread(thread: Box<LoopThread>) -> Result<()> {
+    (thread.0)()
+}
+
 /// The process's schedule (see the module doc): the logging, the loop, the bootstrap, the
 /// command, the exit. `test` and `bench` are the bootstrap's options for those commands.
 fn run<Fut: Future<Output = Result<()>> + 'static>(

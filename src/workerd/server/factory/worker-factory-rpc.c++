@@ -556,8 +556,10 @@ uint startInspector(kj::String inspectorAddress, InspectorServiceIsolateRegistra
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address) {
   auto& impl = factory.getImpl();
-  KJ_REQUIRE(impl.inspectorRegistrar == kj::none, "the inspector is already running");
-  auto& registrar = *impl.inspectorRegistrar.emplace(kj::heap<InspectorServiceIsolateRegistrar>());
+  impl.requirePrimary("start the inspector"_kj);
+  auto lock = impl.shared.inspectorRegistrar.lockExclusive();
+  KJ_REQUIRE(*lock == kj::none, "the inspector is already running");
+  auto& registrar = *lock->emplace(kj::heap<InspectorServiceIsolateRegistrar>());
   return startInspector(kj::str(address), registrar);
 }
 

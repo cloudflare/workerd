@@ -21,6 +21,7 @@
 #include <kj/encoding.h>
 #include <kj/test.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <regex>
@@ -518,10 +519,11 @@ class Server: public kj::PtrTarget {
     capnp::MallocMessageBuilder message;
     message.setRoot(config);
     auto words = capnp::messageToFlatArray(message);
-    auto factory = kj::heap<WorkerFactory>(v8System, timer, monotonicClock, network, entropySource,
-        fs, kj::mv(options),
+    auto shared = kj::arc<SharedFactory>(v8System, entropySource, fs, kj::mv(options),
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
+    auto factory =
+        kj::heap<WorkerFactory>(kj::mv(shared), timer, monotonicClock, network, PrimaryLoop::YES);
     auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
     for (auto& [deployment, service]: deploymentServices) {
       started.add_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
@@ -10462,6 +10464,218 @@ KJ_TEST("Server: a service that fails to start does not leak the services before
   // `~TestServer` fails the case if "first" still holds the factory.
   KJ_EXPECT_THROW_MESSAGE(
       "TODO(beta): parameters", test.server.run(v8System, *test.config).wait(test.ws));
+}
+
+// =======================================================================================
+// Several loop threads
+
+// An entropy source every loop thread may use at once.
+class SharedEntropySource final: public kj::EntropySource {
+ public:
+  void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    buffer.fill(4);
+  }
+};
+
+// One loop thread of a process whose loop threads each run a server of their own over one
+// `SharedFactory`: the thread's tokio-backed loop, its worker factory, and the Rust server on it,
+// which compiles this thread's copy of every worker. Constructed, used and destroyed on its thread.
+class LoopThreadServer {
+ public:
+  LoopThreadServer(kj::Arc<SharedFactory> shared, PrimaryLoop primary) {
+    auto ownFactory = kj::heap<WorkerFactory>(kj::mv(shared), io.getTimer(),
+        kj::systemPreciseMonotonicClock(), provider.getNetwork(), primary);
+    factory = *ownFactory;
+    auto& started = *server.emplace(new_in_process_server(kj::mv(ownFactory)));
+    reportsTask = collectReports(started).eagerlyEvaluate(nullptr);
+    auto task = started.run(""_kj.as<kj_rs::RustUncheckedUtf8>());
+    KJ_ASSERT(!task.poll(ws), "the server stopped");
+    KJ_ASSERT(reports.empty(), "the config has errors or warnings", reports);
+    runTask = kj::mv(task);
+  }
+
+  ~LoopThreadServer() noexcept(false) {
+    runTask = kj::none;
+    reportsTask = kj::none;
+    factory = kj::none;
+    KJ_IF_SOME(s, server) {
+      auto closing = close_in_process_server(kj::mv(s));
+      server = kj::none;
+      unwindDetector.catchExceptionsIfUnwinding([&]() { closing.wait(ws); });
+    }
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(LoopThreadServer);
+
+  // The thread's worker factory, which the server owns.
+  const WorkerFactory& getFactory() {
+    return KJ_ASSERT_NONNULL(factory);
+  }
+
+  // The body of the response to a GET on a new connection to the socket at `addr`.
+  kj::Promise<kj::String> get(kj::StringPtr addr) {
+    auto stream = KJ_ASSERT_NONNULL(server)->connect(addr.as<kj_rs::RustUncheckedUtf8>());
+    auto client = kj::newHttpClient(clientHeaderTable, *stream);
+    co_return co_await get(*client);
+  }
+
+  // The body of the response to a GET on the channel a subrequest token names, which this
+  // thread's factory decodes and this thread's server resolves.
+  kj::Promise<kj::String> getByToken(kj::ArrayPtr<const kj::byte> token) {
+    auto channel = factory_decode_subrequest_token(
+        getFactory(), IoChannelFactory::ChannelTokenUsage::RPC, token);
+    auto client = asHttpClient(channel->startRequest({}));
+    co_return co_await get(*client, factory_header_table(getFactory()));
+  }
+
+  // A token for the default entrypoint of `service`, as this thread's factory encodes it.
+  kj::Array<kj::byte> encodeToken(kj::StringPtr service) {
+    auto pending =
+        factory_encode_subrequest_token(getFactory(), service.as<kj_rs::RustUncheckedUtf8>(),
+            kj::none, kj::none, false, IoChannelFactory::ChannelTokenUsage::RPC);
+    return kj::mv(KJ_ASSERT_NONNULL(pending->tryGet<kj::Array<kj::byte>>()));
+  }
+
+  kj_rs_tokio::TokioAsyncIoContext io = kj_rs_tokio::setupTokioAsyncIo();
+  kj::WaitScope& ws = io.getWaitScope();
+
+ private:
+  kj_rs_io::TokioAsyncIoProvider provider{io.getTimer()};
+  kj::HttpHeaderTable clientHeaderTable;
+  kj::Maybe<const WorkerFactory&> factory;
+  kj::Maybe<::rust::Box<InProcessServer>> server;
+  kj::Vector<kj::String> reports;
+  kj::Maybe<kj::Promise<void>> reportsTask;
+  kj::Maybe<kj::Promise<void>> runTask;
+  kj::UnwindDetector unwindDetector;
+
+  kj::Promise<void> collectReports(InProcessServer& server) {
+    for (;;) {
+      auto report = co_await server.next_report();
+      reports.add(kj::str(report.message));
+    }
+  }
+
+  kj::Promise<kj::String> get(kj::HttpClient& client) {
+    return get(client, clientHeaderTable);
+  }
+  kj::Promise<kj::String> get(kj::HttpClient& client, const kj::HttpHeaderTable& table) {
+    kj::HttpHeaders headers(table);
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo"_kj);
+    auto response =
+        co_await client.request(kj::HttpMethod::GET, "http://foo/"_kj, headers).response;
+    KJ_ASSERT(response.statusCode == 200, response.statusCode, response.statusText);
+    co_return co_await response.body->readAllText();
+  }
+};
+
+KJ_TEST("Server: two loop threads each compile and serve the workers of one shared factory") {
+  // Each request takes its number from a counter of the isolate that serves it, gives the isolate
+  // lock up while a timer of its loop runs, and leaves work behind for its loop's `waitUntil`
+  // tasks.
+  auto config = parseConfig(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let count = 0;
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const n = ++count;
+                `    await scheduler.wait(1);
+                `    ctx.waitUntil(scheduler.wait(1));
+                `    return new Response(String(n));
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [ ( name = "main", address = "loopback:test-addr", service = "hello" ) ]
+  ))"_kj,
+      {});
+  capnp::MallocMessageBuilder message;
+  message.setRoot(*config);
+  auto words = capnp::messageToFlatArray(message);
+
+  SharedEntropySource entropySource;
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::INSPECTOR_ONLY);
+  auto shared = kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
+      kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+          .as<kj_rs::RustCopy>());
+
+  // Both threads serve rounds of concurrent requests until each has seen the other serve
+  // `MIN_ROUNDS` rounds, so for at least that many rounds both loops are serving at once.
+  static constexpr uint MIN_ROUNDS = 25;
+  static constexpr uint MAX_ROUNDS = 20000;
+  static constexpr uint REQUESTS_PER_ROUND = 4;
+  struct Progress {
+    std::atomic<uint> rounds = 0;
+    std::atomic<bool> failed = false;
+  };
+  Progress progress[2];
+
+  // Serves this thread's rounds and returns how many requests that was.
+  auto serve = [&](LoopThreadServer& loop, Progress& mine, Progress& theirs) -> uint {
+    kj::HashSet<uint> seen;
+    uint requests = 0;
+    while (mine.rounds < MIN_ROUNDS || theirs.rounds < MIN_ROUNDS) {
+      KJ_ASSERT(!theirs.failed, "the other loop thread failed");
+      KJ_ASSERT(mine.rounds < MAX_ROUNDS, "the other loop thread never served");
+      auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);
+      for (uint i = 0; i < REQUESTS_PER_ROUND; i++) bodies.add(loop.get("test-addr"_kj));
+      for (auto& body: kj::joinPromisesFailFast(bodies.finish()).wait(loop.ws)) {
+        seen.insert(body.parseAs<uint>());
+        ++requests;
+      }
+      ++mine.rounds;
+    }
+    // This thread's isolate counted this thread's requests and no others: the two threads serve
+    // from two isolates.
+    for (uint n = 1; n <= requests; n++) KJ_ASSERT(seen.contains(n), n, requests);
+    return requests;
+  };
+
+  LoopThreadServer primary(shared.addRef(), PrimaryLoop::YES);
+
+  // The token each thread makes for the worker, which the other decodes.
+  auto primaryToken = primary.encodeToken("hello"_kj);
+  kj::Array<kj::byte> secondaryToken;
+
+  {
+    auto thread = kj::heap<kj::Thread>([&]() {
+      KJ_ON_SCOPE_FAILURE(progress[1].failed = true);
+      LoopThreadServer secondary(shared.addRef(), PrimaryLoop::NO);
+      // One header table, so the header IDs of both loops' capnp factories agree.
+      KJ_ASSERT(&factory_header_table(secondary.getFactory()) ==
+          &factory_header_table(primary.getFactory()));
+      KJ_EXPECT_THROW_MESSAGE("only the primary loop's worker factory can do this",
+          factory_start_inspector(
+              secondary.getFactory(), "127.0.0.1:0"_kj.as<kj_rs::RustUncheckedUtf8>()));
+
+      uint requests = serve(secondary, progress[1], progress[0]);
+
+      // The primary loop's token names this thread's copy of the worker here.
+      KJ_ASSERT(secondary.getByToken(primaryToken).wait(secondary.ws) == kj::str(requests + 1));
+      secondaryToken = secondary.encodeToken("hello"_kj);
+    });
+
+    KJ_ON_SCOPE_FAILURE(progress[0].failed = true);
+    uint requests = serve(primary, progress[0], progress[1]);
+    KJ_EXPECT(requests >= MIN_ROUNDS * REQUESTS_PER_ROUND);
+
+    // The thread is joined here, with its server closed and its factory destroyed on it.
+    thread = nullptr;
+    KJ_EXPECT(progress[1].rounds >= MIN_ROUNDS);
+
+    // And the secondary loop's token names the primary's copy.
+    KJ_EXPECT(primary.getByToken(secondaryToken).wait(primary.ws) == kj::str(requests + 1));
+  }
 }
 
 }  // namespace

@@ -9,6 +9,15 @@
 //! Ownership rules: a `KjOwn` moves ownership across the boundary in the direction of the call;
 //! a `Box` of a Rust type handed to C++ is a cheap handle (an `Rc` inside), so C++ may hold it
 //! for as long as the wrapping KJ object lives and clone it through `*_clone`.
+//!
+//! Threads: everything here belongs to the loop thread it was made on (the factory, its compiled
+//! workers, actors, channels and every `Box` handed to C++), with one exception. An
+//! `ffi::SharedFactory` is what the loop threads of a process share: a `KjArc` of it is `Send`
+//! and `Sync` and may be cloned and dropped on any thread, and it lives as long as it has to,
+//! since every factory made from it holds a reference. `bootstrap_loop` makes a thread's own
+//! `WorkerFactory` from one, on that thread's loop; the thread then compiles its own copy of each
+//! worker and drops the factory before its loop. The thread that drops the last reference to a
+//! `SharedFactory` tears down V8 and the rest of the process's state.
 
 #![allow(
     unsafe_code,
@@ -30,7 +39,9 @@ pub use crate::channels::WorkerStub;
 pub use crate::cluster::Committer;
 pub use crate::cluster::ResultTask;
 pub use crate::cluster::result_task_run;
+pub use crate::entry::LoopThread;
 pub use crate::entry::PendingCommand;
+pub use crate::entry::run_loop_thread;
 pub use crate::entry::run_pending_command;
 pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
@@ -280,10 +291,36 @@ pub mod ffi {
             command: Box<PendingCommand>,
         ) -> Result<i32>;
 
-        /// Sets up what the process needs around the Rust server -- perfetto, autogates, V8
-        /// (platform and `jsg::V8System`), a tokio-backed `kj::Network` on the loop's timer --
-        /// and returns the worker factory over the config, which owns it all: dropping the
-        /// factory tears the rest down after it, in reverse, flushing the perfetto trace.
+        /// Runs `thread` (`run_loop_thread`), the body of a loop thread other than the one
+        /// `with_process_context` runs on, with the process's logging set up on this thread's
+        /// stack too: the JSON logger if the config asks for structured logging.
+        fn with_loop_thread_context(shared: &SharedFactory, thread: Box<LoopThread>) -> Result<()>;
+
+        /// Sets up what the process needs around the Rust server, once -- perfetto, autogates,
+        /// V8 (platform and `jsg::V8System`) -- and returns the shared factory over the config,
+        /// which owns it all: dropping the last reference tears it down, in reverse, flushing
+        /// the perfetto trace. `config`, `test` and `bench` are as for `bootstrap`.
+        fn bootstrap_process(
+            config: Vec<u64>,
+            options: &ServeOrTestOptions,
+            test: KjMaybe<&TestOptions>,
+            bench: KjMaybe<&BenchOptions>,
+        ) -> Result<KjArc<SharedFactory>>;
+
+        /// The worker factory of a loop thread other than the first, on `event_loop`, which is
+        /// the calling thread's: a tokio-backed `kj::Network` on the loop's timer, the capnp
+        /// factories and the task set of that loop, over `shared`. The inspector does not see
+        /// the isolates it compiles, and it cannot open Durable Object storage or start the
+        /// inspector. It dies on its thread, before the thread's Runtime.
+        fn bootstrap_loop(
+            shared: &SharedFactory,
+            event_loop: Pin<&mut TokioAsyncIoContext>,
+        ) -> Result<KjOwn<WorkerFactory>>;
+
+        /// `bootstrap_process`, then the worker factory of the process's first loop thread on
+        /// `event_loop` (a tokio-backed `kj::Network` on the loop's timer), which holds the
+        /// shared factory: when no other thread does, dropping the factory tears the process's
+        /// state down after it.
         /// `config` is an encoded message (segment table, then segments) in 8-byte words.
         /// `test` and `bench` are the options of those commands, at most one of them given. An
         /// error means the process failed to start.
@@ -325,10 +362,18 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/server/factory/worker-factory.h");
 
-        /// Everything shared by the workers of one server: the V8 system, the HTTP header
-        /// table, the capnp factories, the channel token handler, the inspector. Created by the
-        /// C++ bootstrap (bootstrap.c++) for the lifetime of a run.
+        /// What the loop threads of a process share (see the module doc): the config and the
+        /// options, V8, the HTTP header table, the memory caches, the channel token key, the
+        /// inspector's registrar. Thread-safe.
+        type SharedFactory;
+
+        /// Everything shared by the workers of one loop thread: its timer and network, the
+        /// capnp factories, the channel token handler, the background tasks. Created by the
+        /// C++ bootstrap (bootstrap.c++) on the thread's loop, over the `SharedFactory`.
         type WorkerFactory;
+
+        /// The shared factory `factory` is over.
+        fn factory_shared(factory: &WorkerFactory) -> KjArc<SharedFactory>;
 
         /// The config, as the bytes of an encoded `Config` message the factory and the server
         /// both read. Owned by the factory for the run; every reader into it stays valid.
@@ -789,6 +834,10 @@ pub mod ffi {
     // `'static`. C++ keeps the arguments alive until the promise settles or is destroyed.
 
     extern "Rust" {
+        /// The body of a loop thread, run by `with_loop_thread_context` (entry.rs).
+        type LoopThread;
+        fn run_loop_thread(thread: Box<LoopThread>) -> Result<()>;
+
         /// The Rust half of a command, run by `with_process_context` (entry.rs).
         type PendingCommand;
         fn run_pending_command(
@@ -1070,6 +1119,13 @@ pub mod ffi {
         fn take(self: &mut WorkerInterfaceList, index: usize) -> Result<KjOwn<WorkerInterface>>;
     }
 }
+
+// Safety: a `SharedFactory` is what the loop threads share. Its C++ state is immutable once
+// constructed or guards itself (worker-factory.h), its reference count is atomic, and the bridge
+// only gives out shared references to it.
+unsafe impl Send for ffi::SharedFactory {}
+// Safety: as for `Send`.
+unsafe impl Sync for ffi::SharedFactory {}
 
 // =====================================================================================
 /// A response whose headers are edited before they reach `inner`. Borrows `inner` for its life,
