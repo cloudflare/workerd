@@ -404,6 +404,41 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
   JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
 }
 
+namespace {
+
+// Sends the request on to the next service unmodified, as a service worker's fetch event does when
+// no listener called respondWith() or preventDefault().
+kj::Promise<DeferredProxy<void>> sendWithDefaultHandling(Worker::Lock& lock,
+    IoContext& ioContext,
+    kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    kj::Maybe<JsReadableStream> maybeJsStream,
+    kj::Maybe<kj::StringPtr> cfBlobJson) {
+  KJ_IF_SOME(jsStream, maybeJsStream) {
+    if (jsStream.isDisturbed(lock)) {
+      lock.logUncaughtException(
+          "Script consumed request body but didn't call respondWith(). Can't forward request.");
+      return addNoopDeferredProxy(
+          response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
+    }
+  }
+  // Release our reference; we don't need it anymore.
+  maybeJsStream = kj::none;
+
+  auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL, false,
+      cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }), "fetch_default"_kjc);
+  auto adapter = kj::newHttpService(*client);
+  auto promise = adapter->request(method, url, headers, requestBody, response);
+  // Default handling doesn't rely on the IoContext at all so we can return it as a
+  // deferred proxy task.
+  return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
+}
+
+}  // namespace
+
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
@@ -511,88 +546,67 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
-  auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
-
-  uint tasksBefore = ioContext.taskCount();
-
   // We'll drop our span once the promise (fetch handler result) resolves.
   kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("fetch_handler"_kjc);
-  bool useDefaultHandling;
-  // The Response a module's fetch handler returned itself, rather than a promise for.
+  // The Response to send now, or else the promise for it to await.
   kj::Maybe<jsg::Ref<Response>> syncResponse;
+  kj::Maybe<jsg::Promise<jsg::Ref<Response>>> responsePromise;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      KJ_SWITCH_ONEOF(f(lock, event->getRequest(), h.env.addRef(js), h.getCtx())) {
+      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), h.env.addRef(js), h.getCtx())) {
         KJ_CASE_ONEOF(response, jsg::Ref<Response>) {
-          if (ioContext.hasOutputGate()) {
-            // An actor's Response waits for its output locks, which respondWith() arranges.
-            event->respondWith(lock, js.resolvedPromise(kj::mv(response)));
-          } else {
-            syncResponse = kj::mv(response);
-          }
+          syncResponse = kj::mv(response);
         }
         KJ_CASE_ONEOF(promise, jsg::Promise<jsg::Ref<Response>>) {
-          event->respondWith(lock, kj::mv(promise));
+          responsePromise = kj::mv(promise);
         }
       }
-      useDefaultHandling = false;
     } else {
       // In modules mode we don't have a concept of "default handling".
       lock.logWarningOnce("Received a FetchEvent but we lack a handler for FetchEvents. "
                           "Did you remember to export a fetch() function?");
       JSG_FAIL_REQUIRE(Error, "Handler does not export a fetch() function.");
     }
+    if (ioContext.hasOutputGate()) {
+      // An actor's Response waits for its output locks, as FetchEvent::respondWith() arranges
+      // for a service worker's.
+      KJ_IF_SOME(response, syncResponse) {
+        responsePromise = js.resolvedPromise(kj::mv(response));
+      }
+      syncResponse = kj::none;
+      responsePromise =
+          FetchEvent::waitForOutputLocks(js, KJ_ASSERT_NONNULL(kj::mv(responsePromise)));
+    }
   } else {
+    auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
+    uint tasksBefore = ioContext.taskCount();
+
     // Fire off the handlers.
-    useDefaultHandling = dispatchEventImpl(lock, event.addRef()).result;
-  }
-
-  if (useDefaultHandling) {
-    // No one called respondWith() or preventDefault(). Go directly to subrequest.
-
-    if (ioContext.taskCount() > tasksBefore) {
-      lock.logWarning(
-          "FetchEvent handler did not call respondWith() before returning, but initiated some "
-          "asynchronous task. That task will be canceled and default handling will occur -- the "
-          "request will be sent unmodified to your origin. Remember that you must call "
-          "respondWith() *before* the event handler returns, if you don't want default handling. "
-          "You cannot call it asynchronously later on. If you need to wait for I/O (e.g. a "
-          "subrequest) before generating a Response, then call respondWith() with a Promise (for "
-          "the eventual Response) as the argument.");
+    if (dispatchEventImpl(lock, event.addRef()).result) {
+      // No one called respondWith() or preventDefault(). Go directly to subrequest.
+      if (ioContext.taskCount() > tasksBefore) {
+        lock.logWarning(
+            "FetchEvent handler did not call respondWith() before returning, but initiated some "
+            "asynchronous task. That task will be canceled and default handling will occur -- the "
+            "request will be sent unmodified to your origin. Remember that you must call "
+            "respondWith() *before* the event handler returns, if you don't want default "
+            "handling. You cannot call it asynchronously later on. If you need to wait for I/O "
+            "(e.g. a subrequest) before generating a Response, then call respondWith() with a "
+            "Promise (for the eventual Response) as the argument.");
+      }
+      return sendWithDefaultHandling(lock, ioContext, method, url, headers, requestBody, response,
+          kj::mv(maybeJsStream), cfBlobJson);
     }
 
-    KJ_IF_SOME(jsStream, maybeJsStream) {
-      if (jsStream.isDisturbed(js)) {
-        lock.logUncaughtException(
-            "Script consumed request body but didn't call respondWith(). Can't forward request.");
-        return addNoopDeferredProxy(
-            response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
-      }
-      maybeJsStream = kj::none;  // Release our reference; we don't need it anymore.
-    }
-
-    auto client = ioContext.getHttpClient(
-        IoContext::NEXT_CLIENT_CHANNEL, false, cfBlobJson.clone(), "fetch_default"_kjc);
-    auto adapter = kj::newHttpService(*client);
-    auto promise = adapter->request(method, url, headers, requestBody, response);
-    // Default handling doesn't rely on the IoContext at all so we can return it as a
-    // deferred proxy task.
-    return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
+    // The service worker API says that if default handling is prevented and respondWith()
+    // wasn't called, the request should result in "a network error".
+    responsePromise = KJ_UNWRAP_OR(event->getResponsePromise(lock),
+        return KJ_EXCEPTION(DISCONNECTED, "preventDefault() called but respondWith() not called"));
   }
-
-  // The Response to send now, or the promise for it to await.
-  kj::Maybe<jsg::Promise<jsg::Ref<Response>>> responsePromise;
-  if (syncResponse == kj::none) {
-    KJ_IF_SOME(promise, event->getResponsePromise(lock)) {
-      KJ_IF_SOME(resolved, promise.tryConsumeResolved(lock)) {
-        syncResponse = kj::mv(resolved);
-      } else {
-        responsePromise = kj::mv(promise);
-      }
-    } else {
-      // The service worker API says that if default handling is prevented and respondWith()
-      // wasn't called, the request should result in "a network error".
-      return KJ_EXCEPTION(DISCONNECTED, "preventDefault() called but respondWith() not called");
+  KJ_IF_SOME(promise, responsePromise) {
+    KJ_IF_SOME(resolved, promise.tryConsumeResolved(lock)) {
+      syncResponse = kj::mv(resolved);
+      responsePromise = kj::none;
     }
   }
 

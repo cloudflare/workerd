@@ -1329,6 +1329,11 @@ class FetchEvent final: public ExtendableEvent {
   jsg::Ref<Request> getRequest();
   void respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
 
+  // The promise for a fetch handler's Response, resolving only once the actor's output locks
+  // allow it to be sent. Call only in an IoContext with an output gate.
+  static jsg::Promise<jsg::Ref<Response>> waitForOutputLocks(
+      jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
+
   void passThroughOnException();
 
   // TODO(someday): Do any other FetchEvent members make sense on the edge?
