@@ -30,7 +30,10 @@ import {
 } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
-import { entropyAfterSnapshot } from 'pyodide-internal:topLevelEntropy/lib';
+import {
+  entropyAfterSnapshot,
+  getBadEntropyFlagAddr,
+} from 'pyodide-internal:topLevelEntropy/lib';
 import {
   deserializeJsModule,
   maybeSerializeJsModule,
@@ -121,6 +124,9 @@ type SnapshotMeta = {
   readonly settings: SnapshotSettings;
   readonly version: 1;
   readonly jsModuleNames?: ReadonlyArray<string>;
+  // Address of the flag that shouldAllowBadEntropy() in topLevelEntropy/lib.ts reads. Older
+  // snapshots don't have it.
+  readonly badEntropyFlagAddr?: number;
 } & DsoLoadInfo;
 
 // MEMORY_SNAPSHOT_READER has type SnapshotReader | undefined
@@ -203,6 +209,8 @@ if (LOADED_SNAPSHOT_META) {
   CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
 }
 export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
+export const LOADED_BAD_ENTROPY_FLAG_ADDR =
+  LOADED_SNAPSHOT_META?.badEntropyFlagAddr;
 
 export const KEEP_RESTORED_IMPORT_CACHES =
   LOADED_SNAPSHOT_TYPE === 'dedicated' && KEEP_DEDICATED_SNAPSHOT_IMPORT_CACHES;
@@ -786,6 +794,7 @@ function makeLinearMemorySnapshot(
     hiwire,
     jsModuleNames: Array.from(jsModuleNames),
     settings,
+    badEntropyFlagAddr: getBadEntropyFlagAddr(),
     ...CREATED_SNAPSHOT_META,
   });
 }

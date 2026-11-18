@@ -1,0 +1,59 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-proto-descriptor-get",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "get")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "node-proto-descriptor-set",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "set")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "node-proto-descriptor-value",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "value")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "node-proto-descriptor-writable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "writable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "node-proto-descriptor-enumerable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "enumerable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "node-proto-descriptor-configurable",
+      worker = (
+        modules = .modules,
+        bindings = [(name = "key", text = "configurable")],
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "node-proto-descriptor-pollution-test.js"),
+];
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat", "nodejs_compat_v2", "enable_nodejs_process_v2",
+  "enable_nodejs_http_server_modules", "enable_nodejs_http_modules", "enable_nodejs_console_module",
+  "streams_enable_constructors",
+  "experimental",
+];

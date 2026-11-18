@@ -325,6 +325,7 @@ void IsolateBase::applyDeferredActions() {
   }
 
   externalMemoryTarget->applyDeferredMemoryUpdate();
+  heapTracer.flushExternalMemory();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
