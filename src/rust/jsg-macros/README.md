@@ -697,8 +697,8 @@ because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 
 `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is
 interchangeable with any other, so a live instance can transfer through a V8 startup snapshot:
-the macro adds a `GarbageCollected::snapshot_recreate` method that leaks a `Default` instance
-for the wrapper restored from the snapshot. The type must implement `Default`. See
+the macro implements `jsg::SnapshotTransfer` with an empty snapshot, restoring every instance
+as the type's `Default`. The type must implement `Default`. See
 `jsg/README.md` §Startup snapshots.
 
 ### Manual tracing with `custom_trace`
