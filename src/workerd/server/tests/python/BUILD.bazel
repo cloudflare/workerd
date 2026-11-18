@@ -110,7 +110,11 @@ py_wd_test("nodejs-compat")
 
 py_wd_test("pth-file")
 
-py_wd_test("metadata-read-overflow")
+py_wd_test(
+    "metadata-read-overflow",
+    # Needs a buffer of 2 GiB or more, which some downstream builds can't allocate.
+    tags = ["no-downstream"],
+)
 
 py_wd_test("stdlib-zip")
 
