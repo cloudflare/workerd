@@ -65,6 +65,24 @@ fn host_style_incoming_rebuilds_the_absolute_url() {
 }
 
 #[test]
+fn host_style_incoming_takes_the_path_of_an_absolute_url() {
+    let table = HeaderTable::builtin();
+    let rewriter = options(|mut o| o.set_style(http_options::Style::Host));
+    let mut headers = Headers::new(&table);
+    headers.set(HeaderId::HOST, "foo.example");
+    let (rewritten, _) = rewriter
+        .rewrite_incoming_request(
+            &table,
+            "http://other.example/x?y=1",
+            "http",
+            headers.as_ref(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(rewritten.url, "http://foo.example/x?y=1");
+}
+
+#[test]
 fn host_style_incoming_without_a_host_is_a_bad_request() {
     let table = HeaderTable::builtin();
     let rewriter = options(|mut o| o.set_style(http_options::Style::Host));

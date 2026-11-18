@@ -541,8 +541,8 @@ impl Handler for HttpConnection {
             else {
                 return send_error(response, 400, "Bad Request", &Headers::new(table)).await;
             };
-            let cf_blob = cf_blob.or_else(|| self.cf_blob.clone());
-            let mut worker = self.start_request(cf_blob.as_deref())?;
+            let cf_blob = cf_blob.as_deref().or(self.cf_blob.as_deref());
+            let mut worker = self.start_request(cf_blob)?;
             let headers = rewritten
                 .headers
                 .as_deref()
