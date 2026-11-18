@@ -640,8 +640,8 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(lock, h.self.getHandle(lock)));
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise =
-          f(lock, js.alloc<QueueController>(event.addRef()),
-              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
+          f(lock, js.alloc<QueueController>(event.addRef()), jsg::JsValue(h.env.getHandle(js)),
+              h.getCtx())
               .then([event = event.addRef(), weakContext = context.getWeakRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
         auto& context = KJ_REQUIRE_NONNULL(

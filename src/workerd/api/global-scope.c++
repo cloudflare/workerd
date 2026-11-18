@@ -294,7 +294,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -328,7 +328,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
         js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -486,7 +486,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   kj::Maybe<jsg::Promise<jsg::Ref<Response>>> responsePromise;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), h.env.addRef(js), h.getCtx())) {
+      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), jsg::JsValue(h.env.getHandle(js)), h.getCtx())) {
         KJ_CASE_ONEOF(response, jsg::Ref<Response>) {
           syncResponse = kj::mv(response);
         }
@@ -605,17 +605,17 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
-  auto isolate = lock.getIsolate();
   jsg::Lock& js = lock;
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
       auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kjc, traces);
-      auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise = f(lock, tailEvent->getEvents(), jsg::JsValue(h.env.getHandle(js)), h.getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
       auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kjc, traces);
-      auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise =
+          f(lock, traceEvent->getEvents(), jsg::JsValue(h.env.getHandle(js)), h.getCtx());
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce("Attempted to send events but we lack a handler, "
@@ -645,13 +645,11 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
 
   auto event = js.alloc<ScheduledEvent>(eventTime, cron);
 
-  auto isolate = lock.getIsolate();
-
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
-      auto promise =
-          f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx())
-              .then([weakContext = context.getWeakRef()]() {
+      auto promise = f(lock, js.alloc<ScheduledController>(event.addRef()),
+          jsg::JsValue(h.env.getHandle(js)), h.getCtx())
+                         .then([weakContext = context.getWeakRef()]() {
         auto& context = KJ_REQUIRE_NONNULL(
             weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
@@ -944,7 +942,8 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
   jsg::Lock& js = lock;
-  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  return testHandler(
+      lock, js.alloc<TestController>(), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
 }
 
 jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
@@ -961,8 +960,9 @@ jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& loc
   auto controller = js.alloc<BenchController>(params);
   return js
       .tryCatch(
-          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
-          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+          [&] {
+    return benchHandler(lock, controller.addRef(), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
+  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
       .then(js,
           IoContext::current().addFunctor(
               [controller = controller.addRef()](

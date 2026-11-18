@@ -428,7 +428,7 @@ class QueueController final: public jsg::Object {
 // Extension of ExportedHandler covering queue handlers.
 struct QueueExportedHandler {
   using QueueHandler = kj::Promise<void>(jsg::Ref<QueueController> controller,
-      jsg::JsRef<jsg::JsValue> env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<QueueHandler>> queue;
 
