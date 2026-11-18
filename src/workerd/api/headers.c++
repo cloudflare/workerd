@@ -7,8 +7,6 @@
 #include <workerd/util/header-validation.h>
 #include <workerd/util/strings.h>
 
-#include <type_traits>
-
 namespace workerd::api {
 
 namespace {
@@ -371,27 +369,17 @@ Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guar
 
 Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
   // One pass collects the headers, so that the copy can be sized exactly. Requests rarely have
-  // more headers than fit in `firstEntries`, which is left uninitialized: an Entry needs no
-  // destruction, and only the ones collected are read.
-  constexpr size_t STACK_ENTRIES = 32;
-  static_assert(std::is_trivially_destructible_v<Entry>);
-  alignas(Entry) kj::byte firstStorage[STACK_ENTRIES * sizeof(Entry)];
-  auto firstEntries = reinterpret_cast<Entry*>(firstStorage);
-  kj::Vector<Entry> moreEntries;
-  size_t count = 0;
+  // more headers than the Vector reserves, and its reserved capacity is not initialized, so each
+  // entry is written only once here. (Counting the headers first to reserve exactly costs more
+  // than the spare capacity does.)
+  constexpr size_t RESERVED_ENTRIES = 32;
+  kj::Vector<Entry> collected(RESERVED_ENTRIES);
   size_t charCount = 0;
   headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-    if (count < STACK_ENTRIES) {
-      new (&firstEntries[count]) Entry{.name = name, .value = value};
-    } else {
-      moreEntries.add(Entry{.name = name, .value = value});
-    }
-    ++count;
+    collected.add(Entry{.name = name, .value = value});
     charCount += name.size() + value.size() + 2;
   });
-  auto source = [&](size_t i) -> Entry& {
-    return i < STACK_ENTRIES ? firstEntries[i] : moreEntries[i - STACK_ENTRIES];
-  };
+  size_t count = collected.size();
 
   // The entries, then the strings.
   static_assert(alignof(Entry) <= alignof(max_align_t));
@@ -407,8 +395,8 @@ Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
   };
   for (auto i: kj::zeroTo(count)) {
     // Copy the name first: argument evaluation order is unspecified.
-    auto name = copy(source(i).name);
-    new (&entries[i]) Entry{.name = name, .value = copy(source(i).value)};
+    auto name = copy(collected[i].name);
+    new (&entries[i]) Entry{.name = name, .value = copy(collected[i].value)};
   }
 }
 
