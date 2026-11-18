@@ -44,6 +44,7 @@ mod vfs;
 
 pub use dir::Builder;
 pub use dir::Directory;
+pub use dir::LazyLoader;
 pub use dir::ListEntry;
 pub use dir::OpenOptions;
 pub use dir::RemoveOptions;

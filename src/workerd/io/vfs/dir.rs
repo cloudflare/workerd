@@ -13,6 +13,7 @@ use crate::File;
 use crate::FileOrDirectory;
 use crate::FsError;
 use crate::FsType;
+use crate::HostError;
 use crate::MemoryCharge;
 use crate::MemoryTracker;
 use crate::Node;
@@ -84,9 +85,13 @@ enum DirKind {
     Lazy(RefCell<Lazy>),
 }
 
+/// What a lazy directory calls for its contents. It returns an error when the host keeps a
+/// failure to report once the operation returns.
+pub type LazyLoader = Box<dyn FnMut() -> Result<Directory, HostError>>;
+
 enum Lazy {
     // The loader, taken while it runs.
-    Pending(Option<Box<dyn FnOnce() -> Directory>>),
+    Pending(Option<LazyLoader>),
     Loaded(Directory),
 }
 
@@ -97,6 +102,8 @@ enum Target {
     Delegate(Directory),
     // `/tmp` with no store current.
     NoTmpStore,
+    // A lazy directory whose loader failed.
+    Failed,
 }
 
 impl Directory {
@@ -139,9 +146,11 @@ impl Directory {
         Self::from_kind(DirKind::Tmp)
     }
 
-    /// A directory whose contents are those of the directory `load` returns, called once, on
-    /// first use.
-    pub fn new_lazy(load: Box<dyn FnOnce() -> Self>) -> Self {
+    /// A directory whose contents are those of the directory `load` returns, called on first
+    /// use. If it fails, so does the operation that called it, with [`FsError::Failed`] (or
+    /// nothing, for [`Self::count`] and [`Self::list`]), and the next use calls it again, as in
+    /// C++.
+    pub fn new_lazy(load: LazyLoader) -> Self {
         Self::from_kind(DirKind::Lazy(RefCell::new(Lazy::Pending(Some(load)))))
     }
 
@@ -156,7 +165,7 @@ impl Directory {
             DirKind::Tmp => current_tmp_store(host).map_or(Target::NoTmpStore, |store| {
                 Target::Delegate(store.directory())
             }),
-            DirKind::Lazy(lazy) => Target::Delegate(load(lazy)),
+            DirKind::Lazy(lazy) => load(lazy).map_or(Target::Failed, Target::Delegate),
         }
     }
 
@@ -179,6 +188,7 @@ impl Directory {
         let entries = match self.target(host) {
             Target::Delegate(dir) => return dir.stat_in(host, guard, path),
             Target::NoTmpStore => return path.is_empty().then_some(Ok(Stat::directory(true))),
+            Target::Failed => return Some(Err(FsError::Failed)),
             Target::Memory => self.memory_entries(),
         };
         let Some((first, rest)) = path.split_first() else {
@@ -206,7 +216,7 @@ impl Directory {
     pub fn count(&self, host: &dyn VfsHost, type_filter: Option<FsType>) -> usize {
         match self.target(host) {
             Target::Delegate(dir) => dir.count(host, type_filter),
-            Target::NoTmpStore => 0,
+            Target::NoTmpStore | Target::Failed => 0,
             Target::Memory => {
                 let entries = self.memory_entries().borrow();
                 type_filter.map_or_else(
@@ -227,7 +237,7 @@ impl Directory {
     pub fn list(&self, host: &dyn VfsHost) -> Vec<ListEntry> {
         match self.target(host) {
             Target::Delegate(dir) => dir.list(host),
-            Target::NoTmpStore => Vec::new(),
+            Target::NoTmpStore | Target::Failed => Vec::new(),
             Target::Memory => self
                 .memory_entries()
                 .borrow()
@@ -265,6 +275,7 @@ impl Directory {
         let entries = match self.target(host) {
             Target::Delegate(dir) => return dir.try_open_in(host, guard, path, options),
             Target::NoTmpStore => return None,
+            Target::Failed => return Some(Err(FsError::Failed)),
             Target::Memory => self.memory_entries(),
         };
         let Some((first, rest)) = path.split_first() else {
@@ -348,6 +359,7 @@ impl Directory {
         match self.target(host) {
             Target::Delegate(dir) => dir.add(host, name, node),
             Target::NoTmpStore => Err(FsError::NotPermitted),
+            Target::Failed => Err(FsError::Failed),
             Target::Memory => {
                 if !self.memory_writable() {
                     return Err(FsError::NotPermitted);
@@ -383,6 +395,7 @@ impl Directory {
         let entries = match self.target(host) {
             Target::Delegate(dir) => return dir.remove(host, path, options),
             Target::NoTmpStore => return Ok(false),
+            Target::Failed => return Err(FsError::Failed),
             Target::Memory => self.memory_entries(),
         };
         if !self.memory_writable() {
@@ -422,7 +435,7 @@ impl Directory {
             && self.0.unique_id.get().is_none()
         {
             // The contents' identifier never changes once made, so a copy of it stays equal.
-            let id = load(lazy).unique_id(host)?.to_owned();
+            let id = load(lazy).ok()?.unique_id(host)?.to_owned();
             self.0.unique_id.set(id).ok()?;
         }
         unique_id(&self.0.unique_id, host)
@@ -500,18 +513,24 @@ impl Directory {
     }
 }
 
-// The contents of a lazy directory, loading them if this is the first use.
-fn load(lazy: &RefCell<Lazy>) -> Directory {
+// The contents of a lazy directory, loading them if they are not loaded yet. A loader that
+// fails is kept for the next use.
+fn load(lazy: &RefCell<Lazy>) -> Result<Directory, HostError> {
     let loader = match &mut *lazy.borrow_mut() {
-        Lazy::Loaded(dir) => return dir.clone(),
+        Lazy::Loaded(dir) => return Ok(dir.clone()),
         Lazy::Pending(loader) => loader.take(),
     };
-    let Some(loader) = loader else {
-        unreachable!("a lazy directory was used while it was loading");
+    // A loader that uses its own directory, directly or through a link, would recurse forever;
+    // that use fails instead, with no failure kept by the host, so with `FsError::Failed` alone.
+    let Some(mut loader) = loader else {
+        return Err(HostError);
     };
-    let dir = loader();
-    *lazy.borrow_mut() = Lazy::Loaded(dir.clone());
-    dir
+    let result = loader();
+    *lazy.borrow_mut() = match &result {
+        Ok(dir) => Lazy::Loaded(dir.clone()),
+        Err(HostError) => Lazy::Pending(Some(loader)),
+    };
+    result
 }
 
 /// Builds a read-only directory, whose entries may themselves be writable.

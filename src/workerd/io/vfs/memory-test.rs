@@ -149,7 +149,7 @@ fn a_lazy_directory_reports_its_contents_once_loaded() {
     let lazy = Directory::new_lazy(Box::new(|| {
         let mut builder = Builder::default();
         builder.add(b"f", readable(b"x")).unwrap();
-        builder.finish()
+        Ok(builder.finish())
     }));
     let dir = lazy.memory_self_size();
     assert_eq!(report(&lazy), [format!("root: LazyDirectory {dir}")]);

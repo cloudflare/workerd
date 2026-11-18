@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::*;
@@ -285,6 +286,76 @@ fn builder() {
 }
 
 #[test]
+fn a_failed_lazy_load_fails_the_operation_and_is_retried() {
+    let host = TestHost::new();
+    let loads = Rc::new(Cell::new(0));
+    let counter = loads.clone();
+    let lazy = Directory::new_lazy(Box::new(move || {
+        counter.set(counter.get() + 1);
+        // Fails until the ninth call.
+        if counter.get() < 9 {
+            return Err(HostError);
+        }
+        let mut builder = Builder::default();
+        builder.add(b"f", readable(b"x")).unwrap();
+        Ok(builder.finish())
+    }));
+    let file = || Node::File(File::new_dev_null());
+    assert_eq!(lazy.stat(&host, &p("f")), Some(Err(FsError::Failed)));
+    assert_eq!(lazy.count(&host, None), 0);
+    assert!(lazy.list(&host).is_empty());
+    assert!(matches!(
+        open(&host, &lazy, "f"),
+        Some(Err(FsError::Failed))
+    ));
+    assert_eq!(lazy.add(&host, b"g", file()), Err(FsError::Failed));
+    assert_eq!(
+        lazy.remove(&host, &p("f"), RemoveOptions::default()),
+        Err(FsError::Failed)
+    );
+    assert_eq!(lazy.unique_id(&host), None);
+    assert_eq!(loads.get(), 7);
+
+    // So does a path through it, until it loads; then it stays loaded.
+    let root = Directory::new_writable();
+    root.add(&host, b"lazy", Node::Directory(lazy.clone()))
+        .unwrap();
+    assert_eq!(root.stat(&host, &p("lazy/f")), Some(Err(FsError::Failed)));
+    assert_eq!(loads.get(), 8);
+    open_file(&host, &root, "lazy/f");
+    assert_eq!(names(&host, &lazy), ["f"]);
+    assert_eq!(loads.get(), 9);
+}
+
+#[test]
+fn a_lazy_directory_used_by_its_own_loader_fails_that_use() {
+    let host = Rc::new(TestHost::new());
+    let slot: Rc<RefCell<Option<Directory>>> = Rc::default();
+    let inner = slot.clone();
+    let loader_host = host.clone();
+    let lazy = Directory::new_lazy(Box::new(move || {
+        let this = inner.borrow().clone().unwrap();
+        // The loader's own use of its directory fails rather than recursing.
+        assert_eq!(this.count(&*loader_host, None), 0);
+        assert_eq!(
+            this.stat(&*loader_host, &p("f")),
+            Some(Err(FsError::Failed))
+        );
+        Ok(Directory::new_writable())
+    }));
+    *slot.borrow_mut() = Some(lazy.clone());
+    // The outer use loads the directory.
+    assert_eq!(lazy.count(&*host, None), 0);
+    assert!(
+        lazy.add(&*host, b"f", Node::File(File::new_dev_null()))
+            .is_ok()
+    );
+    assert_eq!(names(&*host, &lazy), ["f"]);
+    // Break the cycle through the slot.
+    slot.borrow_mut().take();
+}
+
+#[test]
 fn lazy_directories_load_once_on_first_use() {
     let host = TestHost::new();
     let loads = Rc::new(Cell::new(0));
@@ -293,7 +364,7 @@ fn lazy_directories_load_once_on_first_use() {
         counter.set(counter.get() + 1);
         let mut builder = Builder::default();
         builder.add(b"f", readable(b"x")).unwrap();
-        builder.finish()
+        Ok(builder.finish())
     }));
     assert_eq!(lazy.memory_name(), c"LazyDirectory");
     assert_eq!(loads.get(), 0);
