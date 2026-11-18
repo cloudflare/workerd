@@ -70,6 +70,7 @@ mod io;
 pub mod server;
 mod starttls;
 pub mod tls;
+mod wakes;
 
 use std::result;
 
