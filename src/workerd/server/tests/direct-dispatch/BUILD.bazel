@@ -1,7 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
-# `workerd serve` answering the same requests with WORKERD_DIRECT_DISPATCH unset, "1" and
-# "batched".
+# `workerd serve` answering the same requests with WORKERD_DIRECT_DISPATCH unset, "1",
+# "batched" and "drain".
 js_test(
     name = "direct-dispatch-test",
     size = "small",

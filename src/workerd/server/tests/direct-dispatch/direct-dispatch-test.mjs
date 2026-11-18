@@ -4,7 +4,7 @@
 //
 // A stateless Worker's fetch handler answers the same with the prototype direct-dispatch path
 // (WORKERD_DIRECT_DISPATCH=1 runs the handler inside hyper's dispatch, =batched one KJ event
-// later) as without it: sync and async responses, request bodies and headers, streamed
+// later, =drain from one KJ event for every request queued) as without it: sync and async responses, request bodies and headers, streamed
 // responses, exceptions, waitUntil(), HEAD and keep-alive.
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -157,5 +157,6 @@ test('direct dispatch answers like the default path', async () => {
     })
   );
   await writeFile(join(dir, 'index.js'), WORKER);
-  for (const mode of [undefined, '1', 'batched']) await check(dir, mode);
+  for (const mode of [undefined, '1', 'batched', 'drain'])
+    await check(dir, mode);
 });

@@ -28,6 +28,7 @@
 
 #include <capnp/compat/json.h>
 #include <kj/encoding.h>
+#include <kj/list.h>
 
 namespace workerd::server {
 
@@ -1211,6 +1212,145 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
       kj::mv(channels), kj::mv(tails), kj::none);
 }
 
+namespace {
+
+// Prototype modes of WORKERD_DIRECT_DISPATCH that start requests from the event loop rather than
+// from hyper's dispatch(), so that the requests that arrived in one tokio phase run their handlers
+// one after another (see worker_request_directly()).
+enum class DirectMode { INLINE, BATCHED, DRAIN };
+
+DirectMode directMode() {
+  static const DirectMode mode = [] {
+    const char* value = getenv("WORKERD_DIRECT_DISPATCH");
+    kj::StringPtr text = value == nullptr ? "" : value;
+    if (text == "batched") return DirectMode::BATCHED;
+    if (text == "drain") return DirectMode::DRAIN;
+    return DirectMode::INLINE;
+  }();
+  return mode;
+}
+
+// With WORKERD_DIRECT_DISPATCH_STATS set, how many requests each turn of the event loop started:
+// requests queued while the event loop waited, all of which start in its next turn.
+class BatchStats {
+ public:
+  void queued() {
+    ++pending;
+  }
+  void starting() {
+    if (pending == 0) return;
+    ++batches;
+    requests += pending;
+    if (pending < kj::size(histogram))
+      ++histogram[pending];
+    else
+      ++histogram[kj::size(histogram) - 1];
+    pending = 0;
+    if (requests >= nextReport) report();
+  }
+
+ private:
+  uint64_t pending = 0;
+  uint64_t batches = 0;
+  uint64_t requests = 0;
+  uint64_t nextReport = 100'000;
+  uint64_t histogram[65] = {};
+
+  void report() {
+    static const bool enabled = getenv("WORKERD_DIRECT_DISPATCH_STATS") != nullptr;
+    nextReport += 100'000;
+    if (!enabled) return;
+    auto line = kj::str("direct dispatch: ", requests, " requests in ", batches, " turns, mean ",
+        static_cast<double>(requests) / batches, "; by size:");
+    for (auto i: kj::indices(histogram)) {
+      if (histogram[i] != 0) line = kj::str(line, " ", i, "=", histogram[i]);
+    }
+    fprintf(stderr, "%s\n", line.cStr());
+  }
+};
+
+thread_local BatchStats batchStats;
+
+// WORKERD_DIRECT_DISPATCH=drain: a request waiting in the thread's queue for the one turn of the
+// event loop that starts every queued request. The first request queued owns that turn's event,
+// and hands it to the next one if it is canceled first.
+class QueuedRequest {
+ public:
+  QueuedRequest(kj::PromiseFulfiller<void>& fulfiller,
+      WorkerInterface& worker,
+      kj::HttpMethod method,
+      kj::String url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response)
+      : fulfiller(fulfiller),
+        worker(worker),
+        method(method),
+        url(kj::mv(url)),
+        headers(headers),
+        requestBody(requestBody),
+        response(response) {
+    if (queue.empty()) {
+      drain = kj::evalLater([]() { startQueued(); }).eagerlyEvaluate(nullptr);
+    }
+    queue.add(*this);
+    batchStats.queued();
+  }
+
+  ~QueuedRequest() noexcept(false) {
+    if (link.isLinked()) {
+      queue.remove(*this);
+      KJ_IF_SOME(event, drain) {
+        if (!queue.empty()) queue.front().drain = kj::mv(event);
+      }
+    }
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(QueuedRequest);
+
+ private:
+  kj::PromiseFulfiller<void>& fulfiller;
+  WorkerInterface& worker;
+  kj::HttpMethod method;
+  kj::String url;
+  const kj::HttpHeaders& headers;
+  kj::AsyncInputStream& requestBody;
+  kj::HttpService::Response& response;
+  kj::ListLink<QueuedRequest> link;
+  kj::Maybe<kj::Promise<void>> drain;
+  kj::Maybe<kj::Promise<void>> running;
+
+  using Queue = kj::List<QueuedRequest, &QueuedRequest::link>;
+  static thread_local Queue queue;
+
+  static void startQueued() {
+    batchStats.starting();
+    // A handler may queue another request, as a loopback fetch does; it starts in this turn too.
+    while (!queue.empty()) {
+      auto& request = queue.front();
+      queue.remove(request);
+      request.start();
+    }
+  }
+
+  void start() {
+    bool done = false;
+    auto promise = requestDirectly(worker, method, url, headers, requestBody, response, done);
+    if (done) {
+      fulfiller.fulfill();
+      return;
+    }
+    running = promise
+                  .then([this]() { fulfiller.fulfill(); }, [this](kj::Exception&& e) {
+      fulfiller.reject(kj::mv(e));
+    }).eagerlyEvaluate(nullptr);
+  }
+};
+
+thread_local QueuedRequest::Queue QueuedRequest::queue;
+
+}  // namespace
+
 kj::Promise<void> worker_request_directly(WorkerInterface& worker,
     kj::HttpMethod method,
     ::rust::Slice<const kj::byte> url,
@@ -1219,21 +1359,25 @@ kj::Promise<void> worker_request_directly(WorkerInterface& worker,
     kj::HttpService::Response& response,
     bool* completed) {
   auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
-  // Prototype: WORKERD_DIRECT_DISPATCH=batched runs the request from a turn of the event loop, as
-  // the default dispatch does, so that the handlers of the requests that arrived together run one
-  // after another, but without the default dispatch's coroutines and lock promise.
-  static const bool batched = [] {
-    const char* mode = getenv("WORKERD_DIRECT_DISPATCH");
-    return mode != nullptr && kj::StringPtr(mode) == "batched";
-  }();
-  if (batched) {
-    *completed = false;
-    return kj::evalLater(
-        [&worker, method, urlStr = kj::mv(urlStr), &headers, &requestBody, &response]() mutable {
-      bool done = false;
-      auto promise = requestDirectly(worker, method, urlStr, headers, requestBody, response, done);
-      return promise.attach(kj::mv(urlStr));
-    });
+  switch (directMode()) {
+    case DirectMode::BATCHED:
+      // One event per request, without the default dispatch's coroutines and lock promise.
+      *completed = false;
+      batchStats.queued();
+      return kj::evalLater(
+          [&worker, method, urlStr = kj::mv(urlStr), &headers, &requestBody, &response]() mutable {
+        batchStats.starting();
+        bool done = false;
+        auto promise =
+            requestDirectly(worker, method, urlStr, headers, requestBody, response, done);
+        return promise.attach(kj::mv(urlStr));
+      });
+    case DirectMode::DRAIN:
+      *completed = false;
+      return kj::newAdaptedPromise<void, QueuedRequest>(
+          worker, method, kj::mv(urlStr), headers, requestBody, response);
+    case DirectMode::INLINE:
+      break;
   }
   auto promise =
       requestDirectly(worker, method, urlStr, headers, requestBody, response, *completed);
