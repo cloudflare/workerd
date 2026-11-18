@@ -1431,7 +1431,9 @@ KJ_TEST("an abort while a coupled local WebSocket waits for output locks reports
 // The script checks whether the WebSocket was accepted in a chain of microtasks, one at a time,
 // and spins on the first check after acceptance. A check is always queued ahead of whatever the
 // send queues, so the kill lands before any later microtask, such as one that would hand the
-// response to KJ, regardless of how many microtasks the runtime takes to send it.
+// response to KJ, regardless of how many microtasks the runtime takes to send it. The handler
+// awaits before it returns, so that its Response is sent from a promise continuation between
+// those checks: a Response a handler gives at once is sent only after every queued microtask.
 struct CpuLimitKillAfterWebSocketAccept {
   // Spins even if the WebSocket is never accepted, so that the test fails instead of hanging.
   static constexpr auto source = R"(
@@ -1450,6 +1452,7 @@ struct CpuLimitKillAfterWebSocketAccept {
           }
         };
         queueMicrotask(spinOnceAccepted);
+        await null;
         return new Response(null, {status: 101, webSocket: client});
       }
     };
