@@ -113,13 +113,15 @@ config. `main` is bundled with esbuild, as Wrangler does. The supported fields
 are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `durable_objects`, `exports`, `migrations`, `no_bundle`, `$schema` and, with
 `--experimental`, `kv_namespaces`, `triggers.crons`, `queues`, `workflows`,
-`d1_databases`, `secrets_store_secrets` and `assets`; any other field is an
-error. With `assets`, `main` may be left out to serve files only, and then
-fields that need a Worker are an error. Each KV namespace and each D1 database
-is one Durable Object, so its throughput is that of one object. A Secrets Store
-secret's value is the environment variable `WORKERD_SECRET_` plus its
-`secret_name`, upper-cased, with other characters than letters and digits as
-`_`: `api-key` is `WORKERD_SECRET_API_KEY`. `store_id` is ignored.
+`d1_databases`, `secrets_store_secrets`, `ratelimits` and `assets`; any other
+field is an error. With `assets`, `main` may be left out to serve files only,
+and then fields that need a Worker are an error. Each KV namespace and each D1
+database is one Durable Object, so its throughput is that of one object. A
+Secrets Store secret's value is the environment variable `WORKERD_SECRET_` plus
+its `secret_name`, upper-cased, with other characters than letters and digits as
+`_`: `api-key` is `WORKERD_SECRET_API_KEY`. `store_id` is ignored. Rate limits
+count in the server's memory: a restart forgets the counts, and each node of a
+cluster counts on its own.
 
 A simple "Hello World!" config file might look like:
 

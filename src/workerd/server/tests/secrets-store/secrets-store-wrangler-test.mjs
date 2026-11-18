@@ -6,13 +6,13 @@
 // value is its WORKERD_SECRET_ variable, a secret whose variable is not set
 // is not found, and without --experimental the server refuses to start.
 
-import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from 'node:process';
 import { test } from 'node:test';
 import assert from 'node:assert';
+import { serve } from '../wrangler-serve.mjs';
 
 const WRANGLER = {
   name: 'secrets',
@@ -37,46 +37,6 @@ const WORKER = `export default {
   },
 };
 `;
-
-const CONTROL_FD = 3;
-
-// Runs workerd on `dir`'s wrangler.jsonc until it listens, or until it
-// exits. Answers {port, stop} or {code, stderr}.
-function serve(dir, args, vars = {}) {
-  const child = spawn(
-    env.WORKERD_BINARY,
-    [
-      'serve',
-      join(dir, 'wrangler.jsonc'),
-      `--control-fd=${CONTROL_FD}`,
-      '--socket-addr=http=127.0.0.1:0',
-      ...args,
-    ],
-    { stdio: ['ignore', 'inherit', 'pipe', 'pipe'], env: { ...env, ...vars } }
-  );
-  let stderr = '';
-  child.stderr.on('data', (d) => {
-    stderr += d;
-    process.stderr.write(d);
-  });
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  return new Promise((resolve, reject) => {
-    let buffer = '';
-    child.stdio[CONTROL_FD].on('data', (d) => {
-      buffer += d;
-      for (const line of buffer.split('\n').slice(0, -1)) {
-        const m = JSON.parse(line);
-        if (m.event === 'listen') {
-          const stop = () => (child.kill(), exited);
-          resolve({ port: m.port, stop });
-        }
-      }
-      buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
-    });
-    child.once('error', reject);
-    exited.then((code) => resolve({ code, stderr }));
-  });
-}
 
 test('secrets_store_secrets in a wrangler.jsonc', async () => {
   const dir = await mkdtemp(join(env.TEST_TMPDIR ?? tmpdir(), 'secrets-'));

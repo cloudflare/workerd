@@ -1,0 +1,59 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The rate-limiting module, its clock under test control, and Miniflare's
+# rate-limiting tests (packages/miniflare/test/plugins/ratelimit) against it.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ratelimit-test", worker = .testWorker ),
+    ( name = "ratelimit",
+      worker = (
+        modules = [ ( name = "ratelimit.js", bundled = "/workerd/ratelimit.js" ) ],
+        bindings = [ ( name = "TEST_CLOCK", json = "true" ) ],
+      )
+    ),
+  ],
+);
+
+const testWorker :Workerd.Worker = (
+  modules = [ ( name = "worker", esModule = embed "ratelimit-test.js" ) ],
+  compatibilityFlags = ["nodejs_compat"],
+  bindings = [
+    ( name = "BASIC", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "basic" ), ( name = "limit", json = "2" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "VALIDATE", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "validate" ), ( name = "limit", json = "100" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "WEIGHTED", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "weighted" ), ( name = "limit", json = "5" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "RATE_A", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "shared" ), ( name = "limit", json = "2" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "RATE_B", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "shared" ), ( name = "limit", json = "2" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "RATE_C", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "other" ), ( name = "limit", json = "2" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "RATE_SLOW", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "periods" ), ( name = "limit", json = "1" ),
+          ( name = "period", json = "60" ) ] ) ),
+    ( name = "RATE_FAST", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "periods" ), ( name = "limit", json = "1" ),
+          ( name = "period", json = "10" ) ] ) ),
+    ( name = "WINDOW", wrapped = ( moduleName = "cloudflare-internal:ratelimit-api",
+        innerBindings = [ ( name = "fetcher", service = "ratelimit" ),
+          ( name = "namespace", text = "window" ), ( name = "limit", json = "1" ),
+          ( name = "period", json = "10" ) ] ) ),
+    ( name = "CLOCK", service = "ratelimit" ),
+  ],
+);

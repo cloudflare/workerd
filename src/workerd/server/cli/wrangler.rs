@@ -11,7 +11,7 @@
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
 //! `triggers` (`crons`), `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`,
-//! `assets`, `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
+//! `ratelimits`, `assets`, `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
@@ -35,7 +35,9 @@
 //! migrations are not applied. Its databases are in `.wrangler/state/workerd/d1/`.
 //! `secrets_store_secrets`, also `--experimental`, read the environment: each secret's value is
 //! the variable [`secret_variable`] names after its `secret_name`, read when the server starts;
-//! `store_id` is ignored, so a secret name means the same secret in every store. `assets`, also
+//! `store_id` is ignored, so a secret name means the same secret in every store. `ratelimits`,
+//! also `--experimental`, are the rate-limit API over the Worker `<name>-ratelimit` (the bundled
+//! module `/workerd/ratelimit.js`), which keeps its counts in memory. `assets`, also
 //! `--experimental`, are the files in `directory`, served by the assets service `<name>-assets`,
 //! which routes each request to this Worker or to a file as Cloudflare does; `binding` is its
 //! `AssetWorker` entrypoint. Without `main` it serves only the files. The server listens on
@@ -46,7 +48,7 @@
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
 //! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`,
-//! `queues`, `workflows`, `d1_databases`, `secrets_store_secrets` or `assets` yet.
+//! `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits` or `assets` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -103,6 +105,8 @@ struct Wrangler {
     #[serde(default)]
     secrets_store_secrets: Vec<SecretsStoreSecret>,
     #[serde(default)]
+    ratelimits: Vec<Ratelimit>,
+    #[serde(default)]
     no_bundle: bool,
     assets: Option<Assets>,
 }
@@ -114,6 +118,21 @@ struct SecretsStoreSecret {
     #[serde(rename = "store_id")]
     _store_id: String,
     secret_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ratelimit {
+    name: String,
+    namespace_id: String,
+    simple: SimpleLimit,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimpleLimit {
+    limit: u64,
+    period: u64,
 }
 
 #[derive(Deserialize)]
@@ -408,7 +427,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     check_experimental(&wrangler, target)?;
-    check_secrets(&wrangler.secrets_store_secrets)?;
+    check_bindings(&wrangler)?;
     let root = file.parent().unwrap_or(&file);
 
     let name = match target {
@@ -451,6 +470,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             + 2 * u32::from(!wrangler.queues.is_empty())
             + 2 * u32::from(!wrangler.workflows.is_empty())
             + 2 * u32::from(!wrangler.d1_databases.is_empty())
+            + u32::from(!wrangler.ratelimits.is_empty())
             + u32::from(wrangler.assets.is_some()),
     );
     let at = workers + do_storage;
@@ -514,6 +534,7 @@ fn assets_only(wrangler: &Wrangler) -> Result<(), String> {
             "secrets_store_secrets",
             !wrangler.secrets_store_secrets.is_empty(),
         ),
+        ("ratelimits", !wrangler.ratelimits.is_empty()),
         (
             "assets.binding",
             wrangler
@@ -574,8 +595,8 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
 }
 
 /// `kv_namespaces`, `triggers.crons`, `queues`, `workflows`, `d1_databases`,
-/// `secrets_store_secrets` and `assets` need `--experimental`, and a deployment cannot have them
-/// yet.
+/// `secrets_store_secrets`, `ratelimits` and `assets` need `--experimental`, and a deployment
+/// cannot have them yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
@@ -587,6 +608,7 @@ fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String
             !wrangler.secrets_store_secrets.is_empty(),
             "secrets_store_secrets",
         ),
+        (!wrangler.ratelimits.is_empty(), "ratelimits"),
         (wrangler.assets.is_some(), "assets"),
     ] {
         match target {
@@ -619,11 +641,19 @@ fn secret_variable(secret_name: &str) -> String {
     format!("WORKERD_SECRET_{name}")
 }
 
-/// Two secrets of different names cannot read the same variable. A secret whose variable is not
-/// set is not found; say so now, not only when the Worker asks for it.
-fn check_secrets(secrets: &[SecretsStoreSecret]) -> Result<(), String> {
+/// A rate limit's period is 10 or 60 seconds, as on Cloudflare. Two secrets of different names
+/// cannot read the same variable. A secret whose variable is not set is not found; say so now, not
+/// only when the Worker asks for it.
+fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
+    let periods = [10, 60];
+    if let Some(r) = (wrangler.ratelimits.iter()).find(|r| !periods.contains(&r.simple.period)) {
+        return Err(format!(
+            "ratelimits: {}: simple.period must be 10 or 60",
+            r.name
+        ));
+    }
     let mut names = BTreeMap::new();
-    for s in secrets {
+    for s in &wrangler.secrets_store_secrets {
         let variable = secret_variable(&s.secret_name);
         if std::env::var_os(&variable).is_none() {
             eprintln!(
@@ -644,7 +674,7 @@ fn check_secrets(secrets: &[SecretsStoreSecret]) -> Result<(), String> {
     Ok(())
 }
 
-/// The KV, cron, Queues, Workflows, D1 and assets services `wrangler` asks for, with their disks
+/// The KV, cron, Queues, Workflows, D1, rate-limiting and assets services `wrangler` asks for, with their disks
 /// under `storage`, from `services[at]`. Each is named after the worker, `<name>-<kind>`, so it
 /// cannot collide with it.
 fn bundled_services(
@@ -678,6 +708,10 @@ fn bundled_services(
     if !wrangler.d1_databases.is_empty() {
         d1_services(services, at, &format!("{name}-d1"), &storage.join("d1"))?;
         at += 2;
+    }
+    if !wrangler.ratelimits.is_empty() {
+        ratelimit_service(services.reborrow().get(at), &format!("{name}-ratelimit"));
+        at += 1;
     }
     if let Some(assets) = &wrangler.assets {
         assets_services(services, at, name, root, assets, wrangler, watch)?;
@@ -791,6 +825,16 @@ fn kv_services(
     Ok(())
 }
 
+/// The rate-limiting Worker `name`. Its counts are in memory, so it has no disk.
+fn ratelimit_service(mut service: service::Builder<'_>, name: &str) {
+    service.set_name(name);
+    let mut w = service.init_worker();
+    let mut m = w.reborrow().init_modules(1).get(0);
+    m.set_name("ratelimit.js");
+    m.set_bundled("/workerd/ratelimit.js");
+    w.set_compatibility_date("2026-01-01");
+}
+
 /// A writable disk service `name` at `path`.
 fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     service.set_name(name);
@@ -874,13 +918,14 @@ fn cron_services(
 }
 
 /// The bindings of the worker `name`: `vars`, Durable Objects, those to the bundled Workers
-/// [`bundled_services`] names after it, and Secrets Store secrets.
+/// [`bundled_services`] names after it, Secrets Store secrets, and rate limits.
 fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let kv = &wrangler.kv_namespaces;
     let producers = &wrangler.queues.producers;
     let workflows = &wrangler.workflows;
     let d1 = &wrangler.d1_databases;
     let secrets = &wrangler.secrets_store_secrets;
+    let limits = &wrangler.ratelimits;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
@@ -889,7 +934,9 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let assets = wrangler.assets.as_ref().and_then(|a| a.binding.as_ref());
     let m = n + producers.len() + workflows.len();
     let at = m + d1.len();
-    let mut bs = worker.init_bindings((at + secrets.len() + usize::from(assets.is_some())) as u32);
+    let limits_at = at + secrets.len();
+    let mut bs =
+        worker.init_bindings((limits_at + limits.len() + usize::from(assets.is_some())) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -948,25 +995,53 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         designator.init_props().set_json(props.to_string());
     }
     for (i, secret) in secrets.iter().enumerate() {
-        let mut b = bs.reborrow().get((at + i) as u32);
-        b.set_name(&secret.binding);
-        let mut wrapped = b.init_wrapped();
-        wrapped.set_module_name("cloudflare-internal:secrets-store-api");
-        let mut inner = wrapped.init_inner_bindings(2);
-        let mut name = inner.reborrow().get(0);
-        name.set_name("name");
-        name.set_text(&secret.secret_name);
-        let mut value = inner.get(1);
-        value.set_name("value");
-        value.set_from_environment(secret_variable(&secret.secret_name));
+        set_secret(bs.reborrow().get((at + i) as u32), secret);
+    }
+    for (i, r) in limits.iter().enumerate() {
+        set_ratelimit(bs.reborrow().get((limits_at + i) as u32), r, name);
     }
     if let Some(binding) = assets {
-        let mut b = bs.get((at + secrets.len()) as u32);
+        let mut b = bs.get((limits_at + limits.len()) as u32);
         b.set_name(binding);
         let mut designator = b.init_service();
         designator.set_name(format!("{name}-assets"));
         designator.set_entrypoint("AssetWorker");
     }
+}
+
+/// The Secrets Store secret `secret`: its name, and its value from the variable
+/// [`secret_variable`] names.
+fn set_secret(mut b: worker::binding::Builder<'_>, secret: &SecretsStoreSecret) {
+    b.set_name(&secret.binding);
+    let mut wrapped = b.init_wrapped();
+    wrapped.set_module_name("cloudflare-internal:secrets-store-api");
+    let mut inner = wrapped.init_inner_bindings(2);
+    let mut name = inner.reborrow().get(0);
+    name.set_name("name");
+    name.set_text(&secret.secret_name);
+    let mut value = inner.get(1);
+    value.set_name("value");
+    value.set_from_environment(secret_variable(&secret.secret_name));
+}
+
+/// The rate limit `r` of the worker `name`, counted by `<name>-ratelimit`.
+fn set_ratelimit(mut b: worker::binding::Builder<'_>, r: &Ratelimit, name: &str) {
+    b.set_name(&r.name);
+    let mut wrapped = b.init_wrapped();
+    wrapped.set_module_name("cloudflare-internal:ratelimit-api");
+    let mut inner = wrapped.init_inner_bindings(4);
+    let mut fetcher = inner.reborrow().get(0);
+    fetcher.set_name("fetcher");
+    fetcher.init_service().set_name(format!("{name}-ratelimit"));
+    let mut namespace = inner.reborrow().get(1);
+    namespace.set_name("namespace");
+    namespace.set_text(&r.namespace_id);
+    let mut limit = inner.reborrow().get(2);
+    limit.set_name("limit");
+    limit.set_json(r.simple.limit.to_string());
+    let mut period = inner.get(3);
+    period.set_name("period");
+    period.set_json(r.simple.period.to_string());
 }
 
 /// The Workflow API of the Workflow `workflow` of the worker `name`: the entrypoint

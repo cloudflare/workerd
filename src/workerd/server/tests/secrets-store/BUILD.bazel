@@ -3,7 +3,10 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 # `workerd serve` of a wrangler.jsonc's secrets_store_secrets.
 js_test(
     name = "secrets-store-wrangler-test",
-    data = ["//src/workerd/server:workerd"],
+    data = [
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:wrangler-serve_js_lib",
+    ],
     entry_point = "secrets-store-wrangler-test.mjs",
     env = {"WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)"},
     tags = ["js-test"],
