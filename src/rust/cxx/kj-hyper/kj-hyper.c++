@@ -96,12 +96,17 @@ class BodySinkStream final: public kj::AsyncOutputStream {
   explicit BodySinkStream(::rust::Box<BodySink> sink): sink(kj::mv(sink)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    // A write that finds room is done once Rust has copied it, without a bridged future.
+    bool queued = false;
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&] { queued = sink->try_write(bytes(buffer)); })) {
+      return kj::mv(e);
+    }
+    if (queued) return kj::READY_NOW;
     return hot(sink->write(bytes(buffer)));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     auto joined = join(pieces);
-    auto promise = sink->write(bytes(joined));
-    return hot(kj::mv(promise)).attach(kj::mv(joined));
+    return write(joined.asPtr()).attach(kj::mv(joined));
   }
   kj::Promise<void> whenWriteDisconnected() override {
     return hot(sink->when_write_disconnected());

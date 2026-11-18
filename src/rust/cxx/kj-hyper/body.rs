@@ -24,18 +24,22 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
-use std::future::pending;
 use std::future::poll_fn;
+use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::task::Context;
 use std::task::Poll;
+use std::task::Waker;
 
 use bytes::Buf;
 use bytes::Bytes;
 use cxx::KjError;
 use cxx::KjExceptionType;
-use futures::FutureExt;
 use http::header;
 use http_body::Body;
 use http_body::Frame;
@@ -43,8 +47,6 @@ use http_body::SizeHint;
 use hyper::body::Incoming;
 use hyper::ext::HeaderCaseMap;
 use tokio::io::ReadBuf;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 
 use crate::Result;
 use crate::ffi::Borrowing;
@@ -122,10 +124,86 @@ impl RustBody {
     }
 }
 
+/// What a [`BodySink`] and the [`ChannelBody`] it feeds share: a channel with room for one
+/// chunk, as a write waits for the chunk before it to be read. A mutex, not a cell: the client's
+/// bodies must be `Send`, though each side is only ever used on one thread at a time.
+#[derive(Default)]
+struct Pipe(Mutex<PipeState>);
+
+#[derive(Default)]
+struct PipeState {
+    /// Written and not yet read.
+    chunk: Option<Bytes>,
+    /// The sink is gone: the body ends once its chunk is read.
+    ended: bool,
+    /// The body fails instead of ending ([`BodyAbort`]).
+    aborted: bool,
+    /// The body is gone: nothing written reaches anyone.
+    gone: bool,
+    /// The body, waiting for a chunk or its end.
+    reader: Option<Waker>,
+    /// A write waiting for room.
+    writer: Option<Waker>,
+    /// Waiting for the body to go (`whenWriteDisconnected()`).
+    disconnect: Vec<Waker>,
+}
+
+impl Pipe {
+    fn ended(chunk: Option<Bytes>) -> Self {
+        Self(Mutex::new(PipeState {
+            chunk,
+            ended: true,
+            ..PipeState::default()
+        }))
+    }
+
+    fn state(&self) -> MutexGuard<'_, PipeState> {
+        // Nothing panics while holding the lock, so its state is never left half-changed.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Puts `data` in the pipe once it has room.
+    fn poll_put(&self, cx: &Context<'_>, data: &mut Option<Bytes>) -> Poll<Result<()>> {
+        let mut state = self.state();
+        if state.gone {
+            return Poll::Ready(Err(peer_gone()));
+        }
+        if state.chunk.is_some() {
+            register(&mut state.writer, cx);
+            return Poll::Pending;
+        }
+        state.chunk = data.take();
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Keeps the waker of the task polling with `cx` in `slot`.
+fn register(slot: &mut Option<Waker>, cx: &Context<'_>) {
+    if !slot.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+        *slot = Some(cx.waker().clone());
+    }
+}
+
+fn wake(waker: Option<Waker>) {
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+
+fn peer_gone() -> KjError {
+    KjError::new(
+        KjExceptionType::Disconnected,
+        "HTTP body: the peer went away".to_owned(),
+    )
+}
+
 /// A `kj::AsyncOutputStream` feeding an outgoing hyper body. Dropping it ends the body.
 pub struct BodySink {
     /// `None` for a body that is discarded (a response to HEAD).
-    tx: Option<mpsc::Sender<Bytes>>,
+    pipe: Option<Arc<Pipe>>,
     /// Bytes still to be written, for a body of declared length. A `Cell`: kj writes through
     /// `&self`, as `whenWriteDisconnected()` may be awaited alongside a write.
     remaining: Cell<Option<u64>>,
@@ -136,75 +214,125 @@ impl BodySink {
     #[must_use]
     pub fn discarding() -> Self {
         Self {
-            tx: None,
+            pipe: None,
             remaining: Cell::new(None),
         }
     }
 
-    /// Queues `data`; resolves once the body has room for more. A write beyond the declared
-    /// length fails before any of it is queued, as kj's does.
-    pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<()>> + use<> {
-        let queued = match (&self.tx, self.remaining.get()) {
-            (None, _) => Ok(None),
-            (Some(_), Some(remaining)) if data.len() as u64 > remaining => Err(KjError::new(
+    /// A write beyond the declared length fails before any of it is queued, as kj's does.
+    fn check_length(&self, len: usize) -> Result<Option<u64>> {
+        match self.remaining.get() {
+            Some(remaining) if len as u64 > remaining => Err(KjError::new(
                 KjExceptionType::Failed,
                 "overwrote Content-Length".to_owned(),
             )),
-            (Some(tx), remaining) => {
-                self.remaining.set(remaining.map(|r| r - data.len() as u64));
-                Ok(Some((tx.clone(), Bytes::copy_from_slice(data))))
-            }
+            remaining => Ok(remaining.map(|r| r - len as u64)),
+        }
+    }
+
+    /// Queues `data` if the body has room for it, which a write finds nearly always: true once
+    /// it is queued (or discarded), false if [`BodySink::write`] must wait for room instead.
+    ///
+    /// # Errors
+    ///
+    /// A write past the declared length, or to a body whose peer went away.
+    pub fn try_write(&self, data: &[u8]) -> Result<bool> {
+        let Some(pipe) = &self.pipe else {
+            return Ok(true);
+        };
+        let remaining = self.check_length(data.len())?;
+        if data.is_empty() {
+            return Ok(true);
+        }
+        let mut state = pipe.state();
+        if state.gone {
+            return Err(peer_gone());
+        }
+        if state.chunk.is_some() {
+            return Ok(false);
+        }
+        self.remaining.set(remaining);
+        state.chunk = Some(Bytes::copy_from_slice(data));
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
+        Ok(true)
+    }
+
+    /// Queues `data`; resolves once the body has room for it.
+    pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<()>> + use<> {
+        let queued = match &self.pipe {
+            None => Ok(None),
+            Some(pipe) => self.check_length(data.len()).map(|remaining| {
+                self.remaining.set(remaining);
+                (!data.is_empty()).then(|| (Arc::clone(pipe), Bytes::copy_from_slice(data)))
+            }),
         };
         async move {
-            let Some((tx, data)) = queued? else {
+            let Some((pipe, data)) = queued? else {
                 return Ok(());
             };
-            if data.is_empty() {
-                return Ok(());
-            }
-            tx.send(data).await.map_err(|_| {
-                KjError::new(
-                    KjExceptionType::Disconnected,
-                    "HTTP body: the peer went away".to_owned(),
-                )
-            })
+            let mut data = Some(data);
+            poll_fn(|cx| pipe.poll_put(cx, &mut data)).await
         }
     }
 
     pub fn when_write_disconnected(&self) -> impl Future<Output = ()> + use<> {
-        let tx = self.tx.clone();
-        async move {
-            match tx {
-                Some(tx) => tx.closed().await,
-                None => pending().await,
+        let pipe = self.pipe.clone();
+        poll_fn(move |cx| {
+            let Some(pipe) = &pipe else {
+                return Poll::Pending;
+            };
+            let mut state = pipe.state();
+            if state.gone {
+                return Poll::Ready(());
             }
+            if !state.disconnect.iter().any(|w| w.will_wake(cx.waker())) {
+                state.disconnect.push(cx.waker().clone());
+            }
+            Poll::Pending
+        })
+    }
+}
+
+impl Drop for BodySink {
+    fn drop(&mut self) {
+        if let Some(pipe) = &self.pipe {
+            let mut state = pipe.state();
+            state.ended = true;
+            let reader = state.reader.take();
+            drop(state);
+            wake(reader);
         }
     }
 }
 
 /// Ends a [`ChannelBody`] with an error, so hyper drops the connection instead of framing what
 /// was written as a complete message. Dropping it unused has no effect.
-pub struct BodyAbort(oneshot::Sender<()>);
+pub struct BodyAbort(Arc<Pipe>);
 
 impl BodyAbort {
     pub fn abort(self) {
-        let _ = self.0.send(());
+        let mut state = self.0.state();
+        state.aborted = true;
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
     }
 }
 
 /// The outgoing body a [`BodySink`] feeds.
 pub struct ChannelBody {
-    rx: Option<mpsc::Receiver<Bytes>>,
-    abort: Option<oneshot::Receiver<()>>,
+    /// `None` for a body that was built empty.
+    pipe: Option<Arc<Pipe>>,
     length: Option<u64>,
 }
 
 impl ChannelBody {
     #[must_use]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
-            rx: None,
-            abort: None,
+            pipe: None,
             length: Some(0),
         }
     }
@@ -212,14 +340,9 @@ impl ChannelBody {
     /// A body of exactly `data`.
     #[must_use]
     pub fn full(data: Bytes) -> Self {
-        let length = Some(data.len() as u64);
-        let (tx, rx) = mpsc::channel(1);
-        // A fresh channel has room for the one chunk.
-        let _ = tx.try_send(data);
         Self {
-            rx: Some(rx),
-            abort: None,
-            length,
+            length: Some(data.len() as u64),
+            pipe: Some(Arc::new(Pipe::ended(Some(data)))),
         }
     }
 
@@ -228,10 +351,23 @@ impl ChannelBody {
     #[must_use]
     pub fn ended(&self) -> Self {
         Self {
-            // A channel whose sender is already gone: the body ends on its first poll.
-            rx: self.rx.as_ref().map(|_| mpsc::channel(1).1),
-            abort: None,
+            pipe: self.pipe.as_ref().map(|_| Arc::new(Pipe::ended(None))),
             length: self.length,
+        }
+    }
+}
+
+impl Drop for ChannelBody {
+    fn drop(&mut self) {
+        if let Some(pipe) = &self.pipe {
+            let mut state = pipe.state();
+            state.gone = true;
+            state.chunk = None;
+            let writer = state.writer.take();
+            let disconnect = mem::take(&mut state.disconnect);
+            drop(state);
+            wake(writer);
+            disconnect.into_iter().for_each(Waker::wake);
         }
     }
 }
@@ -240,17 +376,15 @@ impl ChannelBody {
 /// if known.
 #[must_use]
 pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
-    let (tx, rx) = mpsc::channel(1);
-    let (abort_tx, abort_rx) = oneshot::channel();
+    let pipe = Arc::new(Pipe::default());
     (
         BodySink {
-            tx: Some(tx),
+            pipe: Some(Arc::clone(&pipe)),
             remaining: Cell::new(length),
         },
-        BodyAbort(abort_tx),
+        BodyAbort(Arc::clone(&pipe)),
         ChannelBody {
-            rx: Some(rx),
-            abort: Some(abort_rx),
+            pipe: Some(pipe),
             length,
         },
     )
@@ -276,26 +410,30 @@ impl Body for ChannelBody {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, Aborted>>> {
-        let this = self.get_mut();
-        if let Some(abort) = this.abort.as_mut() {
-            match abort.poll_unpin(cx) {
-                Poll::Ready(Ok(())) => return Poll::Ready(Some(Err(Aborted))),
-                // The abort handle was dropped unused: nothing more to watch.
-                Poll::Ready(Err(_)) => this.abort = None,
-                Poll::Pending => {}
-            }
-        }
-        let Some(rx) = &mut this.rx else {
+        let Some(pipe) = &self.pipe else {
             return Poll::Ready(None);
         };
-        rx.poll_recv(cx)
-            .map(|chunk| chunk.map(|data| Ok(Frame::data(data))))
+        let mut state = pipe.state();
+        if state.aborted {
+            return Poll::Ready(Some(Err(Aborted)));
+        }
+        if let Some(chunk) = state.chunk.take() {
+            let writer = state.writer.take();
+            drop(state);
+            wake(writer);
+            return Poll::Ready(Some(Ok(Frame::data(chunk))));
+        }
+        if state.ended {
+            return Poll::Ready(None);
+        }
+        register(&mut state.reader, cx);
+        Poll::Pending
     }
 
     // Only a body that was built empty: hyper drops the `Content-Length: 0` of a message whose
     // body says it has ended and, for a response, writes its own after the other headers.
     fn is_end_stream(&self) -> bool {
-        self.rx.is_none()
+        self.pipe.is_none()
     }
 
     fn size_hint(&self) -> SizeHint {
