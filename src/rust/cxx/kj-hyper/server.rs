@@ -102,7 +102,7 @@ use crate::body::HeaderIds;
 use crate::body::MAX_HEADERS;
 use crate::body::Protocol;
 use crate::body::RustBody;
-use crate::body::channel;
+use crate::body::channel_in;
 use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::WebSocketCompression;
@@ -116,6 +116,7 @@ use crate::io::Hangup;
 use crate::io::RustIo;
 pub use crate::io::Upgrading;
 use crate::io::io_kj_error;
+use crate::scratch::Scratch;
 use crate::wakes::Wakes;
 
 type Response = http::Response<ChannelBody>;
@@ -261,6 +262,8 @@ struct ConnectionState {
     hangup: Shared<Hangup>,
     /// True once the server drains: the connection closes after its next response.
     draining: Option<watch::Receiver<bool>>,
+    /// What one response reuses from the last.
+    scratch: Rc<Scratch>,
 }
 
 /// The handler calls in flight (see the module docs). Owned by [`serve_connection`]'s future,
@@ -301,6 +304,7 @@ where
             upgraded: Cell::new(false),
             hangup: hangup.clone(),
             draining: shutdown.subscribe(),
+            scratch: Rc::default(),
         }),
         ids: RefCell::new(HeaderIds::new(table)),
         blocks: RefCell::default(),
@@ -463,13 +467,17 @@ async fn dispatch<'t>(
 /// One handler call, and the answer when it sends none (module docs).
 async fn handle(
     conn: Rc<Connection<'_>>,
-    parts: Parts,
+    mut parts: Parts,
     body: Incoming,
     sender: Rc<ResponseSender>,
 ) {
     // However the call ends, hyper stops waiting for a head it did not send.
     let _abandon = AbandonHead(&sender);
     let block = conn.header_block(&parts);
+    // The block has the headers now.
+    conn.state
+        .scratch
+        .keep_headers(mem::take(&mut parts.headers));
     let headers = match block.block.as_kj(&conn.ids.borrow()) {
         Ok(headers) => headers,
         Err(e) => {
@@ -571,6 +579,14 @@ struct ResponseSender {
     closing: Cell<bool>,
 }
 
+impl Drop for ResponseSender {
+    fn drop(&mut self) {
+        if let Some(abort) = self.body_abort.get_mut().take() {
+            self.connection.scratch.keep_pipe(abort.into_pipe());
+        }
+    }
+}
+
 /// A response head on its way to hyper.
 enum HeadSlot {
     /// Not sent yet; the waker is hyper's, waiting for it.
@@ -658,6 +674,7 @@ impl ResponseSender {
         {
             parts.extensions.insert(reason);
         }
+        parts.headers = self.connection.scratch.take_headers();
         head.apply(&mut parts.headers, &mut parts.extensions);
         let mut slot = self.head.borrow_mut();
         let HeadSlot::Waiting(waker) = &mut *slot else {
@@ -685,7 +702,7 @@ impl ResponseSender {
         } else {
             length
         };
-        let mut head = Head::new(headers);
+        let mut head = Head::new_in(&self.connection.scratch, headers);
         // As kj: a response to HEAD has no body, and the application's own Content-Length or
         // Transfer-Encoding, describing the representation, stands.
         let described = self.head_request
@@ -708,7 +725,7 @@ impl ResponseSender {
             self.send_head(status, status_text, head, ChannelBody::empty())?;
             return Ok(BodySink::discarding());
         }
-        let (sink, abort, body) = channel(length);
+        let (sink, abort, body) = channel_in(&self.connection.scratch, length);
         self.send_head(status, status_text, head, body)?;
         *self.body_abort.borrow_mut() = Some(abort);
         Ok(sink)

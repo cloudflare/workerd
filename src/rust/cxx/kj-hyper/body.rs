@@ -58,6 +58,7 @@ use crate::ffi::for_each_header;
 use crate::ffi::headers_from_block;
 use crate::ffi::headers_over_block;
 use crate::ffi::new_header_ids;
+use crate::scratch::Scratch;
 
 struct BodyState {
     body: RefCell<Option<Incoming>>,
@@ -132,7 +133,7 @@ impl RustBody {
 /// chunk, as a write waits for the chunk before it to be read. A mutex, not a cell: the client's
 /// bodies must be `Send`, though each side is only ever used on one thread at a time.
 #[derive(Default)]
-struct Pipe(Mutex<PipeState>);
+pub struct Pipe(Mutex<PipeState>);
 
 #[derive(Default)]
 struct PipeState {
@@ -218,6 +219,8 @@ fn peer_gone() -> KjError {
 pub struct BodySink {
     /// `None` for a body that is discarded (a response to HEAD).
     pipe: Option<Arc<Pipe>>,
+    /// Where a server's writes are copied to.
+    scratch: Option<Rc<Scratch>>,
     /// Bytes still to be written, for a body of declared length. A `Cell`: kj writes through
     /// `&self`, as `whenWriteDisconnected()` may be awaited alongside a write.
     remaining: Cell<Option<u64>>,
@@ -229,8 +232,16 @@ impl BodySink {
     pub fn discarding() -> Self {
         Self {
             pipe: None,
+            scratch: None,
             remaining: Cell::new(None),
         }
+    }
+
+    fn copy(&self, data: &[u8]) -> Bytes {
+        self.scratch.as_ref().map_or_else(
+            || Bytes::copy_from_slice(data),
+            |scratch| scratch.copy(data),
+        )
     }
 
     /// A write beyond the declared length fails before any of it is queued, as kj's does.
@@ -266,7 +277,7 @@ impl BodySink {
             return Ok(false);
         }
         self.remaining.set(remaining);
-        state.chunk = Some(Bytes::copy_from_slice(data));
+        state.chunk = Some(self.copy(data));
         let reader = state.reader.take();
         drop(state);
         wake(reader);
@@ -279,7 +290,7 @@ impl BodySink {
             None => Ok(None),
             Some(pipe) => self.check_length(data.len()).map(|remaining| {
                 self.remaining.set(remaining);
-                (!data.is_empty()).then(|| (Arc::clone(pipe), Bytes::copy_from_slice(data)))
+                (!data.is_empty()).then(|| (Arc::clone(pipe), self.copy(data)))
             }),
         };
         async move {
@@ -337,6 +348,11 @@ impl Drop for BodySink {
 pub struct BodyAbort(Arc<Pipe>);
 
 impl BodyAbort {
+    /// The pipe, for a later body once nothing else holds it ([`Scratch::take_pipe`]).
+    pub fn into_pipe(self) -> Arc<Pipe> {
+        self.0
+    }
+
     pub fn abort(&self) {
         self.0.abort();
     }
@@ -397,10 +413,26 @@ impl Drop for ChannelBody {
 /// if known.
 #[must_use]
 pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
-    let pipe = Arc::new(Pipe::default());
+    channel_with(Arc::new(Pipe::default()), None, length)
+}
+
+/// [`channel`], for a served connection whose responses reuse `scratch`.
+pub fn channel_in(
+    scratch: &Rc<Scratch>,
+    length: Option<u64>,
+) -> (BodySink, BodyAbort, ChannelBody) {
+    channel_with(scratch.take_pipe(), Some(Rc::clone(scratch)), length)
+}
+
+fn channel_with(
+    pipe: Arc<Pipe>,
+    scratch: Option<Rc<Scratch>>,
+    length: Option<u64>,
+) -> (BodySink, BodyAbort, ChannelBody) {
     (
         BodySink {
             pipe: Some(Arc::clone(&pipe)),
+            scratch,
             remaining: Cell::new(length),
         },
         BodyAbort(Arc::clone(&pipe)),
@@ -564,6 +596,8 @@ pub struct Head {
     others: Vec<(http::HeaderName, http::HeaderValue)>,
     /// None until a name is spelled other than as hyper title-cases it.
     spellings: Option<HeaderCaseMap>,
+    /// Where a served connection's values are copied to, and `others` is kept.
+    scratch: Option<Rc<Scratch>>,
 }
 
 impl Head {
@@ -574,18 +608,43 @@ impl Head {
         head
     }
 
+    /// [`Head::new`], for a served connection whose responses reuse `scratch`.
+    pub fn new_in(scratch: &Rc<Scratch>, headers: &HttpHeaders) -> Self {
+        let mut head = Self::empty_in(scratch);
+        for_each_header(headers, &mut head);
+        head
+    }
+
     #[must_use]
     pub fn empty() -> Self {
         Self {
             builtin: Default::default(),
             others: Vec::new(),
             spellings: None,
+            scratch: None,
+        }
+    }
+
+    #[must_use]
+    pub fn empty_in(scratch: &Rc<Scratch>) -> Self {
+        Self {
+            others: scratch.take_others(),
+            scratch: Some(Rc::clone(scratch)),
+            ..Self::empty()
+        }
+    }
+
+    /// A header value of `bytes`, which are valid as one.
+    fn value(&self, bytes: &[u8]) -> Option<http::HeaderValue> {
+        match &self.scratch {
+            Some(scratch) => http::HeaderValue::from_maybe_shared(scratch.copy(bytes)).ok(),
+            None => http::HeaderValue::from_bytes(bytes).ok(),
         }
     }
 
     /// One header from kj, in order. kj validated both parts, so they are valid here too.
     pub fn append(&mut self, name: &[u8], value: &[u8]) {
-        let Ok(value) = http::HeaderValue::from_bytes(value) else {
+        let Some(value) = self.value(value) else {
             return;
         };
         let builtin = BUILTIN
@@ -639,7 +698,14 @@ impl Head {
     /// Frames a body of `length` bytes, or a chunked one when the length is unknown.
     pub fn frame(&mut self, length: Option<u64>) {
         match length {
-            Some(length) => self.set(Builtin::ContentLength, http::HeaderValue::from(length)),
+            Some(length) => {
+                let mut digits = [0; 20];
+                let len = format_decimal(length, &mut digits);
+                let value = self
+                    .value(&digits[digits.len() - len..])
+                    .unwrap_or_else(|| http::HeaderValue::from(length));
+                self.set(Builtin::ContentLength, value);
+            }
             None => self.set(
                 Builtin::TransferEncoding,
                 http::HeaderValue::from_static("chunked"),
@@ -647,10 +713,12 @@ impl Head {
         }
     }
 
-    /// Installs the headers and their spellings on a message's parts.
-    pub fn apply(mut self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
+    /// Installs the headers and their spellings on a message's parts, in place of the headers
+    /// there, reusing the map's room.
+    pub fn apply(mut self, map: &mut http::HeaderMap, extensions: &mut http::Extensions) {
         let builtins = self.builtin.iter().flatten().count();
-        let mut map = http::HeaderMap::with_capacity(self.others.len() + builtins);
+        map.clear();
+        map.reserve(self.others.len() + builtins);
         for (index, value) in self.builtin.into_iter().enumerate() {
             let Some(value) = value else {
                 continue;
@@ -664,8 +732,11 @@ impl Head {
             }
             map.append(name.clone(), value);
         }
-        for (name, value) in self.others {
+        for (name, value) in self.others.drain(..) {
             map.append(name, value);
+        }
+        if let Some(scratch) = &self.scratch {
+            scratch.keep_others(mem::take(&mut self.others));
         }
         // hyper's client writes an empty value as `Name:` only through the extension.
         let spellings = self.spellings.or_else(|| {
@@ -673,9 +744,21 @@ impl Head {
                 .any(http::HeaderValue::is_empty)
                 .then(HeaderCaseMap::default)
         });
-        *headers = map;
         if let Some(spellings) = spellings {
             extensions.insert(spellings);
+        }
+    }
+}
+
+/// Writes `n` in decimal at the end of `digits`; returns how many digits it took.
+fn format_decimal(mut n: u64, digits: &mut [u8; 20]) -> usize {
+    let mut len = 0;
+    loop {
+        len += 1;
+        digits[digits.len() - len] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            return len;
         }
     }
 }
