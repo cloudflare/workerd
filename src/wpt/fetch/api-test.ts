@@ -76,14 +76,22 @@ export default {
   },
   'basic/error-after-response.any.js': {
     comment:
-      'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
-    disabledTests: true,
+      'A network error on a response body rejects with Error("Network connection lost."), not TypeError. ' +
+      'The closed test hangs: the body is only read on demand, so with no read pending the bad ' +
+      'chunk is never seen, reader.closed never settles, and the request is cancelled as hung.',
+    disabledTests: [
+      'Response reader closed promise should reject after a network error happening after resolving fetch promise',
+    ],
+    expectedFailures: [
+      'Response reader read() promise should reject after a network error happening after resolving fetch promise',
+    ],
   },
   'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
-      "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
-    disabledTests: true,
+      'The .asis responses end their header block at EOF, without the blank line that ' +
+      'terminates it. fetch() rejects a truncated header block before headers are combined.',
+    expectedFailures: true,
   },
   'basic/header-value-null-byte.any.js': {
     comment: 'We should return a nicer TypeError instead of "internal error"',
@@ -179,8 +187,19 @@ export default {
     ],
   },
   'basic/request-upload.any.js': {
-    comment: 'Appears to corrupt the state of workerd',
-    disabledTests: true,
+    comment:
+      'fetch() resolves with the response even when the request body stream errors, and the ' +
+      "body's TypeError escapes as an uncaught waitUntil() error that fails the whole test " +
+      'event (https://github.com/cloudflare/workerd/issues/7983). workerd allows streaming ' +
+      'uploads over HTTP/1.1 with chunked encoding.',
+    disabledTests: [
+      'Fetch with POST with ReadableStream containing String',
+      'Fetch with POST with ReadableStream containing null',
+      'Fetch with POST with ReadableStream containing number',
+      'Fetch with POST with ReadableStream containing ArrayBuffer',
+      'Fetch with POST with ReadableStream containing Blob',
+    ],
+    expectedFailures: ["Streaming upload shouldn't work on Http/1.1."],
   },
   'basic/request-upload.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',

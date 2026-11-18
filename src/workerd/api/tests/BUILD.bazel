@@ -24,6 +24,14 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "weakref-test.wd-test",
+    data = [
+        "weakref-target.js",
+        "weakref-test.js",
+    ],
+)
+
+wd_test(
     src = "streams-pending-gc-test.wd-test",
     data = ["streams-pending-gc-test.js"],
 )
@@ -1760,7 +1768,7 @@ wd_test(
 )
 
 # Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+# on average. Tagged `python` like the tests under //src/pyodide/tests.
 wd_test(
     size = "enormous",
     src = "worker-loader-python-test.wd-test",

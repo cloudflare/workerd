@@ -15,10 +15,10 @@ def get_parser():
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--level",
+        "--package-depth",
         type=int,
-        default=1,
-        help="Directory level for relative path calculation (default: 1)",
+        required=True,
+        help="Number of path components in the Bazel package of the generated config",
     )
     parser.add_argument(
         "--template",
@@ -38,7 +38,7 @@ def get_parser():
     return parser
 
 
-def make_module_list(file_paths, level=1):
+def make_module_list(file_paths, package_depth):
     modules = []
     for f_path in file_paths:
         if Path(f_path).is_dir():
@@ -49,8 +49,10 @@ def make_module_list(file_paths, level=1):
         #
         # On Windows, we replace windows-style path separators with standard posix path separators.
         components = Path(f_path).parts
-        # without `external/` prefix
-        parents = 6 + level
+        # without `external/` prefix. The embed is relative to the generated config, so climb out
+        # of its package to the main repository, then once more to the external repositories
+        # beside it.
+        parents = package_depth + 1
         embed_path = ("../" * parents) + str(Path(*components[1:])).replace(
             "\\", "\\\\"
         )
@@ -76,11 +78,10 @@ def write_output(modules, template_path, outfile):
 def main():
     parser = get_parser()
     args = parser.parse_args()
-    level = args.level
     file_paths = args.file_paths
     outfile = args.out
     template = args.template
-    modules = make_module_list(file_paths, level)
+    modules = make_module_list(file_paths, args.package_depth)
     write_output(modules, template, outfile)
 
 

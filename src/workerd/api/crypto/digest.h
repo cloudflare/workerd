@@ -21,6 +21,12 @@ class HmacContext final {
 
   size_t size() const;
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(digest, state.tryGet<jsg::JsRef<jsg::JsUint8Array>>()) {
+      visitor.visit(digest);
+    }
+  }
+
  private:
   // Will be kj::Own<HMAC_CTX> while the HMAC data is being updated,
   // and jsg::JsRef<jsg::JsUint8Array> after the digest() has been called.
@@ -39,6 +45,12 @@ class HashContext final {
   HashContext clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
 
   size_t size() const;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(digest, state.tryGet<jsg::JsRef<jsg::JsUint8Array>>()) {
+      visitor.visit(digest);
+    }
+  }
 
  private:
   HashContext(

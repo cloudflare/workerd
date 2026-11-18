@@ -29,7 +29,12 @@ export function readLink(
   options: { failIfNotSymlink: boolean }
 ): string;
 
-export function link(from: URL, to: URL, options: { symbolic: boolean }): void;
+export function link(
+  from: URL,
+  to: URL,
+  options: { symbolic: boolean },
+  rawTarget?: string
+): void;
 
 export function unlink(path: URL): void;
 
