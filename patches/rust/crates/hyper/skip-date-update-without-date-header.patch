@@ -1,0 +1,39 @@
+diff --git a/src/proto/h1/conn.rs b/src/proto/h1/conn.rs
+--- a/src/proto/h1/conn.rs
++++ b/src/proto/h1/conn.rs
+@@ -161,6 +161,19 @@
+         self.state.date_header = false;
+     }
+ 
++    /// workerd: whether this connection writes a `Date` header, which needs the cached date
++    /// kept current.
++    pub(crate) fn date_header(&self) -> bool {
++        #[cfg(feature = "server")]
++        {
++            self.state.date_header
++        }
++        #[cfg(not(feature = "server"))]
++        {
++            false
++        }
++    }
++
+     pub(crate) fn into_inner(self) -> (I, Bytes) {
+         self.io.into_inner()
+     }
+diff --git a/src/proto/h1/dispatch.rs b/src/proto/h1/dispatch.rs
+--- a/src/proto/h1/dispatch.rs
++++ b/src/proto/h1/dispatch.rs
+@@ -145,7 +145,11 @@
+         cx: &mut Context<'_>,
+         should_shutdown: bool,
+     ) -> Poll<crate::Result<Dispatched>> {
+-        T::update_date();
++        // workerd: a connection that writes no `Date` header has no use for the date, which
++        // costs a clock read on every poll.
++        if self.conn.date_header() {
++            T::update_date();
++        }
+ 
+         ready!(self.poll_loop(cx))?;
+ 
