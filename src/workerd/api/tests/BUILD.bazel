@@ -1937,6 +1937,11 @@ wd_test(
 )
 
 wd_test(
+    src = "response-buffer-body-test.wd-test",
+    data = ["response-buffer-body-test.js"],
+)
+
+wd_test(
     src = "body-locked-stream-test.wd-test",
     data = ["body-locked-stream-test.js"],
 )
