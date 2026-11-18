@@ -368,16 +368,31 @@ Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard)
       guard(guard) {}
 
 Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
+  // One pass collects the headers, so that the copy can be sized exactly. Requests rarely have
+  // more headers than fit in `firstEntries`.
+  constexpr size_t STACK_ENTRIES = 32;
+  Entry firstEntries[STACK_ENTRIES];
+  kj::Vector<Entry> moreEntries;
   size_t count = 0;
-  size_t size = 0;
+  size_t charCount = 0;
   headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    if (count < STACK_ENTRIES) {
+      firstEntries[count] = Entry{.name = name, .value = value};
+    } else {
+      moreEntries.add(Entry{.name = name, .value = value});
+    }
     ++count;
-    size += name.size() + value.size() + 2;
+    charCount += name.size() + value.size() + 2;
   });
+  auto source = [&](size_t i) -> Entry& {
+    return i < STACK_ENTRIES ? firstEntries[i] : moreEntries[i - STACK_ENTRIES];
+  };
 
-  chars = kj::heapArray<char>(size);
-  auto builder = kj::heapArrayBuilder<Entry>(count);
-  char* pos = chars.begin();
+  // The entries, then the strings.
+  static_assert(alignof(Entry) <= alignof(max_align_t));
+  storage = kj::heapArray<kj::byte>(count * sizeof(Entry) + charCount);
+  entries = kj::arrayPtr(reinterpret_cast<Entry*>(storage.begin()), count);
+  char* pos = reinterpret_cast<char*>(entries.end());
   auto copy = [&](kj::StringPtr str) {
     memcpy(pos, str.begin(), str.size());
     pos[str.size()] = '\0';
@@ -385,23 +400,26 @@ Headers::Unparsed::Unparsed(const kj::HttpHeaders& headers) {
     pos += str.size() + 1;
     return result;
   };
-  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+  for (auto i: kj::zeroTo(count)) {
     // Copy the name first: argument evaluation order is unspecified.
-    auto nameCopy = copy(name);
-    builder.add(Entry{.name = nameCopy, .value = copy(value)});
-  });
-  entries = builder.finish();
+    auto name = copy(source(i).name);
+    new (&entries[i]) Entry{.name = name, .value = copy(source(i).value)};
+  }
 }
 
 Headers::Unparsed Headers::Unparsed::clone() const {
-  auto newChars = kj::heapArray<char>(chars.asPtr());
+  Unparsed result;
+  result.storage = kj::heapArray<kj::byte>(storage.asPtr());
+  result.entries = kj::arrayPtr(reinterpret_cast<Entry*>(result.storage.begin()), entries.size());
   auto rebase = [&](kj::StringPtr str) {
-    return kj::StringPtr(newChars.begin() + (str.begin() - chars.begin()), str.size());
+    auto offset = reinterpret_cast<const kj::byte*>(str.begin()) - storage.begin();
+    return kj::StringPtr(
+        reinterpret_cast<const char*>(result.storage.begin() + offset), str.size());
   };
-  auto newEntries = KJ_MAP(entry, entries) {
-    return Entry{.name = rebase(entry.name), .value = rebase(entry.value)};
-  };
-  return Unparsed(kj::mv(newChars), kj::mv(newEntries));
+  for (auto& entry: result.entries) {
+    entry = Entry{.name = rebase(entry.name), .value = rebase(entry.value)};
+  }
+  return result;
 }
 
 void Headers::parse() {
@@ -880,8 +898,7 @@ bool Headers::inspectImmutable() {
 
 void Headers::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(u, unparsed) {
-    tracker.trackFieldWithSize(
-        "unparsed", u.chars.size() + u.entries.size() * sizeof(Unparsed::Entry));
+    tracker.trackFieldWithSize("unparsed", u.size());
   }
   for (const auto& entry: commonHeaders) {
     tracker.trackField("header", entry.header);
