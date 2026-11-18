@@ -1574,12 +1574,33 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+IoContext::RequestTraceScope::RequestTraceScope(Worker::Lock& lock, IoContext& context) {
+  jsg::Lock& js = lock;
+  auto span = context.getMetrics().getSpan();
+  auto userSpan = context.getRootUserTraceSpan();
+  // The shared frame inherits nothing, so it can only stand in for a frame built in the root.
+  if (!span.isObserved() && !userSpan.isObserved() && context.actor == kj::none &&
+      jsg::AsyncContextFrame::current(js) == kj::none) {
+    scope.init<jsg::AsyncContextFrame::Scope>(js, lock.getRequestRootTraceFrame());
+    return;
+  }
   jsg::AsyncContextFrame::StorageEntry entries[] = {
-    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
-    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+    {lock.getTraceAsyncContextKey(), context.makeTraceScopeValue(lock, kj::mv(span))},
+    {lock.getUserTraceAsyncContextKey(), context.makeUserTraceScopeValue(lock, kj::mv(userSpan))},
   };
-  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+  scope.init<jsg::AsyncContextFrame::StorageScope>(js, entries);
+}
+
+v8::Local<v8::Value> IoContext::getRequestRootUserTraceScope(Worker::Lock& lock) {
+  jsg::Lock& js = lock;
+  if (incomingRequests.empty()) {
+    return makeUserTraceScopeValue(lock, kj::none).getHandle(js);
+  }
+  auto& request = getCurrentIncomingRequest();
+  KJ_IF_SOME(value, request.rootUserTraceScope) {
+    return value.getHandle(js);
+  }
+  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none)).getHandle(js);
 }
 
 jsg::Value IoContext::makeTraceScopeValue(
@@ -1639,17 +1660,20 @@ SpanParent IoContext::getCurrentTraceSpan() {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
       KJ_IF_SOME(value, frame.get(*lock.getTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
-        jsg::Lock& js = lock;
-        auto& state = jsg::unwrapOpaqueRef<TraceScopeState>(js.v8Isolate, handle);
-        // The frame may have been captured by a different request (e.g. via
-        // AsyncLocalStorage.snapshot()), whose span this request can't use.
-        KJ_SWITCH_ONEOF(state) {
-          KJ_CASE_ONEOF(id, Id) {
-            if (id.isCurrent()) return SpanParent(nullptr);
-          }
-          KJ_CASE_ONEOF(spanParent, IoOwn<SpanParent>) {
-            KJ_IF_SOME(span, spanParent.tryGet()) {
-              return span.addRef();
+        // A request-root entry stands for the current request's span, which is the fallback below.
+        if (!isRequestRootTraceScope(handle)) {
+          jsg::Lock& js = lock;
+          auto& state = jsg::unwrapOpaqueRef<TraceScopeState>(js.v8Isolate, handle);
+          // The frame may have been captured by a different request (e.g. via
+          // AsyncLocalStorage.snapshot()), whose span this request can't use.
+          KJ_SWITCH_ONEOF(state) {
+            KJ_CASE_ONEOF(id, Id) {
+              if (id.isCurrent()) return SpanParent(nullptr);
+            }
+            KJ_CASE_ONEOF(spanParent, IoOwn<SpanParent>) {
+              KJ_IF_SOME(span, spanParent.tryGet()) {
+                return span.addRef();
+              }
             }
           }
         }
@@ -1659,6 +1683,9 @@ SpanParent IoContext::getCurrentTraceSpan() {
 
   // If async context is unavailable (unset, from another request, or JS lock is not held), fall
   // back to heuristic of using the trace info from the most recent active request.
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  }
   return getMetrics().getSpan();
 }
 
@@ -1672,17 +1699,20 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
       KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
-        jsg::Lock& js = lock;
-        auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, handle);
-        // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
-        // fall back to this request's root span.
-        KJ_SWITCH_ONEOF(state) {
-          KJ_CASE_ONEOF(id, Id) {
-            if (id.isCurrent()) return SpanParent(nullptr);
-          }
-          KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
-            KJ_IF_SOME(context, asyncContext.tryGet()) {
-              return context.getSpan();
+        // A request-root entry stands for this request's root span, which is the fallback below.
+        if (!isRequestRootTraceScope(handle)) {
+          jsg::Lock& js = lock;
+          auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, handle);
+          // As in getCurrentTraceSpan(), the frame may belong to a different request, in which
+          // case fall back to this request's root span.
+          KJ_SWITCH_ONEOF(state) {
+            KJ_CASE_ONEOF(id, Id) {
+              if (id.isCurrent()) return SpanParent(nullptr);
+            }
+            KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
+              KJ_IF_SOME(context, asyncContext.tryGet()) {
+                return context.getSpan();
+              }
             }
           }
         }
