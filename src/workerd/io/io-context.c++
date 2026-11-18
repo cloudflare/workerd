@@ -1604,11 +1604,14 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
+  // A nested scope belongs to the same request as the scope it is nested in.
+  SpanParent root =
+      userSpanOverride == kj::none ? getRootUserTraceSpan() : getCurrentRootUserTraceSpan();
   SpanParent userSpan(nullptr);
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
   } else {
-    userSpan = getRootUserTraceSpan();
+    userSpan = root.addRef();
   }
 
   if (!userSpan.isObserved()) {
@@ -1624,7 +1627,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   }
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
-      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
+      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext), kj::mv(root));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
@@ -1661,6 +1664,14 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
+  return getUserTraceSpanFromAsyncContext(UserTraceSpanKind::ACTIVE);
+}
+
+SpanParent IoContext::getCurrentRootUserTraceSpan() {
+  return getUserTraceSpanFromAsyncContext(UserTraceSpanKind::ROOT);
+}
+
+SpanParent IoContext::getUserTraceSpanFromAsyncContext(UserTraceSpanKind kind) {
   if (incomingRequests.empty()) {
     return SpanParent(nullptr);
   }
@@ -1680,7 +1691,13 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
           }
           KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
             KJ_IF_SOME(context, asyncContext.tryGet()) {
-              return context.getSpan();
+              switch (kind) {
+                case UserTraceSpanKind::ACTIVE:
+                  return context.getSpan();
+                case UserTraceSpanKind::ROOT:
+                  return context.getRoot();
+              }
+              KJ_UNREACHABLE;
             }
           }
         }

@@ -1,0 +1,54 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Validates tracing.withActiveSpanContext(): what getActiveSpan() returns inside the callback, and
+# the traces and parents of spans created inside it in the streaming-tail event stream.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tracing-active-span-context-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracing-active-span-context-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        streamingTails = ["tail"],
+        durableObjectNamespaces = [
+          (
+            className = "OverlappingRequests",
+            uniqueKey = "tracing-active-span-context-overlapping-requests"
+          )
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (
+            name = "fetchTarget",
+            service = "tracing-hierarchy-mock"
+          ),
+          (
+            name = "overlapping",
+            durableObjectNamespace = "OverlappingRequests"
+          ),
+        ],
+      )
+    ),
+    # Tailed too, to check that a service called inside withActiveSpanContext() joins the trace.
+    ( name = "tracing-hierarchy-mock",
+      worker = (
+        compatibilityFlags = ["nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
+        ],
+        streamingTails = ["tail"],
+      )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
+  ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tracing-active-span-context-instrumentation-test.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+);
