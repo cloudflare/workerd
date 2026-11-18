@@ -65,6 +65,10 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   // some common dependency between a set of failed alarms
   static constexpr auto RETRY_JITTER_FACTOR = 0.25;
 
+  // How long we wait for the actor to reply that it knows an alarm is abandoned, before we tell it
+  // again.
+  static constexpr auto ABANDON_ALARM_TIMEOUT = 60 * kj::SECONDS;
+
   // Obtains a WorkerInterface for the given actor. `actor.name` carries the actor's original name
   // (from `idFromName()`) if it was persisted, so that the reconstructed ID exposes `ctx.id.name`.
   using GetActorFn = kj::Function<kj::Own<WorkerInterface>(const ActorKey& actor)>;
@@ -83,7 +87,9 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   void deleteAll();
 
  private:
-  enum class AlarmStatus { WAITING, STARTED, FINISHED };
+  // An alarm is ABANDONING while we tell the actor that it is abandoned. Setting or deleting the
+  // actor's alarm then replaces it at once, since the actor then no longer has the abandoned alarm.
+  enum class AlarmStatus { WAITING, STARTED, FINISHED, ABANDONING };
   const kj::Clock& clock;
   kj::Timer& timer;
   std::default_random_engine random;
@@ -119,11 +125,17 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   kj::Promise<void> makeAlarmTask(
       kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
 
-  // Tells the actor that the alarm at scheduledTime is abandoned, after `delay` if given, and then
-  // runs the alarm queued behind it, if any. Otherwise it deletes the abandoned alarm, or, if the
-  // actor couldn't be told, tells it again after a backoff.
+  // Tells the actor that its ABANDONING alarm at scheduledTime is abandoned, after `delay` if given,
+  // and then deletes the alarm, or, if the actor couldn't be told, tells it again after a backoff.
   kj::Promise<void> abandonAlarm(
       const ActorKey& actor, kj::Date scheduledTime, kj::Maybe<kj::Duration> delay = kj::none);
+
+  // Cancels the task that tells the actor its alarm is abandoned, if `alarm` is ABANDONING, before
+  // the caller replaces or erases `alarm`.
+  void cancelAbandonment(ScheduledAlarm& alarm);
+
+  // The actor's alarm, if it is the ABANDONING one at scheduledTime.
+  kj::Maybe<ScheduledAlarm&> findAbandoning(const ActorKey& actor, kj::Date scheduledTime);
 
   // The delay before `alarm` is next retried, with jitter. Advances its backoff.
   kj::Duration nextRetryDelay(ScheduledAlarm& alarm);

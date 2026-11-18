@@ -130,11 +130,12 @@ bool AlarmScheduler::setAlarm(const ActorKey& actor, kj::Date scheduledTime) {
   });
 
   if (existing) {
-    if (entry.status != AlarmStatus::WAITING) {
+    if (entry.status == AlarmStatus::STARTED || entry.status == AlarmStatus::FINISHED) {
       // We queue any new alarm after the existing alarm even if the new alarm has the same scheduled
       // time, as receiving a notification directly maps to a write for that time in the actor.
       entry.queuedAlarm = scheduledTime;
     } else {
+      cancelAbandonment(entry);
       entry = scheduleAlarm(clock.now(), entry.actor, scheduledTime);
     }
   }
@@ -163,12 +164,21 @@ bool AlarmScheduler::deleteAlarm(const ActorKey& actor) {
     } else {
       if (entry.value.status != AlarmStatus::STARTED) {
         // We can't remove running alarms.
+        cancelAbandonment(entry.value);
         alarms.erase(entry);
       }
     }
   }
 
   return query.changeCount() > 0;
+}
+
+void AlarmScheduler::cancelAbandonment(ScheduledAlarm& alarm) {
+  if (alarm.status == AlarmStatus::ABANDONING) {
+    // Telling the actor may be what sets or deletes its alarm, e.g. when the actor requests its
+    // stored alarm again, so the task can't be destroyed until a later turn.
+    tasks.add(kj::evalLater([task = kj::mv(alarm.task)]() mutable { task = nullptr; }));
+  }
 }
 
 AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(
@@ -252,6 +262,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // replies.
         // If the notification fails, we keep the alarm in the scheduler so it is not silently
         // lost, and tell the actor again later.
+        entry.value.status = AlarmStatus::ABANDONING;
         entry.value.task = abandonAlarm(ownActor, scheduledTime);
         co_return;
       }
@@ -277,6 +288,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     } else {
       KJ_ASSERT(entry.value.queuedAlarm == kj::none);
       if (alarmOutcome.outcome == EventOutcome::ABORTED) {
+        entry.value.status = AlarmStatus::ABANDONING;
         entry.value.task = abandonAlarm(ownActor, scheduledTime);
         co_return;
       }
@@ -302,45 +314,52 @@ kj::Duration AlarmScheduler::nextRetryDelay(ScheduledAlarm& alarm) {
 kj::Promise<void> AlarmScheduler::abandonAlarm(
     const ActorKey& actor, kj::Date scheduledTime, kj::Maybe<kj::Duration> delay) {
   auto ownActor = actor.clone();
+  // Telling the actor may set or delete its alarm, which replaces the task that the caller is still
+  // assigning, so we tell it on a later turn.
   KJ_IF_SOME(d, delay) {
     co_await timer.afterDelay(d);
-    KJ_ASSERT_NONNULL(alarms.find(ownActor)).status = AlarmStatus::FINISHED;
+  } else {
+    co_await kj::yield();
+  }
+  // cancelAbandonment() may not have canceled this task yet.
+  if (findAbandoning(ownActor, scheduledTime) == kj::none) {
+    co_return;
   }
   bool notified = false;
   try {
-    // evalNow() makes a synchronous failure wait for the event loop too, since the code below may
-    // replace the task that the caller is still assigning.
-    co_await kj::evalNow([&]() {
-      auto worker = getActor(ownActor);
-      return worker->abandonAlarm(scheduledTime).attach(kj::mv(worker));
-    });
+    auto worker = getActor(ownActor);
+    // The actor may not reply, e.g. if it waits for an input lock that a hung request holds.
+    co_await timer.timeoutAfter(ABANDON_ALARM_TIMEOUT, worker->abandonAlarm(scheduledTime));
     notified = true;
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
     KJ_LOG(WARNING, "abandonAlarm notification failed, keeping alarm in scheduler", exception);
   }
 
-  KJ_IF_SOME(entry, alarms.findEntry(ownActor)) {
-    if (entry.value.status != AlarmStatus::FINISHED || entry.value.scheduledTime != scheduledTime) {
-      co_return;
-    }
-
+  KJ_IF_SOME(alarm, findAbandoning(ownActor, scheduledTime)) {
     // This task cannot remove or replace the promise that owns it until it has been moved out of
     // the alarm entry.
-    tasks.add(kj::mv(entry.value.task));
-    KJ_IF_SOME(replacement, entry.value.queuedAlarm) {
-      entry.value = scheduleAlarm(clock.now(), entry.value.actor, replacement);
-    } else if (notified) {
+    tasks.add(kj::mv(alarm.task));
+    if (notified) {
+      alarm.status = AlarmStatus::FINISHED;
       deleteAlarm(ownActor);
     } else {
       // The actor may still have the alarm, which deleting it here would leave unscheduled. Running
       // it again would run a handler that may have asked not to be retried, so we tell the actor
-      // again later instead. Until then, the alarm is WAITING, so that setting or deleting the
-      // actor's alarm replaces it at once: the actor then no longer has the abandoned alarm.
-      entry.value.status = AlarmStatus::WAITING;
-      entry.value.task = abandonAlarm(ownActor, scheduledTime, nextRetryDelay(entry.value));
+      // again later instead.
+      alarm.task = abandonAlarm(ownActor, scheduledTime, nextRetryDelay(alarm));
     }
   }
+}
+
+kj::Maybe<AlarmScheduler::ScheduledAlarm&> AlarmScheduler::findAbandoning(
+    const ActorKey& actor, kj::Date scheduledTime) {
+  KJ_IF_SOME(alarm, alarms.find(actor)) {
+    if (alarm.status == AlarmStatus::ABANDONING && alarm.scheduledTime == scheduledTime) {
+      return alarm;
+    }
+  }
+  return kj::none;
 }
 
 void AlarmScheduler::taskFailed(kj::Exception&& e) {
