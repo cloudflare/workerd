@@ -127,6 +127,9 @@ namespace workerd::util {
   /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
      (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
   V(RUST_MEMORY_CACHE)                                                                             \
+  /* When enabled, Analytics Engine bindings are the Rust AnalyticsEngine                         \
+     (src/workerd/api/analytics-engine-api) instead of the C++ one (api/analytics-engine.c++). */ \
+  V(RUST_ANALYTICS_ENGINE)                                                                         \
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \

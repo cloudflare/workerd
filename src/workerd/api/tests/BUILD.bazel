@@ -484,6 +484,15 @@ wd_test(
 )
 
 wd_test(
+    src = "analytics-engine-rust-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "analytics-engine-test.js",
+        "analytics-engine-test.wd-test",
+    ],
+)
+
+wd_test(
     src = "http-standard-test.wd-test",
     args = [
         "--experimental",
