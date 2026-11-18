@@ -10,6 +10,7 @@
 #include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/loop-pin.h>
 
 #include <lol_html.h>
 
@@ -453,6 +454,7 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
   return kj::evalLater([weakThis = addWeakToThis(), buffer]() mutable {
     return getFiberPool().startFiber([weakThis = kj::mv(weakThis), buffer](kj::WaitScope& scope) {
+      util::LoopPin pin;
       auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before write ran");
       self.maybeWaitScope = scope;
       if (!self.isPoisoned()) {
@@ -472,6 +474,7 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> p
   KJ_ASSERT(maybeWaitScope == kj::none);
   return kj::evalLater([weakThis = addWeakToThis(), pieces]() mutable {
     return getFiberPool().startFiber([weakThis = kj::mv(weakThis), pieces](kj::WaitScope& scope) {
+      util::LoopPin pin;
       auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before write ran");
       self.maybeWaitScope = scope;
       if (!self.isPoisoned()) {
@@ -496,6 +499,7 @@ kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == kj::none);
   return kj::evalLater([weakThis = addWeakToThis()]() mutable {
     return getFiberPool().startFiber([weakThis = kj::mv(weakThis)](kj::WaitScope& scope) {
+      util::LoopPin pin;
       auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before end ran");
       self.maybeWaitScope = scope;
       if (!self.isPoisoned()) {
