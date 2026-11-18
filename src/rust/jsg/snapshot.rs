@@ -105,8 +105,8 @@ impl RestoredReferences<'_> {
         if wrappable == 0 {
             return None;
         }
-        // SAFETY: C++ passes the Wrappables of restored wrappers, which stay alive while the
-        // context is created.
+        // SAFETY: a `RestoredReferences` is made only by `ErasedSnapshotTransfer::snapshot_relink`,
+        // whose caller guarantees each entry is 0 or a live `Wrappable` of the lock's isolate.
         unsafe { Rc::from_restored_wrappable(lock, wrappable as *const Wrappable) }
     }
 }
@@ -124,7 +124,10 @@ pub trait ErasedSnapshotTransfer {
     }
 
     /// Calls [`SnapshotTransfer::snapshot_relink`] with the Wrappables C++ passes; 0 for none.
-    fn snapshot_relink(&self, _lock: &mut Lock<'_>, _restored: &[usize]) {}
+    ///
+    /// # Safety
+    /// Each entry of `restored` is 0 or the address of a live `Wrappable` of the lock's isolate.
+    unsafe fn snapshot_relink(&self, _lock: &mut Lock<'_>, _restored: &[usize]) {}
 }
 
 impl<R: SnapshotTransfer> ErasedSnapshotTransfer for R {
@@ -143,7 +146,7 @@ impl<R: SnapshotTransfer> ErasedSnapshotTransfer for R {
         references.wrappables
     }
 
-    fn snapshot_relink(&self, lock: &mut Lock<'_>, restored: &[usize]) {
+    unsafe fn snapshot_relink(&self, lock: &mut Lock<'_>, restored: &[usize]) {
         SnapshotTransfer::snapshot_relink(
             self,
             lock,

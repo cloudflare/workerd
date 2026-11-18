@@ -5012,7 +5012,9 @@ unsafe fn wrappable_invoke_snapshot_relink(
     // `HandleScope` innermost until it returns.
     let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
     let lock = scope.open();
-    transfer.snapshot_relink(lock, restored);
+    // SAFETY: C++ passes the Wrappables of restored wrappers of this isolate, which stay alive
+    // while the context is created.
+    unsafe { transfer.snapshot_relink(lock, restored) };
 }
 
 unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str {
