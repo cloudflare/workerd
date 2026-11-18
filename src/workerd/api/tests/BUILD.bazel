@@ -1808,6 +1808,17 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-liftoff-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "test.wasm",
+        "worker-loader-liftoff-test.js",
+    ],
+    # The test uses V8 natives syntax, which eslint can't parse.
+    lint = False,
+)
+
+wd_test(
     size = "large",
     src = "worker-loader-limits-test.wd-test",
     args = ["--experimental"],
