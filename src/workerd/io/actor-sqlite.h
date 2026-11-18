@@ -359,6 +359,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // so it will be picked up when the current in-flight operation completes.
   void scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParent parentSpan);
 
+  // Requests the stored alarm, `storedTime`, from the alarm scheduler again, since an earlier
+  // request for it may have failed or been canceled. Later requests wait for this one, even if the
+  // caller drops the returned promise, which rejects if the request fails.
+  kj::Promise<void> rescheduleStoredAlarm(kj::Maybe<kj::Date> storedTime);
+
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling
     kj::Maybe<kj::Promise<void>> schedulingPromise;
