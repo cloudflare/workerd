@@ -212,9 +212,9 @@ void ActorCache::cancelDeferredAlarmDeletion() {
 }
 
 kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime) {
-  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
-  // Reset the in-memory alarm state to unknown so the next getAlarm() refetches from storage
-  // rather than serving a potentially stale cached value.
+  // Called when the alarm scheduler has given up on an alarm, e.g. after too many counted failures
+  // or an abort that doesn't retry. Reset the in-memory alarm state to unknown so the next
+  // getAlarm() refetches from storage rather than serving a potentially stale cached value.
   // Only act if we still have a clean KnownAlarmTime whose time matches the abandoned alarm.
   KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
     KJ_IF_SOME(storedTime, t.time) {
@@ -223,7 +223,7 @@ kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime
           currentAlarmTime = UnknownAlarmTime{};
           return kj::Maybe<kj::Date>(kj::none);
         } else {
-          // The user set a different alarm. Return it so AlarmManager can re-register.
+          // The user set a different alarm, and it is clean, so storage has it.
           return kj::Maybe<kj::Date>(storedTime);
         }
       }

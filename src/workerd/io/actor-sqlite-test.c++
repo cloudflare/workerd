@@ -3258,15 +3258,15 @@ KJ_TEST("ActorSqlite alarm cleared by abandonAlarm") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  // abandonAlarm() clears the alarm from SQLite:
+  // abandonAlarm() clears the alarm from SQLite, and returns once that is committed:
   // setAlarm(null) -> commit -> scheduleRun(none) (move-later path).
-  auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
+  auto promise = test.actor.abandonAlarm(oneMs);
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
   test.pollAndExpectCalls({});
 
-  // Returns kj::none: alarm was cleared, AlarmManager should not re-register.
-  KJ_ASSERT(result == kj::none);
+  // Returns kj::none: the alarm was cleared, and the actor has no other alarm.
+  KJ_ASSERT(promise.wait(test.ws) == kj::none);
 
   // getAlarm() now returns null (alarm deleted from SQLite).
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
@@ -3303,7 +3303,7 @@ KJ_TEST("ActorSqlite alarm preserved after ALARM_RETRY_MAX_TRIES uncounted (inte
   }
 }
 
-KJ_TEST("ActorSqlite abandonAlarm is a no-op when a newer alarm has replaced the abandoned one") {
+KJ_TEST("ActorSqlite abandonAlarm reports a newer alarm that has replaced the abandoned one") {
   // If the user sets a new alarm between the last retry failure and the abandonAlarm() call,
   // and it has already committed to SQLite, abandonAlarm() must compare the time and leave
   // the new alarm untouched.
@@ -3326,16 +3326,105 @@ KJ_TEST("ActorSqlite abandonAlarm is a no-op when a newer alarm has replaced the
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 
-  // abandonAlarm() for the original oneMs alarm must be a no-op: storedTime (twoMs) !=
-  // scheduledTime (oneMs), so the time check prevents clearing the new alarm.
-  // Returns twoMs so AlarmManager can re-register the actor's real alarm.
+  // storedTime (twoMs) != scheduledTime (oneMs), so the time check prevents clearing the new
+  // alarm. abandonAlarm() returns it, for the scheduler to schedule, without writing or scheduling
+  // anything itself.
   auto result = test.actor.abandonAlarm(oneMs).wait(test.ws);
-  test.pollAndExpectCalls({});  // No commit or scheduleRun -- correct no-op.
+  test.pollAndExpectCalls({});
 
   KJ_ASSERT(KJ_ASSERT_NONNULL(result) == twoMs);
 
   // getAlarm() must still return twoMs.
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("ActorSqlite abandonAlarm reports a newer alarm only once it is committed") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  auto promise = test.actor.abandonAlarm(oneMs);
+  auto commit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  commit->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(test.ws)) == twoMs);
+  test.pollAndExpectCalls({});
+}
+
+KJ_TEST("ActorSqlite abandonAlarm waits for a commit that starts while it waits") {
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  auto promise = test.actor.abandonAlarm(oneMs);
+  auto firstCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+  // The second commit is in flight, with no transaction open, once the first one completes.
+  test.setAlarm(threeMs);
+  auto secondCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  firstCommit->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  secondCommit->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]->fulfill();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(test.ws)) == threeMs);
+  test.pollAndExpectCalls({});
+}
+
+KJ_TEST("ActorSqlite abandonAlarm fails when the commit of a newer alarm fails") {
+  // The commit rolls the newer alarm back, so it must not be reported.
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  test.setAlarm(twoMs);
+  auto promise = test.actor.abandonAlarm(oneMs);
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "a_failed_commit"));
+  KJ_EXPECT_THROW_MESSAGE("a_failed_commit", promise.wait(test.ws));
+}
+
+KJ_TEST("ActorSqlite abandonAlarm reports the stored alarm in an instance started after it") {
+  // An instance aborted after committing a newer alarm may not have given it to the scheduler.
+  // A new instance gets the abandonment, and reports the stored alarm.
+  ActorSqliteTest test;
+
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
+      KJ_EXCEPTION(DISCONNECTED, "move-later request canceled"));
+  test.pollAndExpectCalls({});
+
+  ActorSqlite restarted(kj::heap<SqliteDatabase>(test.vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY),
+      test.gate, KJ_BIND_METHOD(test, commitCallback), test.hooks);
+  auto result = restarted.abandonAlarm(oneMs).wait(test.ws);
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(KJ_ASSERT_NONNULL(result) == twoMs);
+  KJ_ASSERT(expectSync(restarted.getAlarm({})) == twoMs);
+}
+
+KJ_TEST("ActorSqlite abandonAlarm requires no transaction to be open") {
+  ActorSqliteTest test;
+
+  auto txn = test.startTransaction();
+  KJ_EXPECT_THROW_MESSAGE("inside a transaction", test.actor.abandonAlarm(oneMs).wait(test.ws));
+  txn->rollback().wait(test.ws);
 }
 
 KJ_TEST("ActorSqlite abandonAlarm returns kj::none when no alarm is stored") {

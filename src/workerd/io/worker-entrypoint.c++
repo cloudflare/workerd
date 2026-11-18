@@ -1124,7 +1124,10 @@ kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date schedul
       req->getContext().getActor(), "abandonAlarm() should only work with actors");
   auto& persistent = KJ_REQUIRE_NONNULL(
       actor.getPersistent(), "abandonAlarm() requires actor with persistent storage");
-  return persistent.abandonAlarm(scheduledTime);
+  // Hold the input lock, so that no transaction is open and no event writes while the storage
+  // decides which alarm it has.
+  auto inputLock = co_await actor.getInputGate().wait(nullptr);
+  co_return co_await persistent.abandonAlarm(scheduledTime);
 }
 
 kj::Promise<void> WorkerEntrypoint::bench(

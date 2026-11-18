@@ -1128,26 +1128,38 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 }
 
 kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTime) {
-  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
-  // Clear the alarm from SQLite so getAlarm() returns null instead of a stale time.
-  // Only clear if SQLite currently has the exact alarm being abandoned and we're not mid-handler.
-  // The time check guards against the race where the user set a new alarm (which always has a
-  // time >= now() > scheduledTime due to past-time clamping in setAlarm) before this call arrived.
+  // Called when the alarm scheduler has given up on an alarm, e.g. after too many counted failures
+  // or an abort that doesn't retry. Clear the alarm from SQLite so getAlarm() returns null instead
+  // of a stale time.
+  KJ_REQUIRE(!currentTxn.is<ExplicitTxn*>(), "abandonAlarm() called inside a transaction");
+
+  // Wait for the stored alarm to be committed, so that we don't report an alarm that a failed
+  // commit then rolls back, maybe to the abandoned one. Writes made while we wait start another
+  // commit, so wait for that too. A failed commit breaks the output gate, which rejects the wait.
+  while (isCommitScheduled() || metadata.getAlarm() != lastConfirmedAlarmDbState) {
+    co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
+  }
+
   if (inAlarmHandler) {
-    // Shouldn't happen -- AlarmManager shouldn't call abandonAlarm while a handler is running.
+    // The abandoned alarm's run has finished, so the running handler is another alarm's, e.g. one
+    // the user set before the abandonment arrived. That handler settles the alarm state.
     LOG_WARNING_ONCE("abandonAlarm called while alarm handler is still running");
-    return kj::Maybe<kj::Date>(kj::none);
+    co_return kj::none;
   }
   KJ_IF_SOME(storedTime, metadata.getAlarm()) {
+    // Only clear if SQLite has the exact alarm being abandoned. The time check guards against the
+    // race where the user set a new alarm (which always has a time >= now() > scheduledTime due to
+    // past-time clamping in setAlarm) before this call arrived.
     if (storedTime == scheduledTime) {
       setAlarm(kj::none, {}, nullptr);
-      return kj::Maybe<kj::Date>(kj::none);
-    } else {
-      // The user set a different alarm. Return it so AlarmManager can re-register.
-      return kj::Maybe<kj::Date>(storedTime);
+      co_await KJ_ASSERT_NONNULL(onNoPendingFlush(nullptr));
+      co_return kj::none;
     }
+    // The user set a different alarm. The request that gave it to the scheduler may have failed or
+    // been canceled, e.g. because the instance that set it was aborted, so report it.
+    co_return storedTime;
   }
-  return kj::Maybe<kj::Date>(kj::none);
+  co_return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush(SpanParent parentSpan) {
