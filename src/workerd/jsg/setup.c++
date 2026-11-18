@@ -767,6 +767,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
   domExceptionTemplate.Reset();
+  internalFunctionTemplates.clear();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
   domExceptionBrandKey.Reset();
@@ -1262,6 +1263,29 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate
   return from(isolate).domExceptionTemplate.Get(isolate);
 }
 
+v8::Local<v8::ObjectTemplate> IsolateBase::getInternalFunctionTemplate(
+    v8::FunctionCallback callback) {
+  auto& slot = internalFunctionTemplates.findOrCreate(reinterpret_cast<uintptr_t>(callback), [&]() {
+    auto objectTemplate = v8::ObjectTemplate::New(ptr);
+    objectTemplate->SetInternalFieldCount(1);
+    objectTemplate->SetCallAsFunctionHandler(callback);
+    // A startup snapshot that holds one of these objects refers to the callback.
+    registerExternalReference(reinterpret_cast<intptr_t>(callback));
+    return decltype(internalFunctionTemplates)::Entry{
+      reinterpret_cast<uintptr_t>(callback), v8::Global<v8::ObjectTemplate>(ptr, objectTemplate)};
+  });
+  return slot.Get(ptr);
+}
+
+v8::Local<v8::Function> newInternalFunction(
+    v8::Local<v8::Context> context, v8::FunctionCallback callback, v8::Local<v8::Value> data) {
+  auto isolate = v8::Isolate::GetCurrent();
+  auto object =
+      check(IsolateBase::from(isolate).getInternalFunctionTemplate(callback)->NewInstance(context));
+  object->SetInternalField(0, data.IsEmpty() ? v8::Undefined(isolate).As<v8::Value>() : data);
+  return object.As<v8::Function>();
+}
+
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->jsSerializeModeKey.Get(isolate);
@@ -1307,6 +1331,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(domExceptionTemplate.Reset());
+    KJ_DEFER(internalFunctionTemplates.clear());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(domExceptionBrandKey.Reset());
