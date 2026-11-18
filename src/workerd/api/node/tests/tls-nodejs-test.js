@@ -619,6 +619,28 @@ export const testCheckServerIdentity = {
         error: "IP: 127.0.0.2 is not in the cert's list: " + '127.0.0.1',
       },
       {
+        host: 'fe80::1%eth0',
+        cert: {
+          subjectaltname: 'IP Address:FE80:0:0:0:0:0:0:1',
+          subject: {},
+        },
+      },
+      {
+        host: 'fe80::1',
+        cert: {
+          subjectaltname: 'IP Address:FE80:0:0:0:0:0:0:1%eth0',
+          subject: {},
+        },
+      },
+      {
+        host: '9.9.9.9',
+        cert: {
+          subjectaltname: 'IP Address:0:0:0:0:0:0:102:304',
+          subject: {},
+        },
+        error: "IP: 9.9.9.9 is not in the cert's list: " + '::1.2.3.4',
+      },
+      {
         host: '127.0.0.1',
         cert: {
           subjectaltname: 'DNS:a.com',

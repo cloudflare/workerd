@@ -2029,9 +2029,10 @@ export function onConnectionClosed(this: Socket): void {
   // Nobody is reading (the socket is paused or stopped on backpressure), so
   // no read will observe the connection's end: end the readable here.
   // push(null) is a no-op if it already has; read(0) lets 'end' fire on a
-  // socket nobody is reading, as in Node.
+  // socket nobody is reading, as in Node. As in startRead(), it is the
+  // Readable's own read(0): the socket's read() override would start reading.
   this.push(null);
-  this.read(0);
+  Duplex.prototype.read.call(this, 0);
 }
 
 async function startRead(socket: Socket): Promise<void> {

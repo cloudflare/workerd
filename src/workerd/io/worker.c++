@@ -773,6 +773,7 @@ struct Worker::Isolate::Impl {
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
+      ::workerd::rust::jsg::restoreResourceTemplatesFromSnapshot(lock->v8Isolate);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -1226,9 +1227,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
-    // Never in multi-tenant processes: the hook slows down every promise in the isolate.
+    // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
+    // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
+    // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
+    // the snapshot installs a hook of its own.
     KJ_IF_SOME(config, asyncTraceConfig) {
-      if (config.promises && asyncTraceIsolate != kj::none) {
+      if (config.promises && asyncTraceIsolate != kj::none && !lock->isPreparingSnapshot()) {
         if (isMultiTenantProcess()) {
           KJ_LOG(ERROR, "ignoring AsyncTraceConfig::promises in a multi-tenant process");
         } else {
@@ -2468,6 +2472,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
             auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+            if (isolateBase.isStartingFromSnapshot()) {
+              // Objects restored from the snapshot were built before the context existed. Its
+              // embedder-data slots are all populated now, the VFS above being the last, and
+              // none of the Worker's JavaScript has run in it yet, so they bind to what the
+              // context carries (api::FileSystemHandle to the VFS).
+              isolateBase.notifySnapshotContextReady(js);
+            }
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.
@@ -2726,21 +2737,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             "the zygote's top level failed; no startup snapshot was created", e.getDescription());
       }
 
-      // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-      // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-      // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-      // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. The handles the Realm caches
-      // for struct types are reset by the same call. Templates are recreated lazily on demand and
-      // a START_FROM_SNAPSHOT isolate starts with an empty cache.
-      kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-      {
-        auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          rustTemplateHandles.add(
-              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
-        }
-      }
+      // The templates of Rust JSG resource types (e.g. node-internal:dns) are v8::Globals in the
+      // Rust Realm, invisible to the C++ template slots. They are pinned into the snapshot, and
+      // their handles reset with the other isolate handles before CreateBlob().
+      auto rustTemplateHandles =
+          ::workerd::rust::jsg::pinResourceTemplatesIntoSnapshot(lock.v8Isolate);
       auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;

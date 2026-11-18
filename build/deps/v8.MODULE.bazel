@@ -78,6 +78,7 @@ PATCHES = [
     "0053-Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum.patch",
     "0054-Add-SnapshotCreator-HasSuspendedGenerators.patch",
     "0055-Track-external-memory-separately-from-the-global-allocation-limit.patch",
+    "0056-Skip-the-copy-of-zero-bytes-in-SnapshotByteSource-CopyRaw.patch",
 ]
 
 http_archive(

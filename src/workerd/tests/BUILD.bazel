@@ -23,6 +23,18 @@ wd_cc_library(
     }),
 )
 
+# The main() of wd_cc_benchmark() executables.
+wd_cc_library(
+    name = "bench-main",
+    srcs = ["bench-main.c++"],
+    tags = ["workerd-benchmark"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@google_benchmark//:benchmark",
+    ],
+)
+
 kj_test(
     src = "bench-tools-test.c++",
     malloc = "//src/workerd/server:malloc",

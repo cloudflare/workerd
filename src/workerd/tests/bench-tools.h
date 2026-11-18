@@ -56,11 +56,18 @@ inline void warmUpAllocationSampling() {
 }  // namespace workerd::bench
 #endif  // defined(WD_USE_TCMALLOC)
 
+namespace benchmark {
+// Google Benchmark's --benchmark_dry_run, which bench-main.c++ sets under `bazel test`.
+BENCHMARK_EXPORT extern bool FLAGS_benchmark_dry_run;
+}  // namespace benchmark
+
 namespace workerd::bench {
 
 // Collect allocation samples separately so profiling does not affect the timing measurements.
+// Does nothing in a dry run, which measures nothing.
 template <typename Callback>
 void recordAllocationStats(benchmark::State& state, Callback&& callback) {
+  if (benchmark::FLAGS_benchmark_dry_run) return;
 #ifdef WD_USE_TCMALLOC
   auto samplingInterval = tcmalloc::MallocExtension::GetProfileSamplingInterval();
   tcmalloc::MallocExtension::SetProfileSamplingInterval(1);

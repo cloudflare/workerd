@@ -49,6 +49,17 @@ void sendExceptionToInspector(jsg::Lock& js,
     const JsValue& exception,
     JsMessage message);
 
+// Inform the inspector of an exception thrown, as the overload above does once it has a message.
+//
+// Runs no JavaScript, and takes no jsg::Lock, for native code that holds none, such as Rust JSG's
+// shims. Requires an entered context. Returns false, and reports nothing, if V8 fails to describe
+// the message, leaving an exception pending, which it does only if execution is terminating.
+bool sendExceptionToInspector(v8::Isolate* isolate,
+    v8_inspector::V8Inspector& inspector,
+    kj::StringPtr source,
+    v8::Local<v8::Value> exception,
+    v8::Local<v8::Message> message);
+
 }  // namespace workerd::jsg
 
 namespace v8_inspector {
