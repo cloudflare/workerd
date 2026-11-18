@@ -12,6 +12,8 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/util/mimetype.h>
 
+#include <capnp/rpc.capnp.h>
+#include <capnp/serialize-async.h>
 #include <kj/compat/http.h>
 
 namespace workerd::server {
@@ -191,6 +193,141 @@ kj::Promise<void> factory_accept_debug_port(
   capnp::TwoPartyServer rpcServer(rpc::WorkerdDebugPort::Client(
       kj::heap<WorkerdDebugPortImpl>(impl.getServer().server_clone(), impl.httpOverCapnpFactory)));
   co_await rpcServer.accept(*stream);
+}
+
+// =======================================================================================
+// Cluster peers
+
+namespace {
+// What a cluster peer's session serves: the debug port's interface, with only `getActor`, for the
+// actors of clustered namespaces. Every request on one of those is counted on the session, so that
+// a stopping instance knows which it started (`ClusterNode::stop_peer_sessions`); `getEntrypoint`
+// is unimplemented.
+class ClusterPeerPortImpl final: public rpc::WorkerdDebugPort::Server {
+ public:
+  ClusterPeerPortImpl(::rust::Box<ServerHandle> server,
+      ::rust::Box<PeerSession> session,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : server(kj::mv(server)),
+        session(kj::mv(session)),
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+  kj::Promise<void> getActor(GetActorContext context) override {
+    auto params = context.getParams();
+    auto target = subrequest_channel_into_kj(server->resolve_peer_actor(*session,
+        toRust(params.getService()), toRust(params.getEntrypoint()), toRust(params.getActorId())));
+    context.initResults(capnp::MessageSize{4, 1})
+        .setActor(kj::heap<WorkerdBootstrapImpl>(kj::mv(target), httpOverCapnpFactory));
+    return kj::READY_NOW;
+  }
+
+ private:
+  ::rust::Box<ServerHandle> server;
+  ::rust::Box<PeerSession> session;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+};
+
+// The stream a peer's session runs over. Once `closing` fails, every read does, with its
+// exception: the session then disconnects with it as its reason, which the RPC system sends the
+// peer unless the session is idle (see below). Its write side then stays open, for the caller to
+// end (`getReason()`).
+class ClosingStream final: public kj::AsyncIoStream {
+ public:
+  ClosingStream(kj::AsyncIoStream& inner, kj::Promise<void> closing)
+      : inner(inner),
+        closing(closing.fork()) {}
+
+  // Why the session was closed, if it was closed this way.
+  kj::Maybe<const kj::Exception&> getReason() const {
+    return reason;
+  }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto failed = closing.addBranch().then(
+        []() -> size_t { KJ_FAIL_REQUIRE("a session's closing future resolved without a reason"); },
+        // A stream outlives the reads it returns (kj::AsyncInputStream's contract).
+        // NOLINTNEXTLINE(workerd-unsafe-continuation-capture)
+        [this](kj::Exception&& e) -> size_t {
+      if (reason == kj::none) reason = e.clone();
+      kj::throwFatalException(kj::mv(e));
+    });
+    return inner.tryRead(buffer, minBytes, maxBytes).exclusiveJoin(kj::mv(failed));
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner.write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner.write(pieces);
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner.whenWriteDisconnected();
+  }
+  void shutdownWrite() override {
+    if (reason == kj::none) inner.shutdownWrite();
+  }
+  void abortRead() override {
+    inner.abortRead();
+  }
+
+ private:
+  kj::AsyncIoStream& inner;
+  kj::ForkedPromise<void> closing;
+  kj::Maybe<kj::Exception> reason;
+};
+
+// How long a session this instance closed waits for the peer to close its side, once the reason
+// is sent, so a peer that does not close it holds up the stop little. About this long: the KJ
+// timer advances only when the loop runs out of work, and on a loop that stays busy this runs
+// past it. The connections deadline bounds the stop in any case.
+constexpr kj::Duration PEER_CLOSE_TIMEOUT = 1 * kj::SECONDS;
+
+// Reads `stream` until the peer closes it.
+kj::Promise<void> readUntilClosed(kj::AsyncInputStream& stream) {
+  auto scratch = kj::heapArray<kj::byte>(4096);
+  while (co_await stream.tryRead(scratch.begin(), 1, scratch.size()) > 0) {}
+}
+}  // namespace
+
+kj::Promise<void> factory_accept_cluster_peer(const WorkerFactory& factory,
+    kj::Own<kj::AsyncIoStream> stream,
+    ::rust::Box<PeerSession> peer,
+    ::rust::Box<ResultTask> closing) {
+  auto& impl = factory.getImpl();
+  ClosingStream session(*stream, result_task_run(kj::mv(closing)));
+  {
+    capnp::TwoPartyServer rpcServer(rpc::WorkerdDebugPort::Client(kj::heap<ClusterPeerPortImpl>(
+        impl.getServer().server_clone(), kj::mv(peer), impl.httpOverCapnpFactory)));
+    co_await rpcServer.accept(session);
+  }
+  KJ_IF_SOME(reason, session.getReason()) {
+    // Closed by this instance. The RPC system sends no reason when the session is idle, with no
+    // call or capability outstanding either way. Idle on this side does not mean idle on the
+    // peer's, which may have sent calls this side has not read, and fails those with a plain
+    // disconnect if it reads no reason. So the reason goes again here; a peer that read it once
+    // ignores what follows. The peer fails every call it still has out on the session with it,
+    // and shuts its side too. Read on until then, so that the stream closes with nothing of the
+    // peer's unread, which would reset the connection and might discard the reason before the
+    // peer read it; but for about PEER_CLOSE_TIMEOUT at most.
+    KJ_TRY {
+      capnp::MallocMessageBuilder message;
+      auto abort = message.initRoot<capnp::rpc::Message>().initAbort();
+      abort.setReason(reason.getDescription());
+      abort.setType(static_cast<capnp::rpc::Exception::Type>(reason.getType()));
+      auto details = reason.getDetails();
+      auto out = abort.initDetails(details.size());
+      for (auto i: kj::indices(details)) {
+        out[i].setDetailId(details[i].id);
+        out[i].setData(details[i].value);
+      }
+      co_await capnp::writeMessage(*stream, message);
+      stream->shutdownWrite();
+      co_await readUntilClosed(*stream).exclusiveJoin(impl.timer.afterDelay(PEER_CLOSE_TIMEOUT));
+    }
+    KJ_CATCH(e) {
+      // The peer is gone.
+      (void)e;
+    }
+  }
 }
 
 // =======================================================================================
