@@ -246,8 +246,7 @@ IoContext::IoContext(ThreadContext& thread,
       reverseIoOwnValidity(kj::arc<ReverseIoOwnValidity>()),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
-      tasks(*this),
-      deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
+      tasks(*this) {
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -525,7 +524,7 @@ void IoContext::IncomingRequest::cancelPendingWorkForHibernation() {
   // Cross-context promise reactions queued for this context would run on its next turn. The
   // context is about to be destroyed, which drops them anyway; drop them now. The task only runs
   // on its own event-loop turns, never within this call, so it is safe to destroy here.
-  context->deleteQueueSignalTask = nullptr;
+  context->deleteQueueSignalTask = kj::Promise<void>(kj::NEVER_DONE);
   KJ_IF_SOME(exception, context->cancelPendingWork([]() {
     return JSG_KJ_EXCEPTION(FAILED, Error, "The Durable Object is hibernating.");
   }, ClearTasks::NO)) {
@@ -2201,10 +2200,24 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
+    ensureDeleteQueueSignalTask();
     auto deferral = kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
     promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
+}
+
+IoCrossContextExecutor IoContext::getCrossContextExecutor() {
+  ensureDeleteQueueSignalTask();
+  return IoCrossContextExecutor(deleteQueue.queue.addRef());
+}
+
+void IoContext::ensureDeleteQueueSignalTask() {
+  if (deleteQueueSignalTask == kj::none) {
+    // The coroutine installs the queue's signal before it first suspends, so before the caller
+    // hands out an executor.
+    deleteQueueSignalTask = startDeleteQueueSignalTask(this);
+  }
 }
 
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {

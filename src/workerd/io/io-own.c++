@@ -54,7 +54,11 @@ bool DeleteQueue::tryScheduleAction(kj::Function<void(jsg::Lock&)>&& action) con
   auto lock = crossThreadDeleteQueue.lockExclusive();
   KJ_IF_SOME(state, *lock) {
     state.actions.add(kj::mv(action));
-    KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+    // The owner installs the signal before it makes any executor, so it is missing only if the
+    // owner stopped listening for hibernation first, which drops the actions anyway.
+    KJ_IF_SOME(fulfiller, state.crossThreadFulfiller) {
+      fulfiller->fulfill();
+    }
     return true;
   }
   // The queue was deleted, likely because the IoContext was destroyed and the DeleteQueuePtr
