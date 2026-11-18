@@ -24,6 +24,14 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "weakref-test.wd-test",
+    data = [
+        "weakref-target.js",
+        "weakref-test.js",
+    ],
+)
+
+wd_test(
     src = "streams-pending-gc-test.wd-test",
     data = ["streams-pending-gc-test.js"],
 )
