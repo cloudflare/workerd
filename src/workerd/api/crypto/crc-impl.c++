@@ -5,6 +5,8 @@
 #include "crc-impl.h"
 
 #include <array>
+#include <bit>
+#include <cstring>
 #include <type_traits>
 
 namespace {
@@ -60,9 +62,58 @@ constexpr std::array<T, crcTableSize> gen_crc_table(T polynomial, bool reflectIn
 // https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-32-iscsi
 constexpr auto crc32c_table = gen_crc_table(static_cast<uint32_t>(0x1edc6f41), true, true);
 #endif
-// https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-64-nvme
-constexpr auto crc64nvme_table =
-    gen_crc_table(static_cast<uint64_t>(0xad93d23594c93659), true, true);
+// Slicing-by-16 tables for CRC-64/NVME
+// (https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-64-nvme).
+// crc64nvme_tables[0] is the usual byte-at-a-time table. crc64nvme_tables[k][b] is the CRC of byte
+// value b followed by k zero bytes, so a 16-byte block can be folded into the CRC with 16
+// independent lookups, one per byte at its distance from the end of the block, instead of a chain
+// of 16 dependent ones.
+constexpr auto crc64nvmeSlices = 16;
+using Crc64nvmeTables = std::array<std::array<uint64_t, crcTableSize>, crc64nvmeSlices>;
+
+constexpr Crc64nvmeTables gen_crc64nvme_tables() {
+  Crc64nvmeTables tables{};
+  tables[0] = gen_crc_table(static_cast<uint64_t>(0xad93d23594c93659), true, true);
+  for (int k = 1; k < crc64nvmeSlices; ++k) {
+    for (int b = 0; b < crcTableSize; ++b) {
+      uint64_t prev = tables[k - 1][b];
+      tables[k][b] = (prev >> 8) ^ tables[0][prev & 0xff];
+    }
+  }
+  return tables;
+}
+
+constexpr auto crc64nvme_tables = gen_crc64nvme_tables();
+
+// Reads 8 bytes at a possibly unaligned address as a little-endian integer.
+inline uint64_t loadLittleEndian64(const uint8_t *data) {
+  uint64_t value;
+  memcpy(&value, data, sizeof(value));
+  if constexpr (std::endian::native == std::endian::big) {
+    value = __builtin_bswap64(value);
+  }
+  return value;
+}
+
+// CRC-64/NVME without the initial and final inversion: `crc` is the raw CRC register.
+uint64_t crc64nvmeRaw(uint64_t crc, const uint8_t *data, size_t length) {
+  const auto &t = crc64nvme_tables;
+  while (length >= 16) {
+    // The register is xored into the first 8 bytes of the block, as in the byte-at-a-time loop.
+    uint64_t low = crc ^ loadLittleEndian64(data);
+    uint64_t high = loadLittleEndian64(data + 8);
+    crc = 0;
+    for (int i = 0; i < 8; ++i) {
+      crc ^= t[15 - i][(low >> (8 * i)) & 0xff] ^ t[7 - i][(high >> (8 * i)) & 0xff];
+    }
+    data += 16;
+    length -= 16;
+  }
+  while (length--) {
+    crc = t[0][(crc ^ *data++) & 0xff] ^ (crc >> 8);
+  }
+  return crc;
+}
 }  // namespace
 
 uint32_t crc32c(uint32_t crc, const uint8_t *data, unsigned int length) {
@@ -102,9 +153,5 @@ uint64_t crc64nvme(uint64_t crc, const uint8_t *data, unsigned int length) {
   if (data == nullptr) {
     return 0;
   }
-  crc ^= 0xffffffffffffffff;
-  while (length--) {
-    crc = crc64nvme_table[(crc ^ *data++) & 0xffL] ^ (crc >> 8);
-  }
-  return crc ^ 0xffffffffffffffff;
+  return crc64nvmeRaw(crc ^ 0xffffffffffffffff, data, length) ^ 0xffffffffffffffff;
 }
