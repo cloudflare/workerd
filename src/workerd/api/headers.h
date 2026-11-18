@@ -230,7 +230,20 @@ private:
   // Every method that reads or changes the parsed tables calls this first.
   void parse();
 
-  kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
+  struct CommonHeader {
+    kj::uint id;
+    kj::Own<Header> header;
+  };
+
+  // The common headers present, in increasing order of ID. A request or response carries few of
+  // the ~90 common headers, so this is smaller, and quicker to create, scan and destroy, than a
+  // slot for each.
+  kj::Vector<CommonHeader> commonHeaders;
+
+  kj::Maybe<kj::Own<Header>&> findCommon(kj::uint id);
+  // Adds the common header `id`, which must not be present yet.
+  kj::Own<Header>& addCommon(kj::uint id, kj::Own<Header> header);
+  void eraseCommon(kj::uint id);
 
   // The key is always lower-case.
   kj::HashMap<kj::String, kj::Own<Header>> uncommonHeaders;
