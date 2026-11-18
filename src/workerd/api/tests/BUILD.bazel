@@ -307,6 +307,11 @@ wd_test(
 )
 
 wd_test(
+    src = "fetch-handler-sync-response-test.wd-test",
+    data = ["fetch-handler-sync-response-test.js"],
+)
+
+wd_test(
     src = "connect-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["connect-half-open-test.js"],
