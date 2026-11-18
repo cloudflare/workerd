@@ -1663,6 +1663,18 @@ class Ref {
         isolate, object, resourceNeedsGcTracing<T>(), tag, isContextGlobal);
   }
 
+  // Like attachWrapper(), for a Ref that is being consumed by wrapping it, such as one passed by
+  // value to JavaScript. This Ref stops counting as a strong reference, so if it was the only
+  // one, the new wrapper needs no strong handle just until this Ref is dropped. This Ref still
+  // keeps the object alive, but it no longer keeps the wrapper alive.
+  void attachWrapperReleasingStrongRef(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
+    auto releases = ReleasesStrongRef(strong);
+    strong = false;
+    inner->Wrappable::attachWrapper(
+        isolate, object, resourceNeedsGcTracing<T>(), tag, IsContextGlobal::NO, releases);
+  }
+
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
   // object alive and does not participate in GC tracing. It becomes invalid when the underlying
   // Wrappable is destroyed (all Ref<T>s dropped and JS wrapper collected).
