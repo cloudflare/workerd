@@ -501,10 +501,17 @@ build:release_linux --linkopt="-Wl,-O2"
 
 # Profile-guided optimization of the Linux release build with ThinLTO (build/pgo/README.md).
 # pgo-instrument builds the binary that is run to train the profile, and pgo-use builds with it.
-# V8 is compiled in this build, so the same profile covers it. Rust isn't instrumented: stable rustc
-# can't use clang's profile runtime (-Zno-profiler-runtime is unstable).
+# V8 is compiled in this build, so the same profile covers it. pgo-use optimizes only the C++ code;
+# pgo-use-rust adds the Rust code, and rust-lto adds it to the ThinLTO link.
 build:pgo-instrument --config=release_linux --config=thin-lto
 build:pgo-instrument --copt=-fprofile-generate --linkopt=-fprofile-generate
+# Instrument the Rust code too. Its counters go into the same profile, written by the profile
+# runtime that clang links; rustc's own copy of that runtime would clash with it, and stable rustc
+# only accepts -Zno-profiler-runtime with RUSTC_BOOTSTRAP. extra_rustc_env and extra_rustc_flag
+# apply to target-config rustc actions only, so build scripts and proc macros aren't instrumented.
+build:pgo-instrument --@rules_rust//rust/settings:extra_rustc_env=RUSTC_BOOTSTRAP=1
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Cprofile-generate
+build:pgo-instrument --@rules_rust//:extra_rustc_flag=-Zno-profiler-runtime
 build:pgo-use --config=release_linux --config=thin-lto
 # rules_cc's fdo_optimize feature adds -fprofile-use and silences Clang's warnings about files the
 # profile doesn't cover.
@@ -515,6 +522,19 @@ build:pgo-use --copt=-mllvm=-no-pgo-warn-mismatch
 # Under PGO, LoopIdiomRecognize can take the address of a coroutine frame variable before
 # coro.begin, which CoroSplit doesn't rewrite (https://github.com/llvm/llvm-project/pull/240036).
 build:pgo-use --copt=-mllvm=-disable-loop-idiom-all --linkopt=-Wl,-mllvm,-disable-loop-idiom-all
+# Optimize the Rust code with the profile too. rules_rust has no flag that adds an input to rustc
+# actions, so pgo-use-rust runs them in the local sandbox, and the build passes the profile's
+# absolute path, outside /tmp, which the sandbox replaces with its own:
+#   --@rules_rust//:extra_rustc_flag=-Cprofile-use=$HOME/pgo-profiles/workerd-<hash>.profdata
+# Name the file by its contents' hash: the action cache keys on the flag, not on the file.
+build:pgo-use-rust --config=pgo-use
+build:pgo-use-rust --strategy=Rustc=sandboxed --strategy=RustcMetadata=sandboxed
+build:pgo-use-rust --@rules_rust//:extra_rustc_flag=-Cllvm-args=-no-pgo-warn-mismatch
+# Compile the Rust code to bitcode only (-Clinker-plugin-lto), so the ThinLTO link optimizes the
+# Rust and C++ code together, inlining across the cxx bridge. rustc and lld must share an LLVM
+# major version. rules_rust's lto setting isn't used: it also passes -Clto to binaries, which then
+# don't emit the object file that rules_rust's cc_common link expects.
+build:rust-lto --@rules_rust//:extra_rustc_flag=-Clinker-plugin-lto
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
