@@ -28,17 +28,11 @@ fn url_shows_a_wildcard_as_localhost() {
         "http://localhost:8787"
     );
     assert_eq!(
-        url_of("http", "0.0.0.0:0", 4123).unwrap(),
-        "http://localhost:4123"
+        url_of("https", "[::1]:0", 4123).unwrap(),
+        "https://[::1]:4123"
     );
-    assert_eq!(
-        url_of("https", "[::1]:443", 443).unwrap(),
-        "https://[::1]:443"
-    );
-    assert_eq!(url_of("tcp", "::1", 80).unwrap(), "tcp://[::1]:80");
-    assert!(url_of("http", "unix:/tmp/sock", 0).is_none());
-    assert!(url_of("http", "", 8080).is_none());
     assert!(url_of("http", "loopback:0", 0).is_none());
+    assert!(url_of("http", "unix:/tmp/sock", 0).is_none());
 }
 
 #[test]

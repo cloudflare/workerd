@@ -52,7 +52,7 @@ use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
 use crate::worker::WorkerService;
 
-/// Where `serve` tells a person a line such as a socket's URL.
+/// Where `serve` prints a line for a person.
 pub type Announce = Box<dyn Fn(&str)>;
 
 /// The command line's choices for a run.
@@ -84,20 +84,12 @@ pub struct RunOptions {
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
 /// events are formatted by hand to keep their fields in a fixed order, `port` last: consumers
 /// include shell scripts that cut the port off the end of the line.
-struct Control {
-    file: Option<std::fs::File>,
-    /// `RunOptions::announce`, without a control channel.
-    announce: Option<Announce>,
-}
+/// Without a control channel, the socket URLs go to `RunOptions::announce`.
+struct Control(Option<std::fs::File>, Option<Announce>);
 
 impl Control {
-    fn new(file: Option<std::fs::File>, announce: Option<Announce>) -> Self {
-        let announce = announce.filter(|_| file.is_none());
-        Self { file, announce }
-    }
-
     fn write(&mut self, line: &str) {
-        if let Some(file) = &mut self.file
+        if let Some(file) = &mut self.0
             && let Err(e) = file.write_all(line.as_bytes())
         {
             tracing::error!("--control-fd: {e}");
@@ -105,7 +97,7 @@ impl Control {
     }
 
     fn listen(&mut self, socket: &str, port: u16, url: Option<String>) {
-        if let (Some(announce), Some(url)) = (&self.announce, url) {
+        if let (None, Some(announce), Some(url)) = (&self.0, &self.1, url) {
             announce(&format!("Listening on {url}"));
         }
         let socket = serde_json::Value::from(socket);
@@ -153,7 +145,7 @@ async fn start(
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
-    let mut control = Control::new(options.control.take(), options.announce.take());
+    let mut control = Control(options.control.take(), options.announce.take());
 
     let bound = listen::bind_sockets(
         config,
