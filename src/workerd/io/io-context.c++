@@ -1846,8 +1846,18 @@ void IoContext::runInContextScope(Worker::LockType lockType,
     currentLock = lock;
 
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      v8::Isolate::PromiseContextScope promiseContextScope(
-          lock.getIsolate(), getPromiseContextTag(lock));
+      // Many requests never create a promise, so until one does, the scope makes the tag only
+      // when its first promise needs it. Once there is a tag, promises from earlier scopes carry
+      // it, so the scope has to start with it.
+      kj::Maybe<v8::Isolate::PromiseContextScope> promiseContextScope;
+      KJ_IF_SOME(tag, promiseContextTag) {
+        promiseContextScope.emplace(lock.getIsolate(), tag.getHandle(js));
+      } else {
+        promiseContextScope.emplace(
+            lock.getIsolate(), [](v8::Isolate* isolate, void* context) -> v8::Local<v8::Object> {
+          return static_cast<IoContext*>(context)->getPromiseContextTag(jsg::Lock::from(isolate));
+        }, this);
+      }
 
       {
         // Handle any pending deletions that arrived while the worker was processing a different
