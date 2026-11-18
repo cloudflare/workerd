@@ -67,6 +67,11 @@ kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
 // Headers that point into the block, with the slots `ids` resolved.
 kj::Own<kj::HttpHeaders> headers_over_block(
     const HeaderIds& ids, ::rust::Slice<const uint8_t> arena, ::rust::Slice<const uint32_t> fields);
+// `headers_over_block`, refilling headers made over the same table in place of what they held.
+void refill_headers_over_block(kj::HttpHeaders& headers,
+    const HeaderIds& ids,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields);
 
 bool ecdsa_verify(Ecdsa algorithm,
     ::rust::Slice<const uint8_t> publicKey,
