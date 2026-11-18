@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::rc::Rc;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use cluster_logic::cache;
 use cluster_logic::lease::Timing;
@@ -14,6 +16,51 @@ use super::check_conditional_writes;
 use crate::Bucket;
 use crate::Error;
 use crate::bucket::memory::Memory;
+
+/// Linking, after `join`, opens storage, which on a slow disk takes longer
+/// than a lease, in turns of the loop that let nothing else run: the lease
+/// thread's rounds, which `join` starts, keep the lease held throughout.
+#[test]
+fn the_lease_holds_however_long_startup_takes_after_join() {
+    // Rounds that fence only once the lease thread got no time for most of
+    // the lease.
+    let timing = Timing {
+        lease_ms: 400,
+        interval_ms: 10,
+        renew_timeout_ms: 20,
+        list_timeout_ms: 20,
+        retry_ms: 5,
+        renew_attempt_ms: 10,
+        list_attempt_ms: 10,
+        contended_pause_ms: 5,
+        max_skew_ms: 5,
+    };
+    let setup = Setup {
+        url: String::new(),
+        options: Vec::new(),
+        node: "a".into(),
+        address: "a:1".into(),
+        timing,
+        key: vec![0; 32],
+    };
+    let (fenced, fence) = mpsc::channel();
+    let cluster = Cluster::threaded(
+        Bucket::memory(""),
+        || Ok(Bucket::memory("")),
+        setup,
+        Box::new(move |reason, _| {
+            let _ = fenced.send(reason);
+        }),
+        Box::new(|body| body()),
+    )
+    .unwrap();
+    block_on(cluster.join()).unwrap();
+    // Linking, as one turn of the loop thread that outlasts the lease.
+    std::thread::sleep(Duration::from_millis(2 * timing.lease_ms));
+    // What an actor database checks before it opens (`require_lease`).
+    assert!(cluster.lease_holds());
+    assert!(fence.try_recv().is_err());
+}
 
 #[test]
 fn a_bucket_that_ignores_preconditions_is_refused() {
@@ -91,10 +138,13 @@ fn cluster(bucket: &Bucket, node: &str) -> Rc<Cluster> {
     Cluster::over(bucket.clone(), setup)
 }
 
-/// A lease round's renewal, sent at `at`, as `Cluster::maintain` counts it.
+/// A lease round's renewal, sent at `at`, as `Keeper::maintain` counts it.
 async fn renew(cluster: &Cluster, at: u64) {
     let until = cluster.renew(at).await.unwrap();
-    cluster.lease.borrow_mut().renewed(at, Ok(until));
+    let super::Lessee::Here(keeper) = &cluster.lessee else {
+        panic!("a test's cluster keeps its lease itself");
+    };
+    keeper.renewed_at(at, Ok(until));
 }
 
 /// `cache::Timing::view` of `membership` is `cache-test.rs`'s `Sim::leases`.

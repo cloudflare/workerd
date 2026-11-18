@@ -124,6 +124,11 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   service resolves and connects with tokio itself (`kj_hyper::client::connect_allowed`). HTTP in
   both directions is hyper through kj-hyper, SIGTERM is `tokio::signal`, `loopback:` is
   `tokio::io::duplex`.
+- One exception to "one thread": a cluster node keeps its lease on the `cluster-lease` thread
+  (`cluster/keeper.rs`), with a tokio `current_thread` runtime and a bucket client of its own,
+  so that a renewal never waits for a turn of the loop. The loop reads the lease's expiry from
+  an atomic and sends the thread commands; a lease that cannot be kept ends the process from
+  that thread.
 - `kj::setupAsyncIo()` (which `//src/workerd/util:setup-async-io` supplies over kj-rs-tokio and
   kj-rs-io) is the same loop for the threads that block on a `kj::WaitScope` from C++: the
   inspector and fallback-service threads, and every `kj_test` binary.

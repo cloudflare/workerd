@@ -202,7 +202,7 @@ impl Registry {
     /// alarms. The record goes once they have. A renewal of ours that lands
     /// first is expired too; no renewal starts after this.
     pub async fn deregister(&self) -> Result<()> {
-        self.left.set(true);
+        self.leave();
         let Some(mut version) = self.own.take() else {
             return Ok(());
         };
@@ -240,7 +240,14 @@ impl Registry {
         self.draining.set(true);
     }
 
-    /// Whether `deregister` ran.
+    /// Marks this instance as having left the cluster, without writing its
+    /// record: for the registry that reads the peers while another, on the
+    /// lease thread, writes the record (`keeper::Thread`).
+    pub fn leave(&self) {
+        self.left.set(true);
+    }
+
+    /// Whether this instance left: `deregister` or `leave` ran.
     pub fn left(&self) -> bool {
         self.left.get()
     }
