@@ -175,7 +175,7 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
       sqliteDirectory(actors->replicated()
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
-      vfs(*sqliteDirectory, {.sync = factory.getImpl().options->syncStorage}),
+      vfs(*sqliteDirectory, {.sync = factory.getImpl().shared.options->syncStorage}),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
@@ -270,9 +270,12 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Str path,
     ::rust::Str uniqueKey,
     ::rust::Box<ActorNamespaceHandle> actors) {
+  // A namespace's storage is opened once per process: its files and its alarm scheduler's
+  // database have one owner.
+  factory.getImpl().requirePrimary("open Durable Object storage"_kj);
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   if (!path.empty()) {
-    auto& fs = factory.getImpl().fs;
+    auto& fs = factory.getImpl().shared.fs;
     auto base = fs.getRoot().openSubdir(fs.getCurrentPath().evalNative(kj::str(path)),
         kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
     directory = base->openSubdir(

@@ -69,7 +69,7 @@ kj::Rc<OtlpSpanExporter> OtlpExporter::addRef() const {
 kj::Own<OtlpExporter> factory_new_otlp_exporter(
     const WorkerFactory& factory, ::rust::Box<SubrequestChannel> collector) {
   return kj::heap<OtlpExporter>(kj::rc<OtlpExporter::Impl>(
-      kj::mv(collector), *factory.getImpl().headerTable, factory.getImpl().timer));
+      kj::mv(collector), *factory.getImpl().shared.headerTable, factory.getImpl().timer));
 }
 
 kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter) {

@@ -23,6 +23,7 @@ use capnp::message::ReaderOptions;
 use capnp::serialize::BufferSegments;
 use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
+use kj_rs::KjArc;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use workerd_capnp::config;
@@ -91,6 +92,13 @@ impl Factory {
     #[must_use]
     pub fn raw(&self) -> &ffi::WorkerFactory {
         &self.inner
+    }
+
+    /// What this factory shares with the factories of the process's other loop threads, which
+    /// `ffi::bootstrap_loop` makes from it. Unlike the factory, it may go to another thread.
+    #[must_use]
+    pub fn shared(&self) -> KjArc<ffi::SharedFactory> {
+        ffi::factory_shared(&self.inner)
     }
 
     /// The config message; `get_root::<config::Reader>()` gives the `Config`. Configs can

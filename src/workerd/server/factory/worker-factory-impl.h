@@ -77,43 +77,74 @@ uint startInspector(kj::String address, InspectorServiceIsolateRegistrar& regist
 
 // =======================================================================================
 
-class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
+class SharedFactory::Impl final {
  public:
-  Impl(WorkerFactory& factory,
-      jsg::V8System& v8System,
-      kj::Timer& timer,
-      const kj::MonotonicClock& monotonicClock,
-      kj::Network& network,
+  Impl(jsg::V8System& v8System,
       kj::EntropySource& entropySource,
       kj::Filesystem& fs,
       kj::Own<Options> options,
       ::rust::Vec<uint64_t> config);
 
   jsg::V8System& v8System;
+  kj::EntropySource& entropySource;
+  kj::Filesystem& fs;
+  // Not changed once the constructor returns, except for what guards itself (the Pyodide bundle
+  // manager).
+  kj::Own<Options> options;
+
+  // The config message. Each loop's factory reads it through a reader of its own, since a
+  // reader counts what it traverses.
+  ::rust::Vec<uint64_t> configMessage;
+
+  // The one header table of the run, and the IDs in it of the headers each loop's capnp factory
+  // and `ThreadContext` use, so that the loops agree on them. The builder is only used while
+  // constructing.
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory::HeaderIdBundle httpOverCapnpHeaderIds;
+  ThreadContext::HeaderIdBundle threadContextHeaderIds;
+  kj::Own<kj::HttpHeaderTable> headerTable;
+
+  // Isolates take the provider by mutable reference; all it offers is thread-safe.
+  mutable kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+  // Every loop's `ChannelTokenHandler` has a copy, so each decodes the others' tokens.
+  ChannelTokenHandler::Key channelTokenKey;
+  // Set when the primary loop starts the inspector.
+  kj::MutexGuarded<kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>>> inspectorRegistrar;
+};
+
+class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
+ public:
+  Impl(WorkerFactory& factory,
+      kj::Arc<SharedFactory> shared,
+      kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
+      kj::Network& network,
+      PrimaryLoop primary);
+
+  // Declared first, so that everything else here is destroyed before the process-wide state
+  // (V8 among it) this may hold the last reference to.
+  kj::Arc<SharedFactory> sharedRef;
+  const SharedFactory::Impl& shared;
+  PrimaryLoop primary;
+  // The loop this factory is bound to.
+  const kj::Executor& executor;
+
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
   // Expires with this factory, which owns every container cleanup that uses `network`.
   WeakOwner<kj::Network&> weakNetwork;
-  kj::EntropySource& entropySource;
-  kj::Filesystem& fs;
-  kj::Own<Options> options;
 
-  // The reader borrows the message, so the message is declared first.
-  ::rust::Vec<uint64_t> configMessage;
+  // This loop's reader of the shared config message.
   capnp::FlatArrayMessageReader configReader;
   config::Config::Reader config;
 
   capnp::ByteStreamFactory byteStreamFactory;
-  kj::HttpHeaderTable::Builder headerTableBuilder;
   capnp::HttpOverCapnpFactory httpOverCapnpFactory;
   ThreadContext threadContext;
-  kj::Own<kj::HttpHeaderTable> headerTable;
 
-  kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   ChannelTokenHandler channelTokenHandler;
   kj::Maybe<::rust::Box<ServerHandle>> server;
-  kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorRegistrar;
 
   // The Docker client of an actor's container. Actors and `setInactivityTimeout()` timers own the
   // client; while one lives, the actor's next incarnation takes the same one.
@@ -137,6 +168,8 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   uint64_t spawnCount = 0;
 
   const ServerHandle& getServer() const;
+  // Throws unless this is the primary loop's factory; `what` names the operation.
+  void requirePrimary(kj::StringPtr what) const;
 
  private:
   void taskFailed(kj::Exception&& exception) override;

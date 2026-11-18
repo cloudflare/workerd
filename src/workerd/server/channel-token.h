@@ -20,6 +20,15 @@ namespace workerd::server {
 // Note that all `Frankenvalue`s here are expected to contain cap tables holding live instances
 // of `SubrequestChannel`, `ActorClassChannel`, and `RpcChannel`.
 class ChannelTokenHandler: public kj::PtrTarget {
+ private:
+  // Annoyingly the OpenSSL/BoringSSL headers don't seem to define these as static constants.
+  static constexpr uint AES_KEY_SIZE = 32;
+  static constexpr uint AES_IV_SIZE = 12;
+  static constexpr uint AES_MAC_SIZE = 16;
+
+  // The key ID is the 16-byte prefix of a SHA-256 hash of the secret key.
+  static constexpr uint KEY_ID_SIZE = 16;
+
  public:
   kj::Weak<ChannelTokenHandler> addWeak() {
     return addWeakToThis();
@@ -60,8 +69,24 @@ class ChannelTokenHandler: public kj::PtrTarget {
         IoChannelFactory::ChannelTokenUsage usage) = 0;
   };
 
-  // Instances of a cluster share `clusterKey`, so each decodes the others' tokens.
+  // The secret tokens are encrypted with, and its ID. Handlers with the same key decode each
+  // other's tokens. Immutable once constructed, so threads may share one.
+  class Key {
+   public:
+    // Instances of a cluster share `clusterKey`, so each derives the same key from it. Without
+    // one the key is random.
+    explicit Key(kj::Maybe<kj::StringPtr> clusterKey = kj::none);
+
+   private:
+    byte tokenKey[AES_KEY_SIZE];
+    byte keyId[KEY_ID_SIZE];
+    friend class ChannelTokenHandler;
+  };
+
+  // A handler with a key of its own: random, or derived from `clusterKey`.
   explicit ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey = kj::none);
+  // A handler with a copy of `key`, which it may share with handlers on other threads.
+  ChannelTokenHandler(Resolver& resolver, const Key& key);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.
   //
@@ -124,17 +149,8 @@ class ChannelTokenHandler: public kj::PtrTarget {
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
  private:
-  // Annoyingly the OpenSSL/BoringSSL headers don't seem to define these as static constants.
-  static constexpr uint AES_KEY_SIZE = 32;
-  static constexpr uint AES_IV_SIZE = 12;
-  static constexpr uint AES_MAC_SIZE = 16;
-
-  // The key ID is the 16-byte prefix of a SHA-256 hash of the secret key.
-  static constexpr uint KEY_ID_SIZE = 16;
-
   Resolver& resolver;
-  byte tokenKey[AES_KEY_SIZE];
-  byte keyId[KEY_ID_SIZE];
+  Key key;
 
   struct TokenHeader {
     uint32_t magic;

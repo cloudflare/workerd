@@ -36,9 +36,10 @@ struct TestFactory {
     auto words = capnp::messageToFlatArray(message);
     auto config = kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
                       .as<kj_rs::RustCopy>();
-    factory = kj::heap<WorkerFactory>(v8System, provider.getTimer(),
-        kj::systemPreciseMonotonicClock(), provider.getNetwork(), entropy, *fs,
-        kj::heap<WorkerFactory::Options>(), kj::mv(config));
+    auto shared = kj::arc<SharedFactory>(
+        v8System, entropy, *fs, kj::heap<WorkerFactory::Options>(), kj::mv(config));
+    factory = kj::heap<WorkerFactory>(kj::mv(shared), provider.getTimer(),
+        kj::systemPreciseMonotonicClock(), provider.getNetwork(), PrimaryLoop::YES);
   }
 
   NullEntropySource entropy;

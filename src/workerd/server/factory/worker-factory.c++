@@ -37,7 +37,9 @@ namespace workerd::server {
 // writes a table's headers ahead of the others, in the table's order and spelling, so these reach
 // the wire as the config spells them. The names point into the config message.
 static kj::Own<kj::HttpHeaderTable> buildHeaderTable(
-    kj::HttpHeaderTable::Builder& builder, config::Config::Reader config) {
+    kj::HttpHeaderTable::Builder& builder, kj::ArrayPtr<const uint64_t> configWords) {
+  capnp::FlatArrayMessageReader reader(asWords(configWords), CONFIG_READER_OPTIONS);
+  auto config = reader.getRoot<config::Config>();
   auto add = [&](config::HttpOptions::Reader options) {
     for (auto header: options.getInjectRequestHeaders()) builder.add(header.getName());
     for (auto header: options.getInjectResponseHeaders()) builder.add(header.getName());
@@ -57,42 +59,42 @@ static kj::Own<kj::HttpHeaderTable> buildHeaderTable(
   return builder.build();
 }
 
-// =======================================================================================
-// WorkerFactory
+// The key of the run's channel tokens: derived from the cluster's key in a cluster, so that its
+// instances decode each other's tokens, else random.
+static ChannelTokenHandler::Key makeChannelTokenKey(kj::ArrayPtr<const uint64_t> configWords) {
+  capnp::FlatArrayMessageReader reader(asWords(configWords), CONFIG_READER_OPTIONS);
+  auto config = reader.getRoot<config::Config>();
+  if (config.hasCluster()) {
+    return ChannelTokenHandler::Key(kj::StringPtr(config.getCluster().getKey()));
+  }
+  return ChannelTokenHandler::Key();
+}
 
-WorkerFactory::Impl::Impl(WorkerFactory& factory,
-    jsg::V8System& v8System,
-    kj::Timer& timer,
-    const kj::MonotonicClock& monotonicClock,
-    kj::Network& network,
+// =======================================================================================
+// SharedFactory
+
+SharedFactory::Impl::Impl(jsg::V8System& v8System,
     kj::EntropySource& entropySource,
     kj::Filesystem& fs,
-    kj::Own<Options> options,
+    kj::Own<Options> optionsParam,
     ::rust::Vec<uint64_t> config)
     : v8System(v8System),
-      timer(timer),
-      monotonicClock(monotonicClock),
-      network(network),
-      weakNetwork(network),
       entropySource(entropySource),
       fs(fs),
-      options(kj::mv(options)),
+      options(kj::mv(optionsParam)),
       configMessage(kj::mv(config)),
-      configReader(asWords(kj::from<Rust>(configMessage)), CONFIG_READER_OPTIONS),
-      config(configReader.getRoot<config::Config>()),
-      httpOverCapnpFactory(
-          byteStreamFactory, headerTableBuilder, capnp::HttpOverCapnpFactory::LEVEL_2),
-      threadContext(
-          timer, entropySource, headerTableBuilder, httpOverCapnpFactory, byteStreamFactory),
-      headerTable(buildHeaderTable(headerTableBuilder, this->config)),
+      // The IDs are assigned in this order: the capnp factory's headers, the `ThreadContext`'s,
+      // then the config's.
+      httpOverCapnpHeaderIds(headerTableBuilder),
+      threadContextHeaderIds(headerTableBuilder),
+      headerTable(buildHeaderTable(headerTableBuilder, kj::from<Rust>(configMessage))),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenHandler(factory,
-          this->config.hasCluster() ? kj::Maybe<kj::StringPtr>(this->config.getCluster().getKey())
-                                    : kj::none),
-      tasks(*this) {
+      channelTokenKey(makeChannelTokenKey(kj::from<Rust>(configMessage))) {
   // The config's logging settings go on top of the caller's.
-  auto& logging = this->options->loggingOptions;
-  auto& root = this->config;
+  capnp::FlatArrayMessageReader reader(
+      asWords(kj::from<Rust>(configMessage)), CONFIG_READER_OPTIONS);
+  auto root = reader.getRoot<config::Config>();
+  auto& logging = options->loggingOptions;
   if (root.hasLogging()) {
     auto conf = root.getLogging();
     logging.structuredLogging = StructuredLogging(conf.getStructuredLogging());
@@ -107,33 +109,83 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
   }
 }
 
+SharedFactory::SharedFactory(jsg::V8System& v8System,
+    kj::EntropySource& entropySource,
+    kj::Filesystem& fs,
+    kj::Own<Options> options,
+    ::rust::Vec<uint64_t> config,
+    kj::Own<void> attachment)
+    : attachment(kj::mv(attachment)),
+      impl(kj::heap<Impl>(v8System, entropySource, fs, kj::mv(options), kj::mv(config))) {}
+
+SharedFactory::~SharedFactory() noexcept(false) = default;
+
+kj::ArrayPtr<const uint64_t> SharedFactory::getConfigWords() const {
+  return kj::from<Rust>(impl->configMessage);
+}
+
+const SharedFactory::Impl& SharedFactory::getImpl() const {
+  return *impl;
+}
+
+// =======================================================================================
+// WorkerFactory
+
+WorkerFactory::Impl::Impl(WorkerFactory& factory,
+    kj::Arc<SharedFactory> sharedParam,
+    kj::Timer& timer,
+    const kj::MonotonicClock& monotonicClock,
+    kj::Network& network,
+    PrimaryLoop primary)
+    : sharedRef(kj::mv(sharedParam)),
+      shared(sharedRef->getImpl()),
+      primary(primary),
+      executor(kj::getCurrentThreadExecutor()),
+      timer(timer),
+      monotonicClock(monotonicClock),
+      network(network),
+      weakNetwork(network),
+      configReader(asWords(kj::from<Rust>(shared.configMessage)), CONFIG_READER_OPTIONS),
+      config(configReader.getRoot<config::Config>()),
+      httpOverCapnpFactory(byteStreamFactory,
+          shared.httpOverCapnpHeaderIds.clone(),
+          capnp::HttpOverCapnpFactory::LEVEL_2),
+      threadContext(timer,
+          shared.entropySource,
+          shared.threadContextHeaderIds,
+          httpOverCapnpFactory,
+          byteStreamFactory),
+      channelTokenHandler(factory, shared.channelTokenKey),
+      tasks(*this) {}
+
 const ServerHandle& WorkerFactory::Impl::getServer() const {
   return *KJ_REQUIRE_NONNULL(server, "the server has not registered with the worker factory");
+}
+
+void WorkerFactory::Impl::requirePrimary(kj::StringPtr what) const {
+  KJ_REQUIRE(primary.toBool(), "only the primary loop's worker factory can do this", what);
 }
 
 void WorkerFactory::Impl::taskFailed(kj::Exception&& exception) {
   KJ_LOG(ERROR, exception);
 }
 
-WorkerFactory::WorkerFactory(jsg::V8System& v8System,
+WorkerFactory::WorkerFactory(kj::Arc<SharedFactory> shared,
     kj::Timer& timer,
     const kj::MonotonicClock& monotonicClock,
     kj::Network& network,
-    kj::EntropySource& entropySource,
-    kj::Filesystem& fs,
-    kj::Own<Options> options,
-    ::rust::Vec<uint64_t> config)
-    : impl(kj::heap<Impl>(*this,
-          v8System,
-          timer,
-          monotonicClock,
-          network,
-          entropySource,
-          fs,
-          kj::mv(options),
-          kj::mv(config))) {}
+    PrimaryLoop primary)
+    : impl(kj::heap<Impl>(*this, kj::mv(shared), timer, monotonicClock, network, primary)) {}
 
-WorkerFactory::~WorkerFactory() noexcept(false) = default;
+WorkerFactory::~WorkerFactory() noexcept(false) {
+  // The tasks, the capnp factories and the Rust server's handle are the loop's.
+  KJ_DTOR_ASSERT(&impl->executor == &kj::getCurrentThreadExecutor(),
+      "a worker factory must be destroyed on the loop it was constructed on");
+}
+
+kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory) {
+  return factory.getImpl().sharedRef.addRef();
+}
 
 void factory_spawn(const WorkerFactory& factory, ::rust::Box<SpawnedTask> task) {
   auto& impl = factory.getImpl();
@@ -196,19 +248,18 @@ kj::Rc<IoChannelFactory::ActorChannel> WorkerFactory::resolveActor(kj::StringPtr
 }
 
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory) {
-  return kj::from<Rust>(factory.getImpl().configMessage).asBytes().as<Rust>();
+  return factory.getImpl().sharedRef->getConfigWords().asBytes().as<Rust>();
 }
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory) {
-  return *factory.getImpl().headerTable;
+  return *factory.getImpl().shared.headerTable;
 }
 
 namespace {
 // The encoders take props by mutable reference for the sake of channels they refcount; the
-// props are otherwise unchanged.
-Frankenvalue& propsRef(kj::Maybe<const Frankenvalue&> props) {
-  static Frankenvalue EMPTY_PROPS;
+// props are otherwise unchanged. `empty` stands in for no props.
+Frankenvalue& propsRef(kj::Maybe<const Frankenvalue&> props, Frankenvalue& empty) {
   KJ_IF_SOME(p, props) return const_cast<Frankenvalue&>(p);
-  return EMPTY_PROPS;
+  return empty;
 }
 }  // namespace
 
@@ -220,8 +271,9 @@ kj::Own<PendingToken> factory_encode_subrequest_token(const WorkerFactory& facto
     TokenUsage usage) {
   auto service = kj::str(serviceName);
   auto ep = toKj(entrypoint);
+  Frankenvalue empty;
   return kj::heap<PendingToken>(factory.getImpl().channelTokenHandler.encodeSubrequestChannelToken(
-      usage, service, ep, propsRef(props), Persistent(persistent)));
+      usage, service, ep, propsRef(props, empty), Persistent(persistent)));
 }
 
 kj::Own<PendingToken> factory_encode_actor_class_token(const WorkerFactory& factory,
@@ -232,8 +284,9 @@ kj::Own<PendingToken> factory_encode_actor_class_token(const WorkerFactory& fact
     TokenUsage usage) {
   auto service = kj::str(serviceName);
   auto cls = kj::str(className);
+  Frankenvalue empty;
   return kj::heap<PendingToken>(factory.getImpl().channelTokenHandler.encodeActorClassChannelToken(
-      usage, service, cls.asPtr(), propsRef(props), Persistent(persistent)));
+      usage, service, cls.asPtr(), propsRef(props, empty), Persistent(persistent)));
 }
 
 kj::Own<PendingToken> factory_encode_actor_token(const WorkerFactory& factory,
@@ -249,16 +302,21 @@ kj::Own<PendingToken> factory_encode_actor_token(const WorkerFactory& factory,
       usage, kj::str(uniqueKey), idImpl.getRaw(), idImpl.getName(), Persistent(persistent)));
 }
 
+kj::Rc<IoChannelFactory::SubrequestChannel> factory_decode_subrequest_token(
+    const WorkerFactory& factory, TokenUsage usage, kj::ArrayPtr<const kj::byte> token) {
+  return factory.getImpl().channelTokenHandler.decodeSubrequestChannelToken(usage, token);
+}
+
 void factory_set_server(const WorkerFactory& factory, ::rust::Box<ServerHandle> server) {
   factory.getImpl().server = kj::mv(server);
 }
 
 bool factory_experimental(const WorkerFactory& factory) {
-  return factory.getImpl().options->experimental;
+  return factory.getImpl().shared.options->experimental;
 }
 
 bool factory_tail_workers(const WorkerFactory& factory) {
-  return factory.getImpl().options->tailWorkers;
+  return factory.getImpl().shared.options->tailWorkers;
 }
 
 Worker::Actor::Id normalizeActorId(Worker::Actor::Id id) {
@@ -1504,7 +1562,7 @@ void indexDynamicChannels(CompiledWorker::Impl& impl, DynamicWorkerSource& sourc
 kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags::Reader flags) {
   if (!flags.getPythonWorkers()) co_return;
   KJ_IF_SOME(release, getPythonSnapshotRelease(flags)) {
-    auto& options = *factory.options;
+    auto& options = *factory.shared.options;
     auto& manager = options.pythonConfig.pyodideBundleManager;
     auto version = getPythonBundleName(release);
     if (manager.getPyodideBundle(version) != kj::none) co_return;
@@ -1575,7 +1633,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   auto impl = kj::refcounted<CompiledWorker::Impl>(constFactory, kj::mv(name));
   impl->isDynamic = dynamicSource != kj::none;
   ErrorReporter errorReporter;
-  auto& options = *factory.options;
+  auto& options = *factory.shared.options;
   bool experimental = options.experimental;
 
   // The code, its flags and its `env`, from the config or the dynamic source.
@@ -1668,9 +1726,9 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         .port = listener.port,
       };
     };
-    auto api = kj::heap<WorkerdApi>(factory.v8System, featureFlags, extensions,
+    auto api = kj::heap<WorkerdApi>(factory.shared.v8System, featureFlags, extensions,
         limitEnforcer->getCreateParams(), jsg::newIsolateGroup(),
-        kj::atomicRefcounted<JsgIsolateObserver>(), *factory.memoryCacheProvider,
+        kj::atomicRefcounted<JsgIsolateObserver>(), *factory.shared.memoryCacheProvider,
         options.pythonConfig, kj::mv(listeners), kj::mv(snapshotConfig));
     Worker::LoggingOptions isolateLoggingOptions = options.loggingOptions;
     isolateLoggingOptions.consoleMode =
@@ -1846,10 +1904,13 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& fac
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
     kj::Maybe<kj::Own<DynamicSource>> dynamicSource) {
-  auto registrar = factory.getImpl().inspectorRegistrar.map(
-      [](kj::Own<InspectorServiceIsolateRegistrar>& r) -> InspectorServiceIsolateRegistrar& {
-    return *r;
-  });
+  auto& impl = factory.getImpl();
+  // The inspector knows the primary loop's isolates only: it holds one isolate per worker name
+  // and dispatches its messages on the primary loop's thread.
+  kj::Maybe<InspectorServiceIsolateRegistrar&> registrar;
+  if (impl.primary.toBool()) {
+    KJ_IF_SOME(r, *impl.shared.inspectorRegistrar.lockExclusive()) registrar = *r;
+  }
   return compileWorker(factory, spec, configService, kj::mv(dynamicSource), registrar);
 }
 
@@ -1880,13 +1941,13 @@ bool factory_assets_navigation_prefers_asset_serving(
     auto name = assets.getUserWorker().getName();
     for (auto service: services) {
       if (service.getName() == name && service.isWorker()) {
-        return compileFlags(*factory.options, service.getWorker(), arena, errorReporter)
+        return compileFlags(*factory.shared.options, service.getWorker(), arena, errorReporter)
             .getAssetsSecFetchModeNavigateHeaderPrefersAssetServing();
       }
     }
     return false;
   }
-  auto flags = compileFlags(*factory.options, assets, arena, errorReporter);
+  auto flags = compileFlags(*factory.shared.options, assets, arena, errorReporter);
   if (!errorReporter.errors.empty()) {
     kj::throwFatalException(KJ_EXCEPTION(FAILED, kj::strArray(errorReporter.errors, "; ")));
   }

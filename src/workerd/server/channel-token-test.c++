@@ -427,6 +427,28 @@ KJ_TEST("instances of a cluster redeem each other's channel tokens") {
       "failed authentication", stranger.decodeSubrequestChannelToken(Usage::RPC, token));
 }
 
+KJ_TEST("handlers that share a key redeem each other's channel tokens") {
+  MockResolver senderResolver, receiverResolver, strangerResolver;
+  ChannelTokenHandler::Key key;
+  ChannelTokenHandler sender(senderResolver, key);
+  ChannelTokenHandler receiver(receiverResolver, key);
+  ChannelTokenHandler stranger(strangerResolver);
+
+  const byte actorId[] = {12, 34, 56, 78};
+  for (auto usage: {Usage::RPC, Usage::STORAGE}) {
+    auto token = sender.encodeActorChannelToken(
+        usage, "foo-namespace", actorId, "my-actor"_kj, Persistent::YES);
+    auto channel = receiver.decodeSubrequestChannelToken(usage, token).downcast<MockActorChannel>();
+    expectActorChannel(*channel, "foo-namespace", actorId, "my-actor"_kj);
+  }
+
+  // A handler with a random key of its own cannot read an encrypted token.
+  auto token = sender.encodeActorChannelToken(
+      Usage::RPC, "foo-namespace", actorId, "my-actor"_kj, Persistent::NO);
+  KJ_EXPECT_THROW_MESSAGE(
+      "failed authentication", stranger.decodeSubrequestChannelToken(Usage::RPC, token));
+}
+
 KJ_TEST("channel token with nested channels (all synchronous)") {
   MockResolver resolver;
   ChannelTokenHandler handler(resolver);
