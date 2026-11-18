@@ -36,6 +36,7 @@ macro_rules! socket_options {
     () => {
         "  -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
   -S, --socket-fd <name>=<fd>        Serve on an inherited fd (systemd)
+      --threads <N>                  Serve on N threads (experimental)
 "
     };
 }

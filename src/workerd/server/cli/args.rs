@@ -219,7 +219,30 @@ pub struct ServeArgs {
 
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
+
+    /// Serve on <N> event-loop threads; more than one requires --experimental.
+    ///
+    /// Every thread accepts connections from the config's sockets and runs its own copy of every
+    /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
+    /// a service binding reaches the Worker of the same thread. Durable Objects all run on one
+    /// thread, where the other threads call them, and a cluster instance is a member of its
+    /// cluster on that thread. A Durable Object does not see the trace span of a caller on
+    /// another thread, and a stub cannot be restored (`restore()`) from another thread than the
+    /// one its source runs on. --inspector-addr and the options that save a Python snapshot are
+    /// not supported with more than one thread. UDP sockets, cron triggers and --debug-port are
+    /// served by one thread only.
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = 1,
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub threads: u32,
 }
+
+/// The most `--threads`: every thread compiles its own copy of every Worker, so more than a
+/// machine has cores only costs memory.
+const MAX_THREADS: i64 = 256;
 
 #[derive(Args, Debug)]
 pub struct DeployArgs {
@@ -540,6 +563,31 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
                 .iter()
                 .any(|addr| addr.name == *name)
         })
+}
+
+/// Why `serve` cannot run on the `--threads` asked for with the other options given, if it
+/// cannot. The server reports the inspector as a config error, too
+/// (`workerd_server::threads::obstacles`).
+pub fn threads_refused(serve: &ServeArgs, serve_or_test: &ServeOrTestArgs) -> Option<&'static str> {
+    if serve.threads <= 1 {
+        return None;
+    }
+    if !serve_or_test.experimental {
+        return Some(
+            "--threads: Serving on more than one thread is an experimental feature which may \
+             change or go away in the future. You must run workerd with `--experimental` to use \
+             this feature.",
+        );
+    }
+    if serve_or_test.inspector_addr.is_some() {
+        return Some("--threads: --inspector-addr is not supported with more than one thread.");
+    }
+    if serve_or_test.python_save_snapshot || serve_or_test.python_save_baseline_snapshot {
+        return Some(
+            "--threads: Saving a Python snapshot is not supported with more than one thread.",
+        );
+    }
+    None
 }
 
 impl From<&TestArgs> for server::TestOptions {

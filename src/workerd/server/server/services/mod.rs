@@ -88,6 +88,32 @@ pub fn not_transferable(what: &str) -> Error {
     kj::failed!("jsg.DOMException(DataCloneError): {what} can't be passed over RPC.")
 }
 
+/// A `bucket` or `cache` service on a replica (threads.rs): the first loop thread's service of
+/// that name.
+///
+/// The first thread has what such a service keeps once in a process, the cluster and with it the
+/// bucket's client and the cache's protocol among it; requests and their bodies cross the
+/// replica's session with it.
+pub struct ForwardedService(Rc<KjOwn<ffi::RpcClient>>);
+
+impl ForwardedService {
+    #[must_use]
+    pub fn new(service: KjOwn<ffi::RpcClient>) -> Self {
+        Self(Rc::new(service))
+    }
+}
+
+impl Channel for ForwardedService {
+    fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
+        let interface = ffi::rpc_client_start_request(&self.0, metadata);
+        Ok(crate::channels::attach(interface, Rc::clone(&self.0)))
+    }
+
+    fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
+        Err(not_transferable("Services of the first loop thread"))
+    }
+}
+
 /// The error a leaf service answers events it has no handler for with.
 pub fn unsupported(what: &str) -> Error {
     kj::failed!("jsg.Error: {what} don't support this event type.")

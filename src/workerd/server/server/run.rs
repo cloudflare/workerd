@@ -4,6 +4,12 @@
 
 //! `workerd serve`, `workerd test` and `workerd bench`: bind the sockets, build the service
 //! graph, listen, and either wait for the drain signal or run the tests or benchmarks.
+//!
+//! `workerd serve --threads=<N>` does this on the process's first loop thread (`run`), which
+//! then starts the others, the replicas (`threads.rs`); each builds the graph again for itself
+//! and listens on duplicates of the first thread's sockets (`run_replica`). The Durable Objects
+//! and the cluster are the first thread's alone, which the replicas reach over their sessions
+//! with it.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -48,6 +54,7 @@ use crate::config::capnp_error;
 use crate::config::text;
 use crate::listen;
 use crate::listen::BoundSocket;
+use crate::listen::DuplicateSockets;
 use crate::listen::HttpSocket;
 use crate::listen::ListenContext;
 use crate::listen::StreamListener;
@@ -55,6 +62,10 @@ use crate::listen::TcpTls;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
+use crate::threads;
+use crate::threads::Phase;
+use crate::threads::Replicas;
+use crate::threads::Signals;
 use crate::worker::WorkerService;
 
 /// Where `serve` prints a line for a person.
@@ -90,6 +101,8 @@ pub struct RunOptions {
     pub started: Option<oneshot::Sender<Weak<Server>>>,
     /// Drain as soon as told to, rather than serving on through `Config.shutdownDelayMs`.
     pub drain_at_once: bool,
+    /// `--threads`, less the thread the server starts on: the loop threads to start besides it.
+    pub replicas: usize,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -142,41 +155,51 @@ type Listeners = FuturesUnordered<LocalBoxFuture<'static, Result<()>>>;
 /// signal.
 struct Running {
     server: Rc<Server>,
+    /// The listeners; the replicas, if any, are one of them (`Replicas::start`).
     listeners: Listeners,
     drain: watch::Sender<bool>,
+    /// The other loop threads of the run, which end with it.
+    replicas: Option<Replicas>,
 }
 
-/// Binds the sockets, starts the inspector, builds the service graph, and starts the listeners.
+/// The loop thread a server is started on.
+enum Role {
+    /// The process's first: it binds the sockets and has everything a process has one of.
+    First,
+    /// Another, which listens on duplicates of the first's sockets.
+    Replica(DuplicateSockets),
+}
+
+/// Binds the sockets, starts the inspector, builds the service graph, and starts the listeners;
+/// on the first loop thread of several, also starts the replicas and waits until each is ready.
 /// Config errors go to `report`; there is nothing to run (`None`) if it refuses to serve with
 /// them. `for_test` exempts the `TEST_TMPDIR` directory override from the unmatched-override
 /// check.
+///
+/// A replica (see `threads.rs`) gets no `options` but the overrides, so it has no control
+/// channel, inspector or debug port, it arms no cron trigger, and it does not join the cluster:
+/// its factory forwards to the first loop thread what needs one (`Factory::first_thread`).
 async fn start(
     factory: Rc<Factory>,
     mut options: RunOptions,
     report: Reporter,
     for_test: bool,
+    role: Role,
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
     let mut control = Control(options.control.take(), options.announce.take());
 
-    let bound = listen::bind_sockets(
-        config,
-        &mut options.socket_addresses,
-        &mut options.socket_fds,
-        factory.loopback(),
-        &report,
-    )
-    .await?;
-    for name in options
-        .socket_addresses
-        .keys()
-        .chain(options.socket_fds.keys())
-    {
-        report.error(format!(
-            "Config did not define any socket named \"{name}\" to match the override provided \
-             on the command line."
-        ));
+    let is_replica = matches!(role, Role::Replica(_));
+    let bound = sockets(role, config, &mut options, &factory, &report).await?;
+
+    // What several threads cannot serve is a config error. A reporter that serves despite errors
+    // (`--watch`) then serves on this thread alone, like any config with an error.
+    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory));
+    if replicas.is_some() {
+        for obstacle in threads::obstacles(options.inspector.is_some()) {
+            report.error(obstacle);
+        }
     }
 
     // The inspector starts before any isolate exists, so that every isolate registers with it.
@@ -187,7 +210,7 @@ async fn start(
 
     // The cluster port is bound before the services, like the sockets: its address goes in the
     // lease record.
-    let cluster_port = if config.has_cluster() {
+    let cluster_port = if config.has_cluster() && !is_replica {
         let conf = config.get_cluster().map_err(capnp_error)?;
         let (address, advertise) = (&options.cluster_address, &options.cluster_advertise);
         Some(cluster::bind(conf, address.as_deref(), advertise.as_deref()).await?)
@@ -209,10 +232,26 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let (listening, mut listeners) = socket_listeners(&context, config, bound.sockets, &server)?;
+    let replica_count = replicas.as_ref().map_or(0, Replicas::count);
+    let SocketListeners {
+        listening,
+        mut listeners,
+        duplicates,
+    } = socket_listeners(&context, config, bound.sockets, &server, replica_count)?;
     // Every config error is reported by now; a config that is refused gets no `listen` event.
     if server.report().refuses() {
         return Ok(None);
+    }
+    // The replicas build their graphs once this thread accepted the config, and are ready
+    // before the process says it listens. Without a stream socket they would have nothing to
+    // serve.
+    let serves_streams = |sockets: &DuplicateSockets| sockets.iter().any(Option::is_some);
+    let replicas =
+        replicas.filter(|_| !server.report().had_errors() && duplicates.iter().any(serves_streams));
+    if let Some(replicas) = &replicas {
+        let deployments = server.report().replica_deployments();
+        let started = replicas.start(&factory, duplicates, &options.overrides, &deployments);
+        listeners.push(started.await?);
     }
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
@@ -222,7 +261,9 @@ async fn start(
     for socket in listening {
         control.listen(&socket.name, socket.port, socket.url);
     }
-    listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
+    if !is_replica {
+        listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
+    }
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
@@ -245,11 +286,48 @@ async fn start(
         let _ = started.send(Rc::downgrade(&server));
     }
 
+    if let Some(replicas) = &replicas {
+        replicas.serve();
+    }
     Ok(Some(Running {
         server,
         listeners,
         drain,
+        replicas,
     }))
+}
+
+/// The config's sockets for the thread of `role`: bound, with the command line's overrides for
+/// them taken out of `options` and those that match no socket reported, or adopted.
+async fn sockets(
+    role: Role,
+    config: config::Reader<'_>,
+    options: &mut RunOptions,
+    factory: &Factory,
+    report: &Reporter,
+) -> Result<listen::BoundSockets> {
+    if let Role::Replica(sockets) = role {
+        return listen::adopt_sockets(config, sockets);
+    }
+    let bound = listen::bind_sockets(
+        config,
+        &mut options.socket_addresses,
+        &mut options.socket_fds,
+        factory.loopback(),
+        report,
+    )
+    .await?;
+    for name in options
+        .socket_addresses
+        .keys()
+        .chain(options.socket_fds.keys())
+    {
+        report.error(format!(
+            "Config did not define any socket named \"{name}\" to match the override provided \
+             on the command line."
+        ));
+    }
+    Ok(bound)
 }
 
 /// Runs this instance's part in the cluster: the peer port, the peer listing, and compaction. They
@@ -279,22 +357,42 @@ struct ListeningSocket {
     url: Option<String>,
 }
 
-/// Starts the listener of every socket of the config that bound; the sockets, for their `listen`
-/// events, and the listeners. A socket whose service does not resolve is a config error.
+/// What `socket_listeners` makes of the bound sockets.
+struct SocketListeners {
+    /// The sockets that listen, for their `listen` events.
+    listening: Vec<ListeningSocket>,
+    listeners: Listeners,
+    /// For each replica, its duplicates of the stream sockets.
+    duplicates: Vec<DuplicateSockets>,
+}
+
+/// Starts the listener of every socket of the config that bound, and makes `replicas` duplicates
+/// of each. A socket whose service does not resolve is a config error.
 fn socket_listeners(
     context: &Rc<ListenContext>,
     config: config::Reader<'_>,
     bound: Vec<Option<(BoundSocket, String)>>,
     server: &Server,
-) -> Result<(Vec<ListeningSocket>, Listeners)> {
+    replicas: usize,
+) -> Result<SocketListeners> {
     let mut listening = Vec::new();
     let listeners = Listeners::new();
+    let mut duplicates: Vec<DuplicateSockets> = Vec::new();
+    duplicates.resize_with(replicas, Vec::new);
     let sockets = config.get_sockets().map_err(capnp_error)?;
     for (sock, bound) in sockets.iter().zip(bound) {
-        // A socket that failed to bind already reported its error.
+        // A socket that failed to bind already reported its error; a replica has no datagram
+        // sockets.
         let Some((bound, address)) = bound else {
+            for sockets in &mut duplicates {
+                sockets.push(None);
+            }
             continue;
         };
+        for sockets in &mut duplicates {
+            let duplicate = listen::duplicate_listener(&bound)?;
+            sockets.push(duplicate.map(|duplicate| (duplicate, address.clone())));
+        }
         let name = text(sock.get_name())?;
         let mut errors = Vec::new();
         let designator = Designator::from_reader(
@@ -316,7 +414,11 @@ fn socket_listeners(
             listeners.push(listener);
         }
     }
-    Ok((listening, listeners))
+    Ok(SocketListeners {
+        listening,
+        listeners,
+        duplicates,
+    })
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -477,6 +579,11 @@ async fn serve_listeners(listeners: &mut Listeners) -> Result<()> {
 /// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
 /// leaves the cluster, and accepts requests for a grace period at least; the cluster's
 /// `stopTimeoutMs` bounds all of it, from the end of the shutdown delay.
+///
+/// The replicas, if any, serve through all of that as this thread's listeners do: they stop
+/// accepting when it does, and it waits for them, with its actors and their sessions up, as it
+/// waits for its own connections. A request a replica has in an object that is handed off, or
+/// sends to one, is this thread's own to the object (`ActorNamespace::channel`).
 #[expect(clippy::too_many_lines, reason = "a server's life, from start to stop")]
 pub async fn run(
     factory: Rc<Factory>,
@@ -489,11 +596,14 @@ pub async fn run(
     } else {
         shutdown_delay(&factory)?
     };
+    // The replicas are bound last, so they are dropped, and with that stopped and joined, before
+    // this thread's server.
     let Some(Running {
         server,
         mut listeners,
         drain: draining,
-    }) = start(factory, options, report, false).await?
+        replicas,
+    }) = start(factory, options, report, false, Role::First).await?
     else {
         return Ok(());
     };
@@ -571,6 +681,9 @@ pub async fn run(
                 stop = Some((Rc::clone(node), deadlines));
             }
             draining.send_replace(true);
+            if let Some(replicas) = &replicas {
+                replicas.drain();
+            }
             if let Some((node, deadlines)) = &stop {
                 let finished = async {
                     if !serving.is_terminated() {
@@ -652,6 +765,87 @@ async fn drain_due(
     futures::future::select(delay, drain.next()).await;
 }
 
+/// `workerd serve` on a loop thread other than the first (see `threads.rs`).
+///
+/// Builds the graph of `factory`'s config for this thread and, once the process serves, accepts
+/// from `sockets` until it drains, then lets the open connections finish.
+///
+/// The first thread accepted the config, so an error in it here is this thread's failure. The
+/// errors and warnings are the ones the first thread reported, and are not reported again.
+pub async fn run_replica(
+    factory: Rc<Factory>,
+    overrides: Overrides,
+    deployments: Deployments,
+    sockets: DuplicateSockets,
+    signals: &Signals,
+) -> Result<()> {
+    let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+    // A deployment's errors leave this thread serving, as they left the first, with the same
+    // services broken.
+    let report = Reporter::new(
+        Box::new({
+            let errors = Rc::clone(&errors);
+            move |error| errors.borrow_mut().push(error)
+        }),
+        Box::new(drop),
+        false,
+    )
+    .with_deployments(deployments, Box::new(drop), Box::new(drop));
+    let options = RunOptions {
+        overrides,
+        ..RunOptions::default()
+    };
+    let role = Role::Replica(sockets);
+    let Some(Running {
+        server: _server,
+        mut listeners,
+        drain: draining,
+        ..
+    }) = start(Rc::clone(&factory), options, report, false, role).await?
+    else {
+        return Err(kj::failed!(
+            "the config has errors here that it did not have on the first loop thread: {}",
+            errors.borrow().join(" ")
+        ));
+    };
+
+    let serve = async {
+        signals.ready();
+        if signals.reached(Phase::Serving).await == Phase::Stopping {
+            return Ok(());
+        }
+        let mut serving = std::pin::pin!(serve_listeners(&mut listeners));
+        let drain = std::pin::pin!(signals.reached(Phase::Draining));
+        match futures::future::select(serving.as_mut(), drain).await {
+            // The listeners end only once they drain: this is a failure, or a thread that
+            // stopped serving, which the first thread takes for one.
+            Either::Left((result, _)) => return result,
+            Either::Right((Phase::Stopping, _)) => return Ok(()),
+            Either::Right(_) => {}
+        }
+        draining.send_replace(true);
+        let stop = std::pin::pin!(signals.reached(Phase::Stopping));
+        match futures::future::select(serving, stop).await {
+            Either::Left((result, _)) => result,
+            Either::Right(_) => Ok(()),
+        }
+    };
+    // The first thread serves this thread's session until this thread has ended, so a session
+    // that ends is one that failed, and this thread's Durable Object calls with it.
+    let lost = async {
+        match factory.first_thread() {
+            Some(first) => first.disconnected().await,
+            None => std::future::pending().await,
+        }
+    };
+    match futures::future::select(std::pin::pin!(serve), std::pin::pin!(lost)).await {
+        Either::Left((result, _)) => result,
+        Either::Right(((), _)) => Err(kj::disconnected!(
+            "the session with the first loop thread ended"
+        )),
+    }
+}
+
 /// An entrypoint `workerd test` or `workerd bench` runs a handler of.
 struct Target {
     channel: Rc<dyn Channel>,
@@ -676,7 +870,7 @@ async fn start_local(
         glob::Pattern::new(pattern).map_err(|e| kj::failed!("{handler} filter \"{pattern}\": {e}"))
     };
     let (services, entrypoints) = (glob(service_pattern)?, glob(entrypoint_pattern)?);
-    let Some(running) = start(factory, options, report, true).await? else {
+    let Some(running) = start(factory, options, report, true, Role::First).await? else {
         return Ok(None);
     };
 

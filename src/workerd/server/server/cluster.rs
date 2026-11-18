@@ -749,7 +749,13 @@ impl ClusterNode {
         })?;
         // A channel per stub, so a stub stays with the instance it reached.
         let connection = RpcConnection {
-            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor)?,
+            client: ffi::rpc_client_debug_actor(
+                &session.client,
+                service,
+                class,
+                actor,
+                kj_rs::KjMaybe::None,
+            )?,
             down: Rc::clone(&session.down),
         };
         Ok(Owner::Remote(Rc::new(connection), node))

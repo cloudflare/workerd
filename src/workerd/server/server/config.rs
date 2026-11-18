@@ -10,6 +10,7 @@
 //! debug-port requests into it.
 
 use std::cell::Cell;
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -64,11 +65,16 @@ use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
 use crate::services::bucket::Home;
+use crate::threads::FirstThread;
+use crate::threads::SessionEnd;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
-/// The C++ worker factory: everything the workers of one run share, owned for the run.
+/// The C++ worker factory: everything the workers of one loop thread share, owned for the run.
 pub struct Factory {
+    /// On a replica (threads.rs), the session with the first loop thread. Declared before the
+    /// factory, which the session's client refers to, so that it is dropped first.
+    first_thread: OnceCell<FirstThread>,
     inner: KjOwn<ffi::WorkerFactory>,
     loopback: Loopback,
 }
@@ -77,9 +83,25 @@ impl Factory {
     #[must_use]
     pub fn new(inner: KjOwn<ffi::WorkerFactory>) -> Self {
         Self {
+            first_thread: OnceCell::new(),
             inner,
             loopback: Loopback::default(),
         }
+    }
+
+    /// Makes this the factory of a replica: what only the first loop thread has, the actors
+    /// and the cluster's bucket, is reached over `end` from now on. Before the server is built.
+    pub fn forward_to_first_thread(&self, end: SessionEnd) {
+        // A factory is a replica's from the start, so this is the only call.
+        let _ = self
+            .first_thread
+            .set(FirstThread::connect(&self.inner, end));
+    }
+
+    /// The session with the first loop thread, on a replica.
+    #[must_use]
+    pub fn first_thread(&self) -> Option<&FirstThread> {
+        self.first_thread.get()
     }
 
     /// The `loopback:` namespace of this server's sockets and external services.
@@ -194,7 +216,7 @@ pub struct Reporter {
 }
 
 /// Tracks which services came from cluster deployments.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Deployments {
     /// The deployment name for each service appended to the node's config, by service name.
     pub services: HashMap<String, String>,
@@ -211,7 +233,7 @@ pub struct Deployments {
 }
 
 /// One line of [`Deployments::log`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeploymentLog {
     Info(String),
     Error(String),
@@ -252,6 +274,17 @@ impl Reporter {
         }
     }
 
+    /// The deployments this reporter attributes errors to, without the messages from loading
+    /// them: what the reporter of another loop thread, which builds the same config, attributes
+    /// its errors by.
+    #[must_use]
+    pub fn replica_deployments(&self) -> Deployments {
+        Deployments {
+            log: Vec::new(),
+            ..self.deployments.clone()
+        }
+    }
+
     /// Records the services of `config` that the node's own config defines, before the services
     /// are built: the implicit `internet` service and every service that no deployment defined.
     pub fn set_node_services(&self, config: config::Reader<'_>) -> Result<()> {
@@ -269,6 +302,12 @@ impl Reporter {
     pub fn error(&self, message: impl Into<String>) {
         self.had_errors.set(true);
         (self.error)(message.into());
+    }
+
+    /// Whether an error in the node's config was reported.
+    #[must_use]
+    pub fn had_errors(&self) -> bool {
+        self.had_errors.get()
     }
 
     /// Whether an error was reported that the server must not serve with.
@@ -422,7 +461,7 @@ impl Reporter {
 }
 
 /// The CLI's substitutions for config values, by service or socket name.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Overrides {
     /// `--directory-path`: a disk or cache service's path.
     pub directories: HashMap<String, String>,
@@ -2024,11 +2063,23 @@ impl ServerHandle {
         service_name: &str,
         class_name: &str,
         actor_id: &str,
+        actor_name: KjMaybe<&str>,
+        local_caller: bool,
     ) -> Result<Box<SubrequestChannel>> {
         let namespace = self.actor_namespace(service_name, class_name)?;
-        Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?, None),
-            None => namespace.channel_by_name(actor_id, false),
+        if namespace.unique_key().is_none() {
+            return Ok(SubrequestChannel::new(
+                namespace.channel_by_name(actor_id, false),
+            ));
+        }
+        let id = ffi::actor_id_from_hex(actor_id, actor_name)?;
+        // Another loop thread's stub is a stub of this process: its channel is the one a stub on
+        // this thread gets, which a draining cluster node routes for as for its own. Whether
+        // the stub is persistent arrives with each of its requests.
+        Ok(SubrequestChannel::new(if local_caller {
+            namespace.channel(id, false)
+        } else {
+            namespace.peer_channel(id, None)
         }))
     }
 
@@ -2102,7 +2153,7 @@ impl ServerHandle {
                      \"{service_name}\""
                 )
             })?;
-        let id = ffi::actor_id_from_hex(actor_id)?;
+        let id = ffi::actor_id_from_hex(actor_id, KjMaybe::None)?;
         let session = Rc::clone(&session.requests);
         Ok(SubrequestChannel::new(
             namespace.peer_channel(id, Some(session)),
@@ -2165,6 +2216,18 @@ fn cluster_services(
 ) -> Result<()> {
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
+        // A replica has no cluster, and these services keep state a process has once: each is
+        // the first loop thread's, which checked it.
+        if let Some(first) = factory.first_thread() {
+            if matches!(
+                conf.which(),
+                Ok(service::Which::Bucket(_) | service::Which::Cache(_))
+            ) {
+                let forwarded = crate::services::ForwardedService::new(first.service(&name)?);
+                services.0.insert(name, Service::Leaf(Rc::new(forwarded)));
+            }
+            continue;
+        }
         let bucket = match conf.which() {
             Ok(service::Which::Bucket(bucket)) => bucket,
             Ok(service::Which::Cache(cache)) => {

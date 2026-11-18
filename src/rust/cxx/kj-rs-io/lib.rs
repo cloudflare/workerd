@@ -111,6 +111,7 @@
 compile_error!("kj-rs-io supports Unix and Windows targets only");
 
 pub use error::exception_type;
+pub use net::ListenerDuplicate;
 pub use net::TokioAddress;
 pub use net::TokioListener;
 pub use net::wrap_listener;
@@ -177,6 +178,7 @@ const _: () = {
     send_sync::<TokioAddress>();
     send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
+    send_sync::<net::ListenerDuplicate>();
     send_sync::<watcher::TokioFileWatcher>();
 };
 

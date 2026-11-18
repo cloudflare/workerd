@@ -8,7 +8,10 @@
 //! Sockets are kj-rs-io's (`TokioAddress`: KJ's address grammar, resolver, socket options and
 //! accept retries over tokio) but for a `loopback:name` address, which names a queue of this
 //! server's registry (`listen::loopback`). They are bound before the services start so that a
-//! worker can learn its own address. A listener is one future: its accept loop and every
+//! worker can learn its own address. The first loop thread binds them; another loop thread
+//! accepts from the same stream sockets through duplicates the first hands it
+//! (`duplicate_listener`, `adopt_sockets`), with a listener of its own on its own loop, and has
+//! no datagram sockets. A listener is one future: its accept loop and every
 //! connection it accepted, so that `run()` can wait for the connections to finish once draining
 //! has stopped the accept loop. A failure of the accept loop itself is the listener's failure,
 //! and fatal to the server; a failure of one connection is logged and ends that connection only.
@@ -36,6 +39,7 @@ use kj_hyper::server::ServerSettings;
 use kj_hyper::server::Shutdown;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
+use kj_rs_io::ListenerDuplicate;
 use kj_rs_io::Socket;
 use kj_rs_io::TokioAddress;
 use tokio::net::UdpSocket;
@@ -186,6 +190,25 @@ fn wrap_inherited(socket: socket2::Socket) -> Result<StreamListener> {
     Ok(StreamListener::Socket(kj_rs_io::wrap_listener(socket)?))
 }
 
+/// The stream sockets of the config as another loop thread gets them.
+///
+/// For each socket of the config, in order, a duplicate of the bound listener and the address it
+/// was bound to; `None` for a socket that thread does not serve: a datagram socket, or one that
+/// failed to bind.
+pub type DuplicateSockets = Vec<Option<(ListenerDuplicate, String)>>;
+
+/// A duplicate of a bound socket for another loop thread to accept from; none for a datagram
+/// socket, which only the thread that bound it serves.
+pub fn duplicate_listener(socket: &BoundSocket) -> Result<Option<ListenerDuplicate>> {
+    match socket {
+        BoundSocket::Stream(StreamListener::Socket(listener)) => Ok(Some(listener.duplicate()?)),
+        BoundSocket::Stream(StreamListener::Loopback(_)) => Err(kj::failed!(
+            "a loopback socket is served by one loop thread"
+        )),
+        BoundSocket::Datagram(_) => Ok(None),
+    }
+}
+
 // =====================================================================================
 // Binding
 
@@ -269,6 +292,46 @@ pub async fn bind_sockets(
             }
         };
 
+        bound.push_stream(sock, listener, address)?;
+    }
+    Ok(bound)
+}
+
+/// The config's sockets on a loop thread other than the one that bound them: a listener on this
+/// thread's loop over each of `sockets`.
+pub fn adopt_sockets(
+    config: config::Reader<'_>,
+    sockets: DuplicateSockets,
+) -> Result<BoundSockets> {
+    let mut bound = BoundSockets {
+        sockets: Vec::new(),
+        inbound: HashMap::new(),
+    };
+    for (sock, duplicate) in config
+        .get_sockets()
+        .map_err(capnp_error)?
+        .iter()
+        .zip(sockets)
+    {
+        match duplicate {
+            Some((duplicate, address)) => {
+                let listener = StreamListener::Socket(duplicate.listen()?);
+                bound.push_stream(sock, listener, address)?;
+            }
+            None => bound.sockets.push(None),
+        }
+    }
+    Ok(bound)
+}
+
+impl BoundSockets {
+    /// Adds the stream socket `sock`, bound to `address` as `listener`.
+    fn push_stream(
+        &mut self,
+        sock: socket::Reader<'_>,
+        listener: StreamListener,
+        address: String,
+    ) -> Result<()> {
         // A loopback socket is not a listener another process could reach.
         let designator = sock.get_service().map_err(capnp_error)?;
         if matches!(sock.which(), Ok(socket::Which::Tcp(_)))
@@ -276,8 +339,7 @@ pub async fn bind_sockets(
             && designator.has_name()
         {
             let service = text(designator.get_name())?;
-            bound
-                .inbound
+            self.inbound
                 .entry(service)
                 .or_default()
                 .push(ffi::InboundListener {
@@ -286,11 +348,10 @@ pub async fn bind_sockets(
                     port: listener.port()?,
                 });
         }
-        bound
-            .sockets
+        self.sockets
             .push(Some((BoundSocket::Stream(listener), address)));
+        Ok(())
     }
-    Ok(bound)
 }
 
 /// A bound socket's port, for the control channel's `listen` event.

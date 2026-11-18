@@ -48,7 +48,8 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), the same addresses and
   sockets for a Rust caller (`TokioAddress::parse_str`, then `listen` and `TokioListener::accept`,
   `connect_first` or `bind_udp`; `wrap_listener` for an inherited socket; they hand back tokio's
-  own sockets), and the `--watch` file watcher (Rust over `notify`).
+  own sockets; `TokioListener::duplicate` gives another loop thread the same listening sockets
+  to make its own listener of), and the `--watch` file watcher (Rust over `notify`).
   C++ there is interface adaptation only; the one policy
   object that stays C++ is `PeerFilter`, a wrapper over KJ's own `kj::_::NetworkFilter`, which
   the C++ adapters apply in their connect and accept loops

@@ -45,7 +45,10 @@
 //! workerd's Rust server uses the same addresses without the C++ adapter and without a filter:
 //! [`TokioAddress::parse_str`], then `listen` and [`TokioListener::accept`], `connect_first` or
 //! `bind_udp`; [`wrap_listener`] for an inherited socket. It gets tokio's own sockets back
-//! ([`Socket`], `UdpSocket`) and serves them itself.
+//! ([`Socket`], `UdpSocket`) and serves them itself. For several loop threads to accept from the
+//! same sockets, the thread that listens hands each of the others a
+//! [`TokioListener::duplicate`], of which that thread makes a listener of its own
+//! ([`ListenerDuplicate::listen`]): the sockets are shared, the registrations are per loop.
 //!
 //! # Runtime and ownership
 //!
@@ -808,6 +811,16 @@ impl ListenerInner {
         }
     }
 
+    /// A second descriptor for the same socket, registered with no loop.
+    fn duplicate(&self) -> Result<socket2::Socket> {
+        match self {
+            Self::Tcp(listener) => socket2::SockRef::from(listener).try_clone(),
+            #[cfg(unix)]
+            Self::Unix(listener) => socket2::SockRef::from(listener).try_clone(),
+        }
+        .map_err(op("dup()"))
+    }
+
     fn local_addr(&self) -> Result<SocketAddress> {
         match self {
             Self::Tcp(listener) => Ok(SocketAddress::from(
@@ -967,6 +980,61 @@ impl TokioListener {
     /// `kj::ConnectionReceiver::getsockname`: the first socket's.
     fn local_addr(&self) -> Result<SocketAddress> {
         self.shared.backend.inners[0].local_addr()
+    }
+
+    /// Duplicates of this listener's sockets, for another loop thread to accept from: the
+    /// duplicates share the sockets' accept queues, so each connection goes to one of the
+    /// listeners. Needs no loop: nothing is registered until [`ListenerDuplicate::listen`].
+    pub fn duplicate(&self) -> Result<ListenerDuplicate> {
+        let sockets = self
+            .shared
+            .backend
+            .inners
+            .iter()
+            .map(ListenerInner::duplicate);
+        Ok(ListenerDuplicate {
+            sockets: sockets.collect::<Result<_>>()?,
+        })
+    }
+}
+
+/// The sockets of a [`TokioListener`], duplicated ([`TokioListener::duplicate`]) and not yet
+/// registered with a loop, so that they may go to another thread, which makes its own listener
+/// of them.
+pub struct ListenerDuplicate {
+    /// Never empty.
+    sockets: Vec<socket2::Socket>,
+}
+
+impl ListenerDuplicate {
+    /// A listener over these sockets, registered with the calling thread's loop.
+    pub fn listen(self) -> Result<Box<TokioListener>> {
+        ensure_loop_thread()?;
+        let inners = self.sockets.into_iter().map(|socket| {
+            let local = socket.local_addr().map_err(op("getsockname()"))?;
+            listener_inner(socket, &local, "listen()")
+        });
+        let backend = ListenerBackend::sockets(inners.collect::<Result<_>>()?);
+        Ok(Box::new(TokioListener::new(backend)?))
+    }
+}
+
+/// A listening socket of the family of `local`, its address, registered with the calling
+/// thread's loop. The socket is non-blocking already.
+fn listener_inner(
+    socket: socket2::Socket,
+    local: &socket2::SockAddr,
+    what: &'static str,
+) -> Result<ListenerInner> {
+    match local.domain() {
+        socket2::Domain::IPV4 | socket2::Domain::IPV6 => Ok(ListenerInner::Tcp(
+            TcpListener::from_std(socket.into()).map_err(op(what))?,
+        )),
+        #[cfg(unix)]
+        socket2::Domain::UNIX => Ok(ListenerInner::Unix(
+            UnixListener::from_std(socket.into()).map_err(op(what))?,
+        )),
+        _ => Err(KjIoError::other(what, "unsupported socket family")),
     }
 }
 
@@ -1137,21 +1205,7 @@ pub fn wrap_socket(socket: socket2::Socket) -> Result<Box<TokioStream>> {
 pub fn wrap_listener(socket: socket2::Socket) -> Result<Box<TokioListener>> {
     let local = socket.local_addr().map_err(op("getsockname()"))?;
     ensure_loop_thread()?;
-    let inner = match local.domain() {
-        socket2::Domain::IPV4 | socket2::Domain::IPV6 => ListenerInner::Tcp(
-            TcpListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?,
-        ),
-        #[cfg(unix)]
-        socket2::Domain::UNIX => ListenerInner::Unix(
-            UnixListener::from_std(socket.into()).map_err(op("wrapListenSocketFd"))?,
-        ),
-        _ => {
-            return Err(KjIoError::other(
-                "wrapListenSocketFd",
-                "unsupported socket family",
-            ));
-        }
-    };
+    let inner = listener_inner(socket, &local, "wrapListenSocketFd")?;
     Ok(Box::new(TokioListener::new(ListenerBackend::sockets(
         vec![inner],
     ))?))

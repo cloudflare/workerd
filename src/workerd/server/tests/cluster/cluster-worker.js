@@ -7,6 +7,9 @@
 // fail are reported as JSON `{ error }` with status 500 rather than letting the
 // exception propagate, so the test can assert on the message.
 //
+// The worker itself answers `/thread`, which tells the threads of a node that
+// serves on several apart (`threadRequest`).
+//
 // The DO supports the following request paths:
 //   /increment       Increments and returns the current counter value.
 //   /get             Returns the current counter value without incrementing it,
@@ -102,6 +105,20 @@ import {
   restore,
 } from 'cloudflare:workers';
 
+// The identity of this isolate. A node serving on several threads has one per
+// thread.
+let thread;
+
+// Answers `/thread` with this isolate's identity, after keeping its thread
+// busy for `spin` milliseconds if given; nothing for any other path.
+function threadRequest(url) {
+  if (url.pathname !== '/thread') return undefined;
+  thread ??= crypto.randomUUID();
+  const until = Date.now() + Number(url.searchParams.get('spin') ?? 0);
+  while (Date.now() < until) {}
+  return Response.json({ thread });
+}
+
 export default {
   // cluster-cron.wd-test's trigger: each occurrence logged by the node
   // that runs it, its schedule's owner.
@@ -111,6 +128,8 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+    const answer = threadRequest(url);
+    if (answer !== undefined) return answer;
     if (url.pathname === '/cron-clock') {
       return env.CRON.fetch(`http://cron/clock${url.search}`, {
         method: 'POST',
