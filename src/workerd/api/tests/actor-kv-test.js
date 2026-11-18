@@ -28,6 +28,27 @@ async function testKvOperations(state) {
     return 'test';
   });
   await storage.sync();
+
+  // Test failed operations. Depending on the compatibility date, these throw synchronously or
+  // return a rejected promise; the async functions handle both.
+  await assert.rejects(async () => storage.put('testKey3', undefined), {
+    name: 'TypeError',
+    message: 'put() called with undefined value.',
+  });
+  await assert.rejects(
+    async () => storage.list({ start: 'a', startAfter: 'b' }),
+    {
+      name: 'TypeError',
+      message: 'list() cannot be called with both start and startAfter values.',
+    }
+  );
+  await assert.rejects(
+    async () =>
+      storage.transaction(() => {
+        throw new Error('Transaction failed');
+      }),
+    { message: 'Transaction failed' }
+  );
 }
 
 export class ActorKvTest extends DurableObject {

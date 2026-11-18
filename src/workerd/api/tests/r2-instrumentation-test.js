@@ -11,6 +11,14 @@ import {
 // Use shared instrumentation test tail worker
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     // Wait for all the tailStream executions to finish
@@ -256,6 +264,7 @@ export const test = {
         'cloudflare.r2.operation': 'PutObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'throwOnInvalidEtag',
+        ...failed('Invalid ETag in if-match header'),
         closed: true,
       },
       {
@@ -265,6 +274,7 @@ export const test = {
         'cloudflare.r2.operation': 'PutObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'throwOnInvalidEtag',
+        ...failed('Invalid ETag in if-none-match header'),
         closed: true,
       },
       {
@@ -1190,6 +1200,20 @@ export const test = {
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.keys': 'existing, missing',
         'cloudflare.r2.response.success': true,
+        closed: true,
+      },
+      {
+        name: 'r2_head',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'HeadObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.key': 'internalError',
+        'cloudflare.r2.response.success': false,
+        'error.type': 'Internal error',
+        'cloudflare.r2.error.message': 'Internal error',
+        'cloudflare.r2.error.code': 10001n,
+        ...failed('head: Internal error (10001)'),
         closed: true,
       },
     ];

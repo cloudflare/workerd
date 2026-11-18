@@ -11,6 +11,14 @@ import {
 // Use shared instrumentation test tail worker
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     // Wait for all the tailStream executions to finish
@@ -70,6 +78,7 @@ export const test = {
         'cloudflare.kv.query.keys':
           'key0, key1, key2, key3, key4, key5, key6, key7, key8, key9, key10, key11, key12, key13, key14, key15, key16, key17, key18, key19, key20, key21, key22, key23, key24, key25, key26, key27, key28, key29, key30, key31, key32, key33, key34, key35, key36, key37, key38, key39, key40, key41, key42, key43, key44, key45, key46, key47, key48, key49, key50, key51, key52, key53, key54, key55, key56, key57, key58, key59, key60, key61, key62, key63, key64, key65, key66, key67, key68, key69, key70, key71, key72, key73, k...',
         'cloudflare.kv.query.keys.count': 101n,
+        ...failed('KV GET_BULK failed: 400 Bad Request'),
         closed: true,
       },
       {
@@ -93,6 +102,7 @@ export const test = {
         'cloudflare.binding.type': 'KV',
         'cloudflare.kv.query.keys': '',
         'cloudflare.kv.query.keys.count': 0n,
+        ...failed('KV GET_BULK failed: 400 Bad Request'),
         closed: true,
       },
       {
@@ -117,6 +127,7 @@ export const test = {
         'cloudflare.kv.query.keys': 'key-not-json, key2',
         'cloudflare.kv.query.keys.count': 2n,
         'cloudflare.kv.query.type': 'json',
+        ...failed('KV GET_BULK failed: 500 Internal Server Error'),
         closed: true,
       },
       {
@@ -128,6 +139,7 @@ export const test = {
         'cloudflare.kv.query.keys': 'key-not-json, key2',
         'cloudflare.kv.query.keys.count': 2n,
         'cloudflare.kv.query.type': 'arrayBuffer',
+        ...failed('KV GET_BULK failed: 500 Internal Server Error'),
         closed: true,
       },
       {
@@ -139,6 +151,7 @@ export const test = {
         'cloudflare.kv.query.keys': 'key-not-json, key2',
         'cloudflare.kv.query.keys.count': 2n,
         'cloudflare.kv.query.type': 'banana',
+        ...failed('KV GET_BULK failed: 500 Internal Server Error'),
         closed: true,
       },
       {
@@ -225,6 +238,7 @@ export const test = {
         'cloudflare.binding.type': 'KV',
         'cloudflare.kv.query.keys': 'fail-server',
         'cloudflare.kv.query.keys.count': 1n,
+        ...failed('KV GET failed: 500 Internal Server Error'),
         closed: true,
       },
       {
@@ -367,6 +381,69 @@ export const test = {
         'cloudflare.kv.query.expiration_ttl': 15n,
         'cloudflare.kv.query.value_type': 'ArrayBuffer',
         'cloudflare.kv.query.payload.size': 256n,
+        closed: true,
+      },
+      {
+        name: 'kv_put',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'put',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        ...failed('Key name cannot be empty.', 'TypeError'),
+        closed: true,
+      },
+      {
+        name: 'kv_put',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'put',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        'cloudflare.kv.query.keys': 'fail-server',
+        'cloudflare.kv.query.keys.count': 1n,
+        'cloudflare.kv.query.value_type': 'text',
+        'cloudflare.kv.query.payload.size': 5n,
+        ...failed('KV PUT failed: 500 Internal Server Error'),
+        closed: true,
+      },
+      {
+        name: 'kv_delete',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'delete',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        ...failed('Key name cannot be empty.', 'TypeError'),
+        closed: true,
+      },
+      {
+        name: 'kv_delete',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'delete',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        'cloudflare.kv.query.keys': 'fail-server',
+        'cloudflare.kv.query.keys.count': 1n,
+        ...failed('KV DELETE failed: 500 Internal Server Error'),
+        closed: true,
+      },
+      {
+        name: 'kv_getWithMetadata',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'get',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        'cloudflare.kv.query.keys': 'fail-server',
+        'cloudflare.kv.query.keys.count': 1n,
+        ...failed('KV GET failed: 500 Internal Server Error'),
+        closed: true,
+      },
+      {
+        name: 'kv_list',
+        'db.system.name': 'cloudflare-kv',
+        'db.operation.name': 'list',
+        'cloudflare.binding.name': 'KV',
+        'cloudflare.binding.type': 'KV',
+        'cloudflare.kv.query.prefix': 'fail-server',
+        ...failed('KV GET failed: 500 Internal Server Error'),
         closed: true,
       },
     ];

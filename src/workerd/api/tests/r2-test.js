@@ -837,6 +837,18 @@ const testWorker = {
             }
             return buildGetResponse({ error: preconditionFailedError });
           }
+          case 'internalError': {
+            return new Response(null, {
+              status: 500,
+              headers: {
+                'cf-r2-error': JSON.stringify({
+                  version: 0,
+                  v4code: 10001,
+                  message: 'Internal error',
+                }),
+              },
+            });
+          }
           case 'rangeOffLen': {
             assert.deepEqual(jsonRequest.range, {
               offset: '1',
@@ -1488,6 +1500,12 @@ export const r2ValidationTests = {
           'Part number must be between 1 and 10000 (inclusive). Actual value was: 0',
       }
     );
+    // Errors
+    {
+      await assert.rejects(env.BUCKET.head('internalError'), {
+        message: 'head: Internal error (10001)',
+      });
+    }
   },
 };
 

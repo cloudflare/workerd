@@ -11,6 +11,14 @@ import {
 // Use shared instrumentation test tail worker
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     // Wait for all the tailStream executions to finish
@@ -67,6 +75,34 @@ export const test = {
         'cache.request.method': 'POST',
         'cache.response.status_code': 404n,
         'cache.response.success': false,
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'cache.request.url': 'https://example.com/put-post',
+        'cache.request.method': 'POST',
+        'cache.request.payload.status_code': 200n,
+        ...failed('Cannot cache response to non-GET request.', 'TypeError'),
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'cache.request.url': 'https://example.com/put-body-error',
+        'cache.request.method': 'GET',
+        'cache.request.payload.status_code': 200n,
+        'cache.response.success': false,
+        ...failed('Body failed'),
+        closed: true,
+      },
+      {
+        name: 'cache_delete',
+        'cache.request.url': 'https://example.com/delete-rate-limited',
+        'cache.request.method': 'GET',
+        'cache.response.status_code': 429n,
+        'cache.response.success': false,
+        ...failed(
+          'Unable to delete cached response. Subrequests are being rate-limited.'
+        ),
         closed: true,
       },
       {
