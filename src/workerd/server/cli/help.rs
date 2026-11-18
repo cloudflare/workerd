@@ -1,11 +1,12 @@
 //! The help pages, written by hand, one per command. `workerd -h` is the page people and agents
 //! read first: it should be enough to run, test, compile and cluster an application without
-//! another call. Each command's page lists every one of its options.
+//! another call. Each command's page lists every one of its options, except that test and bench
+//! refer to serve for the groups in [`SHARED`].
 //!
-//! Style: sentence-case headings, lowercase `<placeholders>`, at most 80 columns. Option and
-//! command descriptions start at column 37, short labels' at column 17. `args-test.rs` checks the
-//! width, the option column, that each page lists its command's options, and that `workerd -h`
-//! names every visible command.
+//! Style: minimal. Sentence-case headings, lowercase `<placeholders>`, at most 80 columns. Option
+//! and command descriptions start at column 37, short labels' at column 17, and fit one line.
+//! `args-test.rs` checks the width, the option column, that no row wraps, that each page lists
+//! its command's options, and that `workerd -h` names every visible command.
 //!
 //! A block whose first line is indented starts on the line of its opening quote: `\` at the end
 //! of a line also skips the next line's leading spaces.
@@ -19,14 +20,11 @@ macro_rules! config_arg {
 macro_rules! run_options {
     () => {
         "  -i, --inspector-addr <addr>        Accept DevTools connections
-  -w, --watch                        Reload when the config, code or
-                                     binary changes; for development
-      --experimental                 Allow experimental features: clusters,
-                                     KV, Queues, Cron, Workflows, D1, assets
+  -w, --watch                        Reload when files change
+      --experimental                 Allow experimental features
       --verbose                      Log to stderr
-  -d, --directory-path <name>=<dir>  Point the disk service name at dir
-  -e, --external-addr <name>=<addr>  Point the external service name at
-                                     addr
+  -d, --directory-path <name>=<dir>  Point disk service name at dir
+  -e, --external-addr <name>=<addr>  Point external service name at addr
   -h, --help                         Print this help
 "
     };
@@ -34,10 +32,8 @@ macro_rules! run_options {
 
 macro_rules! socket_options {
     () => {
-        "  -s, --socket-addr <name>=<addr>    Listen on addr for the socket name;
-                                     wrangler's is http, on localhost:8787
-  -S, --socket-fd <name>=<fd>        Listen on an inherited descriptor
-                                     (systemd socket activation)
+        "  -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
+  -S, --socket-fd <name>=<fd>        Serve on an inherited fd (systemd)
 "
     };
 }
@@ -46,12 +42,12 @@ macro_rules! cluster_options {
     () => {
         "\
 Cluster (experimental):
-      --cluster-addr <addr>          Listen for peers on addr, kept private
+      --cluster-addr <addr>          Override cluster address; keep private
       --cluster-advertise <addr>     Address peers reach this instance at
   s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
   AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
   SIGTERM an instance hands its objects to its peers and exits, within 8 s.
-  GET /ready on the peer address answers OK once serving.
+  GET /ready on the cluster address answers OK once serving.
 "
     };
 }
@@ -86,10 +82,8 @@ macro_rules! tool_options {
     () => {
         "\
 Tools:
-      --control-fd <fd>              Write a JSON line to fd as each socket
-                                     listens, with its port
-      --debug-port <addr>            Serve debug RPC with full access to
-                                     every service; for Miniflare only
+      --control-fd <fd>              Write each socket's port to fd (JSON)
+      --debug-port <addr>            Full-access debug RPC, for Miniflare
 "
     };
 }
@@ -98,15 +92,10 @@ macro_rules! trace_options {
     () => {
         "\
 Tracing:
-      --async-trace <path>           Write async activity (requests, I/O,
-                                     what caused what) to path as JSON
-                                     lines; it holds URLs and storage keys
-      --async-trace-stacks <n>       Record n (1-64) stack frames per async
-                                     resource; slow
+      --async-trace <path>           Write async activity to path (JSONL)
+      --async-trace-stacks <n>       Keep n (1-64) stack frames; slow
       --async-trace-promises         Also trace promises; slow
-      --perfetto-trace <path>=<categories>
-                                     Write a Perfetto trace, in builds with
-                                     Perfetto
+      --perfetto-trace <path>=<cats> Write a Perfetto trace
 "
     };
 }
@@ -115,15 +104,10 @@ macro_rules! python_options {
     () => {
         "\
 Python:
-      --pyodide-package-disk-cache-dir <dir>
-                                     Cache packages in dir
-      --pyodide-bundle-disk-cache-dir <dir>
-                                     Cache Pyodide bundles in dir
-      --python-snapshot-dir <dir>    Keep snapshots in dir
-      --python-save-snapshot         Save a dedicated snapshot
-      --python-save-baseline-snapshot
-                                     Save a baseline snapshot
-      --python-load-snapshot <path>  Load a snapshot
+  --pyodide-package-disk-cache-dir and --pyodide-bundle-disk-cache-dir
+  <dir> cache downloads; --python-snapshot-dir <dir>,
+  --python-save-snapshot, --python-save-baseline-snapshot and
+  --python-load-snapshot <path> manage snapshots.
 "
     };
 }
@@ -134,13 +118,23 @@ macro_rules! capnp_options {
 Cap'n Proto configs:
   <config> can also be a .capnp file, workerd's native format; <const>,
   where a command takes one, names the config constant in it.
-  -b, --binary                       <config> is an encoded config, as
-                                     compile --config-only writes; - is
-                                     stdin
+  -b, --binary                       <config> is an encoded config; - is stdin
   -I, --import-path <dir>            Search dir for imports that start /
 "
     };
 }
+
+macro_rules! shared_note {
+    () => {
+        "Tracing, Python and Cap'n Proto options: as for serve.\n"
+    };
+}
+
+/// The option groups that test and bench refer to serve for.
+#[cfg(test)]
+pub const SHARED: &str = concat!(trace_options!(), python_options!(), capnp_options!());
+#[cfg(test)]
+pub const SHARED_NOTE: &str = shared_note!();
 
 pub const MAIN: &str = "\
 workerd runs Cloudflare Workers on your own machines: JavaScript,
@@ -162,21 +156,19 @@ Quick start:
   $ workerd serve wrangler.json --watch        # http://localhost:8787
 
 Cluster (experimental):
-  Several machines that share an S3 or GCS bucket serve as one. Each
-  Durable Object runs on one machine at a time, and any machine routes
-  requests to it. There is no database or coordinator. On SIGTERM a
-  machine hands its objects to the others, then exits. Anyone with the
-  cluster key, or write access to the bucket, controls every Worker and
-  object in it, and peer traffic is unencrypted: keep the cluster port on
-  a private network. Setup: workerd serve --help.
+  Machines that share an object store bucket serve as one: each Durable
+  Object runs on one machine, and any machine routes to it. The cluster
+  key and the bucket grant full control and peer traffic is unencrypted,
+  so keep peers on a private network. Setup: workerd serve --help.
 
 Config:
-  A wrangler.json or wrangler.jsonc, as for wrangler dev. Fields: name,
-  main, compatibility_date, compatibility_flags, vars, durable_objects,
-  exports, migrations, no_bundle; with --experimental, kv_namespaces,
-  queues, triggers, workflows, d1_databases, assets. Other fields are
-  errors. esbuild, from node_modules or PATH, bundles main unless
-  no_bundle is set. State lives in .wrangler/state/workerd/. A .capnp
+  A wrangler.json or wrangler.jsonc, as for wrangler dev, with fields:
+    name, main, compatibility_date, compatibility_flags, vars,
+    durable_objects, exports, migrations, no_bundle
+    with --experimental: kv_namespaces, queues, triggers, workflows,
+    d1_databases, assets
+  Other fields are errors. esbuild (node_modules or PATH) bundles main
+  unless no_bundle is set. State: .wrangler/state/workerd/. A .capnp
   config also works.
 
 Options:
@@ -189,8 +181,7 @@ Options:
   -V, --version                      Print the newest supported compat date
 
 More, in each command's --help:
-  serve          systemd sockets, service overrides, cluster settings,
-                 --debug-port, tracing, Python
+  serve          sockets, cluster, --debug-port, tracing, Python
   test           filters, --predictable, --compat-date
   bench          writing benchmarks, filters, JSON output
   compile        --config-only
@@ -253,25 +244,16 @@ throws. Export several under different names for several tests:
   <const>:<service>:<entrypoint>     For a .capnp config
 
 Options:
-      --compat-date <date>           Give every Worker this compatibility
-                                     date; Workers must not set one.
-                                     0000-00-00 is the oldest behavior,
-                                     9999-12-31 the newest
-      --predictable                  Use fixed values for random data and
-                                     timestamps
+      --compat-date <date>           Set every Worker's compat date
+      --predictable                  Fix random data and timestamps
       --no-verbose                   Don't log uncaught exceptions
       --all-autogates                Enable every autogate
-      --gc-stress                    Run a full GC at each awaitIo
-                                     continuation; very slow
-  -s, --socket-addr <name>=<addr>    Listen on addr for the socket name
+      --gc-stress                    GC at each awaitIo; very slow
+  -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
 ",
     run_options!(),
     "\n",
-    trace_options!(),
-    "\n",
-    python_options!(),
-    "\n",
-    capnp_options!(),
+    shared_note!(),
 );
 
 pub const BENCH: &str = concat!(
@@ -302,27 +284,18 @@ a table.
 case names: <service>[:<entrypoint>][/<case>].
 
 Options:
-      --compat-date <date>           Give every Worker this compatibility
-                                     date, as for test; latest, the
-                                     default, is the newest this build
-                                     supports
-      --format text|json             text is a table; json is the full
-                                     report, with raw samples
-      --output <path>                Write the results to path
-      --quick                        Use short time budgets, to check that
-                                     benchmarks run rather than measure
+      --compat-date <date>           As for test; newest by default
+      --format text|json             A table, or JSON with raw samples
+      --output <path>                Write results to path
+      --quick                        Check benchmarks run; don't measure
       --no-startup                   Don't time cold starts
-      --trace                        Run tail workers, otherwise skipped
+      --trace                        Also run tail workers
       --no-verbose                   Don't log uncaught exceptions
       --all-autogates                Enable every autogate
 ",
     run_options!(),
     "\n",
-    trace_options!(),
-    "\n",
-    python_options!(),
-    "\n",
-    capnp_options!(),
+    shared_note!(),
 );
 
 pub const COMPILE: &str = concat!(
@@ -339,23 +312,21 @@ and data inside. The binary needs no other files:
 
 It takes serve's options (./app --help); pass it --experimental if the
 application needs it.
+
 ",
     config_arg!(),
     "
 Options:
-      --config-only                  Write only the encoded config, for
-                                     workerd serve -b
-  -b, --binary                       <config> is an encoded config; - is
-                                     stdin
-  -I, --import-path <dir>            Search dir for .capnp imports
+      --config-only                  Write only the encoded config (serve -b)
+  -b, --binary                       <config> is an encoded config; - is stdin
+  -I, --import-path <dir>            Search dir for imports that start /
       --verbose                      Log to stderr
   -h, --help                         Print this help
 ",
 );
 
 pub const DEPLOY: &str = "\
-workerd deploy: publish an application to a cluster's bucket
-(experimental).
+workerd deploy: publish a Worker to a cluster's bucket (experimental).
 
 Usage:
   workerd deploy --experimental [project] --bucket <url>
@@ -373,15 +344,10 @@ each instance's disk service `do-storage`, keyed by deployment name and
 class, so deploying under another name starts with empty objects.
 
 Options:
-      --bucket <url>                 s3://bucket[/prefix] or
-                                     gs://bucket[/prefix]
-      --name <name>                  1-64 letters, digits, - or _,
-                                     starting with a letter or digit;
-                                     default: the config's name
-      --endpoint <url>               For s3://: the endpoint; default
-                                     AWS_ENDPOINT_URL
-      --region <region>              For s3://: default AWS_REGION, else
-                                     us-east-1
+      --bucket <url>                 s3:// or gs://bucket[/prefix]
+      --name <name>                  Deployment name; default: the config's
+      --endpoint <url>               s3:// endpoint; default AWS_ENDPOINT_URL
+      --region <region>              s3:// region; AWS_REGION, or us-east-1
       --experimental                 Required
       --verbose                      Log to stderr
   -h, --help                         Print this help
@@ -390,8 +356,7 @@ Options:
 Cap'n Proto configs:
   [project] can be a .capnp config that holds only services, with --name;
   <const> names its constant.
-  -b, --binary                       [project] is an encoded config; - is
-                                     stdin
+  -b, --binary                       [project] is an encoded config; - is stdin
   -I, --import-path <dir>            Search dir for imports that start /
 ";
 

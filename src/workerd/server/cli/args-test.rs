@@ -399,6 +399,11 @@ fn help_pages_are_complete() {
                 line.chars().count() <= 80,
                 "{path}: over 80 columns: {line}"
             );
+            assert!(
+                !(line.len() > 37 && line[..37].trim().is_empty()),
+                "{path}: a row wraps: {line}"
+            );
+            assert!(!line.starts_with('-'), "{path}: unindented: {line}");
             // An option row's description starts at column 37.
             let flag = line
                 .strip_prefix("  -")
@@ -415,7 +420,9 @@ fn help_pages_are_complete() {
             let long = arg.get_long().map(|l| format!("--{l}"));
             let short = arg.get_short().map(|s| format!("-{s}"));
             for flag in long.iter().chain(short.iter()) {
-                assert!(page.contains(flag.as_str()), "{path}: no {flag}");
+                let shared = page.contains(crate::help::SHARED_NOTE)
+                    && crate::help::SHARED.contains(flag.as_str());
+                assert!(shared || page.contains(flag.as_str()), "{path}: no {flag}");
             }
         }
     }
@@ -423,11 +430,6 @@ fn help_pages_are_complete() {
     main.build();
     let page = main.render_help().to_string();
     assert!(page.len() < 6000, "workerd -h is {} bytes", page.len());
-    let wrapped = |l: &&str| l.len() > 37 && l[..37].trim().is_empty();
-    assert!(
-        !page.lines().any(|l| wrapped(&l)),
-        "workerd -h: a row wraps"
-    );
     check(&mut main, "workerd");
     for sub in main.get_subcommands_mut() {
         let name = sub.get_name().to_owned();
