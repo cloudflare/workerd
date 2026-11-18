@@ -4,6 +4,8 @@
 
 use std::cell::OnceCell;
 use std::cell::RefCell;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::rc::Rc;
 
 use crate::BuilderError;
@@ -66,7 +68,7 @@ pub struct Directory(Rc<DirInner>);
 
 struct DirInner {
     kind: DirKind,
-    unique_id: OnceCell<String>,
+    unique_id: OnceCell<CString>,
     // The charge for the node itself, made by `count_towards_isolate_limit()`.
     self_charge: RefCell<Option<Box<dyn MemoryCharge>>>,
 }
@@ -412,9 +414,14 @@ impl Directory {
 
     /// A UUID that identifies this directory, the same on every call, or `None` if one cannot be
     /// made because no request is current. A lazy directory has the identifier of its contents.
-    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<String> {
-        if let DirKind::Lazy(lazy) = &self.0.kind {
-            return load(lazy).unique_id(host);
+    /// NUL-terminated for C++, which keeps a pointer to it.
+    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<&CStr> {
+        if let DirKind::Lazy(lazy) = &self.0.kind
+            && self.0.unique_id.get().is_none()
+        {
+            // The contents' identifier never changes once made, so a copy of it stays equal.
+            let id = load(lazy).unique_id(host)?.to_owned();
+            self.0.unique_id.set(id).ok()?;
         }
         unique_id(&self.0.unique_id, host)
     }
@@ -432,11 +439,11 @@ impl Directory {
     }
 
     /// The name heap snapshots give this kind of directory.
-    pub fn memory_name(&self) -> &'static str {
+    pub fn memory_name(&self) -> &'static CStr {
         match &self.0.kind {
-            DirKind::Memory { .. } => "Directory",
-            DirKind::Tmp => "TmpDirectory",
-            DirKind::Lazy(_) => "LazyDirectory",
+            DirKind::Memory { .. } => c"Directory",
+            DirKind::Tmp => c"TmpDirectory",
+            DirKind::Lazy(_) => c"LazyDirectory",
         }
     }
 

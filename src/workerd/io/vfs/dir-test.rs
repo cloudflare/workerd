@@ -296,7 +296,7 @@ fn lazy_directories_load_once_on_first_use() {
         builder.add(b"f", readable(b"x")).unwrap();
         builder.finish()
     }));
-    assert_eq!(lazy.memory_name(), "LazyDirectory");
+    assert_eq!(lazy.memory_name(), c"LazyDirectory");
     assert!(lazy.memory_children().is_empty());
     assert_eq!(loads.get(), 0);
     assert_eq!(names(&host, &lazy), ["f"]);

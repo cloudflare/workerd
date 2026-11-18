@@ -4,6 +4,8 @@
 
 use std::cell::OnceCell;
 use std::cell::RefCell;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::rc::Rc;
 use std::rc::Weak;
 
@@ -54,7 +56,7 @@ pub struct File(Rc<FileInner>);
 
 struct FileInner {
     kind: FileKind,
-    unique_id: OnceCell<String>,
+    unique_id: OnceCell<CString>,
     // The charge for the node itself, made by `count_towards_isolate_limit()`.
     self_charge: RefCell<Option<Box<dyn MemoryCharge>>>,
 }
@@ -433,8 +435,8 @@ impl File {
     }
 
     /// A UUID that identifies this file, the same on every call, or `None` if one cannot be made
-    /// because no request is current.
-    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<String> {
+    /// because no request is current. NUL-terminated for C++, which keeps a pointer to it.
+    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<&CStr> {
         unique_id(&self.0.unique_id, host)
     }
 
@@ -454,14 +456,14 @@ impl File {
     }
 
     /// The name heap snapshots give this kind of file.
-    pub fn memory_name(&self) -> &'static str {
+    pub fn memory_name(&self) -> &'static CStr {
         match &self.0.kind {
-            FileKind::Data(_) => "File",
-            FileKind::Device(Device::Null) => "/dev/null",
-            FileKind::Device(Device::Zero) => "/dev/zero",
-            FileKind::Device(Device::Full) => "/dev/full",
-            FileKind::Device(Device::Random) => "/dev/random",
-            FileKind::Stdio(_) => "stdio",
+            FileKind::Data(_) => c"File",
+            FileKind::Device(Device::Null) => c"/dev/null",
+            FileKind::Device(Device::Zero) => c"/dev/zero",
+            FileKind::Device(Device::Full) => c"/dev/full",
+            FileKind::Device(Device::Random) => c"/dev/random",
+            FileKind::Stdio(_) => c"stdio",
         }
     }
 
@@ -567,12 +569,12 @@ fn append_to_line_buffer(buffer: &mut Vec<u8>, data: &[u8]) {
     }
 }
 
-pub fn unique_id(cell: &OnceCell<String>, host: &dyn VfsHost) -> Option<String> {
-    if let Some(id) = cell.get() {
-        return Some(id.clone());
+pub fn unique_id<'a>(cell: &'a OnceCell<CString>, host: &dyn VfsHost) -> Option<&'a CStr> {
+    if cell.get().is_none() {
+        let id = CString::new(host.random_uuid()?).ok()?;
+        cell.set(id).ok()?;
     }
-    let id = host.random_uuid()?;
-    Some(cell.get_or_init(|| id).clone())
+    cell.get().map(CString::as_c_str)
 }
 
 #[cfg(test)]

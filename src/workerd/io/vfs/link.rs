@@ -4,6 +4,8 @@
 
 use std::cell::OnceCell;
 use std::cell::RefCell;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::rc::Rc;
 
 use crate::Directory;
@@ -30,7 +32,7 @@ pub struct SymbolicLink(Rc<LinkInner>);
 struct LinkInner {
     root: Directory,
     target: Vec<Vec<u8>>,
-    unique_id: OnceCell<String>,
+    unique_id: OnceCell<CString>,
     self_charge: RefCell<Option<Box<dyn MemoryCharge>>>,
 }
 
@@ -92,8 +94,8 @@ impl SymbolicLink {
     }
 
     /// A UUID that identifies this link, the same on every call, or `None` if one cannot be made
-    /// because no request is current.
-    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<String> {
+    /// because no request is current. NUL-terminated for C++, which keeps a pointer to it.
+    pub fn unique_id(&self, host: &dyn VfsHost) -> Option<&CStr> {
         unique_id(&self.0.unique_id, host)
     }
 
