@@ -27,6 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
+    patch_strip = 1,
+    patches = [
+        "//:patches/capnp-cpp/0001-Make-the-stack-trace-symbolizer-s-pipes-close-on-exec.patch",
+    ],
     sha256 = "487e97008c1f2468c3da20812b19973b40b62e5d9b8132627723367e03d96d63",
     strip_prefix = "capnproto-capnproto-be8fbe7/c++",
     type = "tgz",
