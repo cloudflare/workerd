@@ -96,6 +96,8 @@ pub struct ClusterNode {
     peer_requests: Rc<PeerRequests>,
     /// Whether the application's listeners are being served (`Serving`).
     serving: Cell<bool>,
+    /// Whether a `cache` service stores here, so that leaving waits out its leases.
+    pub caching: Cell<bool>,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -105,7 +107,8 @@ pub struct Deadlines {
     pub handoff: Instant,
     pub release: Instant,
     /// Leaving the cluster waits for this: a peer that lists this instance gone serves its cache
-    /// keys at once, so the read leases it granted until it drained must have run out.
+    /// keys at once, so the read leases it granted until it drained must have run out. Now,
+    /// without a `cache` service.
     pub leave: Instant,
     pub grace: Instant,
     pub connections: Instant,
@@ -455,6 +458,7 @@ impl ClusterNode {
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
             serving: Cell::new(false),
+            caching: Cell::new(false),
         }))
     }
 
@@ -472,7 +476,11 @@ impl ClusterNode {
             in_flight: at(self.budget.in_flight_ms()),
             handoff: at(self.budget.handoff_ms()),
             release: at(self.budget.release_ms()),
-            leave: at(self.cache_timing.lease_wait_ms()),
+            leave: at(if self.caching.get() {
+                self.cache_timing.lease_wait_ms()
+            } else {
+                0
+            }),
             grace: at(self.budget.grace_ms()),
             connections: at(self.budget.connections_ms()),
             stop: at(self.budget.stop_ms),

@@ -99,6 +99,7 @@ pub fn store(
 ) -> Result<Clustered> {
     let me = node.cluster.node();
     let (dir, lock) = claim(root, me).map_err(|e| io_kj_error(&e))?;
+    node.caching.set(true);
     let shared = Rc::new(Shared {
         name: name.to_owned(),
         node: Rc::clone(node),
