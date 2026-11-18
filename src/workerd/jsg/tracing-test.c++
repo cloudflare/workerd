@@ -60,10 +60,38 @@ class GcDetector: public jsg::Object {
   }
 
   JSG_RESOURCE_TYPE(GcDetector) {
-    // NOTE: Using an instance property instead of a prototype property causes V8 to refuse to
-    //   collect the wrapper during minor GCs, as it always thinks the wrapper is "modified".
     JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
     JSG_METHOD(touch);
+  }
+};
+
+// A GcDetector with properties on its instance template, as ExecutionContext has. V8 installs
+// them on each wrapper as native data properties, so no wrapper is ever on its constructor's
+// initial map.
+class InstancePropertyGcDetector: public jsg::Object {
+ public:
+  ~InstancePropertyGcDetector() noexcept(false) {
+    KJ_IF_SOME(s, sibling) s.sibling = kj::none;
+  }
+
+  kj::Maybe<InstancePropertyGcDetector&> sibling;
+
+  bool getSiblingCollected() {
+    return sibling == kj::none;
+  }
+
+  int getEager() {
+    return 1;
+  }
+
+  int getLazy() {
+    return 2;
+  }
+
+  JSG_RESOURCE_TYPE(InstancePropertyGcDetector) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
+    JSG_READONLY_INSTANCE_PROPERTY(eager, getEager);
+    JSG_LAZY_INSTANCE_PROPERTY(lazy, getLazy);
   }
 };
 
@@ -185,6 +213,15 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
+  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeInstancePropertyGcDetectorPair(
+      jsg::Lock& js) {
+    auto obj1 = js.alloc<InstancePropertyGcDetector>();
+    auto obj2 = js.alloc<InstancePropertyGcDetector>();
+    obj1->sibling = *obj2;
+    obj2->sibling = *obj1;
+    return kj::arr(kj::mv(obj1), kj::mv(obj2));
+  }
+
   kj::Array<jsg::Ref<GcDetectorBox>> makeGcDetectorBoxPair(jsg::Lock& js) {
     auto obj1 = js.alloc<GcDetectorBox>(js);
     auto obj2 = js.alloc<GcDetectorBox>(js);
@@ -213,6 +250,7 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD(wrapOpaquely);
+    JSG_METHOD(makeInstancePropertyGcDetectorPair);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -223,6 +261,7 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBox,
     NumberBoxHolder,
     GcDetector,
+    InstancePropertyGcDetector,
     GcDetectorBox,
     ValueBox,
     ItemQueue);
@@ -343,6 +382,65 @@ KJ_TEST("GC collects objects when expected") {
     gc({type: "minor"});
 
     assert(b.siblingCollected, "minor GC did not collect jsg::Value");
+  )",
+      "undefined", "undefined");
+}
+
+KJ_TEST("minor GC collects wrappers with instance properties") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // The instance properties alone don't make the wrapper "modified".
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    a = null;
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect a wrapper with instance properties");
+  )",
+      "undefined", "undefined");
+
+  // Reading an eager instance property leaves the wrapper as it was.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    (() => {
+      assert(a.eager === 1);
+    })();
+    a = null;
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect a wrapper after an eager read");
+  )",
+      "undefined", "undefined");
+
+  // Reading a lazy instance property stores its value on the wrapper, which modifies it.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    (() => {
+      assert(a.lazy === 2);
+    })();
+    a = null;
+    gc({type: "minor"});
+    assert(!b.siblingCollected, "minor GC collected a wrapper holding a lazy property's value");
+  )",
+      "undefined", "undefined");
+
+  // So does deleting an instance property.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    delete a.lazy;
+    a = null;
+    gc({type: "minor"});
+    assert(!b.siblingCollected, "minor GC collected a wrapper missing an instance property");
   )",
       "undefined", "undefined");
 }
