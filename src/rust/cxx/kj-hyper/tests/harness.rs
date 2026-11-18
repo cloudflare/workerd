@@ -105,7 +105,6 @@ impl Forwarding {
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl Handler for Forwarding {
     async fn request<'a>(
         &'a self,
@@ -145,7 +144,7 @@ impl Handler for Forwarding {
 struct Served {
     table: &'static HeaderTable,
     settings: Rc<ServerSettings>,
-    handler: Rc<dyn Handler>,
+    handler: Rc<Forwarding>,
     shutdown: Rc<Shutdown>,
     /// `true` once drained; stops the accept loop.
     draining: watch::Sender<bool>,
