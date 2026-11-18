@@ -26,6 +26,7 @@
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.capnp.h>
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
@@ -1274,6 +1275,34 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
       kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 
+namespace {
+
+// Writes a body that no stream was built for, as for `new Response("text")`, straight to the
+// response stream, without the stream and pump that sending any other body needs. The bytes are
+// kj-heap memory owned by `buffer` and the response stream doesn't depend on the IoContext, so
+// the whole write can be deferred past it.
+kj::Promise<void> writeBufferToResponse(
+    kj::Own<kj::AsyncOutputStream> stream, kj::Rc<JsReadableStream::Buffer> buffer) {
+  try {
+    auto bytes = buffer->view;
+    if (bytes.size() > 0) {
+      co_await stream->write(bytes);
+    }
+    // Ends the stream as EncodedAsyncOutputStream::end() does.
+    KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+      co_await ee.end();
+    } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+      aio.shutdownWrite();
+    }
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    stream->abortWrite(exception.clone());
+    kj::throwException(kj::mv(exception));
+  }
+}
+
+}  // namespace
+
 kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     kj::HttpService::Response& outer,
     SendOptions options,
@@ -1346,6 +1375,13 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     return wsPromise;
   } else KJ_IF_SOME(jsBody, tryGetBodyStream()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    if (encoding == StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(buffer, jsBody.tryTakeUnstreamedBuffer()) {
+        auto size = buffer->view.size();
+        return DeferredProxy<void>{writeBufferToResponse(
+            outer.send(statusCode, getReasonPhrase(), outHeaders, uint64_t(size)), kj::mv(buffer))};
+      }
+    }
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
     if (encoding != StreamEncoding::IDENTITY) {
       KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {

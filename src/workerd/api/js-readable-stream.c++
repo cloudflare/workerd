@@ -1430,6 +1430,16 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
   KJ_UNREACHABLE;
 }
 
+kj::Maybe<kj::Rc<JsReadableStream::Buffer>> JsReadableStream::tryTakeUnstreamedBuffer() {
+  KJ_IF_SOME(i, impl) {
+    if (!i.hasStream && !cachedIsDisturbed) {
+      cachedIsDisturbed = true;
+      return KJ_ASSERT_NONNULL(i.maybeOwnedBuffer).addRef();
+    }
+  }
+  return kj::none;
+}
+
 jsg::Promise<void> JsReadableStream::pipeTo(
     jsg::Lock& js, JsWritableStream& destination, PipeToOptions options) {
   auto& i = KJ_ASSERT_NONNULL(impl, "pipeTo() called on a null JsReadableStream");
