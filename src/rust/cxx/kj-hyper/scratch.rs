@@ -4,7 +4,8 @@
 //! hyper keeps a written response's emptied header map for the next request it parses; the
 //! connection keeps the request's for the next response ([`Scratch::take_headers`]), so one
 //! map's room serves both. Header values and small body chunks are cut from a shared block
-//! ([`Scratch::copy`]) instead of each being an allocation of its own.
+//! ([`Scratch::copy`]) instead of each being an allocation of its own. A call's kj body stream and
+//! response serve the next call too ([`Scratch::take_call`]).
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -12,8 +13,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use hyper::body::Incoming;
 
 use crate::body::Pipe;
+use crate::body::RustBody;
+use crate::ffi::ServerCall;
 
 /// The size of a block small copies are cut from.
 const BLOCK: usize = 4096;
@@ -36,6 +40,15 @@ pub struct Scratch {
     others: Cell<Vec<(http::HeaderName, http::HeaderValue)>>,
     /// The pipe of an earlier response body, reused once nothing else holds it.
     pipe: Cell<Option<Arc<Pipe>>>,
+    /// What an earlier call handed the handler, emptied.
+    call: Cell<Option<CallParts>>,
+}
+
+/// The kj body stream and response a call hands the handler, with the state of the body behind
+/// them.
+pub struct CallParts {
+    pub call: ServerCall,
+    pub body: RustBody,
 }
 
 impl Scratch {
@@ -90,6 +103,29 @@ impl Scratch {
 
     pub fn keep_pipe(&self, pipe: Arc<Pipe>) {
         self.pipe.set(Some(pipe));
+    }
+
+    /// A call's parts, over `body`: the kept ones if an earlier call left them.
+    pub fn take_call(&self, body: Incoming) -> CallParts {
+        match self.call.take() {
+            Some(mut parts) => {
+                parts.body.refill(body);
+                parts
+            }
+            None => CallParts {
+                call: ServerCall::default(),
+                body: RustBody::new(body),
+            },
+        }
+    }
+
+    /// Keeps a finished call's parts for the next call, letting go of its body. A body a read
+    /// still holds is not reused; one a concurrent call kept first is not replaced.
+    pub fn keep_call(&self, mut parts: CallParts) {
+        if parts.body.clear() {
+            let kept = self.call.take();
+            self.call.set(kept.or(Some(parts)));
+        }
     }
 }
 

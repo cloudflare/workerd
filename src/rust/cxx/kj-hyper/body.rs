@@ -77,6 +77,27 @@ impl RustBody {
         }))
     }
 
+    /// `body` in place of the one this held, in the same state unless a read still holds that.
+    pub fn refill(&mut self, body: Incoming) {
+        match Rc::get_mut(&mut self.0) {
+            Some(state) => {
+                *state.body.get_mut() = Some(body);
+                *state.buffered.get_mut() = Bytes::new();
+            }
+            None => *self = Self::new(body),
+        }
+    }
+
+    /// Lets go of the body, unless a read still holds it: false then.
+    pub fn clear(&mut self) -> bool {
+        let Some(state) = Rc::get_mut(&mut self.0) else {
+            return false;
+        };
+        *state.body.get_mut() = None;
+        *state.buffered.get_mut() = Bytes::new();
+        true
+    }
+
     /// kj's `tryRead`: reads until `min_bytes` or the body's end.
     pub fn read<'b>(
         &self,
