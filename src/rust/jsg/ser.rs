@@ -76,7 +76,8 @@ pub struct SerializeOptions<'a, 's> {
     /// `ArrayBuffer`s, or views of them, whose contents move to the reader rather than being
     /// copied, as with `structuredClone`'s `transfer` option and `jsg::Serializer::transfer()`.
     /// Each buffer is transferred once, however many times it or views of it are listed, and is
-    /// detached once the value is written.
+    /// detached once the value is written. One that is detached by then, before serialization or
+    /// by JavaScript it ran, throws a `DataCloneError`, and none is detached.
     pub transfer: &'a [v8::Local<'s, v8::Value>],
 }
 

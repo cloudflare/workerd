@@ -166,15 +166,20 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   }
 
   // Detaches the transferred buffers and moves the data and the backing stores into `result`, as
-  // jsg::Serializer::release() does. Returns false if detaching threw, leaving the exception
-  // pending.
+  // jsg::Serializer::release() does. Returns false, leaving the exception pending, if a
+  // transferred buffer is already detached, which throws a DataCloneError before any is detached,
+  // or if detaching threw.
   bool release(Serialized& result) {
     for (auto& global: transferredBuffers) {
+      // As jsg::Serializer::release() explains, its backing store may back another buffer.
+      if (global.Get(isolate)->WasDetached()) {
+        throwDataCloneError(isolate, "An ArrayBuffer is detached and could not be cloned."_kj);
+        return false;
+      }
+    }
+    for (auto& global: transferredBuffers) {
       auto buffer = global.Get(isolate);
-      // JavaScript that serialization ran may have detached it already, as a nested
-      // structuredClone() that transfers it does.
-      if (buffer->IsDetachable() && !buffer->WasDetached() &&
-          buffer->Detach(v8::Local<v8::Value>()).IsNothing()) {
+      if (buffer->IsDetachable() && buffer->Detach(v8::Local<v8::Value>()).IsNothing()) {
         return false;
       }
     }

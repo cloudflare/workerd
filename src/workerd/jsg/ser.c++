@@ -550,14 +550,19 @@ Serializer::Released Serializer::release() {
   // intentionally defer this until after write() -- see transfer() for details.
   if (!arrayBuffers.empty()) {
     auto& js = jsg::Lock::current();
+    // A transferred buffer must still be attached, as in HTML's StructuredSerializeWithTransfer.
+    // One may have been detached before transfer(), or by JavaScript that write() ran (an
+    // accessor getter performing a nested structuredClone that transfers the same buffer, or
+    // calling ArrayBuffer.prototype.transfer()). The backing store transfer() took for it may
+    // then back another buffer, which the clone would share. Nothing is detached if one is.
     for (auto& arrayBuffer: arrayBuffers) {
+      JSG_REQUIRE(!arrayBuffer.getHandle(js)->WasDetached(), DOMDataCloneError,
+          "An ArrayBuffer is detached and could not be cloned.");
+    }
+    for (auto& arrayBuffer: arrayBuffers) {
+      // transfer() checked IsDetachable(), which v8::ArrayBuffer::Detach() fatally checks.
       auto handle = arrayBuffer.getHandle(js);
-      // JS run during write() (e.g. an accessor getter performing a nested structuredClone that
-      // transfers the same buffer, or calling ArrayBuffer.prototype.transfer()) may have already
-      // detached this buffer. Skip those: v8::ArrayBuffer::Detach() fatally checks IsDetachable(),
-      // and while a plain double-detach happens to be a no-op today, we don't want to depend on
-      // that V8 internal.
-      if (handle->IsDetachable() && !handle->WasDetached()) {
+      if (handle->IsDetachable()) {
         check(handle->Detach(v8::Local<v8::Value>()));
       }
     }

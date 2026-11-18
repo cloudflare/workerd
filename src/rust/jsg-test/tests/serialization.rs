@@ -1088,22 +1088,6 @@ fn transferred_array_buffers_move_to_the_deserializer() {
             "b.byteLength === 0",
             "v.size === 8 && v.b.byteLength === 8",
         );
-        // A getter that serialization runs can detach a transferred buffer itself, as a nested
-        // structuredClone() that transfers it does. release() doesn't detach it again, which V8
-        // happens to allow today, and passes on the backing store it took in transfer(). The
-        // HTML standard throws a DataCloneError for a buffer detached by then; both serializers
-        // differ from it alike, so this checks only that they agree and don't crash.
-        assert_transfer(
-            lock,
-            ctx,
-            "globalThis.b = new ArrayBuffer(8); new Uint8Array(b)[0] = 42;
-             globalThis.value = { get moved() { return new Uint8Array(b.transfer()); } };
-             globalThis.transfer = [b];",
-            1,
-            1,
-            "b.detached",
-            "v.moved[0] === 42 && v.moved.length === 8",
-        );
         // A buffer that the value doesn't hold is still detached, and passed on.
         assert_transfer(
             lock,
@@ -1165,6 +1149,58 @@ fn values_that_cannot_be_transferred_throw() {
                 // Nothing is detached.
                 assert!(
                     ctx.eval::<bool>(lock, "b.byteLength === 1").unwrap(),
+                    "{setup}"
+                );
+            }
+        }
+        Ok(())
+    });
+}
+
+/// A transferred buffer that is detached by the time the value is written, by a getter that
+/// serialization runs (as a nested `structuredClone()` that transfers it does) or before, throws a
+/// `DataCloneError`, as in the HTML standard, rather than passing on a backing store that another
+/// buffer may own. No other buffer is detached.
+#[test]
+fn detached_transferred_buffers_throw() {
+    Harness::new().run_in_context(|lock, ctx| {
+        for setup in [
+            "globalThis.b = new ArrayBuffer(8); globalThis.c = new ArrayBuffer(1);
+             globalThis.value = { get moved() { globalThis.moved = b.transfer(); return 1; } };
+             globalThis.transfer = [b, c];",
+            "globalThis.b = new ArrayBuffer(8); globalThis.c = new ArrayBuffer(1); b.transfer();
+             globalThis.value = 1; globalThis.transfer = [b, c];",
+        ] {
+            for cpp in [false, true] {
+                let (value, transfer) = transfer_setup(lock, ctx, setup, 2);
+                let caught = lock
+                    .try_catch(|lock| {
+                        let options = jsg::ser::SerializeOptions {
+                            transfer: &transfer,
+                            ..Default::default()
+                        };
+                        let result = if cpp {
+                            Harness::cpp_try_serialize_with(lock, value, options)
+                        } else {
+                            jsg::ser::serialize_with_options(lock, value, options)
+                        };
+                        assert!(
+                            result.as_ref().is_err_and(jsg::Error::is_pending),
+                            "{setup}"
+                        );
+                        result
+                    })
+                    .unwrap();
+                assert_error(
+                    lock,
+                    ctx,
+                    caught.expect_err(setup),
+                    "DataCloneError",
+                    "An ArrayBuffer is detached and could not be cloned.",
+                );
+                assert!(
+                    ctx.eval::<bool>(lock, "b.detached && c.byteLength === 1")
+                        .unwrap(),
                     "{setup}"
                 );
             }

@@ -1135,19 +1135,33 @@ KJ_TEST("recursive structuredClone with transfer") {
   // A getter invoked during serialization performs a nested structuredClone that transfers the
   // SAME ArrayBuffer the outer clone is also transferring. Because detaching is deferred until the
   // serializer's release(), the inner clone runs to completion (including its own release(), which
-  // detaches the buffer) while the outer clone is still inside write(). The outer release() then
-  // attempts to detach the already-detached buffer; this must not crash. Each structuredClone uses
+  // detaches the buffer) while the outer clone is still inside write(). Each structuredClone uses
   // its own serializer, so the nested call does not disturb the outer's transfer list.
   //
-  // Expected: buf is detached (byteLength 0) and the nested clone observed the real data (42).
+  // The outer release() then finds the buffer detached and throws a DataCloneError, as HTML does,
+  // rather than passing on a backing store that the nested clone's buffer owns. It detaches none
+  // of its other buffers.
+  e.expectEval(
+      "const buf = new ArrayBuffer(8);\n"
+      "const other = new ArrayBuffer(1);\n"
+      "new Uint8Array(buf)[0] = 42;\n"
+      "let nested;\n"
+      "const obj = { get nested() {\n"
+      "  nested = structuredCloneWithTransfer(new Uint8Array(buf), [buf]);\n"
+      "  return 1;\n"
+      "} };\n"
+      "let caught;\n"
+      "try { structuredCloneWithTransfer(obj, [buf, other]); } catch (e) { caught = e; }\n"
+      "`${caught.name}: ${caught.message},${buf.byteLength},${other.byteLength},${nested[0]}`",
+      "string", "DataCloneError: An ArrayBuffer is detached and could not be cloned.,0,1,42");
+
+  // So does a buffer detached before the clone.
   e.expectEval("const buf = new ArrayBuffer(8);\n"
-               "new Uint8Array(buf)[0] = 42;\n"
-               "const obj = { get nested() {\n"
-               "  return structuredCloneWithTransfer(new Uint8Array(buf), [buf]);\n"
-               "} };\n"
-               "const outer = structuredCloneWithTransfer(obj, [buf]);\n"
-               "`${buf.byteLength},${outer.nested[0]}`",
-      "string", "0,42");
+               "structuredCloneWithTransfer(buf, [buf]);\n"
+               "let caught;\n"
+               "try { structuredCloneWithTransfer(1, [buf]); } catch (e) { caught = e; }\n"
+               "`${caught.name}: ${caught.message}`",
+      "string", "DataCloneError: An ArrayBuffer is detached and could not be cloned.");
 }
 }  // namespace
 }  // namespace workerd::jsg::test

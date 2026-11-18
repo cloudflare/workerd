@@ -1128,7 +1128,7 @@ throws `DataCloneError`.
 `Released`: the bytes, and the backing stores of the value's `SharedArrayBuffer`s and of the
 `ArrayBuffer`s in `SerializeOptions::transfer`, which are detached once the value is written. A
 value that can't be transferred throws a `TypeError` or `DataCloneError`, as in C++, before
-anything is detached. The data refers to these buffers by number, so only
+anything is detached, and so does a buffer that is already detached by then. The data refers to these buffers by number, so only
 `Serialized::deserialize` reads it with them, as `jsg::Deserializer` reads a `Released`. Safe code
 has no other way to hand a reader backing stores (the hidden hooks for C++ comparison tests give
 their addresses, which only `unsafe` code can use), so a reader can't be given another
