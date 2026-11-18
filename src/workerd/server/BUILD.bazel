@@ -89,6 +89,8 @@ wd_rust_crate(
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
     test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
+    # A test's binary is the same command line over a server with services of its own.
+    visibility = ["//src/workerd/server/tests/send-worker:__pkg__"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
