@@ -222,8 +222,8 @@ function maxFlush(a: number, b: number): number {
 // shared zero-length ArrayBuffer: every Worker that imports node:zlib keeps
 // these, and V8 restores a startup snapshot's off-heap typed array over a
 // zero-length ArrayBuffer by copying its zero bytes to a null pointer, which is
-// undefined behavior (see docs/startup-snapshot.md §Failures). Buffer.alloc(0)
-// keeps its bytes on the V8 heap.
+// undefined behavior (see the Failures section of docs/startup-snapshot.md).
+// Buffer.alloc(0) keeps its bytes on the V8 heap.
 const kFlushBuffers: (Buffer & { [kFlushFlag]: number })[] = [];
 for (const flushFlag of kFlushFlagList) {
   const buf = Buffer.alloc(0) as Buffer & { [kFlushFlag]: number };
