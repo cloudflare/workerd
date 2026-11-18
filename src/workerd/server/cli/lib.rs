@@ -8,8 +8,9 @@
 //! `deploy` publishes one ([`deploy`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
-// Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
-// and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
+// Three modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations;
+// socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor; and
+// rseq.rs, which reads a glibc symbol and edits the environment before any thread starts.
 // Everything else is safe code over std, socket2 and the bridge.
 
 mod args;
@@ -18,6 +19,10 @@ mod config;
 mod deploy;
 mod deployments;
 mod process;
+#[cfg(target_os = "linux")]
+mod rseq;
+#[cfg(target_os = "linux")]
+pub use rseq::reexec_without_glibc_rseq;
 mod socket_fd;
 mod watch;
 mod wrangler;
