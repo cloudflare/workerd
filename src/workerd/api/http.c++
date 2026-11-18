@@ -1321,18 +1321,15 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 
 namespace {
 
-// Writes a body that no stream was built for, as for `new Response("text")`, straight to the
-// response stream, without the stream and pump that sending any other body needs. The bytes are
-// kj-heap memory owned by `buffer` and the response stream doesn't depend on the IoContext, so
-// the whole write can be deferred past it.
-kj::Promise<void> writeBufferToResponse(
-    kj::Own<kj::AsyncOutputStream> stream, kj::Rc<JsReadableStream::Buffer> buffer) {
+// Writes `bytes` to `stream`, unless `written`, then ends it as EncodedAsyncOutputStream::end()
+// does. On failure, aborts the stream.
+kj::Promise<void> finishBufferWrite(kj::Own<kj::AsyncOutputStream> stream,
+    kj::Rc<JsReadableStream::Buffer> buffer,
+    bool written) {
   try {
-    auto bytes = buffer->view;
-    if (bytes.size() > 0) {
-      co_await stream->write(bytes);
+    if (!written) {
+      co_await stream->write(buffer->view);
     }
-    // Ends the stream as EncodedAsyncOutputStream::end() does.
     KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
       co_await ee.end();
     } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
@@ -1343,6 +1340,29 @@ kj::Promise<void> writeBufferToResponse(
     stream->abortWrite(exception.clone());
     kj::throwException(kj::mv(exception));
   }
+}
+
+// Writes a body that no stream was built for, as for `new Response("text")`, straight to the
+// response stream, without the stream and pump that sending any other body needs. The bytes are
+// kj-heap memory owned by `buffer` and the response stream doesn't depend on the IoContext, so
+// the whole write can be deferred past it. If the stream takes the bytes synchronously and needs
+// no asynchronous end, as a response body nearly always does, nothing is left to wait for.
+kj::Promise<void> writeBufferToResponse(
+    kj::Own<kj::AsyncOutputStream> stream, kj::Rc<JsReadableStream::Buffer> buffer) {
+  auto bytes = buffer->view;
+  bool written = false;
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    written = bytes.size() == 0 || stream->tryWriteSync(bytes);
+  })) {
+    stream->abortWrite(exception.clone());
+    return kj::mv(exception);
+  }
+  if (written &&
+      kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream) == kj::none &&
+      kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream) == kj::none) {
+    return kj::READY_NOW;
+  }
+  return finishBufferWrite(kj::mv(stream), kj::mv(buffer), written);
 }
 
 }  // namespace
