@@ -320,6 +320,17 @@ export class MyService extends WorkerEntrypoint {
   getRpcPromise(callback) {
     return callback();
   }
+  async callTwice(callback) {
+    await callback();
+    // Bounded so that a second call that can't enter the caller's critical section fails the
+    // test instead of hanging it.
+    return await Promise.race([
+      callback(),
+      scheduler.wait(1000).then(() => {
+        throw new Error('second callback call did not complete');
+      }),
+    ]);
+  }
   getNestedRpcPromise(callback) {
     return { value: callback() };
   }
@@ -642,6 +653,14 @@ export class MyActor extends DurableObject {
         return 12345;
       };
       return await this.env.MyService.getRpcPromise(func);
+    });
+  }
+
+  async doCallbackTwiceBlockingConcurrency() {
+    // Like doCallbackBlockingConcurrency(), but the callback is invoked more than once, and every
+    // call must run in the critical section.
+    return this.ctx.blockConcurrencyWhile(async () => {
+      return await this.env.MyService.callTwice(() => 12345);
     });
   }
 
@@ -1019,6 +1038,7 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(8), 15);
 
     assert.strictEqual(await stub.doCallbackBlockingConcurrency(), 12345);
+    assert.strictEqual(await stub.doCallbackTwiceBlockingConcurrency(), 12345);
   },
 };
 
