@@ -383,14 +383,22 @@ impl Shared {
             body.extend_from_slice(&chunk[..read]);
         }
         if answer.status != 200 {
-            return Err(kj::failed!("{to} answered a purge {phase} {}", answer.status));
+            return Err(kj::failed!(
+                "{to} answered a purge {phase} {}",
+                answer.status
+            ));
         }
         let body = String::from_utf8(body).map_err(|_| kj::failed!("{to}: keys not UTF-8"))?;
         Ok(body.lines().map(str::to_owned).collect())
     }
 
     /// Fences or scans the purge `url` names.
-    async fn purge_phase(&self, phase: &str, url: &[u8], response: ServiceResponse<'_>) -> Result<()> {
+    async fn purge_phase(
+        &self,
+        phase: &str,
+        url: &[u8],
+        response: ServiceResponse<'_>,
+    ) -> Result<()> {
         let purge = Purge::parse(url)?;
         let keys = match phase {
             "fence" => {
@@ -403,10 +411,10 @@ impl Shared {
         let headers = kj_headers(header_table(&self.factory), &HeaderMap::new())?;
         let length = keys.len() as u64;
         let mut out = response.send(200, "OK", HeadersRef::from(&*headers), Some(length))?;
-        match keys.is_empty() {
-            true => Ok(()),
-            false => out.write(keys.as_bytes()).await,
+        if keys.is_empty() {
+            return Ok(());
         }
+        out.write(keys.as_bytes()).await
     }
 
     /// `body`, whole, in a file of its own.
@@ -497,7 +505,9 @@ impl Store for Clustered {
         let bad = || kj::failed!("cluster cache: a malformed message from {from}");
         let text = |name| headers.get_by_name(name).map(std::str::from_utf8);
         if let Some(phase) = text("cf-cache-purge") {
-            return shared.purge_phase(phase.map_err(|_| bad())?, url, response).await;
+            return shared
+                .purge_phase(phase.map_err(|_| bad())?, url, response)
+                .await;
         }
         let op = match text("cf-cache-op") {
             Some(Ok(op)) => op.parse().map_err(|_| bad())?,

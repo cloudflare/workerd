@@ -218,7 +218,7 @@ impl Purge {
 }
 
 /// How long a purge is remembered for the fills begun before it. One older stores nothing.
-const KEEP: Duration = Duration::from_secs(600);
+const KEEP: Duration = Duration::from_mins(10);
 
 /// The purges begun on this node, which a fill begun before one checks before it stores, and the
 /// fills storing. So once [`Purges::fence`] returns, no fill begun before stores what it purges.
@@ -275,7 +275,11 @@ impl Purges {
         }
         loop {
             let stored = self.stored.notified();
-            let storing = self.storing.borrow().first_key_value().map(|(after, _)| *after);
+            let storing = self
+                .storing
+                .borrow()
+                .first_key_value()
+                .map(|(after, _)| *after);
             if storing.is_none_or(|after| after >= n) {
                 return;
             }
