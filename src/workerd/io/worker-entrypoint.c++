@@ -116,7 +116,7 @@ class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
   kj::Maybe<kj::Promise<void>> proxyTask;
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
-  kj::Maybe<jsg::Ref<api::AbortController>> abortController;
+  kj::Maybe<jsg::Ref<api::IncomingRequestSignal>> requestSignal;
 
   void init(kj::Own<const Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -468,7 +468,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     {
       // Drain the incoming request and trigger the client-disconnect abort signal on scope exit
       // (success, failure, or cancellation). This must run regardless of outcome so that the
-      // incoming request is always drained and the AbortController is released; it must also run
+      // incoming request is always drained and the request signal is released; it must also run
       // before final error handling so that `failOpenService` is populated when needed.
       KJ_DEFER({
         // The request has been canceled, but allow it to continue executing in the background.
@@ -483,17 +483,17 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         // already completed normally, or failed with an exception.
         // TODO(perf): Don't add a task to trigger the abort unless we know it has at least one
         // listener.
-        if (proxyTask == kj::none && !loggedExceptionEarlier && abortController != kj::none) {
-          auto ctrl = KJ_ASSERT_NONNULL(abortController).addRef();
-          context.addWaitUntil(context.run([ctrl = kj::mv(ctrl)](Worker::Lock& lock) mutable {
-            ctrl->getSignal()->triggerAbort(
+        if (proxyTask == kj::none && !loggedExceptionEarlier && requestSignal != kj::none) {
+          auto signal = KJ_ASSERT_NONNULL(requestSignal).addRef();
+          context.addWaitUntil(context.run([signal = kj::mv(signal)](Worker::Lock& lock) mutable {
+            signal->triggerAbort(
                 lock, JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The client has disconnected"));
           }));
         }
 
-        // Release reference to the AbortController.
+        // Release reference to the signal.
         // Either the waitUntilTask holds a reference to it, or it will never be triggered at all.
-        abortController = kj::none;
+        requestSignal = kj::none;
 
         incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
@@ -509,16 +509,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
           auto traceScope = context.makeRequestTraceScope(lock);
 
-          kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
+          kj::Maybe<jsg::Ref<api::IncomingRequestSignal>> signal;
           auto featureFlags = FeatureFlags::get(lock);
           if (featureFlags.getEnableRequestSignal()) {
             auto abortSignalFlag = featureFlags.getRequestSignalPassthrough()
                 ? api::AbortSignal::Flag::NONE
                 : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
             jsg::Lock& js = lock;
-            signal.emplace(
-                abortController.emplace(js.alloc<api::AbortController>(js, abortSignalFlag))
-                    ->getSignal());
+            signal = requestSignal.emplace(js.alloc<api::IncomingRequestSignal>(abortSignalFlag))
+                         .addRef();
           }
 
           // Getting the handler finishes actor construction, so the claim sees a constructed actor

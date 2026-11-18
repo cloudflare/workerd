@@ -340,6 +340,7 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<Headers>> headers;
   kj::Maybe<jsg::Ref<Fetcher>> fetcher;
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
+  kj::Maybe<jsg::Ref<IncomingRequestSignal>> incomingSignal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
   Redirect redirect = Redirect::FOLLOW;
@@ -414,7 +415,9 @@ jsg::Ref<Request> Request::constructor(
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
-      signal = oldRequest->getSignal();
+      signal = oldRequest->signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+      incomingSignal = oldRequest->incomingSignal.map(
+          [](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
     }
   }
 
@@ -473,6 +476,7 @@ jsg::Ref<Request> Request::constructor(
           // explicitly say `signal: null`, they must want to drop the signal that was on the
           // original request.
           signal = kj::mv(s);
+          incomingSignal = kj::none;
           initDict.signal = kj::none;
         }
 
@@ -527,7 +531,9 @@ jsg::Ref<Request> Request::constructor(
         cacheMode = otherRequest->cacheMode;
         responseBodyEncoding = otherRequest->responseBodyEncoding;
         fetcher = otherRequest->getFetcher();
-        signal = otherRequest->getSignal();
+        signal = otherRequest->signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+        incomingSignal = otherRequest->incomingSignal.map(
+            [](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
         headers = js.alloc<Headers>(js, *otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
         KJ_IF_SOME(b, otherRequest->getBody(js)) {
@@ -545,9 +551,11 @@ jsg::Ref<Request> Request::constructor(
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
-  return js.alloc<Request>(js, method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
+  auto request = js.alloc<Request>(js, method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
       kj::mv(fetcher), kj::mv(signal), kj::mv(cf), kj::mv(body), /* thisSignal */ kj::none,
       cacheMode, responseBodyEncoding);
+  request->incomingSignal = kj::mv(incomingSignal);
+  return request;
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -556,9 +564,12 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
   auto cfClone = cf.deepClone(js);
   auto bodyClone = Body::clone(js);
 
-  return js.alloc<Request>(js, method, url, redirect, kj::mv(headersClone), getFetcher(),
-      /* signal */ getSignal(), kj::mv(cfClone), kj::mv(bodyClone), /* thisSignal */ kj::none,
-      cacheMode, responseBodyEncoding);
+  auto request = js.alloc<Request>(js, method, url, redirect, kj::mv(headersClone), getFetcher(),
+      /* signal */ signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); }), kj::mv(cfClone),
+      kj::mv(bodyClone), /* thisSignal */ kj::none, cacheMode, responseBodyEncoding);
+  request->incomingSignal =
+      incomingSignal.map([](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
+  return request;
 }
 
 kj::StringPtr Request::getMethod() {
@@ -586,8 +597,43 @@ kj::StringPtr Request::getRedirect() {
 kj::Maybe<jsg::Ref<Fetcher>> Request::getFetcher() {
   return fetcher.map([](jsg::Ref<Fetcher>& f) { return f.addRef(); });
 }
-kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal() {
+kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal(jsg::Lock& js) {
+  takeIncomingSignal(js);
   return signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+}
+
+jsg::Ref<AbortSignal> IncomingRequestSignal::get(jsg::Lock& js) {
+  KJ_IF_SOME(s, signal) {
+    return s.addRef();
+  }
+  auto s = js.alloc<AbortSignal>(kj::none, kj::none, flag);
+  KJ_IF_SOME(reason, abortReason) {
+    s->triggerAbort(js, kj::mv(reason));
+    abortReason = kj::none;
+  }
+  signal = s.addRef();
+  return s;
+}
+
+void IncomingRequestSignal::triggerAbort(jsg::Lock& js, kj::Exception reason) {
+  KJ_IF_SOME(s, signal) {
+    s->triggerAbort(js, kj::mv(reason));
+  } else {
+    abortReason = kj::mv(reason);
+  }
+}
+
+bool IncomingRequestSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
+  return !FeatureFlags::get(js).getRequestSignalPassthrough() &&
+      flag == AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
+}
+
+void Request::takeIncomingSignal(jsg::Lock& js) {
+  KJ_IF_SOME(incoming, incomingSignal) {
+    auto s = incoming->get(js);
+    incomingSignal = kj::none;
+    signal = kj::mv(s);
+  }
 }
 
 jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
@@ -603,6 +649,7 @@ jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
 // The name "thisSignal" is derived from the fetch spec, which draws a
 // distinction between the "signal" and "this' signal".
 jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
+  takeIncomingSignal(js);
   KJ_IF_SOME(s, signal) {
     return s.addRef();
   }
@@ -615,6 +662,11 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
 }
 
 void Request::clearSignalIfIgnoredForSubrequest(jsg::Lock& js) {
+  KJ_IF_SOME(s, incomingSignal) {
+    if (s->isIgnoredForSubrequests(js)) {
+      incomingSignal = kj::none;
+    }
+  }
   KJ_IF_SOME(s, signal) {
     if (s->isIgnoredForSubrequests(js)) {
       signal = kj::none;
@@ -783,6 +835,7 @@ void Request::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
     const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
   serializer.writeLengthDelimited(url);
+  takeIncomingSignal(js);
 
   // Our strategy is to construct an initializer dict object and serialize that as a JS object.
   // This makes the deserialization end really simple (just call the constructor), and it also
@@ -1780,7 +1833,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
 }
 
 kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
-  KJ_IF_SOME(signal, request.getSignal()) {
+  KJ_IF_SOME(signal, request.getSignal(js)) {
     if (signal->getAborted(js)) {
       return signal->getReason(js);
     }
@@ -1809,7 +1862,7 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   auto& ioContext = IoContext::current();
   jsRequest->rewindBody(js);
 
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
   auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
                           .catch_([retryState = retryState.addRef()](
                                       kj::Exception&& exception) mutable -> kj::Promise<void> {
@@ -1895,7 +1948,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
 
   auto& ioContext = IoContext::current();
 
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
     KJ_IF_SOME(state, retryState) {
       state->recordCanceled();
@@ -2097,7 +2150,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     kj::HttpClient::Response&& response,
     kj::Maybe<kj::TimePoint> callStart) {
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
 
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
