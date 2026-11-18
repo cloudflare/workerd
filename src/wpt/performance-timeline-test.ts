@@ -36,8 +36,24 @@ export default {
     ],
   },
   'idlharness.any.js': {
-    comment: 'idl_test setup hangs the Worker runtime',
-    disabledTests: ['idl_test setup'],
+    comment:
+      'PerformanceObserver never calls its callback, so the setup does not wait for it and there is no entryList. PerformanceEntry has no id or navigationId.',
+    expectedFailures: [
+      'PerformanceEntry interface: attribute id',
+      'PerformanceEntry interface: attribute navigationId',
+      'PerformanceObserverEntryList must be primary interface of entryList',
+      'Stringification of entryList',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntries()" with the proper type',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntriesByType(DOMString)" with the proper type',
+      'PerformanceObserverEntryList interface: calling getEntriesByType(DOMString) on entryList with too few arguments must throw TypeError',
+      'PerformanceObserverEntryList interface: entryList must inherit property "getEntriesByName(DOMString, optional DOMString)" with the proper type',
+      'PerformanceObserverEntryList interface: calling getEntriesByName(DOMString, optional DOMString) on entryList with too few arguments must throw TypeError',
+    ],
+    replace: (code): string =>
+      code.replace(
+        'self.entryList = await new Promise(',
+        'self.entryList = undefined; void new Promise('
+      ),
   },
   'multiple-buffered-flag-observers.any.js': {
     comment: 'This is not yet implemented',
