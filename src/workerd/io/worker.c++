@@ -545,7 +545,15 @@ struct Worker::Impl {
   // Note: The default export is given the string name "default", because that's what V8 tells us,
   // and so it's easiest to go with it. I guess that means that you can't actually name an export
   // "default"?
-  kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
+  struct NamedHandler {
+    api::ExportedHandler handler;
+
+    // A clone of `handler` that getExportedHandler() handed out and got back, kept with its `ctx`
+    // reset so that the next request needn't clone `handler` again. Cloning copies every handler
+    // field and creates a global handle for each function, `self` and `env`.
+    kj::Maybe<kj::Own<api::ExportedHandler>> spare;
+  };
+  kj::HashMap<kj::String, NamedHandler> namedHandlers;
   kj::HashMap<kj::String, ActorClassInfo> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
   kj::HashMap<kj::String, EntrypointClass> workflowClasses;
@@ -2605,7 +2613,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             }
                           }
                         } else {
-                          impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                          impl->namedHandlers.insert(
+                              kj::mv(handler.name), Impl::NamedHandler{.handler = kj::mv(obj)});
                         }
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
@@ -2878,6 +2887,23 @@ static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
 }
 
+// Lends `handler`, a clone of a named handler, to a request. If the request gives it back while
+// holding the isolate lock, as a fetch handler's does, it becomes the handler's `spare`, with the
+// request's `ctx` dropped. `worker` is kept alive meanwhile, so that `spare` stays valid.
+static kj::Own<api::ExportedHandler> lendToRequest(kj::Own<api::ExportedHandler> handler,
+    kj::Maybe<kj::Own<api::ExportedHandler>>& spare,
+    Worker& worker,
+    v8::Isolate* isolate) {
+  auto& ref = *handler;
+  return fakeOwn(ref).attach(kj::defer(
+      [handler = kj::mv(handler), &spare, isolate, worker = kj::atomicAddRef(worker)]() mutable {
+    if (v8::Locker::IsLocked(isolate)) {
+      handler->ctx = kj::none;
+      spare = kj::mv(handler);
+    }
+  }));
+}
+
 kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     kj::Maybe<kj::StringPtr> name,
     kj::Maybe<VersionInfo> versionInfo,
@@ -2913,15 +2939,23 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     return handler;
   };
 
-  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+  KJ_IF_SOME(entry, worker.impl->namedHandlers.find(n)) {
     jsg::Lock& js = *this;
+    auto& h = entry.handler;
     if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
-      api::ExportedHandler constructedHandler = h.clone(js);
-      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
+      auto ctx = js.alloc<api::ExecutionContext>(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
           kj::mv(versionInfo));
-      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler.self.getHandle(js)));
-      return kj::heap(kj::mv(constructedHandler));
+      kj::Own<api::ExportedHandler> constructedHandler;
+      KJ_IF_SOME(spare, entry.spare) {
+        constructedHandler = kj::mv(spare);
+        entry.spare = kj::none;
+      } else {
+        constructedHandler = kj::heap(h.clone(js));
+      }
+      constructedHandler->ctx = kj::mv(ctx);
+      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler->self.getHandle(js)));
+      return lendToRequest(kj::mv(constructedHandler), entry.spare, worker, getIsolate());
     }
     ioctx.setEntrypointHandler(js, jsg::JsObject(h.self.getHandle(js)));
     return fakeOwn(h);
@@ -3222,7 +3256,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       };
 
       for (auto& entry: worker.impl->namedHandlers) {
-        report(getEntrypointName(entry.key), entry.value);
+        report(getEntrypointName(entry.key), entry.value.handler);
       }
       for (auto& entry: worker.impl->actorClasses) {
         KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
