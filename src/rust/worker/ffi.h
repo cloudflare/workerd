@@ -45,7 +45,11 @@ inline kj::Promise<void> worker_request(WorkerInterface& worker,
     AsyncInputStream& requestBody,
     HttpServiceResponse& response) {
   auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
-  co_await worker.request(method, urlStr, headers, requestBody, response);
+  // Not a coroutine, whose frame would be an allocation of its own: the attachment shares the
+  // request's promise arena.
+  return kj::evalNow([&] {
+    return worker.request(method, urlStr, headers, requestBody, response);
+  }).attach(kj::mv(urlStr));
 }
 
 inline kj::Promise<void> worker_connect(WorkerInterface& worker,
