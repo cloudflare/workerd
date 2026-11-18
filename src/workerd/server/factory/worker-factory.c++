@@ -73,26 +73,10 @@ static ChannelTokenHandler::Key makeChannelTokenKey(kj::ArrayPtr<const uint64_t>
 // =======================================================================================
 // SharedFactory
 
-SharedFactory::Impl::Impl(jsg::V8System& v8System,
-    kj::EntropySource& entropySource,
-    kj::Filesystem& fs,
-    kj::Own<Options> optionsParam,
-    ::rust::Vec<uint64_t> config)
-    : v8System(v8System),
-      entropySource(entropySource),
-      fs(fs),
-      options(kj::mv(optionsParam)),
-      configMessage(kj::mv(config)),
-      // The IDs are assigned in this order: the capnp factory's headers, the `ThreadContext`'s,
-      // then the config's.
-      httpOverCapnpHeaderIds(headerTableBuilder),
-      threadContextHeaderIds(headerTableBuilder),
-      headerTable(buildHeaderTable(headerTableBuilder, kj::from<Rust>(configMessage))),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenKey(makeChannelTokenKey(kj::from<Rust>(configMessage))) {
-  // The config's logging settings go on top of the caller's.
-  capnp::FlatArrayMessageReader reader(
-      asWords(kj::from<Rust>(configMessage)), CONFIG_READER_OPTIONS);
+// `options` with the config's logging settings on top of the caller's.
+static kj::Own<const WorkerFactory::Options> withConfigLogging(
+    kj::Own<WorkerFactory::Options> options, kj::ArrayPtr<const uint64_t> configWords) {
+  capnp::FlatArrayMessageReader reader(asWords(configWords), CONFIG_READER_OPTIONS);
   auto root = reader.getRoot<config::Config>();
   auto& logging = options->loggingOptions;
   if (root.hasLogging()) {
@@ -107,7 +91,26 @@ SharedFactory::Impl::Impl(jsg::V8System& v8System,
   } else {
     logging.structuredLogging = StructuredLogging(root.getStructuredLogging());
   }
+  return kj::mv(options);
 }
+
+SharedFactory::Impl::Impl(jsg::V8System& v8System,
+    kj::EntropySource& entropySource,
+    kj::Filesystem& fs,
+    kj::Own<Options> optionsParam,
+    ::rust::Vec<uint64_t> config)
+    : v8System(v8System),
+      entropySource(entropySource),
+      fs(fs),
+      options(withConfigLogging(kj::mv(optionsParam), kj::from<Rust>(config))),
+      configMessage(kj::mv(config)),
+      // The IDs are assigned in this order: the capnp factory's headers, the `ThreadContext`'s,
+      // then the config's.
+      httpOverCapnpHeaderIds(headerTableBuilder),
+      threadContextHeaderIds(headerTableBuilder),
+      headerTable(buildHeaderTable(headerTableBuilder, kj::from<Rust>(configMessage))),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
+      channelTokenKey(makeChannelTokenKey(kj::from<Rust>(configMessage))) {}
 
 SharedFactory::SharedFactory(jsg::V8System& v8System,
     kj::EntropySource& entropySource,
@@ -179,9 +182,13 @@ WorkerFactory::WorkerFactory(kj::Arc<SharedFactory> shared,
     : impl(kj::heap<Impl>(*this, kj::mv(shared), timer, monotonicClock, network, primary)) {}
 
 WorkerFactory::~WorkerFactory() noexcept(false) {
-  // The tasks, the capnp factories and the Rust server's handle are the loop's.
-  KJ_DTOR_ASSERT(&impl->executor == &kj::getCurrentThreadExecutor(),
-      "a worker factory must be destroyed on the loop it was constructed on");
+  // The tasks, the capnp factories and the Rust server's handle are the loop's. A thread with no
+  // loop is not it either.
+  bool onItsLoop = false;
+  KJ_IF_SOME(executor, kj::tryGetCurrentThreadExecutor()) {
+    onItsLoop = &executor == &impl->executor;
+  }
+  KJ_DTOR_ASSERT(onItsLoop, "a worker factory must be destroyed on the loop it was constructed on");
 }
 
 kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory) {
@@ -1383,8 +1390,8 @@ kj::Own<ActorIdHandle> actor_id_from_hex(::rust::Str hex, kj::Maybe<::rust::Str>
   KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
       "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
   return kj::heap<ActorIdHandle>(
-      kj::Own<ActorIdFactory::ActorId>(kj::heap<ActorIdFactoryImpl::ActorIdImpl>(
-          decoded.begin(), name.map([](::rust::Str n) { return kj::str(n); }))));
+      normalizeActorId(kj::Own<ActorIdFactory::ActorId>(kj::heap<ActorIdFactoryImpl::ActorIdImpl>(
+          decoded.begin(), name.map([](::rust::Str n) { return kj::str(n); })))));
 }
 kj::Maybe<::rust::String> actor_id_name(const ActorIdHandle& id) {
   KJ_IF_SOME(obj, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {

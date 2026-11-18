@@ -134,7 +134,8 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   (`bootstrap_loop`), and its own `Server`: it compiles its own copy of every Worker (a Worker's
   global scope runs on every thread, its startup `console.log` lines appear N times, the startup
   snapshot and the isolates' memory are paid per thread, a `workerLoader` loads a dynamic Worker
-  per thread) and builds its own services and client pools from the same config, which numbers
+  per thread, a named one from what its `getCode` callback returns on that thread, so threads
+  can run different code under one name if the callback's answer changes) and builds its own services and client pools from the same config, which numbers
   channels the same way on every thread, so a binding or a channel token resolves within the
   thread. The threads share the listening stream sockets: the first binds them and hands each
   replica a duplicate (`kj_rs_io::TokioListener::duplicate`), of which the replica makes a
@@ -178,8 +179,8 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   itself does not have: the callee does not see the caller's trace span (`parentSpan`,
   `userSpanParent`); a `restore()` whose parameters hold a capability whose channel token is
   not available synchronously is refused, since the event is sent as it is written;
-  `abortAllDurableObjects()` and the eviction test hooks act on the thread they are called on,
-  which on a replica has no actors (the calls that can fail say so).
+  `abortAllDurableObjects()`, `deleteAllDurableObjects()` and the eviction test hooks act on
+  the thread they are called on and fail on a replica, which has no actors.
 - **A cluster instance's part in the cluster is the first loop thread's**: the `ClusterNode`
   with its lease, ownership, capture, alarm index, peer port and sessions exists once per
   process. A replica does not join; its Durable Object calls go to the first thread as above,

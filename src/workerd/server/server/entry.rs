@@ -182,6 +182,18 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
     Ok(ffi::with_process_context(verbose, config, command)?)
 }
 
+/// Ends the process with `code` at once, from any thread.
+///
+/// Other loop threads may still be running: this runs none of the atexit handlers and static
+/// destructors that `std::process::exit` runs on this thread under the others' feet. What Rust
+/// buffered for stdout is written first, as `std::process::exit` would; stderr and the log lines
+/// (`kj_log`) are not buffered.
+pub fn exit_now(code: i32) -> ! {
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    ffi::cli_exit(code);
+    unreachable!("cli_exit returned")
+}
+
 /// Reports an error -- a config error, failed tests, the run's failure -- and makes the exit
 /// status 1.
 fn error(structured: bool, message: &str) {

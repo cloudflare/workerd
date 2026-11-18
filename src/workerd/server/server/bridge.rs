@@ -599,7 +599,8 @@ pub mod ffi {
         /// The key the server files the actor under: the hex id, or the name.
         fn actor_id_key(id: &ActorIdHandle) -> String;
         fn actor_id_from_name(name: &str) -> KjOwn<ActorIdHandle>;
-        /// The id of a durable namespace, from its hex text (a debug-port request).
+        /// The id of a durable namespace, from its hex text (a debug-port request), carrying
+        /// `name` as an id derived from a name does: dropped if it is longer than 1024 bytes.
         fn actor_id_from_hex(hex: &str, name: KjMaybe<&str>) -> Result<KjOwn<ActorIdHandle>>;
         /// The name a durable actor's id was derived from, if it carries one.
         fn actor_id_name(id: &ActorIdHandle) -> KjMaybe<String>;
@@ -1159,7 +1160,7 @@ pub mod ffi {
         /// The channel of the worker's Cloudflare Access identity binding, whose props come from
         /// the request's access blob, if the worker has one.
         fn access_binding_channel(self: &ChannelFactory) -> KjMaybe<u32>;
-        fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>);
+        fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
         fn delete_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
         async unsafe fn evict_all_actors_for_test<'a>(
             self: &'a ChannelFactory,

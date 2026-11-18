@@ -155,7 +155,7 @@ type Listeners = FuturesUnordered<LocalBoxFuture<'static, Result<()>>>;
 /// signal.
 struct Running {
     server: Rc<Server>,
-    /// The listeners; the replicas, if any, are one of them (`Replicas::start`).
+    /// The listeners; the replicas, if any, are one of them (`threads::Started::watch`).
     listeners: Listeners,
     drain: watch::Sender<bool>,
     /// The other loop threads of the run, which end with it.
@@ -179,6 +179,7 @@ enum Role {
 /// A replica (see `threads.rs`) gets no `options` but the overrides, so it has no control
 /// channel, inspector or debug port, it arms no cron trigger, and it does not join the cluster:
 /// its factory forwards to the first loop thread what needs one (`Factory::first_thread`).
+#[expect(clippy::too_many_lines, reason = "a server's start, in order")]
 async fn start(
     factory: Rc<Factory>,
     mut options: RunOptions,
@@ -248,15 +249,28 @@ async fn start(
     let serves_streams = |sockets: &DuplicateSockets| sockets.iter().any(Option::is_some);
     let replicas =
         replicas.filter(|_| !server.report().had_errors() && duplicates.iter().any(serves_streams));
-    if let Some(replicas) = &replicas {
-        let deployments = server.report().replica_deployments();
-        let started = replicas.start(&factory, duplicates, &options.overrides, &deployments);
-        listeners.push(started.await?);
-    }
+    let mut started = match &replicas {
+        Some(replicas) => {
+            let deployments = server.report().replica_deployments();
+            Some(
+                replicas
+                    .start(&factory, duplicates, &options.overrides, &deployments)
+                    .await?,
+            )
+        }
+        None => None,
+    };
     // The cluster's event goes before the sockets', so a consumer that stops reading at a
     // socket's has it.
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        if let Some(started) = &mut started {
+            started.check()?;
+        }
         start_cluster(&factory, node, listener, &mut control)?;
+    }
+    if let Some(mut started) = started {
+        started.check()?;
+        listeners.push(started.watch());
     }
     for socket in listening {
         control.listen(&socket.name, socket.port, socket.url);

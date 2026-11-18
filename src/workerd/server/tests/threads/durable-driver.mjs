@@ -431,6 +431,32 @@ for (const threads of [THREADS, 1]) {
       connections.close();
     }));
 
+  test(`the hooks that end every object work on the first thread only ${on}`, () =>
+    withServer(threads, async (server) => {
+      const connections = await connect(server, threads);
+      const { first, object } = connections;
+      for (const hook of ['abort', 'delete']) {
+        const before = await first.get(`/where?name=${hook}`);
+        for (const connection of connections.replicas) {
+          const { error } = await connection.get(`/${hook}-all`);
+          assert.strictEqual(
+            error,
+            `Cannot ${hook} Durable Objects from this thread: with --threads, Durable ` +
+              "Objects run on the server's first thread, and only a request that thread " +
+              'serves can do this.'
+          );
+          // The object was left as it was.
+          const still = await connection.get(`/where?name=${hook}`);
+          assert.strictEqual(still.instance, before.instance);
+        }
+        assert.strictEqual((await first.get(`/${hook}-all`)).error, null);
+        const after = await first.get(`/where?name=${hook}`);
+        assert.strictEqual(after.isolate, object);
+        assert.notStrictEqual(after.instance, before.instance);
+      }
+      connections.close();
+    }));
+
   test(`SIGTERM completes the object calls in flight ${on}`, async () => {
     const server = await serve(threads);
     const connections = await connect(server, threads);

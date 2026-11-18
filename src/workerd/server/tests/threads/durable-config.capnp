@@ -8,7 +8,7 @@ const config :Workerd.Config = (
       worker = (
         modules = [(name = "worker", esModule = embed "durable-worker.mjs")],
         compatibilityDate = "2025-06-01",
-        compatibilityFlags = ["experimental", "enable_ctx_exports", "allow_irrevocable_stub_storage"],
+        compatibilityFlags = ["experimental", "enable_ctx_exports", "allow_irrevocable_stub_storage", "unsafe_module"],
         bindings = [
           (name = "COUNTER", durableObjectNamespace = "Counter"),
           (name = "EPHEMERAL", durableObjectNamespace = "Ephemeral"),

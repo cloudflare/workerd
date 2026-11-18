@@ -601,7 +601,7 @@ impl ActorNamespace {
     }
 
     /// Fails on a replica, for what only the thread that has the actors can do.
-    fn require_actors_here(&self, what: &str) -> Result<()> {
+    pub fn require_actors_here(&self, what: &str) -> Result<()> {
         if self.forwards() {
             return Err(kj::failed!(
                 "jsg.Error: Cannot {what} from this thread: with --threads, Durable Objects run \
