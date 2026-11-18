@@ -135,6 +135,14 @@ class TestService final: public kj::HttpService {
     } else if (url == "/hello") {
       auto out = response.send(200, "OK", responseHeaders, static_cast<uint64_t>(5));
       co_await out->write("hello"_kj.asBytes());
+    } else if (url == "/sync") {
+      // The body takes a write synchronously once hyper has taken the last, and refuses the
+      // next until it has, keeping nothing of the refused write.
+      auto out = response.send(200, "OK", responseHeaders, static_cast<uint64_t>(10));
+      KJ_ASSERT(out->tryWriteSync("hello"_kj.asBytes()));
+      kj::ArrayPtr<const kj::byte> pieces[] = {"wor"_kj.asBytes(), "ld"_kj.asBytes()};
+      KJ_ASSERT(!out->tryWriteSync(pieces));
+      co_await out->write(pieces);
     } else if (url == "/no-content") {
       response.send(204, "No Content", responseHeaders, static_cast<uint64_t>(0));
     } else if (url == "/stream") {
@@ -823,6 +831,14 @@ KJ_TEST("server: a write beyond the declared length fails, and nothing of it is 
   auto expected = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"_kj;
   KJ_EXPECT(readBytes(f.ws, *conn, expected.size()) == expected);
   KJ_EXPECT(KJ_ASSERT_NONNULL(f.service.overwriteError).contains("overwrote Content-Length"));
+}
+
+KJ_TEST("server: a response body is written synchronously when it has room") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("GET /sync HTTP/1.1\r\nHost: foo\r\n\r\n"_kj.asBytes()).wait(f.ws);
+  auto expected = "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhelloworld"_kj;
+  KJ_EXPECT(readBytes(f.ws, *conn, expected.size()) == expected);
 }
 
 KJ_TEST("server: 304 carries no body, and the connection stays in sync") {
