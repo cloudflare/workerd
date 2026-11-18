@@ -1,6 +1,6 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 
-js_test(
+wd_js_test(
     name = "inspector-test",
     size = "large",
     data = [
@@ -19,7 +19,7 @@ js_test(
     tags = ["js-test"],
 )
 
-js_test(
+wd_js_test(
     name = "inspector-profiler-test",
     size = "large",
     data = [

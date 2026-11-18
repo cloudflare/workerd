@@ -26,6 +26,9 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 **Conventions:**
 
 - Test tags: `off-by-default`, `requires-container-engine`, `no-asan`, `no-coverage`
+- Test rules pass their attributes through `test_attrs()` (`test_attrs.bzl`), which derives
+  `exec_properties` and `target_compatible_with` from tags; use `wd_js_test`, `wd_sh_test` and
+  `wd_py_test` rather than `js_test`, `sh_test` and `py_test`
 - Variant generation controllable per-test via `generate_*_variant` booleans
 - `BUILD.*` files: overlay build files for third-party deps (sqlite3, zlib, simdutf, pyodide, wpt)
 

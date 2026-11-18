@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -13,7 +13,7 @@ wd_test(
 )
 
 # `workerd serve` of a wrangler.jsonc's d1_databases.
-js_test(
+wd_js_test(
     name = "d1-wrangler-test",
     data = ["//src/workerd/server:workerd"],
     entry_point = "d1-wrangler-test.mjs",

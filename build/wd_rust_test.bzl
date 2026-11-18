@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_test")
+load("//:build/test_attrs.bzl", "test_attrs")
 
 def split_rust_test_srcs(srcs):
     """Partitions a crate's sources into (production sources, unit test sources).
@@ -16,6 +17,9 @@ def wd_rust_test(
         env = {},
         link_deps = [],
         tags = [],
+        size = "medium",
+        target_compatible_with = None,
+        exec_properties = {},
         **kwargs):
     rust_test(
         name = name,
@@ -33,6 +37,6 @@ def wd_rust_test(
             "@@//deps:rust_runtime",
         ],
         malloc = "//src/workerd/server:malloc",
-        tags = tags + ["no-coverage"],
-        **kwargs
+        size = size,
+        **(kwargs | test_attrs(tags + ["no-coverage"], size, target_compatible_with, exec_properties))
     )
