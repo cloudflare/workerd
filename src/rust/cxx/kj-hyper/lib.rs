@@ -63,6 +63,7 @@
 #![deny(clippy::absolute_paths)]
 
 mod body;
+mod calls;
 pub mod client;
 pub mod ffi;
 mod handshake;

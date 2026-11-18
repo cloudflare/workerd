@@ -61,9 +61,7 @@ use std::time::Duration;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use futures::FutureExt;
-use futures::StreamExt;
 use futures::future::Shared;
-use futures::stream::FuturesUnordered;
 use http::header::SEC_WEBSOCKET_KEY;
 use http::header::UPGRADE;
 use http::request::Parts;
@@ -99,6 +97,7 @@ use crate::body::HeaderIds;
 use crate::body::MAX_HEADERS;
 use crate::body::Protocol;
 use crate::body::channel_in;
+use crate::calls;
 use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::ReusedHeaders;
@@ -118,9 +117,9 @@ use crate::wakes::Wakes;
 type Response = http::Response<ChannelBody>;
 
 /// The futures [`serve_connection`] drives besides the calls, as [`Wakes`] names them.
-const SERVING: u8 = 1;
-const HANGUP: u8 = 2;
-const DRAINED: u8 = 4;
+const SERVING: u64 = 1;
+const HANGUP: u64 = 2;
+const DRAINED: u64 = 4;
 
 fn failed(what: impl Into<String>) -> KjError {
     KjError::new(KjExceptionType::Failed, what.into())
@@ -280,11 +279,14 @@ struct ConnectionState {
 /// hyper's service pushes to it and the serve loop polls it, each borrowing it only for that.
 ///
 /// `F` is [`handle`]'s future, held in the queue's own task rather than boxed apart from it.
-type Calls<F> = Rc<RefCell<FuturesUnordered<F>>>;
+type Calls<F> = Rc<RefCell<calls::Calls<F>>>;
 
-/// An empty queue of the calls `start` starts.
-fn calls<A, F>(_start: &impl Fn(A, Parts, Incoming, Rc<ResponseSender>) -> F) -> Calls<F> {
-    Rc::default()
+/// An empty queue of the calls `start` starts, woken through `wakes`.
+fn calls<A, F: Future<Output = ()>>(
+    _start: &impl Fn(A, Parts, Incoming, Rc<ResponseSender>) -> F,
+    wakes: &Wakes,
+) -> Calls<F> {
+    Rc::new(RefCell::new(calls::Calls::new(wakes)))
 }
 
 /// Serves HTTP/1.1 on `io` until the peer is done with the connection (or `shutdown` says so)
@@ -327,7 +329,10 @@ where
         blocks: RefCell::default(),
     });
     let start = handle::<H>;
-    let calls = calls(&start);
+    // hyper's connection, the hang-up, the drain and each call are polled only when they woke
+    // the task.
+    let wakes = Wakes::new();
+    let calls = calls(&start, &wakes);
     let service = {
         let conn = Rc::clone(&conn);
         let calls = Rc::clone(&calls);
@@ -342,14 +347,12 @@ where
     let mut hangup = pin!(hangup);
     let mut draining = false;
     let mut served: Option<hyper::Result<()>> = None;
-    // hyper's connection, the hang-up and the drain are each polled only when they woke the task;
-    // the calls have their own wakers in `FuturesUnordered`.
-    let wakes = Wakes::new();
     let serving_waker = wakes.waker(SERVING);
     let hangup_waker = wakes.waker(HANGUP);
     let drained_waker = wakes.waker(DRAINED);
     poll_fn(|cx| {
         let woken = wakes.begin(cx);
+        calls.borrow_mut().begin(woken);
         // Only while hyper serves: hyper shuts down its side once it is done, so a hang-up after
         // that is the close it started, not a peer going away mid-call.
         if woken & HANGUP != 0
@@ -386,7 +389,7 @@ where
         // the service), which then gets its first poll in this same turn, and a call may send
         // its response head, which the connection then writes in this same turn.
         loop {
-            while calls.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {}
+            calls.borrow_mut().poll();
             poll_serving |= wakes.take(SERVING);
             if !poll_serving || served.is_some() {
                 break;
@@ -467,6 +470,7 @@ async fn dispatch<'t, H, S, F>(
 ) -> Result<Response, io::Error>
 where
     S: Fn(Rc<Connection<'t, H>>, Parts, Incoming, Rc<ResponseSender>) -> F,
+    F: Future<Output = ()>,
 {
     let may_upgrade =
         request.method() == http::Method::CONNECT || request.headers().contains_key(UPGRADE);
