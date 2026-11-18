@@ -501,26 +501,40 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
     auto body2 = kj::addRef(*ownRequestBody);
 
-    // The response is sent from within awaitJs()'s own continuation so that the promise returned
-    // by send(), which owns the response body stream or the accepted WebSocket, is handed to the
-    // KJ promise chain in the same microtask that created it. See awaitJs() for why. awaitJs()
-    // also skips the continuation if this request was canceled, such as when the client
-    // disconnected, in which case `response` would be a dangling reference.
-    return ioContext
-        .awaitJs(lock, kj::mv(promise),
-            [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
-                jsg::Lock& js,
-                jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
+    auto sendResponse =
+        [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
+            jsg::Lock& js,
+            jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
       return innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
-    })
-        .then(
-            [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
-                DeferredProxy<void> deferredProxy) mutable {
+    };
+
+    kj::Promise<DeferredProxy<void>> sent = nullptr;
+    KJ_IF_SOME(innerResponse, promise.tryConsumeResolved(lock)) {
+      // The handler returned a Response itself rather than a promise for one, so it is sent now,
+      // without the promise reaction and the wrappers that awaiting it would allocate. That
+      // reaction would have run after the microtasks the handler queued, which may still change
+      // the Response, so they run first.
+      js.runMicrotasks();
+      if (js.v8Isolate->IsExecutionTerminating()) {
+        throw jsg::JsExceptionThrown();
+      }
+      sent = sendResponse(js, kj::mv(innerResponse));
+    } else {
+      // The response is sent from within awaitJs()'s own continuation so that the promise
+      // returned by send(), which owns the response body stream or the accepted WebSocket, is
+      // handed to the KJ promise chain in the same microtask that created it. See awaitJs() for
+      // why. awaitJs() also skips the continuation if this request was canceled, such as when the
+      // client disconnected, in which case `response` would be a dangling reference.
+      sent = ioContext.awaitJs(lock, kj::mv(promise), kj::mv(sendResponse));
+    }
+    return sent.then(
+        [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
+            DeferredProxy<void> deferredProxy) mutable {
       // In the case of bidirectional streaming, the request body stream needs to remain valid
       // while proxying the response. So, arrange for neutering to happen only after the proxy
       // task finishes.
@@ -534,7 +548,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
       return deferredProxy;
     },
-            [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+        [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
       // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
       //   so `deferredNeuter` hasn't been destroyed yet.
       body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
