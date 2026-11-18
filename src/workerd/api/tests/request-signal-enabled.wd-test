@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
           (name = "AbortTracker", durableObjectNamespace = "AbortTracker"),
           (name = "OtherServer", service = (name = "request-signal-enabled", entrypoint = "OtherServer")),
           (name = "Server", service = (name = "request-signal-enabled", entrypoint = "Server")),
+          (name = "DerivedSignalServer", service = (name = "request-signal-enabled", entrypoint = "DerivedSignalServer")),
           (name = "defaultExport", service = "request-signal-enabled"),
         ]
       )
