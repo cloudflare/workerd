@@ -403,7 +403,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "xrMQmrStrueR0w0uwmELEMgm68O+gE0GEzsLEEf8Fv8=",
+        "usagesDigest": "OY319dAxJryStBqDBk11AV30Kg6Y9bddTIRdglGx37U=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -431,10 +431,10 @@
               "remote_module_file_urls": [],
               "remote_patch_strip": 0,
               "remote_patches": {},
-              "sha256": "487e97008c1f2468c3da20812b19973b40b62e5d9b8132627723367e03d96d63",
-              "strip_prefix": "capnproto-capnproto-be8fbe7/c++",
+              "sha256": "4dc9341ff0d9c27dd833d2ef31e192f3aeb4452532babc46d2d09731fd970e11",
+              "strip_prefix": "capnproto-capnproto-cc7c8ee/c++",
               "type": "tgz",
-              "url": "https://github.com/capnproto/capnproto/tarball/be8fbe7bc7ad6c5cc8106385a1919df7222b1e5e",
+              "url": "https://github.com/capnproto/capnproto/tarball/cc7c8eec7b5d7dae1ae6665c400612b1317ad853",
               "urls": [],
               "workspace_file_content": ""
             }
