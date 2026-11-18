@@ -544,7 +544,15 @@ pub struct HeaderBlock {
 impl HeaderBlock {
     pub fn new(map: &http::HeaderMap, extensions: &http::Extensions) -> Self {
         let spellings = extensions.get::<HeaderCaseMap>();
-        let mut block = Self::default();
+        // A spelling is as long as its name.
+        let size = map
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.len() + 2)
+            .sum();
+        let mut block = Self {
+            arena: Vec::with_capacity(size),
+            lens: Vec::with_capacity(2 * map.len()),
+        };
         for name in map.keys() {
             let mut spelled = spellings.map(|s| s.get_all_internal(name));
             for value in map.get_all(name) {
