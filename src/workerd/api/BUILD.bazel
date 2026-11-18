@@ -134,6 +134,7 @@ wd_cc_library(
     name = "analytics-engine",
     srcs = [
         "analytics-engine.c++",
+        "analytics-engine-impl.c++",
     ],
     hdrs = [
         "analytics-engine.h",
