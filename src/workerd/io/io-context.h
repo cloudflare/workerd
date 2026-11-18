@@ -682,9 +682,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns an executor through which other IoContexts (or code running outside any
   // IoContext) can later check whether this context is current, still alive, or defer work
   // into it. Safe to retain beyond this context's lifetime.
-  IoCrossContextExecutor getCrossContextExecutor() {
-    return IoCrossContextExecutor(deleteQueue.queue.addRef());
-  }
+  IoCrossContextExecutor getCrossContextExecutor();
 
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
@@ -1658,7 +1656,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       kj::Function<void(Worker::Lock&)> func);
 
-  kj::Promise<void> deleteQueueSignalTask;
+  // Runs the actions other contexts schedule on deleteQueue. Only an IoCrossContextExecutor can
+  // schedule them, and this context makes each one on its own thread, so the task starts when the
+  // first executor is made rather than for every context. Once hibernation has stopped it, it
+  // holds NEVER_DONE, so that it doesn't start again.
+  kj::Maybe<kj::Promise<void>> deleteQueueSignalTask;
+  void ensureDeleteQueueSignalTask();
   static kj::Promise<void> startDeleteQueueSignalTask(IoContext* context);
 
   // Runs the actions queued on deleteQueue under the input lock and current IncomingRequest. If
