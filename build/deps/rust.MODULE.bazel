@@ -94,7 +94,9 @@ crate.annotation(
 # kj-hyper's larger limit (MAX_HEADERS) only when it has more than that; upstream allocates the
 # whole limit for every head, a large allocation per request at kj-hyper's limit. And
 # preserve_header_case records a spelling only where it is not the lowercase name, so a request
-# whose names are all lowercase, as many clients send them, carries no HeaderCaseMap.
+# whose names are all lowercase, as many clients send them, carries no HeaderCaseMap. And a
+# connection that writes no Date header (kj-hyper's server) skips the date upkeep, a clock read on
+# every poll of the connection.
 crate.annotation(
     crate = "hyper",
     patch_args = ["-p1"],
@@ -105,6 +107,7 @@ crate.annotation(
         "//:patches/rust/crates/hyper/parse-error-explanation.patch",
         "//:patches/rust/crates/hyper/stack-headers-first.patch",
         "//:patches/rust/crates/hyper/unrecorded-lowercase-spellings.patch",
+        "//:patches/rust/crates/hyper/skip-date-update-without-date-header.patch",
     ],
 )
 crate.annotation(
