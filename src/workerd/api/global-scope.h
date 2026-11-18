@@ -528,26 +528,26 @@ struct ExportedHandler {
   // promise for it, so that it can be sent without awaiting anything.
   using FetchResult = kj::OneOf<jsg::Ref<api::Response>, jsg::Promise<jsg::Ref<api::Response>>>;
   using FetchHandler = FetchResult(jsg::Ref<api::Request> request,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
   using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Ref<Socket> socket, jsg::JsValue env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
   using TailStreamHandler = kj::Promise<void>(
-      jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::JsObject obj, jsg::JsValue env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
   using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
@@ -556,7 +556,7 @@ struct ExportedHandler {
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
@@ -653,7 +653,7 @@ struct ExportedHandler {
 // benchmark runs.
 struct BenchExportedHandler {
   using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
 
