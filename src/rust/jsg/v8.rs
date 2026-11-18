@@ -360,6 +360,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             byte_length: usize,
         ) -> Local;
+        #[nothrow]
         pub unsafe fn array_buffer_new_with_mode(
             isolate: *mut Isolate,
             byte_length: usize,
@@ -500,14 +501,20 @@ pub mod ffi {
         ) -> bool;
         // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
         // coercion threw, leaving the exception pending; see `call_into_js()`.
+        #[nothrow]
         pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
         pub unsafe fn local_to_detail_string(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<String>
+        #[nothrow]
         pub unsafe fn local_string_length(value: &Local) -> i32;
+        #[nothrow]
         pub unsafe fn local_string_is_one_byte(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_string_contains_only_one_byte(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_string_utf8_length(isolate: *mut Isolate, value: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_string_write_v2(
             isolate: *mut Isolate,
             value: &Local,
@@ -516,6 +523,7 @@ pub mod ffi {
             buffer: *mut u16,
             flags: i32,
         );
+        #[nothrow]
         pub unsafe fn local_string_write_one_byte_v2(
             isolate: *mut Isolate,
             value: &Local,
@@ -524,6 +532,7 @@ pub mod ffi {
             buffer: *mut u8,
             flags: i32,
         );
+        #[nothrow]
         pub unsafe fn local_string_write_utf8_v2(
             isolate: *mut Isolate,
             value: &Local,
@@ -531,8 +540,11 @@ pub mod ffi {
             capacity: usize,
             flags: i32,
         ) -> usize;
+        #[nothrow]
         pub unsafe fn local_string_empty(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_string_equals(lhs: &Local, rhs: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_string_is_flat(value: &Local) -> bool;
         pub unsafe fn local_string_concat(
             isolate: *mut Isolate,
