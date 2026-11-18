@@ -430,7 +430,7 @@ KJ_TEST("JsReadableStream pipeTo pipes into a JsWritableStream and closes it") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     // pipeTo() self-retains the source; the destination must still outlive the pipe because the
     // pipe's write loop runs inside the writable controller.
@@ -449,7 +449,7 @@ KJ_TEST("JsReadableStream pipeTo with preventClose leaves the destination open")
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     auto promise = source.pipeTo(js, destination, PipeToOptions{.preventClose = true})
                        .then(js, [destination = kj::mv(destination)](jsg::Lock& js) {});
@@ -467,7 +467,7 @@ KJ_TEST("JsReadableStream pipeTo rejects when the source is locked") {
 
     // detach() leaves the original as a locked husk, which is a convenient way to produce a
     // locked stream without a reader.
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto detached = source.detach(js);
     KJ_EXPECT(source.isLocked(js));
 
@@ -489,7 +489,7 @@ KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     // Pre-lock the destination via the legacy WritableStream's writer before adopting it.
     // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
@@ -511,7 +511,7 @@ KJ_TEST("JsReadableStream pipeThrough pipes through an identity transform") {
   testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto result = source.pipeThrough(js, makeIdentityPair(js));
     KJ_EXPECT(!result.isNull());
     // The source is now locked into the pipe.
@@ -536,7 +536,7 @@ KJ_TEST("JsReadableStream pipeThrough composes with pipeTo") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
     auto piped = source.pipeThrough(js, makeIdentityPair(js));
     // pipeTo() self-retains the piped source; pipeThrough() self-retains the original source
@@ -555,7 +555,7 @@ KJ_TEST("JsReadableStream pipeThrough throws synchronously when the source is lo
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
     auto detached = source.detach(js);
     KJ_EXPECT(source.isLocked(js));
 
@@ -575,7 +575,7 @@ KJ_TEST("JsReadableStream pipeThrough throws synchronously when the transform wr
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    JsReadableStream source(js, kj::str(kData));
+    auto source = JsReadableStream::create(js, kj::str(kData));
 
     auto transform = IdentityTransformStream::constructor(js);
     auto writable = transform->getWritable();

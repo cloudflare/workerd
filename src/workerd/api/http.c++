@@ -105,16 +105,16 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       auto handle = value.getHandle(js);
       KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
         auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream(js, str), kj::mv(contentType));
+        return ExtractedBody(js, JsReadableStream::create(js, str), kj::mv(contentType));
       } else KJ_IF_SOME(bufferSource, handle.tryCast<jsg::JsBufferSource>()) {
-        return ExtractedBody(js, JsReadableStream(js, bufferSource));
+        return ExtractedBody(js, JsReadableStream::create(js, bufferSource));
       } else {
         // In this case we have to convert the value to a JS string now as the
         // timing of the stringify call on the value is observable. The call
         // cannot be deferred.
         auto str = value.getHandle(js).toJsString(js);
         auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
-        return ExtractedBody(js, JsReadableStream(js, str), kj::mv(contentType));
+        return ExtractedBody(js, JsReadableStream::create(js, str), kj::mv(contentType));
       }
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
@@ -125,7 +125,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       if (blobType != nullptr) {
         contentType = kj::str(blobType);
       }
-      return ExtractedBody(js, JsReadableStream(js, kj::mv(blob)), kj::mv(contentType));
+      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(blob)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       // Make an array of characters containing random hexadecimal digits.
@@ -139,18 +139,18 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       auto boundary = kj::encodeHex(boundaryBuffer);
       auto contentType = MimeType::formDataWithBoundary(boundary);
       return ExtractedBody(
-          js, JsReadableStream(js, formData->serialize(js, boundary)), kj::mv(contentType));
+          js, JsReadableStream::create(js, formData->serialize(js, boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
+      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(searchParams)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
-      return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
+      return ExtractedBody(js, JsReadableStream::create(js, kj::mv(searchParams)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
-      return ExtractedBody(js, JsReadableStream(js, searchParams.serializeJs(js)),
+      return ExtractedBody(js, JsReadableStream::create(js, searchParams.serializeJs(js)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
   }

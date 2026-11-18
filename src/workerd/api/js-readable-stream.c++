@@ -816,31 +816,40 @@ JsReadableStream::JsReadableStream(jsg::Lock&, jsg::JsRef<jsg::JsObject> obj)
         .stream = StreamImpl(kj::mv(obj)),
       }) {}
 
-JsReadableStream::JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data)))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, kj::String data)
-    : JsReadableStream(js, webstreams::stringToBytes(kj::mv(data))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsString str)
-    : JsReadableStream(js, str.toString(js)) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsBufferSource view)
-    : JsReadableStream(js, view.copy()) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
-
-JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
-    : JsReadableStream(js, urlSearchParams->toString()) {}
-
-JsReadableStream::JsReadableStream(
-    jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams)
-    : JsReadableStream(js, urlSearchParams->toString()) {}
-
 JsReadableStream JsReadableStream::create(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
   return JsReadableStream(Impl{.stream = newBackingStream(js, ioContext, kj::mv(source))});
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Array<const kj::byte> data) {
+  // TODO (soon): Add memory accounting for this path
+  return JsReadableStream(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(data))));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::String data) {
+  return create(js, webstreams::stringToBytes(kj::mv(data)));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsString str) {
+  return create(js, str.toString(js));
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsBufferSource source) {
+  return create(js, source.copy());
+}
+
+JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::Ref<Blob> blob) {
+  return JsReadableStream(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob))));
+}
+
+JsReadableStream JsReadableStream::create(
+    jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams) {
+  return create(js, urlSearchParams->toString());
+}
+
+JsReadableStream JsReadableStream::create(
+    jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams) {
+  return create(js, urlSearchParams->toString());
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
@@ -914,10 +923,12 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
       constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
 }
 
-JsReadableStream JsReadableStream::fromPull(
-    jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
+JsReadableStream JsReadableStream::fromPull(jsg::Lock& js,
+    kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull,
+    kj::Maybe<uint64_t> maybeExpectedLength) {
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     UnderlyingSource underlyingSource;
+    underlyingSource.expectedLength = kj::mv(maybeExpectedLength);
     underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
                                 UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
       auto defaultController =
@@ -958,6 +969,9 @@ JsReadableStream JsReadableStream::fromPull(
   });
 
   auto sourceObj = js.obj();
+  KJ_IF_SOME(length, maybeExpectedLength) {
+    sourceObj.set(js, "expectedLength", js.bigInt(length));
+  }
   sourceObj.set(js, "pull"_kj, jsg::JsValue(tsPull));
   // Demand-driven pulls only, matching from()'s TypeScript arm.
   auto strategyObj = js.obj();

@@ -78,19 +78,6 @@ class JsReadableStream final {
   // (create()) construct from a known-good conduit instance.
   JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsObject> obj);
 
-  // Create a buffer-backed (rewindable) JsReadableStream from various in-memory data sources. The
-  // kj::String, jsg::JsRef<jsg::JsBufferSource>, and URLSearchParams overloads are conveniences
-  // that copy / serialize the source into owned bytes and delegate to the kj::Array overload. The
-  // JsBufferSource overload copies (rather than retaining a reference to the view) so the resulting
-  // stream is unaffected if the source ArrayBuffer is later detached or transferred.
-  JsReadableStream(jsg::Lock& js, kj::Array<const kj::byte> data);
-  JsReadableStream(jsg::Lock& js, kj::String data);
-  JsReadableStream(jsg::Lock& js, jsg::JsString str);
-  JsReadableStream(jsg::Lock& js, jsg::JsBufferSource view);
-  JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob);
-  JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams);
-  JsReadableStream(jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams);
-
   JsReadableStream(JsReadableStream&&) = default;
   JsReadableStream& operator=(JsReadableStream&&) = default;
   JsReadableStream(const JsReadableStream&) = delete;
@@ -106,8 +93,21 @@ class JsReadableStream final {
   // ReadableStream is used. Buffer-backed construction (the data constructors above)
   // dispatches the same way; see bufferBackedImpl().
   //
+  static JsReadableStream create(jsg::Lock& js,
+      IoContext& ioContext,
+      kj::Own<ReadableStreamSource> source) KJ_WARN_UNUSED_RESULT;
+
+  // Create stream variations that hold a fixed buffer in memory.
   static JsReadableStream create(
-      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+      jsg::Lock& js, kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(jsg::Lock& js, kj::String data) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(jsg::Lock& js, jsg::JsString str) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(jsg::Lock& js, jsg::JsBufferSource source) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(jsg::Lock& js, jsg::Ref<Blob> blob) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(
+      jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams) KJ_WARN_UNUSED_RESULT;
+  static JsReadableStream create(
+      jsg::Lock& js, jsg::Ref<api::url::URLSearchParams> urlSearchParams) KJ_WARN_UNUSED_RESULT;
 
   // Create a stream-backed JsReadableStream that reads the values produced by the given
   // async generator, following the ReadableStream.from() algorithm: demand-driven pulls
@@ -123,7 +123,8 @@ class JsReadableStream final {
   // typescript_implemented_streams the TypeScript stream is constructed over a
   // C++-built JS underlying source driving the generator; otherwise this delegates to the
   // legacy ReadableStream::from().
-  static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+  static JsReadableStream from(
+      jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) KJ_WARN_UNUSED_RESULT;
 
   // Create a stream-backed, value-mode JsReadableStream driven directly by a C++ pull
   // function: each call is awaited, and its result is either enqueued as-is
@@ -135,8 +136,9 @@ class JsReadableStream final {
   // TypeScript stream is constructed over a plain (non-native-marked) underlying source,
   // which resolves to its QUEUED backend; otherwise this builds the legacy C++
   // ReadableStreamJsController directly.
-  static JsReadableStream fromPull(
-      jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull);
+  static JsReadableStream fromPull(jsg::Lock& js,
+      kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull,
+      kj::Maybe<uint64_t> maybeExpectedLength = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream
@@ -144,7 +146,7 @@ class JsReadableStream final {
   // the type wrapper yields the same JavaScript object. This is what identity-preserving
   // accessors (e.g. request.body === request.body) are built from. addRef() of a null stream
   // is a null stream.
-  JsReadableStream addRef(jsg::Lock& js);
+  JsReadableStream addRef(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // True if this is a null / empty stream ("no body"). Inspects only C++-side state; a
   // jsg::Lock& is not required because it never dispatches to the JS backend.

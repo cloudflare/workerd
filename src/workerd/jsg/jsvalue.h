@@ -604,6 +604,9 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
 
+  // Return a copy of this buffer's data as the same kind of buffersource
+  JsBufferSource copyJs(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+
   // Regardless of what kind of typed array view this is, we can always get it as a Uint8Array
   operator JsUint8Array() const;
 

@@ -315,7 +315,7 @@ KJ_TEST("legacy pumpTo: a buffer-backed stream's proxy is a no-op") {
     // Memory-backed bodies must finish their I/O before the IoContext goes away, so
     // their pump defers nothing.
     auto sink = newSystemStream(kj::mv(out), StreamEncoding::IDENTITY, env.context);
-    JsReadableStream stream(env.js, kj::str("hello world"));
+    auto stream = JsReadableStream::create(env.js, kj::str("hello world"));
     auto pump = stream.pumpTo(env.js, kj::mv(sink), EndStream::YES);
 
     bool outerResolved = false;
