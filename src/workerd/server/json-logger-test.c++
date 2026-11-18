@@ -15,7 +15,6 @@
 #include <kj/vector.h>
 
 #include <cstdio>
-#include <cstring>
 #endif  // __linux__
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -171,7 +170,7 @@ KJ_TEST("JsonLogger records from several threads do not interleave") {
   // Reads slowly, so writers find the pipe full and resume one at a time.
   kj::Vector<char> output;
   auto reader = kj::heap<kj::Thread>([&output, fd = pipe.output.get()]() {
-    char buffer[4096];
+    char buffer[4096]{};
     for (;;) {
       ssize_t n;
       KJ_SYSCALL(n = read(fd, buffer, sizeof(buffer)));
@@ -187,7 +186,7 @@ KJ_TEST("JsonLogger records from several threads do not interleave") {
       writers.add(kj::heap<kj::Thread>([i]() {
         JsonLogger logger;
         auto text = kj::heapString(RECORD_SIZE);
-        memset(text.begin(), 'a' + i, RECORD_SIZE);
+        text.asArray().fill('a' + i);
         for (auto _ KJ_UNUSED: kj::zeroTo(RECORDS_PER_THREAD)) {
           KJ_LOG(ERROR, text);
         }
@@ -196,7 +195,7 @@ KJ_TEST("JsonLogger records from several threads do not interleave") {
     // What a Worker's console does under structured logging (`writeConsoleLine`, worker.c++).
     writers.add(kj::heap<kj::Thread>([]() {
       auto text = kj::heapString(RECORD_SIZE);
-      memset(text.begin(), 'z', RECORD_SIZE);
+      text.asArray().fill('z');
       auto json = buildJsonLogMessage(kj::LogSeverity::INFO, "console", 0, 0, text);
       for (auto _ KJ_UNUSED: kj::zeroTo(RECORDS_PER_THREAD)) {
         fprintf(stdout, "%s\n", json.cStr());

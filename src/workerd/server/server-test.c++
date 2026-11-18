@@ -10103,8 +10103,8 @@ KJ_TEST("Server: debug port RPC calls") {
 
   // Test 5b: A debug-port client cannot name an actor: the name it sends is not the actor's.
   {
-    kj::byte actorIdBytes[32];
-    for (auto& byte: actorIdBytes) byte = 0xab;
+    kj::byte actorIdBytes[32] = {};
+    kj::arrayPtr(actorIdBytes).fill(0xab);
     auto req = debugPort.getActorRequest();
     req.setService("actor-service");
     req.setEntrypoint("MyActor");
