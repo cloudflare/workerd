@@ -379,6 +379,22 @@ fn lazy_directories_load_once_on_first_use() {
 }
 
 #[test]
+fn a_link_keeps_its_target_as_written() {
+    let host = TestHost::new();
+    let root = Directory::new_writable();
+    root.add(&host, b"f", Node::File(readable(b"abc"))).unwrap();
+    // A relative target as written, resolved by the caller to an absolute path.
+    let kept = SymbolicLink::new_with_raw_target(root.clone(), p("f"), Some(b"../f".to_vec()));
+    assert_eq!(kept.raw_target(), Some(&b"../f"[..]));
+    assert_eq!(kept.target_path(), p("f"));
+    assert!(matches!(
+        kept.resolve(&host),
+        Some(Ok(FileOrDirectory::File(_)))
+    ));
+    assert_eq!(SymbolicLink::new(root, p("f")).raw_target(), None);
+}
+
+#[test]
 fn links_are_followed_unless_asked_not_to() {
     let host = TestHost::new();
     let root = Directory::new_writable();

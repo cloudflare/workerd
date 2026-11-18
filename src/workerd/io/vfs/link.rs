@@ -32,6 +32,7 @@ pub struct SymbolicLink(Rc<LinkInner>);
 struct LinkInner {
     root: Directory,
     target: Vec<Vec<u8>>,
+    raw_target: Option<Vec<u8>>,
     unique_id: OnceCell<CString>,
     self_charge: RefCell<Option<Box<dyn MemoryCharge>>>,
 }
@@ -39,9 +40,20 @@ struct LinkInner {
 impl SymbolicLink {
     /// A new link to `target`, an evaluated path from `root`.
     pub fn new(root: Directory, target: Vec<Vec<u8>>) -> Self {
+        Self::new_with_raw_target(root, target, None)
+    }
+
+    /// A new link to `target`, an evaluated path from `root`, that keeps `raw_target`, the target
+    /// as written, for `readlink`. A relative target as written still resolves to `target`.
+    pub fn new_with_raw_target(
+        root: Directory,
+        target: Vec<Vec<u8>>,
+        raw_target: Option<Vec<u8>>,
+    ) -> Self {
         Self(Rc::new(LinkInner {
             root,
             target,
+            raw_target,
             unique_id: OnceCell::new(),
             self_charge: RefCell::new(None),
         }))
@@ -67,6 +79,11 @@ impl SymbolicLink {
     /// The path the link points to, from the root.
     pub fn target_path(&self) -> &[Vec<u8>] {
         &self.0.target
+    }
+
+    /// The target as written, if the link keeps one.
+    pub fn raw_target(&self) -> Option<&[u8]> {
+        self.0.raw_target.as_deref()
     }
 
     /// The file or directory the link points to, following any further links, or `None` if the
