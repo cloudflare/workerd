@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dlapid@cloudflare.com>
+Date: Tue, 17 Nov 2026 12:00:00 +0000
+Subject: Treat API objects with only their template's accessors as unmodified
+
+A young API object is weak in a scavenge only if
+IsUnmodifiedApiObject() holds, which requires its map to be its
+constructor's initial map. An ObjectTemplate with native data
+properties (SetNativeDataProperty, SetLazyDataProperty) moves every
+instance off that map as it is instantiated, so such instances are
+never dropped in a scavenge. They survive until the next full GC even
+when nothing refers to them, along with everything they reach.
+
+Also accept a fast map with the initial map's prototype, extensibility
+and elements kind whose properties are exactly the AccessorInfos of
+the constructor's instance template, with the attributes they were
+installed with. AccessorInfo properties hold no per-object state, so
+such an object can be recreated from its template like one on the
+initial map. Any other change, including reading a lazy data property,
+which turns it into a data field, still makes the object count as
+modified.
+---
+ src/objects/js-objects.cc | 80 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
+index 6d54368605bd8e4c439fc76cc014c127807f3d54..4d0efa8bc5437730ce3f1db8558a8d043663c483 100644
+--- a/src/objects/js-objects.cc
++++ b/src/objects/js-objects.cc
+@@ -76,6 +76,7 @@
+ #include "src/objects/shared-function-info.h"
+ #include "src/objects/swiss-name-dictionary-inl.h"
+ #include "src/objects/tagged.h"
++#include "src/objects/templates-inl.h"
+ #include "src/objects/transitions.h"
+ #include "src/strings/string-builder-inl.h"
+ #include "src/strings/string-stream.h"
+@@ -3196,6 +3197,81 @@ void JSObject::PrintInstanceMigration(FILE* file, Tagged<Map> original_map,
+   PrintF(file, "\n");
+ }
+ 
++namespace {
++
++// Calls `callback` on each AccessorInfo that instantiating `info`'s instance
++// template installs, walking the parent templates as ConfigureInstance() in
++// api-natives.cc does.
++template <typename Callback>
++void ForEachTemplateAccessor(Tagged<FunctionTemplateInfo> info,
++                             Callback callback) {
++  for (Tagged<Object> current = info; IsFunctionTemplateInfo(current);
++       current = Cast<FunctionTemplateInfo>(current)->GetParentTemplate()) {
++    Tagged<Object> instance_template =
++        Cast<FunctionTemplateInfo>(current)->GetInstanceTemplate();
++    if (!IsObjectTemplateInfo(instance_template)) continue;
++    Tagged<Object> accessors =
++        Cast<ObjectTemplateInfo>(instance_template)->property_accessors();
++    if (!IsArrayList(accessors)) continue;
++    Tagged<ArrayList> list = Cast<ArrayList>(accessors);
++    for (int i = 0; i < list->length(); i++) callback(list->get(i));
++  }
++}
++
++// Returns whether `map` differs from `initial_map` only by having exactly the
++// native data properties (AccessorInfos) of `constructor`'s instance template,
++// as every instance of such a template does from the start. Instantiation
++// normalizes the object to install them and then gives it a new fast map, so
++// `map` is not a transition of `initial_map` and is compared field by field.
++// AccessorInfo properties hold no per-object state, so such an object holds no
++// more than a fresh instance. A lazy data property turns into a data field
++// when first read, after which this returns false.
++bool HasOnlyTemplateAccessors(Tagged<Map> map, Tagged<Map> initial_map,
++                              Tagged<JSFunction> constructor) {
++  if (map->is_dictionary_map() || initial_map->NumberOfOwnDescriptors() != 0 ||
++      map->prototype() != initial_map->prototype() ||
++      map->is_extensible() != initial_map->is_extensible() ||
++      map->elements_kind() != initial_map->elements_kind()) {
++    return false;
++  }
++  Tagged<SharedFunctionInfo> shared = constructor->shared();
++  if (!shared->IsApiFunction()) return false;
++  Tagged<FunctionTemplateInfo> info = shared->api_func_data();
++
++  int template_accessors = 0;
++  ForEachTemplateAccessor(info, [&](Tagged<Object>) { template_accessors++; });
++  if (template_accessors == 0 ||
++      map->NumberOfOwnDescriptors() != template_accessors) {
++    return false;
++  }
++
++  Tagged<DescriptorArray> descriptors = map->instance_descriptors();
++  for (InternalIndex i : map->IterateOwnDescriptors()) {
++    PropertyDetails details = descriptors->GetDetails(i);
++    if (details.kind() != PropertyKind::kAccessor ||
++        details.location() != PropertyLocation::kDescriptor) {
++      return false;
++    }
++    Tagged<Object> value = descriptors->GetStrongValue(i);
++    if (!IsAccessorInfo(value) ||
++        details.attributes() !=
++            Cast<AccessorInfo>(value)->initial_property_attributes()) {
++      return false;
++    }
++    // Each AccessorInfo can only be installed once, under its own name, so
++    // finding all of them in the template means the object has all of the
++    // template's.
++    bool from_template = false;
++    ForEachTemplateAccessor(info, [&](Tagged<Object> accessor) {
++      from_template |= accessor == value;
++    });
++    if (!from_template) return false;
++  }
++  return true;
++}
++
++}  // namespace
++
+ // static
+ bool JSObject::IsUnmodifiedApiObject(FullObjectSlot o) {
+   Tagged<Object> object = *o;
+@@ -3212,7 +3288,9 @@ bool JSObject::IsUnmodifiedApiObject(FullObjectSlot o) {
+   if (!IsUndefined(js_object->GetIdentityHash())) return false;
+ 
+   Tagged<JSFunction> constructor = Cast<JSFunction>(maybe_constructor);
+-  return constructor->initial_map() == map;
++  Tagged<Map> initial_map = constructor->initial_map();
++  return map == initial_map ||
++         HasOnlyTemplateAccessors(map, initial_map, constructor);
+ }
+ 
+ // static
