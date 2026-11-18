@@ -205,6 +205,12 @@ class LimitEnforcer {
   // Returns a promise that will reject if and when a limit is exceeded that prevents further
   // JavaScript execution, such as the CPU or memory limit.
   virtual kj::Promise<void> onLimitsExceeded() = 0;
+
+  // False if onLimitsExceeded() never settles, so that an IoContext needn't wait on it.
+  virtual bool canExceedLimits() {
+    return true;
+  }
+
   // Sets a callback to call when the cpu limit is nearly exceeded. The callback must be signal safe
   // and cannot take the isolate lock.
   virtual void setCpuLimitNearlyExceededCallback(kj::Function<void()>) = 0;
