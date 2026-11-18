@@ -555,6 +555,28 @@ kj::Promise<DeferredProxy<void>> pumpExtractedSource(
   return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
+// Writes a buffer-backed body's bytes straight to the sink, for a body that no stream was built
+// for. Like the memory source it replaces, it finishes all I/O before resolving rather than
+// deferring any of it: the sink may depend on the IoContext. A failure, or the sink disconnecting
+// while a write is blocked, aborts the sink.
+kj::Promise<DeferredProxy<void>> writeBufferToSink(
+    kj::Rc<JsReadableStream::Buffer> buffer, kj::Own<WritableStreamSink> sink, EndStream end) {
+  auto bytes = buffer->view;
+  try {
+    if (bytes.size() > 0 && !sink->tryWriteSync(bytes)) {
+      co_await sink->write(bytes).exclusiveJoin(rejectWhenWriteDisconnected<void>(*sink));
+    }
+    if (end == EndStream::YES) {
+      co_await sink->end();
+    }
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    sink->abort(exception.clone());
+    kj::throwException(kj::mv(exception));
+  }
+  co_return;
+}
+
 // Writes one drained batch to the sink and, when this is the final batch, ends it.
 kj::Promise<void> queuedWriteStep(
     kj::Ptr<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
@@ -1361,12 +1383,10 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, EndStream end) {
   auto& i = KJ_ASSERT_NONNULL(impl, "pumpTo() called on a null JsReadableStream");
   if (!i.hasStream) {
-    // Nothing in JS has seen this stream, so pump the buffer without constructing one.
+    // Nothing in JS has seen this stream, so write the buffer without constructing one.
     JSG_REQUIRE(!cachedIsDisturbed, TypeError, "The ReadableStream has been locked to a reader.");
     cachedIsDisturbed = true;
-    auto& buffer = KJ_ASSERT_NONNULL(i.maybeOwnedBuffer);
-    return pumpExtractedSource(newMemorySource(buffer->view, buffer.addRef().toOwn()), kj::mv(sink),
-        end == EndStream::YES);
+    return writeBufferToSink(KJ_ASSERT_NONNULL(i.maybeOwnedBuffer).addRef(), kj::mv(sink), end);
   }
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
