@@ -29,6 +29,8 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
+#include <atomic>
+
 namespace v8 {
 class BackingStore;
 class Isolate;
@@ -494,8 +496,22 @@ class Worker::Isolate: public kj::AtomicRefcounted {
     return featureFlagsForFl;
   }
 
+  // Called when a request is delivered to a Worker in this isolate. Does not require a lock.
+  void startedRequest() const;
+
   // Called after each completed request. Does not require a lock.
-  void completedRequest() const;
+  //
+  // May return a task if the request was the isolate's last one in flight. The caller must run
+  // the task on the current thread, where it may outlive the request's IoContext.
+  //
+  // The task waits for the thread to go idle and then, if the isolate still has no request in
+  // flight and its lock is free, calls v8::Isolate::SetIsLoading(false) under the lock. That
+  // tells V8 that a GC pause now delays no request, and V8 runs a full GC before returning if the
+  // heap is due for one.
+  //
+  // The NO_LOADING_MODE autogate keeps the isolate from being created in V8's loading mode, which
+  // the first notification ends, and NO_IDLE_GC stops the notifications after that one.
+  kj::Maybe<kj::Promise<void>> completedRequest() const;
 
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
@@ -597,6 +613,18 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   AsyncLockQueue<Isolate> asyncLockQueue;
 
   friend class Worker::AsyncLock;
+
+  // Number of requests delivered to this isolate's Workers and not yet completed, on any thread.
+  mutable std::atomic<uint> inFlightRequests = 0;
+
+  // True from when the isolate is created in V8's loading mode until notifyV8WhenIdle() ends it.
+  mutable std::atomic<bool> v8Loading = false;
+
+  // True while some thread has a notifyV8WhenIdle() task waiting for that thread to go idle.
+  mutable std::atomic<bool> idleNotificationPending = false;
+
+  // The task that completedRequest() returns.
+  static kj::Promise<void> notifyV8WhenIdle(kj::Own<const WeakIsolateRef> weakIsolate);
 
   void disconnectInspector();
 

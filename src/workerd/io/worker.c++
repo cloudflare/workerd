@@ -1227,6 +1227,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
+    if (!util::Autogate::isEnabled(util::AutogateKey::NO_LOADING_MODE)) {
+      // Lets the heap grow past its allocation limit instead of running a full GC during startup
+      // and an early first request. V8 drops the mode by itself after 7 seconds;
+      // completedRequest() ends it sooner.
+      lock->v8Isolate->SetIsLoading(true);
+      v8Loading.store(true);
+    }
+
     // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
     // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
     // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
@@ -5238,8 +5246,55 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
       kj::mv(maybeNewModuleRegistry));
 }
 
-void Worker::Isolate::completedRequest() const {
+void Worker::Isolate::startedRequest() const {
+  inFlightRequests.fetch_add(1);
+}
+
+kj::Maybe<kj::Promise<void>> Worker::Isolate::completedRequest() const {
   limitEnforcer->completedRequest(id);
+  if (inFlightRequests.fetch_sub(1) == 1 &&
+      (v8Loading.load() || !util::Autogate::isEnabled(util::AutogateKey::NO_IDLE_GC)) &&
+      !idleNotificationPending.exchange(true)) {
+    return notifyV8WhenIdle(getWeakRef());
+  }
+  return kj::none;
+}
+
+kj::Promise<void> Worker::Isolate::notifyV8WhenIdle(kj::Own<const WeakIsolateRef> weakIsolate) {
+  {
+    // Cleared before `inFlightRequests` is read, so that a request completing after the read
+    // starts a new task, and on cancellation, so that the isolate's other threads still can.
+    auto clearPending = kj::defer([&weakIsolate]() {
+      KJ_IF_SOME(isolate, weakIsolate->tryAddStrongRef()) {
+        isolate->idleNotificationPending.store(false);
+      }
+    });
+    co_await AsyncLock::whenThreadIdle();
+  }
+
+  auto isolate = KJ_UNWRAP_OR(weakIsolate->tryAddStrongRef(), co_return);
+  if (isolate->inFlightRequests.load() != 0) co_return;
+
+  // A thread queued for the lock means the isolate is in use by something that is not a request,
+  // such as a prewarm or a dynamic import, so it is not idle. Waiting behind it would also keep
+  // this thread from taking any other isolate's lock.
+  auto queueLock =
+      KJ_UNWRAP_OR(isolate->asyncLockQueue.tryLock(kj::atomicAddRef(*isolate)), co_return);
+  auto lockTiming = isolate->getMetrics().tryCreateLockTiming(SpanParent(nullptr));
+  KJ_IF_SOME(lt, lockTiming) {
+    lt->reportAsyncInfo(0, false, 0);
+  }
+  AsyncLock asyncLock(kj::mv(queueLock), kj::mv(lockTiming));
+  isolate->runInLockScope(asyncLock, [&](jsg::Lock& js) {
+    // A request delivered in the meantime gets its own notification when it completes.
+    if (isolate->inFlightRequests.load() == 0) {
+      js.v8Isolate->SetIsLoading(false);
+      isolate->v8Loading.store(false);
+      // Lets the enforcer account for memory that a GC just freed. Condemnation is left for the
+      // next request to act on.
+      (void)isolate->getLimitEnforcer().exitJs(js);
+    }
+  });
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {
