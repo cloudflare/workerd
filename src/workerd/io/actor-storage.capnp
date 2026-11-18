@@ -34,7 +34,12 @@ interface ActorStorage @0xd7759d7fc87c08e4 {
     rename @9 (entries :List(KeyRename)) -> (renamed :List(Data));
 
     getAlarm @6 () -> (scheduledTimeMs :Int64);
-    setAlarm @7 (scheduledTimeMs :Int64);
+    setAlarm @7 (scheduledTimeMs :Int64, abandonedTimeMs :Int64);
+    # A nonzero `abandonedTimeMs` marks the alarm as the actor's stored alarm, requested again
+    # because the alarm scheduler abandoned the alarm at that time. The scheduler then takes it
+    # only if it has no alarm for the actor or still has the abandoned one, not one set since.
+    # Storage that predates `abandonedTimeMs` ignores it and sets the alarm unconditionally.
+    # Transactions don't accept a nonzero `abandonedTimeMs`.
     deleteAlarm @8 (timeToDeleteMs :Int64) -> (deleted :Bool);
   }
 

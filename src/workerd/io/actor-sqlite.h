@@ -41,6 +41,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     virtual kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask);
 
+    // Like scheduleRun(), for the stored alarm, which the actor requests again when the alarm
+    // manager tells it that it has abandoned the alarm at `abandonedTime`. The alarm manager should
+    // take the request only if it has no alarm for the actor, or still has the abandoned one, and
+    // not if it has taken another request from the actor since. It may tell the actor again, e.g.
+    // if it lost the reply, and must not then run the stored alarm again if it already has.
+    //
+    // The default implementation calls scheduleRun().
+    virtual kj::Promise<void> scheduleRunInPlaceOfAbandoned(
+        kj::Date newAlarmTime, kj::Date abandonedTime, kj::Promise<void> priorTask);
+
     static const Hooks DEFAULT;
 
     static constexpr inline Hooks& getDefaultHooks() {
@@ -350,9 +360,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);
 
   // Issues a request to the alarm scheduler for the given time, returning a promise that resolves
-  // when the request is confirmed.
-  kj::Promise<void> requestScheduledAlarm(
-      kj::Maybe<kj::Date> requestedTime, kj::Promise<void> priorTask);
+  // when the request is confirmed. With `abandonedTime`, the request is for the stored alarm in
+  // place of the abandoned one; see Hooks::scheduleRunInPlaceOfAbandoned().
+  kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime,
+      kj::Promise<void> priorTask,
+      kj::Maybe<kj::Date> abandonedTime = kj::none);
 
   // Schedules a "move alarm later" operation. If no move-later is currently in-flight, starts one
   // immediately. If one is already in-flight, stores the desired time in `pendingLaterAlarmTime`
@@ -361,8 +373,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   // Requests the stored alarm, `storedTime`, from the alarm scheduler again, since an earlier
   // request for it may have failed or been canceled. Later requests wait for this one, even if the
-  // caller drops the returned promise, which rejects if the request fails.
-  kj::Promise<void> rescheduleStoredAlarm(kj::Maybe<kj::Date> storedTime);
+  // caller drops the returned promise, which rejects if the request fails. `abandonedTime` is as
+  // for requestScheduledAlarm().
+  kj::Promise<void> rescheduleStoredAlarm(
+      kj::Maybe<kj::Date> storedTime, kj::Maybe<kj::Date> abandonedTime = kj::none);
 
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling

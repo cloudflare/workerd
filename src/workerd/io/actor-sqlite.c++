@@ -422,8 +422,9 @@ void ActorSqlite::onWrite(bool allowUnconfirmed) {
   }
 }
 
-kj::Promise<void> ActorSqlite::requestScheduledAlarm(
-    kj::Maybe<kj::Date> requestedTime, kj::Promise<void> priorTask) {
+kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime,
+    kj::Promise<void> priorTask,
+    kj::Maybe<kj::Date> abandonedTime) {
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
 
@@ -439,8 +440,15 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
   }
   auto requestNumber = ++alarmRequestCount;
 
-  return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
-      .then([weakThis = addWeakToThis(), movingAlarmLater, requestedTime, requestNumber]() {
+  auto request = [&]() {
+    KJ_IF_SOME(abandoned, abandonedTime) {
+      return hooks.scheduleRunInPlaceOfAbandoned(
+          KJ_REQUIRE_NONNULL(requestedTime), abandoned, kj::mv(priorTask));
+    }
+    return hooks.scheduleRun(requestedTime, kj::mv(priorTask));
+  }();
+  return request.then(
+      [weakThis = addWeakToThis(), movingAlarmLater, requestedTime, requestNumber]() {
     if (!movingAlarmLater) {
       auto& self =
           KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled");
@@ -488,7 +496,8 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
   }));
 }
 
-kj::Promise<void> ActorSqlite::rescheduleStoredAlarm(kj::Maybe<kj::Date> storedTime) {
+kj::Promise<void> ActorSqlite::rescheduleStoredAlarm(
+    kj::Maybe<kj::Date> storedTime, kj::Maybe<kj::Date> abandonedTime) {
   // We need to update the alarmLaterInFlight promise, so that later requests wait for this one, as
   // they do for one that moves the alarm later. We issue a single requestScheduledAlarm call, fork
   // it, and use one branch for alarmLaterInFlight (with error catching so the fork remains usable)
@@ -496,7 +505,7 @@ kj::Promise<void> ActorSqlite::rescheduleStoredAlarm(kj::Maybe<kj::Date> storedT
   // alarmLaterInFlight here rather than using scheduleLaterAlarm(), because we need that separate
   // un-caught branch.
   auto schedulingPromise =
-      requestScheduledAlarm(storedTime, alarmLaterInFlight.addBranch()).fork();
+      requestScheduledAlarm(storedTime, alarmLaterInFlight.addBranch(), abandonedTime).fork();
   // Clear any stale pending time so that when the existing completion handler fires it does not
   // start a redundant scheduleLaterAlarm for the same time that this is already scheduling.
   pendingLaterAlarmTime = kj::none;
@@ -1164,8 +1173,9 @@ kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::abandonAlarm(kj::Date scheduledTim
       co_return kj::none;
     }
     // The user set a different alarm. The request that gave it to the scheduler may have failed or
-    // been canceled, e.g. because the instance that set it was aborted, so request it again.
-    co_await rescheduleStoredAlarm(storedTime);
+    // been canceled, e.g. because the instance that set it was aborted, so request it again, in
+    // place of the abandoned one.
+    co_await rescheduleStoredAlarm(storedTime, scheduledTime);
     co_return storedTime;
   }
   co_return kj::none;
@@ -1251,6 +1261,11 @@ const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 kj::Promise<void> ActorSqlite::Hooks::scheduleRun(
     kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) {
   JSG_FAIL_REQUIRE(Error, "Alarms have not been configured for this Durable Object.");
+}
+
+kj::Promise<void> ActorSqlite::Hooks::scheduleRunInPlaceOfAbandoned(
+    kj::Date newAlarmTime, kj::Date abandonedTime, kj::Promise<void> priorTask) {
+  return scheduleRun(newAlarmTime, kj::mv(priorTask));
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
