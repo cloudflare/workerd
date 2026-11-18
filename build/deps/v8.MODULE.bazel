@@ -78,6 +78,7 @@ PATCHES = [
     "2026-11-09-Gate-RacyDecodeEmbeddedFeedback-s-DISABLE_TSAN-on-THREAD_SANITIZER.patch",
     "2026-11-09-Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum.patch",
     "2026-11-10-Add-SnapshotCreator-HasSuspendedGenerators.patch",
+    "2026-11-17-Treat-API-objects-with-only-their-template-s-accessors-as-unmodified.patch",
     "2026-11-17-heap-Check-the-old-generation-limit-in-SetIsLoading-false-without-incremental-marking.patch",
     "2026-11-18-Skip-the-copy-of-zero-bytes-in-SnapshotByteSource-CopyRaw.patch",
     "2026-11-23-Implement-DOMException-and-QuotaExceededError.patch",
