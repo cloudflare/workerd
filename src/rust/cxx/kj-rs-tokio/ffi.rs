@@ -15,8 +15,11 @@
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 
+pub use bridge::LoopUnitContext;
 pub use bridge::TokioAsyncIoContext;
+pub use bridge::new_loop_unit_context;
 pub use bridge::new_tokio_async_io_context;
+use kj_rs::KjOwn;
 use tokio::runtime::EnterGuard;
 use tokio::runtime::Runtime;
 
@@ -24,6 +27,11 @@ use crate::port::TokioPort;
 use crate::port::new_tokio_port;
 use crate::runtime::BlockOnTask;
 use crate::runtime::block_on_task_join;
+use crate::unit::UnitFuture;
+use crate::unit::UnitTask;
+use crate::unit::UnitWake;
+use crate::unit::unit_future_run;
+use crate::unit::unit_task_start;
 
 struct TokioContextSentinel;
 
@@ -106,6 +114,47 @@ impl Drop for EnteredRuntime {
     }
 }
 
+/// A [`LoopUnit`](crate::LoopUnit)'s C++ context -- the KJ event loop and, through its root
+/// promise, every object created on it -- as the task that drives the unit holds it.
+pub struct UnitContext(pub KjOwn<LoopUnitContext>);
+
+// SAFETY: the context and everything on its loop (KJ objects, `Rc`s, the root future) is
+// single-threaded state, which is sound to move between threads as a whole when no two threads
+// touch it at once and no thread keeps a way into it after it moved on. Each condition, and
+// what holds it:
+//
+// 1. Only the driving task reaches the context. `UnitContext` is private to this crate and
+//    `LoopUnit` hands out no reference to it; the task is polled by one thread at a time, with
+//    `&mut`, which is the exclusion. The one reference that leaves is the
+//    `Pin<&mut LoopUnitContext>` `make` gets, inside a call on the loop, for the duration of
+//    that call.
+// 2. Nothing on the loop is reachable from outside the unit except through handles that are
+//    thread-safe themselves: the port's `UnitWake` (`Arc`, atomics, a mutex), a `kj::Executor`
+//    and cross-thread fulfillers (KJ's own cross-thread interface), kj-rs wakers (`ArcWaker`,
+//    atomically counted, which take the same-thread path only when `Executor::isCurrent()`
+//    says the caller has this very loop entered), and tokio's resources. `make` is `Send` and
+//    the root future's output is `Send`, so no `Rc` or KJ object enters or leaves by value;
+//    what the root future creates it creates on the loop, and can only hand to another thread
+//    through an API that requires `Send`.
+// 3. No thread keeps a piece of the unit between polls. KJ binds a loop to a thread only while
+//    a `kj::WaitScope` exists (`EventLoop::enterScope`), and every entry (`start`, `turn`,
+//    `turnPinned`, `finish`, the destructor) makes one for the duration of the call; KJ's other
+//    thread-locals (the firing event, the exception callback stack, the async-destructor
+//    scopes) are scoped to frames inside those calls. This crate's own `LOOP_RUNTIME_HANDLE`
+//    is set by `EnteredLoop` around each entry and holds a runtime handle, not a piece of the
+//    unit; a unit has no `LocalSet`. Code running on the loop must follow the same rule:
+//    thread-local state it sets must be scoped to a stack frame or keyed by the loop
+//    (`kj::EventLoopLocal`).
+// 4. No stack frame of the unit survives a poll on a thread the unit then leaves. The only
+//    frames that outlive a turn are those of a suspended fiber, and a unit with a fiber is
+//    pinned (`loop-unit.h`): `turn()` returns `UNIT_PINNED` instead of going idle and never
+//    yields, and the driver stays in `turn_pinned()` on the same thread until the fiber is
+//    gone. Pinning is the fiber's creator's duty (`LoopUnitContext::setPinCheck`).
+// 5. The context is destroyed with its loop entered, on a thread that has no other loop
+//    entered: by the poll that completes the unit or by `LoopUnit`'s drop, which leaks it
+//    rather than destroy it where it cannot enter the loop.
+unsafe impl Send for UnitContext {}
+
 #[cxx::bridge(namespace = "kj_rs_tokio")]
 // FFI island: the cxx bridge macro generates the `unsafe` extern shims.
 // unnecessary_box_returns: returning the opaque `TokioPort` to C++ boxed is the cxx idiom. The
@@ -164,6 +213,57 @@ mod bridge {
         /// waits on `block_on_task_join`, which resolves when the task block_on spawned has ended.
         type BlockOnTask;
         async fn block_on_task_join(task: Box<BlockOnTask>);
+    }
+
+    extern "Rust" {
+        /// The Rust half of a `UnitEventPort`: the wake latch and the driving task's waker.
+        type UnitWake;
+
+        /// Sets the wake latch, wakes the task that drives the unit and ends a concurrent
+        /// `block`. Callable from any thread.
+        fn wake(self: &UnitWake);
+
+        /// Takes the wake latch.
+        fn take(self: &UnitWake) -> bool;
+
+        /// Blocks the calling thread until the wake latch is set or `timeout_ns` nanoseconds
+        /// passed (`UNIT_NO_TIMER`: until the latch is set). Leaves the latch as it is.
+        fn block(self: &UnitWake, timeout_ns: u64);
+
+        /// What makes a unit's root future, and that future (unit.rs).
+        type UnitTask;
+        type UnitFuture;
+        fn unit_task_start(
+            task: Box<UnitTask>,
+            context: Pin<&mut LoopUnitContext>,
+        ) -> Box<UnitFuture>;
+        async fn unit_future_run(future: Box<UnitFuture>);
+    }
+
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/loop-unit.h");
+
+        /// A unit's KJ event loop with its port and timer (see loop-unit.h). Every method
+        /// enters the loop on the calling thread for the duration of the call.
+        type LoopUnitContext;
+
+        #[cxx_name = "newLoopUnitContext"]
+        fn new_loop_unit_context(wake: Box<UnitWake>) -> KjOwn<LoopUnitContext>;
+
+        /// `Result`: `make` may panic, which the bridge surfaces as a `kj::Exception`.
+        fn start(self: Pin<&mut LoopUnitContext>, task: Box<UnitTask>) -> Result<()>;
+
+        /// `Result`: a `kj::Exception` thrown by an event that nothing caught comes out of it.
+        fn turn(self: Pin<&mut LoopUnitContext>, max_turns: u32) -> Result<u8>;
+
+        #[cxx_name = "turnPinned"]
+        fn turn_pinned(self: Pin<&mut LoopUnitContext>) -> Result<()>;
+
+        #[cxx_name = "nextTimerNs"]
+        fn next_timer_ns(self: Pin<&mut LoopUnitContext>) -> u64;
+
+        /// `Result`: the exception the root future failed with.
+        fn finish(self: Pin<&mut LoopUnitContext>) -> Result<()>;
     }
 
     unsafe extern "C++" {

@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -45,10 +46,36 @@ thread_local! {
 }
 
 /// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
-/// thread.
+/// thread or a [`LoopUnit`](crate::LoopUnit) is entered on it.
 #[must_use]
 pub fn current_handle() -> Option<Handle> {
     LOOP_RUNTIME_HANDLE.with(|h| h.borrow().clone())
+}
+
+/// This thread as one that has a [`LoopUnit`](crate::LoopUnit)'s loop entered: for as long as
+/// this lives, [`current_handle`] is the runtime that drives the unit. A unit has no `LocalSet`.
+pub struct EnteredLoop(PhantomData<*const ()>);
+
+impl EnteredLoop {
+    /// `None` if this thread has a `TokioEventPort` or another unit entered.
+    pub fn new(handle: Handle) -> Option<Self> {
+        LOOP_RUNTIME_HANDLE.with(|h| {
+            let mut slot = h.borrow_mut();
+            if slot.is_some() {
+                return None;
+            }
+            *slot = Some(handle);
+            Some(Self(PhantomData))
+        })
+    }
+}
+
+impl Drop for EnteredLoop {
+    fn drop(&mut self) {
+        let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
+            *h.borrow_mut() = None;
+        });
+    }
 }
 
 /// Returns this thread's KJ-loop `LocalSet`, if a `TokioEventPort` exists on this thread.
@@ -77,7 +104,8 @@ fn current_local_set() -> Option<Rc<LocalSet>> {
 ///
 /// # Panics
 ///
-/// Panics if no `TokioEventPort` has been created on this thread.
+/// Panics if no `TokioEventPort` has been created on this thread. A
+/// [`LoopUnit`](crate::LoopUnit) has no `LocalSet`, so this panics on its loop too.
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future + 'static,
