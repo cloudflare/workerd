@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/io/io-context/current-with-id.h>
 #include <workerd/io/io-context/ffi.rs.h>
 #include <workerd/jsg/inspector.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -23,14 +24,6 @@ namespace {
 // IoContext::Id holds only the process-unique uint64_t that Rust stores.
 static_assert(sizeof(IoContext::Id) == sizeof(uint64_t));
 static_assert(std::is_trivially_copyable_v<IoContext::Id>);
-
-// The current IoContext, which must be the one `id` identifies.
-IoContext& currentWithId(uint64_t id) {
-  auto& context = KJ_REQUIRE_NONNULL(IoContext::tryCurrent(), "there is no current request");
-  KJ_REQUIRE(context.getId() == std::bit_cast<IoContext::Id>(id),
-      "the IoContext is not the one of the current request");
-  return context;
-}
 
 // Wraps a `Literal` (see ffi.h) without copying it.
 kj::ConstString wrapLiteral(Literal bytes) {
