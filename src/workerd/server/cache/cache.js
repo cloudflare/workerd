@@ -191,6 +191,19 @@ async function load(env, at, miss = {}) {
     return null;
   }
   if (!r.ok) throw new Error(`Reading the entry failed: ${r.status}.`);
+  // Workers Caching's entries keep their head beside the body, in a store
+  // that has `X-Meta`: so their body is served as it comes.
+  const meta = r.headers.get('X-Meta');
+  if (meta !== null) {
+    const head = JSON.parse(decodeURIComponent(meta));
+    if (head.expires > clock()) {
+      const size = Number(r.headers.get('Content-Length'));
+      return { head, body: r.body, size };
+    }
+    await r.body?.cancel();
+    await remove(env, at).catch(() => {});
+    return null;
+  }
   const reader = r.body.getReader({ mode: 'byob' });
   // `n` bytes, or null at the end.
   const read = async (n) => {
@@ -688,10 +701,7 @@ async function fillFrom(request, env, fill, wake, { at, ns, path, ticket }) {
   };
   const stores = ticket !== null && ticket !== 'none';
   if (stores) names['X-Ticket'] = ticket;
-  const json = enc.encode(JSON.stringify(head));
-  const prefix = new Uint8Array(4);
-  new DataView(prefix.buffer).setUint32(0, json.byteLength);
-  const first = concat(prefix, json);
+  names['X-Meta'] = encodeURIComponent(JSON.stringify(head));
   const read = await spool(res.body);
   const store = (body, signal) =>
     !stores
@@ -703,7 +713,7 @@ async function fillFrom(request, env, fill, wake, { at, ns, path, ticket }) {
     fill.head = head;
     fill.bytes = read.bytes;
     wake();
-    const stored = store(concat(first, read.bytes));
+    const stored = store(read.bytes);
     const body = new Response(read.bytes).body;
     const entry = { head, body, size: read.bytes.byteLength };
     return { response: await answer(request, entry, 'MISS'), stored };
@@ -714,7 +724,7 @@ async function fillFrom(request, env, fill, wake, { at, ns, path, ticket }) {
   const [mine, theirs] = rest(read.first, read.reader, (_, error) => {
     if (error) abort.abort(error);
   }).tee();
-  const stored = store(rest(first, theirs.getReader()), abort.signal);
+  const stored = store(theirs, abort.signal);
   const headers = new Headers(head.headers);
   headers.set('CF-Cache-Status', 'MISS');
   const response = new Response(mine, {

@@ -7,18 +7,18 @@
 //! In a cluster it is one across the nodes, by the protocol in `cache-cluster.rs`; on one
 //! machine that Worker stores to a writable `disk` instead. A record is opaque, with an expiry:
 //!
-//! - `GET <url>`: 200 with the record and its `Content-Length`, or 404, as once it expired,
-//!   with an `X-Ticket` for a fill.
-//! - `PUT <url>` with `X-Expires: <ms since the epoch>`: 204 stored, 413 refused, 500 if the
-//!   outcome is unknown. Workers Caching's also name the entry for purges, by
+//! - `GET <url>`: 200 with the record, its `Content-Length` and the put's `X-Meta`, or 404, as
+//!   once it expired, with an `X-Ticket` for a fill.
+//! - `PUT <url>` with `X-Expires: <ms since the epoch>` and optionally `X-Meta`, kept opaque
+//!   beside the record: 204 stored, 413 refused, 500 if the outcome is unknown. Workers Caching's also name the entry for purges, by
 //!   `X-Purge-Namespace`, `X-Purge-Path` and `X-Purge-Tags`, and return the miss's `X-Ticket`:
 //!   412 if a purge since stores nothing (`cache-purge.rs`).
 //! - `DELETE <url>`: 204 had an unexpired record, 404 did not, 500 if unknown.
 //! - `POST /?ns=..&tag=..&prefix=..&everything`: purges what matches, on every node. 200, or
 //!   500 if a node did not answer.
 //!
-//! The URL's last segment is the key. A value is a file: its expiry, a space, the length of its
-//! purge names and a newline, the names, then the record. A put writes a draft that the store takes once the whole body was read; a request
+//! The URL's last segment is the key. A value is a file: its expiry, the lengths of its purge
+//! names and `X-Meta`, space-separated, and a newline; the names, the `X-Meta`, then the record. A put writes a draft that the store takes once the whole body was read; a request
 //! cancelled first stores nothing. From a worker in this process, a body without a length that
 //! fails ends instead, so the worker cancels. Disk I/O is synchronous, as in `disk`.
 
@@ -67,9 +67,9 @@ use crate::services::header_table;
 use crate::services::not_transferable;
 use crate::services::unsupported;
 
-/// A value's expiry, in ms since the epoch, the length of its purge names, and where its record
-/// starts.
-fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64)>> {
+/// A value's expiry, in ms since the epoch, the lengths of its purge names and `X-Meta`, and
+/// where the names start.
+fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64, u64)>> {
     let mut line = [0; 48];
     let read = file.read(&mut line).map_err(|e| io_kj_error(&e))?;
     let Some(end) = line[..read].iter().position(|&b| b == b'\n') else {
@@ -77,22 +77,28 @@ fn expiry(file: &mut File) -> Result<Option<(u64, u64, u64)>> {
     };
     let text = std::str::from_utf8(&line[..end]).ok();
     let parsed = text.and_then(|t| {
-        let (expires, n) = t.split_once(' ')?;
-        Some((expires.parse().ok()?, n.parse::<u64>().ok()?))
+        let mut words = t.split(' ').map(str::parse::<u64>);
+        let [e, n, m] = [words.next()?, words.next()?, words.next()?].map(|w| w.ok());
+        Some((e?, n?, m?, end as u64 + 1))
     });
-    Ok(parsed.map(|(e, n)| (e, n, end as u64 + 1 + n)))
+    Ok(parsed)
+}
+
+/// `n` bytes of `file` at `at`.
+fn read_at(file: &mut File, at: u64, n: u64) -> Result<Vec<u8>> {
+    let mut bytes = vec![0; usize::try_from(n).unwrap()];
+    file.seek(SeekFrom::Start(at))
+        .and_then(|_| file.read_exact(&mut bytes))
+        .map_err(|e| io_kj_error(&e))?;
+    Ok(bytes)
 }
 
 /// The purge names of the value in `file`, if it has them.
 fn meta(file: &mut File) -> Result<Option<Meta>> {
-    let Some((_, n, start)) = expiry(file)? else {
+    let Some((_, n, _, at)) = expiry(file)? else {
         return Ok(None);
     };
-    let mut bytes = vec![0; usize::try_from(n).unwrap()];
-    file.seek(SeekFrom::Start(start - n))
-        .and_then(|_| file.read_exact(&mut bytes))
-        .map_err(|e| io_kj_error(&e))?;
-    Ok(Meta::parse(&bytes).filter(|_| n > 0))
+    Ok(Meta::parse(&read_at(file, at, n)?).filter(|_| n > 0))
 }
 
 /// Whether the value in `file` is unexpired at `now`.
@@ -231,13 +237,18 @@ impl CacheRequest {
             return self.send(response, 404, "Not Found", &miss, 0).map(drop);
         };
         // A near copy, leased, may expire before its home drops it.
-        let Some((.., start)) = expiry(&mut file)?.filter(|&(e, ..)| e > now_ms()) else {
+        let Some((_, n, m, at)) = expiry(&mut file)?.filter(|&(e, ..)| e > now_ms()) else {
             store.expire(key);
             return self.send(response, 404, "Not Found", &miss, 0).map(drop);
         };
+        let start = at + n + m;
         let size = file.metadata().map_err(|e| io_kj_error(&e))?.len() - start;
         let mut headers = HeaderMap::new();
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
+        if m > 0 {
+            let meta = HeaderValue::from_bytes(&read_at(&mut file, at + n, m)?);
+            headers.insert("X-Meta", meta.map_err(|_| kj::failed!("X-Meta is no header"))?);
+        }
         let mut out = self.send(response, 200, "OK", &headers, size)?;
         copy_file(&mut file, start, size, &mut out).await
     }
@@ -263,10 +274,12 @@ impl CacheRequest {
         let ticket = text("X-Ticket").map(|t| Ticket::parse(&t));
         let meta = Meta::from(text);
         let names = meta.as_ref().map(Meta::bytes).unwrap_or_default();
+        let opaque = text("X-Meta").unwrap_or_default();
         let (temp, mut file) = self.cache.store.draft()?;
         let mut write = |bytes: &[u8]| file.write_all(bytes).map_err(|e| io_kj_error(&e));
-        write(format!("{expires} {}\n", names.len()).as_bytes())?;
+        write(format!("{expires} {} {}\n", names.len(), opaque.len()).as_bytes())?;
         write(&names)?;
+        write(opaque.as_bytes())?;
         let mut chunk = vec![0; 64 * 1024];
         loop {
             let read = body.as_mut().try_read(&mut chunk, 1).await?;

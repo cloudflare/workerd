@@ -16,13 +16,13 @@ fn a_value_is_its_expiry_and_names_then_the_record() {
         expiry(&mut File::open(&path).unwrap()).unwrap()
     };
     assert_eq!(
-        read(b"1700000000000 0\nrecord"),
-        Some((1_700_000_000_000, 0, 16))
+        read(b"1700000000000 0 2\n{}record"),
+        Some((1_700_000_000_000, 0, 2, 18))
     );
-    assert_eq!(read(b"1700000000000\nrecord"), None);
-    assert_eq!(read(b"soon 0\nrecord"), None);
-    assert_eq!(read(b"1700000000000 0"), None);
-    write(b"1 0\nrecord");
+    assert_eq!(read(b"1700000000000 0\nrecord"), None);
+    assert_eq!(read(b"soon 0 0\nrecord"), None);
+    assert_eq!(read(b"1700000000000 0 0"), None);
+    write(b"1 0 0\nrecord");
     assert!(meta(&mut File::open(&path).unwrap()).unwrap().is_none());
     let names = |ns: &str, path: &str, tags: &str| {
         let headers = [("X-Purge-Namespace", ns), ("X-Purge-Path", path)];
@@ -30,7 +30,7 @@ fn a_value_is_its_expiry_and_names_then_the_record() {
         Meta::from(|n| headers.iter().find(|h| h.0 == n).map(|h| h.1.to_owned()))
     };
     let bytes = names("a", "/x/y?z", "t1, T2").unwrap().bytes();
-    write(&[format!("1 {}\n", bytes.len()).as_bytes(), &bytes, b"record"].concat());
+    write(&[format!("1 {} 0\n", bytes.len()).as_bytes(), &bytes, b"record"].concat());
     let meta = meta(&mut File::open(&path).unwrap()).unwrap().unwrap();
     let purge = |q: &str| Purge::parse(format!("http://store/?{q}").as_bytes()).unwrap();
     for q in ["ns=a&tag=t2", "ns=a&prefix=/x/", "ns=a&everything", "ns=a&tag=no&tag=t1"] {
