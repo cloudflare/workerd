@@ -516,7 +516,10 @@ class AlarmInvocationInfo: public jsg::Object {
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
+  // A Response the handler returns itself is taken as it is, rather than as an already-resolved
+  // promise for it, so that it can be sent without awaiting anything.
+  using FetchResult = kj::OneOf<jsg::Ref<api::Response>, jsg::Promise<jsg::Ref<api::Response>>>;
+  using FetchHandler = FetchResult(jsg::Ref<api::Request> request,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
