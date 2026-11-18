@@ -49,7 +49,8 @@ fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
     }
 }
 
-#[jsg_resource]
+#[jsg_resource(snapshot_stateless)]
+#[derive(Default)]
 pub struct UrlUtil;
 
 #[jsg_resource]

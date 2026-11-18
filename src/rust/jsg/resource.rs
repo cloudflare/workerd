@@ -541,6 +541,25 @@ unsafe impl<R: Resource + Send> Send for Rc<R> {}
 // `upgrade`.
 unsafe impl<R: Resource + Send> Send for Weak<R> {}
 
+/// The trait object [`GarbageCollected::snapshot_recreate`] hands over: a fresh instance that a
+/// C++ `Wrappable` built for a startup-snapshot restore takes ownership of.
+pub struct SnapshotRecreated(pub(crate) v8::ffi::TraitObjectPtr);
+
+/// Leaks `resource` as a [`SnapshotRecreated`].
+///
+/// The one `std::rc::Rc` goes to the Wrappable, whose drop releases it, and nothing on the Rust
+/// side holds the instance until a JavaScript caller unwraps it into an [`Rc`]: the counterpart
+/// of [`Rc::new`] for an instance whose wrapper comes out of the snapshot rather than from
+/// `to_js`.
+pub fn snapshot_recreate_leak<R: GarbageCollected + 'static>(resource: R) -> SnapshotRecreated {
+    let raw: *const R = std::rc::Rc::into_raw(std::rc::Rc::new(resource));
+    let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
+    SnapshotRecreated(v8::ffi::TraitObjectPtr::from_raw(
+        fat,
+        std::any::TypeId::of::<R>(),
+    ))
+}
+
 /// `Rc<R>` is a strong GC edge — visited via `GcVisitor::visit_rc`.
 impl<R: Resource> Traced for Rc<R> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {

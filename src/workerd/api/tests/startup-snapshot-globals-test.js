@@ -238,11 +238,15 @@ async function test(ctrl, env) {
     'buffer-assign'(r) {
       strictEqual(r.bufferCustom, 'Buffer');
     },
-    // Reading `process` evaluates the process object's module, which the zygote can run. Its
-    // stdio streams are built on first access, so a top level that leaves them alone stays
-    // transferable; process-stdout below shows what touching one costs.
+    // Reading `process` evaluates the process object's module, which the zygote can run; its
+    // stdio streams are built on first access.
     'process-env'(r) {
       strictEqual(r.processEnv, 'yes');
+    },
+    // Building a stdio stream evaluates the fs stream modules, whose module scope reaches
+    // UrlUtil, a Rust JSG resource (src/rust/api/url.rs) that transfers as a stateless type.
+    'process-stdout'(r) {
+      strictEqual(r.topLevel.stdoutWritable, 'function');
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top
@@ -308,12 +312,6 @@ async function test(ctrl, env) {
     // V8 adds Date.prototype.toTemporalInstant on restore.
     'date-frozen'(r) {
       strictEqual(r.dateFrozen, true);
-    },
-    // Building a stdio stream evaluates the fs stream modules, whose module scope reaches
-    // UrlUtil, a Rust JSG resource (src/rust/api/url.rs). Rust resource types have no snapshot
-    // transfer, so this falls back until they do.
-    'process-stdout'(r) {
-      strictEqual(r.topLevel.stdoutWritable, 'function');
     },
   };
 
