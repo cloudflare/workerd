@@ -285,7 +285,7 @@ fn error_info_value(error_info: Vec<Option<ErrorInfo>>) -> Value {
     Value::Array(proto::ArrayValue { values })
 }
 
-/// `text` as an OTLP value, or `None` when it is not JSON. serde_json's default recursion limit
+/// `text` as an OTLP value, or `None` when it is not JSON. `serde_json`'s default recursion limit
 /// bounds how deeply nested it may be.
 fn parse_json(text: &str) -> Option<Value> {
     serde_json::from_str::<JsonValue>(text).ok().map(|v| v.0)

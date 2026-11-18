@@ -8,8 +8,6 @@
 #include <kj/test.h>
 #include <kj/vector.h>
 
-#include <cstring>
-
 namespace workerd::server {
 namespace {
 
@@ -25,7 +23,7 @@ kj::Array<const kj::byte> makeMessage(uint index, size_t padding = 0) {
   // A schema_url-only ResourceSpans gives each encoded export a distinct, adjustable payload.
   auto name = kj::str(index);
   auto payload = kj::heapArray<kj::byte>(name.size() + padding);
-  std::memset(payload.begin(), 'x', payload.size());
+  payload.asPtr().fill('x');
   payload.slice(0, name.size()).copyFrom(name.asBytes());
   kj::Vector<kj::byte> resource;
   resource.add(0x1a);

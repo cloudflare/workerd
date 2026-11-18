@@ -18,6 +18,10 @@ const MAX_BATCH_BYTES: usize = 1 << 20;
 const MAX_OPEN_SPANS: usize = 1024;
 
 /// What is fixed for one invocation's spans.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent per-invocation switches, not states of one thing"
+)]
 pub struct Options {
     /// The 16-byte trace id every span shares.
     pub trace_id: Vec<u8>,
