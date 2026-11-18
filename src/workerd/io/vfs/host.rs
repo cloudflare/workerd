@@ -33,6 +33,11 @@ pub trait MemoryCharge {
     fn set(&mut self, bytes: usize);
 }
 
+/// A host operation failed, as `console.log` does when it throws. The host keeps what went wrong
+/// and reports it when control returns to it; the file system stops the operation and returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostError;
+
 /// A task to run as a microtask. It receives the host that is current when it runs.
 pub type Microtask = Box<dyn FnOnce(&dyn VfsHost)>;
 
@@ -60,7 +65,11 @@ pub trait VfsHost {
 
     /// Logs one line written to stdout or stderr, without its trailing newline. In workerd this
     /// calls `console.log` with the isolate's prefix for the stream, so it can run JavaScript.
-    fn log_stdio(&self, stdio: Stdio, line: &[u8]);
+    ///
+    /// # Errors
+    ///
+    /// [`HostError`] if logging failed, as when `console.log` throws.
+    fn log_stdio(&self, stdio: Stdio, line: &[u8]) -> Result<(), HostError>;
 
     /// Enqueues `task` on the current context's microtask queue.
     fn enqueue_microtask(&self, task: Microtask);

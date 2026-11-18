@@ -24,6 +24,8 @@ pub struct TestHost {
     /// Called after each line is logged, to run "JavaScript" from `console.log`.
     #[expect(clippy::type_complexity, reason = "a test hook")]
     pub on_log: RefCell<Option<Box<dyn Fn(&Self)>>>,
+    /// The number of lines logged after which logging fails, as a throwing `console.log` does.
+    pub fail_log_after: Cell<Option<usize>>,
 }
 
 impl TestHost {
@@ -38,6 +40,7 @@ impl TestHost {
             microtasks: RefCell::new(Vec::new()),
             tmp_store: RefCell::new(Some(TmpDirStore::new())),
             on_log: RefCell::new(None),
+            fail_log_after: Cell::new(None),
         }
     }
 
@@ -128,11 +131,15 @@ impl VfsHost for TestHost {
         self.in_request.get()
     }
 
-    fn log_stdio(&self, stdio: Stdio, line: &[u8]) {
+    fn log_stdio(&self, stdio: Stdio, line: &[u8]) -> Result<(), HostError> {
+        if self.fail_log_after.get() == Some(self.logged.borrow().len()) {
+            return Err(HostError);
+        }
         self.logged.borrow_mut().push((stdio, line.to_vec()));
         if let Some(hook) = &*self.on_log.borrow() {
             hook(self);
         }
+        Ok(())
     }
 
     fn enqueue_microtask(&self, task: Microtask) {

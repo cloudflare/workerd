@@ -53,6 +53,7 @@ pub use error::Stat;
 pub use file::ExternalBytes;
 pub use file::File;
 pub use host::FdObserver;
+pub use host::HostError;
 pub use host::MemoryCharge;
 pub use host::Microtask;
 pub use host::NoopFdObserver;

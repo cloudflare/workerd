@@ -260,6 +260,22 @@ fn stdio_logs_complete_lines() {
 }
 
 #[test]
+fn stdio_stops_when_logging_fails() {
+    let host = TestHost::new();
+    let out = stdout();
+    host.fail_log_after.set(Some(1));
+    assert_eq!(
+        out.write(&host, 0, b"one\ntwo\nthree\n"),
+        Err(FsError::Failed)
+    );
+    assert_eq!(host.logged_lines(), [(Stdio::Out, "one".to_owned())]);
+    // The file stays usable once logging works again.
+    host.fail_log_after.set(None);
+    assert_eq!(out.write(&host, 0, b"four\n"), Ok(5));
+    assert_eq!(host.logged_lines()[1], (Stdio::Out, "four".to_owned()));
+}
+
+#[test]
 fn stdio_flushes_an_unfinished_line_in_a_microtask() {
     let host = TestHost::new();
     let err = File::new_stdio(Stdio::Err);

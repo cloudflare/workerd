@@ -9,6 +9,7 @@ use std::rc::Weak;
 
 use crate::FsError;
 use crate::FsType;
+use crate::HostError;
 use crate::MemoryCharge;
 use crate::Stat;
 use crate::Stdio;
@@ -286,7 +287,7 @@ impl File {
             }
             FileKind::Device(Device::Null | Device::Zero) => Ok(len_u32(data.len())),
             FileKind::Device(Device::Full | Device::Random) => Err(FsError::NotPermitted),
-            FileKind::Stdio(stdio) => Ok(self.write_stdio(host, stdio, data)),
+            FileKind::Stdio(stdio) => self.write_stdio(host, stdio, data),
         }
     }
 
@@ -484,10 +485,16 @@ impl File {
     // Logs the complete lines of `data` and buffers the rest. `log_stdio()` can run JavaScript,
     // which can write to this file again or change the memory `data` views, so this copies
     // `data` first and holds no borrow of the state while logging.
-    fn write_stdio(&self, host: &dyn VfsHost, file: &StdioFile, data: &[u8]) -> u32 {
+    // A failure of `log_stdio()` ends the write with `FsError::Failed`.
+    fn write_stdio(
+        &self,
+        host: &dyn VfsHost,
+        file: &StdioFile,
+        data: &[u8],
+    ) -> Result<u32, FsError> {
         let data = &data[..data.len().min(MAX_STDIO_WRITE_SIZE)];
         if data.is_empty() || file.stdio == Stdio::In {
-            return len_u32(data.len());
+            return Ok(len_u32(data.len()));
         }
         let owned = data.to_vec();
         let mut rest = &owned[..];
@@ -496,10 +503,10 @@ impl File {
                 let (line, tail) = rest.split_at(newline + 1);
                 let mut pending = std::mem::take(&mut file.state.borrow_mut().line_buffer);
                 if pending.is_empty() {
-                    log_line(host, file.stdio, line);
+                    log_line(host, file.stdio, line)?;
                 } else {
                     pending.extend_from_slice(line);
-                    log_line(host, file.stdio, &pending);
+                    log_line(host, file.stdio, &pending)?;
                 }
                 rest = tail;
             } else {
@@ -508,7 +515,7 @@ impl File {
                 break;
             }
         }
-        len_u32(data.len())
+        Ok(len_u32(data.len()))
     }
 
     fn schedule_stdio_flush(&self, host: &dyn VfsHost, file: &StdioFile) {
@@ -533,15 +540,17 @@ impl File {
                 std::mem::take(&mut state.line_buffer)
             };
             if !pending.is_empty() && host.has_io_context() {
-                log_line(host, file.stdio, &pending);
+                // The host reports a failure itself when the microtask returns.
+                let _ = log_line(host, file.stdio, &pending);
             }
         }));
     }
 }
 
 // Logs `line` without one trailing newline.
-fn log_line(host: &dyn VfsHost, stdio: Stdio, line: &[u8]) {
-    host.log_stdio(stdio, line.strip_suffix(b"\n").unwrap_or(line));
+fn log_line(host: &dyn VfsHost, stdio: Stdio, line: &[u8]) -> Result<(), FsError> {
+    host.log_stdio(stdio, line.strip_suffix(b"\n").unwrap_or(line))
+        .map_err(|HostError| FsError::Failed)
 }
 
 // Appends `data` to `buffer`, keeping only the last `MAX_LINE_BUFFER_SIZE` bytes.
