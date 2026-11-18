@@ -263,10 +263,11 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
-`GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`; the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject`, `newDataCloneError` and
-`tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
+`GcVisitor`, `IsolateBase` (with the `ExternalMemoryTarget` it owns and its
+`ExternalMemoryAdjustment`s, which go with it when C++ JSG is removed) or the module registries is
+fine for now, since Rust JSG still shares them with C++ JSG. So are thin calls into
+`src/workerd/io`; the serialization hooks in `workerd/jsg/ser.h` (`writeApiObject`,
+`readApiObject`, `newDataCloneError` and `tryGetBootstrapExports`), through which workerd's API objects and DOMExceptions serialize, since
 their serializers are written against C++ JSG, and the deserializer finds classes implemented in
 JavaScript among the bootstrap's modules; `newDOMException` and `tryGetDOMExceptionNameAndMessage`
 in `workerd/jsg/dom-exception.h`, through which Rust creates and reads DOMExceptions without
@@ -618,11 +619,12 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
 | `std::sync::Arc<T>`, `std::sync::Mutex<T>` | No | Only for `T: HoldsNoGcReferences`, and `Sync` for `Arc` |
+| `jsg::ExternalMemoryAdjustment`, `jsg::ExternalMemoryTarget` | No | Hold no GC reference; see [External memory](#external-memory) |
 | `std::rc::Rc<T>` | Compile error — not `Send`, so not `Traced` | Share a resource through a `jsg::Rc` or `jsg::Weak`, and plain data with a future through an `Arc` (Safety rules, rules 2 and 5) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced!`, unchecked, for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
@@ -652,6 +654,42 @@ created in, which the `Realm` shares with every persistent handle of it, and a d
   left to update. No lock serializes them, so they go through the queue, which one thread at a
   time drains. Nothing else touches the counts by then: every other operation takes a lock of
   the isolate, and panics once its `Realm` is dropped.
+
+### External memory
+
+A resource reports memory it owns outside the V8 heap through `jsg::ExternalMemoryAdjustment`,
+using the same accounting as C++ JSG. Create an adjustment under the isolate lock, keep it in a
+field, and use `set(total)` as the allocation size changes:
+
+```rust
+#[jsg_resource]
+struct ExternalBuffer {
+    data: RefCell<Vec<u8>>,
+    external_memory: RefCell<jsg::ExternalMemoryAdjustment>,
+}
+
+let external_memory = lock.external_memory_adjustment(data.len());
+// ... and when the buffer grows:
+self.external_memory.borrow_mut().set(data.len());
+```
+
+Keep one adjustment per resource for its significant native allocations, updated at construction,
+growth, and release. Each adjustment allocates an FFI wrapper and holds an atomic reference to the
+target; avoid creating one per string or small allocation, or updating it on every small change.
+
+Adjustments are `Send` and `Sync` and can be updated or dropped on any thread. Dropping one removes
+its charge, including when V8 collects the resource. To create adjustments without the lock, first
+obtain an `ExternalMemoryTarget` with `lock.external_memory_target()`, then call
+`target.adjustment(amount)` on any thread. Both types can outlive the isolate; after its destruction,
+updates no longer reach V8.
+
+Use `adjust(delta)` when tracking changes rather than a total. Lowering an adjustment below zero
+returns an internal error and leaves the amount unchanged, matching C++. An amount or change of
+32 GiB or more aborts the process, including after isolate destruction.
+
+External memory accounting is separate from heap snapshots: a resource reports its allocations
+through `visit_for_memory_info`. See [`external_memory.rs`](external_memory.rs) for reporting and
+deferral details.
 
 ### Creating resources from C++
 
@@ -1091,7 +1129,7 @@ error, as C++ JSG fails with a `KJ_ASSERT`.
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the object is created from a `v8::DictionaryTemplate` cached for the struct type, as C++ JSG creates it, so the fields are data properties, an absent optional field is `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
-A `#[jsg_method]`, property getter or wildcard property converts its return value with `ToJS::to_js_with_creator`, passing the resource's wrapper for an instance member and `None` for a static one, as C++ JSG's `wrap()` takes a `creator`. Only a value that stays pending, a `jsg::Promise`, uses it, and a container passes it on; a `ToJS` impl that holds such values should forward it too.
+A `#[jsg_method]`, property getter or wildcard property that returns `()`, `bool` or one of the numeric types a Fast API callback returns, directly or as the `Ok` type of a `Result`, sets its result directly in V8: a `bool` with `set_return_boolean`, a number with `set_return_number`, and `()` leaves V8's default `undefined`. Any other return value converts with `ToJS::to_js_with_creator`. Instance members pass the resource's wrapper as the creator, and static members pass `None`. As in C++ JSG's `wrap()`, a `jsg::Promise` keeps its creator resource alive until it settles. Containers pass the creator on; a `ToJS` impl that holds such values should forward it too.
 
 Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or an exception or a termination is already pending, and a container passes on the error from converting an element, whichever kind it is. A `&str` or `String` longer than `v8::String::MAX_LENGTH` fails with a `RangeError` ("Invalid string length", as V8 reports it), which is not pending; every other conversion of a single value in this crate fails only with a pending error. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 

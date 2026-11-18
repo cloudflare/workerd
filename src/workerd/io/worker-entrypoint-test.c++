@@ -1069,7 +1069,7 @@ KJ_TEST("hibernatable WebSocket clean close is reported as a stream disconnect")
   loopback->fixture = fixture;
   auto& actor = fixture.getActor();
   actor.setHibernationManager(
-      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+      kj::rc<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
 
   auto entrypoint = fixture.makeWorkerEntrypoint();
   recordRequests = false;
@@ -1148,7 +1148,7 @@ KJ_TEST("a promise settled from another context while an actor idles with a hibe
   auto& waitScope = fixture.getWaitScope();
   auto& actor = fixture.getActor();
   actor.setHibernationManager(
-      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+      kj::rc<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
 
   auto entrypoint = fixture.makeWorkerEntrypoint();
   kj::HttpHeaderTable headerTable;

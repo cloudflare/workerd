@@ -60,6 +60,7 @@ class BaseTracer: public kj::Refcounted {
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
   virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
+  virtual void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
   virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) = 0;
@@ -171,9 +172,11 @@ class WorkerTracer final: public BaseTracer {
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
+  void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) override;
   // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
   void addSpanUpdateInternal(
       tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp);
+  void addSpanLinksInternal(tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp);
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
@@ -275,6 +278,7 @@ class SpanSubmitter: public kj::Refcounted {
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
 
   virtual void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
+  virtual void submitSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
 
   virtual void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
@@ -326,6 +330,7 @@ class UserSpanObserver final: public SpanObserver {
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
   void onUpdateStatus(tracing::SpanStatus&& status) override;
+  void onLinks(tracing::SpanLinks links) override;
   void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
       kj::String name,

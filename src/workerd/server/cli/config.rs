@@ -1,8 +1,7 @@
 //! Where the config comes from: a Cap'n Proto schema file (compiled by C++, the only compiler for
 //! that format), an encoded config file (`--binary`), stdin, the config compiled into the
-//! executable, or the config `make-pyodide-baseline-snapshot` synthesizes. Every source is
-//! checked to be a well-formed `Config` message here, and ends up as a [`Config`] for the C++
-//! driver.
+//! executable. Every source is checked to be a well-formed `Config` message here, and ends up as
+//! a [`Config`] for the C++ driver.
 
 use std::fmt;
 use std::fs::File;
@@ -67,26 +66,6 @@ impl Config {
             .map_err(|error| error.to_string())?;
         Ok(Self(words_from_bytes(
             &capnp::serialize::write_message_segments_to_words(&message.into_segments()),
-        )))
-    }
-
-    /// The config `make-pyodide-baseline-snapshot` runs: one Python worker with the given
-    /// compatibility flag selecting the Python version.
-    pub fn python_baseline(python_flag: &str) -> Self {
-        let mut message = capnp::message::Builder::new_default();
-        let config = message.init_root::<config::Builder>();
-        let mut service = config.init_services(1).get(0);
-        service.set_name("main");
-        let mut worker = service.init_worker();
-        worker.set_compatibility_date("2023-12-18");
-        let mut flags = worker.reborrow().init_compatibility_flags(2);
-        flags.set(0, python_flag);
-        flags.set(1, "python_workers");
-        let mut module = worker.init_modules(1).get(0);
-        module.set_name("main.py");
-        module.set_python_module("def test():\n pass");
-        Self(words_from_bytes(&capnp::serialize::write_message_to_words(
-            &message,
         )))
     }
 

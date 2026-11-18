@@ -55,6 +55,7 @@ import {
 import { Buffer } from 'node-internal:internal_buffer';
 import internalUtil from 'node-internal:util';
 import processImpl from 'node-internal:public_process';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 interface ConsoleStream {
   write(chunk: string, cb?: (err?: Error | null) => void): unknown;
@@ -201,12 +202,18 @@ export function Console(
   // that subclasses can override them.
   for (const key of Object.keys(Console.prototype as object)) {
     const bound = (this[key] as (...args: unknown[]) => unknown).bind(this);
-    Object.defineProperty(bound, 'name', { value: key });
+    Object.defineProperty(bound, 'name', {
+      // @ts-expect-error TS2353 Required for __proto__
+      __proto__: kNullProtoObject,
+      value: key,
+    });
     this[key] = bound;
   }
 
   const define = (key: string | symbol, value: unknown): void => {
     Object.defineProperty(this, key, {
+      // @ts-expect-error TS2353 Required for __proto__
+      __proto__: kNullProtoObject,
       value,
       writable: true,
       enumerable: false,
@@ -226,6 +233,8 @@ export function Console(
   define(kGroupIndentationString, '');
   define(kInspectOptions, inspectOptionsMap);
   Object.defineProperty(this, Symbol.toStringTag, {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: kNullProtoObject,
     value: 'console',
     writable: false,
     enumerable: false,

@@ -102,7 +102,7 @@ unsafe fn transcode(
     // feature callback operates only on safe JSG types.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            crate::transcode_impl(lock, source, from_encoding, to_encoding)
+            crate::transcode(lock, source, from_encoding, to_encoding)
         })
     }
 }

@@ -4293,7 +4293,7 @@ struct Worker::Actor::Impl {
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
   // (since it's long lived), but can still refer to the HibernationManager by passing a reference
   // in each CustomEvent.
-  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
+  kj::Maybe<kj::Rc<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
 
   struct ScheduledAlarm {
@@ -4340,7 +4340,7 @@ struct Worker::Actor::Impl {
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metricsParam,
-      kj::Maybe<kj::Own<HibernationManager>> manager,
+      kj::Maybe<kj::Rc<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
       jsg::Dict<kj::String> containerImages,
@@ -4397,7 +4397,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
-    kj::Maybe<kj::Own<HibernationManager>> manager,
+    kj::Maybe<kj::Rc<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
     jsg::Dict<kj::String> containerImages,
@@ -4980,9 +4980,8 @@ jsg::JsValue Worker::Actor::getEnv(jsg::Lock& js) {
   return jsg::JsValue(KJ_REQUIRE_NONNULL(worker->impl->env).getHandle(js));
 }
 
-kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
-  return impl->hibernationManager.map(
-      [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
+kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> Worker::Actor::getHibernationManager() {
+  return impl->hibernationManager.map([](kj::Rc<HibernationManager>& hib) { return hib.addRef(); });
 }
 
 kj::Maybe<uint64_t> Worker::Actor::getHolderToken() {
@@ -5027,7 +5026,7 @@ void Worker::Actor::attachHibernationManager(HibernationManager& manager) {
   manager.setLoopback(impl->loopback->addRef());
 }
 
-void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+void Worker::Actor::setHibernationManager(kj::Rc<HibernationManager> hib) {
   KJ_REQUIRE(impl->hibernationManager == kj::none);
 
   // A manager built by acceptWebSocket() already points here, but an adopted one still carries the

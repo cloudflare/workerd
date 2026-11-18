@@ -695,7 +695,7 @@ class DurableObjectState: public jsg::Object {
   void abort(jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options);
 
   // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
-  Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
+  kj::Rc<Worker::Actor::HibernationManager> maybeInitHibernationManager(Worker::Actor& actor);
 
   // Adds a WebSocket to the set attached to this object.
   // `ws.accept()` must NOT have been called separately.

@@ -417,7 +417,7 @@ impl CallbackOutcome {
 
 // Holds no handle that GC traces: the value's `Global` is strong, and is taken by the reaction,
 // which runs in the microtask checkpoint after the callback.
-jsg::jsg_traced!(CallbackOutcome);
+jsg::jsg_traced_unchecked!(CallbackOutcome);
 
 /// The reaction to the promise that [`IoContext::await_io`] resolves once its callback has
 /// returned: returns the callback's value, or throws its error. Throwing in a reaction gives the
@@ -520,7 +520,7 @@ impl<T> IoOwned<T> {
 }
 
 // Holds no JavaScript handles; see `IoContext::add_object`.
-jsg::jsg_traced!(<T> IoOwned<T>);
+jsg::jsg_traced_unchecked!(<T> IoOwned<T>);
 
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);
@@ -573,7 +573,7 @@ struct ThreadBoundSpan(SpanBuilder);
 unsafe impl Send for ThreadBoundSpan {}
 
 // A span holds no JavaScript handles.
-jsg::jsg_traced!(ThreadBoundSpan);
+jsg::jsg_traced_unchecked!(ThreadBoundSpan);
 
 impl<T> Drop for SlotRef<T> {
     fn drop(&mut self) {

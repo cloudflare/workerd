@@ -24,6 +24,26 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "weakref-test.wd-test",
+    data = [
+        "weakref-target.js",
+        "weakref-test.js",
+    ],
+)
+
+wd_test(
+    src = "streams-pending-gc-test.wd-test",
+    data = ["streams-pending-gc-test.js"],
+)
+
+wd_test(
+    src = "streams-pending-gc-gate-off-test.wd-test",
+    data = ["streams-pending-gc-test.js"],
+    # Every gate is on in that variant.
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
     src = "streams-byob-progress-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -1451,6 +1471,16 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-standard-url-test.wd-test",
+    data = [
+        "websocket-standard-url-server.js",
+        "websocket-standard-url-test.js",
+    ],
+    # One service tests the behaviour without websocket_standard_url_and_extensions.
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
@@ -1749,7 +1779,7 @@ wd_test(
 )
 
 # Each case starts Pyodide in a new isolate: 15-20 s of CPU in debug builds, using 1.5-1.8 cores
-# on average. Tagged `python` like the tests under //src/workerd/server/tests/python.
+# on average. Tagged `python` like the tests under //src/pyodide/tests.
 wd_test(
     size = "enormous",
     src = "worker-loader-python-test.wd-test",

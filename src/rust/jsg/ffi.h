@@ -18,6 +18,12 @@
 #include <kj/refcount.h>
 
 // Forward declarations needed by v8.rs.h
+namespace workerd::jsg {
+// Defined in jsg.h, which ffi.c++ includes and the crates that include this header don't depend
+// on. The bridge's kj::Arc glue doesn't need the definition.
+class ExternalMemoryTarget;
+}  // namespace workerd::jsg
+
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
@@ -25,6 +31,8 @@ using PropertyCallbackInfo = v8::PropertyCallbackInfo<v8::Value>;
 using PropertySetterCallbackInfo = v8::PropertyCallbackInfo<v8::Boolean>;
 using PropertyQueryCallbackInfo = v8::PropertyCallbackInfo<v8::Integer>;
 using FastApiCallbackOptions = v8::FastApiCallbackOptions;
+// Const, as IsolateBase hands it out: every member that the shims call is const and thread-safe.
+using ExternalMemoryTarget = const ::workerd::jsg::ExternalMemoryTarget;
 struct ModuleRegistry;
 struct Local;
 struct ArrayElement;
@@ -399,7 +407,6 @@ bool local_promise_resolver_resolve(Isolate* isolate, const Local& resolver, con
 bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, const Local& reason);
 
 // Local<Array>
-Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 // Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
 Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
@@ -465,6 +472,9 @@ MaybeLocal array_buffer_new_with_mode(
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
 size_t local_array_buffer_byte_length(const Local& buffer);
 uint8_t* local_array_buffer_data(const Local& buffer);
+// Returns the address of the buffer's first byte (zero if it has none) and sets `byteLength` to
+// its byte length.
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<ArrayBufferView>
@@ -549,6 +559,8 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+void fci_set_return_number(FunctionCallbackInfo* args, double value);
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value);
 // The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
 // attaches it; none if the data is anything else.
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
@@ -557,6 +569,8 @@ kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);
 Local pci_get_this(PropertyCallbackInfo* info);
 void pci_set_return_value(PropertyCallbackInfo* info, Local value);
+void pci_set_return_number(PropertyCallbackInfo* info, double value);
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value);
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info);
 Local psci_get_this(PropertySetterCallbackInfo* info);
 
@@ -749,5 +763,35 @@ kj::Vector<v8::Global<v8::FunctionTemplate>> pinResourceTemplatesIntoSnapshot(v8
 // the templates pinResourceTemplatesIntoSnapshot() pinned. Does nothing in any other isolate. Call
 // under the isolate lock, before any Rust resource is wrapped.
 void restoreResourceTemplatesFromSnapshot(v8::Isolate* isolate);
+
+// ExternalMemory
+// The isolate's ExternalMemoryTarget and ExternalMemoryAdjustments of it, shared with C++ JSG.
+// An adjustment may be made, changed or destroyed on any thread. A change made by a thread that
+// has entered the isolate reaches V8 at once. Any other change is added to the target's pending
+// total, which IsolateBase::applyDeferredActions() hands to V8 at the next lock. A decrease that
+// reaches V8 at once has a pending rise netted into it.
+// An adjustment of 32 GiB or more aborts the process, as in C++ JSG.
+// external_memory_adjustment_adjust() throws, as C++ adjust() does, when it would lower an
+// adjustment below zero. None of the others throw: the shims that take an amount cap it at
+// SSIZE_MAX, so that it can't wrap to a fall in C++.
+
+// A jsg::ExternalMemoryAdjustment, which ffi.c++ holds in a subclass. kj::Own's disposal needs a
+// complete type and checks whether it is polymorphic, so the bridge's kj::Own glue needs only this
+// declaration, not the definition in jsg.h.
+class ExternalMemoryAdjustment {
+ public:
+  virtual ~ExternalMemoryAdjustment() noexcept(false) = default;
+};
+
+kj::Arc<ExternalMemoryTarget> isolate_external_memory_target(Isolate* isolate);
+kj::Own<ExternalMemoryAdjustment> isolate_external_memory_adjustment(
+    Isolate* isolate, size_t amount);
+kj::Own<ExternalMemoryAdjustment> external_memory_target_adjustment(
+    ExternalMemoryTarget& target, size_t amount);
+bool external_memory_target_is_isolate_alive(ExternalMemoryTarget& target);
+int64_t external_memory_target_pending_update_for_test(ExternalMemoryTarget& target);
+size_t external_memory_adjustment_amount(const ExternalMemoryAdjustment& adjustment);
+void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::rust::isize delta);
+void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount);
 
 }  // namespace workerd::rust::jsg

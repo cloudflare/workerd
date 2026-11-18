@@ -66,3 +66,22 @@ test('Profiler mostly sees deriveBits() frames, and can safely reconnect', async
     await inspectorClient.close();
   }
 });
+
+// While the CPU profiler runs, V8 calls API callbacks through a C++ thunk whose indirect call is
+// checked in builds with cfi-icall, where a callback implemented in Rust must not trap. Builds
+// without CFI pass this either way.
+test('Rust-implemented callbacks can be called while profiling', async () => {
+  const inspectorClient = await connectInspector(
+    await workerd.getListenInspectorPort()
+  );
+  await inspectorClient.Profiler.enable();
+  await inspectorClient.Profiler.start();
+
+  const httpPort = await workerd.getListenPort('http');
+  const response = await fetch(`http://localhost:${httpPort}/urlParse`);
+  assert.equal(await response.text(), 'example.com');
+
+  await inspectorClient.Profiler.stop();
+  await inspectorClient.Profiler.disable();
+  await inspectorClient.close();
+});

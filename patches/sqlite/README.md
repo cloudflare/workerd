@@ -15,15 +15,16 @@ To update to a new SQLite version, obtain the new SQLite in plain
 form. Apply the patches to SQLite, fixing as necessary, and replace
 any patches that needed modification with their fixed versions.
 
-Example, assuming the new SQLite has been downloaded into the current
-directory:
+Example, downloading the new SQLite from its GitHub mirror into the
+current directory:
 
 ```bash
-export VERSION=3470000
-unzip sqlite-src-$VERSION.zip
-mv sqlite-src-$VERSION sqlite-src-pristine
-unzip sqlite-src-$VERSION.zip  # yes, again
-mv sqlite-src-$VERSION sqlite-src-modified
+export VERSION=3.55.0
+curl -L -o sqlite-$VERSION.tar.gz \
+    https://github.com/sqlite/sqlite/tarball/refs/tags/version-$VERSION
+mkdir sqlite-src-pristine sqlite-src-modified
+tar xzf sqlite-$VERSION.tar.gz --strip-components=1 -C sqlite-src-pristine
+tar xzf sqlite-$VERSION.tar.gz --strip-components=1 -C sqlite-src-modified
 ```
 
 Now patch:
@@ -42,4 +43,17 @@ diff -u5 -r sqlite-src-pristine sqlite-src-modified \
     > /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
 ```
 
+Bazel's built-in patcher needs the `diff` line that `diff -r` writes
+before each file, so always generate patches this way.
+
 Repeat for each patch.
+
+Finally, switch the build to the new version. In
+`build/deps/shared_deps.jsonc`, set the `freeze_version` of `sqlite3`
+to the new release's tag, such as `version-3.55.0`, and update its
+`patches` if any were added or removed. Then regenerate the Bazel
+definition:
+
+```bash
+just update-deps sqlite3
+```

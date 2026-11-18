@@ -9,7 +9,7 @@ use jsg_macros::jsg_resource;
 
 struct NotReported;
 
-jsg::jsg_traced!(NotReported);
+jsg::jsg_traced_unchecked!(NotReported);
 
 #[jsg_resource(memory_info)]
 struct Holder {

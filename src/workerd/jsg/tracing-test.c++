@@ -4,6 +4,8 @@
 
 #include "jsg-test.h"
 
+#include <workerd/util/autogate.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -112,7 +114,58 @@ class ValueBox: public jsg::Object {
   }
 };
 
+// A heap object whose handles the queue holding it visits.
+struct QueuedItem {
+  kj::Maybe<jsg::Value> value;
+  kj::Maybe<jsg::Ref<GcDetector>> detector;
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(value, detector);
+  }
+};
+
+class ItemQueue: public jsg::Object {
+ public:
+  static jsg::Ref<ItemQueue> constructor(jsg::Lock& js) {
+    return js.alloc<ItemQueue>();
+  }
+
+  void pushValue(jsg::Value value) {
+    items.add(TracedOwn(kj::heap(QueuedItem{.value = kj::mv(value)})));
+  }
+
+  void pushDetector(jsg::Ref<GcDetector> detector) {
+    items.add(TracedOwn(kj::heap(QueuedItem{.detector = kj::mv(detector)})));
+  }
+
+  kj::Vector<TracedOwn<QueuedItem>> items;
+
+  JSG_RESOURCE_TYPE(ItemQueue) {
+    JSG_METHOD(pushValue);
+    JSG_METHOD(pushDetector);
+  }
+
+ private:
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visitAll(items);
+  }
+};
+
 struct TraceTestContext: public Object, public ContextGlobal {
+  // An item taken out of an ItemQueue. Nothing visits it.
+  kj::Maybe<kj::Own<QueuedItem>> taken;
+
+  void take(jsg::Ref<ItemQueue> queue) {
+    auto item = kj::mv(queue->items.back());
+    queue->items.removeLast();
+    taken = item.release();
+  }
+
+  void putBack(jsg::Ref<ItemQueue> queue) {
+    queue->items.add(TracedOwn(KJ_ASSERT_NONNULL(kj::mv(taken))));
+    taken = kj::none;
+  }
+
   kj::Maybe<jsg::Ref<NumberBox>> strongRef;
   // A strong reference to a NumberBox which may be get and set.
 
@@ -149,6 +202,9 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(NumberBoxHolder);
     JSG_NESTED_TYPE(GcDetector);
     JSG_NESTED_TYPE(ValueBox);
+    JSG_NESTED_TYPE(ItemQueue);
+    JSG_METHOD(take);
+    JSG_METHOD(putBack);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD_NAMED(assert, assert_);
@@ -162,7 +218,8 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBoxHolder,
     GcDetector,
     GcDetectorBox,
-    ValueBox);
+    ValueBox,
+    ItemQueue);
 
 KJ_TEST("GC collects objects when expected") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
@@ -268,6 +325,68 @@ KJ_TEST("GC collects objects when expected") {
       "undefined", "undefined");
 }
 
+KJ_TEST("TracedOwn keeps an object's handles alive after it leaves the owner that visited it") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+  util::Autogate::initAutogateForTest({util::AutogateKey::GC_COMPLETE_TRACING});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+
+  // A jsg::Value taken out of a traced queue stays alive after the queue is collected.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      queue.pushValue(pair[0]);
+      pair = null;
+      gc();  // traces the queued value
+      take(queue);
+    })();
+    gc();
+    assert(!b.siblingCollected, "a value taken out of a traced queue was collected");
+  )",
+      "undefined", "undefined");
+
+  // So does a jsg::Ref, and a different queue can then visit it.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      queue.pushDetector(pair[0]);
+      pair = null;
+      gc();
+      take(queue);
+    })();
+    gc();
+    assert(!b.siblingCollected, "a Ref taken out of a traced queue was collected");
+    (() => {
+      const other = new ItemQueue();
+      putBack(other);
+      gc();
+      assert(!b.siblingCollected, "a Ref put in a live queue was collected");
+    })();
+    gc();
+    assert(b.siblingCollected, "a Ref left in a dead queue was not collected");
+  )",
+      "undefined", "undefined");
+
+  // A value still in the queue is collected with the queue, even when it refers to the queue.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      const queue = new ItemQueue();
+      pair[0].queue = queue;
+      queue.pushValue(pair[0]);
+      pair = null;
+      gc();  // A handle added to an object that has a wrapper stays strong until a trace visits it.
+    })();
+    gc();
+    assert(b.siblingCollected, "a queue holding a cycle through its items was not collected");
+  )",
+      "undefined", "undefined");
+}
+
 KJ_TEST("TracedReference usage does not lead to crashes") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
 
@@ -324,6 +443,73 @@ KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {
   e.expectEval("(() => { for (let i = 0; i < 1000000; ++i) new NumberBox(i); })()", "undefined",
       "undefined");
   KJ_EXPECT(majorGcCount > 0);
+}
+
+// Wrappable bytes charged in this isolate, reported to V8 or not.
+int64_t wrappableBytes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
+  return e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    return HeapTracer::getTracer(lock.v8Isolate).getChargedWrappableBytes();
+  });
+}
+
+int64_t reportedWrappableBytes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
+  return e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    return HeapTracer::getTracer(lock.v8Isolate).getReportedWrappableBytes();
+  });
+}
+
+constexpr int kKeptBoxes = 10000;
+
+// Keeps kKeptBoxes NumberBoxes alive in `globalThis.keep`.
+void keepBoxes(Evaluator<TraceTestContext, TraceTestIsolate>& e) {
+  e.expectEval(kj::str("globalThis.keep = []; for (let i = 0; i < ", kKeptBoxes,
+                   "; ++i) keep.push(new NumberBox(i));"),
+      "number", kj::str(kKeptBoxes));
+}
+
+KJ_TEST("wrappables are charged as external memory while they live") {
+  util::Autogate::initAutogateForTest({util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY});
+  KJ_DEFER(util::Autogate::deinitAutogate());
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  e.expectEval("gc()", "undefined", "undefined");
+  int64_t before = wrappableBytes(e);
+
+  // Kept alive, so each is charged and none is released yet.
+  keepBoxes(e);
+  int64_t live = wrappableBytes(e) - before;
+  KJ_EXPECT(live >= int64_t(kKeptBoxes * sizeof(NumberBox)), live);
+
+  // The charge is reported to V8 in batches, so at most one batch is still pending.
+  e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    int64_t pending = HeapTracer::getTracer(lock.v8Isolate).getUnreportedWrappableBytesForTest();
+    KJ_EXPECT(pending < HeapTracer::kExternalMemoryFlushBytes, pending);
+  });
+
+  // Collected, so the charges are released again, with slack for a few boxes the GCs leave alive.
+  // The GC is requested from C++ without stack scanning, as a stale stack slot that points at
+  // `keep` would keep every box alive.
+  e.expectEval("keep = null", "object", "null");
+  e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    for (int i = 0; i < 2; ++i) {
+      lock.v8Isolate->RequestGarbageCollectionForTesting(
+          v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
+    }
+  });
+  int64_t remaining = wrappableBytes(e) - before;
+  KJ_EXPECT(remaining < int64_t(sizeof(NumberBox)) * 16, remaining);
+}
+
+KJ_TEST("wrappables are counted but not reported to V8 when the autogate is off") {
+  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
+  KJ_DEFER(util::Autogate::deinitAutogate());
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+  int64_t before = wrappableBytes(e);
+  int64_t reportedBefore = reportedWrappableBytes(e);
+  keepBoxes(e);
+  int64_t live = wrappableBytes(e) - before;
+  KJ_EXPECT(live >= int64_t(kKeptBoxes * sizeof(NumberBox)), live);
+  KJ_EXPECT(reportedWrappableBytes(e) == reportedBefore);
 }
 
 }  // namespace
