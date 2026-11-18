@@ -1104,12 +1104,14 @@ impl<'s> Lock<'s> {
             };
             // A panic must not unwind into C++; it is resumed once the `TryCatch` is gone.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let result = f(call.lock);
-                if let Err(err) = &result {
-                    // Thrown in the `TryCatch`, so that it catches what `f` failed with.
-                    call.lock.throw_exception(err);
-                }
-                result
+                cxx::panic_on_exception(|| {
+                    let result = f(call.lock);
+                    if let Err(err) = &result {
+                        // Thrown in the `TryCatch`, so that it catches what `f` failed with.
+                        call.lock.throw_exception(err);
+                    }
+                    result
+                })
             }));
             let failed = !matches!(result, Ok(Ok(_)));
             call.result = Some(result);
@@ -1917,7 +1919,10 @@ where
     let isolate = scope.isolate();
     // V8 is single-threaded and the panic terminates execution, so no JavaScript observes
     // state that `f` left half-updated.
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(scope.open()))) {
+    // A `#[nothrow]` shim that throws regardless is handled as a panic.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        cxx::panic_on_exception(|| f(scope.open()))
+    })) {
         Ok(result) => Some(result),
         Err(payload) => {
             let msg = panic_message(&*payload);

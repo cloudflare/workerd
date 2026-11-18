@@ -119,6 +119,12 @@ mod ffi {
         /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
         pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
+        /// Throws a `kj::Exception`, which a `#[nothrow]` shim must not do.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        #[nothrow]
+        pub fn throw_from_nothrow_shim();
+
         /// Runs the isolate's pending microtasks.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
@@ -684,6 +690,11 @@ impl Harness {
     pub fn take_realm_templates(&self) {
         // SAFETY: the harness is valid, and no Rust `Lock` is in use outside a callback.
         unsafe { self.0.take_realm_templates() };
+    }
+
+    /// Throws a C++ exception from a `#[nothrow]` shim.
+    pub fn throw_from_nothrow_shim() {
+        ffi::throw_from_nothrow_shim();
     }
 
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {

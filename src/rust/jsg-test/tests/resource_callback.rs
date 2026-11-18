@@ -564,6 +564,52 @@ fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     });
 }
 
+/// A resource whose methods call a `#[nothrow]` shim that throws a C++ exception.
+#[jsg_resource]
+struct NothrowShimThrowsResource;
+
+#[jsg_resource]
+impl NothrowShimThrowsResource {
+    #[jsg_method]
+    pub fn throw_now(&self) {
+        crate::Harness::throw_from_nothrow_shim();
+    }
+
+    #[jsg_method]
+    pub fn throw_in_try_catch(&self, lock: &mut jsg::Lock) {
+        let _ = lock.try_catch(|_| {
+            crate::Harness::throw_from_nothrow_shim();
+            Ok(())
+        });
+    }
+}
+
+/// The bridge function of a `#[nothrow]` shim does not catch, so an exception from one unwinds
+/// the Rust callback. It is handled as a panic is, rather than aborting the process.
+#[test]
+fn exception_in_nothrow_shim_errors_request_and_terminates_isolate() {
+    for call in ["obj.throwNow()", "obj.throwInTryCatch()"] {
+        let harness = crate::Harness::new();
+        harness.run_in_context(|lock, ctx| {
+            let resource = jsg::Rc::new(lock, NothrowShimThrowsResource);
+            let wrapped = resource.to_js(lock)?;
+            ctx.set_global(lock, "obj", wrapped);
+
+            let err = ctx
+                .eval::<bool>(lock, &format!("while (true) {{ {call}; }}"))
+                .unwrap_err()
+                .unwrap_jsg_err(lock);
+            assert!(err.message.contains("internal error"), "{:?}", err.message);
+            assert!(
+                !err.message.contains("intentional exception"),
+                "{:?}",
+                err.message
+            );
+            Ok(())
+        });
+    }
+}
+
 /// A resource whose method runs closures in a nested `CallbackScope` through
 /// `jsg::catch_panic`, as a Rust entry point called from C++ does.
 #[jsg_resource]

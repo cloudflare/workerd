@@ -109,6 +109,9 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // was terminated.
 void terminate_and_deliver(Isolate* isolate);
 
+// Throws a kj::Exception. Declared #[nothrow], so its bridge function does not catch it.
+void throw_from_nothrow_shim();
+
 // Runs the isolate's pending microtasks, as the event loop does after each task.
 void run_microtasks(Isolate* isolate);
 

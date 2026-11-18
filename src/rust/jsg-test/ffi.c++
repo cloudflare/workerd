@@ -350,6 +350,10 @@ void terminate_and_deliver(Isolate* isolate) {
   KJ_ASSERT(isolate->IsExecutionTerminating());
 }
 
+void throw_from_nothrow_shim() {
+  kj::throwException(KJ_EXCEPTION(FAILED, "intentional exception in #[nothrow] shim"));
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:
