@@ -423,6 +423,11 @@ fn help_pages_are_complete() {
     main.build();
     let page = main.render_help().to_string();
     assert!(page.len() < 6000, "workerd -h is {} bytes", page.len());
+    let wrapped = |l: &&str| l.len() > 37 && l[..37].trim().is_empty();
+    assert!(
+        !page.lines().any(|l| wrapped(&l)),
+        "workerd -h: a row wraps"
+    );
     check(&mut main, "workerd");
     for sub in main.get_subcommands_mut() {
         let name = sub.get_name().to_owned();

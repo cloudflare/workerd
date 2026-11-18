@@ -46,11 +46,27 @@ macro_rules! cluster_options {
     () => {
         "\
 Cluster (experimental):
-  Each instance serves a .capnp config with a cluster field, and workerd
-  deploy publishes the Worker to the bucket. For a wrangler.json named
-  app, on each instance:
+      --cluster-addr <addr>          Listen for peers on addr, kept private
+      --cluster-advertise <addr>     Address peers reach this instance at
+  s3:// buckets read AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID and the other
+  AWS_* variables; gs:// buckets, GOOGLE_APPLICATION_CREDENTIALS. On
+  SIGTERM an instance hands its objects to its peers and exits, within 8 s.
+  GET /ready on the peer address answers OK once serving.
+"
+    };
+}
 
-    # instance.capnp
+macro_rules! cluster_setup {
+    () => {
+        "\
+Cluster setup:
+  Publish the Worker to the bucket, then start each instance; restart
+  them after each deploy.
+
+    $ workerd deploy --experimental . --bucket s3://bucket/prefix
+    $ workerd serve --experimental instance.capnp config
+
+    # instance.capnp, for a wrangler.json named app
     using Workerd = import \"/workerd/workerd.capnp\";
     const config :Workerd.Config = (
       cluster = (bucket = \"s3://bucket/prefix\", key = \"<secret>\",
@@ -60,26 +76,8 @@ Cluster (experimental):
       sockets = [(name = \"http\", address = \"*:8787\", service = \"app\")],
     );
 
-    $ workerd deploy --experimental . --bucket s3://bucket/prefix
-    $ workerd serve --experimental instance.capnp config
-
-  app is the deployment, named after the wrangler.json; config is the
-  constant in instance.capnp. key is a secret of at least 32 bytes
-  (openssl rand -hex 32), the same on every instance. address is where
-  peers reach this instance, on a private network. Instances read the
-  bucket's deployments when they start, so deploy first and restart them
-  after each deploy.
-      --cluster-addr <addr>          Listen for peers on addr instead of
-                                     the config's; a public IP is refused
-      --cluster-advertise <addr>     Tell peers to reach this instance at
-                                     addr (NAT, containers); port 0 is the
-                                     bound one
-  s3:// buckets read AWS_ENDPOINT_URL, AWS_REGION, AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN or AWS_CREDENTIALS_FILE; gs://
-  buckets, GOOGLE_APPLICATION_CREDENTIALS or the VM's metadata server.
-  On SIGTERM the instance keeps serving while it hands its Durable Objects
-  to its peers, then exits, within 8 s by default (stopTimeoutMs). GET
-  /ready on address answers OK, or 503 while it starts or stops.
+  key is at least 32 bytes, the same everywhere (openssl rand -hex 32).
+  address is where peers reach this instance, on a private network.
 "
     };
 }
@@ -182,15 +180,13 @@ Config:
   config also works.
 
 Options:
-  -s, --socket-addr <name>=<addr>    Listen on addr (wrangler's socket:
-                                     http)
+  -s, --socket-addr <name>=<addr>    Serve on addr, as in -s http=*:8080
   -i, --inspector-addr <addr>        Accept DevTools connections
   -w, --watch                        Reload when files change
       --experimental                 Allow experimental features
       --verbose                      Log to stderr
   -h, --help                         Print this help
-  -V, --version                      Print the newest compatibility date
-                                     this build supports
+  -V, --version                      Print the newest supported compat date
 
 More, in each command's --help:
   serve          systemd sockets, service overrides, cluster settings,
@@ -229,6 +225,8 @@ Usage:
     python_options!(),
     "\n",
     capnp_options!(),
+    "\n",
+    cluster_setup!(),
 );
 
 pub const TEST: &str = concat!(
