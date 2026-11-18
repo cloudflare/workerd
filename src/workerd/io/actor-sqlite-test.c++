@@ -718,8 +718,9 @@ KJ_TEST("runs overdue alarm immediately when local alarm time is in the past") {
     auto overdueCurrentTime = fiveMs;
     auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, overdueCurrentTime);
 
-    // Should run the handler immediately instead of canceling/rescheduling.
+    // Should run the handler immediately instead of canceling/rescheduling, for the local alarm.
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    KJ_EXPECT(armResult.get<ActorSqlite::RunAlarmHandler>().scheduledTime == twoMs);
   }
 
   // commit and delete the alarm after we drop the alarm handler (this is a deferred delete).
@@ -741,6 +742,7 @@ KJ_TEST("does not cancel handler when local db alarm state is later than schedul
   {
     auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    KJ_EXPECT(armResult.get<ActorSqlite::RunAlarmHandler>().scheduledTime == oneMs);
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();

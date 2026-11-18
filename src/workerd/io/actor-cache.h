@@ -273,6 +273,10 @@ class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
     // cancelDeferredAlarmDeletion() are called.  Caller should attach it to a promise
     // representing the alarm handler's execution.
     kj::Own<void> deferredDelete;
+    // The scheduled time of the alarm that the handler runs for, which the caller passes to the
+    // handler. It is the local alarm time, rather than the requested one, when the local alarm is
+    // overdue and runs in the requested alarm's place.
+    kj::Date scheduledTime;
   };
 
   // Call when entering the alarm handler.

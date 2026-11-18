@@ -698,7 +698,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       }
 
       return context
-          .run([exportedHandler, timeout, retryCount, scheduledTime,
+          .run([exportedHandler, timeout, retryCount, scheduledTime = armResult.scheduledTime,
                    weakRequest = incomingRequest.addWeak(),
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {

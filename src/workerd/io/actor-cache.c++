@@ -200,7 +200,8 @@ kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCach
     };
   }
   static const DeferredAlarmDeleter disposer;
-  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+  return RunAlarmHandler{
+    .deferredDelete = kj::Own<void>(this, disposer), .scheduledTime = scheduledTime};
 }
 
 void ActorCache::cancelDeferredAlarmDeletion() {

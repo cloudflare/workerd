@@ -1061,9 +1061,9 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
   auto localAlarmState = metadata.getAlarm();
   if (localAlarmState != scheduledTime) {
     if (localAlarmState == lastConfirmedAlarmDbState) {
-      // If the local alarm time is already in the past, just run the handler now. This avoids
-      // blocking alarm execution on the AlarmManager sync when storage is overloaded. The alarm
-      // will either delete itself on success or reschedule on failure.
+      // If the local alarm time is already in the past, just run the handler now, for the local
+      // alarm. This avoids blocking alarm execution on the AlarmManager sync when storage is
+      // overloaded. The alarm will either delete itself on success or reschedule on failure.
       if ((willFireEarlier(localAlarmState, currentTime))) {
         auto localAlarmTime = KJ_ASSERT_NONNULL(localAlarmState);
         LOG_WARNING_PERIODICALLY(
@@ -1073,7 +1073,8 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         inAlarmHandler = true;
         deferredAlarmSpan = kj::mv(parentSpan);
         static const DeferredAlarmDeleter disposer;
-        return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+        return RunAlarmHandler{
+          .deferredDelete = kj::Own<void>(this, disposer), .scheduledTime = localAlarmTime};
       }
 
       // If there's a clean db time that differs from the requested handler's scheduled time, this
@@ -1126,7 +1127,8 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
   inAlarmHandler = true;
 
   static const DeferredAlarmDeleter disposer;
-  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+  return RunAlarmHandler{
+    .deferredDelete = kj::Own<void>(this, disposer), .scheduledTime = scheduledTime};
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
