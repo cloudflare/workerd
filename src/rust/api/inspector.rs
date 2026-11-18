@@ -183,20 +183,9 @@ fn connect(lock: &mut jsg::Lock) -> jsg::Result<KjOwn<ffi::InspectorSession>> {
 /// It exposes the `Connection` constructor used by the TypeScript `Session` implementation,
 /// mirroring the shape of Node.js's `internalBinding('inspector')` minus the pieces the
 /// TypeScript layer implements itself.
-#[jsg_resource]
+#[jsg_resource(snapshot_stateless)]
+#[derive(Default)]
 pub struct InspectorModule;
-
-/// The module object holds no state, so a Worker whose top level imports `node-internal:inspector` can start from a
-/// startup snapshot.
-impl jsg::SnapshotTransfer for InspectorModule {
-    type Snapshot = ();
-
-    fn snapshot(&self) {}
-
-    fn restore((): &()) -> Self {
-        Self
-    }
-}
 
 #[jsg_resource(nested_types(Connection = InspectorConnection))]
 impl InspectorModule {

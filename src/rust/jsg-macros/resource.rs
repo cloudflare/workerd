@@ -24,6 +24,7 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
+use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -51,6 +52,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
+    let snapshot_stateless = has_flag(&attr, "snapshot_stateless");
     let typescript = typescript_options(attr.clone());
     let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
         Ok(generated) => generated,
@@ -83,6 +85,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         &memory_info.gc_fn,
         &drop_detach_types(custom_trace, &fields),
     );
+    let snapshot_transfer_impl = snapshot_stateless_impl(&name, snapshot_stateless);
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
@@ -150,6 +153,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+
+        #snapshot_transfer_impl
         #visit_for_memory_info_impl
     }
     .into()
@@ -649,6 +654,30 @@ fn drop_probe_items() -> proc_macro2::TokenStream {
     }
 }
 
+/// The `jsg::SnapshotTransfer` impl of a `#[jsg_resource(snapshot_stateless)]` type, whose
+/// snapshot is empty and whose every restored instance is its `Default`; nothing for any other
+/// type.
+fn snapshot_stateless_impl(
+    name: &syn::Ident,
+    snapshot_stateless: bool,
+) -> proc_macro2::TokenStream {
+    if !snapshot_stateless {
+        return quote! {};
+    }
+    quote! {
+        #[automatically_derived]
+        impl jsg::SnapshotTransfer for #name {
+            type Snapshot = ();
+
+            fn snapshot(&self) {}
+
+            fn restore((): &()) -> Self {
+                <Self as ::core::default::Default>::default()
+            }
+        }
+    }
+}
+
 /// The types whose `Traced::needs_drop_detach` makes a resource with `fields` detach its
 /// references before it is dropped. A `custom_trace` resource's own `Traced` impl answers for
 /// its fields, which need not be `Traced`.
@@ -720,14 +749,15 @@ fn generate_gc_impl(
 }
 
 /// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
-/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
-/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
-/// the impl block.
+/// `custom_trace`, `memory_info`, `custom_memory_info`, `snapshot_stateless` and `ts_root`, so
+/// that a misspelled flag does not compile instead of being ignored. `nested_types(...)` and
+/// `custom_members` belong on the impl block.
 fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
-                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `custom_memory_info`, `snapshot_stateless`, `ts_root`, \
+                            `ts_override = \"...\"` or \
                             `ts_define = \"...\"` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
@@ -760,6 +790,7 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
                     "custom_trace",
                     "memory_info",
                     "custom_memory_info",
+                    "snapshot_stateless",
                     "ts_root",
                 ]
                 .iter()

@@ -130,6 +130,12 @@ switch (MODE) {
   case 'process-stdout':
     topLevel.stdoutWritable = typeof process.stdout.write;
     break;
+  case 'empty-typed-array':
+    // A typed array over an ArrayBuffer of its own has an off-heap backing store, of zero bytes
+    // here, which the snapshot carries like any other.
+    globalThis.emptyBytes = new Uint8Array(new ArrayBuffer(0));
+    globalThis.someBytes = new Uint8Array(new ArrayBuffer(4)).fill(7);
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -159,6 +165,14 @@ function report() {
     processCustom: globalThis.process?.custom ?? null,
     bufferCustom: globalThis.Buffer?.custom ?? null,
     processEnv: globalThis.process?.env?.FROM_TOP_LEVEL ?? null,
+    typedArrays:
+      globalThis.emptyBytes === undefined
+        ? null
+        : {
+            emptyLength: globalThis.emptyBytes.length,
+            emptyBufferLength: globalThis.emptyBytes.buffer.byteLength,
+            some: [...globalThis.someBytes],
+          },
     types: {
       WebAssembly: typeof WebAssembly,
       SharedArrayBuffer: typeof SharedArrayBuffer,
@@ -238,15 +252,22 @@ async function test(ctrl, env) {
     'buffer-assign'(r) {
       strictEqual(r.bufferCustom, 'Buffer');
     },
-    // Reading `process` evaluates the process object's module, which the zygote can run. Its
+    // Reading `process` evaluates the process object's module, which the zygote can run; its
     // stdio streams are built on first access.
     'process-env'(r) {
       strictEqual(r.processEnv, 'yes');
     },
     // Building a stdio stream evaluates the fs stream modules, whose module scope reaches
-    // UrlUtil, a Rust JSG resource (src/rust/api/url.rs).
+    // UrlUtil, a Rust JSG resource (src/rust/api/url.rs) that transfers as a stateless type.
     'process-stdout'(r) {
       strictEqual(r.topLevel.stdoutWritable, 'function');
+    },
+    'empty-typed-array'(r) {
+      deepStrictEqual(r.typedArrays, {
+        emptyLength: 0,
+        emptyBufferLength: 0,
+        some: [7, 7, 7, 7],
+      });
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top

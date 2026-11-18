@@ -253,9 +253,7 @@ leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are 
 allowlist described below, and are to be removed. The one exception is in
 `src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
 `JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way, and `io_context_add_wait_until()` calls the C++ function that
-`ctx.waitUntil()` calls, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
-explains why that is sound. Don't extend it.
+learns of exceptions no other way. Don't extend it.
 
 Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
 `IoContext::getCurrentLock()`),
@@ -627,6 +625,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
+- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. It generates a `jsg::SnapshotTransfer` impl with an empty snapshot; a type with state implements `SnapshotTransfer` itself. See [Startup snapshots](#startup-snapshots).
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
@@ -772,17 +771,20 @@ implements `jsg::SnapshotTransfer`, the counterpart of C++ `Wrappable::snapshotC
 zygote calls `snapshot()` on the live instance and stores the `Snapshot` it returns, which holds
 no GC reference and is `Send` and `Sync`, as the threads of the Workers started from it read it.
 Each Worker started from the snapshot calls `restore()` on it, with no lock, and attaches the
-result to the restored wrapper. A type
-without the impl makes the Worker start without the snapshot.
+result to the restored wrapper. A type without the impl makes the Worker start without the
+snapshot. `#[jsg_resource(snapshot_stateless)]` implements it for a `Default` type with no state,
+such as `UrlUtil`; a type with state copies it into its `Snapshot`:
 
 ```rust
-impl jsg::SnapshotTransfer for UrlUtil {
-    type Snapshot = ();
+impl jsg::SnapshotTransfer for Point {
+    type Snapshot = (f64, f64);
 
-    fn snapshot(&self) {}
+    fn snapshot(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
 
-    fn restore((): &()) -> Self {
-        Self
+    fn restore(&(x, y): &(f64, f64)) -> Self {
+        Self { x, y }
     }
 }
 ```

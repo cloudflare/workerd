@@ -37,13 +37,10 @@ all of these hold:
   top-level code has to run there for DevTools to see its console output and stop at its
   breakpoints;
 - `supportsStartupSnapshot()` accepts the Worker: ES-modules syntax (not a service-worker
-  script), no Wasm modules, not a Python Worker, the `typescript_implemented_streams` flag, and
-  only bindings of kinds
-  that transfer (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). The C++
-  streams implementation leaves a pending `pull()` as a C++ promise continuation reachable from
-  the context, which `CreateBlob()` cannot serialize; the TypeScript implementation keeps it in
-  JavaScript. A dynamically loaded Worker (`dynamicSource`), whose `env` arrives as capabilities
-  rather than channel numbers, never qualifies.
+  script), no Wasm modules, not a Python Worker, and only bindings of kinds that transfer
+  (`WorkerdApi::isBindingTransferableThroughSnapshot()`; see step 3 below). A dynamically loaded
+  Worker (`dynamicSource`), whose `env` arrives as capabilities rather than channel numbers,
+  never qualifies.
 
 ## The zygote (PREPARE_SNAPSHOT)
 
@@ -228,24 +225,33 @@ A JSG resource type whose instance can be alive when top-level evaluation ends n
   type's `Lock&` constructor, or its default constructor. The type must be `final` (a
   `static_assert` enforces it), since a subclass would inherit the flag.
 - an override of `Wrappable::snapshotClone()` returning a deep, isolate-independent copy
-  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`): no V8 handles, no IoContext, and no
-  `jsg::Ref` members except to a fresh object the copy owns, which has never been wrapped and so
-  belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
+  (`Headers`, `URL`, `TextDecoder`, `FileSystemModule`, `Performance`): no V8 handles, no
+  IoContext, and no `jsg::Ref` members except to a fresh object the copy owns, which has never
+  been wrapped and so belongs to no isolate (the `Fetcher` a `WrappedBinding` copy holds, or the
   `LoopbackDurableObjectClass` of a loopback namespace copy). It is called in the zygote on the
   live original, and once more per started worker on the stored copy.
+- for a Rust JSG resource, an impl of `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`); see
+  below. `#[jsg_resource(snapshot_stateless)]` (`UrlUtil`, `DnsUtil`, `InspectorModule`)
+  generates one, with an empty snapshot, for a type that implements `Default`. Every Rust
+  resource shares one CppHeapPointerTag, so a Rust type is never recorded by tag alone: it goes
+  through the Rust-side `Wrappable`'s `snapshotClone()`.
 
 A type that holds a `jsg::Ref` to another transferred object whose identity JavaScript can see
 also overrides `Wrappable::snapshotReferences()` and `snapshotRelink()`, as `Crypto` does for
 `subtle`: the restored instance is built afresh, and would otherwise refer to a new object rather
 than to the one behind the restored wrapper.
 
-A Rust JSG resource type implements `jsg::SnapshotTransfer` (`src/rust/jsg/snapshot.rs`), which
-covers both: `snapshot()` and `restore()` stand for the two `snapshotClone()` calls, through an
-isolate-independent `Snapshot` value, and `snapshot_references()` and `snapshot_relink()` for
-their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
+`jsg::SnapshotTransfer` covers both for a Rust type: `snapshot()` and `restore()` stand for the
+two `snapshotClone()` calls, through an isolate-independent `Snapshot` value, and
+`snapshot_references()` and `snapshot_relink()` for their C++ counterparts. A Worker started from the snapshot restores the Rust resource templates
 into its new `Realm` (`restoreResourceTemplatesFromSnapshot()`) before anything is wrapped, so
 that its new wrappers of a type and the restored ones share a template. `relinkReferences()` runs
 with the new context entered, for the `Lock` of `snapshot_relink()`.
+
+A type whose state lives on the context, and so does not exist yet when `snapshotClone()` runs
+for the started worker, also overrides `Wrappable::snapshotContextReady()`. The file system
+handles bind to the worker's VFS there, when the `Worker` constructor, having installed the VFS
+on the context, enters it and calls `IsolateBase::notifySnapshotContextReady()`.
 
 A `jsg::Function` the top level keeps (the function `createRequire()` returns, or the new module
 registry's `import.meta.resolve`, for example) transfers if its functor provides
@@ -275,14 +281,19 @@ its base type.
 Two outcomes are possible for a Worker that qualifies:
 
 - **The Worker does not qualify.** `supportsStartupSnapshot()` says no: an inspector, a module
-  fallback service, a service-worker script, Wasm modules, Python, C++ streams, or a binding
+  fallback service, a service-worker script, Wasm modules, Python, or a binding
   of a kind that cannot transfer (`cryptoKey`, `memoryCache`, `wrapped`, logged at INFO as
   `startup snapshot skipped: a binding of this kind cannot be transferred`), or a dynamically
   loaded Worker. No zygote runs.
 - **The zygote fails.** A KJ exception while compiling, evaluating, recording or serializing: a
   top-level exception or parse error (the `Worker` constructor throws before anything is
-  recorded), an unclonable type reachable from the context such as an `AbortController` or an
-  RPC method taken off a stub (`const { ping } = env.RPC`), a restore-time global the top level
+  recorded), an unclonable type reachable from the context such as an aborted `AbortSignal`, an
+  RPC method taken off a stub (`const { ping } = env.RPC`) or a C++ promise continuation that is
+  still pending, such as a C++ stream's `pull()` or `cancel()` awaiting a promise the top level
+  left unsettled (`jsg::Promise::thenImpl()` and `PromiseWrapper::wrap()`/`tryUnwrap()` register
+  their callbacks as external references while a snapshot is prepared, so that the serializer
+  reports the continuation's opaque data instead of aborting on an unknown address), a
+  restore-time global the top level
   redefined, a listener registered with a `signal` option, FinalizationRegistry cleanups that
   keep dooming new objects or that become due only once the zygote's objects are destroyed, ...
   Or an error reported to the zygote's `ErrorReporter` without an exception (a module that does
@@ -300,6 +311,15 @@ Two outcomes are possible for a Worker that qualifies:
 V8 fatal errors (`CHECK` failures) abort the process and cannot be caught at either stage. The
 one known way for a Worker's top level to cause one, a duplicate of a property V8 adds on restore,
 is what the restore-time-globals handling exists to prevent.
+
+A typed array that keeps its bytes off the V8 heap, over a zero-length ArrayBuffer that is not
+detached (`new Uint8Array(new ArrayBuffer(0))`), neither fails the zygote nor restores soundly: V8
+serializes its backing store although it holds no bytes, and on restore copies the zero bytes to
+the null start of a zero-length allocation. That is undefined behavior, which UBSan aborts on. The
+zygote cannot detect it in every build: the internal-field serializer that would see the view is
+not called for ArrayBuffer views when V8 is built with `v8_array_buffer_view_internal_field_count
+= 0`. workerd's own modules avoid leaving such a view reachable at their top level (`node:zlib`'s
+flush buffers are `Buffer.alloc(0)`, which V8 keeps on its heap).
 
 ## Console output
 
@@ -335,8 +355,8 @@ once.
 | `src/workerd/api/tests/startup-snapshot-functions-test`              | a top-level `createRequire()` function across the snapshot; an `AsyncLocalStorage.bind()` function falls back |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
 | `src/workerd/api/tests/startup-snapshot-new-module-registry-test`    | the same with the new module registry: re-importing modules the top level imported (also under a query or a fragment, and `import()` from inside those) and builtins, importing one it never loaded, and `import.meta`, including an `import.meta.resolve` the top level kept |
-| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot |
-| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder` and ineligible cases fall back; `node:fs` transfers |
+| `src/workerd/api/tests/startup-snapshot-node-test`                   | Node.js API objects (`AsyncLocalStorage`, a root-frame `AsyncResource`, `node:diagnostics_channel`, and the Rust resources behind `node:url` and `node:dns`) across the snapshot; an `AsyncLocalStorage` with a default value and an `AsyncResource` created inside a frame fall back |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, TextDecoder, crypto, navigator, performance, tracing spans started outside a request, file system handles to a `/tmp` file and to a bundle file, `node:fs`, bindings) and the identity of `crypto`, `crypto.subtle` and `navigator`, GC and a FinalizationRegistry cleanup across the snapshot; unclonable, `URLSearchParams`, a mid-stream `TextDecoder`, `performance` with a recorded entry and C++ streams left awaiting a `pull()` or `cancel()` fall back; a Worker on C++ streams otherwise transfers |
 | `src/workerd/api/tests/startup-snapshot-bindings-test`               | bindings captured at module scope (service stub, Durable Object namespace and ID) used at request time; an RPC method taken off a stub, `wrapped` and `cryptoKey` fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector; a top level that throws gets no snapshot and its startup error is reported once |
 

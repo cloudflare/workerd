@@ -31,9 +31,12 @@ export default {
         strictEqual(value, true, `${name}: ${check}`);
       }
     };
-    for (const name of ['als', 'diagnostics-channel', 'rust-modules']) {
+    for (const name of ['als', 'async-resource', 'diagnostics-channel', 'rust-modules']) {
       await run(name, pipelineOn);
     }
-    await run('als-default', false);
+    // Cases the zygote rejects: always plain Workers.
+    for (const name of ['als-default', 'async-resource-frame']) {
+      await run(name, false);
+    }
   },
 };

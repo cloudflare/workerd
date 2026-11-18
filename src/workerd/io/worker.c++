@@ -1227,9 +1227,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
-    // Never in multi-tenant processes: the hook slows down every promise in the isolate.
+    // Never in multi-tenant processes: the hook slows down every promise in the isolate. Never in
+    // a zygote either: it runs no traced turn, the hook would only leave a V8 handle (the private
+    // symbol promise IDs are stored under) for CreateBlob() to reject, and the Worker started from
+    // the snapshot installs a hook of its own.
     KJ_IF_SOME(config, asyncTraceConfig) {
-      if (config.promises && asyncTraceIsolate != kj::none) {
+      if (config.promises && asyncTraceIsolate != kj::none && !lock->isPreparingSnapshot()) {
         if (isMultiTenantProcess()) {
           KJ_LOG(ERROR, "ignoring AsyncTraceConfig::promises in a multi-tenant process");
         } else {
@@ -2469,6 +2472,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
             auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+            if (isolateBase.isStartingFromSnapshot()) {
+              // Objects restored from the snapshot were built before the context existed. Its
+              // embedder-data slots are all populated now, the VFS above being the last, and
+              // none of the Worker's JavaScript has run in it yet, so they bind to what the
+              // context carries (api::FileSystemHandle to the VFS).
+              isolateBase.notifySnapshotContextReady(js);
+            }
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.

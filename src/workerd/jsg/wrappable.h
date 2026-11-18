@@ -459,6 +459,13 @@ class Wrappable: public kj::Refcounted {
   // Runs under the isolate lock with the new context entered. Must not throw.
   virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
 
+  // In a Worker started from a snapshot, once the embedder has populated the restored context's
+  // embedder-data slots (IsolateBase::notifySnapshotContextReady()): lets a restored instance
+  // bind state that lives on the context and so was not available to snapshotClone(), which runs
+  // before the context exists. Called with the context entered, on every object with a live
+  // wrapper. Must not throw, attach or detach wrappers, or allocate on the V8 or cppgc heap.
+  virtual void snapshotContextReady(Lock& js) {}
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 
