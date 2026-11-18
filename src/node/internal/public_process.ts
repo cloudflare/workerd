@@ -17,7 +17,7 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
-import { parseEnv } from 'node-internal:internal_utils';
+import { kNullProtoObject, parseEnv } from 'node-internal:internal_utils';
 import {
   platform,
   nextTick,
@@ -704,6 +704,8 @@ for (const name of ['stdin', 'stdout', 'stderr'] as const) {
     // Assignment replaces the stream, as it did when these were data properties.
     set(value: unknown): void {
       Object.defineProperty(process, name, {
+        // @ts-expect-error TS2353 Required for __proto__
+        __proto__: kNullProtoObject,
         value,
         writable: true,
         configurable: true,
