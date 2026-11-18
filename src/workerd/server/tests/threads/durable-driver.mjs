@@ -354,6 +354,13 @@ for (const threads of [THREADS, 1]) {
             'Stubs pointing to ephemeral objects are not serializable.',
           // A stub the object vended through `restore()`.
           vended: 4,
+          // Restored from the thread that got it, by a new run of the object's `[restore]()`.
+          restored: 4,
+          // A service restored the same way, from parameters that hold a service: it runs on
+          // the object's thread.
+          restoredGreeter: { greeting: 'restored, front', ...at },
+          // A stub of a facet that the object's `[restore]()` gives, restored through both.
+          restoredChain: 6,
         });
         // A service binding passed to the object is the binding of the object's thread.
         assert.notStrictEqual(result.service.front, connection.front);

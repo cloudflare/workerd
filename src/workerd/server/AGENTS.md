@@ -103,7 +103,7 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
 ## TEST INFRASTRUCTURE
 
 - **Rust unit tests**: a module's tests are in the `<module>-test.rs` beside it (`config-test.rs` for `config.rs`, `listen/mod-test.rs` for `listen/mod.rs`), compiled only into the crates' test targets (`//src/workerd/server/server:workerd-server_test`, `//src/workerd/server:workerd-cli_test`); see `src/rust/AGENTS.md`, UNIT TEST FILES. The server crate's test binary links `//src/workerd/util:setup-async-io` because the C++ it reaches calls `kj::setupAsyncIo()`.
-- **C++ unit tests** (`*-test.c++`, `kj_test`): alarm scheduler, channel tokens, container client, facet tree index, fallback service, JSON logger, actor IDs.
+- **C++ unit tests** (`*-test.c++`, `kj_test`): alarm scheduler, channel tokens, container client, facet tree index, fallback service, JSON logger, actor IDs; `stack-trace-threads-test` has several threads symbolize stack traces at once, as the loop threads of a debug build do when they log exceptions (KJ's symbolizer needs `patches/capnp-cpp` for that: without it the threads hang).
 - **`server-test.c++`** (`//src/workerd/server:server-test@`): the server end to end, in the test process. Each `TestServer` builds a `SharedFactory` and a `WorkerFactory` on the test's V8, timer, network and a temp directory, and hands the latter to `InProcessServer` (`server/in_process.rs`, through the server crate's bridge), which runs `run::run` / `run::test` / `run::bench` on it and queues the config errors and warnings for the test. `server.addDeploymentService` and `server.addSkippedDeploymentService` mark config services as coming from deployments; `startWithErrors` starts a server whose deployment errors leave it serving. No connection but UDP's leaves the process: the config's socket and external addresses become `loopback:` names, the test connects to the server's sockets and accepts the server's outbound connections by name (the `network` services' too), and the factory's own C++ clients (Docker, the debug port) dial the same names through the test's `kj::Network`. The factory's timer is the test's mock `kj::TimerImpl`, which `test.wait(n)` advances; the server's own delays run on it too (`Factory::sleep` / `Factory::now`, `server/config.rs`). An unexpected error log, config error or warning fails the case, as does a factory still referenced once the server is closed. Add a case here for every new config error or warning. `LoopThreadServer` is the lean variant for several loop threads over one `SharedFactory`: a tokio loop, a per-loop factory and an `InProcessServer` on each thread, on real timers; one given a session of the primary loop's (`accept_loop_session`, `forward_to_first_thread`) is a replica's, whose actors are the primary's.
 - **`tests/`**: `server-harness.mjs`, a Node.js harness spawning the `workerd` binary for E2E tests; it reads the `listen` events off `--control-fd` (`inspector: false` leaves `--inspector-addr` out, `kill()` and `closed()` signal the server and await its exit separately). Subdirectories: `compile-tests`, `container-client`, `container-shutdown`, `extensions`, `inspector`, `module-fallback`, `python`, `socket-close`, `structured-logging`, `udp-connect`, `threads`, `udp-connect-ts-streams`, `udp-datagram-drop`, `unsafe-eval`, `unsafe-module`, `weakref`, `wrapped-binding-serialization`. `threads` has the stateless Workers (`threads-test`) and the Durable Objects (`threads-durable-test`, the same checks on one thread and on four) of `--threads`; `cluster` runs its `on several threads` cases with `--threads=3`. Every `.wd-test` in the repository also runs through `workerd test` (`wd_test` in `build/wd_test.bzl`, over `:workerd`), and every `wd_bench()` config through `workerd bench --quick`, in its `@smoke` tests (`build/wd_bench.bzl`).
 - **kj-hyper contract tests** (`src/rust/cxx/kj-hyper/tests`): HTTP and WebSocket semantics against kj's interfaces.
@@ -149,14 +149,21 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
   with streamed bodies, `connect()`, WebSockets (a hibernatable one stays open on the replica's
   connection while the actor hibernates) and JS RPC cross as capnp, in the order one stub's
   calls were made; stubs, service bindings and classes passed in JS RPC cross as channel tokens,
-  which each thread resolves in its own graph, so the actor gets its own thread's. Limits of
-  the hop, which a call from the first thread itself does not have: the callee does not see the
-  caller's trace span (`parentSpan`, `userSpanParent`); a stub cannot be restored
-  (`restore()`) from a replica, since a session has no encoding for a Frankenvalue's
-  capabilities (the stub fails as disconnected and the log says why,
-  `getSessionFrankenvalueHandler`); `abortAllDurableObjects()` and the eviction test hooks act
-  on the thread they are called on, which on a replica has no actors (the calls that can fail
-  say so).
+  which each thread resolves in its own graph, so the actor gets its own thread's. A stub whose
+  source is an actor is restored from a replica (`restore()`) by an event on the same
+  capability (`restoreService`, `restoreRpcStub`): the parameters' capabilities cross as channel
+  tokens too (`LoopFrankenvalueHandler`), and the first thread builds from the actor's channel
+  and the parameters the channel a `restored` token of its own decodes to
+  (`ChannelTokenHandler::restoredSubrequestChannel` / `restoredRpcChannel`), so `[restore]()`
+  runs there as for a stub of that thread, and a restore chain continues on what it returns.
+  Only a loop session does this; a session with another instance (a cluster peer, an external
+  server) refuses the event, and the stub's calls fail with an error that says so
+  (`getInstanceFrankenvalueHandler`). Limits of the hop, which a call from the first thread
+  itself does not have: the callee does not see the caller's trace span (`parentSpan`,
+  `userSpanParent`); a `restore()` whose parameters hold a capability whose channel token is
+  not available synchronously is refused, since the event is sent as it is written;
+  `abortAllDurableObjects()` and the eviction test hooks act on the thread they are called on,
+  which on a replica has no actors (the calls that can fail say so).
 - **A cluster instance's part in the cluster is the first loop thread's**: the `ClusterNode`
   with its lease, ownership, capture, alarm index, peer port and sessions exists once per
   process. A replica does not join; its Durable Object calls go to the first thread as above,

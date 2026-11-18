@@ -483,6 +483,8 @@ class RpcClient final {
 void actor_close_storage(const ActorHandle& actor);
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Own<RpcClient> new_loop_session_client(
+    const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
 kj::Own<RpcClient> rpc_client_debug_actor(const RpcClient& session,
     ::rust::Str service,
     ::rust::Str className,

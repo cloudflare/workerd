@@ -113,7 +113,24 @@ export class Counter extends DurableObject {
     return this.ctx.restore({ by: 3 });
   }
 
-  [restore]({ by }) {
+  // A service that this object's `[restore]()` makes of `greeter`, a service of the caller's
+  // thread.
+  vendGreeter(greeter) {
+    return this.ctx.restore({ greeter });
+  }
+
+  // The facet `name`, as this object's `[restore]()` gives it.
+  vendFacet(name) {
+    return this.ctx.restore({ facet: name });
+  }
+
+  [restore]({ by, greeter, facet }) {
+    if (greeter !== undefined) return greeter;
+    if (facet !== undefined) {
+      return this.ctx.facets.get(facet, () => ({
+        class: this.ctx.exports.Bumper,
+      }));
+    }
     const session = new Session();
     session.add(by);
     return session;
@@ -186,6 +203,17 @@ export class Bumper extends DurableObject {
     await this.ctx.storage.put('bumps', bumps);
     return { bumps, isolate: isolateId() };
   }
+
+  // A stub that this facet's `[restore]()` makes.
+  vend() {
+    return this.ctx.restore({ by: 5 });
+  }
+
+  [restore]({ by }) {
+    const session = new Session();
+    session.add(by);
+    return session;
+  }
 }
 
 export class Ephemeral extends DurableObject {
@@ -202,6 +230,13 @@ export class Greeter extends WorkerEntrypoint {
       greeting: `${this.ctx.props.greeting}, ${name}`,
       isolate: isolateId(),
     };
+  }
+}
+
+// Its props hold a stub as what restores it, not as a live capability.
+export class Keeper extends WorkerEntrypoint {
+  async add(n) {
+    return await this.ctx.props.stub.add(n);
   }
 }
 
@@ -267,6 +302,25 @@ async function features(env, ctx, name) {
   // A stub the object vends through `restore()`, called from this thread.
   using vended = await counter.vend();
   result.vended = await vended.add(1);
+
+  // The same stub restored from this thread: the object's `[restore]()` runs again, for an
+  // event this thread sends it.
+  const keeper = ctx.exports.Keeper({ props: { stub: vended } });
+  result.restored = await keeper.add(1);
+
+  // A service stub the object vended arrives as what restores it, and its parameters hold a
+  // service of this thread: the object's `[restore]()` gets its own thread's.
+  const greeter = await counter.vendGreeter(
+    ctx.exports.Greeter({ props: { greeting: 'restored' } })
+  );
+  result.restoredGreeter = await greeter.greet('front');
+
+  // A restore chain: the object's `[restore]()` gives a facet, whose own makes the stub.
+  const facet = await counter.vendFacet('a');
+  using deep = await facet.vend();
+  result.restoredChain = await ctx.exports
+    .Keeper({ props: { stub: deep } })
+    .add(1);
 
   // An ephemeral object's stub cannot be an argument.
   try {

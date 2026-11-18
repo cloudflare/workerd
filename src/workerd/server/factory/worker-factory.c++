@@ -155,6 +155,7 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           httpOverCapnpFactory,
           byteStreamFactory),
       channelTokenHandler(factory, shared.channelTokenKey),
+      loopFrankenvalueHandler(channelTokenHandler),
       tasks(*this) {}
 
 const ServerHandle& WorkerFactory::Impl::getServer() const {

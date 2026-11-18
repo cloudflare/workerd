@@ -111,6 +111,19 @@ class SharedFactory::Impl final {
   kj::MutexGuarded<kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>>> inspectorRegistrar;
 };
 
+// Writes a `Frankenvalue` for another loop thread of the process: the capabilities of its cap
+// table cross as channel tokens, which each loop resolves in its own graph.
+class LoopFrankenvalueHandler final: public FrankenvalueHandler {
+ public:
+  explicit LoopFrankenvalueHandler(ChannelTokenHandler& tokens): tokens(tokens) {}
+  void toCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) override {
+    tokens.frankenvalueToCapnp(value, builder);
+  }
+
+ private:
+  ChannelTokenHandler& tokens;
+};
+
 class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
  public:
   Impl(WorkerFactory& factory,
@@ -143,6 +156,8 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   ThreadContext threadContext;
 
   ChannelTokenHandler channelTokenHandler;
+  // Writes the Frankenvalues this loop sends another loop of the process.
+  LoopFrankenvalueHandler loopFrankenvalueHandler;
   kj::Maybe<::rust::Box<ServerHandle>> server;
 
   // The Docker client of an actor's container. Actors and `setInactivityTimeout()` timers own the
@@ -285,11 +300,14 @@ class RpcClient::Impl final {
  public:
   // A connection and its RPC system, shared by the capabilities obtained over it.
   struct Session: public kj::Refcounted {
-    explicit Session(kj::Own<kj::AsyncIoStream> connection)
+    Session(kj::Own<kj::AsyncIoStream> connection, FrankenvalueHandler& frankenvalueHandler)
         : connection(kj::mv(connection)),
-          rpcSystem(*this->connection) {}
+          rpcSystem(*this->connection),
+          frankenvalueHandler(frankenvalueHandler) {}
     kj::Own<kj::AsyncIoStream> connection;
     capnp::TwoPartyClient rpcSystem;
+    // Writes the Frankenvalues sent over the session; it outlives the factory's sessions.
+    FrankenvalueHandler& frankenvalueHandler;
   };
 
   Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)
@@ -304,25 +322,33 @@ class RpcClient::Impl final {
 };
 
 // The `WorkerdBootstrap` a peer sees over capnp: every event it starts goes to `service`.
+//
+// A peer that is another loop thread of this process may also restore a stub whose source is
+// `service`: its `restore()` events carry their parameters' capabilities as channel tokens
+// (`LoopFrankenvalueHandler`), which `restoreTokens` resolves in this loop's graph.
 class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
  public:
   WorkerdBootstrapImpl(kj::Rc<IoChannelFactory::SubrequestChannel> service,
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory);
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Maybe<ChannelTokenHandler&> restoreTokens = kj::none);
   kj::Promise<void> startEvent(StartEventContext context) override;
 
  private:
   kj::Rc<IoChannelFactory::SubrequestChannel> service;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::Maybe<ChannelTokenHandler&> restoreTokens;
   class EventDispatcherImpl;
 };
 
 // The debug port: every service's entrypoints and actors, looked up through the server. It is
-// also what a cluster peer and another loop thread of the process (`localCaller`) see.
+// also what a cluster peer and another loop thread of the process (`localCaller`) see; the
+// latter has `restoreTokens`, so the actors and entrypoints it gets take its `restore()` events.
 class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
  public:
   WorkerdDebugPortImpl(::rust::Box<ServerHandle> server,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      LocalCaller localCaller);
+      LocalCaller localCaller,
+      kj::Maybe<ChannelTokenHandler&> restoreTokens = kj::none);
   kj::Promise<void> getEntrypoint(GetEntrypointContext context) override;
   kj::Promise<void> getActor(GetActorContext context) override;
 
@@ -330,6 +356,7 @@ class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
   ::rust::Box<ServerHandle> server;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   LocalCaller localCaller;
+  kj::Maybe<ChannelTokenHandler&> restoreTokens;
 };
 
 // Trims the name off a durable id longer than production keeps (1024 bytes).

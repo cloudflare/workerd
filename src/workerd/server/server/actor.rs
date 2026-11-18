@@ -2372,7 +2372,8 @@ impl Channel for ActorChannel {
 /// lives, so a stub here keeps the actor's container as a stub there does and lets it go when
 /// dropped; in a cluster it stays, like a stub there, with the instance its first request found
 /// the object on. A request is an event started on that channel: HTTP with its bodies,
-/// WebSockets and JS RPC cross as capnp, in the order the stub's requests were made.
+/// WebSockets and JS RPC cross as capnp, in the order the stub's requests were made. So does the
+/// `restore()` of a stub whose source is the actor, which runs the actor's `[restore]()`.
 struct ForwardedChannel {
     namespace: Weak<ActorNamespace>,
     id: KjOwn<ActorIdHandle>,

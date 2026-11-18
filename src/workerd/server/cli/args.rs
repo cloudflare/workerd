@@ -440,9 +440,8 @@ pub struct ServeArgs {
     /// a service binding reaches the Worker of the same thread. Durable Objects all run on one
     /// thread, where the other threads call them, and a cluster instance is a member of its
     /// cluster on that thread. A Durable Object does not see the trace span of a caller on
-    /// another thread, and a stub cannot be restored (`restore()`) from another thread than the
-    /// one its source runs on. --inspector-addr and the options that save a Python snapshot are
-    /// not supported with more than one thread. UDP sockets, cron triggers and --debug-port are
+    /// another thread. --inspector-addr and the options that save a Python snapshot are not
+    /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
     /// served by one thread only.
     #[arg(
         long,
