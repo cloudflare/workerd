@@ -625,8 +625,7 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   }
 
   // Create disk cache module
-  auto diskCache = lockParam.alloc<api::pyodide::DiskCache>(
-      pythonConfig.packageDiskCacheRoot, pythonConfig.snapshotDirectory);
+  auto diskCache = lockParam.alloc<api::pyodide::DiskCache>(pythonConfig.snapshotDirectory);
 
   modules::python::registerPythonCommonModules<api::pyodide::DisabledInternalJaeger>(lockParam,
       modules, featureFlags, bundle, source, kj::mv(snapshot), api::pyodide::IsWorkerd::YES,
