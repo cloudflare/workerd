@@ -83,6 +83,11 @@ wd_cc_library(
     name = "bootstrap",
     srcs = ["bootstrap.c++"],
     linkstatic = CC_LIBRARY_LINKSTATIC,
+    # Bootstrap starts tcmalloc's background thread when the binary links tcmalloc.
+    local_defines = select({
+        "//src/workerd/server:really_use_tcmalloc": ["WORKERD_USE_TCMALLOC"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":bootstrap-hdrs",
         ":worker-factory",
@@ -102,7 +107,10 @@ wd_cc_library(
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
-    ],
+    ] + select({
+        "//src/workerd/server:really_use_tcmalloc": ["@tcmalloc//tcmalloc:malloc_extension"],
+        "//conditions:default": [],
+    }),
     # The C++ root of the workerd binary is linked eagerly, as a cc_binary's own sources would be.
     # Bazel places it ahead of everything it depends on, and from an eager object the linker
     # resolves the rest of the C++ in that order. Left lazy, the Rust side's references would reach
