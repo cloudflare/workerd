@@ -7,10 +7,15 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "fetch-handler-sync-response-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "rpc"],
         bindings = [
           (name = "SELF", service = "fetch-handler-sync-response-test"),
+          (name = "COUNTER", durableObjectNamespace = "Counter"),
         ],
+        durableObjectNamespaces = [
+          (className = "Counter", uniqueKey = "fetch-handler-sync-response-test"),
+        ],
+        durableObjectStorage = (inMemory = void),
       )
     ),
   ],

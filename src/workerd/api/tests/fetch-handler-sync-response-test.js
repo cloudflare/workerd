@@ -7,6 +7,7 @@
 // for the same Response does.
 
 import { strictEqual } from 'node:assert';
+import { DurableObject } from 'cloudflare:workers';
 
 function respond(path) {
   switch (path) {
@@ -41,6 +42,25 @@ export default {
   },
 };
 
+// An actor's Response, returned itself or as a promise, waits for its output locks, here held by
+// the write the handler leaves unawaited, and is then sent.
+export class Counter extends DurableObject {
+  count = 0;
+
+  fetch(request) {
+    this.count += 1;
+    this.ctx.storage.put('count', this.count);
+    const response = new Response(`${this.count}`);
+    return new URL(request.url).pathname === '/async'
+      ? Promise.resolve(response)
+      : response;
+  }
+
+  async stored() {
+    return await this.ctx.storage.get('count');
+  }
+}
+
 async function outcome(env, mode, path) {
   try {
     const response = await env.SELF.fetch(`http://example.com/${mode}/${path}`);
@@ -60,5 +80,24 @@ export const syncResponseMatchesAsync = {
     strictEqual(await outcome(env, 'sync', 'plain'), '200 plain null');
     strictEqual(await outcome(env, 'sync', 'microtask'), '200 microtask ran');
     strictEqual(await outcome(env, 'sync', 'stream'), '200 streamed null');
+  },
+};
+
+export const actorSyncResponse = {
+  async test(ctrl, env) {
+    const stub = env.COUNTER.getByName('counter');
+    strictEqual(
+      await (await stub.fetch('http://example.com/sync')).text(),
+      '1'
+    );
+    strictEqual(
+      await (await stub.fetch('http://example.com/async')).text(),
+      '2'
+    );
+    strictEqual(
+      await (await stub.fetch('http://example.com/sync')).text(),
+      '3'
+    );
+    strictEqual(await stub.stored(), 3);
   },
 };
