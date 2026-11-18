@@ -523,9 +523,44 @@ class AlarmInvocationInfo: public jsg::Object {
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  // A Response the handler returns itself is taken as it is, rather than as an already-resolved
-  // promise for it, so that it can be sent without awaiting anything.
-  using FetchResult = kj::OneOf<jsg::Ref<api::Response>, jsg::Promise<jsg::Ref<api::Response>>>;
+  // What a fetch handler returns. A Response the handler returns itself is taken as it is, rather
+  // than as an already-resolved promise for it, so that it can be sent without awaiting anything.
+  // So is the Response that an `async` handler's promise has already been fulfilled with, which
+  // spares making a resolved promise of our own only to take the Response straight back out.
+  struct FetchResult {
+    using Value = kj::OneOf<jsg::Ref<api::Response>, jsg::Promise<jsg::Ref<api::Response>>>;
+    using JsgRttiDelegate = Value;
+    Value value;
+
+    static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        kj::Maybe<v8::Local<v8::Object>> creator,
+        FetchResult result) {
+      return typeWrapper.wrap(js, context, creator, kj::mv(result.value));
+    }
+
+    // A FetchResult is only ever a handler's return value, so any other value is unwrapped, and
+    // fails if it is of the wrong type, exactly as a returned Value would be.
+    static kj::Maybe<FetchResult> jsgTryUnwrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        v8::Local<v8::Value> handle,
+        kj::Maybe<v8::Local<v8::Object>> parentObject) {
+      if (handle->IsPromise()) {
+        auto promise = handle.As<v8::Promise>();
+        if (promise->State() == v8::Promise::kFulfilled) {
+          KJ_IF_SOME(response,
+              typeWrapper.tryUnwrap(js, context, promise->Result(),
+                  static_cast<jsg::Ref<api::Response>*>(nullptr), kj::none)) {
+            return FetchResult{kj::mv(response)};
+          }
+        }
+      }
+      return FetchResult{typeWrapper.template unwrap<Value>(
+          js, context, handle, jsg::TypeErrorContext::callbackReturn(), parentObject)};
+    }
+  };
   using FetchHandler = FetchResult(jsg::Ref<api::Request> request,
       jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
