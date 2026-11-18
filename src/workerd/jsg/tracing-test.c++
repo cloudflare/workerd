@@ -59,9 +59,15 @@ class GcDetector: public jsg::Object {
     return true;
   }
 
+  // Returning a jsg::Promise from a method makes the promise keep the method's object alive.
+  jsg::Promise<kj::String> settle(jsg::Lock& js) {
+    return js.resolvedPromise(kj::str("value"));
+  }
+
   JSG_RESOURCE_TYPE(GcDetector) {
     JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
     JSG_METHOD(touch);
+    JSG_METHOD(settle);
   }
 };
 
@@ -235,6 +241,39 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return jsg::JsValue(wrapOpaque(js.v8Context(), kj::mv(detector)));
   }
 
+  // The number of wrappers this isolate currently has attached, whatever their type.
+  uint liveWrapperCount(jsg::Lock& js) {
+    uint count = 0;
+    HeapTracer::getTracer(js.v8Isolate)
+        .forEachLiveWrapper(
+            [&](jsg::Wrappable&, v8::Object::Wrappable&, v8::CppHeapPointerTag) { ++count; });
+    return count;
+  }
+
+  // Attaches C++ continuations to settled promises and drops the results, so the continuations
+  // run at the next microtask checkpoint and are garbage afterwards.
+  void attachContinuations(jsg::Lock& js) {
+    js.resolvedPromise().then(js, [](jsg::Lock&) {});
+    js.resolvedPromise(kj::str("value")).then(js, [](jsg::Lock&, kj::String) {
+    }, [](jsg::Lock&, jsg::Value) {});
+    js.rejectedPromise<void>(js.v8Undefined()).catch_(js, [](jsg::Lock&, jsg::Value) {});
+  }
+
+  // Returning a jsg::Promise to JavaScript attaches a continuation that converts its value.
+  jsg::Promise<kj::String> resolvedString(jsg::Lock& js) {
+    return js.resolvedPromise(kj::str("value"));
+  }
+
+  // Accepting a JavaScript promise as a jsg::Promise attaches a continuation that converts its
+  // value.
+  void acceptStringPromise(jsg::Lock& js, jsg::Promise<kj::String> promise) {
+    promise.then(js, [](jsg::Lock&, kj::String) {});
+  }
+
+  void runMicrotasks(jsg::Lock& js) {
+    js.runMicrotasks();
+  }
+
   void assert_(bool condition, jsg::Optional<kj::String> message) {
     JSG_ASSERT(condition, Error, message.orDefault(nullptr));
   }
@@ -251,6 +290,11 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD(wrapOpaquely);
     JSG_METHOD(makeInstancePropertyGcDetectorPair);
+    JSG_METHOD(liveWrapperCount);
+    JSG_METHOD(attachContinuations);
+    JSG_METHOD(resolvedString);
+    JSG_METHOD(acceptStringPromise);
+    JSG_METHOD(runMicrotasks);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -356,6 +400,28 @@ KJ_TEST("GC collects objects when expected") {
     gc({type: "minor"});
     gc({type: "minor"});
     assert(b.siblingCollected, "minor GC did not collect an opaque wrapper");
+  )",
+      "undefined", "undefined");
+
+  // Test that minor GC collects the wrappers of promise continuations that have run, along with
+  // the opaque wrappers that carried their values.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    let before = liveWrapperCount();
+    attachContinuations();
+    resolvedString().then(() => {});
+    acceptStringPromise(Promise.resolve("value"));
+    pair[0].settle().then(() => {});
+    pair = null;
+    runMicrotasks();
+    // The first pass drops the wrappers and the second whatever they still referenced.
+    gc({type: "minor"});
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect the object a promise kept alive");
+    // pair[0] was counted in `before`.
+    let survivors = liveWrapperCount() - (before - 1);
+    assert(survivors == 0, `${survivors} wrappers survived minor GCs`);
   )",
       "undefined", "undefined");
 
