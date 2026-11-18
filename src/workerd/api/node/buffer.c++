@@ -101,6 +101,8 @@ uint32_t writeInto(jsg::Lock& js,
       // dest may start at an odd byte offset, so a uint16_t view of it is misaligned. Write into
       // an aligned temporary and copy the bytes across so UBSan sees only byte-sized accesses.
       kj::Array<uint16_t> tmpBuf = kj::heapArray<uint16_t>(dest.size() / sizeof(uint16_t));
+      // Zeroed because V8 may not fill it; see JsString::writeInto().
+      tmpBuf.asPtr().fill(0);
       auto result = string.writeInto(js, tmpBuf, flags);
       dest.first(result.written * sizeof(uint16_t))
           .copyFrom(tmpBuf.first(result.written).asBytes());

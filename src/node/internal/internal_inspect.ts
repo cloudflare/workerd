@@ -64,6 +64,7 @@ import {
   validateString,
   kValidateObjectAllowArray,
 } from 'node-internal:validators';
+import { kNullProtoObject } from 'node-internal:internal_utils';
 
 // Simplified assertions to avoid `Assertions require every name in the call target to be
 // declared with an explicit type` TypeScript error
@@ -3129,6 +3130,8 @@ function formatJsgResourceType(
     // This is an additional property if it's not an unimplemented marker
     if (symbol !== false) {
       Object.defineProperty(record, key, {
+        // @ts-expect-error TS2353 Required for __proto__
+        __proto__: kNullProtoObject,
         value: this[symbol],
         enumerable: false,
       });

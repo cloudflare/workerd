@@ -17,9 +17,19 @@ namespace {
 V8System v8System;
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
+struct Baz {
+  kj::String qux = kj::str("test");
+
+  JSG_MEMORY_INFO(Baz) {
+    tracker.trackField("qux", qux);
+  }
+};
+
 struct Foo: public Object {
   kj::String bar = kj::str("test");
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ref;
+  jsg::TracedOwn<Baz> traced = kj::heap<Baz>();
+  jsg::TracedOwn<Baz> empty = nullptr;
 
   Foo(jsg::Lock& js): ref(js.obj().addRef(js)) {}
 
@@ -27,6 +37,8 @@ struct Foo: public Object {
   void visitForMemoryInfo(MemoryTracker& tracker) const {
     tracker.trackField("bar", bar);
     tracker.trackField("ref", ref);
+    tracker.trackField("traced", traced);
+    tracker.trackField("empty", empty);
   }
 };
 
@@ -92,6 +104,9 @@ KJ_TEST("MemoryTracker test") {
     checks.insert(kj::str("workerd / Foo"));
     checks.insert(kj::str("ref"));
     checks.insert(kj::str("bar"));
+    checks.insert(kj::str("workerd / Baz"));
+    checks.insert(kj::str("traced"));
+    checks.insert(kj::str("qux"));
 
     // Find what we're looking for... this is slow but, you know
     for (size_t n = 0; n < array.size(); n++) {

@@ -284,6 +284,9 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# Keep kj's stack traces on backtrace(). Under ASan kj defaults to _Unwind_Backtrace(), which with
+# our statically linked LLVM libunwind is much slower; exception-heavy tests time out.
+build:asan --per_file_copt='external/.*capnp-cpp/src/kj/exception\.c\+\+@-DKJ_BACKTRACE_WITH_UNWINDER=0'
 # One toolchain per host, plus its cargo toolchain; resolution picks the one matching the
 # (host-parented) asan platform.
 build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64

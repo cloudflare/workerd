@@ -22,7 +22,7 @@ class CompressionStream: public TransformStream {
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
-                                 : "gzip" | "deflate" | "deflate-raw");
+                                 : "gzip" | "deflate" | "deflate-raw" | "brotli");
     });
   }
 };
@@ -37,7 +37,7 @@ class DecompressionStream: public TransformStream {
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
-                                 : "gzip" | "deflate" | "deflate-raw");
+                                 : "gzip" | "deflate" | "deflate-raw" | "brotli");
     });
   }
 };

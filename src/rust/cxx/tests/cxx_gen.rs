@@ -88,6 +88,105 @@ const BRIDGE4: &str = r#"
     }
 "#;
 
+const BRIDGE5: &str = r"
+    #[cxx::bridge]
+    mod ffi {
+        struct Shared {
+            value: u64,
+        }
+
+        impl UniquePtr<Shared> {}
+    }
+";
+
+#[test]
+fn test_nothrow_extern_c_function() {
+    let source = r#"
+        #[cxx::bridge]
+        mod ffi {
+            struct Pair {
+                a: u32,
+                b: u32,
+            }
+            unsafe extern "C++" {
+                #[nothrow]
+                fn nothrow_len(s: &str) -> usize;
+                #[nothrow]
+                fn nothrow_pair() -> Pair;
+                #[nothrow]
+                fn nothrow_string() -> String;
+                #[nothrow]
+                fn nothrow_void(n: usize);
+            }
+        }
+    "#;
+    let opt = cxx_gen::Opt::default();
+    let generated = generate_header_and_cc(source.parse().unwrap(), &opt).unwrap();
+    let output = str::from_utf8(&generated.implementation).unwrap();
+    // Called with no exception handling, returning through the out parameter as any shim does.
+    assert!(
+        output.contains("void cxxbridge1$nothrow_len(::rust::Str s, ::std::size_t *return$) {")
+    );
+    assert!(output.contains("new (return$) ::std::size_t(::nothrow_len(s));"));
+    assert!(output.contains("void cxxbridge1$nothrow_pair(::Pair *return$) {"));
+    assert!(output.contains("new (return$) ::Pair(::nothrow_pair());"));
+    assert!(output.contains("void cxxbridge1$nothrow_string(::rust::String *return$) {"));
+    assert!(output.contains("new (return$) ::rust::String(::nothrow_string());"));
+    assert!(output.contains("void cxxbridge1$nothrow_void(::std::size_t n) {"));
+    assert!(!output.contains("Result::run("));
+}
+
+#[test]
+fn test_extern_c_function_called_by_name() {
+    let source = r#"
+        #[cxx::bridge(namespace = "ns")]
+        mod ffi {
+            unsafe extern "C++" {
+                fn len(s: &str) -> usize;
+            }
+        }
+    "#;
+    let opt = cxx_gen::Opt::default();
+    let generated = generate_header_and_cc(source.parse().unwrap(), &opt).unwrap();
+    let output = str::from_utf8(&generated.implementation).unwrap();
+    // The signature is checked in an unevaluated operand, and the call doesn't go through a
+    // function pointer, which -fsanitize=cfi-icall would route through a CFI jump table.
+    assert!(output.contains(
+        "static_assert(sizeof(static_cast<::std::size_t (*)(::rust::Str)>(&::ns::len)) != 0);"
+    ));
+    assert!(output.contains("new (return$) ::std::size_t(::ns::len(s));"));
+    assert!(!output.contains("(*len$)"));
+}
+
+#[test]
+fn test_nothrow_rejected() {
+    for (decl, error) in [
+        (
+            "fn f() -> Result<()>;",
+            "#[nothrow] function cannot return Result",
+        ),
+        ("async fn f();", "#[nothrow] function cannot be async"),
+        (
+            "fn f(callback: fn(u8));",
+            "#[nothrow] function cannot take a function pointer",
+        ),
+    ] {
+        let source =
+            format!("#[cxx::bridge] mod ffi {{ unsafe extern \"C++\" {{ #[nothrow] {decl} }} }}");
+        let opt = cxx_gen::Opt::default();
+        let Err(err) = generate_header_and_cc(source.parse().unwrap(), &opt) else {
+            panic!("expected an error for {decl}");
+        };
+        assert!(err.to_string().contains(error), "{decl}: {err}");
+    }
+    let source = r#"#[cxx::bridge] mod ffi { extern "Rust" { #[nothrow] fn f(); } }"#;
+    let opt = cxx_gen::Opt::default();
+    let Err(err) = generate_header_and_cc(source.parse().unwrap(), &opt) else {
+        panic!("expected an error for #[nothrow] on an extern Rust function");
+    };
+    assert!(err.to_string().contains("unsupported attribute"), "{err}");
+}
+
 #[test]
 fn test_extern_c_function() {
     let opt = cxx_gen::Opt::default();
@@ -208,9 +307,11 @@ fn test_kj_exception_by_value() {
     assert!(implementation.contains(
         "::rust::repr::Result cxxbridge1$take_exception(::std::uint64_t id, ::kj::Exception *exception) noexcept"
     ));
-    assert!(implementation.contains("take_exception$(id, ::rust::repr::takeException(exception))"));
+    assert!(
+        implementation.contains("::take_exception(id, ::rust::repr::takeException(exception))")
+    );
     assert!(implementation.contains(
-        "new (return$) ::kj::Exception *(::rust::repr::releaseException(return_exception$()))"
+        "new (return$) ::kj::Exception *(::rust::repr::releaseException(::return_exception()))"
     ));
 
     // Rust functions too, as C++ sees them.
@@ -280,4 +381,17 @@ fn test_kj_exception_only_by_value() {
             "{bridge}: {messages:?}"
         );
     }
+}
+
+#[test]
+fn test_unique_ptr_new_allocates_with_alignment() {
+    let opt = cxx_gen::Opt::default();
+    let source = BRIDGE5.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let implementation = str::from_utf8(&generated.implementation).unwrap();
+    assert!(implementation.contains("new ::rust::MaybeUninit<::Shared>"));
+    // The class-scope `operator new` of `MaybeUninit` hides the aligned global one, so it
+    // passes the alignment on itself.
+    assert!(implementation.contains("if (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)"));
+    assert!(implementation.contains("::operator new(sz, ::std::align_val_t(alignof(T)))"));
 }

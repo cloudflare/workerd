@@ -1408,5 +1408,125 @@ KJ_TEST("an actor's asynchronous RPC exception waits for its output gate") {
   expectReplyWaitsForOutputGate("failLater"_kj, false);
 }
 
+// A channel whose token is issued asynchronously, as in a process sandbox, where the channel's
+// owner is asked for it over RPC and may refuse.
+class DelayedTokenChannel final: public IoChannelFactory::SubrequestChannel {
+ public:
+  explicit DelayedTokenChannel(kj::Promise<kj::Array<byte>> token): token(kj::mv(token)) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata) override {
+    KJ_UNREACHABLE;
+  }
+  void requireAllowsTransfer() override {}
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage) override {
+    auto result = kj::mv(KJ_ASSERT_NONNULL(token, "token requested twice"));
+    token = kj::none;
+    return kj::mv(result);
+  }
+
+ private:
+  kj::Maybe<kj::Promise<kj::Array<byte>>> token;
+};
+
+constexpr kj::StringPtr DELAYED_TOKEN_RECEIVER_SOURCE = R"JS(
+  import { WorkerEntrypoint } from "cloudflare:workers";
+
+  export default class extends WorkerEntrypoint {
+    describe(value) { return typeof value.fetch; }
+    async callBackThenReturn(value, callback) {
+      await callback();
+      return "returned";
+    }
+  }
+)JS"_kj;
+
+// Calls `method` with a service stub whose token is `token`, followed by `extraArgs`, and returns
+// the settled result: the returned string, or "rejected: <name>: <message>".
+kj::Promise<kj::String> callWithDelayedTokenStub(const TestFixture::Environment& env,
+    TestFixture& receiver,
+    kj::StringPtr method,
+    kj::Promise<kj::Array<byte>> token,
+    kj::ArrayPtr<v8::Local<v8::Value>> extraArgs = nullptr) {
+  auto& js = env.js;
+  auto fetcher = js.alloc<Fetcher>(
+      env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReceiverOutgoingFactory>(receiver)),
+      Fetcher::RequiresHostAndProtocol::YES);
+  auto stub = js.alloc<Fetcher>(env.context.addObject<IoChannelFactory::SubrequestChannel>(
+      kj::rc<DelayedTokenChannel>(kj::mv(token)).toOwn()));
+  auto& fetcherHandler = KJ_REQUIRE_NONNULL(js.tryGetTypeHandler<jsg::Ref<Fetcher>>());
+
+  auto function = wrapMethod(js, *fetcher, method);
+  v8::LocalVector<v8::Value> args(js.v8Isolate);
+  args.push_back(fetcherHandler.wrap(js, kj::mv(stub)));
+  for (auto arg: extraArgs) {
+    args.push_back(arg);
+  }
+  auto result = jsg::JsFunction(function.getHandle(js)).call(js, js.undefined(), args);
+  auto settled = js.toPromise(result).then(js, [](jsg::Lock& js, jsg::Value value) {
+    return kj::str(jsg::JsValue(value.getHandle(js)));
+  }, [](jsg::Lock& js, jsg::Value error) {
+    auto object = KJ_REQUIRE_NONNULL(jsg::JsValue(error.getHandle(js)).tryCast<jsg::JsObject>());
+    return kj::str("rejected: ", object.get(js, "name"_kj), ": ", object.get(js, "message"_kj));
+  });
+  return env.context.awaitJs(js, kj::mv(settled)).attach(kj::mv(function), kj::mv(fetcher));
+}
+
+KJ_TEST("an RPC argument with a delayed channel token is delivered once the token arrives") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture receiver(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .mainModuleSource = DELAYED_TOKEN_RECEIVER_SOURCE,
+    .useRealTimers = false,
+  });
+  TestFixture sender(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .featureFlags = flags.asReader(),
+    .useRealTimers = false,
+  });
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto token = kj::newPromiseAndFulfiller<kj::Array<byte>>();
+    auto result = callWithDelayedTokenStub(env, receiver, "describe"_kj, kj::mv(token.promise));
+    co_await kj::yieldUntilWouldSleep();
+    token.fulfiller->fulfill(kj::heapArray<byte>({1, 2, 3}));
+    KJ_EXPECT(co_await result == "function");
+  });
+}
+
+KJ_TEST("an RPC call fails with the error of a channel token its argument's owner refused") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture receiver(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .mainModuleSource = DELAYED_TOKEN_RECEIVER_SOURCE,
+    .useRealTimers = false,
+  });
+  TestFixture sender(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .featureFlags = flags.asReader(),
+    .useRealTimers = false,
+  });
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // The owner refuses only once the receiver is running the call, so the call has been
+    // delivered, and would return, by the time the refusal reaches the sender.
+    auto token = kj::newPromiseAndFulfiller<kj::Array<byte>>();
+    v8::Local<v8::Value> refuse = env.js.wrapReturningFunction(env.js.v8Context(),
+        [&fulfiller = *token.fulfiller](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
+      fulfiller.reject(JSG_KJ_EXCEPTION(FAILED, DOMDataCloneError, "owner refused"));
+      return v8::Local<v8::Value>(js.undefined());
+    });
+    auto result = callWithDelayedTokenStub(
+        env, receiver, "callBackThenReturn"_kj, kj::mv(token.promise), kj::arr(refuse));
+    KJ_EXPECT(co_await result == "rejected: DataCloneError: owner refused");
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

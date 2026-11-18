@@ -794,7 +794,7 @@ impl Conversion {
     }
 }
 
-jsg::jsg_traced!(Conversion);
+jsg::jsg_traced_unchecked!(Conversion);
 
 /// A Rust-backed resource that converts values, and records whether a conversion failed with a
 /// pending error.

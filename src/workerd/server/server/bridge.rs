@@ -12,8 +12,10 @@
 
 #![allow(
     unsafe_code,
-    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers` and `rewriting_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
+    reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `edit_headers`, `rewriting_response` and `image_filter_response`, the safe wrappers over the bridge's `unsafe fn`s of those names"
 )]
+
+pub use assets_router::mitigations::should_block_image_response;
 
 pub use crate::actor::MovedHook;
 pub use crate::channels::ActorClassChannel;
@@ -202,7 +204,6 @@ pub mod ffi {
         async_trace_stacks: KjMaybe<u32>,
         async_trace_promises: bool,
         experimental: bool,
-        pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,
         python_save_snapshot: bool,
         python_save_baseline_snapshot: bool,
@@ -378,6 +379,14 @@ pub mod ffi {
             config_service: u32,
             params: &[u64],
         ) -> Result<Vec<u64>>;
+
+        /// Whether the config's assets service `services[config_service]` prefers serving an
+        /// asset to a navigation (`assetsSecFetchModeNavigateHeaderPrefersAssetServing`), under
+        /// its user worker's compatibility flags, or, with none, its own.
+        fn factory_assets_navigation_prefers_asset_serving(
+            factory: &WorkerFactory,
+            config_service: u32,
+        ) -> Result<bool>;
 
         /// A compiled worker: the isolate, script and `Worker` plus what was learned compiling
         /// them.
@@ -715,6 +724,15 @@ pub mod ffi {
             table: &HttpHeaderTable,
             edits: &[HeaderEdit],
         ) -> Result<KjOwn<HttpServiceResponse>>;
+        /// A response that sends the user Worker's answer to a request for a remote image only
+        /// if `should_block_image_response` lets it through, else a 403 whose body
+        /// `image_filter_finish` writes. Borrows `inner` for its life.
+        unsafe fn new_image_filter_response<'a>(
+            inner: Pin<&'a mut HttpServiceResponse>,
+        ) -> KjOwn<HttpServiceResponse>;
+        async unsafe fn image_filter_finish<'a>(
+            response: Pin<&'a mut HttpServiceResponse>,
+        ) -> Result<()>;
         /// The `ConnectResponse` of a raw TCP socket's `connect()`: accepting does nothing,
         /// rejecting discards the body.
         fn new_null_connect_response() -> KjOwn<ConnectResponse>;
@@ -1037,6 +1055,9 @@ pub mod ffi {
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.
         type UdpFlow;
+        /// Whether the user Worker's answer to a request for a remote image is blocked.
+        fn should_block_image_response(status: u16, content_type: &[u8]) -> bool;
+
         /// The next datagram, or `ended`. One call at a time.
         async unsafe fn receive<'a>(self: &'a UdpFlow) -> Result<UdpDatagram>;
         async unsafe fn send<'a>(self: &'a UdpFlow, datagram: &'a [u8]) -> Result<()>;
@@ -1104,6 +1125,33 @@ pub fn edit_headers<'a>(
     Ok(EditedHeaders {
         headers,
         _source: std::marker::PhantomData,
+    })
+}
+
+/// See `ffi::new_image_filter_response`.
+pub struct ImageFilterResponse<'a>(RewritingResponse<'a>);
+
+impl ImageFilterResponse<'_> {
+    pub fn as_mut(&mut self) -> std::pin::Pin<&mut ffi::HttpServiceResponse> {
+        self.0.as_mut()
+    }
+
+    /// Writes the body of the 403, if the response was blocked.
+    pub async fn finish(&mut self) -> crate::Result<()> {
+        // SAFETY: the response outlives the future, which borrows it.
+        Ok(unsafe { ffi::image_filter_finish(self.as_mut()) }.await?)
+    }
+}
+
+/// See `ffi::new_image_filter_response`.
+pub fn image_filter_response(
+    inner: std::pin::Pin<&mut ffi::HttpServiceResponse>,
+) -> ImageFilterResponse<'_> {
+    // SAFETY: the returned wrapper carries `inner`'s lifetime, so it cannot outlive it.
+    let response = unsafe { ffi::new_image_filter_response(inner) };
+    ImageFilterResponse(RewritingResponse {
+        response,
+        _inner: std::marker::PhantomData,
     })
 }
 

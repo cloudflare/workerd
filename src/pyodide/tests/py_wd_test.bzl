@@ -1,0 +1,244 @@
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "DEFAULT_PYTHON_TEST_FLAGS")
+load("//:build/wd_test.bzl", "wd_test")
+
+def _get_enable_flags(python_flag):
+    flags = [BUNDLE_VERSION_INFO[python_flag]["enable_flag_name"]]
+    if "python_workers" not in flags:
+        flags.append("python_workers")
+    for key, value in BUNDLE_VERSION_INFO.items():
+        # With all-compat-flags variant we might end up accidently using a newer python bundle than
+        # intended. To make sure we get the speicific intended version we also need to disable newer
+        # python versions.
+        if python_flag != key and value["enable_flag_name"] not in ["python_workers", "python_workers_development"]:
+            flags.append("no_" + value["enable_flag_name"])
+    return flags
+
+def _feature_flags_txt(python_flag, feature_flags):
+    flags = _get_enable_flags(python_flag) + feature_flags
+
+    # Deduplicate flag list because passing the same flag multiple times fails with "Compatibility
+    # flag specified multiple times".
+    flags = list({flag: 1 for flag in flags})
+    return ",".join(['"{}"'.format(flag) for flag in flags])
+
+def _select_snapshots_disabled(value, fallback):
+    return select({
+        "//build/config:python_snapshots_disabled": fallback,
+        "//conditions:default": value,
+    })
+
+def _py_wd_test_helper(
+        name,
+        src,
+        python_flag,
+        *,
+        make_snapshot,
+        use_snapshot,
+        args,
+        feature_flags,
+        data = [],
+        **kwargs):
+    name_flag = name + "_" + python_flag
+    templated_src = name_flag.replace("/", "-") + "@template"
+    templated_src = "/".join(src.split("/")[:-1] + [templated_src])
+
+    pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
+
+    load_snapshot = None
+    snapshot_data = []
+    snapshot_args = []
+    snapshot_feature_flags = []
+    if use_snapshot == "stacked":
+        if pyodide_version == "0.26.0a2":
+            use_snapshot = None
+        else:
+            use_snapshot = "baseline"
+            if make_snapshot:
+                snapshot_feature_flags.append("python_dedicated_snapshot")
+    elif use_snapshot and not make_snapshot:
+        # The test exists only to load this specific pre-existing snapshot, so it is meaningless
+        # without one.
+        if not BUNDLE_VERSION_INFO[python_flag][use_snapshot + "_snapshot"]:
+            fail("%s: no %s_snapshot in python_metadata.bzl for version %s (generate it with src/pyodide/scripts/make_snapshots.py)" % (name, use_snapshot, python_flag))
+    if use_snapshot:
+        version_info = BUNDLE_VERSION_INFO[python_flag]
+
+        snapshot = version_info[use_snapshot + "_snapshot"]
+        snapshot_data = [":python_snapshots"]
+        load_snapshot = snapshot or None
+    if make_snapshot and pyodide_version != "0.26.0a2":
+        snapshot_feature_flags.append("python_dedicated_snapshot")
+
+    if load_snapshot and not make_snapshot:
+        snapshot_args = ["--python-load-snapshot", "load_snapshot.bin"]
+
+    feature_flags_txt = _feature_flags_txt(python_flag, feature_flags + snapshot_feature_flags)
+    no_snapshot_feature_flags_txt = _feature_flags_txt(python_flag, feature_flags)
+
+    expand_template(
+        name = name_flag + "@rule",
+        out = templated_src,
+        template = src,
+        substitutions = _select_snapshots_disabled(
+            {
+                "%PYTHON_FEATURE_FLAGS": feature_flags_txt,
+            },
+            {
+                "%PYTHON_FEATURE_FLAGS": no_snapshot_feature_flags_txt,
+            },
+        ),
+    )
+
+    # Since we bumped the development flag to point to 0.28.2, it doesn't work on windows CI.
+    # TODO: Fix this.
+    if python_flag == "development":
+        kwargs["target_compatible_with"] = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        })
+
+    wd_test(
+        src = templated_src,
+        name = name_flag,
+        args = args + _select_snapshots_disabled(snapshot_args, []),
+        python_snapshot_test = _select_snapshots_disabled(make_snapshot, False),
+        data = data,
+        _configurable_data = _select_snapshots_disabled(snapshot_data, []),
+        load_snapshot = _select_snapshots_disabled(load_snapshot, None),
+        # TODO(soon): at the time of disabling these they all passed but because of how slow python
+        #             tests are we disabled them for now. We should re-enable them when we have
+        #             a better way to run them.
+        generate_all_autogates_variant = False,
+        generate_all_compat_flags_variant = False,
+        **kwargs
+    )
+
+def _snapshot_names(
+        name,
+        baseline_snapshot = None,
+        dedicated_fastapi_snapshot = None,
+        dedicated_numpy_vendor_snapshot = None,
+        **_kwds):
+    if name == "development":
+        return []
+    return [s for s in [baseline_snapshot, dedicated_fastapi_snapshot, dedicated_numpy_vendor_snapshot] if s]
+
+def _snapshot_file_group():
+    # Deduplicate so that a snapshot shared by several versions is only copied once.
+    snapshots = {}
+    for x in BUNDLE_VERSION_INFO.values():
+        for snapshot in _snapshot_names(**x):
+            snapshots[snapshot] = 1
+
+    for snapshot in snapshots:
+        copy_file(
+            name = "pyodide-snapshot-%s@copy" % snapshot,
+            src = "@pyodide-snapshot-%s//file" % snapshot,
+            out = snapshot,
+            visibility = ["//visibility:public"],
+        )
+
+    native.filegroup(
+        name = "python_snapshots",
+        data = [":" + snapshot for snapshot in snapshots],
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundle(id, **_kwds):
+    if id == "dev":
+        return
+    name = "pyodide_%s.capnp.bin" % id
+    copy_file(
+        name = name + "@rule",
+        src = "@%s//file" % name,
+        out = "pyodide-bundle-cache/" + name,
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundles_file_group():
+    # pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
+    # at build time using the latest contents of the src/pyodide directory.
+    # This is used to run tests to ensure that they are always run against the latest build of
+    # the Pyodide bundle.
+    copy_file(
+        name = "pyodide_dev.capnp.bin@rule",
+        src = "//src/pyodide:pyodide.capnp.bin",
+        out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
+        visibility = ["//visibility:public"],
+    )
+    for info in BUNDLE_VERSION_INFO.values():
+        _capnp_bundle(**info)
+
+def _capnp_rules():
+    return ["//src/pyodide/tests:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
+
+def python_test_setup():
+    _capnp_bundles_file_group()
+    _snapshot_file_group()
+
+def compute_python_flags(python_flags, skip_python_flags):
+    if python_flags == "all":
+        python_flags = DEFAULT_PYTHON_TEST_FLAGS
+    python_flags = [flag for flag in python_flags if flag not in skip_python_flags and flag in BUNDLE_VERSION_INFO]
+    return python_flags
+
+def py_wd_test(
+        directory = None,
+        *,
+        src = None,
+        data = None,
+        name = None,
+        python_flags = "all",
+        skip_python_flags = [],
+        feature_flags = [],
+        args = [],
+        size = "enormous",
+        tags = [],
+        make_snapshot = True,
+        use_snapshot = "stacked",
+        skip_default_data = False,
+        **kwargs):
+    python_flags = compute_python_flags(python_flags, skip_python_flags)
+    if data == None:
+        data = []
+    if directory and not skip_default_data:
+        data += native.glob(
+            [
+                directory + "/**",
+            ],
+            exclude = ["**/*.wd-test"],
+        )
+    if src == None:
+        src = native.glob([directory + "/*.wd-test"])[0]
+    if name == None and directory != None:
+        name = directory
+    elif name == None:
+        name = src.removesuffix(".wd-test")
+    data += _capnp_rules()
+    args = args + [
+        "--pyodide-bundle-disk-cache-dir",
+        "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)/..",
+        "--experimental",
+        "--python-snapshot-dir",
+        ".",
+    ]
+
+    # Python tests are extremely slow with coverage instrumentation, skip them
+    tags = tags + ["py_wd_test", "python", "no-coverage"]
+
+    for python_flag in python_flags:
+        _py_wd_test_helper(
+            name,
+            src,
+            python_flag,
+            make_snapshot = make_snapshot,
+            use_snapshot = use_snapshot,
+            feature_flags = feature_flags,
+            data = data,
+            args = args,
+            size = size,
+            tags = tags,
+            **kwargs
+        )

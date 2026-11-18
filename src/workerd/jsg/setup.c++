@@ -325,6 +325,7 @@ void IsolateBase::applyDeferredActions() {
   }
 
   externalMemoryTarget->applyDeferredMemoryUpdate();
+  heapTracer.flushExternalMemory();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -1454,6 +1455,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
 
     case v8::JitCodeEvent::CODE_MOVED:
       KJ_IF_SOME(entry, codeMap.findEntry(startAddr)) {
+        self->recordCodeMoved(entry.value.type);
         auto info = kj::mv(entry.value);
         codeMap.erase(entry);
         codeMap.upsert(reinterpret_cast<uintptr_t>(event->new_code_start), kj::mv(info),
@@ -1543,6 +1545,14 @@ void IsolateBase::recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size) 
   }
 }
 
+void IsolateBase::recordCodeMoved(kj::Maybe<v8::JitCodeEvent::CodeType> type) {
+  KJ_IF_SOME(t, type) {
+    if (t != v8::JitCodeEvent::BYTE_CODE) {
+      codeStatistics.machineCodeMoveCount.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+}
+
 IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
   return {
     .bytecodeCount = codeStatistics.bytecodeCount.load(std::memory_order_relaxed),
@@ -1551,6 +1561,7 @@ IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
     .jitCodeBytes = codeStatistics.jitCodeBytes.load(std::memory_order_relaxed),
     .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
     .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
+    .machineCodeMoveCount = codeStatistics.machineCodeMoveCount.load(std::memory_order_relaxed),
   };
 }
 

@@ -58,6 +58,7 @@ use crate::cluster::ClusterNode;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
+use crate::services::assets::Assets;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -102,6 +103,14 @@ impl Factory {
     #[must_use]
     pub fn experimental(&self) -> bool {
         ffi::factory_experimental(&self.inner)
+    }
+
+    /// The navigation flag of the assets service `services[service]`.
+    pub fn assets_navigation_prefers_asset_serving(&self, service: u32) -> Result<bool> {
+        Ok(ffi::factory_assets_navigation_prefers_asset_serving(
+            &self.inner,
+            service,
+        )?)
     }
 
     /// Whether requests get tail workers: not under `workerd bench`, unless given `--trace`.
@@ -417,6 +426,7 @@ pub enum Service {
     /// the rest of the config can be checked.
     Leaf(Rc<dyn Channel>),
     Disk(Rc<DiskDirectoryService>),
+    Assets(Rc<Assets>),
 }
 
 impl Service {
@@ -427,6 +437,7 @@ impl Service {
             Self::Worker(worker) => worker.default_entrypoint(),
             Self::Leaf(channel) => Rc::clone(channel),
             Self::Disk(disk) => Rc::clone(disk) as Rc<dyn Channel>,
+            Self::Assets(assets) => assets.channel(false),
         }
     }
 
@@ -1260,6 +1271,11 @@ pub fn lookup_service(
     };
     let props = configured_props(props_json.as_deref());
 
+    if let Service::Assets(assets) = service
+        && entrypoint.as_deref().is_none_or(|e| e == "AssetWorker")
+    {
+        return assets.channel(entrypoint.is_some());
+    }
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
             report.reference_error(
@@ -1498,6 +1514,11 @@ impl Server {
         // Third pass: the links.
         for (name, worker) in server.workers() {
             tolerate_deployment(&server.report, name, server.link_worker(name, worker))?;
+        }
+        for (name, service) in &server.services.0 {
+            if let Service::Assets(assets) = service {
+                assets.link(|d| lookup_service(&server.services.0, &server.report, Some(name), d));
+            }
         }
 
         // A deployment's service with errors fails every request.
@@ -1794,6 +1815,23 @@ async fn make_service(
                 report,
                 crate::services::make_disk_directory_service(name, disk, path, factory)
                     .map(Service::Disk),
+            ))
+        }
+        Ok(service::Which::Assets(assets)) => {
+            if !factory.experimental() {
+                report.error_in(
+                    name,
+                    "Assets services are an experimental feature which may change or go away in \
+                     the future. You must run workerd with `--experimental` to use this feature.",
+                );
+                return Ok(Service::Leaf(Rc::new(InvalidConfigChannel)));
+            }
+            let assets = assets.map_err(capnp_error)?;
+            Ok(invalid_on_error(
+                name,
+                report,
+                crate::services::assets::make_assets_service(name, index, assets, factory, report)
+                    .map(Service::Assets),
             ))
         }
         // Made once the cluster is joined (`make_bucket_services`).

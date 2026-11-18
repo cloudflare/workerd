@@ -128,8 +128,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
   traced (no-op). Verify that every resource reference is properly traced — missing traces
   cause use-after-free when the child is collected prematurely. `Traced::trace` has no
-  default; a type with nothing to trace uses `jsg::jsg_traced!` rather than an empty `trace`
-  next to a hand-written `HoldsNoGcReferences`.
+  default; a struct with nothing to trace uses `#[jsg_traced]`, which checks that each field
+  holds no GC references, rather than an empty `trace` next to a hand-written
+  `HoldsNoGcReferences`. `jsg::jsg_traced_unchecked!` makes the same claim without checking it;
+  accept it only for a type whose fields can't implement the marker, such as a wrapper of a type
+  from outside JSG.
 
 ### Rust JSG Safety Rules
 

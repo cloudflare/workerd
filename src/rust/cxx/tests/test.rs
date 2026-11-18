@@ -385,6 +385,28 @@ fn test_c_try_return() {
 }
 
 #[test]
+fn test_c_nothrow() {
+    let shared = ffi::Shared { z: 2020 };
+    assert_eq!(2020, ffi::c_return_primitive_nothrow());
+    assert_eq!(2020, ffi::c_return_shared_nothrow().z);
+    assert_eq!(2020, ffi::c_return_box_nothrow().0);
+    assert_eq!("2020", ffi::c_return_rust_string_nothrow());
+    // SAFETY: The returned borrows are bounded by their live input values.
+    unsafe {
+        assert_eq!(2020, *ffi::c_return_ref_nothrow(&shared));
+        assert_eq!("2020", ffi::c_return_str_nothrow(&shared));
+    }
+    check!(ffi::c_take_primitive_nothrow(2020));
+
+    let ptr = ffi::c_return_mut_ptr_nothrow(2023);
+    // SAFETY: `c_return_mut_ptr` returns a new, owned `C`, which `UniquePtr` then deletes.
+    let mut unique_ptr = unsafe { cxx::UniquePtr::from_raw(ptr) };
+    assert_eq!(2023, unique_ptr.get_nothrow());
+    assert_eq!(2024, unique_ptr.pin_mut().set_nothrow(2024));
+    assert_eq!(2024, unique_ptr.get());
+}
+
+#[test]
 fn test_c_take() {
     let unique_ptr = ffi::c_return_unique_ptr();
     let unique_ptr_ns = ffi2::c_return_ns_unique_ptr();
@@ -660,6 +682,24 @@ fn test_rust_vec_copy_assign_failure() {
     ];
     ffi2::c_copy_assign_rust_vec(&mut dst, &src).unwrap();
     assert_eq!(values(&dst), [1, 2]);
+}
+
+#[test]
+fn test_smart_ptr_new_over_aligned() {
+    let is_aligned =
+        |ptr: *const ffi2::OverAligned| ptr.addr().is_multiple_of(align_of::<ffi2::OverAligned>());
+
+    let unique: Vec<_> = (0..16)
+        .map(|value| UniquePtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(unique.iter().all(|ptr| is_aligned(ptr.as_ptr())));
+    assert!(unique.iter().map(|ptr| ptr.value).eq(0..16));
+
+    let shared: Vec<_> = (0..16)
+        .map(|value| SharedPtr::new(ffi2::OverAligned { value }))
+        .collect();
+    assert!(shared.iter().all(|ptr| is_aligned(&raw const **ptr)));
+    assert!(shared.iter().map(|ptr| ptr.value).eq(0..16));
 }
 
 #[test]

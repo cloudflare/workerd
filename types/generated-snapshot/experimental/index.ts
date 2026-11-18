@@ -1155,6 +1155,7 @@ export declare class Blob {
 }
 export interface BlobOptions {
   type?: string;
+  endings?: "transparent" | "native";
 }
 /**
  * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
@@ -1183,6 +1184,7 @@ export declare class File extends Blob {
 export interface FileOptions {
   type?: string;
   lastModified?: number;
+  endings?: "transparent" | "native";
 }
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
@@ -3296,7 +3298,7 @@ export declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`DecompressionStream`** interface of the Compression Streams API decompresses a stream of data. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -3307,7 +3309,7 @@ export declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
-  constructor(format: "gzip" | "deflate" | "deflate-raw");
+  constructor(format: "gzip" | "deflate" | "deflate-raw" | "brotli");
 }
 /**
  * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding. It is the streaming equivalent of TextEncoder. It implements the same shape as a TransformStream, allowing it to be used in ReadableStream.pipeThrough() and similar methods.
@@ -4555,6 +4557,11 @@ export interface Tracing {
   ): T;
   Span: typeof Span;
 }
+export interface TracingSpanLink {
+  context: TracingSpanContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 export declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4587,6 +4594,8 @@ export declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
@@ -17707,6 +17716,22 @@ export declare namespace TailStream {
     readonly type: "spanUpdate";
     readonly info: SpanUpdateInfo;
   }
+  /** A causal relationship to a span, including spans in another trace. */
+  interface SpanLink {
+    readonly context: {
+      readonly traceId: string;
+      readonly spanId: string;
+      readonly traceFlags: number;
+    };
+    readonly attributes: readonly Attribute[];
+    /** Attributes dropped before this link was recorded. */
+    readonly droppedAttributesCount: number;
+  }
+  /** Links added to the receiver identified by the event's spanContext. */
+  interface SpanLinks {
+    readonly type: "spanLinks";
+    readonly links: readonly SpanLink[];
+  }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
     readonly channel: string;
@@ -17777,6 +17802,7 @@ export declare namespace TailStream {
     | SpanOpen
     | SpanClose
     | SpanUpdate
+    | SpanLinks
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17820,6 +17846,7 @@ export declare namespace TailStream {
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
+    spanLinks?: TailEventHandler<SpanLinks>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

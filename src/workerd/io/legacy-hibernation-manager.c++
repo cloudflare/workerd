@@ -153,10 +153,6 @@ LegacyHibernationManagerImpl::~LegacyHibernationManagerImpl() noexcept(false) {
   KJ_DTOR_ASSERT(tagToWs.size() == 0, "tagToWs hashmap wasn't cleared.");
 }
 
-kj::Own<Worker::Actor::HibernationManager> LegacyHibernationManagerImpl::addRef() {
-  return kj::addRef(*this);
-}
-
 void LegacyHibernationManagerImpl::acceptWebSocket(
     jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) {
   // First, we create the HibernatableWebSocket and add it to the collection where it'll stay
@@ -310,7 +306,7 @@ void LegacyHibernationManagerImpl::setLoopback(kj::Own<Worker::Actor::Loopback> 
 // between actor generations, so the end of the handoff reaches it wherever it ended up.
 class LoopbackHandoff {
  public:
-  LoopbackHandoff(kj::Own<LegacyHibernationManagerImpl> manager, uint64_t generation)
+  LoopbackHandoff(kj::Rc<LegacyHibernationManagerImpl> manager, uint64_t generation)
       : manager(kj::mv(manager)),
         generation(generation) {}
   ~LoopbackHandoff() noexcept(false) {
@@ -319,7 +315,7 @@ class LoopbackHandoff {
   KJ_DISALLOW_COPY_AND_MOVE(LoopbackHandoff);
 
  private:
-  kj::Own<LegacyHibernationManagerImpl> manager;
+  kj::Rc<LegacyHibernationManagerImpl> manager;
   uint64_t generation;
 };
 
@@ -327,7 +323,7 @@ kj::Own<void> LegacyHibernationManagerImpl::beginLoopbackHandoff() {
   KJ_REQUIRE(loopbackHandoffGeneration == 0, "a loopback handoff is already in progress");
   loopbackHandoffGeneration = nextLoopbackHandoffGeneration++;
   handoffLoopback = kj::mv(loopback);
-  return kj::heap<LoopbackHandoff>(kj::addRef(*this), loopbackHandoffGeneration);
+  return kj::heap<LoopbackHandoff>(addRefToThis(), loopbackHandoffGeneration);
 }
 
 void LegacyHibernationManagerImpl::cancelLoopbackHandoff(uint64_t generation) {
@@ -399,10 +395,10 @@ kj::Maybe<uint32_t> LegacyHibernationManagerImpl::getEventTimeout() {
   return eventTimeoutMs;
 }
 
-kj::Maybe<Worker::Actor::HibernationManager&> LegacyHibernationManagerImpl::findManagerForEvent(
-    kj::StringPtr websocketId) {
+kj::Maybe<kj::Rc<Worker::Actor::HibernationManager>> LegacyHibernationManagerImpl::
+    findManagerForEvent(kj::StringPtr websocketId) {
   KJ_IF_SOME(registered, getEventRegistry().find(websocketId)) {
-    return *registered.manager;
+    return registered.manager->addRefToThis();
   }
   return kj::none;
 }

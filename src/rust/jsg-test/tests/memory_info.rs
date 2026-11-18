@@ -16,6 +16,7 @@ use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 // =============================================================================
 // Snapshot parsing
@@ -215,6 +216,7 @@ fn new_child(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Child> {
 }
 
 /// A helper that is a node of its own, like a C++ type with `JSG_MEMORY_INFO`.
+#[jsg_traced]
 struct Cache {
     entries: HashMap<String, String>,
 }
@@ -230,8 +232,6 @@ impl jsg::MemoryRetainer for Cache {
 }
 
 jsg::jsg_memory_retainer!(Cache);
-
-jsg::jsg_traced!(Cache);
 
 fn new_cache() -> Cache {
     Cache {
@@ -478,6 +478,7 @@ struct Outer {
     label: String,
 }
 
+#[jsg_traced]
 struct Inner {
     name: String,
 }
@@ -532,8 +533,6 @@ impl jsg::MemoryRetainer for Link {
 }
 
 jsg::jsg_memory_retainer!(Outer, Inner, Empty, Link);
-
-jsg::jsg_traced!(Inner);
 
 /// Two links, each the other's `next`.
 fn new_ring() -> std::sync::Arc<Link> {

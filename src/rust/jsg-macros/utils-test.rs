@@ -340,3 +340,41 @@ fn invalid_typescript_options_still_evaluate_to_customizations() {
     assert!(expression.contains("compile_error"));
     assert!(expression.contains("TypeScript :: default ()"));
 }
+
+#[test]
+fn primitive_returns_are_set_directly() {
+    for (sig, kind) in [
+        (parse_quote!(fn f()), PrimitiveReturn::Void),
+        (parse_quote!(fn f() -> ()), PrimitiveReturn::Void),
+        (parse_quote!(fn f() -> bool), PrimitiveReturn::Boolean),
+        (parse_quote!(fn f() -> u32), PrimitiveReturn::Number),
+        (parse_quote!(fn f() -> f64), PrimitiveReturn::Number),
+        (
+            parse_quote!(fn f() -> Result<(), Error>),
+            PrimitiveReturn::Void,
+        ),
+        (
+            parse_quote!(fn f() -> jsg::Result<u32>),
+            PrimitiveReturn::Number,
+        ),
+        (
+            parse_quote!(fn f() -> std::result::Result<bool, Error>),
+            PrimitiveReturn::Boolean,
+        ),
+    ] {
+        let sig: syn::Signature = sig;
+        assert_eq!(primitive_return(&sig), Some(kind), "{sig:?}");
+    }
+    for sig in [
+        parse_quote!(fn f() -> jsg::Promise<u32>),
+        parse_quote!(fn f() -> Option<jsg::Promise<u32>>),
+        parse_quote!(fn f() -> Result<jsg::Promise<u32>, Error>),
+        parse_quote!(fn f() -> Option<u32>),
+        parse_quote!(fn f() -> MyReturnType),
+        parse_quote!(async fn f()),
+        parse_quote!(async fn f() -> u32),
+    ] {
+        let sig: syn::Signature = sig;
+        assert_eq!(primitive_return(&sig), None, "{sig:?}");
+    }
+}

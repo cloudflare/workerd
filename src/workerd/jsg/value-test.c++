@@ -591,6 +591,9 @@ KJ_TEST("bigints") {
   e.expectEval("takeOneOfUint64(1)", "bigint", "1");
   e.expectEval("takeOneOfUint64(1n)", "bigint", "1");
 
+  e.expectEval("takeOneOfUint64(18446744073709551615n)", "bigint", "18446744073709551615");
+  e.expectEval("takeOneOfUint64(9223372036854775808n)", "bigint", "9223372036854775808");
+
   e.expectEval("takeOneOfInt64(1)", "bigint", "1");
   e.expectEval("takeOneOfInt64(1n)", "bigint", "1");
 

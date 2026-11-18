@@ -471,12 +471,30 @@ User code: const mod = await import('./bar.js')
       bundle module.
    b. Build ResolveContext { type from referrer's module, source=DYNAMIC_IMPORT, ... }
    c. findResolved or resolveWithCaching (same as static)
-   d. Call module.evaluate(js, v8Module, observer, maybeEvaluate) -> Promise
-   e. Chain: .then(namespace -> resolve Promise with module namespace)
+   d. Reject an already-errored target with its stored exception.
+   e. When nested in module evaluation, try linking an uninstantiated target.
+      If linking fails, defer linking and evaluation to a microtask instead.
+      Graphs that link successfully still evaluate inline.
+   f. If the target is kEvaluating, resolve to its namespace without evaluating
+      it again, matching the legacy registry.
+   g. Otherwise, call module.evaluate(js, v8Module, observer, maybeEvaluate) -> Promise
+   h. Chain: .then(namespace -> resolve Promise with module namespace)
 
 6. Return Promise to V8
 
-Note: a dynamically imported module whose top-level await never settles leaves
+Nested evaluation does not drain microtasks, so deferred links run after the
+current synchronous evaluation stack unwinds. This lets a new graph link when
+it statically imports an evaluating module. Deferred work captures a persistent
+module handle, not a borrowed registry entry, and retries only once: permanent
+link errors and evaluation failures reject the import. Synchronous `require()`
+cannot wait and continues to reject such ESM cycles.
+
+An import that resolves directly to an already-evaluating target's namespace
+does not wait for its evaluation promise or reject if that evaluation later
+fails. Its continuations run after the synchronous stack unwinds, but may run
+before the target's top-level await finishes.
+
+Otherwise, a dynamically imported module whose top-level await never settles leaves
 the import() promise pending indefinitely (standard ESM semantics, subject to
 normal request hang detection). The legacy registry instead throws an eager
 "Top-level await in module is unsettled." error, a deviation tied to its

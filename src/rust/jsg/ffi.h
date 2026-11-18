@@ -98,6 +98,11 @@ struct ResourceDescriptor;
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
+// Whether a collection found the Wrappable unreachable and is sweeping it (see
+// jsg::Wrappable::isCondemned()). Weak::is_alive and Weak::upgrade refuse such a Wrappable;
+// wrappable_try_condemn also condemns it, as C++ WeakRef::tryAddRef() does.
+bool wrappable_is_condemned(const Wrappable& wrappable);
+bool wrappable_try_condemn(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
@@ -325,6 +330,16 @@ MaybeLocal local_function_call(
 // termination is pending, or if V8 could not create the function.
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
 
+// Struct shapes
+// Returns a `v8::Global<v8::DictionaryTemplate>` declaring `keys` as data properties, in order.
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> keys);
+// Returns a new object from the `v8::Global<v8::DictionaryTemplate>` `tmpl`, with `values[i]`
+// the value of its `i`th declared property. Runs no JavaScript. Returns none if an exception or
+// a termination is pending, leaving it pending. There must be as many values as declared
+// properties, and, like any storage of V8 handles, they must be on the stack.
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<MaybeLocal> values);
+
 // Local<Object>
 // Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
 // JavaScript: no setter on Object.prototype is called. Throws a KJ exception if a key is too
@@ -334,6 +349,9 @@ MaybeLocal object_new_with_data_properties(
 // Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
 // leaving the exception pending.
 bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
+// The same for a key held in a `v8::Global<v8::Name>`, such as a cached struct field name.
+bool local_object_set_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name, Local value);
 // Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
 // trap threw, leaving the exception pending.
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has);
@@ -343,6 +361,9 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 // The same for a `v8::Name` key.
 MaybeLocal local_object_get_property_by_name(
     Isolate* isolate, const Local& object, const Local& name);
+// The same for a key held in a `v8::Global<v8::Name>`, such as a cached struct field name.
+MaybeLocal local_object_get_property_by_global_name(
+    Isolate* isolate, const Local& object, const Global& name);
 // Appends the names of the own enumerable string-keyed properties, converted to strings, to
 // `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
 // the exception pending.
@@ -373,7 +394,6 @@ bool local_promise_resolver_resolve(Isolate* isolate, const Local& resolver, con
 bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, const Local& reason);
 
 // Local<Array>
-Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 // Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
 Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
@@ -439,6 +459,9 @@ MaybeLocal array_buffer_new_with_mode(
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
 size_t local_array_buffer_byte_length(const Local& buffer);
 uint8_t* local_array_buffer_data(const Local& buffer);
+// Returns the address of the buffer's first byte (zero if it has none) and sets `byteLength` to
+// its byte length.
+uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<ArrayBufferView>
@@ -523,6 +546,8 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+void fci_set_return_number(FunctionCallbackInfo* args, double value);
+void fci_set_return_boolean(FunctionCallbackInfo* args, bool value);
 // The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
 // attaches it; none if the data is anything else.
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
@@ -531,6 +556,8 @@ kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);
 Local pci_get_this(PropertyCallbackInfo* info);
 void pci_set_return_value(PropertyCallbackInfo* info, Local value);
+void pci_set_return_number(PropertyCallbackInfo* info, double value);
+void pci_set_return_boolean(PropertyCallbackInfo* info, bool value);
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info);
 Local psci_get_this(PropertySetterCallbackInfo* info);
 
