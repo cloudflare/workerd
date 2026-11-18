@@ -18,6 +18,7 @@ pub use bridge::AsyncInputStream;
 pub use bridge::AsyncIoStream;
 pub use bridge::ConnectResponse;
 pub use bridge::Ecdsa;
+pub use bridge::HeaderIds;
 pub use bridge::HttpHeaderTable;
 pub use bridge::HttpHeaders;
 pub use bridge::HttpMethod;
@@ -130,8 +131,18 @@ mod bridge {
 
         /// Every header, in kj's order, appended to `head`.
         fn for_each_header(headers: &HttpHeaders, head: &mut Head);
-        /// `kj::HttpHeaders` from a packed block (body.rs's `HeaderBlock`), checked against the
-        /// block's bounds.
+        /// The ids `table` gives the header names a connection's requests carry, each looked
+        /// up once (body.rs's `HeaderIds`).
+        type HeaderIds;
+        /// # Safety
+        ///
+        /// The ids keep a reference to `table`, which the `KjOwn` does not carry: the caller
+        /// keeps `table` alive for as long as they exist ([`Borrowing`] does).
+        unsafe fn new_header_ids(table: &HttpHeaderTable) -> KjOwn<HeaderIds>;
+        /// The slot of the id the table gives `name`; -1 for a name it lacks.
+        fn resolve(self: Pin<&mut HeaderIds>, name: &str) -> i32;
+        /// `kj::HttpHeaders` owning a copy of a packed block (body.rs's `HeaderBlock`), checked
+        /// against the block's bounds.
         ///
         /// # Safety
         ///
@@ -140,7 +151,20 @@ mod bridge {
         unsafe fn headers_from_block(
             table: &HttpHeaderTable,
             arena: &[u8],
-            lens: &[u32],
+            fields: &[u32],
+        ) -> Result<KjOwn<HttpHeaders>>;
+        /// `kj::HttpHeaders` pointing into a packed block whose slots `ids` resolved, checked
+        /// against the block's bounds and the slots.
+        ///
+        /// # Safety
+        ///
+        /// The headers keep references to the table behind `ids` and into `arena`, which the
+        /// `KjOwn` does not carry: the caller keeps both alive and the arena unchanged for as
+        /// long as they exist ([`Borrowing`] does).
+        unsafe fn headers_over_block(
+            ids: &HeaderIds,
+            arena: &[u8],
+            fields: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
         /// kj's parse of a request method; false for one kj has no name for.
         fn parse_method(name: &[u8], method: &mut HttpMethod) -> bool;
@@ -317,7 +341,17 @@ impl<T: OwnTarget> Deref for Borrowing<'_, T> {
     }
 }
 
-/// `kj::HttpHeaders` over `table` from a packed block ([`crate::body::HeaderBlock`]).
+/// The ids `table` gives header names, looked up as they are first resolved.
+pub fn new_header_ids(table: &HttpHeaderTable) -> Borrowing<'_, HeaderIds> {
+    Borrowing {
+        // SAFETY: the result is bounded by the borrow of `table` the ids keep.
+        own: unsafe { bridge::new_header_ids(table) },
+        borrow: PhantomData,
+    }
+}
+
+/// `kj::HttpHeaders` over `table` owning a copy of a packed block
+/// ([`crate::body::HeaderBlock`]).
 ///
 /// # Errors
 ///
@@ -325,10 +359,30 @@ impl<T: OwnTarget> Deref for Borrowing<'_, T> {
 pub fn headers_from_block<'t>(
     table: &'t HttpHeaderTable,
     arena: &[u8],
-    lens: &[u32],
+    fields: &[u32],
 ) -> Result<Borrowing<'t, HttpHeaders>> {
     // SAFETY: the result is bounded by `'t`, the borrow of `table` the headers keep.
-    let own = unsafe { bridge::headers_from_block(table, arena, lens) }?;
+    let own = unsafe { bridge::headers_from_block(table, arena, fields) }?;
+    Ok(Borrowing {
+        own,
+        borrow: PhantomData,
+    })
+}
+
+/// `kj::HttpHeaders` over the table behind `ids`, pointing into a packed block
+/// ([`crate::body::HeaderBlock`]) whose slots `ids` resolved.
+///
+/// # Errors
+///
+/// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
+pub fn headers_over_block<'a>(
+    ids: &Borrowing<'a, HeaderIds>,
+    arena: &'a [u8],
+    fields: &[u32],
+) -> Result<Borrowing<'a, HttpHeaders>> {
+    // SAFETY: the result is bounded by `'a`, within both the borrow of the table `ids` keeps
+    // and the shared borrow of `arena`, which keeps the bytes unchanged.
+    let own = unsafe { bridge::headers_over_block(ids, arena, fields) }?;
     Ok(Borrowing {
         own,
         borrow: PhantomData,

@@ -49,6 +49,7 @@ use std::future::Future;
 use std::future::pending;
 use std::future::poll_fn;
 use std::io;
+use std::mem;
 use std::pin::Pin;
 use std::pin::pin;
 use std::rc::Rc;
@@ -95,6 +96,7 @@ use crate::body::Builtin;
 use crate::body::ChannelBody;
 use crate::body::Head;
 use crate::body::HeaderBlock;
+use crate::body::HeaderIds;
 use crate::body::MAX_HEADERS;
 use crate::body::Protocol;
 use crate::body::RustBody;
@@ -203,10 +205,48 @@ impl Shutdown {
 }
 
 struct Connection<'t> {
-    table: &'t HeaderTable,
     settings: Rc<ServerSettings>,
     handler: Rc<dyn Handler + 't>,
     state: Rc<ConnectionState>,
+    /// The kj ids of the header names the requests carry, borrowed only to fill a block.
+    ids: RefCell<HeaderIds<'t>>,
+    /// Header blocks a finished call left, for the next request's headers.
+    blocks: RefCell<Vec<HeaderBlock>>,
+}
+
+/// How many header blocks a connection keeps: one per call, which hyper starts only once the
+/// last response is written, though the call may still be finishing.
+const KEPT_BLOCKS: usize = 2;
+
+impl Connection<'_> {
+    /// A header block filled with a request's headers, back to the connection when dropped.
+    fn header_block(&self, parts: &Parts) -> PooledBlock<'_> {
+        let mut block = self.blocks.borrow_mut().pop().unwrap_or_default();
+        block.fill(
+            &parts.headers,
+            &parts.extensions,
+            Some(&mut self.ids.borrow_mut()),
+        );
+        PooledBlock {
+            blocks: &self.blocks,
+            block,
+        }
+    }
+}
+
+/// A [`HeaderBlock`] that returns to its connection's pool.
+struct PooledBlock<'c> {
+    blocks: &'c RefCell<Vec<HeaderBlock>>,
+    block: HeaderBlock,
+}
+
+impl Drop for PooledBlock<'_> {
+    fn drop(&mut self) {
+        let mut blocks = self.blocks.borrow_mut();
+        if blocks.len() < KEPT_BLOCKS && self.block.reusable() {
+            blocks.push(mem::take(&mut self.block));
+        }
+    }
 }
 
 /// What a connection's responses share with it.
@@ -253,7 +293,6 @@ where
 {
     let hangup = hangup.shared();
     let conn = Rc::new(Connection {
-        table,
         settings,
         handler,
         state: Rc::new(ConnectionState {
@@ -261,6 +300,8 @@ where
             hangup: hangup.clone(),
             draining: shutdown.subscribe(),
         }),
+        ids: RefCell::new(HeaderIds::new(table)),
+        blocks: RefCell::default(),
     });
     let calls: Calls<'_> = Rc::default();
     let service = {
@@ -426,7 +467,8 @@ async fn handle(
 ) {
     // However the call ends, hyper stops waiting for a head it did not send.
     let _abandon = AbandonHead(&sender);
-    let headers = match HeaderBlock::new(&parts.headers, &parts.extensions).to_kj(conn.table) {
+    let block = conn.header_block(&parts);
+    let headers = match block.block.as_kj(&conn.ids.borrow()) {
         Ok(headers) => headers,
         Err(e) => {
             let _ = sender.send_error(400, b"Bad Request", format!("ERROR: {}", e.description()));
