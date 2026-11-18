@@ -698,8 +698,8 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
 
 kj::Maybe<kj::Own<jsg::Wrappable>> AbortSignal::snapshotClone() const {
   if (aborting || maybeAbortException != kj::none || reason != kj::none || hasEventListeners() ||
-      nativeRegistrations.size() > 0 || abortAlgorithms.size() > 0 || dependent ||
-      dependentSignals.size() > 0 || sourceSignals.size() > 0 || rpcRegistrations.size() > 0 ||
+      !nativeRegistrations.empty() || !abortAlgorithms.empty() || dependent ||
+      !dependentSignals.empty() || !sourceSignals.empty() || !rpcRegistrations.empty() ||
       rpcReceiverContext != kj::none || rpcSubscriptionRequested || rpcAbortPromise != kj::none ||
       pendingReason != kj::none) {
     return kj::none;
