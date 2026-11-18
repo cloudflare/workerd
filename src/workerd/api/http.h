@@ -145,6 +145,13 @@ class Body: public jsg::Object {
   // Helper to implement Request/Response::clone().
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
+  // The body stream itself, or none for a null body. Unlike getBody(), this doesn't make a new
+  // reference, so a buffer-backed body that is only sent never constructs a ReadableStream.
+  kj::Maybe<JsReadableStream&> tryGetBodyStream() {
+    if (bodyStream.isNull()) return kj::none;
+    return bodyStream;
+  }
+
  private:
   // The body stream. The null state represents a null body ("no body"). Buffer-backed streams
   // carry their own retransmit buffer, making the body rewindable for redirect handling.

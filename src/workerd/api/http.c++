@@ -1331,7 +1331,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       }
     }
     return wsPromise;
-  } else KJ_IF_SOME(jsBody, getBody(js)) {
+  } else KJ_IF_SOME(jsBody, tryGetBodyStream()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
     if (encoding != StreamEncoding::IDENTITY) {
