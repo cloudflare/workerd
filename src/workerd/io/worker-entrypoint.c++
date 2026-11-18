@@ -530,9 +530,13 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
           // but still precedes the choice and invocation of the fetch handler.
           auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
               context.getActor(), isDynamicDispatch);
+          // Only an actor's request carries a retry token, so only an actor's handler is asked
+          // whether it is retryable; the observer ignores the claim of any other request.
           auto retryable = IsRetryableHandler::NO;
           KJ_IF_SOME(h, handler) {
-            retryable = h->isFetchRetryable(lock);
+            if (context.getActor() != kj::none) {
+              retryable = h->isFetchRetryable(lock);
+            }
           }
           metrics->claimRetryTokenBeforeUserCode(retryable);
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
