@@ -572,6 +572,8 @@ function lifetime(status, headers, req) {
 //
 // The store hands a miss a ticket, and refuses the fill's put (412) if a
 // purge that matches it began since. Without a ticket nothing is stored.
+// Joiners wait on promises their fill resolves, which needs a compatibility
+// date of 2024-10-14 or later (`handle_cross_request_promise_resolution`).
 //
 // TODO(soon): `Vary`, stale-while-revalidate, stale-if-error,
 // `invalidate`, `cf.cacheKey`, a cache per entrypoint and version, a disk
@@ -600,57 +602,69 @@ async function readThrough(request, env, ctx) {
     const entry = await load(env, at, miss);
     if (entry !== null) return answer(request, entry, 'HIT');
     if (request.method === 'HEAD') return env.ORIGIN.fetch(request);
+    const ticket = miss.ticket ?? null;
     const fill = fills.get(at);
     if (fill === undefined) {
-      const ticket = miss.ticket ?? null;
       return run(request, env, ctx, { at, ns, path, ticket });
     }
-    const joined = await join(fill);
+    const joined = await join(fill, ticket);
     if (joined !== null) return answer(request, joined, 'MISS');
   }
 }
 
-// The fill's entry once it has one in memory, or null to look again.
-// Called in the joiner's request: streams cannot cross requests.
-async function join(fill) {
-  if (fill.bytes === null && !fill.over) {
+// The fill's entry once it has one in memory, or null to look again once
+// it is over. Only a joiner whose miss had the fill's ticket takes it: a
+// purge begun on this node between the two, as is every purge that
+// returned before the joiner's request, may remove it. Called in the
+// joiner's request: streams cannot cross requests.
+async function join(fill, ticket) {
+  const same = ticket !== null && ticket !== 'none' && ticket === fill.ticket;
+  while (!fill.over && !(same && fill.bytes !== null)) {
     await new Promise((resolve) => fill.waiting.push(resolve));
   }
   const { head, bytes } = fill;
-  if (bytes === null) return null;
+  if (!same || bytes === null) return null;
   return { head, body: new Response(bytes).body, size: bytes.byteLength };
 }
 
-// Runs the Worker for a miss of `at`, and answers with its response.
+// Runs the Worker for a miss of `at`, and answers with its response. The
+// fill is in waitUntil from the start, so that it ends however this
+// request does.
 async function run(request, env, ctx, { at, ns, path, ticket }) {
-  const fill = { head: null, bytes: null, waiting: [], over: false };
+  const fill = { ticket, head: null, bytes: null, waiting: [], over: false };
   const wake = () => fill.waiting.splice(0).forEach((resolve) => resolve());
-  const release = () => {
-    fill.over = true;
-    if (fills.get(at) === fill) fills.delete(at);
-    wake();
-  };
   fills.set(at, fill);
-  let res;
-  try {
-    res = await env.ORIGIN.fetch(request, { encodeResponseBody: 'manual' });
-  } catch (e) {
-    release();
-    throw e;
-  }
+  const filled = fillFrom(request, env, fill, wake, { at, ns, path, ticket });
+  const over = filled.then(
+    ({ stored }) => stored,
+    () => {}
+  );
+  ctx.waitUntil(
+    over.finally(() => {
+      fill.over = true;
+      if (fills.get(at) === fill) fills.delete(at);
+      wake();
+    })
+  );
+  return (await filled).response;
+}
+
+// `{response, stored}`: the Worker's response to serve, and its put.
+async function fillFrom(request, env, fill, wake, { at, ns, path, ticket }) {
+  const res = await env.ORIGIN.fetch(request, { encodeResponseBody: 'manual' });
   const { status, statusText } = res;
   const policy = cdnLifetime(status, [...res.headers]);
   if (policy === null) {
-    release();
     const headers = new Headers(res.headers);
     UNSERVED.forEach((name) => headers.delete(name));
     headers.set('CF-Cache-Status', 'BYPASS');
-    return new Response(res.body, {
+    const response = new Response(res.body, {
       status,
       statusText,
       headers,
       encodeBody: 'manual',
     });
+    return { response };
   }
   const expires = Math.min(
     Math.floor(clock() + policy.ms),
@@ -680,9 +694,10 @@ async function run(request, env, ctx, { at, ns, path, ticket }) {
     fill.head = head;
     fill.bytes = read.bytes;
     wake();
-    ctx.waitUntil(store(concat(first, read.bytes)).finally(release));
+    const stored = store(concat(first, read.bytes));
     const body = new Response(read.bytes).body;
-    return answer(request, { head, body, size: read.bytes.byteLength }, 'MISS');
+    const entry = { head, body, size: read.bytes.byteLength };
+    return { response: await answer(request, entry, 'MISS'), stored };
   }
   // A body that fails must not be stored, but the store may see one
   // without a length that fails as one that ends: so it is cancelled.
@@ -690,17 +705,16 @@ async function run(request, env, ctx, { at, ns, path, ticket }) {
   const [mine, theirs] = rest(read.first, read.reader, (_, error) => {
     if (error) abort.abort(error);
   }).tee();
-  ctx.waitUntil(
-    store(rest(first, theirs.getReader()), abort.signal).finally(release)
-  );
+  const stored = store(rest(first, theirs.getReader()), abort.signal);
   const headers = new Headers(head.headers);
   headers.set('CF-Cache-Status', 'MISS');
-  return new Response(mine, {
+  const response = new Response(mine, {
     status,
     statusText,
     headers,
     encodeBody: 'manual',
   });
+  return { response, stored };
 }
 
 // `{bytes}`, `body` whole if it is at most SPOOL bytes, else `{first,

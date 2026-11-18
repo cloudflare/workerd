@@ -36,6 +36,8 @@ fn a_value_is_its_expiry_and_names_then_the_record() {
     for q in ["ns=a&tag=t2", "ns=a&prefix=/x/", "ns=a&everything", "ns=a&tag=no&tag=t1"] {
         assert!(purge(q).matches(&meta), "{q}");
     }
+    let untagged = names("a", "/x", "").unwrap();
+    assert!(!purge("ns=a&tag=").matches(&untagged));
     for q in ["ns=b&everything", "everything", "ns=a&tag=t", "ns=a&prefix=/y"] {
         assert!(!purge(q).matches(&meta), "{q}");
     }

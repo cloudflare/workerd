@@ -103,7 +103,10 @@ impl Purge {
     }
 
     pub(super) fn matches(&self, meta: &Meta) -> bool {
-        let tag = |t: &str| self.tags.iter().any(|tag| tag.eq_ignore_ascii_case(t.trim()));
+        let tag = |t: &str| {
+            let t = t.trim();
+            !t.is_empty() && self.tags.iter().any(|tag| tag.eq_ignore_ascii_case(t))
+        };
         meta.ns == self.ns
             && (self.everything
                 || meta.tags.split(',').any(tag)
