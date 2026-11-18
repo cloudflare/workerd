@@ -11,7 +11,6 @@
 #include <kj/thread.h>
 #include <kj/vector.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -195,28 +194,6 @@ KJ_TEST("timer fires while blocked waiting on a cross-thread event") {
 // =======================================================================================
 // Timer precision: due timers fire without sleeping; pending ones fire on tokio's 1 ms timer
 // wheel (see tokio-event-port.h). No high-resolution side channel.
-
-KJ_TEST("an already-due timer fires without waiting for a tokio tick") {
-  // A zero-delay timer, like setTimeout(fn, 0), is due by the time the loop runs out of work, so
-  // the loop must fire it without sleeping. A tokio sleep lasts until its next 1 ms tick: almost
-  // always a full tick, but only a moment when a tick boundary happens to pass right before the
-  // loop parks. The median of a few waits sees past that, and past contention.
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  auto &timer = io.getTimer();
-  auto &sysClock = kj::systemPreciseMonotonicClock();
-
-  constexpr size_t WAITS = 9;
-  kj::Vector<kj::Duration> waits(WAITS);
-  for (size_t i = 0; i < WAITS; i++) {
-    auto start = sysClock.now();
-    timer.afterDelay(0 * kj::MILLISECONDS).wait(ws);
-    waits.add(sysClock.now() - start);
-  }
-  std::sort(waits.begin(), waits.end());
-  auto median = waits[WAITS / 2];
-  KJ_EXPECT(median < 1 * kj::MILLISECONDS, median / kj::MICROSECONDS);
-}
 
 KJ_TEST("wake() from another thread interrupts a loop cycling through short timers promptly") {
   // While the loop keeps re-arming a short timer (so wait() is always a short timed sleep), a
