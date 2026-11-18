@@ -687,6 +687,14 @@ class VirtualFileSystem {
     // When reading from or writing to the file, if an offset is not
     // explicitly given then the offset will be set to the current
     // position in the file.
+    virtual uint32_t getPosition() const {
+      return position;
+    }
+    virtual void setPosition(uint32_t newPosition) {
+      position = newPosition;
+    }
+
+   private:
     uint32_t position = 0;
   };
 

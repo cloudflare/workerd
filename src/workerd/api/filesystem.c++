@@ -535,7 +535,7 @@ uint32_t FileSystemModule::write(
         auto stat = file->stat(js);
         return stat.size;
       }
-      auto pos = options.position.orDefault(opened->position);
+      auto pos = options.position.orDefault(opened->getPosition());
       if (pos > kMax) {
         node::THROW_ERR_UV_EINVAL(js, "write"_kj, "position out of range"_kj);
       }
@@ -560,7 +560,7 @@ uint32_t FileSystemModule::write(
         // We only update the position if the options.position is not set and
         // the file descriptor is not opened in append mode.
         if (options.position == kj::none && !opened->append) {
-          opened->position += total;
+          opened->setPosition(opened->getPosition() + total);
         }
         return total;
       }
@@ -589,7 +589,7 @@ uint32_t FileSystemModule::read(
 
     KJ_SWITCH_ONEOF(opened->node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        auto pos = options.position.orDefault(opened->position);
+        auto pos = options.position.orDefault(opened->getPosition());
         if (pos > kMax) {
           node::THROW_ERR_UV_EINVAL(js, "read"_kj, "position out of range"_kj);
         }
@@ -604,7 +604,7 @@ uint32_t FileSystemModule::read(
         }
         // We only update the position if the options.position is not set.
         if (options.position == kj::none) {
-          opened->position += total;
+          opened->setPosition(opened->getPosition() + total);
         }
         return total;
       }
@@ -667,7 +667,7 @@ jsg::JsRef<jsg::JsUint8Array> FileSystemModule::readAll(
           // Move the opened.position to the end of the file.
           KJ_DEFER({
             auto stat = file->stat(js);
-            opened->position = stat.size;
+            opened->setPosition(stat.size);
           });
 
           KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
@@ -818,7 +818,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
           KJ_DEFER({
             // In either case, we need to update the position of the file descriptor.
             stat = file->stat(js);
-            opened->position = stat.size;
+            opened->setPosition(stat.size);
           });
 
           // If the file descriptor was opened in append mode, or if the append option
