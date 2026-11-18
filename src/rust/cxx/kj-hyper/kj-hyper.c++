@@ -98,15 +98,26 @@ class BodySinkStream final: public kj::AsyncOutputStream {
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     // A write that finds room is done once Rust has copied it, without a bridged future.
     bool queued = false;
-    KJ_IF_SOME(e, kj::runCatchingExceptions([&] { queued = sink->try_write(bytes(buffer)); })) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&] { queued = tryWriteSync(buffer); })) {
       return kj::mv(e);
     }
     if (queued) return kj::READY_NOW;
     return hot(sink->write(bytes(buffer)));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    if (pieces.size() == 1) return write(pieces[0]);
+    // Rust copies the bytes before write() returns, so the joined copy need not outlive it.
     auto joined = join(pieces);
-    return write(joined.asPtr()).attach(kj::mv(joined));
+    return write(joined.asPtr());
+  }
+  // The body takes a chunk whenever hyper has taken the last one, as it nearly always has.
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return sink->try_write(bytes(buffer));
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    if (pieces.size() == 1) return tryWriteSync(pieces[0]);
+    auto joined = join(pieces);
+    return tryWriteSync(joined.asPtr());
   }
   kj::Promise<void> whenWriteDisconnected() override {
     return hot(sink->when_write_disconnected());
