@@ -65,6 +65,9 @@ class JsReadableStream final {
   };
 
   struct Impl {
+    // False for a buffer-backed stream that nothing has needed yet: `stream` is empty and is
+    // built from `maybeOwnedBuffer` by ensureStream().
+    bool hasStream = true;
     StreamImpl stream;
     kj::Maybe<kj::Rc<Buffer>> maybeOwnedBuffer;
   };
@@ -340,6 +343,9 @@ class JsReadableStream final {
   // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
   // other stream.
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
+
+  // Constructs `i.stream` if bufferBackedImpl() deferred it.
+  void ensureStream(jsg::Lock& js, Impl& i);
 
   kj::Maybe<Impl> impl;
   // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS
