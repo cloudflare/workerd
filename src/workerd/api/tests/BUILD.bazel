@@ -538,6 +538,11 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-per-event-test.wd-test",
+    data = ["ctx-per-event-test.js"],
+)
+
+wd_test(
     src = "ctx-access-test.wd-test",
     data = ["ctx-access-test.js"],
 )
