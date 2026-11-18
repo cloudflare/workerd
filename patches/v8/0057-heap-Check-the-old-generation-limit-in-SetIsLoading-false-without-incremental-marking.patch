@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <ecorry@cloudflare.com>
+Date: Tue, 17 Nov 2026 21:14:10 +0100
+Subject: [heap] Check the old generation limit in SetIsLoading(false) without
+ incremental marking
+
+The old generation allocation limit is only checked when the mutator
+expands the old generation: on a new old-space page or a large object
+allocation. Objects promoted by the scavenger consume the headroom
+without any check. Upstream covers this by starting incremental marking
+after a scavenge (StartIncrementalMarkingIfAllocationLimitIsReached())
+and from the incremental marking task, but both do nothing with
+--no-incremental-marking, which workerd passes.
+
+A worker that allocates mostly short-lived objects, a few of which
+survive two scavenges and then die, therefore grows its old generation
+well past the limit, in the worst case to the maximum heap size, before
+anything collects it. With --no-incremental-marking
+--max-old-space-size=128 and 1.5 MB of live data, d8 runs each full GC at
+127 MB ("scavenge might not succeed").
+
+SetIsLoading(false) is the embedder's signal that a pause is acceptable.
+It already schedules the incremental marking task for this purpose. When
+incremental marking is disabled, make it check the old generation limit
+itself and run one atomic full GC if the limit is reached. The check runs
+whether or not the isolate was loading, so an embedder can call
+SetIsLoading(false) at each idle point.
+
+With incremental marking enabled, behaviour is unchanged.
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1610,8 +1610,11 @@ class V8_EXPORT Isolate {
+    * SetIsLoading(true) when loading starts and SetIsLoading(false) when it
+    * ends.
+    * It's valid to call SetIsLoading(true) again while loading, which will
+-   * update the timestamp when V8 considers the load started. Calling
+-   * SetIsLoading(false) while not loading does nothing.
++   * update the timestamp when V8 considers the load started.
++   * SetIsLoading(false) tells V8 that this is a good time for a GC pause,
++   * whether or not the isolate was loading. If incremental marking is disabled
++   * and the old generation allocation limit has been reached, the call
++   * performs a full GC before it returns.
+    * V8 uses these notifications to guide heuristics.
+    * This is an unfinished experimental feature. Semantics and implementation
+    * may change frequently.
+diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+--- a/src/heap/heap.cc
++++ b/src/heap/heap.cc
+@@ -7705,6 +7705,18 @@ void Heap::NotifyLoadingEnded(LeaveHeapState context) {
+       // and advance marking if incremental marking is active.
+       job->ScheduleTask();
+     }
++    // The task can only act by starting incremental marking. Without
++    // incremental marking the old generation allocation limit is checked only
++    // when the mutator expands the old generation, so objects promoted by the
++    // scavenger can take the old generation past the limit unnoticed. The
++    // embedder calls this when a pause is acceptable, so check the limit here
++    // and collect atomically.
++    if (!v8_flags.incremental_marking && gc_state() == NOT_IN_GC &&
++        deserialization_complete() && !isolate()->serializer_enabled() &&
++        !always_allocate() && OldGenerationSpaceAvailable() == 0) {
++      CollectAllGarbage(GCFlag::kNoFlags,
++                        GarbageCollectionReason::kAllocationLimit);
++    }
+   } else {
+     DCHECK_EQ(context, LeaveHeapState::kReachedTimeout);
+     // Nothing to do here because we only trigger this from a GC.
+diff --git a/test/unittests/heap/heap-unittest.cc b/test/unittests/heap/heap-unittest.cc
+--- a/test/unittests/heap/heap-unittest.cc
++++ b/test/unittests/heap/heap-unittest.cc
+@@ -584,6 +584,66 @@ TEST_F(HeapTest, CollectingAllAvailableGarbageShrinksNewSpace) {
+   CHECK_EQ(new_space->TotalCapacity(), new_space->MinimumCapacity());
+ }
+ 
++// Without incremental marking, objects promoted by the scavenger can take the
++// old generation past its allocation limit without a full GC, because only the
++// mutator's old generation allocations check the limit. SetIsLoading(false)
++// checks it too, whether or not the isolate was loading.
++TEST_F(HeapTest,
++       LoadingEndedCollectsAtAllocationLimitWithoutIncrementalMarking) {
++  if (v8_flags.single_generation || v8_flags.sticky_mark_bits) return;
++  ManualGCScope manual_gc_scope(i_isolate());
++  FlagScope<bool> no_incremental_marking(&v8_flags.incremental_marking, false);
++  Factory* factory = i_isolate()->factory();
++
++  // Compute the allocation limit from the live size.
++  InvokeMajorGC();
++
++  for (bool loading : {true, false}) {
++    if (loading) v8_isolate()->SetIsLoading(true);
++    ASSERT_GT(OldGenerationSpaceAvailable(), 0u);
++    const int full_gcs = heap()->ms_count();
++    {
++      HandleScope scope(i_isolate());
++      // Young objects of regular size that the scope keeps alive, so that the
++      // scavenges their allocation causes promote them.
++      const int kArrayLength = 8 * KB;
++      const int kMaxArrays =
++          static_cast<int>(GB / (kArrayLength * kTaggedSize));
++      for (int i = 0; OldGenerationSpaceAvailable() > 0; i++) {
++        ASSERT_LT(i, kMaxArrays);
++        USE(factory->NewFixedArray(kArrayLength));
++      }
++      // The limit is reached, but nothing has checked it. If this fails, V8
++      // has started to check the limit after promotion and the check in
++      // Heap::NotifyLoadingEnded() may no longer be needed.
++      EXPECT_EQ(full_gcs, heap()->ms_count());
++    }
++    v8_isolate()->SetIsLoading(false);
++    EXPECT_EQ(full_gcs + 1, heap()->ms_count());
++    EXPECT_GT(OldGenerationSpaceAvailable(), 0u);
++
++    // Below the limit the notification does not collect.
++    v8_isolate()->SetIsLoading(false);
++    EXPECT_EQ(full_gcs + 1, heap()->ms_count());
++  }
++}
++
++// With incremental marking, SetIsLoading(false) leaves the limit to the
++// incremental marking task.
++TEST_F(HeapTest, LoadingEndedDoesNotCollectWithIncrementalMarking) {
++  if (!v8_flags.incremental_marking) return;
++  ManualGCScope manual_gc_scope(i_isolate());
++  InvokeMajorGC();
++  const int full_gcs = heap()->ms_count();
++  // Put the old generation at its allocation limit.
++  heap()->limits()->SetAllocationLimit(
++      heap()->OldGenerationConsumedBytes(),
++      heap()->limits()->global_allocation_limit());
++  ASSERT_EQ(0u, OldGenerationSpaceAvailable());
++  v8_isolate()->SetIsLoading(false);
++  EXPECT_EQ(full_gcs, heap()->ms_count());
++}
++
+ // Test that HAllocateObject will always return an object in new-space.
+ TEST_F(HeapTest, OptimizedAllocationAlwaysInNewSpace) {
+   if (v8_flags.single_generation) return;

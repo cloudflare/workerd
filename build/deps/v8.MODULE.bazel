@@ -79,6 +79,7 @@ PATCHES = [
     "0054-Add-SnapshotCreator-HasSuspendedGenerators.patch",
     "0055-Track-external-memory-separately-from-the-global-allocation-limit.patch",
     "0056-Skip-the-copy-of-zero-bytes-in-SnapshotByteSource-CopyRaw.patch",
+    "0057-heap-Check-the-old-generation-limit-in-SetIsLoading-false-without-incremental-marking.patch",
 ]
 
 http_archive(
