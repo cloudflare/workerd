@@ -619,12 +619,21 @@ async function readThrough(request, env, ctx) {
 // joiner's request: streams cannot cross requests.
 async function join(fill, ticket) {
   const same = ticket !== null && ticket !== 'none' && ticket === fill.ticket;
-  while (!fill.over && !(same && fill.bytes !== null)) {
-    await new Promise((resolve) => fill.waiting.push(resolve));
-  }
+  while (!fill.over && !(same && fill.bytes !== null)) await woken(fill);
   const { head, bytes } = fill;
   if (!same || bytes === null) return null;
   return { head, body: new Response(bytes).body, size: bytes.byteLength };
+}
+
+// Until the fill wakes its joiners, or 100 ms. The timer keeps this
+// request pending: workerd cancels one that awaits only another request's
+// promise as hung.
+function woken(fill) {
+  let timer;
+  return Promise.race([
+    new Promise((resolve) => fill.waiting.push(resolve)),
+    new Promise((resolve) => (timer = setTimeout(resolve, 100))),
+  ]).finally(() => clearTimeout(timer));
 }
 
 // Runs the Worker for a miss of `at`, and answers with its response. The
