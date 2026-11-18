@@ -12,6 +12,10 @@ import {
   readlinkSync,
   realpathSync,
   unlinkSync,
+  cpSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
   link,
   symlink,
   readlink,
@@ -19,6 +23,7 @@ import {
   unlink,
   promises,
 } from 'node:fs';
+import { Buffer } from 'node:buffer';
 
 strictEqual(typeof existsSync, 'function');
 strictEqual(typeof statSync, 'function');
@@ -464,5 +469,57 @@ export const symlinkAndUnlinkPromisesTest = {
 
     // But unlinking does not remove the source.
     ok(existsSync(src));
+  },
+};
+
+export const relativeSymlinkTargetIsKeptAndResolvedFromTheLink = {
+  async test() {
+    mkdirSync('/tmp/r/sub', { recursive: true });
+    writeFileSync('/tmp/r/sub/x.txt', 'x');
+
+    // The target is stored as written and resolves from the link's directory.
+    symlinkSync('sub/x.txt', '/tmp/r/link');
+    strictEqual(readlinkSync('/tmp/r/link'), 'sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/link', 'utf8'), 'x');
+    strictEqual(realpathSync('/tmp/r/link'), '/tmp/r/sub/x.txt');
+
+    symlinkSync('../sub/x.txt', '/tmp/r/sub/up');
+    strictEqual(readlinkSync('/tmp/r/sub/up'), '../sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/sub/up', 'utf8'), 'x');
+
+    // A relative link to a directory can be traversed.
+    symlinkSync('sub', '/tmp/r/dirlink');
+    strictEqual(readFileSync('/tmp/r/dirlink/x.txt', 'utf8'), 'x');
+
+    // Absolute targets are also kept as written.
+    symlinkSync('/tmp/r//sub/../sub/x.txt', '/tmp/r/abs');
+    strictEqual(readlinkSync('/tmp/r/abs'), '/tmp/r//sub/../sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/abs', 'utf8'), 'x');
+
+    // Buffer targets are kept as written.
+    symlinkSync(Buffer.from('sub/x.txt'), '/tmp/r/buf');
+    strictEqual(readlinkSync('/tmp/r/buf'), 'sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/buf', 'utf8'), 'x');
+
+    // cp writes the absolute target, so the copy still points at the same
+    // file from another directory.
+    mkdirSync('/tmp/r2');
+    cpSync('/tmp/r/link', '/tmp/r2/link', { dereference: false });
+    strictEqual(readlinkSync('/tmp/r2/link'), '/tmp/r/sub/x.txt');
+    strictEqual(readFileSync('/tmp/r2/link', 'utf8'), 'x');
+    cpSync('/tmp/r/abs', '/tmp/r2/abs', { dereference: false });
+    strictEqual(readlinkSync('/tmp/r2/abs'), '/tmp/r//sub/../sub/x.txt');
+
+    // The callback form.
+    const { promise, resolve, reject } = Promise.withResolvers();
+    symlink('sub/x.txt', '/tmp/r/cb', (err) => (err ? reject(err) : resolve()));
+    await promise;
+    strictEqual(readlinkSync('/tmp/r/cb'), 'sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/cb', 'utf8'), 'x');
+
+    // The promises form.
+    await promises.symlink('../sub/x.txt', '/tmp/r/sub/p');
+    strictEqual(await promises.readlink('/tmp/r/sub/p'), '../sub/x.txt');
+    strictEqual(readFileSync('/tmp/r/sub/p', 'utf8'), 'x');
   },
 };
