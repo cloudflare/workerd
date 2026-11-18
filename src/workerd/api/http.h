@@ -82,7 +82,9 @@ class Body: public jsg::Object {
   // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
   static ExtractedBody extractBody(jsg::Lock& js, Initializer init);
 
-  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
+  // `headers` is none only for a Response that creates its Headers on first use, which then gets
+  // the body's Content-Type from getPendingContentType().
+  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, kj::Maybe<Headers&> headers);
 
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
@@ -153,6 +155,19 @@ class Body: public jsg::Object {
     return bodyStream;
   }
 
+  // The Headers object of the Request/Response subclass.
+  virtual Headers& getHeadersRef(jsg::Lock& js) = 0;
+
+  // The Content-Type the body implies, if the constructor got no Headers to put it in.
+  kj::Maybe<kj::StringPtr> getPendingContentType() const {
+    return pendingContentType;
+  }
+  kj::Maybe<kj::String> takePendingContentType() {
+    auto result = kj::mv(pendingContentType);
+    pendingContentType = kj::none;
+    return result;
+  }
+
  private:
   // The body stream. The null state represents a null body ("no body"). Buffer-backed streams
   // carry their own retransmit buffer, making the body rewindable for redirect handling.
@@ -163,10 +178,8 @@ class Body: public jsg::Object {
   // working outside of a request context (where IoContext::current() would throw).
   uint64_t bufferingLimit();
 
-  // HACK: This `headersRef` variable refers to a Headers object in the Request/Response subclass.
-  //   As such, it will briefly dangle during object destruction. While unlikely to be an issue,
-  //   it's worth being aware of.
-  Headers& headersRef;
+  // The Content-Type the body implies, if the constructor got no Headers to put it in.
+  kj::Maybe<kj::String> pendingContentType;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(bodyStream);
@@ -953,6 +966,9 @@ class Request final: public Body {
   kj::StringPtr getMethod();
   kj::StringPtr getUrl();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
+  Headers& getHeadersRef(jsg::Lock& js) override {
+    return *headers;
+  }
   kj::StringPtr getRedirect();
   kj::Maybe<jsg::Ref<Fetcher>> getFetcher();
 
@@ -1162,10 +1178,11 @@ class Response final: public Body {
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
+  // `headers` is none if they should be created only when used.
   Response(jsg::Lock& js,
       int statusCode,
       kj::Maybe<kj::String> statusText,
-      jsg::Ref<Headers> headers,
+      kj::Maybe<jsg::Ref<Headers>> headers,
       CfProperty&& cf,
       kj::Maybe<Body::ExtractedBody> body,
       kj::Array<kj::String> urlList = {},
@@ -1248,6 +1265,7 @@ class Response final: public Body {
   // unset status message falls back to the status code's conventional phrase.
   kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
+  Headers& getHeadersRef(jsg::Lock& js) override;
 
   bool getOk();
   bool getRedirected();
@@ -1339,7 +1357,9 @@ class Response final: public Body {
   // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
   // requires, while getReasonPhrase() derives the status code's conventional phrase.
   kj::Maybe<kj::String> statusText;
-  jsg::Ref<Headers> headers;
+  // Created on first use, with the body's Content-Type, if the Response was constructed without
+  // headers: most Responses are only sent, which needs nothing but the Content-Type.
+  kj::Maybe<jsg::Ref<Headers>> headers;
   CfProperty cf;
 
   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
