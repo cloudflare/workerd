@@ -12,6 +12,7 @@ mod async_context;
 mod buffer;
 mod cell;
 mod dict;
+mod external_memory;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -45,6 +46,8 @@ pub use buffer::ToJsTypedArray;
 pub use cell::Cell;
 pub use cell::RefCell;
 pub use dict::Dict;
+pub use external_memory::ExternalMemoryAdjustment;
+pub use external_memory::ExternalMemoryTarget;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
@@ -74,10 +77,12 @@ pub use resource::NestedType;
 pub use resource::NestedTypeMember;
 pub use resource::Rc;
 pub use resource::Resource;
+pub use resource::SnapshotRecreated;
 pub use resource::Undescribed;
 pub use resource::Weak;
 pub use resource::described_member;
 pub use resource::nested_type;
+pub use resource::snapshot_recreate_leak;
 pub use resource::undescribed;
 pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
@@ -1631,6 +1636,16 @@ pub trait GarbageCollected: Traced {
     /// type that needs it must override it to return `true`.
     fn detach_before_drop(&self) -> bool {
         false
+    }
+
+    /// The startup-snapshot recreate hook of a stateless resource type
+    /// (`#[jsg_resource(snapshot_stateless)]`): a fresh instance, leaked as the trait object a
+    /// C++ `Wrappable` takes over for a wrapper restored from the snapshot. `None` for every other
+    /// type, whose live instance keeps the Worker out of the pipeline. Runs in the zygote before
+    /// `CreateBlob()` and in a Worker started from the snapshot before its context exists, so it
+    /// must not touch V8 or panic. See [`snapshot_recreate_leak`].
+    fn snapshot_recreate(&self) -> Option<SnapshotRecreated> {
+        None
     }
 }
 

@@ -4,18 +4,25 @@
 
 // A case of startup-snapshot-node-test.js: MODE names the object the top level creates.
 
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { env } from 'cloudflare:workers';
+// Whether a Worker was started from a startup snapshot is asked at request time: at module scope
+// the answer would be the zygote's and be baked into the snapshot.
+import unsafe from 'workerd:unsafe';
 
 const MODE = env.MODE;
 
-// Whether this Worker was started from a startup snapshot rather than running its top level
-// itself. In the zygote's env a service binding is an `undefined` placeholder (the started Worker
-// supplies the value: isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF
-// is undefined exactly when this code runs in the zygote, and the constant is baked into the
-// snapshot.
-const snapshotUsed = typeof env.SELF === 'undefined';
+// An instance of a JavaScript subclass is a wrapper around the same native AsyncResource.
+class Handler extends AsyncResource {
+  constructor() {
+    super('handler');
+  }
+
+  storeOf(als) {
+    return this.runInAsyncScope(() => als.getStore());
+  }
+}
 
 let state = null;
 
@@ -33,6 +40,24 @@ switch (MODE) {
     // hold, so the zygote rejects the snapshot.
     state = new AsyncLocalStorage({ defaultValue: 'default' });
     break;
+  case 'async-resource':
+    // AsyncResource::snapshotClone(). A resource created in the root frame captures no frame.
+    state = {
+      als: new AsyncLocalStorage(),
+      resource: new AsyncResource('startup'),
+      handler: new Handler(),
+    };
+    break;
+  case 'async-resource-frame': {
+    // A resource created inside a frame holds that frame, which its clone cannot carry, so the
+    // zygote rejects the snapshot.
+    const als = new AsyncLocalStorage();
+    state = {
+      als,
+      resource: als.run('framed', () => new AsyncResource('startup')),
+    };
+    break;
+  }
   case 'diagnostics-channel': {
     // node:diagnostics_channel reaches the stateless DiagnosticsChannelModule; its channels and
     // their subscribers are JavaScript.
@@ -58,6 +83,46 @@ function checks() {
     }
     case 'als-default':
       return { defaultValue: state.getStore() === 'default' };
+    case 'async-resource': {
+      const { als, resource, handler } = state;
+      const receiver = {};
+      const bound = resource.bind(function (a, b) {
+        return this === receiver && a + b === 3 && als.getStore() === undefined;
+      }, receiver);
+      return {
+        ids: resource.asyncId() === 0 && resource.triggerAsyncId() === 0,
+        // The resource belongs to the root frame, so its scope leaves the caller's frame.
+        rootFrame:
+          als.run(1, () => resource.runInAsyncScope(() => als.getStore())) ===
+          undefined,
+        callerFrameRestored:
+          als.run(1, () => {
+            resource.runInAsyncScope(() => {});
+            return als.getStore();
+          }) === 1,
+        receiverAndArguments: resource.runInAsyncScope(
+          function (a, b) {
+            return this === receiver && a + b === 3;
+          },
+          receiver,
+          1,
+          2
+        ),
+        bind: als.run(1, () => bound(1, 2)),
+        boundResource: bound.asyncResource === resource,
+        subclass:
+          handler instanceof Handler &&
+          als.run(1, () => handler.storeOf(als)) === undefined,
+      };
+    }
+    case 'async-resource-frame': {
+      const { als, resource } = state;
+      return {
+        capturedFrame:
+          resource.runInAsyncScope(() => als.getStore()) === 'framed',
+        outside: als.getStore() === undefined,
+      };
+    }
     case 'diagnostics-channel': {
       const { channel, messages } = state;
       channel.publish('hello');
@@ -72,6 +137,10 @@ function checks() {
 
 export default {
   async fetch() {
-    return Response.json({ mode: MODE, snapshotUsed, checks: checks() });
+    return Response.json({
+      mode: MODE,
+      snapshotUsed: unsafe.startedFromStartupSnapshot(),
+      checks: checks(),
+    });
   },
 };

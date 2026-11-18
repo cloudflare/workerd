@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "websocket-standard-url-test", worker = .standardWorker),
+    (name = "websocket-legacy-url-test", worker = .legacyWorker),
+    (name = "websocket-url-server", worker = .serverWorker),
+  ],
+);
+
+const standardWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "websocket_standard_url_and_extensions"],
+  modules = [(name = "worker", esModule = embed "websocket-standard-url-test.js")],
+  globalOutbound = "websocket-url-server",
+  bindings = [(name = "standard", json = "true")],
+);
+
+const legacyWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+  modules = [(name = "worker", esModule = embed "websocket-standard-url-test.js")],
+  globalOutbound = "websocket-url-server",
+  bindings = [(name = "standard", json = "false")],
+);
+
+const serverWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+  modules = [(name = "worker", esModule = embed "websocket-standard-url-server.js")],
+);

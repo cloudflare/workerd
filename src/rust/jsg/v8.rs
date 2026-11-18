@@ -205,6 +205,11 @@ pub mod ffi {
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
 
+        /// Called from C++ `Wrappable::snapshotClone`: the trait object of a fresh instance for
+        /// a wrapper restored from a startup snapshot (`GarbageCollected::snapshot_recreate`), or
+        /// a cleared pointer (`data_ptr == 0`) when the resource's type is not stateless.
+        unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &Wrappable) -> TraitObjectPtr;
+
         /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
         /// which C++ adds to the Wrappable's own.
         unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
@@ -234,6 +239,12 @@ pub mod ffi {
         /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
         /// snapshot.
         type MemoryTracker;
+        /// C++ `const jsg::ExternalMemoryTarget`, the isolate's singleton that adjustments add
+        /// to. Thread-safe.
+        type ExternalMemoryTarget;
+        /// The interface around C++ `jsg::ExternalMemoryAdjustment` that `ffi.c++` implements
+        /// (see `ffi.h`).
+        type ExternalMemoryAdjustment;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -989,7 +1000,34 @@ pub mod ffi {
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
         pub unsafe fn ignore_leak(ptr: usize);
+
+        // ExternalMemory
+        pub unsafe fn isolate_external_memory_target(
+            isolate: *mut Isolate,
+        ) -> KjArc<ExternalMemoryTarget>;
+        pub unsafe fn isolate_external_memory_adjustment(
+            isolate: *mut Isolate,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_adjustment(
+            target: &ExternalMemoryTarget,
+            amount: usize,
+        ) -> KjOwn<ExternalMemoryAdjustment>;
+        pub fn external_memory_target_is_isolate_alive(target: &ExternalMemoryTarget) -> bool;
+        pub fn external_memory_target_pending_update_for_test(target: &ExternalMemoryTarget)
+        -> i64;
+        pub fn external_memory_adjustment_amount(adjustment: &ExternalMemoryAdjustment) -> usize;
+        pub fn external_memory_adjustment_adjust(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            delta: isize,
+        ) -> Result<()>;
+        pub fn external_memory_adjustment_set(
+            adjustment: Pin<&mut ExternalMemoryAdjustment>,
+            amount: usize,
+        );
     }
+
+    impl KjOwn<ExternalMemoryAdjustment> {}
 
     /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
     ///
@@ -5137,6 +5175,25 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // literal). Convert to &str so CXX can pass it as rust::Str. The C++
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
+    }
+}
+
+unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &ffi::Wrappable) -> ffi::TraitObjectPtr {
+    const NONE: ffi::TraitObjectPtr = ffi::TraitObjectPtr {
+        data_ptr: 0,
+        vtable_ptr: 0,
+        type_id_lo: 0,
+        type_id_hi: 0,
+    };
+    // SAFETY: wrappable is valid.
+    unsafe {
+        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
+            return NONE;
+        };
+        trait_ptr
+            .as_gc_ref()
+            .snapshot_recreate()
+            .map_or(NONE, |recreated| recreated.0)
     }
 }
 

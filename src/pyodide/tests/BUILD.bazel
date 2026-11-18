@@ -29,6 +29,14 @@ py_wd_test("asgi-sse")
 
 py_wd_test("top-level-entropy")
 
+# Restores the baseline snapshot without creating one, so the top level runs after the restore and
+# reads the bad entropy flag at the address the restored snapshot records, if it records one.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-baseline",
+    make_snapshot = False,
+)
+
 py_wd_test("subdirectory")
 
 py_wd_test(

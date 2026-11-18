@@ -11,16 +11,13 @@
 // plain Workers and the same assertions hold with snapshotUsed false.
 
 import { strictEqual } from 'node:assert';
-import { env } from 'cloudflare:workers';
-
-// See startup-snapshot-node-case-test.js.
-const snapshotUsed = typeof env.SELF === 'undefined';
+import unsafe from 'workerd:unsafe';
 
 export default {
   async test(ctrl, env) {
     // The runner went through the same pipeline as the cases: whether it was started from a
     // snapshot says whether the pipeline is on in this variant.
-    const pipelineOn = snapshotUsed;
+    const pipelineOn = unsafe.startedFromStartupSnapshot();
     const run = async (name, expectedSnapshotUsed) => {
       const response = await env[name].fetch('http://case/');
       const r = await response.json();
@@ -34,9 +31,12 @@ export default {
         strictEqual(value, true, `${name}: ${check}`);
       }
     };
-    for (const name of ['als', 'diagnostics-channel']) {
+    for (const name of ['als', 'async-resource', 'diagnostics-channel']) {
       await run(name, pipelineOn);
     }
-    await run('als-default', false);
+    // Cases the zygote rejects: always plain Workers.
+    for (const name of ['als-default', 'async-resource-frame']) {
+      await run(name, false);
+    }
   },
 };

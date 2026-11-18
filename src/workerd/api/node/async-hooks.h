@@ -181,6 +181,10 @@ class AsyncResource final: public jsg::Object {
 
   AsyncResource(jsg::Lock& js);
 
+  // A resource of the root frame, with no captured frame or IoContext; what snapshotClone()
+  // rebuilds.
+  AsyncResource() = default;
+
   // While Node.js' API expects the first argument passed to the `new AsyncResource(...)`
   // constructor to be a string specifying the resource type, we do not actually use it
   // for anything. We'll just ignore the value and not store it, but we at least need to
@@ -220,6 +224,14 @@ class AsyncResource final: public jsg::Object {
 
   // No-op. We do not track resource lifetimes. This is provided only for API compatibility.
   void emitDestroy(jsg::Lock&) {};
+
+  // Clonable only when created in the root frame: a captured AsyncContextFrame is a jsg::Ref,
+  // which the clone contract forbids, and would need the frame restored alongside; kj::none
+  // otherwise.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    if (frame != kj::none) return kj::none;
+    return ownAsWrappable(kj::refcounted<AsyncResource>());
+  }
 
   JSG_RESOURCE_TYPE(AsyncResource) {
     JSG_STATIC_METHOD_NAMED(bind, staticBind);
