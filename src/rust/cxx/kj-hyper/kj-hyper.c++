@@ -292,25 +292,74 @@ void for_each_header(const kj::HttpHeaders& headers, Head& head) {
       [&](kj::StringPtr name, kj::StringPtr value) { head.append(bytes(name), bytes(value)); });
 }
 
-kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
-    ::rust::Slice<const uint8_t> arena,
-    ::rust::Slice<const uint32_t> lens) {
-  KJ_REQUIRE(lens.size() % 2 == 0, "malformed header block");
-  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
-  kj::ArrayPtr<const char> rest = owned;
+int32_t HeaderIds::resolve(::rust::Str name) {
+  KJ_IF_SOME(id, table.stringToId(kj::str(kj::arrayPtr(name.data(), name.size())))) {
+    ids.add(id);
+    return static_cast<int32_t>(ids.size() - 1);
+  }
+  return -1;
+}
+
+kj::Own<HeaderIds> new_header_ids(const kj::HttpHeaderTable& table) {
+  return kj::heap<HeaderIds>(table);
+}
+
+namespace {
+
+// A header whose name is in no slot, as body.rs's `UNINDEXED`.
+constexpr uint32_t UNINDEXED = UINT32_MAX;
+
+// Adds a block's headers: a name with a slot by its id, unless it repeats, and any other as kj
+// adds a name it looks up.
+void addBlock(kj::HttpHeaders& headers,
+    kj::Maybe<const HeaderIds&> ids,
+    kj::ArrayPtr<const char> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  KJ_REQUIRE(fields.size() % 3 == 0, "malformed header block");
+  kj::ArrayPtr<const char> rest = arena;
   auto next = [&](uint32_t len) {
     KJ_REQUIRE(len < rest.size() && rest[len] == '\0', "malformed header block");
     kj::StringPtr text(rest.begin(), len);
     rest = rest.slice(len + 1);
     return text;
   };
-  auto headers = kj::heap<kj::HttpHeaders>(table);
-  for (size_t i = 0; i < lens.size(); i += 2) {
-    auto name = next(lens[i]);
-    auto value = next(lens[i + 1]);
-    headers->addPtrPtr(name, value);
+  for (size_t i = 0; i < fields.size(); i += 3) {
+    auto slot = fields[i];
+    auto name = next(fields[i + 1]);
+    auto value = next(fields[i + 2]);
+    KJ_IF_SOME(slots, ids) {
+      if (slot != UNINDEXED) {
+        KJ_REQUIRE(slot < slots.size(), "malformed header block");
+        auto id = slots[slot];
+        // A repeat is joined to the first value (or, for Set-Cookie, kept apart) by kj.
+        if (headers.get(id) == kj::none) {
+          headers.setPtr(id, value);
+          continue;
+        }
+      }
+    }
+    headers.addPtrPtr(name, value);
   }
+}
+
+}  // namespace
+
+kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
+  auto headers = kj::heap<kj::HttpHeaders>(table);
+  addBlock(*headers, kj::none, owned, fields);
   headers->takeOwnership(kj::mv(owned));
+  return headers;
+}
+
+kj::Own<kj::HttpHeaders> headers_over_block(const HeaderIds& ids,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  auto headers = kj::heap<kj::HttpHeaders>(ids.getTable());
+  addBlock(*headers, ids, kj::arrayPtr(reinterpret_cast<const char*>(arena.data()), arena.size()),
+      fields);
   return headers;
 }
 

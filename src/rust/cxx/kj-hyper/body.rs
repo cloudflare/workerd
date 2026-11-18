@@ -17,7 +17,8 @@
 //! `Transfer-Encoding`, and hyper closes a connection, saying so after the other headers, when
 //! the request asked it to (`Connection: close`, HTTP/1.0 without keep-alive, which it also
 //! answers as HTTP/1.0 and never chunked); kj kept those open. hyper's headers come back packed
-//! ([`HeaderBlock`]) and C++ checks the block's bounds before building `kj::HttpHeaders`.
+//! ([`HeaderBlock`]) and C++ checks the block's bounds before building `kj::HttpHeaders`; a
+//! server resolves each name's kj id once per connection ([`HeaderIds`]).
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -49,11 +50,14 @@ use hyper::ext::HeaderCaseMap;
 use tokio::io::ReadBuf;
 
 use crate::Result;
+use crate::ffi;
 use crate::ffi::Borrowing;
 use crate::ffi::HttpHeaderTable;
 use crate::ffi::HttpHeaders;
 use crate::ffi::for_each_header;
 use crate::ffi::headers_from_block;
+use crate::ffi::headers_over_block;
+use crate::ffi::new_header_ids;
 
 struct BodyState {
     body: RefCell<Option<Incoming>>,
@@ -708,29 +712,81 @@ fn title_case(name: &http::HeaderName) -> Bytes {
     cased.into()
 }
 
-/// Incoming headers packed for C++ to build `kj::HttpHeaders` from in one allocation.
+/// A header in a [`HeaderBlock`] whose name has no slot in [`HeaderIds`]: C++ looks it up.
+const UNINDEXED: u32 = u32::MAX;
+
+/// How many names [`HeaderIds`] remembers, so a peer cannot grow it without end. Names past
+/// that are looked up as kj looks them up.
+const MAX_REMEMBERED_NAMES: usize = 128;
+
+/// The kj ids of the header names one connection's requests carry, each looked up in the table
+/// once instead of on every request (`kj::HttpHeaderTable::stringToId` hashes a name byte by
+/// byte; hyper's `HeaderName` of a standard header hashes as one number).
+pub struct HeaderIds<'t> {
+    kj: Borrowing<'t, ffi::HeaderIds>,
+    /// The slot in `kj` of each name looked up so far, or [`UNINDEXED`].
+    slots: http::HeaderMap<u32>,
+}
+
+impl<'t> HeaderIds<'t> {
+    pub fn new(table: &'t HttpHeaderTable) -> Self {
+        Self {
+            kj: new_header_ids(table),
+            slots: http::HeaderMap::default(),
+        }
+    }
+
+    fn slot(&mut self, name: &http::HeaderName) -> u32 {
+        if let Some(slot) = self.slots.get(name) {
+            return *slot;
+        }
+        let slot = u32::try_from(self.kj.as_mut().resolve(name.as_str())).unwrap_or(UNINDEXED);
+        if self.slots.len() < MAX_REMEMBERED_NAMES {
+            self.slots.insert(name.clone(), slot);
+        }
+        slot
+    }
+}
+
+/// Incoming headers packed for C++ to build `kj::HttpHeaders` from.
 ///
-/// Each header's name and value, each followed by a NUL, and their lengths. Names keep the
-/// peer's spelling where hyper recorded it (`preserve_header_case`); hyper groups repeated names.
+/// Each header's name and value, each followed by a NUL, and per header its name's slot in
+/// [`HeaderIds`] (or [`UNINDEXED`]) and the two lengths. Names keep the peer's spelling where
+/// hyper recorded it (`preserve_header_case`); hyper groups repeated names. A server reuses its
+/// blocks, so filling one allocates only when its headers outgrow it.
 #[derive(Default)]
 pub struct HeaderBlock {
     arena: Vec<u8>,
-    lens: Vec<u32>,
+    fields: Vec<u32>,
 }
 
 impl HeaderBlock {
+    /// A block of `map`'s headers, every name to be looked up by C++.
     pub fn new(map: &http::HeaderMap, extensions: &http::Extensions) -> Self {
+        let mut block = Self::default();
+        block.fill(map, extensions, None);
+        block
+    }
+
+    /// Packs `map`'s headers in place of the block's, with the slots `ids` gives their names.
+    pub fn fill(
+        &mut self,
+        map: &http::HeaderMap,
+        extensions: &http::Extensions,
+        mut ids: Option<&mut HeaderIds<'_>>,
+    ) {
         let spellings = extensions.get::<HeaderCaseMap>();
         // A spelling is as long as its name.
         let size = map
             .iter()
             .map(|(name, value)| name.as_str().len() + value.len() + 2)
             .sum();
-        let mut block = Self {
-            arena: Vec::with_capacity(size),
-            lens: Vec::with_capacity(2 * map.len()),
-        };
+        self.arena.clear();
+        self.arena.reserve(size);
+        self.fields.clear();
+        self.fields.reserve(3 * map.len());
         for name in map.keys() {
+            let slot = ids.as_mut().map_or(UNINDEXED, |ids| ids.slot(name));
             let mut spelled = spellings.map(|s| s.get_all_internal(name));
             for value in map.get_all(name) {
                 let spelling = spelled.as_mut().and_then(Iterator::next);
@@ -741,23 +797,38 @@ impl HeaderBlock {
                 else {
                     continue;
                 };
-                block.arena.extend_from_slice(name);
-                block.arena.push(0);
-                block.arena.extend_from_slice(value.as_bytes());
-                block.arena.push(0);
-                block.lens.extend([name_len, value_len]);
+                self.arena.extend_from_slice(name);
+                self.arena.push(0);
+                self.arena.extend_from_slice(value.as_bytes());
+                self.arena.push(0);
+                self.fields.extend([slot, name_len, value_len]);
             }
         }
-        block
     }
 
-    /// The headers as `kj::HttpHeaders` over `table`, which they borrow.
+    /// The headers as `kj::HttpHeaders` over `table`, which they borrow, owning a copy of the
+    /// block.
     ///
     /// # Errors
     ///
     /// A block whose lengths do not describe its bytes.
     pub fn to_kj<'t>(&self, table: &'t HttpHeaderTable) -> Result<Borrowing<'t, HttpHeaders>> {
-        headers_from_block(table, &self.arena, &self.lens)
+        headers_from_block(table, &self.arena, &self.fields)
+    }
+
+    /// The headers as `kj::HttpHeaders` over the table behind `ids`, which filled the block,
+    /// pointing into the block, which they borrow.
+    ///
+    /// # Errors
+    ///
+    /// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
+    pub fn as_kj<'a>(&'a self, ids: &HeaderIds<'a>) -> Result<Borrowing<'a, HttpHeaders>> {
+        headers_over_block(&ids.kj, &self.arena, &self.fields)
+    }
+
+    /// Whether the block is small enough to keep for another request.
+    pub fn reusable(&self) -> bool {
+        self.arena.capacity() <= 8192
     }
 }
 
