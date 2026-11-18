@@ -888,8 +888,13 @@ impl Channel for EntrypointChannel {
         // A restored persistent stub tells the target so that it re-verifies that it still allows
         // persistent stubs; a bit already set by an outer hop is kept.
         ffi::request_metadata_set_from_persistent_stub(metadata.as_mut(), self.persistent);
-        // A template called without props runs with empty props.
-        let props = self.props.as_deref().map(ffi::frankenvalue_clone);
+        // A template called without props runs with empty props, as do empty props, which are
+        // not copied.
+        let props = self
+            .props
+            .as_deref()
+            .filter(|props| !ffi::frankenvalue_is_empty(props))
+            .map(ffi::frankenvalue_clone);
         self.worker
             .start_request(self.entrypoint.as_deref(), props, None, metadata, false)
     }
