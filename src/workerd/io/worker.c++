@@ -3350,6 +3350,23 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLock(RequestObserver& r
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
+  {
+    // When it's already this thread's turn, skip the waiting coroutine below.
+    kj::Maybe<AsyncLockHooks> hooks;
+    kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
+    KJ_IF_SOME(lt, lockTiming) {
+      hooksRef = hooks.emplace(*lt);
+    }
+    auto self = kj::atomicAddRef(*this);
+    KJ_IF_SOME(lock, asyncLockQueue.tryLockNow(self, hooksRef)) {
+      return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
+    }
+  }
+  return takeAsyncLockSlow(kj::mv(lockTiming));
+}
+
+kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockSlow(
+    kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
   // Held on the coroutine frame so it outlives the wait below.
   kj::Maybe<AsyncLockHooks> hooks;
   kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;

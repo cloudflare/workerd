@@ -564,6 +564,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
  private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
+  kj::Promise<AsyncLock> takeAsyncLockSlow(
+      kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
 
   kj::Own<IsolateObserver> metrics;
   // NOTE: destruction order is important here. The teardown guard should be destroyed after the
