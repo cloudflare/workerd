@@ -10430,6 +10430,63 @@ KJ_TEST("Server: handler validation does not evaluate unrelated getters") {
   conn.httpGet200("/", "ok");
 }
 
+KJ_TEST("Server: a dynamic worker a Durable Object holds does not leak") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers";
+                `export class Holder extends DurableObject {
+                `  async fetch(req) {
+                `    this.worker = this.env.LOADER.load({
+                `      compatibilityDate: "2025-01-01",
+                `      mainModule: "main.js",
+                `      modules: {
+                `        "main.js": "export default { fetch() { return new Response('OK'); } }",
+                `      },
+                `    });
+                `    return this.worker.getEntrypoint().fetch(req);
+                `  }
+                `}
+                `export default {
+                `  fetch(req, env) {
+                `    return env.HOLDER.get(env.HOLDER.idFromName("holder")).fetch(req);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "LOADER", workerLoader = () ),
+            ( name = "HOLDER", durableObjectNamespace = "Holder" ),
+          ],
+          durableObjectNamespaces = [( className = "Holder", uniqueKey = "holder" )],
+          durableObjectStorage = (inMemory = void),
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "OK");
+
+  // The server's drop aborts the object, which drops its hold on the dynamic worker's stub, and
+  // then clears the factory's tasks, the stub's unlink among them. `~TestServer` fails the case
+  // if the worker still holds the factory.
+}
+
 KJ_TEST("Server: a service that fails to start does not leak the services before it") {
   TestServer test(R"((
     services = [
