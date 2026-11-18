@@ -6,6 +6,7 @@
 
 #include "jsg.h"
 #include "util.h"
+#include "web-idl.h"
 #include "wrappable.h"
 
 #include <v8-function.h>
@@ -653,13 +654,22 @@ class PromiseWrapper {
     if (handle->IsPromise()) {
       auto promise = handle.As<v8::Promise>();
       if constexpr (!isVoid<T>() && !isV8Ref<T>()) {
+        if constexpr (webidl::IsRef<T>) {
+          // A promise that has already fulfilled with a resource is unwrapped now, into a
+          // promise that is resolved already, so that a caller can take the value out without
+          // waiting for a microtask. Unwrapping a resource runs no JavaScript. A value of the
+          // wrong type takes the .then() below, which rejects with the usual TypeError.
+          if (promise->State() == v8::Promise::kFulfilled) {
+            KJ_IF_SOME(value,
+                self.tryUnwrap(
+                    js, context, promise->Result(), static_cast<T*>(nullptr), kj::none)) {
+              return js.resolvedPromise(kj::mv(value));
+            }
+          }
+        }
         // Add a .then() to unwrap the promise's resolution (i.e. convert it from JS to C++).
         // Note that we don't need to handle the rejection case here as there is no wrapping
         // applied to exception values, so we just let it propagate through.
-        //
-        // TODO(perf): We could in theory check if promise->State() is kFulfilled and, in that
-        //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
-        //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
         auto then = check(v8::Function::New(
             context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));
