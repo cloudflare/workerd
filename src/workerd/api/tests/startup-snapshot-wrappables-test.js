@@ -341,9 +341,16 @@ export class Counter extends DurableObject {
 }
 
 async function test(ctrl, env) {
-  // The runner went through the same pipeline as the cases: whether it was started from a
-  // snapshot says whether the pipeline is on in this variant.
-  const pipelineOn = unsafe.startedFromStartupSnapshot();
+  // Only the @all-autogates variant runs the pipeline, and TEST_WORKERD is on exactly there. The
+  // runner went through the same pipeline as the cases, so it must have started from the
+  // snapshot exactly when the pipeline is on; otherwise its top level is not transferable, and
+  // every case would be checked against a pipeline that is off.
+  const pipelineOn = unsafe.isTestAutogateEnabled();
+  strictEqual(
+    unsafe.startedFromStartupSnapshot(),
+    pipelineOn,
+    'runner: snapshotUsed'
+  );
   // Whether URL is the TypeScript implementation (the TS_URL autogate), which decides whether the
   // searchparams case can be carried. User code cannot read an autogate, but unlike a JSG class,
   // a TypeScript class's source text is not [native code].
