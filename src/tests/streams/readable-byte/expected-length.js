@@ -29,17 +29,13 @@
 // before any read; C++ gives tee branches no length, so they go out
 // chunked. The declaration is the stream's total, so once anything has
 // been read before a fork, the fork and its own forks go out chunked in
-// both (PARITY). A partly read stream itself (ledger #45, a C++ defect)
-// is pinned in js-rpc-streams-crossflag-test.js, as no consumer here
-// accepts one.
+// both (PARITY). A partly read stream itself, which reports no length in
+// both (PARITY), is pinned in js-rpc-streams-crossflag-test.js, as no
+// consumer here accepts one.
 //
-// C++ DEFECT (ledger #46): a response whose byte source declares
-// expectedLength and is compressed on the way out by Content-Encoding:
-// gzip. TypeScript reports no length for an encoded body, so it goes out
-// chunked and decodes in full. C++ keeps the uncompressed length as the
-// Content-Length, as its tryGetLength() ignores the encoding, so the
-// compressed body falls short of it and the reader fails with 'Network
-// connection lost.'
+// PARITY: a response whose byte source declares expectedLength and is
+// compressed on the way out by Content-Encoding: gzip reports no length
+// for the encoded body, so it goes out chunked and decodes in full.
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -355,16 +351,12 @@ export function compressedByteResponse() {
   return new Response(body, { headers: { 'content-encoding': 'gzip' } });
 }
 
-// C++ DEFECT (ledger #46)
+// PARITY
 export const byteSourceCompressedResponseDropsLength = {
   async test(ctrl, env) {
     const resp = await env.SELF.fetch('http://example.org/gzip');
     strictEqual(resp.headers.get('content-encoding'), 'gzip');
-    if (usingTsImpl) {
-      strictEqual(await resp.text(), PAYLOAD);
-    } else {
-      await rejects(resp.text(), { message: 'Network connection lost.' });
-    }
+    strictEqual(await resp.text(), PAYLOAD);
   },
 };
 

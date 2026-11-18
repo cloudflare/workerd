@@ -3938,6 +3938,11 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
 }
 
 kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding encoding) {
+  // The declared expectedLength is the stream's total, which reading from the stream does not
+  // reduce, and the number of bytes before any Content-Encoding is applied.
+  if (encoding != StreamEncoding::IDENTITY || disturbed) {
+    return kj::none;
+  }
   return expectedLength;
 }
 
