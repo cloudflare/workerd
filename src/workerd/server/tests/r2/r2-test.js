@@ -83,6 +83,15 @@ export const largeAndRanges = {
         [{ offset: CHUNK - 3, length: 2 * CHUNK }, CHUNK - 3, 2 * CHUNK],
         [{ length: size + 100 }, 0, size],
       ];
+      // A length a Number can't hold exactly reads to the end, not past
+      // u64::MAX.
+      const huge = { offset: 1, length: '18446744073709551614' };
+      const request = { method: 'get', object: `v${size}`, range: huge };
+      const raw = await env.R2_WORKER.fetch('http://r2/', {
+        headers: { 'cf-r2-request': JSON.stringify(request) },
+      });
+      assert.strictEqual(raw.status, 200, raw.headers.get('cf-r2-error'));
+      await raw.body.cancel();
       for (const [range, offset, n] of cases) {
         if (offset + n > size) continue;
         const r = await env.BUCKET.get(`v${size}`, { range });

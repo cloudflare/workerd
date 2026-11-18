@@ -332,23 +332,40 @@ fn object_headers(object: &Object) -> Answer<http::HeaderMap> {
     Ok(map)
 }
 
+/// The path and query of an absolute URL, or of a request target, which
+/// may hold `://` in a key. Not `url::Url`, which would resolve dot segments
+/// in a key.
+fn target(url: &str) -> &str {
+    match url.split_once("://") {
+        Some((_, rest)) if !url.starts_with('/') => rest.find('/').map_or("", |i| &rest[i..]),
+        _ => url,
+    }
+}
+
 /// Fills `buffer` from `body` up to `limit` bytes: whether it is full. It
-/// grows as it is read, so a small body costs a small buffer.
+/// doubles as it is read, so a small body costs a small buffer and each
+/// byte is zeroed about once.
 async fn fill(
     body: &mut Pin<&mut AsyncInputStream>,
     buffer: &mut Vec<u8>,
     limit: usize,
 ) -> Result<bool> {
-    while buffer.len() < limit {
-        let len = buffer.len();
-        buffer.resize(limit.min(len.max(64 << 10) * 2), 0);
-        let read = body.as_mut().try_read(&mut buffer[len..], 1).await?;
-        buffer.truncate(len + read);
-        if read == 0 {
-            return Ok(false);
+    let mut filled = buffer.len();
+    let full = loop {
+        if filled >= limit {
+            break true;
         }
-    }
-    Ok(true)
+        if filled == buffer.len() {
+            buffer.resize(limit.min(filled.max(64 << 10) * 2), 0);
+        }
+        let read = body.as_mut().try_read(&mut buffer[filled..], 1).await?;
+        if read == 0 {
+            break false;
+        }
+        filled += read;
+    };
+    buffer.truncate(filled);
+    Ok(full)
 }
 
 /// Reads the rest of a part into `part`, and when it fills, one byte past
@@ -380,11 +397,7 @@ impl BucketRequest {
     ) -> Answer<Reply> {
         let url = std::str::from_utf8(url)
             .map_err(|_| refuse(400, "InvalidArgument", "the URL is not UTF-8"))?;
-        // The path of an absolute URL, or of a request target. Not
-        // `url::Url`, which would resolve dot segments in a key.
-        let path = url
-            .split_once("://")
-            .map_or(url, |(_, rest)| rest.find('/').map_or("", |i| &rest[i..]));
+        let path = target(url);
         let (path, query) = path.split_once('?').unwrap_or((path, ""));
         let key = percent_decode_str(path.strip_prefix('/').unwrap_or(path))
             .decode_utf8()

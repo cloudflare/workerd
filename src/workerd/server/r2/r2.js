@@ -545,7 +545,9 @@ function toRange(req) {
   if (offset === undefined && length === undefined) return undefined;
   if (length !== undefined && length <= 0) throw new Fail('InvalidRange');
   const first = offset ?? 0;
-  return `bytes=${first}-${length === undefined ? '' : first + length - 1}`;
+  // A length past what a Number holds exactly reads to the end.
+  const last = length === undefined ? NaN : first + length - 1;
+  return `bytes=${first}-${last <= Number.MAX_SAFE_INTEGER ? last : ''}`;
 }
 
 // Whether an object passes an R2Conditional, as R2's gateway decides

@@ -14,6 +14,18 @@ fn refused<T>(answer: Answer<T>) -> (u16, String) {
 }
 
 #[test]
+fn request_targets() {
+    for (url, path) in [
+        ("http://b/k?list", "/k?list"),
+        ("http://b", ""),
+        ("/a/b://c", "/a/b://c"),
+        ("/?list&prefix=http://x", "/?list&prefix=http://x"),
+    ] {
+        assert_eq!(target(url), path, "{url}");
+    }
+}
+
+#[test]
 fn ranges() {
     let from = |offset, length| Range::From { offset, length };
     for (header, parsed) in [
