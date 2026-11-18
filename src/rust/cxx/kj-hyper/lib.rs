@@ -67,6 +67,7 @@ pub mod client;
 pub mod ffi;
 mod handshake;
 mod io;
+mod scratch;
 pub mod server;
 mod starttls;
 pub mod tls;
