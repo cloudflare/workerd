@@ -15,6 +15,8 @@
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 
+#include <cstring>
+
 namespace workerd::rust::kj_hyper {
 
 using WebSocketErrorHandler = kj::WebSocketErrorHandler;
@@ -33,9 +35,38 @@ enum class Ecdsa : uint8_t;
 // --- Headers and methods.
 
 void for_each_header(const kj::HttpHeaders& headers, Head& head);
+
+// The ids a table gives the header names one connection's requests carry, each looked up once
+// and then named by its slot here (body.rs's `HeaderIds` keeps the slots by name).
+class HeaderIds {
+ public:
+  explicit HeaderIds(const kj::HttpHeaderTable& table): table(table) {}
+
+  const kj::HttpHeaderTable& getTable() const {
+    return table;
+  }
+  // The slot of the id the table gives `name`; -1 for a name the table lacks.
+  int32_t resolve(::rust::Str name);
+  kj::HttpHeaderId operator[](uint32_t slot) const {
+    return ids[slot];
+  }
+  size_t size() const {
+    return ids.size();
+  }
+
+ private:
+  const kj::HttpHeaderTable& table;
+  kj::Vector<kj::HttpHeaderId> ids;
+};
+
+kj::Own<HeaderIds> new_header_ids(const kj::HttpHeaderTable& table);
+// Headers that own a copy of the block.
 kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
     ::rust::Slice<const uint8_t> arena,
-    ::rust::Slice<const uint32_t> lens);
+    ::rust::Slice<const uint32_t> fields);
+// Headers that point into the block, with the slots `ids` resolved.
+kj::Own<kj::HttpHeaders> headers_over_block(
+    const HeaderIds& ids, ::rust::Slice<const uint8_t> arena, ::rust::Slice<const uint32_t> fields);
 
 bool ecdsa_verify(Ecdsa algorithm,
     ::rust::Slice<const uint8_t> publicKey,
@@ -43,8 +74,14 @@ bool ecdsa_verify(Ecdsa algorithm,
     ::rust::Slice<const uint8_t> signature);
 
 inline bool parse_method(::rust::Slice<const uint8_t> name, kj::HttpMethod& method) {
-  auto text = kj::str(kj::arrayPtr(name.data(), name.size()).asChars());
-  KJ_IF_SOME(parsed, kj::tryParseHttpMethod(text)) {
+  // Every method kj knows has a short name, made a C string here without an allocation.
+  char text[16];
+  if (name.size() >= sizeof(text)) {
+    return false;
+  }
+  memcpy(text, name.data(), name.size());
+  text[name.size()] = '\0';
+  KJ_IF_SOME(parsed, kj::tryParseHttpMethod(kj::StringPtr(text, name.size()))) {
     method = parsed;
     return true;
   }
