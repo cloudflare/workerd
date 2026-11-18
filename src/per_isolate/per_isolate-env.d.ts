@@ -241,6 +241,12 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The global atob() and btoa() for an argument already converted to a
+  // string (api/bootstrap-utils.h): the result, or undefined where the
+  // global throws an InvalidCharacterError. Each throws a TypeError for a
+  // non-string.
+  atob(data: string): string | undefined;
+  btoa(data: string): string | undefined;
 };
 
 // The I/O of a bootstrap API, bound to the request that created it

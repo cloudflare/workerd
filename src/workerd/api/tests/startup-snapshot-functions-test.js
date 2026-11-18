@@ -32,6 +32,7 @@ export default {
       }
     };
     await run('create-require', pipelineOn);
+    await run('atob-btoa', pipelineOn);
     // Cases the zygote rejects: always plain Workers.
     await run('bind', false);
   },

@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the atob() and btoa() benchmarks against the TypeScript
+# implementation (src/per_isolate/atob-btoa.ts, under TS_ATOB_BTOA). No
+# compatibilityDate, so that the variants supply it.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "atob-btoa-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "atob-btoa.js")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-atob-btoa"],
+);

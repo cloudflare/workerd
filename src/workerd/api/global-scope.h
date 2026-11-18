@@ -955,8 +955,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(EventTarget);
     }
 
-    JSG_METHOD(btoa);
-    JSG_METHOD(atob);
+    // Under the TS_ATOB_BTOA autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript atob() and btoa() instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_ATOB_BTOA)) {
+      JSG_METHOD(btoa);
+      JSG_METHOD(atob);
+    }
 
     JSG_METHOD(setTimeout);
     JSG_METHOD(clearTimeout);

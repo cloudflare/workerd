@@ -30,6 +30,9 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_ATOB_BTOA` autogate, `main.ts` installs the TypeScript
+  `atob()` and `btoa()` (`atob-btoa.ts`), which replace the C++ methods of
+  the global scope; see `src/tests/atob-btoa/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which

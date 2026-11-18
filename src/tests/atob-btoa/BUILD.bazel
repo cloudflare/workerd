@@ -1,0 +1,36 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The atob() and btoa() suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. The opt-in cells need
+# --experimental for spec_compliant_property_attributes.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_ATOB_BTOA, which swaps in the TypeScript implementation under a
+# cell whose USING_TS_IMPL binding says C++. The TypeScript cells enable
+# TS_ATOB_BTOA themselves.
+
+atob_btoa_suite_srcs = glob(["*.js"]) + ["atob-btoa-modules.capnp"]
+
+wd_test(
+    src = "atob-btoa-cpp.wd-test",
+    data = atob_btoa_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "atob-btoa-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = atob_btoa_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "atob-btoa-ts.wd-test",
+    data = atob_btoa_suite_srcs,
+)
+
+wd_test(
+    src = "atob-btoa-opt-in-ts.wd-test",
+    args = ["--experimental"],
+    data = atob_btoa_suite_srcs,
+)

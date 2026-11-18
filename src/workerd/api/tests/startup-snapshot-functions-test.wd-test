@@ -23,6 +23,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "create-require", service = "create-require"),
           (name = "bind", service = "bind"),
+          (name = "atob-btoa", service = "atob-btoa"),
         ],
       )
     ),
@@ -47,6 +48,17 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"bind\""),
+        ],
+      )
+    ),
+    ( name = "atob-btoa",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-functions-case-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"atob-btoa\""),
         ],
       )
     ),

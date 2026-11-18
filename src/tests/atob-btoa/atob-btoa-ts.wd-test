@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+using AtobBtoaModules = import "atob-btoa-modules.capnp";
+
+# Runs the atob() and btoa() suite against the TypeScript implementation
+# (src/per_isolate/atob-btoa.ts, under TS_ATOB_BTOA).
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. nodejs_compat is for node:assert.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "atob-btoa-ts",
+      worker = (
+        modules = AtobBtoaModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+        ],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-atob-btoa"],
+);
