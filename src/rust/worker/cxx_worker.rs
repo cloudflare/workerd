@@ -47,11 +47,10 @@ impl CxxWorkerInterface {
     pub fn new(inner: KjOwn<bridge::WorkerInterface>) -> Self {
         Self { inner }
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl Service for CxxWorkerInterface {
-    async fn request<'a>(
+    /// [`Service::request`], for a caller that holds this type itself: the trait's future is
+    /// boxed, and this one is not.
+    pub async fn request<'a>(
         &'a mut self,
         method: Method,
         url: &'a [u8],
@@ -72,6 +71,20 @@ impl Service for CxxWorkerInterface {
         }
         .await?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Service for CxxWorkerInterface {
+    async fn request<'a>(
+        &'a mut self,
+        method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        request_body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> Result<()> {
+        Self::request(self, method, url, headers, request_body, response).await
     }
 
     async fn connect<'a>(

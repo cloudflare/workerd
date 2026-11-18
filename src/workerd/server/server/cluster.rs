@@ -942,7 +942,7 @@ pub async fn serve(listener: TcpListener, node: Rc<ClusterNode>) {
         let hangup = kj_rs_io::when_write_disconnected(&stream)
             .err_into()
             .boxed();
-        let handler: Rc<dyn Handler> = Rc::new(PeerConnection {
+        let handler = Rc::new(PeerConnection {
             node: Rc::clone(&node),
         });
         let (settings, shutdown) = (Rc::clone(&settings), Rc::clone(&shutdown));
@@ -979,7 +979,6 @@ impl PeerConnection {
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl Handler for PeerConnection {
     async fn request<'a>(
         &'a self,

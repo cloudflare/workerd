@@ -163,7 +163,13 @@ impl ServerSettings {
 /// The arguments are the ones `kj::http::Service` takes, so an implementation can forward them
 /// straight to a C++ `WorkerInterface`; a connection's peer identity is whatever the caller of
 /// [`serve_connection`] built its handler with.
-#[async_trait::async_trait(?Send)]
+///
+/// A connection calls its handler statically, so a call's future is part of the request's and
+/// is not allocated on its own. That is also why nothing here is `Send`.
+#[expect(
+    async_fn_in_trait,
+    reason = "a connection and its calls stay on one thread, so no caller needs `Send` futures"
+)]
 pub trait Handler {
     /// One request. The response is sent through `response`; how a call that sends none or
     /// fails is answered is in the module docs.
@@ -207,9 +213,9 @@ impl Shutdown {
     }
 }
 
-struct Connection<'t> {
+struct Connection<'t, H> {
     settings: Rc<ServerSettings>,
-    handler: Rc<dyn Handler + 't>,
+    handler: Rc<H>,
     state: Rc<ConnectionState>,
     /// The kj ids of the header names the requests carry, borrowed only to fill a block.
     ids: RefCell<HeaderIds<'t>>,
@@ -221,7 +227,7 @@ struct Connection<'t> {
 /// last response is written, though the call may still be finishing.
 const KEPT_BLOCKS: usize = 2;
 
-impl Connection<'_> {
+impl<H> Connection<'_, H> {
     /// A header block filled with a request's headers, back to the connection when dropped.
     fn header_block(&self, parts: &Parts) -> PooledBlock<'_> {
         let mut block = self.blocks.borrow_mut().pop().unwrap_or_default();
@@ -285,16 +291,17 @@ type Calls<'t> = Rc<RefCell<FuturesUnordered<LocalBoxFuture<'t, ()>>>>;
 ///
 /// An I/O failure of the transport itself, or of watching it for a hang-up. A peer that
 /// disconnects or speaks bad HTTP ends the connection quietly.
-pub async fn serve_connection<'t, IO>(
+pub async fn serve_connection<'t, IO, H>(
     io: IO,
     hangup: Hangup,
     table: &'t HeaderTable,
     settings: Rc<ServerSettings>,
-    handler: Rc<dyn Handler + 't>,
+    handler: Rc<H>,
     shutdown: &Shutdown,
 ) -> Result<()>
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    H: Handler + 't,
 {
     let hangup = hangup.shared();
     let conn = Rc::new(Connection {
@@ -441,8 +448,8 @@ fn transport_error(error: &hyper::Error) -> Option<KjError> {
 
 /// hyper's service: starts the handler call alongside the connection and waits for the response
 /// head it sends. A call that ends without one closes the connection.
-async fn dispatch<'t>(
-    conn: Rc<Connection<'t>>,
+async fn dispatch<'t, H: Handler + 't>(
+    conn: Rc<Connection<'t, H>>,
     calls: Calls<'t>,
     mut request: http::Request<Incoming>,
 ) -> Result<Response, io::Error> {
@@ -465,8 +472,8 @@ async fn dispatch<'t>(
 }
 
 /// One handler call, and the answer when it sends none (module docs).
-async fn handle(
-    conn: Rc<Connection<'_>>,
+async fn handle<H: Handler>(
+    conn: Rc<Connection<'_, H>>,
     mut parts: Parts,
     body: Incoming,
     sender: Rc<ResponseSender>,
