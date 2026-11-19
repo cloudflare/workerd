@@ -52,7 +52,7 @@ Types in this project come from four layers. Changes must be made in the correct
 | ------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **C++ RTTI**             | `src/workerd/api/*.h` (JSG macros)                 | Types derived from C++ classes — the generator extracts these automatically                                |
 | **`JSG_TS_OVERRIDE`**    | Same `.h` files, inside `JSG_RESOURCE_TYPE` blocks | When the auto-generated TS signature needs adjustment (e.g., conditional properties, union narrowing)      |
-| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest (`URL`, `URLSearchParams`, `URLPattern`, `MessageChannel`, `MessagePort`), and `DOMException`, which V8 implements, from a hand-written declaration; their C++ counterparts, if any, declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
+| **Per-isolate bootstrap** | `src/per_isolate/**/*.ts`, listed in `src/per_isolate/public-types.d.ts` | APIs the per-isolate bootstrap implements in TypeScript and publishes in its manifest (`URL`, `URLSearchParams`, `URLPattern`, `EventSource`, `MessageChannel`, `MessagePort`), and `DOMException`, which V8 implements, from a hand-written declaration; their C++ counterparts, if any, declare `JSG_TS_OVERRIDE(type X = never)`. See "Per-isolate declarations" below |
 | **Hand-written defines** | `types/defines/*.d.ts`                             | Types for APIs not expressible via C++ RTTI (Cloudflare product bindings like AI, D1, R2, Vectorize, etc.), and for `structuredClone()` (`structured-clone.d.ts`), a global scope method the bootstrap implements, which the manifest cannot publish; its C++ counterpart is a `never` member in the global scope's override |
 
 Do **not** edit files in `generated-snapshot/` directly — they are overwritten by `just generate-types`. If the generated output looks wrong, fix the source layer (C++ RTTI, `JSG_TS_OVERRIDE`, the per-isolate implementation, or `defines/`).
@@ -92,9 +92,10 @@ emits is what users get:
   is not the global it names: TypeScript emits a base that is an
   expression, or a binding of the module such as the `EventTarget` from
   `events/event-target-internals`, as a variable of the module, which the
-  generator rejects. `MessagePort` extends a stand-in for `EventTarget`, so
-  `messagechannel/messagechannel.public.d.ts` declares it. `DOMException`,
-  which V8 implements, has the declaration file alone
+  generator rejects. `EventSource` extends that `EventTarget`, and
+  `MessagePort` a stand-in for it, so `eventsource/eventsource.public.d.ts`
+  and `messagechannel/messagechannel.public.d.ts` declare them.
+  `DOMException`, which V8 implements, has the declaration file alone
   (`dom-exception.public.d.ts`).
 - **A published declaration refers only to globals and published
   declarations.** The generator rejects a reference to another of the
