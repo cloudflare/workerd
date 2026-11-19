@@ -17,6 +17,7 @@ mod bridge;
 mod config;
 mod deploy;
 mod deployments;
+mod help;
 mod process;
 mod socket_fd;
 mod watch;
@@ -30,7 +31,6 @@ use std::sync::OnceLock;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::error::ErrorKind;
-use workerd_server::bridge::ffi as server;
 use workerd_server::config::Overrides;
 use workerd_server::entry;
 use workerd_server::run::RunOptions;
@@ -182,10 +182,6 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             serve_or_test,
             bench,
         } => run_bench(verbose, config, &serve_or_test, bench, executable),
-        args::Command::MakePyodideBaselineSnapshot {
-            python_version,
-            output_directory,
-        } => run_baseline_snapshot(verbose, &python_version, output_directory, executable),
         args::Command::Deploy {
             project,
             const_name,
@@ -364,32 +360,6 @@ fn run_bench(
         bench.options(filter.case_pattern),
         run_options(serve_or_test),
         patterns(filter.test),
-        watching(process),
-    )
-}
-
-/// Runs a synthesized Python worker's tests with a baseline snapshot saved to `output_directory`.
-fn run_baseline_snapshot(
-    verbose: bool,
-    python_version: &str,
-    output_directory: String,
-    executable: Option<Executable>,
-) -> workerd_server::Result<i32> {
-    let serve_or_test = args::ServeOrTestArgs::default();
-    let process = Process::new(executable, None, Vec::new());
-    entry::test(
-        verbose,
-        Config::python_baseline(python_version).into_words(),
-        server::ServeOrTestOptions {
-            experimental: true,
-            python_save_baseline_snapshot: true,
-            pyodide_bundle_disk_cache_dir: Some(".".to_owned()).into(),
-            pyodide_package_disk_cache_dir: Some(output_directory).into(),
-            ..(&serve_or_test).into()
-        },
-        (&args::TestArgs::default()).into(),
-        run_options(&serve_or_test),
-        patterns(args::TestFilter::default()),
         watching(process),
     )
 }
@@ -577,20 +547,12 @@ fn watcher<T: CommandFactory>(
     }
 }
 
-/// Rejects `--perfetto-trace` on builds without perfetto, and a `--pyodide-package-disk-cache-dir`
-/// that does not exist.
+/// Rejects `--perfetto-trace` on builds without perfetto.
 fn check_serve_or_test<T: CommandFactory>(serve_or_test: &args::ServeOrTestArgs) {
     if serve_or_test.perfetto_trace.is_some() && !ffi::perfetto_supported() {
         exit_with(&T::command().error(
             ErrorKind::UnknownArgument,
             "--perfetto-trace: perfetto tracing is not supported by this build",
-        ));
-    }
-    if let Some(dir) = &serve_or_test.pyodide_package_disk_cache_dir
-        && !std::path::Path::new(dir).is_dir()
-    {
-        usage_error::<T>(format!(
-            "--pyodide-package-disk-cache-dir={dir}: package disk cache dir must exist"
         ));
     }
 }

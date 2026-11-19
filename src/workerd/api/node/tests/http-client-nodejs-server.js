@@ -16,7 +16,10 @@ function listenAndReport(server, name) {
 const pongServer = http.createServer((req, res) => {
   req.resume();
   req.on('end', () => {
-    res.writeHead(200);
+    res.writeHead(200, {
+      'x-echo-url': req.url,
+      'x-echo-foo': req.headers.foo ?? '',
+    });
     res.end('pong');
   });
 });

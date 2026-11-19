@@ -32,7 +32,9 @@ WD_STRONG_BOOL(SnapshotToDisk);
 
 class PyodideBundleManager {
  public:
-  void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
+  // `data` is read in place for the manager's lifetime, including by V8, through external strings
+  // over the bundle's module sources.
+  void setPyodideBundleData(kj::String version, kj::Array<const kj::byte> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
   // Returns the holder for the compiled pyodide.asm.wasm of bundle `version`, or kj::none if that
@@ -57,7 +59,6 @@ class PyodideBundleManager {
 };
 
 struct PythonConfig {
-  kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
   bool createSnapshot;
@@ -150,9 +151,6 @@ class PythonModuleInfo {
     auto clonedNames = KJ_MAP(name, this->names) { return kj::str(name); };
     return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
   }
-
-  kj::HashSet<kj::String> getWorkerModuleSet();
-  kj::Array<kj::String> getPythonFileContents();
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -418,28 +416,22 @@ class DisabledInternalJaeger: public jsg::Object {
   JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
 
-// This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
+// Writes memory snapshots that workerd creates (--python-save-snapshot,
+// --python-save-baseline-snapshot) to the --python-snapshot-dir directory.
 class DiskCache: public jsg::Object {
  private:
-  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
+  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_SNAPSHOT_ROOT;  // always kj::none
 
-  const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
   const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
-      const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
-      : cacheRoot(cacheRoot),
-        snapshotRoot(snapshotRoot) {};
+  DiskCache(): snapshotRoot(NULL_SNAPSHOT_ROOT) {};  // Disabled disk cache
+  explicit DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
+      : snapshotRoot(snapshotRoot) {};
 
-  jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
-  void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
   void putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
 
   JSG_RESOURCE_TYPE(DiskCache) {
-    JSG_METHOD(get);
-    JSG_METHOD(put);
     JSG_METHOD(putSnapshot);
   }
 };

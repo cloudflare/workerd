@@ -9090,20 +9090,26 @@ auto makePipeFds() {
   };
 }
 
+// Reads the next line from `fd` and passes it to `f`, skipping the startup snapshot pipeline's
+// INFO lines: whether the Worker started from a snapshot or fell back is not what the callers
+// check, and TestServer installs no JsonLogger, so KJ logs them as plain text.
 template <typename Func>
 auto expectLogLine(int fd, Func&& f) {
   char buffer[4096]{};
-  int pos = 0;
-  char c;
-  while (read(fd, &c, 1) == 1) {
-    if (c == '\n') {
-      break;
+  for (;;) {
+    int pos = 0;
+    char c;
+    while (read(fd, &c, 1) == 1) {
+      if (c == '\n') {
+        break;
+      }
+      if (pos < sizeof(buffer) - 1) {
+        buffer[pos++] = c;
+      }
     }
-    if (pos < sizeof(buffer) - 1) {
-      buffer[pos++] = c;
-    }
+    buffer[pos] = '\0';  // null-terminate
+    if (!kj::StringPtr(buffer).contains("startup snapshot"_kj)) break;
   }
-  buffer[pos] = '\0';  // null-terminate
 
   kj::StringPtr logline(buffer);
   f(logline);

@@ -464,6 +464,21 @@ class NoopSpanState final: public SpanState {
 
 Span::Span(kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state): state(kj::mv(state)) {}
 
+kj::Maybe<kj::Own<jsg::Wrappable>> Span::snapshotClone() const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(own, kj::Own<SpanState>) {
+      // A span created outside an IoContext (see Tracing::startSpan()).
+      if (dynamic_cast<const user_tracing::NoopSpanState*>(own.get()) == nullptr) return kj::none;
+      return ownAsWrappable(
+          kj::refcounted<Span>(kj::Own<SpanState>(kj::refcounted<user_tracing::NoopSpanState>())));
+    }
+    KJ_CASE_ONEOF(io, IoOwn<SpanState>) {
+      return kj::none;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 bool Span::getIsTraced() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
