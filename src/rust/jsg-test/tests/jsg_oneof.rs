@@ -356,7 +356,14 @@ fn describe_string_or_bool(value: &StringOrBool) -> String {
 /// Runs `f` with a `OneOfContext` installed as the global `cx` and a
 /// `OneOfBox` holding 321 as the global `box321`.
 fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
-    let harness = crate::Harness::new();
+    with_context_and_flags(|_| {}, f);
+}
+
+fn with_context_and_flags(
+    set_flags: impl FnOnce(jsg::feature_flags::compatibility_flags::Builder<'_>),
+    f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>),
+) {
+    let harness = crate::Harness::with_flags(set_flags);
     harness.run_in_context(|lock, ctx| {
         let cx = jsg::Rc::new(lock, OneOfContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
@@ -494,18 +501,30 @@ fn string_is_not_taken_as_a_sequence() {
     });
 }
 
-// "kj::Maybe noSubstituteNull", whose union C++ tests with `noSubstituteNull`, as
-// Rust JSG always converts `Nullable`.
+// "maybes - don't substitute null" in value-test.c++: with `dont_substitute_null_on_type_error`,
+// a value that no variant takes is a type error.
 #[test]
 fn nullable_union_rejects_a_value_no_variant_takes() {
-    with_context(|lock, ctx| {
-        assert_eq!(
-            expect_type_error(lock, ctx, "cx.takeMaybeStrictString({})"),
-            "Failed to execute 'takeMaybeStrictString' on 'OneOfContext': parameter 1 is not \
+    with_context_and_flags(
+        |mut flags| flags.set_no_substitute_null(true),
+        |lock, ctx| {
+            assert_eq!(
+                expect_type_error(lock, ctx, "cx.takeMaybeStrictString({})"),
+                "Failed to execute 'takeMaybeStrictString' on 'OneOfContext': parameter 1 is not \
              of type 'string'."
-        );
+            );
+            expect_eval(lock, ctx, "cx.takeMaybeStrictString('a')", "string:a");
+            expect_eval(lock, ctx, "cx.takeMaybeStrictString(null)", "null");
+        },
+    );
+}
+
+// Without `dont_substitute_null_on_type_error`, as in C++, it is null.
+#[test]
+fn nullable_union_substitutes_null_without_the_flag() {
+    with_context(|lock, ctx| {
+        expect_eval(lock, ctx, "cx.takeMaybeStrictString({})", "null");
         expect_eval(lock, ctx, "cx.takeMaybeStrictString('a')", "string:a");
-        expect_eval(lock, ctx, "cx.takeMaybeStrictString(null)", "null");
     });
 }
 

@@ -1338,7 +1338,8 @@ impl<T: Type> Type for Nullable<T> {
     }
 }
 
-// Like C++ `kj::Maybe<T>`, Web IDL nullable conversion reads `undefined` as `null`.
+// Like C++ `kj::Maybe<T>`, Web IDL nullable conversion reads `undefined` as `null`, and a value
+// that `T` does not take is `null` unless the worker has `dont_substitute_null_on_type_error`.
 // Nullable arguments remain required; use `NullOrUndefined` to permit omission.
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
@@ -1353,10 +1354,10 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null_or_undefined() {
-            Ok(Nullable::Null)
-        } else {
-            Ok(Nullable::Some(T::from_js(lock, value)?))
+        match Self::try_from_js(lock, value)? {
+            Some(nullable) => Ok(nullable),
+            // `T`'s own conversion gives the error.
+            None => Ok(Nullable::Some(T::from_js(lock, value)?)),
         }
     }
 
@@ -1365,13 +1366,19 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         if value.is_null_or_undefined() {
-            Ok(Some(Nullable::Null))
-        } else {
-            Ok(T::try_from_js(lock, value)?.map(Nullable::Some))
+            return Ok(Some(Nullable::Null));
+        }
+        // The flag is read only on a mismatch.
+        match T::try_from_js(lock, value)? {
+            Some(value) => Ok(Some(Nullable::Some(value))),
+            None if !lock.feature_flags().get_no_substitute_null() => Ok(Some(Nullable::Null)),
+            None => Ok(None),
         }
     }
 }
 
+// Like C++ `jsg::Optional<kj::Maybe<T>>`: `undefined` is `Undefined`, and any other value
+// converts as for `Nullable<T>`.
 impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
     type ResultType = NullOrUndefined<T::ResultType>;
 
@@ -1389,26 +1396,20 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            Ok(NullOrUndefined::Null)
-        } else if value.is_undefined() {
-            Ok(NullOrUndefined::Undefined)
-        } else {
-            Ok(NullOrUndefined::Some(T::from_js(lock, value)?))
+        if value.is_undefined() {
+            return Ok(NullOrUndefined::Undefined);
         }
+        Ok(Nullable::<T>::from_js(lock, value)?.into())
     }
 
     fn try_from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
-            Ok(Some(NullOrUndefined::Null))
-        } else if value.is_undefined() {
-            Ok(Some(NullOrUndefined::Undefined))
-        } else {
-            Ok(T::try_from_js(lock, value)?.map(NullOrUndefined::Some))
+        if value.is_undefined() {
+            return Ok(Some(NullOrUndefined::Undefined));
         }
+        Ok(Nullable::<T>::try_from_js(lock, value)?.map(NullOrUndefined::from))
     }
 }
 
