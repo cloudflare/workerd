@@ -5,11 +5,22 @@
 // parks the thread inside `tokio::Runtime::block_on`, driving the whole tokio scheduler, so
 // every Rust task on the loop's runtime makes progress while C++ is "blocked".
 //
+// A loop that never runs out of events never sleeps, so tokio also gets a turn while KJ is busy:
+// on TokioAsyncIoContext's WaitScope, a promise.wait() polls the port after every turn, and the
+// port runs tokio on those polls at most every BUSY_POLL_INTERVAL. Otherwise every task on the
+// runtime -- tokio sockets and timers, and the Rust futures they wake -- would wait out the whole
+// of a busy stretch, which a server taking over many objects at once keeps up for seconds. A
+// waitScope.poll() or promise.poll() polls the port only once KJ's queue is empty, so it runs
+// tokio only then.
+//
 // Notes on the kj::EventPort contract (see kj/async.h):
 //  - wait()/poll() return true iff wake() latched. This is load-bearing: kj::Executor's
-//    executeAsync and kj::newPromiseAndCrossThreadFulfiller only get drained on `true`.
-//  - The kj::TimerImpl is advanced after every wait()/poll(). A due timer fires without the
-//    thread sleeping. A pending one fires on tokio's timer wheel, which rounds the deadline up
+//    executeAsync and kj::newPromiseAndCrossThreadFulfiller only get drained on `true`. A busy
+//    poll() that skips tokio still consumes and reports the latch.
+//  - The kj::TimerImpl is advanced after every wait() and every poll() that finds KJ's queue
+//    empty, not by a busy poll(): a due timer fires after the work queued ahead of it, as on a
+//    loop that does not busy poll. Once advanced, a due timer fires without the thread
+//    sleeping. A pending one fires on tokio's timer wheel, which rounds the deadline up
 //    to the end of a 1 ms tick and sleeps whole ticks, so up to 2 ms late. (KJ's own port is
 //    less than 1 ms late on Linux, where epoll_wait() takes milliseconds, and close to exact on
 //    macOS, where kevent() takes nanoseconds.)
@@ -94,8 +105,9 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
   }
 
   // Timer fed by this port. now() is frozen while KJ events run and advances only when the loop
-  // waits/polls, preserving stock KJ timer semantics (the port calls timerImpl.advanceTo() after
-  // every wait()/poll() return; timers would silently never fire otherwise).
+  // waits, or polls with KJ's queue empty, preserving stock KJ timer semantics (the port calls
+  // timerImpl.advanceTo() after every wait() and every such poll(); timers would silently never
+  // fire otherwise). A busy poll leaves it, so a due timer fires after the work queued ahead.
   kj::Timer &getTimer() {
     assertOwnerThread();
     return timerImpl;
@@ -128,12 +140,24 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 
   const kj::ThreadId ownerThread;
   const kj::MonotonicClock &clock;
+  // Reads cost a busy poll nothing to speak of; it ticks every few milliseconds.
+  const kj::MonotonicClock &coarseClock;
   // Declaration order is destruction order in reverse, and it matters: `loop` is destroyed
   // first, then `rustPort` (the runtime), then `timerImpl`. The destructor body cancels spawned
   // tasks before any of them go.
   kj::TimerImpl timerImpl;
   ::rust::Box<TokioPort> rustPort;
   kj::Own<kj::EventLoop> loop;
+
+  // When tokio last ran, on the coarse clock: a wait() or a poll() that ran it returned. A poll()
+  // while KJ still has events queued runs tokio again only once BUSY_POLL_INTERVAL has passed
+  // since. Loop thread only.
+  kj::TimePoint lastTokioTurn;
+
+  // Whether KJ has been turning events since a wait() returned or a busy poll, so that a poll()
+  // that finds the queue empty most likely follows the turn that emptied it, and KJ waits next.
+  // Cleared by that poll(). Loop thread only.
+  bool turning = false;
 
   // The earliest timer deadline wait() computed its sleep from (none = no timer; sleep forever).
   // updateNextTimerEvent() compares against it so only a *sooner* deadline ends the park. Loop
@@ -157,7 +181,14 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 struct TokioAsyncIoContext {
   TokioAsyncIoContext()
       : port(kj::heap<TokioEventPort>()),
-        waitScope(kj::heap<kj::WaitScope>(port->getLoop())) {}
+        waitScope(kj::heap<kj::WaitScope>(port->getLoop())) {
+    // Inside promise.wait(), KJ polls the port after every turn, and the port decides how often
+    // that runs tokio. A poll every n turns would let tokio wait n turns, and turns can be long:
+    // a Durable Object's start takes tens of milliseconds in a slow build. A poll costs a turn a
+    // coarse clock read. waitScope.poll() and promise.poll() take no busy polls: they poll the
+    // port only once the queue is empty.
+    waitScope->setBusyPollInterval(0);
+  }
   ~TokioAsyncIoContext() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(TokioAsyncIoContext);
 

@@ -9,6 +9,11 @@
 namespace kj_rs_tokio {
 
 namespace {
+// How often a loop that stays busy gives tokio a turn: often enough that a timer or a socket on
+// the runtime is served within tens of milliseconds of its event however long KJ stays busy, and
+// seldom enough that the turns cost a busy loop no measurable time.
+constexpr kj::Duration BUSY_POLL_INTERVAL = 20 * kj::MILLISECONDS;
+
 // The port active on this loop thread, to enforce one port per thread (KJ's one-loop-per-thread
 // model); set by the constructor, cleared by the destructor.
 thread_local TokioEventPort* activePort = nullptr;
@@ -28,9 +33,11 @@ const kj::MonotonicClock& requireNoActivePort() {
 TokioEventPort::TokioEventPort()
     : ownerThread(kj::ThreadId::current()),
       clock(requireNoActivePort()),
+      coarseClock(kj::systemCoarseMonotonicClock()),
       timerImpl(clock.now()),
       rustPort(new_tokio_port()),
-      loop(kj::heap<kj::EventLoop>(*this)) {
+      loop(kj::heap<kj::EventLoop>(*this)),
+      lastTokioTurn(coarseClock.now()) {
   activePort = this;
 }
 
@@ -97,7 +104,11 @@ bool TokioEventPort::wait() {
   // Load-bearing: TimerImpl only fires timer events from advanceTo(). Forgetting this after a
   // wait means every kj::Timer promise silently never resolves. Deferred so a wait that throws
   // also clears the sleep hooks.
-  KJ_DEFER(timerImpl.advanceTo(clock.now()));
+  KJ_DEFER({
+    timerImpl.advanceTo(clock.now());
+    lastTokioTurn = coarseClock.now();
+    turning = true;
+  });
   KJ_IF_SOME(timeoutNs, timerImpl.timeoutToNextEvent(clock.now(), kj::NANOSECONDS, kj::maxValue)) {
     return rustPort->wait_timeout_ns(timeoutNs);
   } else {
@@ -107,8 +118,42 @@ bool TokioEventPort::wait() {
 
 bool TokioEventPort::poll() {
   assertOwnerThread();
-  bool woken = rustPort->poll();
+  // KJ polls after every turn of a promise.wait() (busy polling, which TokioAsyncIoContext
+  // enables), and from waitScope.poll() and promise.poll() only once the queue is empty. A busy
+  // poll runs tokio every BUSY_POLL_INTERVAL, on the coarse clock: other busy polls cost a turn
+  // little more than that clock's read.
+  bool due = coarseClock.now() - lastTokioTurn >= BUSY_POLL_INTERVAL;
+  bool woken;
+  if (loop->isRunnable()) {
+    turning = true;
+    // Every busy poll reports the wake latch, so that cross-thread events reach KJ within a turn
+    // whether tokio runs or not.
+    if (!due) {
+      return rustPort->take_wake_latch();
+    }
+    woken = rustPort->poll();
+    // The KJ timer stays put while KJ has work queued: a due timer fires once the queue drains,
+    // as on a loop that does not busy poll, so a timer of zero still fires after the work queued
+    // ahead of it.
+    lastTokioTurn = coarseClock.now();
+    return woken;
+  } else {
+    // A poll that finds the queue empty always runs tokio. A waitScope.poll() that empties the
+    // queue within its turn limit ends with such a poll, and so does a promise.poll() whose
+    // promise is still pending then; one whose promise becomes ready while queued events run
+    // returns without polling the port. KJ also polls this way after the busy turn that emptied
+    // the queue, and then waits, and the wait runs tokio as it parks. KJ cannot tell us
+    // which this is, so after turns that a wait() or a busy poll left queued the poll yields to
+    // tokio only once, unless BUSY_POLL_INTERVAL has passed: its ready tasks and drivers run,
+    // without the full pump that would double the cost of going idle. Any other such poll is
+    // the full pump. So a waitScope.poll() that runs turns left queued gives tokio one yield,
+    // and the next one, with nothing queued in between, the full pump.
+    bool afterTurns = turning;
+    turning = false;
+    woken = afterTurns && !due ? rustPort->poll_once() : rustPort->poll();
+  }
   timerImpl.advanceTo(clock.now());
+  lastTokioTurn = coarseClock.now();
   return woken;
 }
 

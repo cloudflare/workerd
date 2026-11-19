@@ -66,6 +66,8 @@ use crate::worker::WorkerService;
 pub struct Factory {
     inner: KjOwn<ffi::WorkerFactory>,
     loopback: Loopback,
+    /// Dynamic workers whose stubs were dropped, to unlink (`unlink_later`).
+    dropped_workers: RefCell<Vec<Rc<WorkerService>>>,
 }
 
 impl Factory {
@@ -74,6 +76,36 @@ impl Factory {
         Self {
             inner,
             loopback: Loopback::default(),
+            dropped_workers: RefCell::default(),
+        }
+    }
+
+    /// Unlinks `worker` on the next turn of the event loop, or when the server goes, if that is
+    /// first: the server's drop drops the tasks that have not run, this one's included, and a
+    /// worker never unlinked keeps its links, and with them this factory.
+    pub fn unlink_later(self: &Rc<Self>, worker: Rc<WorkerService>) {
+        // The task unlinks every worker in the list, so only the first worker needs one.
+        let first = {
+            let mut workers = self.dropped_workers.borrow_mut();
+            workers.push(worker);
+            workers.len() == 1
+        };
+        if first {
+            let factory = Rc::clone(self);
+            self.spawn_detached(async move { factory.unlink_dropped_workers() });
+        }
+    }
+
+    /// Unlinks the workers `unlink_later` was given.
+    pub fn unlink_dropped_workers(&self) {
+        loop {
+            let workers = std::mem::take(&mut *self.dropped_workers.borrow_mut());
+            if workers.is_empty() {
+                return;
+            }
+            for worker in workers {
+                worker.unlink();
+            }
         }
     }
 
@@ -631,6 +663,7 @@ impl Drop for Server {
         for loader in loaders.by_id.values().chain(&loaders.anonymous) {
             loader.unlink();
         }
+        self.factory.unlink_dropped_workers();
     }
 }
 

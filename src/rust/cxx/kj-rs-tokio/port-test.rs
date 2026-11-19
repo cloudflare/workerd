@@ -178,6 +178,23 @@ fn poll_advances_a_ready_local_task() {
 }
 
 #[test]
+fn poll_once_runs_a_ready_local_task() {
+    let port = TokioPort::new();
+    let flag = Arc::new(AtomicBool::new(false));
+    let f2 = Arc::clone(&flag);
+    let _jh = spawn(async move {
+        f2.store(true, Ordering::SeqCst);
+    });
+    assert!(
+        !port.poll_once(),
+        "poll_once() must not report a wake latch here"
+    );
+    assert!(flag.load(Ordering::SeqCst));
+    port.wake();
+    assert!(port.poll_once());
+}
+
+#[test]
 fn wake_latch_semantics() {
     let port = TokioPort::new();
     // No wake: a timed-out wait reports false.

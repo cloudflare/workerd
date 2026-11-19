@@ -189,10 +189,10 @@ impl WorkerStub {
 }
 
 impl Drop for WorkerStub {
-    /// Unlinks the worker on the next turn of the event loop: a stub is typically dropped while
-    /// another isolate is current (or by a request inside the dynamic isolate itself, through
-    /// `ctx.restore()`), so its isolate cannot be entered now. A stub already unlinked has
-    /// nothing left to do.
+    /// Unlinks the worker on the next turn of the event loop (`Factory::unlink_later`): a stub
+    /// is typically dropped while another isolate is current (or by a request inside the dynamic
+    /// isolate itself, through `ctx.restore()`), so its isolate cannot be entered now. A stub
+    /// already unlinked has nothing left to do.
     fn drop(&mut self) {
         if self.unlinked.get() {
             return;
@@ -201,7 +201,7 @@ impl Drop for WorkerStub {
             return;
         };
         let factory = Rc::clone(service.factory());
-        factory.spawn_detached(async move { service.unlink() });
+        factory.unlink_later(service);
     }
 }
 

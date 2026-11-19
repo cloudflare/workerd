@@ -610,7 +610,8 @@ impl Running {
     ///
     /// `handlers` runs as a task of the KJ loop: each handler starts in the turn after the one
     /// before it returned, ahead of the events that one left queued (its tail workers'
-    /// deliveries), where this future would resume only once the loop is idle. The task should
+    /// deliveries), where this future, on tokio, would resume only once tokio next runs: once
+    /// the loop is idle, or at a busy poll after them. The task should
     /// hold the channels, not the server, whose drop clears the tasks.
     async fn alongside<T: 'static>(
         &mut self,
