@@ -165,6 +165,9 @@ struct StallingSinkCalls {
   bool aborted = false;
   // Completes the latest write; it stops waiting if the write's promise is dropped.
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pendingWrite;
+  // If set, whenWriteDisconnected() reports sinkGone() once this resolves; otherwise it never
+  // resolves.
+  kj::Maybe<kj::ForkedPromise<void>> disconnected;
 };
 
 // A sink whose writes stay pending until the test completes them, recording every call.
@@ -187,6 +190,13 @@ class StallingSink final: public WritableStreamSink {
 
   void abort(kj::Exception reason) override {
     calls.aborted = true;
+  }
+
+  kj::Promise<kj::Exception> whenWriteDisconnected() override {
+    KJ_IF_SOME(disconnected, calls.disconnected) {
+      return disconnected.addBranch().then([]() { return sinkGone(); });
+    }
+    return kj::NEVER_DONE;
   }
 
  private:
@@ -2013,6 +2023,131 @@ KJ_TEST("JsReadableStream pumpTo of an in-memory body ends the sink with its las
     KJ_EXPECT(collected.size() == size, size);
     KJ_EXPECT(endedWithLastWrite, size);
   }
+}
+
+// How a test hands an in-memory stream to a pump: as made, detached, or as both branches of a tee.
+enum class Handoff { DIRECT, DETACHED, TEED };
+
+kj::StringPtr KJ_STRINGIFY(Handoff handoff) {
+  switch (handoff) {
+    case Handoff::DIRECT:
+      return "direct"_kj;
+    case Handoff::DETACHED:
+      return "detached"_kj;
+    case Handoff::TEED:
+      return "teed"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory body converts no failed write to JavaScript") {
+  // The stream's source ignores the reason it is canceled with, so the pump cancels it without
+  // converting the sink's exception, which jsg would log and report as an internal exception. A
+  // detached stream, and each branch of a tee, reads the same source.
+  for (bool typescript: {false, true}) {
+    for (size_t size: {kData.size(), 3 * ByteChunker::kMaxChunkSize}) {
+      for (Handoff handoff: {Handoff::DIRECT, Handoff::DETACHED, Handoff::TEED}) {
+        capnp::MallocMessageBuilder message;
+        auto flags = message.initRoot<CompatibilityFlags>();
+        flags.setTypeScriptImplementedStreams(typescript);
+        TestFixture fixture({.featureFlags = flags.asReader()});
+        LogRecorder conversions(kSinkGone);
+        LogRecorder uncaught("uncaught exception");
+        // One sink for each stream handed off.
+        kj::FixedArray<StallingSinkCalls, 2> calls;
+        kj::Vector<kj::Promise<DeferredProxy<void>>> pumps;
+        // Stands in for the I/O the stalled writes would be waiting on, so that the IoContext does
+        // not abort the request as hung.
+        kj::Own<void> pendingEvent;
+
+        auto request = fixture.newIncomingRequest();
+        fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+          auto& js = env.js;
+          pendingEvent = env.context.registerPendingEvent();
+          auto pump = [&](JsReadableStream& stream) {
+            auto& sinkCalls = calls[pumps.size()];
+            pumps.add(stream.pumpTo(js, kj::heap<StallingSink>(sinkCalls), EndStream::YES));
+          };
+          auto data = kj::heapArray<kj::byte>(size);
+          data.asPtr().fill('a');
+          auto stream = JsReadableStream::create(
+              js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+          switch (handoff) {
+            case Handoff::DIRECT:
+              pump(stream);
+              break;
+            case Handoff::DETACHED: {
+              auto detached = stream.detach(js);
+              pump(detached);
+              break;
+            }
+            case Handoff::TEED: {
+              auto tee = stream.tee(js);
+              pump(tee.branch1);
+              pump(tee.branch2);
+              break;
+            }
+          }
+        });
+
+        fixture.pollEventLoop();
+        for (auto i: kj::indices(pumps)) {
+          KJ_ASSERT(calls[i].writes == 1, typescript, size, handoff, i);
+        }
+        auto& ws = fixture.getWaitScope();
+        for (auto i: kj::indices(pumps)) {
+          KJ_ASSERT_NONNULL(calls[i].pendingWrite)->reject(sinkGone());
+          auto exception = KJ_ASSERT_NONNULL(
+              kj::runCatchingExceptions([&]() { pumps[i].wait(ws).proxyTask.wait(ws); }));
+          KJ_EXPECT(exception.getDescription() == kSinkGone, exception.getDescription(), typescript,
+              size, handoff, i);
+        }
+        KJ_EXPECT(conversions.messages.empty(), kj::strArray(conversions.messages, " | "),
+            typescript, size, handoff);
+        KJ_EXPECT(uncaught.messages.empty(), kj::strArray(uncaught.messages, " | "), typescript,
+            size, handoff);
+
+        pumps.clear();
+        fixture.drainAndDestroy(kj::mv(request));
+      }
+    }
+  }
+}
+
+KJ_TEST("JsReadableStream pumpTo of an in-memory TypeScript stream whose sink disconnects converts "
+        "nothing to JavaScript") {
+  // When the sink reports that its writes can no longer succeed, the pump cancels the stream with
+  // no reason, as when a write fails. The write in flight then completes, and the canceled stream
+  // ends the pump.
+  auto fixture = makeTsStreamsFixture();
+  LogRecorder conversions(kSinkGone);
+  auto disconnect = kj::newPromiseAndFulfiller<void>();
+  StallingSinkCalls calls;
+  calls.disconnected = disconnect.promise.fork();
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto data = kj::heapArray<kj::byte>(3 * ByteChunker::kMaxChunkSize);
+    data.asPtr().fill('a');
+    auto stream =
+        JsReadableStream::create(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, data)));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  disconnect.fulfiller->fulfill();
+  fixture.pollEventLoop();
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->fulfill();
+  auto& ws = fixture.getWaitScope();
+  KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws);
+  KJ_EXPECT(calls.writes == 1);
+  KJ_EXPECT(conversions.messages.empty(), kj::strArray(conversions.messages, " | "));
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
 }
 
 KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte chunks") {

@@ -29,6 +29,12 @@ constexpr kj::StringPtr kBodyUsedError =
     "Body has already been used. It can only be used once. Use tee() first if you need to "
     "read it twice."_kj;
 
+// The V8-private property that marks a TypeScript ReadableStream whose underlying source ignores
+// the reason it is canceled with; see SourceIgnoresCancelReason. C++ sets it and reads it. The
+// TypeScript implementation carries it to the streams that take over a stream's source: tee
+// branches and detached streams.
+constexpr kj::StringPtr kSourceIgnoresCancelReason = "kSourceIgnoresCancelReason"_kj;
+
 bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
@@ -580,12 +586,16 @@ kj::Promise<void> lastQueuedWriteStep(
 }
 
 struct QueuedPumpState {
-  QueuedPumpState(jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink)
+  QueuedPumpState(jsg::JsRef<jsg::JsObject> reader,
+      IoOwn<WritableStreamSink> sink,
+      SourceIgnoresCancelReason sourceIgnoresCancelReason)
       : reader(kj::mv(reader)),
-        sink(kj::mv(sink)) {}
+        sink(kj::mv(sink)),
+        sourceIgnoresCancelReason(sourceIgnoresCancelReason) {}
 
   jsg::JsRef<jsg::JsObject> reader;
   IoOwn<WritableStreamSink> sink;
+  SourceIgnoresCancelReason sourceIgnoresCancelReason;
   // Wraps each sink operation so that dropping the pump can cancel the one in flight. Declared
   // after `sink` so that it is destroyed first.
   kj::Canceler writeCanceler;
@@ -613,16 +623,28 @@ void cancelDrainingReader(jsg::Lock& js, jsg::JsObject reader, jsg::JsValue reas
   }
 }
 
-// Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
-// any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
-// there is nothing left to cancel.
-void cancelReaderFromKj(
-    IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader, kj::Exception exception) {
+// The reason to cancel a pump's source with when the sink fails with `exception`: none for a
+// source that ignores it.
+jsg::JsValue cancelReasonForSinkFailure(
+    jsg::Lock& js, SourceIgnoresCancelReason sourceIgnoresCancelReason, kj::Exception exception) {
+  if (sourceIgnoresCancelReason) {
+    return js.undefined();
+  }
+  return exceptionToCancelReason(js, kj::mv(exception));
+}
+
+// Cancels `reader` (a ReadableStreamDrainingReader) because the sink failed with `exception`, from
+// outside any JS-lock scope: the work is queued on the IoContext, which may already be gone, in
+// which case there is nothing left to cancel.
+void cancelReaderFromKj(IoContext::WeakRef& weakContext,
+    jsg::JsRef<jsg::JsObject> reader,
+    kj::Exception exception,
+    SourceIgnoresCancelReason sourceIgnoresCancelReason) {
   weakContext.runIfAlive([&](IoContext& context) {
-    context.addTask(context.run(
-        [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
+    context.addTask(context.run([reader = kj::mv(reader), exception = kj::mv(exception),
+                                    sourceIgnoresCancelReason](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
-      auto reason = exceptionToCancelReason(js, kj::mv(exception));
+      auto reason = cancelReasonForSinkFailure(js, sourceIgnoresCancelReason, kj::mv(exception));
       cancelDrainingReader(js, reader.getHandle(js), reason);
     }));
   });
@@ -692,9 +714,9 @@ kj::Promise<kj::Maybe<kj::Exception>> settleQueuedWrite(kj::Promise<void> write)
 }
 
 // Ends the queued pump's loop after a write before the last fails with `exception`: aborts the
-// sink, as the last write does should it fail; cancels the reader with the exception as the
-// reason, as the legacy pump cancels its source; and leaves the exception for awaitQueuedPump()
-// to throw.
+// sink, as the last write does should it fail; cancels the reader (see
+// cancelReasonForSinkFailure()), as the legacy pump cancels its source; and leaves the exception
+// for awaitQueuedPump() to throw.
 void endQueuedPumpAfterFailedWrite(jsg::Lock& js, QueuedPumpState& state, kj::Exception exception) {
   // The reader is canceled here, so the disconnect watch has nothing left to cancel.
   state.sinkDisconnectWatch = kj::none;
@@ -702,7 +724,7 @@ void endQueuedPumpAfterFailedWrite(jsg::Lock& js, QueuedPumpState& state, kj::Ex
   state.writeFailure = exception.clone();
   // Converting the reason can run JavaScript that drops the pump. The cancel the drop queues then
   // finds the stream closed.
-  auto reason = exceptionToCancelReason(js, kj::mv(exception));
+  auto reason = cancelReasonForSinkFailure(js, state.sourceIgnoresCancelReason, kj::mv(exception));
   cancelDrainingReader(js, state.reader.getHandle(js), reason);
 }
 
@@ -782,9 +804,11 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     IoContext& context,
     jsg::JsObject reader,
     kj::Own<WritableStreamSink> sink,
-    EndStream end) {
+    EndStream end,
+    SourceIgnoresCancelReason sourceIgnoresCancelReason) {
 
-  auto state = kj::rc<QueuedPumpState>(reader.addRef(js), context.addObject(kj::mv(sink)));
+  auto state = kj::rc<QueuedPumpState>(
+      reader.addRef(js), context.addObject(kj::mv(sink)), sourceIgnoresCancelReason);
 
   // Should the sink report that its writes can no longer succeed (for example, the peer of an
   // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
@@ -797,9 +821,9 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
       state->sink->whenWriteDisconnected()
           .then([](kj::Exception&& exception) { return kj::mv(exception); },
               [](kj::Exception&& exception) { return kj::mv(exception); })
-          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js)](
-                    kj::Exception exception) mutable {
-    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception));
+          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js),
+                    sourceIgnoresCancelReason](kj::Exception exception) mutable {
+    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception), sourceIgnoresCancelReason);
   }).eagerlyEvaluate(nullptr)));
 
   auto loop = queuedPumpStep(js, state.addRef(), end)
@@ -907,7 +931,8 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chu
       chunker->cancel();
       return js.resolvedPromise();
     };
-    auto controller = newReadableStreamJsController();
+    // The cancel algorithm ignores its reason.
+    auto controller = newReadableStreamJsController(SourceIgnoresCancelReason::YES);
     auto stream = js.allocAccounted<ReadableStream>(
         sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
     stream->getController().setup(js, kj::mv(source), StreamQueuingStrategy{.highWaterMark = 0});
@@ -940,8 +965,10 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chu
   strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
 
   auto constructor = webstreams::getCppExport(js, "ReadableStream");
-  return JsReadableStream(js,
-      constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
+  auto stream = constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj));
+  // The cancel algorithm ignores its reason.
+  stream.setPrivate(js, kSourceIgnoresCancelReason, js.boolean(true));
+  return JsReadableStream(js, stream.addRef(js));
 }
 
 JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
@@ -1457,7 +1484,8 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
       // drive the internal DrainingReader batch by batch under the isolate lock.
       auto reader = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(
           webstreams::dispatchCall(js, "acquireReadableStreamDrainingReader", handle)));
-      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end);
+      return pumpQueuedTsStream(js, context, reader, kj::mv(sink), end,
+          SourceIgnoresCancelReason(handle.hasPrivate(js, kSourceIgnoresCancelReason)));
     }
   }
   KJ_UNREACHABLE;
@@ -1595,8 +1623,9 @@ JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreD
       // The TypeScript-side detach performs the whole takeover atomically: precondition
       // checks (legacy-exact error texts), internal-state transfer into a fresh stream,
       // and neutralization of the original (permanently locked + disturbed).
-      auto detached = webstreams::dispatchCall(js, "detachReadableStream", obj.getHandle(js),
-          js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
+      auto handle = obj.getHandle(js);
+      auto detached = webstreams::dispatchCall(
+          js, "detachReadableStream", handle, js.boolean(ignoreDisturbed == IgnoreDisturbed::YES));
       auto detachedObj = KJ_REQUIRE_NONNULL(
           JSG_TRY_CAST_OBJECT(detached), "detachReadableStream did not return a stream");
       return JsReadableStream(Impl{

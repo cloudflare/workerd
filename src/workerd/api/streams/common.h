@@ -9,6 +9,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strong-bool.h>
 
 #include <utility>
 
@@ -727,7 +728,13 @@ class ReadableStreamController {
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
 };
 
-kj::Own<ReadableStreamController> newReadableStreamJsController();
+// Whether a stream's underlying source ignores the reason it is canceled with. A pump that cancels
+// such a stream because its sink failed passes no reason, rather than converting the sink's
+// exception to a JavaScript error, which jsg would report as an internal exception, for nothing.
+WD_STRONG_BOOL(SourceIgnoresCancelReason);
+
+kj::Own<ReadableStreamController> newReadableStreamJsController(
+    SourceIgnoresCancelReason sourceIgnoresCancelReason = SourceIgnoresCancelReason::NO);
 kj::Own<ReadableStreamController> newReadableStreamInternalController(
     IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 

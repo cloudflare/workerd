@@ -286,6 +286,15 @@ let isByteStreamController: (value: unknown) => boolean;
 // proxies up front), matching the #-brand's no-tunneling behavior.
 const kReadableStreamBrand = utils.getPrivateSymbol('kReadableStreamBrand');
 
+// A V8-private marker that C++ stamps on the streams it makes over in-memory
+// data, whose underlying sources ignore the reason they are canceled with
+// (SourceIgnoresCancelReason in streams/common.h). A C++ pump that cancels a
+// marked stream because its sink failed passes no reason. Shells carry it
+// forward (see makeShell), since they read the same source.
+const kSourceIgnoresCancelReason = utils.getPrivateSymbol(
+  'kSourceIgnoresCancelReason'
+);
+
 // The Node.js stream-interop hooks, keyed by the well-known symbols Node's
 // own web streams carry. node:stream's finished()/eos() observes a web
 // stream's completion through `stream[kIsClosedPromise].promise` (which
@@ -4111,11 +4120,11 @@ class ReadableStream<R> {
     };
 
     // A shell carries another stream's state forward: a tee branch, or the
-    // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, records whether anything was read before the fork,
-    // and shares `controller`, if any; the caller gives it a consumer when
-    // it has data to read. Callers make shells before handing `from` off,
-    // which disturbs it.
+    // stream detach() moves a body to. It copies the state, stored error,
+    // pending closure and kSourceIgnoresCancelReason marker, records whether
+    // anything was read before the fork, and shares `controller`, if any; the
+    // caller gives it a consumer when it has data to read. Callers make shells
+    // before handing `from` off, which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -4126,6 +4135,12 @@ class ReadableStream<R> {
       shell.#pendingClosure = from.#pendingClosure;
       shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
+      const marks = from as unknown as Record<symbol, unknown>;
+      if (marks[kSourceIgnoresCancelReason] === true) {
+        (shell as unknown as Record<symbol, unknown>)[
+          kSourceIgnoresCancelReason
+        ] = true;
+      }
       return shell;
     };
 
