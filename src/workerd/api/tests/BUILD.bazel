@@ -1368,15 +1368,16 @@ wd_test(
     ],
 )
 
-# Live API objects (Headers, URL, TextEncoder, crypto, navigator, node:fs, bindings) across a
-# startup snapshot, and the cases that must fall back. Only the @all-autogates variant runs the
-# pipeline.
+# Live API objects (Headers, URL, TextEncoder, crypto, navigator, performance, tracing spans,
+# node:fs, file system handles, bindings) across a startup snapshot, and the cases that must fall
+# back. Only the @all-autogates variant runs the pipeline.
 wd_test(
     src = "startup-snapshot-wrappables-test.wd-test",
     args = ["--experimental"],
     data = [
         "startup-snapshot-wrappables-fs-test.js",
         "startup-snapshot-wrappables-test.js",
+        "startup-snapshot-wrappables-webfs-test.js",
     ],
 )
 
@@ -1419,6 +1420,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-rust-case-test.js",
         "startup-snapshot-node-test.js",
     ],
 )
@@ -1470,9 +1472,32 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-standard-url-test.wd-test",
+    data = [
+        "websocket-standard-url-server.js",
+        "websocket-standard-url-test.js",
+    ],
+    # One service tests the behaviour without websocket_standard_url_and_extensions.
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
 )
 
 js_binary(

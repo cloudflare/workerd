@@ -1011,7 +1011,8 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // new object.
   JsObject newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
-  // Gets the function's length property.
+  // Gets the function's length property, truncated and clamped to the range of size_t. A
+  // length that isn't a number, or is NaN, gives 0.
   size_t length(Lock& js) const;
 
   // Gets the function's name property.

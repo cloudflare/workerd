@@ -590,3 +590,46 @@ export const symmetricKeySizeIgnoresModifiedAlgorithm = {
     strictEqual(KeyObject.from(key).symmetricKeySize, size);
   },
 };
+
+export const ed25519JwkImportAlg = {
+  async test() {
+    const { publicKey, privateKey } = await crypto.subtle.generateKey(
+      'Ed25519',
+      true,
+      ['sign', 'verify']
+    );
+    const publicJwk = await crypto.subtle.exportKey('jwk', publicKey);
+    const privateJwk = await crypto.subtle.exportKey('jwk', privateKey);
+    const data = new TextEncoder().encode('hello');
+
+    for (const alg of ['Ed25519', 'EdDSA']) {
+      const priv = await crypto.subtle.importKey(
+        'jwk',
+        { ...privateJwk, alg },
+        'Ed25519',
+        true,
+        ['sign']
+      );
+      const pub = await crypto.subtle.importKey(
+        'jwk',
+        { ...publicJwk, alg },
+        'Ed25519',
+        true,
+        ['verify']
+      );
+      const signature = await crypto.subtle.sign('Ed25519', priv, data);
+      ok(await crypto.subtle.verify('Ed25519', pub, signature, data));
+    }
+
+    await rejects(
+      crypto.subtle.importKey(
+        'jwk',
+        { ...publicJwk, alg: 'ES256' },
+        'Ed25519',
+        true,
+        ['verify']
+      ),
+      { name: 'DataError' }
+    );
+  },
+};

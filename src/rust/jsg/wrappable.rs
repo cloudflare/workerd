@@ -120,7 +120,8 @@ use crate::v8;
 ///
 /// # Built-in implementations
 ///
-/// - **Primitives** (`bool`, `String`, integers, floats, atomics, `()`) — no-op.
+/// - **Primitives** (`bool`, `String`, `str`, integers, floats, atomics, `()`) — no-op.
+/// - **`&'static T`** — only for `T: HoldsNoGcReferences + Sync`; no-op.
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each. Map keys are not visited, so
@@ -138,9 +139,10 @@ pub trait Traced: Send {
     /// Visit GC-visible references held by this value.
     ///
     /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
-    /// GC-visible references (primitives, plain data structs, etc.) uses `#[jsg_traced]`, which
-    /// checks that each field holds none, or `jsg_traced_unchecked!`, which doesn't; both
-    /// generate a no-op `trace` and implement [`HoldsNoGcReferences`].
+    /// GC-visible references (primitives, plain data structs and enums, etc.) uses
+    /// `#[jsg_traced]`, which checks that each field holds none, or `jsg_traced_unchecked!`, which
+    /// doesn't and is for types from outside JSG; both generate a no-op `trace` and implement
+    /// [`HoldsNoGcReferences`].
     ///
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
@@ -228,7 +230,7 @@ impl_traced_noop!(
     std::sync::atomic::AtomicIsize,
     std::time::SystemTime,
     crate::v8::BackingStore,
-    &str,
+    str,
 );
 
 impl<T: Traced> Traced for Option<T> {
@@ -428,6 +430,14 @@ impl<T: HoldsNoGcReferences> Traced for std::sync::Mutex<T> {
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::sync::Mutex<T> {}
+
+/// Only for `T: HoldsNoGcReferences`, so there is nothing behind the reference to visit. `Sync`
+/// makes the reference `Send`.
+impl<T: ?Sized + HoldsNoGcReferences + Sync> Traced for &'static T {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+}
+
+impl<T: ?Sized + HoldsNoGcReferences + Sync> HoldsNoGcReferences for &'static T {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)
@@ -909,6 +919,11 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
     format!("Value out of range. Must be between {min} and {max} (inclusive).")
 }
 
+/// 2^63, the smallest `f64` above `i64::MAX`, which rounds up to it as an `f64`.
+const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
+/// 2^64, the smallest `f64` above `u64::MAX`, which rounds up to it as an `f64`.
+const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
+
 impl_integer!(
     u8 => "octet", new_from_unsigned, not_an_integer(), unsigned_range(u8::MAX);
     u16 => "unsigned short integer", new_from_unsigned, not_an_integer(), unsigned_range(u16::MAX);
@@ -951,9 +966,7 @@ impl<'s> FromJS<'s> for i64 {
 
     #[expect(
         clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        reason = "like C++ JSG, the range is checked in doubles, where i64::MAX rounds up to 2^63, \
-                  which then saturates"
+        reason = "the number is checked to be in range, and truncates toward zero"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
         if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
@@ -967,7 +980,7 @@ impl<'s> FromJS<'s> for i64 {
         if !num.is_finite() {
             return not_an_integer();
         }
-        if num < Self::MIN as f64 || num > Self::MAX as f64 {
+        if !(-TWO_POW_63..TWO_POW_63).contains(&num) {
             return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
         }
         Ok(num as Self)
@@ -1007,10 +1020,8 @@ impl<'s> FromJS<'s> for u64 {
 
     #[expect(
         clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
         clippy::cast_sign_loss,
-        reason = "like C++ JSG, the range is checked in doubles, where u64::MAX rounds up to 2^64, \
-                  which then saturates"
+        reason = "the number is checked to be in range, and truncates toward zero"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
         if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
@@ -1031,7 +1042,7 @@ impl<'s> FromJS<'s> for u64 {
                  positive bigint.",
             ));
         }
-        if num > Self::MAX as f64 {
+        if num >= TWO_POW_64 {
             return Err(Error::new_type_error(unsigned_range(Self::MAX)));
         }
         Ok(num as Self)

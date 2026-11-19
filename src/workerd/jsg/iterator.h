@@ -739,7 +739,7 @@ class IteratorBase: public Object {
     }
   }
 
-  JSG_MEMORY_INFO(IteratorBase) {
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
     if constexpr (MemoryRetainer<State>) {
       tracker.trackField("state", state);
     } else {
@@ -785,7 +785,13 @@ class AsyncIteratorImpl {
   };
 
   JSG_MEMORY_INFO(AsyncIteratorImpl) {
-    // TODO(soon): Implement memory tracking
+    if (!pendingStack.empty()) {
+      tracker.pushContainer("pendingStack"_kjc, sizeof(pendingStack), "pendingStack"_kjc);
+      for (const auto& promise: pendingStack) {
+        tracker.trackField(nullptr, promise);
+      }
+      tracker.popNode();
+    }
   }
 
  private:
@@ -864,7 +870,7 @@ class AsyncIteratorBase: public Object {
     }
   }
 
-  JSG_MEMORY_INFO(AsyncIteratorBase) {
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(fin, Finished) {
         tracker.trackFieldWithSize("state", sizeof(Finished));

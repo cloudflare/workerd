@@ -29,6 +29,14 @@ py_wd_test("asgi-sse")
 
 py_wd_test("top-level-entropy")
 
+# Restores the baseline snapshot without creating one, so the top level runs after the restore and
+# reads the bad entropy flag at the address the restored snapshot records, if it records one.
+py_wd_test(
+    "top-level-entropy",
+    name = "top-level-entropy-baseline",
+    make_snapshot = False,
+)
+
 py_wd_test("subdirectory")
 
 py_wd_test(
@@ -154,14 +162,12 @@ sh_test(
         "$(location //src/workerd/server:workerd)",
         "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
         "$(location //src/pyodide/tests:pyodide_dev.capnp.bin@rule)",
-        "../+pyodide+all_pyodide_wheels_20250808",
     ],
     data = [
         "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
         "python-abort-isolate-on-fatal/worker.py",
         "//src/pyodide/tests:pyodide_dev.capnp.bin@rule",
         "//src/workerd/server:workerd",
-        "@all_pyodide_wheels_20250808//:whls",
     ],
     tags = [
         "no-coverage",

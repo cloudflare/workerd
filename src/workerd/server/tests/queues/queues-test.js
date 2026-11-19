@@ -16,13 +16,15 @@ export class Seen extends DurableObject {
   entries() {
     return this.log;
   }
-  #held;
-  // Resolves once `release()` is called.
-  hold() {
-    return new Promise((wake) => (this.#held = wake));
+  // `hold()` resolves once `release()` is called, before or after it: the
+  // delivery calls `hold()` after `add()`, so the test can get there first.
+  #gate = Promise.withResolvers();
+  async hold() {
+    await this.#gate.promise;
+    this.#gate = Promise.withResolvers();
   }
   release() {
-    this.#held();
+    this.#gate.resolve();
   }
   // The log, once it holds `n` entries.
   async until(n) {
@@ -82,18 +84,22 @@ export let formats = {
 export let batchesRetriesAndDeadLetters = {
   async test(ctrl, env, ctx) {
     const before = (await seen(ctx).entries()).length;
+    const lateSeconds = 60;
     // One batch of four: a retry goes to "dead" after its second attempt;
     // an explicit ack wins over the exception that retries the rest.
     await env.JOBS.sendBatch([
       { body: 'fail' },
       { body: 'throw' },
       { body: 'ok' },
-      { body: 'late', delaySeconds: 1 },
+      { body: 'late', delaySeconds: lateSeconds },
     ]);
-    // All but "late", which is due once the clock moves a second.
+    // All but "late". The clock is real time plus advances, so the delay is
+    // longer than the test can take.
     const early = (await until(ctx, before + 6)).slice(before);
     assert(!early.some((e) => e.body === 'late'));
-    await env.QUEUES.fetch('http://q/clock?advance=1000', { method: 'POST' });
+    await env.QUEUES.fetch(`http://q/clock?advance=${lateSeconds * 1000}`, {
+      method: 'POST',
+    });
     await env.JOBS.metrics();
     const log = (await until(ctx, before + 7)).slice(before);
     const of = (body) =>

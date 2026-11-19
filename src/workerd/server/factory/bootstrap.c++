@@ -245,11 +245,6 @@ class Bootstrap {
     options.asyncTracePromises = serveOrTest.async_trace_promises;
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
-    KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {
-      // The command line checked that the directory exists.
-      python.packageDiskCacheRoot = KJ_REQUIRE_NONNULL(
-          openWritableDirectory(kj::str(path)), "package disk cache dir must exist");
-    }
     KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
       // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
       // directory).

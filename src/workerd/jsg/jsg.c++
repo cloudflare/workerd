@@ -761,6 +761,12 @@ void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
   this->schemaLoader = schemaLoader;
 }
 
+void ContextGlobal::jsgGetContextGlobalMemoryInfo(MemoryTracker& tracker) const {
+  KJ_IF_SOME(registry, legacyModuleRegistry) {
+    tracker.trackField("moduleRegistry", registry);
+  }
+}
+
 #ifdef V8_ENABLE_SANDBOX
 // These are disabled by default in workerd. We do not build workerd with
 // the V8_ENABLED_SANDBOX flag. If we do decide to enable it, we will need

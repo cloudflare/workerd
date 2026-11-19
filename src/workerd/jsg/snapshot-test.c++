@@ -781,17 +781,16 @@ KJ_TEST("a cleanup callback that throws does not fail the zygote") {
       *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "fromCleanup.getValue()"_kj) == "3"_kj); });
 }
 
-KJ_TEST("dropUnreachableWrappables() raises what the serializer callback could only record") {
-  auto artifact = kj::atomicRefcounted<SnapshotArtifact>();
+KJ_TEST("checkCallbackFindings() raises what the serializer callback could only record") {
   {
     WrappablesSerializeMetadata metadata;
     metadata.unknownWrappersCount = 1;
-    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.dropUnreachableWrappables(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.checkCallbackFindings());
   }
   {
     WrappablesSerializeMetadata metadata;
     metadata.unclonable.add(kj::str("SomeType"));
-    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.dropUnreachableWrappables(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.checkCallbackFindings());
   }
 }
 
