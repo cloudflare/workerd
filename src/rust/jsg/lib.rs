@@ -5,6 +5,7 @@
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod arguments;
@@ -187,6 +188,9 @@ mod ffi {
         type Global = crate::v8::ffi::Global;
 
         // Realm
+        /// Null if no Realm is attached. `#[nothrow]` so that cross-language LTO inlines it:
+        /// a struct conversion reads the Realm on each call.
+        #[nothrow]
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
         /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
         /// none has been detached, which sets the dispose hook.
@@ -1062,8 +1066,9 @@ impl<'s> Lock<'s> {
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the Realm stays attached
+        // while the lock is in use, and `self` is borrowed for as long as the result.
+        unsafe { attached_realm(self.isolate().as_ffi()).as_mut() }
     }
 
     /// Returns the current worker's compatibility flags reader.
@@ -1887,6 +1892,29 @@ unsafe fn isolate_disposed(state: *const IsolateState) {
     state.isolate_disposed();
 }
 
+/// The Realm attached to `isolate`. The caller chooses whether to borrow it shared or unique.
+///
+/// # Panics
+///
+/// Panics if no Realm is attached.
+///
+/// # Safety
+///
+/// `isolate` must be valid and locked by this thread.
+#[expect(
+    unsafe_code,
+    reason = "reads the Realm pointer from the isolate's data slot"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "a Realm is attached to every isolate that runs Rust JSG code"
+)]
+unsafe fn attached_realm(isolate: *mut v8::ffi::Isolate) -> NonNull<Realm> {
+    // SAFETY: the isolate is valid and locked (guaranteed by the caller).
+    let realm = unsafe { ffi::realm_from_isolate(isolate) };
+    NonNull::new(realm).expect("Rust Realm not set on isolate")
+}
+
 /// See the bridge declaration.
 #[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
 unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
@@ -1904,8 +1932,10 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
     // (guaranteed by the C++ caller, and checked above).
     let isolate = unsafe { Isolate::from_raw(isolate) };
-    // SAFETY: the Realm is attached while the hook that calls this is installed.
-    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    // SAFETY: the isolate is valid and locked, and the Realm is attached while the hook that
+    // calls this is installed. The reference is shared, since releasing a reference can drop a
+    // resource, whose `Drop` may reach the Realm.
+    let realm = unsafe { attached_realm(isolate.as_ffi()).as_ref() };
     realm.state.drain_awaiting_lock(isolate);
 }
 
