@@ -88,6 +88,8 @@ test:ci-macOS --test_env=CI=true
 # Windows CI always runs in the release configuration to prevent breaking the release build.
 # build:ci-windows --config=windows_no_dbg
 build:ci-windows --config=release_windows
+# --jobs=64 overlaps cache downloads, but local test processes must fit the runner's cores.
+test:ci-windows --local_test_jobs=HOST_CPUS
 build:ci-windows-debug --config=debug
 
 # Some tests (like Python import tests) take a long time to run, especially when debug is enabled

@@ -56,8 +56,13 @@ class Repl:
         self.running, running = os.pipe()
 
         def start():
-            # A REPL that SIGQUIT ends would otherwise dump core.
-            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            # Linux ignores a zero core limit for piped core dumps. A limit of one
+            # suppresses those too (fs/coredump.c's recursive core-handler guard),
+            # so SIGQUIT does not wait for a host core-dump service. Respect an
+            # inherited hard limit of zero, which an unprivileged child cannot raise.
+            _, hard_limit = resource.getrlimit(resource.RLIMIT_CORE)
+            core_limit = 1 if sys.platform == "linux" and hard_limit != 0 else 0
+            resource.setrlimit(resource.RLIMIT_CORE, (core_limit, core_limit))
             for number in ignored:
                 signal.signal(number, signal.SIG_IGN)
 

@@ -3668,8 +3668,9 @@ export interface Socket {
 }
 export interface SocketOptions {
   secureTransport?: string;
-  allowHalfOpen: boolean;
+  allowHalfOpen?: boolean;
   highWaterMark?: number | bigint;
+  protocol?: "tcp" | "udp";
 }
 export interface SocketAddress {
   hostname: string;

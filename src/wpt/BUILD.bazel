@@ -289,6 +289,7 @@ wpt_test(
 wpt_test(
     name = "performance-timeline",
     config = "performance-timeline-test.ts",
+    tags = ["cpu:2"],
     wpt_directory = "@wpt//:performance-timeline@module",
 )
 

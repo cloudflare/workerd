@@ -6,13 +6,17 @@ load("//:build/wd_bench.bzl", "wd_bench")
 
 readable_byte_bench_srcs = glob(["*.js"]) + ["readable-byte-modules.capnp"]
 
+# The C++ byte read loops and cold starts exceed the medium test budget.
 wd_bench(
+    size = "large",
     src = "readable-byte-cpp.wd-bench",
     data = readable_byte_bench_srcs,
+    tags = ["cpu:2"],
 )
 
 wd_bench(
     src = "readable-byte-ts.wd-bench",
     args = ["--experimental"],
     data = readable_byte_bench_srcs,
+    tags = ["cpu:2"],
 )

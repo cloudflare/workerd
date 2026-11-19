@@ -629,12 +629,13 @@ export const timeoutOptionAndCallback = {
 export const timeoutMidBodyAbortsResponse = {
   async test(ctrl, env) {
     const log = [];
-    const req = get(env, '/slow-body?delay=300');
-    req.setTimeout(80);
+    const req = get(env, '/never-ends');
     record(log, 'req', req, ['timeout', 'error', 'close']);
     const res = await response(req);
     record(log, 'res', res, ['timeout', 'aborted', 'error', 'end', 'close']);
     res.on('data', (chunk) => log.push(`data:${chunk}`));
+    // Exercise an idle body, even when establishing the response takes longer.
+    res.once('data', () => req.setTimeout(80));
     await Promise.all([once(req, 'close'), once(res, 'close')]);
     deepStrictEqual(log, [
       'data:first',

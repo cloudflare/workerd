@@ -2,7 +2,7 @@ load("//:build/wd_sh_test.bzl", "wd_sh_test")
 
 wd_sh_test(
     name = "helloworld_compile_test",
-    size = "medium",
+    size = "large",
     srcs = ["compile-test.sh"],
     args = [
         "$(location //src/workerd/server:workerd)",

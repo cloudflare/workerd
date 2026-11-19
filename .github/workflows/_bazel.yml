@@ -122,7 +122,9 @@ permissions:
 
 jobs:
   bazel:
-    runs-on: ${{ inputs.image }}
+    # Fork PRs cannot use bazelflare's OIDC credentials, so their tools execute on the runner.
+    # The x64 clang-tidy binary requires glibc 2.38, which Ubuntu 22.04 does not provide.
+    runs-on: ${{ inputs.bazelflare && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && inputs.image == 'ubuntu-22.04-16core' && 'ubuntu-24.04' || inputs.image }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -137,9 +139,14 @@ jobs:
           RUNNER_DEVELOPER_FLAGS: ${{ inputs.runner_developer_flags }}
           RUNNER_EXTRA_BAZEL_ARGS: ${{ inputs.runner_extra_bazel_args }}
           REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+          REMOTE_CACHE_READ_ONLY: ${{ secrets.BAZEL_CACHE_KEY == '' }}
         run: |
           # bazelflare is cache and executor in one, so it takes no separate remote cache.
           BAZELFLARE=false BAZEL_REMOTE_ARGS=--remote_cache=$REMOTE_CACHE
+          # Jobs without cache credentials can read the public cache but cannot upload.
+          if [ "$REMOTE_CACHE_READ_ONLY" = true ]; then
+            BAZEL_REMOTE_ARGS="$BAZEL_REMOTE_ARGS --noremote_upload_local_results"
+          fi
           if [ "$WANTS_BAZELFLARE" = true ]; then
             if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
               BAZELFLARE=true BAZEL_REMOTE_ARGS=
@@ -148,6 +155,11 @@ jobs:
               DEVELOPER_FLAGS=$RUNNER_DEVELOPER_FLAGS
               EXTRA_BAZEL_ARGS=$RUNNER_EXTRA_BAZEL_ARGS
             fi
+          fi
+          if [ "$BAZELFLARE" = false ]; then
+            # Local actions need dependency sources to survive remote cache eviction.
+            # Keep the action cache; materialize repositories instead of caching their contents.
+            echo "startup --noexperimental_remote_repo_contents_cache" >> .bazelrc
           fi
           {
             echo "BAZELFLARE=$BAZELFLARE"
@@ -184,6 +196,14 @@ jobs:
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
+      - name: Set up Linux sanitizer diagnostics
+        if: runner.os == 'Linux' && env.BAZELFLARE != 'true' && (inputs.suffix == '-asan' || inputs.suffix == '-tsan')
+        # LSan's existing resolver-race suppression needs function names from libc.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends llvm-18 libc6-dbg
+          sudo ln -sf /usr/bin/llvm-symbolizer-18 /usr/local/bin/llvm-symbolizer
+          llvm-symbolizer --version
       - name: Configure download mirrors
         shell: bash
         run: |
@@ -199,9 +219,9 @@ jobs:
           sudo systemctl restart docker
       - name: Bazel build
         # `bazel test` and `bazel coverage` build the targets they run, so a job testing the targets
-        # it builds skips this step. Each test then starts as soon as its own dependencies are
-        # built, rather than after the whole build.
-        if: ${{ !(inputs.run_tests || inputs.run_coverage) || inputs.build_target != inputs.test_target }}
+        # it builds skips this step. Windows builds first so that its short-budget tests do not
+        # compete with Rust compilation and linking for the runner's CPU and disk.
+        if: ${{ runner.os == 'Windows' || !(inputs.run_tests || inputs.run_coverage) || inputs.build_target != inputs.test_target }}
         run: |
           bazel build ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.build_target }}
       - name: Check I/O backend dependency graph
@@ -248,7 +268,8 @@ jobs:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
-        if: always() && runner.os != 'Windows'
+        # Bazel info can wait on a command interrupted by cancellation.
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         shell: bash
         run: |
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
@@ -261,7 +282,7 @@ jobs:
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
       - name: Report disk usage (in MB)
-        if: always() && runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           function Get-SizeMB($path) {
@@ -313,7 +334,7 @@ jobs:
           fi
 
       - name: Bazel shutdown
-        if: always()
+        if: ${{ !cancelled() }}
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
       - name: Drop unused bazelflare cache entries

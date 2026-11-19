@@ -341,14 +341,17 @@ export const sourceReleasedOnceEnded = {
         let controller;
         let ref;
         const stream = (() => {
-          const source = {
+          let source = {
             start(c) {
               controller = c;
             },
             ...(startOnly ? {} : { pull() {}, cancel() {} }),
           };
           ref = new WeakRef(source);
-          return new ReadableStream(source);
+          const result = new ReadableStream(source);
+          // Clear the allocating frame's reference, even if V8 retains its context.
+          source = undefined;
+          return result;
         })();
         await scheduler.wait(1);
         if (end === 'close') controller.close();

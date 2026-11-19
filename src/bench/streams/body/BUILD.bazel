@@ -10,6 +10,7 @@ wd_bench(
     size = "large",
     src = "body-cpp.wd-bench",
     data = body_bench_srcs,
+    tags = ["cpu:4"],
 )
 
 wd_bench(
@@ -17,4 +18,5 @@ wd_bench(
     src = "body-ts.wd-bench",
     args = ["--experimental"],
     data = body_bench_srcs,
+    tags = ["cpu:4"],
 )

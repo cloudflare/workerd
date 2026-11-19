@@ -96,7 +96,7 @@ jobs:
       suffix: ${{ matrix.config.suffix }}
       # A bazelflare job builds a developer's bazelflare config, with CI's flags for bazelflare.
       developer_flags: ${{ matrix.os.bazelflare && format('--config=bazelflare {0}', matrix.config.bazelflare_flags) || '' }}
-      extra_bazel_args: '--config=ci-test ${{ matrix.os.bazelflare && ''--config=ci-bazelflare'' || format(''--config=ci-{0}{1}'', matrix.os.name, matrix.config.suffix) }}'
+      extra_bazel_args: "--config=ci-test ${{ matrix.os.bazelflare && '--config=ci-bazelflare' || format('--config=ci-{0}{1}', matrix.os.name, matrix.config.suffix) }}"
       runner_extra_bazel_args: '--config=ci-test --config=ci-${{ matrix.os.name }}${{ matrix.config.suffix }}'
       macos_use_lld: ${{ matrix.os.use_lld || false }}
       bazelflare: ${{ matrix.os.bazelflare || false }}
@@ -227,18 +227,26 @@ jobs:
         # The build `just generate-types` makes, on bazelflare, which the test-linux job's build
         # mostly shares. Without an OIDC token, as in a pull request from a fork, it builds on the
         # runner.
+        env:
+          REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+          REMOTE_CACHE_READ_ONLY: ${{ secrets.BAZEL_CACHE_KEY == '' }}
         run: |
           if [ "$BAZELFLARE" = true ]; then
             bazel build --config=bazelflare --config=ci --config=ci-bazelflare --config=ci-download-types //types
           else
-            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux-without-pgo --config=x64-release //types
+            cache_args=(--remote_cache="$REMOTE_CACHE")
+            if [ "$REMOTE_CACHE_READ_ONLY" = true ]; then
+              cache_args+=(--noremote_upload_local_results)
+            fi
+            bazel build --strip=always "${cache_args[@]}" --config=ci --config=release_linux-without-pgo --config=x64-release //types
           fi
       - name: Check snapshot diff
+        id: snapshot_diff
         run: |
           diff -r types/generated-snapshot bazel-bin/types/definitions > types.diff
           diff -r types/generated-snapshot/experimental bazel-bin/types/definitions/experimental >> types.diff
       - name: 'Put diff on the environment'
-        if: failure()
+        if: failure() && steps.snapshot_diff.outcome == 'failure'
         id: types_diff
         run: |
           {
@@ -252,7 +260,7 @@ jobs:
           name: generated-snapshot
           path: bazel-bin/types/definitions/
       - name: 'Comment on PR with error details'
-        if: failure()
+        if: failure() && steps.snapshot_diff.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
         with:
           message: |
@@ -330,12 +338,13 @@ jobs:
           --filter=./fixtures/vitest-plugin-examples
           --filter=create-cloudflare
 
-      # The suites are independent, and no single one keeps the runner's cores
-      # busy, so run them at the same time. `--only` skips the dependency builds
-      # done above. The Vite and Vitest suites run fewer workers than their
-      # defaults so that timing-sensitive tests aren't starved of CPU. Each
-      # suite's output is printed in its own group once all of them have
-      # finished.
+      # Wrangler's default fork pool scales to the runner's cores, so run it
+      # before the other suites to leave capacity for runtime startup and reloads.
+      # Miniflare's artifact listener releases its probed port before binding it.
+      # Run its files on one worker, separately from the other SDK suites.
+      # Run the remaining suites together, keeping the Vite/Vitest worker caps.
+      # `--only` skips the dependency builds done above. Print each suite's
+      # output in its own group once all suites have finished.
       - name: Run workers-sdk tests
         # Serially the suites took about 12 minutes, so a run past 30 is hung.
         timeout-minutes: 30
@@ -351,8 +360,8 @@ jobs:
           }
           # Skip Wrangler's ConfigController tests, which are flaky
           # (https://jira.cfdata.org/browse/DEVX-2309).
-          suite wrangler-unit pnpm test:ci --filter wrangler --only -- -t '^((?!(ConfigController)).)*$' &
-          suite miniflare-unit pnpm test:ci --filter miniflare --only &
+          suite wrangler-unit pnpm test:ci --filter wrangler --only -- -t '^((?!(ConfigController)).)*$'
+          suite miniflare-unit pnpm test:ci --filter miniflare --only -- --maxWorkers=1
           suite vite-unit pnpm test:ci --filter @cloudflare/vite-plugin --only -- --maxWorkers=4 &
           suite vitest-unit pnpm test:ci --filter=./fixtures/vitest-plugin-examples --only -- --maxWorkers=4 &
           suite wrangler-nodejs-e2e pnpm test:e2e --filter wrangler --only -- unenv-preset &

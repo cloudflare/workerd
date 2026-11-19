@@ -4,7 +4,7 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
 # config runs a cron trigger. cluster-test runs in shards, each of which
 # should stay well under 60 s: each test starts a cluster of its own, which
 # takes a second under TSan, the takeovers wait out a dead owner's lease, a
-# quarter of the default in cluster-test.wd-test, and the drain tests wait
+# half of the default in cluster-test.wd-test, and the drain tests wait
 # out stop deadlines. Add takeovers to the simulations instead.
 [wd_js_test(
     name = name,
@@ -35,7 +35,13 @@ load("//:build/wd_js_test.bzl", "wd_js_test")
         "BROKEN_DEPLOYMENTS_CONFIG": "$(rootpath :cluster-broken-deployments.wd-test)",
     },
     shard_count = shards,
-    tags = ["js-test"],
+    # Each shard starts several V8 processes and SQLite stores with short leases. Keep local
+    # builds and tests from starving startup and renewal; remote executors isolate the shards.
+    tags = [
+        "cpu:4",
+        "exclusive-if-local",
+        "js-test",
+    ],
 ) for name, tests, config, shards in [
     ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 5),
     ("cluster-cron-test", "^cluster: a cron", "cluster-cron.wd-test", 1),

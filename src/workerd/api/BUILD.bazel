@@ -716,6 +716,8 @@ kj_test(
     # Each injection point drains microtasks and forces a full GC, including under ASan.
     size = "large",
     src = "streams/termination-injection-test.c++",
+    # V8's background work runs concurrently with the test thread.
+    tags = ["cpu:2"],
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:promise-wrapper",
@@ -959,6 +961,7 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )
 
