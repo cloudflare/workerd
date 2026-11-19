@@ -29,6 +29,7 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Runs `f` in `try_catch`. `f` must fail with an error for a pending exception; returns what
 /// JavaScript threw.
@@ -680,6 +681,7 @@ fn coercion_exception_propagates_through_method() {
 // =============================================================================
 
 /// What `ConvertingResource` does with its value.
+#[jsg_traced]
 #[derive(Clone, Copy, Debug)]
 enum Conversion {
     String,
@@ -793,8 +795,6 @@ impl Conversion {
         }
     }
 }
-
-jsg::jsg_traced_unchecked!(Conversion);
 
 /// A Rust-backed resource that converts values, and records whether a conversion failed with a
 /// pending error.

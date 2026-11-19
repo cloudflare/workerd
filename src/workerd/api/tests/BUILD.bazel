@@ -1488,6 +1488,19 @@ wd_test(
 )
 
 js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
+)
+
+js_binary(
     name = "websocket-client-error-sidecar",
     entry_point = "websocket-client-error-sidecar.js",
 )

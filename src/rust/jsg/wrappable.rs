@@ -120,7 +120,8 @@ use crate::v8;
 ///
 /// # Built-in implementations
 ///
-/// - **Primitives** (`bool`, `String`, integers, floats, atomics, `()`) — no-op.
+/// - **Primitives** (`bool`, `String`, `str`, integers, floats, atomics, `()`) — no-op.
+/// - **`&'static T`** — only for `T: HoldsNoGcReferences + Sync`; no-op.
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each. Map keys are not visited, so
@@ -138,9 +139,10 @@ pub trait Traced: Send {
     /// Visit GC-visible references held by this value.
     ///
     /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
-    /// GC-visible references (primitives, plain data structs, etc.) uses `#[jsg_traced]`, which
-    /// checks that each field holds none, or `jsg_traced_unchecked!`, which doesn't; both
-    /// generate a no-op `trace` and implement [`HoldsNoGcReferences`].
+    /// GC-visible references (primitives, plain data structs and enums, etc.) uses
+    /// `#[jsg_traced]`, which checks that each field holds none, or `jsg_traced_unchecked!`, which
+    /// doesn't and is for types from outside JSG; both generate a no-op `trace` and implement
+    /// [`HoldsNoGcReferences`].
     ///
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
@@ -228,7 +230,7 @@ impl_traced_noop!(
     std::sync::atomic::AtomicIsize,
     std::time::SystemTime,
     crate::v8::BackingStore,
-    &str,
+    str,
 );
 
 impl<T: Traced> Traced for Option<T> {
@@ -428,6 +430,14 @@ impl<T: HoldsNoGcReferences> Traced for std::sync::Mutex<T> {
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::sync::Mutex<T> {}
+
+/// Only for `T: HoldsNoGcReferences`, so there is nothing behind the reference to visit. `Sync`
+/// makes the reference `Send`.
+impl<T: ?Sized + HoldsNoGcReferences + Sync> Traced for &'static T {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+}
+
+impl<T: ?Sized + HoldsNoGcReferences + Sync> HoldsNoGcReferences for &'static T {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)
