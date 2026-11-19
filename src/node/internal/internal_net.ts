@@ -1596,6 +1596,10 @@ Object.defineProperties(Socket.prototype, {
 
       if (!writableBuffer) return undefined;
 
+      if (!data) {
+        return this.writableLength + bytes;
+      }
+
       if (Array.isArray(data)) {
         // Was a writev, iterate over chunks to get total length
         for (let i = 0; i < data.length; i++) {
@@ -1616,19 +1620,23 @@ Object.defineProperties(Socket.prototype, {
             );
           }
         }
-      } else if (data) {
+      } else if (typeof data !== 'string') {
         // Writes are either a string or a Buffer.
-        if (typeof data !== 'string') {
-          bytes += data.length;
-        } else {
-          bytes += Buffer.byteLength(data, encoding);
-        }
+        bytes += data.length;
       } else {
-        const flushed =
-          this._handle != null
-            ? this._handle.bytesWritten
-            : this[kBytesWritten];
-        return this.writableLength + flushed;
+        bytes += Buffer.byteLength(data, encoding);
+      }
+
+      // Writes queued behind the pending one.
+      const queued = writableBuffer as unknown as {
+        chunk: Buffer | string;
+        encoding: NodeJS.BufferEncoding;
+      }[];
+      for (const el of queued) {
+        bytes +=
+          el.chunk instanceof Buffer
+            ? el.chunk.length
+            : Buffer.byteLength(el.chunk, el.encoding);
       }
 
       return bytes;
