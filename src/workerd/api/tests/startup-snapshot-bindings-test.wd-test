@@ -3,7 +3,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # Capability bindings captured at module scope and used at request time; see
 # startup-snapshot-bindings-test.js. The runner's test() fetches every case service and asserts
 # its report. The @all-autogates variant turns the startup-snapshot autogate on, so every service
-# here goes through the zygote; the @ variant runs them as plain Workers.
+# here goes through the zygote, and the rust-worker-loader autogate, so the loader binding is the
+# Rust WorkerLoader; the @ variant runs them as plain Workers with the C++ WorkerLoader.
 
 const compatibilityFlags :List(Text) = [
   "nodejs_compat",
@@ -26,6 +27,7 @@ const unitTests :Workerd.Config = (
           (name = "MODE", json = "\"runner\""),
           (name = "rpc", service = "rpc"),
           (name = "durable-object", service = "durable-object"),
+          (name = "worker-loader", service = "worker-loader"),
           (name = "rpc-property", service = "rpc-property"),
           (name = "wrapped", service = "wrapped"),
           (name = "crypto-key", service = "crypto-key"),
@@ -53,6 +55,16 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "MODE", json = "\"durable-object\""),
           (name = "NS", durableObjectNamespace = "Counter"),
+        ],
+      )
+    ),
+    ( name = "worker-loader",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"worker-loader\""),
+          (name = "LOADER", workerLoader = ()),
         ],
       )
     ),

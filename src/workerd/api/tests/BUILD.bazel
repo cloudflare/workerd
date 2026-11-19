@@ -1852,9 +1852,21 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-validation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-validation-test.js"],
+)
+
+wd_test(
     src = "worker-loader-gc-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-gc-test.js"],
+)
+
+wd_test(
+    src = "worker-loader-hibernation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-hibernation-test.js"],
 )
 
 wd_test(

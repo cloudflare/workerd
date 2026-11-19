@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "worker-loader-hibernation-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "worker-loader-hibernation-test.js" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "unsafe_module"],
+        durableObjectNamespaces = [
+          ( className = "LoaderHolder", uniqueKey = "loader-holder" ),
+        ],
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
+        bindings = [
+          ( name = "LOADER", workerLoader = () ),
+          ( name = "HOLDER", durableObjectNamespace = "LoaderHolder" ),
+        ],
+      )
+    ),
+  ],
+);

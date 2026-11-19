@@ -137,7 +137,10 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* When enabled, Worker Loader bindings are the Rust WorkerLoader                                \
+     (src/workerd/api/worker-loader-api) instead of the C++ one (api/worker-loader.c++). */        \
+  V(RUST_WORKER_LOADER)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
