@@ -115,8 +115,10 @@ class GrowableBuffer final {
     builder.resize(size);
   }
 
+  // Makes room for up to another chunk, but never past the maximum capacity: the output that is
+  // still to come may fit in less.
   void addChunk() {
-    reserve(size() + chunkSize);
+    reserve(kj::min(size() + chunkSize, maxCapacity));
   }
 
   void reserve(size_t size) {

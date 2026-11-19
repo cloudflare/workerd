@@ -3075,3 +3075,44 @@ export const oneShotErrorCodes = {
     });
   },
 };
+
+// The sync functions write into a buffer that grows 40 KiB at a time up to maxOutputLength. A
+// maxOutputLength the output fits in, but that leaves less than that much room after a full
+// buffer, used to fail with "Memory limit exceeded". adm-zip passes an entry's exact size.
+export const maxOutputLengthAfterBufferGrowth = {
+  test() {
+    for (const size of [40961, 50000, 100000, 200000]) {
+      const original = Buffer.alloc(size);
+      for (let i = 0; i < size; i++) original[i] = (i * 7 + (i >> 9)) & 0xff;
+      for (const [compress, decompress] of [
+        [zlib.deflateRawSync, zlib.inflateRawSync],
+        [zlib.deflateSync, zlib.inflateSync],
+        [zlib.gzipSync, zlib.gunzipSync],
+        [zlib.brotliCompressSync, zlib.brotliDecompressSync],
+      ]) {
+        const compressed = compress(original);
+        for (const maxOutputLength of [size, size + 1, size + 20000]) {
+          assert.deepStrictEqual(
+            decompress(compressed, { maxOutputLength }),
+            original,
+            `${decompress.name}, ${size} bytes, maxOutputLength ${maxOutputLength}`
+          );
+        }
+        assert.throws(
+          () => decompress(compressed, { maxOutputLength: size - 1 }),
+          { name: 'RangeError', code: 'ERR_BUFFER_TOO_LARGE' },
+          `${decompress.name}, ${size} bytes, maxOutputLength ${size - 1}`
+        );
+      }
+      // Compression output is bounded the same way.
+      const compressed = zlib.deflateSync(original, { level: 0 });
+      assert.strictEqual(
+        zlib.deflateSync(original, {
+          level: 0,
+          maxOutputLength: compressed.length,
+        }).length,
+        compressed.length
+      );
+    }
+  },
+};

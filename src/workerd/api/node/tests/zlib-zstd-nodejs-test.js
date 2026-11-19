@@ -739,3 +739,26 @@ export const zstdDecompressEmptyInputTest = {
     assert.strictEqual(zlib.zstdDecompressSync(Buffer.alloc(0)).length, 0);
   },
 };
+// A maxOutputLength the output fits in, but that leaves less than the 40 KiB the sync output
+// buffer grows by, is enough.
+export const zstdMaxOutputLengthAfterBufferGrowthTest = {
+  test() {
+    for (const size of [40961, 50000, 100000, 200000]) {
+      const original = xorshiftBytes(size);
+      const compressed = zlib.zstdCompressSync(original);
+      for (const maxOutputLength of [size, size + 1, size + 20000]) {
+        assert(
+          original.equals(
+            zlib.zstdDecompressSync(compressed, { maxOutputLength })
+          ),
+          `${size} bytes, maxOutputLength ${maxOutputLength}`
+        );
+      }
+      assert.throws(
+        () =>
+          zlib.zstdDecompressSync(compressed, { maxOutputLength: size - 1 }),
+        { name: 'RangeError', code: 'ERR_BUFFER_TOO_LARGE' }
+      );
+    }
+  },
+};
