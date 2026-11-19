@@ -89,6 +89,7 @@ pub use scope::CallbackScopeParam;
 pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
+pub use scope::NestedScope;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;

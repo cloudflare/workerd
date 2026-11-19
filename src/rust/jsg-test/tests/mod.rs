@@ -27,6 +27,7 @@ mod function;
 mod function_new;
 mod gc;
 mod global;
+mod handle_scope;
 mod harness;
 mod integer;
 mod internal_error;
