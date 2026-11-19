@@ -1239,10 +1239,11 @@ void readdirImpl(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
     kj::Rc<workerd::Directory> dir,
     const kj::Path& path,
+    const kj::Path& relative,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
   for (auto& entry: *dir) {
-    auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
+    auto name = options.recursive ? relative.append(entry.key).toString(false) : kj::str(entry.key);
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto stat = file->stat(js);
@@ -1260,7 +1261,8 @@ void readdirImpl(jsg::Lock& js,
         });
 
         if (options.recursive) {
-          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), relative.append(entry.key),
+              options, entries);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1281,7 +1283,8 @@ void readdirImpl(jsg::Lock& js,
                 // Do nothing
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
+                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key),
+                    relative.append(entry.key), options, entries);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 throwFsError(js, err, "readdir"_kj);
@@ -1304,7 +1307,7 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Vector<DirEntHandle> entries;
-        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, options, entries);
+        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, kj::Path(nullptr), options, entries);
         return entries.releaseAsArray();
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
