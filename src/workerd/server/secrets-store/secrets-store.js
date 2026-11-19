@@ -10,10 +10,11 @@
 //       "{\"store_id\": \"demo\", \"secret_name\": \"api-key\"}")))
 //
 // `get()` resolves to the secret's value or throws `Secret "<name>" not
-// found`, as on Cloudflare. `["SecretsStoreSecret::admin_api"]()` answers
-// Miniflare's local admin API, which wrangler's `secrets-store secret`
-// commands use: `create`, `update`, `duplicate`, `delete`, `list` and `get`,
-// with Miniflare's ids and errors. Any Worker holding the binding can call it.
+// found`, as Miniflare's does. `["SecretsStoreSecret::admin_api"]()` answers
+// Miniflare's local admin API: `create`, `update`, `duplicate`, `delete`,
+// `list` and `get`, with Miniflare's ids and errors. Any Worker holding the
+// binding can call it. wrangler's local `secrets-store secret` commands write
+// Miniflare's own state, not this store.
 //
 // The config that runs this module (`bundled = "/workerd/secrets-store.js"`)
 // is an interface: cli/wrangler.rs and hand-written configs write it.

@@ -41,7 +41,7 @@
 //! `secrets_store_secrets`, also `--experimental`, are the entrypoint `SecretsStoreSecret` of the
 //! Worker `<name>-secrets-store` (the bundled module `/workerd/secrets-store.js`), the store and
 //! secret name in its props. Each store is a KV namespace of the Worker `<name>-secrets-kv`, in
-//! `.wrangler/state/workerd/secrets-store/`, which only this user may read. The variable
+//! `.wrangler/state/workerd/secrets-store/`, which on Unix only this user may read. The variable
 //! [`secret_variable`] names after a `secret_name`, read when the server starts, overrides that
 //! secret in every store and is never stored. `ratelimits`,
 //! also `--experimental`, are the entrypoint `RateLimit` of the Worker `<name>-ratelimit` (the
@@ -879,8 +879,9 @@ fn stateless_worker<'a>(
 }
 
 /// The Secrets Store Worker `<name>-secrets-store` at `services[at]`, then the KV Worker
-/// `<name>-secrets-kv` that holds its stores and that KV Worker's disks under `dir`, which only
-/// this user may read. Each store is a KV namespace, bound as `store:<store_id>`; each secret's
+/// `<name>-secrets-kv` that holds its stores and that KV Worker's disks under `dir`, a real
+/// directory that on Unix only this user may read. Each store is a KV namespace, bound as
+/// `store:<store_id>`; each secret's
 /// variable, which overrides it in every store, is bound as `env:<secret_name>`.
 fn secrets_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
@@ -889,6 +890,12 @@ fn secrets_services(
     dir: &Path,
     secrets: &[SecretsStoreSecret],
 ) -> Result<(), String> {
+    if fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(format!(
+            "{}: a symlink; secrets need a real directory",
+            dir.display()
+        ));
+    }
     let kv = format!("{name}-secrets-kv");
     kv_services(services, at + 1, &kv, dir, "SecretsStoreKV")?;
     #[cfg(unix)]

@@ -714,6 +714,78 @@ fn secrets_store_secrets_cannot_share_a_variable() {
 }
 
 #[test]
+fn bindings_of_every_kind_keep_their_places() {
+    let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+        "no_bundle": true, "vars": { "V": "v" },
+        "kv_namespaces": [{ "binding": "KV", "id": "kv" }],
+        "r2_buckets": [{ "binding": "R2", "bucket_name": "r2" }],
+        "d1_databases": [{ "binding": "D1", "database_id": "d1" }],
+        "secrets_store_secrets": [{ "binding": "S", "store_id": "s", "secret_name": "x" }],
+        "ratelimits": [{ "name": "L", "namespace_id": "1", "simple": { "limit": 1, "period": 10 } }],
+        "assets": { "directory": "public", "binding": "ASSETS" } }"#;
+    let config = load_project(&[
+        ("wrangler.jsonc", wrangler),
+        ("index.js", ""),
+        ("public/a.txt", "a"),
+    ])
+    .unwrap();
+    let message = read(config);
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "app",
+            "app-kv",
+            "app-kv-storage",
+            "app-kv-blobs",
+            "app-r2",
+            "app-r2-storage",
+            "app-r2-blobs",
+            "app-secrets-store",
+            "app-secrets-kv",
+            "app-secrets-kv-storage",
+            "app-secrets-kv-blobs",
+            "app-d1",
+            "app-d1-storage",
+            "app-ratelimit",
+            "app-assets",
+        ]
+    );
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let bound: Vec<_> = (w.unwrap().get_bindings().unwrap().iter())
+        .map(|b| b.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(bound, ["V", "KV", "R2", "D1", "S", "L", "ASSETS"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn secrets_store_secrets_refuse_a_symlinked_directory() {
+    let wrangler = r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true,
+        "secrets_store_secrets": [{ "binding": "S", "store_id": "s", "secret_name": "x" }] }"#;
+    let dir = project(&[("wrangler.jsonc", wrangler), ("index.js", "")]);
+    let state = dir.join(".wrangler/state/workerd");
+    fs::create_dir_all(&state).unwrap();
+    std::os::unix::fs::symlink(&dir, state.join("secrets-store")).unwrap();
+    let process = Process::new(None, None, Vec::new());
+    let error = load(dir.join("wrangler.jsonc").to_str().unwrap(), &process, true)
+        .err()
+        .unwrap();
+    assert!(error.contains("symlink"), "{error}");
+    assert!(!dir.join("blobs").exists());
+}
+
+#[test]
 fn ratelimits_bind_the_ratelimit_worker() {
     let wrangler = r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
         "no_bundle": true, "ratelimits": [

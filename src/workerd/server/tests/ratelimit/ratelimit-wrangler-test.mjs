@@ -41,10 +41,10 @@ test('ratelimits in a wrangler.jsonc', async () => {
   assert.notStrictEqual(refused.code, 0);
   assert.match(refused.stderr, /ratelimits.*--experimental/s);
 
+  const server = await serve(dir, ['--experimental']);
   // Calls straddling a minute boundary would start a new window.
   const second = Date.now() % 60_000;
   if (second > 55_000) await new Promise((r) => setTimeout(r, 60_000 - second));
-  const server = await serve(dir, ['--experimental']);
   const status = async () =>
     (await fetch(`http://127.0.0.1:${server.port}/`)).status;
   assert.deepStrictEqual(

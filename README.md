@@ -121,7 +121,9 @@ of one object; each R2 object is an object in the store. A cluster's bucket
 should have a lifecycle rule that aborts incomplete multipart uploads, or the
 parts of R2 uploads that never finish stay forever. Secrets Store secrets are
 kept in `.wrangler/state/workerd/secrets-store/`, mode 0700 on Unix, and are
-written through Miniflare's admin API on the binding. The environment variable
+written through Miniflare's admin API on the binding; wrangler's local
+`secrets-store secret` commands write Miniflare's state instead, so they do not
+reach it. The environment variable
 `WORKERD_SECRET_` plus a `secret_name`, upper-cased, with other characters than
 letters and digits as `_` (`api-key` is `WORKERD_SECRET_API_KEY`), overrides
 that secret in every store and is never written to disk. Secrets Store secrets
