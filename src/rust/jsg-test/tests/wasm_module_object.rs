@@ -203,7 +203,11 @@ fn struct_field_holds_a_module() {
             panic!("a Uint8Array is not a module");
         };
         assert_eq!(err.name, ExceptionType::TypeError);
-        assert_eq!(err.message, "Expected WasmModuleObject but got object");
+        assert_eq!(
+            err.message,
+            "Incorrect type for the 'wasm' field on 'WasmCode': the provided value is not \
+             of type 'WasmModuleObject'."
+        );
         Ok(())
     });
 }
