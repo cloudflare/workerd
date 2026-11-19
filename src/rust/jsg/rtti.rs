@@ -63,6 +63,10 @@ pub enum Type {
         name: &'static str,
         fully_qualified_name: &'static str,
     },
+    /// The bytes of a buffer source, [`jsg::Bytes`](crate::Bytes), described as C++ RTTI describes
+    /// a `kj::Array<kj::byte>`, which TypeScript declares as `ArrayBuffer | ArrayBufferView` for a
+    /// parameter, and as `ArrayBuffer` otherwise.
+    Bytes,
     /// A rest parameter, [`jsg::Arguments`](crate::Arguments), which C++ RTTI describes without
     /// its element type, so TypeScript declares it as `...name: any[]`.
     Varargs,
@@ -393,6 +397,11 @@ impl Type {
             Self::Object => builder.set_object(()),
             Self::Builtin(ty) => builder.init_builtin().set_type(*ty),
             Self::Array(element) => element.write(builder.init_array().init_element()),
+            Self::Bytes => {
+                let mut array = builder.init_array();
+                array.set_name("kj::Array");
+                array.init_element().init_number().set_name("unsigned char");
+            }
             Self::Dict(value) => {
                 let mut dict = builder.init_dict();
                 Self::String.write(dict.reborrow().init_key());

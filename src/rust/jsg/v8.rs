@@ -376,6 +376,13 @@ pub mod ffi {
         -> usize;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
+        // Local<SharedArrayBuffer>
+        #[nothrow]
+        pub unsafe fn local_shared_array_buffer_contents(
+            buffer: &Local,
+            byte_length: &mut usize,
+        ) -> usize;
+
         // Local<WasmModuleObject>
         pub unsafe fn local_wasm_module_object_get_compiled_module(
             module: &Local,

@@ -558,6 +558,10 @@ uint8_t* local_array_buffer_data(const Local& buffer);
 uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength);
 size_t local_array_buffer_get_backing_store(const Local& buffer);
 
+// Local<SharedArrayBuffer>
+// The address of the buffer's bytes (0 if it has none), and their number in `byteLength`.
+uintptr_t local_shared_array_buffer_contents(const Local& buffer, size_t& byteLength);
+
 // Local<WasmModuleObject>
 kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module);
 // Compiles `bytes` as v8::WasmModuleObject::Compile() does. Returns none if they do not compile,

@@ -8,6 +8,7 @@ mod async_context;
 mod boolean;
 mod buffer_types;
 mod builtin_module;
+mod bytes;
 mod callable;
 mod cell;
 mod coercion_safety;

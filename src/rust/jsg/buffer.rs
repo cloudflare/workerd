@@ -103,3 +103,88 @@ impl ToJsArrayBuffer for [u8] {
         v8::ArrayBuffer::new(lock, self)
     }
 }
+
+/// The bytes of an `ArrayBuffer`, an `ArrayBufferView` or a `SharedArrayBuffer`, as a method
+/// parameter or struct field of C++ type `kj::Array<kj::byte>` takes them: anything else is a
+/// type error naming `ArrayBuffer or ArrayBufferView`, as in C++. Unlike C++, which views the
+/// buffer's memory, this copies the bytes, so that what Rust holds can't change or be detached
+/// while it holds it.
+///
+/// RTTI describes it as C++ describes `kj::Array<kj::byte>`, so TypeScript declares it as
+/// `ArrayBuffer | ArrayBufferView` for a parameter.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Bytes(pub Vec<u8>);
+
+crate::jsg_traced_unchecked!(Bytes);
+
+impl Bytes {
+    const TYPE_NAME: &'static str = "ArrayBuffer or ArrayBufferView";
+}
+
+impl std::ops::Deref for Bytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl crate::TypeInfo for Bytes {
+    fn describe(_cx: &mut crate::rtti::Context) -> crate::rtti::Type {
+        crate::rtti::Type::Bytes
+    }
+}
+
+impl<'s> crate::FromJS<'s> for Bytes {
+    type ResultType = Self;
+
+    // Reading a buffer's bytes runs no script.
+    const OBJECT_CONVERSION_MAY_RUN_SCRIPT: bool = false;
+
+    fn type_name() -> String {
+        Self::TYPE_NAME.to_owned()
+    }
+
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> crate::Result<Self> {
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            crate::Error::new_type_error(format!(
+                "expected {}, got {}",
+                Self::TYPE_NAME,
+                value.type_of(lock)
+            ))
+        })
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "copies the bytes of a SharedArrayBuffer from V8"
+    )]
+    fn try_from_js(
+        _lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> crate::Result<Option<Self>> {
+        // In C++'s order: a view, then a buffer.
+        if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
+            return Ok(Some(Self(view.to_vec())));
+        }
+        if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
+            return Ok(Some(Self(buffer.to_vec())));
+        }
+        if value.is_shared_array_buffer() {
+            let mut length = 0;
+            // SAFETY: `value` is a `SharedArrayBuffer` valid in the current HandleScope.
+            let data =
+                unsafe { v8::ffi::local_shared_array_buffer_contents(value.raw(), &mut length) };
+            if length == 0 {
+                return Ok(Some(Self(Vec::new())));
+            }
+            // SAFETY: V8 returned the address of the buffer's `length` bytes, which stay in place
+            // while no JavaScript runs, as none does before the copy completes. The isolate's
+            // JavaScript can't touch them meanwhile, and nothing in workerd shares a
+            // SharedArrayBuffer with another thread.
+            let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, length) };
+            return Ok(Some(Self(bytes.to_vec())));
+        }
+        Ok(None)
+    }
+}
