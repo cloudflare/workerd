@@ -554,3 +554,28 @@ export const zstdCompressSyncMaxOutputLengthAtBufferBoundaryTest = {
     );
   },
 };
+
+// The sync output buffer starts at 40 KiB and doubles, so 1x, 2x and 4x fill it exactly.
+export const zstdDecompressSyncOutputFillsBufferTest = {
+  async test() {
+    const syncFirstBufferSize = 40 * 1024;
+    for (const multiple of [1, 2, 3, 4]) {
+      for (const delta of [-1, 0, 1]) {
+        const size = multiple * syncFirstBufferSize + delta;
+        const input = xorshiftBytes(size);
+        const compressed = zlib.zstdCompressSync(input);
+        assert(
+          input.equals(zlib.zstdDecompressSync(compressed)),
+          `size ${size}`
+        );
+
+        const { promise, resolve, reject } = Promise.withResolvers();
+        zlib.zstdDecompress(compressed, (err, res) => {
+          if (err) reject(err);
+          else resolve(res);
+        });
+        assert(input.equals(await promise), `size ${size}`);
+      }
+    }
+  },
+};
