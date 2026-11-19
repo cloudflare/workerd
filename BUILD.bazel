@@ -48,6 +48,7 @@ copy_to_bin(
 
 # Rust formatting and lint configuration for every crate in the repository, wherever it lives.
 exports_files([
+    ".bazelrc",
     "clippy.toml",
     "rustfmt.toml",
 ])

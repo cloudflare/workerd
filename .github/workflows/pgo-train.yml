@@ -1,0 +1,55 @@
+name: Train the PGO profile
+
+# Trains a new profile for the Linux release builds, uploads it to the pgo-profiles release and
+# opens a pull request that points build/pgo/profile.json at it (build/pgo/README.md). Run it by
+# hand, after changes that move the hot code, such as a V8 update; release builds keep the profile
+# they have until then.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: pgo-train
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-24.04-16core
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          show-progress: false
+          token: ${{ secrets.DEVPROD_PAT }}
+      - name: Set up bazelflare
+        uses: ./.github/actions/setup-bazelflare
+        with:
+          save_cache: 'false'
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+        with:
+          GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+      - name: Train
+        run: build/pgo/train.sh /tmp/pgo-profile --config=bazelflare --config=ci --config=ci-bazelflare
+      - name: Upload
+        run: build/pgo/upload.sh /tmp/pgo-profile/workerd.profdata.zst
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: 'Update the PGO profile'
+          branch: 'automatic-update-pgo-profile'
+          title: 'Update the PGO profile'
+          token: ${{ secrets.DEVPROD_PAT }}
+          author: 'Workers DevProd <workers-devprod@cloudflare.com>'
+          committer: 'Workers DevProd <workers-devprod@cloudflare.com>'
+          body: |
+            Points build/pgo/profile.json at a profile that the [Train the PGO profile](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) workflow trained on ${{ github.sha }}.
+          delete-branch: true
+          add-paths: build/pgo/profile.json
