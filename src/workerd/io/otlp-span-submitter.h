@@ -136,11 +136,15 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
 
   kj::Date getTime() override;
 
-  bool submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
-  bool submitUserSpanOpen(tracing::SpanId spanId,
+  bool submitUserSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;

@@ -23,7 +23,12 @@ kj::Rc<WorkerTracer> makeTracer() {
 
 class NullSpanSubmitter final: public SpanSubmitter {
  public:
-  bool submitSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {
+  bool submitSpanOpen(tracing::TraceId,
+      kj::Maybe<tracing::TraceFlags>,
+      tracing::SpanId,
+      tracing::SpanId,
+      kj::ConstString,
+      kj::Date) override {
     return true;
   }
   void submitSpanClose(tracing::SpanId, kj::Date, kj::Date, Span::TagMap&&) override {}

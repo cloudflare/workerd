@@ -22,7 +22,9 @@ class RecordingSpanSubmitter final: public SpanSubmitter {
   kj::Vector<tracing::SpanId> parentSpanIds;
   kj::Vector<kj::Date> exceptions;
 
-  bool submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {

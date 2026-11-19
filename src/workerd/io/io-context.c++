@@ -331,6 +331,12 @@ tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanCont
   auto& base = getInvocationSpanContext();
   tracing::SpanId sid = userSpan.getSpanId();
   if (sid != tracing::SpanId::nullId) {
+    KJ_IF_SOME(spanContext, userSpan.toSpanContext()) {
+      if (spanContext.getTraceId() != nullptr) {
+        return tracing::InvocationSpanContext(
+            spanContext.getTraceId(), base.getInvocationId(), sid, spanContext.getTraceFlags());
+      }
+    }
     return tracing::InvocationSpanContext(
         base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
   }
@@ -1618,15 +1624,8 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
   }
 
-  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
-  auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
-  auto spanId = userSpan.getSpanId();
-  if (spanId != tracing::SpanId::nullId) {
-    invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
-        baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
-  } else {
-    invocationSpanContext = baseContext.clone();
-  }
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext =
+      getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
 
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   KJ_IF_SOME(value, getWorkerTracer()) {

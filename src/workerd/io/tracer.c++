@@ -218,7 +218,9 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
+void WorkerTracer::addSpanOpen(tracing::TraceId traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
     kj::Date startTime) {
@@ -228,6 +230,15 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  if (traceId == nullptr) {
+    traceId = topLevelContext.getTraceId();
+    traceFlags = topLevelContext.getTraceFlags();
+  } else if (traceId != topLevelContext.getTraceId() ||
+      traceFlags != topLevelContext.getTraceFlags()) {
+    // Remembered for the span's later events, until it closes.
+    spanTraces.upsert(spanId.getId(), SpanTrace{.traceId = traceId, .traceFlags = traceFlags},
+        [](SpanTrace& existing, SpanTrace&& replacement) { existing = kj::mv(replacement); });
+  }
   // Every span has a parent: spans at the top of the invocation are children of its root user span,
   // which stands for the onset span (see makeUserRequestSpan()). A span reported without one is
   // reported under the onset span, as it was before the root user span had the onset's span ID.
@@ -240,10 +251,20 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
     parentSpanId = topLevelContext.getSpanId();
   }
   size_t spanNameSize = operationName.size();
-  auto spanOpenContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), parentSpanId, topLevelContext.getTraceFlags());
+  auto spanOpenContext = tracing::InvocationSpanContext(
+      traceId, topLevelContext.getInvocationId(), parentSpanId, traceFlags);
   tailStreamWriter->report(
       spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
+}
+
+tracing::InvocationSpanContext WorkerTracer::spanEventContext(tracing::SpanId spanId) {
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  KJ_IF_SOME(spanTrace, spanTraces.find(spanId.getId())) {
+    return tracing::InvocationSpanContext(
+        spanTrace.traceId, topLevelContext.getInvocationId(), spanId, spanTrace.traceFlags);
+  }
+  return tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
 }
 
 void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
@@ -276,9 +297,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 
   // Compose Attributes and SpanClose, which are available at span completion time and transmitted
   // together.
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto spanComponentContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), span.spanId, topLevelContext.getTraceFlags());
+  auto spanComponentContext = spanEventContext(span.spanId);
 
   if (span.tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
     tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
@@ -287,6 +306,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.endTime, spanTagsSize);
   }
   tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
+  spanTraces.erase(span.spanId.getId());
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -306,9 +326,7 @@ void WorkerTracer::addSpanLinksInternal(
     tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE || links.links.size() == 0) return;
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
   auto size = links.size();
   writer->report(context, kj::mv(links), timestamp, size);
 }
@@ -320,9 +338,7 @@ void WorkerTracer::addSpanUpdateInternal(
   }
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
   auto size = update.size();
   tailStreamWriter->report(context, kj::mv(update), timestamp, size);
 }
@@ -385,9 +401,7 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
   }
 
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
-      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto context = spanEventContext(spanId);
 
   reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
@@ -895,10 +909,11 @@ void UserSpanObserver::onLinks(tracing::SpanLinks links) {
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
   this->startTime = startTime;
   if (fromUserCode) {
-    wasAccepted =
-        submitter->submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    wasAccepted = submitter->submitUserSpanOpen(
+        traceId, traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   } else {
-    wasAccepted = submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    wasAccepted = submitter->submitSpanOpen(
+        traceId, traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 }
 

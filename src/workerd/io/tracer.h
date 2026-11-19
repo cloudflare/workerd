@@ -96,8 +96,11 @@ class BaseTracer: public kj::Refcounted {
       LogLevel logLevel,
       kj::String message,
       tracing::LogErrorInfo errorInfo = kj::none) = 0;
-  // Add a span open event.
-  virtual void addSpanOpen(tracing::SpanId spanId,
+  // Add a span open event. `traceId` and `traceFlags` are the span's trace, which its later events
+  // are reported in too. A null `traceId` means the invocation's trace.
+  virtual void addSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
@@ -271,7 +274,9 @@ class WorkerTracer final: public BaseTracer {
       LogLevel logLevel,
       kj::String message,
       tracing::LogErrorInfo errorInfo = kj::none) override;
-  void addSpanOpen(tracing::SpanId spanId,
+  void addSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
@@ -358,6 +363,17 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  struct SpanTrace {
+    tracing::TraceId traceId;
+    kj::Maybe<tracing::TraceFlags> traceFlags;
+  };
+  // The trace of each open span whose trace or trace flags differ from the invocation's, keyed by
+  // span ID.
+  kj::HashMap<uint64_t, SpanTrace> spanTraces;
+
+  // The context for an event on the span `spanId`, in the span's trace.
+  tracing::InvocationSpanContext spanEventContext(tracing::SpanId spanId);
 };
 
 class SpanSubmitter: public kj::Refcounted {
@@ -367,19 +383,24 @@ class SpanSubmitter: public kj::Refcounted {
   virtual kj::Date getTime();
 
   // Called when a span is opened. Submitters may buffer this for later assembly or stream it
-  // immediately.
-  virtual bool submitSpanOpen(tracing::SpanId spanId,
+  // immediately. `traceId` and `traceFlags` are the span's trace (see BaseTracer::addSpanOpen()).
+  virtual bool submitSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
 
   // Variant for spans opened directly by user JS (`ctx.tracing.enterSpan`). Submitters can
   // apply different policies (e.g. bypass operation-name allowlists for user spans).
-  virtual bool submitUserSpanOpen(tracing::SpanId spanId,
+  virtual bool submitUserSpanOpen(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) {
-    return submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    return submitSpanOpen(
+        kj::mv(traceId), traceFlags, spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 
   // Called when a span is closed. Together with the open data, provides all span information.
