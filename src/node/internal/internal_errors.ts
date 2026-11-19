@@ -632,10 +632,14 @@ export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
 
 export class ERR_INVALID_URL extends NodeTypeError {
   input: string;
+  base?: string;
 
-  constructor(url: string) {
+  constructor(url: string, base?: string) {
     super('ERR_INVALID_URL', 'Invalid URL');
     this.input = url;
+    if (base != null) {
+      this.base = base;
+    }
   }
 }
 

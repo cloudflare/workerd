@@ -359,6 +359,30 @@ export const testPathToFileURL = {
         }
       );
 
+      // A UNC server name that isn't a valid host:
+      for (const host of ['a b', 'xn--i\u00f1valid', 'a%20b', 'a:1', 'a@b']) {
+        throws(() => pathToFileURL(`\\\\${host}\\s\\x`, { windows: true }), {
+          name: 'TypeError',
+          code: 'ERR_INVALID_URL',
+          input: '\\s\\x',
+          base: host,
+        });
+      }
+      strictEqual(
+        pathToFileURL('\\\\localhost\\s\\x', { windows: true }).href,
+        'file:///s/x'
+      );
+      // As in Node, a server name starting with '/', '?' or '#' is an empty
+      // host.
+      strictEqual(
+        pathToFileURL('\\\\#x\\s\\y', { windows: true }).href,
+        'file:///s/y'
+      );
+      strictEqual(
+        pathToFileURL('\\\\[::1]\\s\\x', { windows: true }).href,
+        'file://[::1]/s/x'
+      );
+
       // UNC paths on Posix are considered a single path that has backslashes:
       const fileURL = pathToFileURL('\\\\nas\\share\\path.txt').href;
       match(fileURL, /file:\/\/.+%5C%5Cnas%5Cshare%5Cpath\.txt$/);
