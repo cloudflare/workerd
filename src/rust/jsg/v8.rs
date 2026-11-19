@@ -4618,10 +4618,33 @@ impl<T> TracedGlobal<T> {
     }
 
     /// Materializes this handle as a `Local` in the scope of `lock`.
+    ///
+    /// Panics if the handle is empty; see [`TracedGlobal::is_empty`] and
+    /// [`TracedGlobal::try_as_local`].
     pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
         assert_in_isolate_of(lock, &self.state);
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
+    }
+
+    /// Whether the handle is empty, because GC made it weak and its value then died.
+    ///
+    /// A handle that a resource's `Drop` moves out of a field is empty if the resource was its
+    /// value's only holder and a full GC collected the resource's wrapper. It is never empty
+    /// while a resource that GC traces through holds it.
+    pub fn is_empty(&self, lock: &mut Lock<'_>) -> bool {
+        assert_in_isolate_of(lock, &self.state);
+        self.strong_handle().ptr == 0
+    }
+
+    /// Materializes this handle as a `Local` in the scope of `lock`, or returns `None` if it is
+    /// empty; see [`TracedGlobal::is_empty`].
+    pub fn try_as_local<'s>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, T>> {
+        if self.is_empty(lock) {
+            None
+        } else {
+            Some(self.as_local(lock))
+        }
     }
 
     /// Clears the traced reference, if any, without resetting it, and makes the strong handle

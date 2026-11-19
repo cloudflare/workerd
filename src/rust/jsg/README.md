@@ -220,7 +220,10 @@ impl that visits through it must handle). The `jsg::` cells below detach a value
   `#[jsg_resource]` value is dropped, if it implements `Drop` or a field's type says it needs it
   (`Traced::needs_drop_detach`), every `jsg::Rc`, `jsg_cpp::Ref` and `TracedGlobal` it traces is
   made strong, and every `jsg::Rc` forgets its parent, so that a `Drop` impl may move one out and
-  keep it. A `TracedGlobal` whose value died with the resource is empty by then. A hand-written
+  keep it. A `TracedGlobal` whose value died with the resource is empty by then: that happens
+  when the resource was the value's only holder and a full GC, not a scavenge, collected its
+  wrapper. Code that keeps such a handle checks it with `TracedGlobal::is_empty` or opens it with
+  `TracedGlobal::try_as_local`, since `as_local` panics on an empty handle. A hand-written
   `impl Traced` for a type with its own `Drop` returns `true` from `needs_drop_detach`, and so
   does the hand-written `Traced` impl of a `custom_trace` resource whose field's type needs it.
   Wrappers such as `Option` and `Vec` pass it on, and a `#[jsg_resource]` says so when it
