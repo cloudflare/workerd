@@ -1,0 +1,41 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# UnsafeEval, UnsafeModule and Stdin, the unsafe modules, in Rust. C++ registers them, and
+# creates an unsafeEval binding, when the RUST_UNSAFE_MODULES autogate is on; unsafe.c++
+# otherwise.
+wd_rust_crate(
+    name = "unsafe-api",
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
+    link_deps = [":ffi"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
+        "//src/workerd/io/io-context",
+        "@crates_vendor//libc",
+    ],
+)
+
+# Separate from the bridge's :ffi.rs@cxx, which only includes ffi.h, so that a C++ library that
+# depends on the crate never closes a cycle through it.
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/cxx:core",
+        "//src/workerd/util:autogate",
+        "@workerd-v8//:v8",
+    ],
+)
+
+exports_files([
+    "ffi.c++",
+    "ffi.h",
+])
