@@ -1356,11 +1356,13 @@ pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
 // #[jsg_traced]
 // =============================================================================
 
-/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct of GC-free fields.
+/// Implements a no-op `Traced` and `jsg::HoldsNoGcReferences` for a struct or enum of GC-free
+/// fields.
 ///
-/// Each field's type must implement `HoldsNoGcReferences`, so a field that can hold a GC
-/// reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile. For a type whose fields
-/// can't implement the marker, see `jsg::jsg_traced_unchecked!`.
+/// Each field's type, in every variant of an enum, must implement `HoldsNoGcReferences`, so a
+/// field that can hold a GC reference, such as a `jsg::Rc` or a `TracedGlobal`, fails to compile.
+/// For a type whose fields can't implement the marker, such as one from outside JSG, see
+/// `jsg::jsg_traced_unchecked!`.
 ///
 /// ```ignore
 /// #[jsg_traced]
