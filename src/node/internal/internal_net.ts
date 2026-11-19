@@ -1946,6 +1946,25 @@ function initializeConnection(
         }
       );
     } catch (err) {
+      if (
+        isIP(address) === 0 &&
+        err instanceof TypeError &&
+        err.message.startsWith('Specified address')
+      ) {
+        // connect() rejects a host name that is not a valid address before
+        // any lookup, where Node's getaddrinfo fails with ENOTFOUND. Node
+        // never looks up an IP literal, so those keep the platform's error. The
+        // platform's error keeps its message and gains the properties Node
+        // gives a failed lookup, which Node reports through 'lookup' first.
+        const { code, errno, syscall, hostname } = new GetAddrInfoException(
+          'ENOTFOUND',
+          address
+        );
+        Object.assign(err, { code, errno, syscall, hostname });
+        nextTick(() =>
+          socket.emit('lookup', err, undefined, undefined, address)
+        );
+      }
       socket.destroy(err as Error);
     }
   };
