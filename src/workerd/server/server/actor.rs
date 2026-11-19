@@ -45,6 +45,8 @@ use worker::Interface;
 use worker::PromisedInterface;
 
 use crate::Result;
+use crate::alarm_elsewhere::AlarmElsewhere;
+use crate::alarm_elsewhere::AlarmOwnedElsewhere;
 use crate::bindings::ActorConfig;
 use crate::bridge::ffi;
 use crate::channels::ActorClass;
@@ -708,7 +710,7 @@ impl ActorNamespaceHandle {
         // A draining instance starts nothing: the alarm runs where the object goes, once peers
         // adopt this instance's alarms as it leaves, or the next owner opens the object.
         if node.cluster.is_draining() {
-            return Ok(ffi::alarm_owned_elsewhere(ffi::AlarmElsewhere::Retry));
+            return Ok(AlarmOwnedElsewhere::new(AlarmElsewhere::Retry).into_kj());
         }
         // Only an object's owner runs its alarm. One that moved since this instance scheduled
         // the alarm has it scheduled where it lives now, since opening an object schedules its
@@ -726,11 +728,11 @@ impl ActorNamespaceHandle {
                         .await
                         .unwrap_or(true);
                     let then = if again {
-                        ffi::AlarmElsewhere::Retry
+                        AlarmElsewhere::Retry
                     } else {
-                        ffi::AlarmElsewhere::Done
+                        AlarmElsewhere::Done
                     };
-                    Ok(ffi::alarm_owned_elsewhere(then))
+                    Ok(AlarmOwnedElsewhere::new(then).into_kj())
                 }
             }
         })
