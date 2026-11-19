@@ -103,6 +103,12 @@ impl UnitScope for EntryScope {
 }
 
 /// The process's scheduler: a multi-thread runtime of `threads` workers.
+///
+/// Call it on the thread that set V8 up, after it did. Where the CPU has memory protection keys
+/// (x86-64), V8 guards its code pages with one, and a thread has the rights to a key that the
+/// thread that created it had at the time: a thread that exists before V8 allocates its key has
+/// none, and faults when it reads what V8 compiled. The runtime's workers are created here, and
+/// the threads it adds later (`block_in_place`, `spawn_blocking`) by its workers, outside V8.
 pub fn runtime(threads: usize) -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(threads)

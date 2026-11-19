@@ -87,9 +87,10 @@ fn serve_units(
     work_stealing: crate::run::WorkStealing,
 ) -> Result<i32> {
     let command = move |config, structured| {
-        let runtime = crate::units::runtime(work_stealing.threads)?;
         let none = (None::<&ffi::TestOptions>, None::<&ffi::BenchOptions>);
         let shared = ffi::bootstrap_process(config, &options, none.0.into(), none.1.into())?;
+        // After V8 is set up, by the thread that set it up (see `units::runtime`).
+        let runtime = crate::units::runtime(work_stealing.threads)?;
         let role = crate::units::Role {
             structured,
             primary: true,
