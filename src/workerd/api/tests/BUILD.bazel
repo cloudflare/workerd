@@ -467,6 +467,15 @@ wd_test(
 )
 
 wd_test(
+    src = "otlp-tracing-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "otlp-tracing-test.js",
+        "otlp-tracing-test-collector.js",
+    ],
+)
+
+wd_test(
     src = "tail-cf-gc-test.wd-test",
     data = ["tail-cf-gc-test.js"],
 )
@@ -1372,6 +1381,9 @@ wd_test(
 # node:fs, file system handles, bindings) across a startup snapshot, and the cases that must fall
 # back. Only the @all-autogates variant runs the pipeline.
 wd_test(
+    # About 25 startup snapshots are built before any case runs, which takes over 15 seconds in
+    # an arm64 debug build.
+    size = "large",
     src = "startup-snapshot-wrappables-test.wd-test",
     args = ["--experimental"],
     data = [
