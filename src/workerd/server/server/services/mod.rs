@@ -15,6 +15,7 @@ pub mod bucket;
 pub mod disk;
 pub mod network;
 pub mod rewriter;
+pub mod send_worker;
 
 use std::cell::RefCell;
 use std::pin::Pin;

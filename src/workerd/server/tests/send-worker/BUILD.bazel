@@ -1,0 +1,44 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# `workerd` with toy services registered in code (see main.rs): the same toy on the KJ loop and as
+# a send worker behind the adapter, for the end-to-end test below and for bench.sh.
+wd_rust_binary(
+    name = "workerd-with-toys",
+    srcs = ["main.rs"],
+    crate_root = "main.rs",
+    malloc = "//src/workerd/server:malloc",
+    proc_macro_deps = ["@crates_vendor//async-trait"],
+    test = False,
+    tool = True,
+    deps = [
+        "//src/rust/kj",
+        "//src/rust/send-worker",
+        "//src/rust/worker",
+        "//src/workerd/server:workerd-cli",
+        "//src/workerd/server/server:workerd-server",
+        "@crates_vendor//bytes",
+        "@crates_vendor//futures",
+        "@crates_vendor//http",
+        "@crates_vendor//tokio",
+    ],
+)
+
+# `workerd-with-toys serve`: every toy over HTTP, and JavaScript Workers in front of them.
+js_test(
+    name = "send-worker-test",
+    size = "medium",
+    data = [
+        ":config.capnp",
+        ":fetch.mjs",
+        ":hello.mjs",
+        ":workerd-with-toys",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "send-worker-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath :workerd-with-toys)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = ["js-test"],
+)

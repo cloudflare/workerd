@@ -1,0 +1,51 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# A `Send` worker behind `workerd::WorkerInterface`: the seam, the adapter that puts a worker on
+# another runtime behind a `worker::Interface`, and two toy workers. Experimental; see lib.rs.
+wd_rust_crate(
+    name = "send-worker",
+    cxx_bridge_deps = [
+        "//src/rust/kj",
+        "//src/rust/worker:bridge",
+        "//src/workerd/io:worker-interface",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [
+        ":bridge",
+    ],
+    proc_macro_deps = [
+        "@crates_vendor//async-trait",
+    ],
+    # The tests serve HTTP on the loop of a `kj_rs_tokio::Runtime`.
+    test_deps = [
+        "//src/rust/cxx/kj-rs-tokio",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/kj",
+        "//src/rust/worker",
+        "@crates_vendor//bytes",
+        "@crates_vendor//futures",
+        "@crates_vendor//http",
+        "@crates_vendor//http-body",
+        "@crates_vendor//hyper",
+        "@crates_vendor//tokio",
+    ],
+)
+
+wd_cc_library(
+    name = "bridge",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/workerd/io:worker-interface",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)

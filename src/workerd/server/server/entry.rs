@@ -25,6 +25,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use futures::future::Either;
 use futures::future::LocalBoxFuture;
@@ -43,6 +44,9 @@ use crate::run::RunOptions;
 /// `--watch`: fails if watching does; a config change replaces the process with a fresh run of
 /// the same command line instead.
 pub type Watch = LocalBoxFuture<'static, Result<Infallible>>;
+
+/// How long the exit waits for the send worker runtime's threads to stop.
+const SEND_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Whether an error was reported (`error`): the exit status is then 1.
 static HAD_ERRORS: AtomicBool = AtomicBool::new(false);
@@ -139,6 +143,9 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
         // The command owns the factory and drops it when it completes (`shutdown`); if it does not
         // complete, `block_on` drops it, and the factory with it, before returning.
         let result = runtime.block_on(command(factory, structured));
+        // No request is left to hear from a send worker. Their runtime, if one was started, ends
+        // here, outside any task and before the loop its tasks report to.
+        send_worker::runtime::shutdown_shared(SEND_WORKER_SHUTDOWN_TIMEOUT);
         if let Err(failure) = result.and_then(|result| result) {
             let failure = ffi::exception_text(cxx::KjException::from(failure));
             let message = format!("*** Uncaught exception ***\n{failure}");
