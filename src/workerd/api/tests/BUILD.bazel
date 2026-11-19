@@ -739,6 +739,20 @@ wd_test(
 )
 
 wd_test(
+    src = "sql-cursor-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+)
+
+wd_test(
+    src = "sql-cursor-gc-gate-off-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-cursor-gc-test.js"],
+    # Every gate is on in that variant.
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
     src = "kv-resizable-arraybuffer-test.wd-test",
     args = [
         "--experimental",
