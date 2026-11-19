@@ -371,3 +371,12 @@ struct SqlStorage::IngestResult {
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
+
+namespace workerd::jsg {
+
+// An exception: a Ref is a GC handle. RowIterator and RawIterator hold their Cursor as a strong Ref
+// that is never visited, so the iterator keeps the Cursor alive until the iterator is destroyed.
+template <>
+inline constexpr bool holdsNoGcHandles<Ref<api::SqlStorage::Cursor>> = true;
+
+}  // namespace workerd::jsg
