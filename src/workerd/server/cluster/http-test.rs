@@ -79,6 +79,7 @@ fn get_call(empty: &Payload) -> Call<'_> {
         guarded: false,
         body: empty,
         to: None,
+        stream: false,
     }
 }
 
@@ -274,9 +275,12 @@ fn only_a_request_safe_to_send_twice_is_sent_again() {
         guarded,
         body,
         to,
+        stream: false,
     };
     let cases = [
         (call("GET", false, &empty, None), Some(Repeat::Read)),
+        (call("HEAD", false, &empty, None), Some(Repeat::Read)),
+        (call("POST", false, &small, None), None),
         (call("DELETE", false, &empty, None), Some(Repeat::Delete)),
         (call("PUT", true, &small, None), Some(Repeat::GuardedWrite)),
         // A download into a file.

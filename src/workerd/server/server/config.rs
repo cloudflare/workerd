@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -59,6 +60,7 @@ use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
+use crate::services::bucket::Home;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -549,6 +551,7 @@ impl Drop for Services {
 /// The server: the service graph of one run.
 pub struct Server {
     report: Reporter,
+    otlp: Option<OtlpTracing>,
     services: Services,
     /// Durable namespaces by `uniqueKey`, for actor tokens.
     namespaces_by_unique_key: HashMap<String, Rc<ActorNamespace>>,
@@ -559,7 +562,54 @@ pub struct Server {
     factory: Rc<Factory>,
 }
 
+struct OtlpTracing {
+    collector: String,
+    exporter: KjOwn<ffi::OtlpExporter>,
+}
+
+impl OtlpTracing {
+    fn from_config(
+        factory: &Factory,
+        config: config::Reader<'_>,
+        services: &Services,
+        report: &Reporter,
+    ) -> Result<Option<Self>> {
+        let tracing = config.get_tracing().map_err(capnp_error)?;
+        if !tracing.has_otlp() {
+            return Ok(None);
+        }
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            tracing.get_otlp().map_err(capnp_error)?,
+            "tracing.otlp".to_owned(),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            report.error(error);
+        }
+        let collector = lookup_service(&services.0, report, None, &designator);
+        Ok(Some(Self {
+            collector: designator.service,
+            exporter: ffi::factory_new_otlp_exporter(
+                factory.raw(),
+                SubrequestChannel::new(collector),
+            )?,
+        }))
+    }
+}
+
 impl Server {
+    /// The collector's own worker is excluded across all of its entrypoints. Dynamic workers
+    /// have no configured service name and are eligible too.
+    pub fn otlp_exporter(&self, service: Option<&str>) -> Option<&ffi::OtlpExporter> {
+        let otlp = self.otlp.as_ref()?;
+        if service == Some(otlp.collector.as_str()) {
+            return None;
+        }
+        Some(&otlp.exporter)
+    }
+
     #[must_use]
     pub fn factory(&self) -> &Rc<Factory> {
         &self.factory
@@ -622,6 +672,9 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        if let Some(otlp) = &self.otlp {
+            ffi::otlp_exporter_unlink(&otlp.exporter);
+        }
         // Actors may have background work, which aborting them cancels. The run's background
         // tasks (tasks.rs) go too: one may hold an actor, and so its class's worker.
         self.abort_all_actors(Some(&kj::disconnected!("Server shutting down.")));
@@ -1500,8 +1553,11 @@ impl Server {
         }
         make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
 
+        let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
+
         let server = Rc::new(Self {
             report,
+            otlp,
             services,
             namespaces_by_unique_key,
             worker_loaders: RefCell::new(WorkerLoaders::default()),
@@ -1994,8 +2050,8 @@ impl Server {
 #[path = "config-test.rs"]
 mod tests;
 
-/// Replaces each `bucket` service's stand-in with the directory of the
-/// cluster's bucket it names.
+/// Replaces each `bucket` service's stand-in with the directory it names:
+/// of the cluster's bucket, or without a cluster of its `localDisk`.
 fn make_bucket_services(
     config: config::Reader<'_>,
     services: &mut Services,
@@ -2008,12 +2064,29 @@ fn make_bucket_services(
             continue;
         };
         let name = text(conf.get_name())?;
-        let Some(node) = cluster else {
-            report.service_error(&name, "A bucket service requires Config.cluster.");
-            continue;
-        };
         let bucket = bucket.map_err(capnp_error)?;
-        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let disk = text(bucket.get_local_disk())?;
+        let disk = match services.0.get(&disk) {
+            Some(Service::Disk(disk)) => disk.writable_path().map(PathBuf::from),
+            _ => None,
+        };
+        let home = match (cluster, &disk) {
+            (Some(node), _) => Home::Cluster(node),
+            (None, Some(_)) if !factory.experimental() => {
+                report.service_error(&name, "A bucket service requires --experimental.");
+                continue;
+            }
+            (None, Some(disk)) => Home::Disk(disk),
+            (None, None) => {
+                report.service_error(
+                    &name,
+                    "A bucket service requires Config.cluster, or localDisk naming a writable \
+                     disk service.",
+                );
+                continue;
+            }
+        };
+        let made = crate::services::bucket::make_bucket_service(bucket, home, factory);
         let channel: Rc<dyn Channel> = match made {
             Ok(service) => Rc::new(service),
             Err(error) => {

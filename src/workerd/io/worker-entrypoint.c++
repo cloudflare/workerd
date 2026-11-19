@@ -475,8 +475,18 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         if (context.isFailOpen()) {
           // Fail-open behavior has been chosen, we'd better save an interface that we can use for
           // that purpose later.
-          failOpenService = context.getSubrequestChannelNoChecks(
-              IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+          //
+          // Opening the channel can throw, as a null global outbound does. This runs in a
+          // destructor, usually while the handler's exception unwinds, so it must not throw.
+          // Instead the fail-open request fails with the exception, as it would have had the
+          // channel opened lazily, as a channel to another process does.
+          KJ_TRY {
+            failOpenService = context.getSubrequestChannelNoChecks(
+                IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+          }
+          KJ_CATCH(exception) {
+            failOpenService = WorkerInterface::fromException(kj::mv(exception));
+          }
         }
 
         // When the client disconnects, trigger an abort on request.signal, unless the request has
@@ -768,8 +778,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     });
   }
 
-  // TODO(soon): Implement basic TLS support for connect handler.
-  JSG_REQUIRE(!settings.useTls, Error, "Incoming CONNECT with TLS not supported");
+  // The handler can't run a handshake on this connection, so a peer that wants TLS from the start
+  // is served only by a handler that has opted in to making it secure further along. See
+  // ServiceWorkerGlobalScope::connect().
+  JSG_REQUIRE(!settings.useTls || featureFlags.getConnectHandlerImmediateTls(), Error,
+      "Incoming CONNECT with TLS not supported");
   // Capture workerTracer, see request() for rationale.
   kj::Maybe<BaseTracer&> workerTracer;
 

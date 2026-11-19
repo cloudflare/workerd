@@ -264,6 +264,37 @@ export let nullGlobalOutbound = {
   },
 };
 
+// A worker with a null global outbound that calls `passThroughOnException()` and then throws fails
+// open to the null outbound, which refuses the request, so the response is a 500.
+export let nullGlobalOutboundPassThroughOnException = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get(
+      'nullGlobalOutboundPassThroughOnException',
+      () => {
+        return {
+          compatibilityDate: '2025-01-01',
+          mainModule: 'foo.js',
+          modules: {
+            'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                ctx.passThroughOnException();
+                throw new Error('handler failed');
+              },
+            }
+          `,
+          },
+
+          globalOutbound: null,
+        };
+      }
+    );
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(resp.status, 500);
+  },
+};
+
 // We need to bounce the tail event through an actor to receive it back in the execution context
 // that set up the dynamic tail. `RendezvousActor` helps with that.
 export class RendezvousActor extends DurableObject {

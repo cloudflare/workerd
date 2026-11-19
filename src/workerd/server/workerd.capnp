@@ -97,6 +97,9 @@ struct Config {
 
   cluster @7 :ClusterConfig;
   # Set when this instance should join a cluster. Requires `--experimental`.
+
+  tracing @8 :TracingOptions;
+  # Where the spans of Worker invocations are exported.
 }
 
 struct ClusterConfig {
@@ -191,7 +194,10 @@ struct ClusterConfig {
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
-  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage. Give the
+  # bucket a lifecycle rule that aborts incomplete multipart uploads: a `bucket` service's upload
+  # that is never completed or aborted, such as an R2 put cut off mid-stream, otherwise keeps its
+  # parts, and their storage, forever.
   #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
@@ -316,6 +322,32 @@ struct ClusterConfig {
   # `stopTimeoutMs` is not divided. A divisor of 0, or one that rounds a time down to 0 (above
   # 1000), fails the config. Bucket requests that stall past the shortened bounds fence the
   # instance, so leave this at 1 outside tests.
+}
+
+struct TracingOptions {
+  otlp @0 :ServiceDesignator;
+  # Export spans to an OpenTelemetry collector. Every Worker invocation produces a trace: a span
+  # for the invocation itself, one for each subrequest and binding operation it performs, and any
+  # the Worker opens with `ctx.tracing.enterSpan()`. They are POSTed to `/v1/traces` on this
+  # service in the OTLP/HTTP protobuf encoding, so the service is typically an `ExternalServer`
+  # pointing at a collector's OTLP/HTTP port. For example, to see traces in a local Jaeger:
+  #
+  #     services = [
+  #       ...,
+  #       (name = "jaeger", external = (address = "localhost:4318", http = ())),
+  #     ],
+  #     tracing = (otlp = "jaeger"),
+  #
+  # Use `HttpOptions.injectRequestHeaders` to send credentials along. The `service.name` resource
+  # attribute is the name of the Worker's service. A request arriving on a socket starts its trace
+  # with the Worker's invocation span. Traces without an upstream sampling decision are sampled.
+  # Invocations of the designated service itself are not traced. While this is set, user spans are
+  # exported over OTLP instead of being delivered to streaming tail workers.
+  #
+  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. Queued
+  # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
+  # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
+  # no retries.
 }
 
 struct LoggingOptions {
@@ -449,7 +481,8 @@ struct Service {
     # a Worker that adds logic for setting Content-Type and the like.
 
     bucket @6 :ClusterBucket;
-    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
+    # A directory of objects, served over HTTP: in the cluster's bucket, or without a cluster
+    # in a `disk` service's directory.
 
     assets @7 :AssetsService;
     # A directory of static assets, served as Cloudflare serves a Worker's `assets`.
@@ -462,14 +495,35 @@ struct Service {
 }
 
 struct ClusterBucket {
-  # GET, PUT and DELETE on `/<file>` read, write and remove the object
-  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
-  # that every instance sees the same files. The cluster keeps its own state outside
-  # `services/`, where this service cannot reach it. A binding to this service grants only its
-  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+  # A directory of objects served over a small HTTP API (the one workerd's R2 Worker
+  # uses): `/<key>` is the object `<key>`, the path percent-decoded whole, so keys may hold `/`
+  # and empty segments, but not a `.` or `..` segment, which is refused. HEAD, GET (with one
+  # `Range`), PUT (content headers, `x-meta-<name>` user metadata, `If-Match: <x-version>`,
+  # `If-None-Match: *`) and DELETE;
+  # `GET /?list&prefix=&start-after=&delimiter=&max=&token=`; multipart uploads with
+  # `POST /<key>?uploads`, `PUT /<key>?part=<n>&upload=<id>`, and `GET` (parts), `POST`
+  # (complete) and `DELETE` (abort) on `/<key>?upload=<id>`. Errors answer `{code, message}`
+  # JSON with the object store's error code, such as `NoSuchKey`.
+  #
+  # In a cluster (`Config.cluster`) the objects are `<cluster prefix>services/<path>/<key>` in
+  # the cluster's bucket, so that every instance sees the same ones. The cluster keeps its own
+  # state outside `services/`, where this service cannot reach it. Without a cluster they are
+  # in `localDisk`. A binding to this service grants only its directory, as a writable `disk`
+  # does. Experimental: requires `--experimental`.
 
   path @0 :Text;
   # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
+
+  localDisk @1 :Text;
+  # Without `Config.cluster`, the name of a writable `disk` service whose directory
+  # `<disk>/<path>/` holds the objects: a JSON file per object under `objects/`, and its bytes
+  # under `blobs/`. Processes may share it, as `wrangler dev` and `wrangler r2 object put
+  # --local` do. Ignored in a cluster.
+
+  minPartSize @2 :UInt64 = 5242880;
+  # The least size of a multipart upload's part but the last, checked at completion by the
+  # `localDisk` store; for tests, which use small parts. Ignored in a cluster, whose store has
+  # its own rule.
 }
 
 struct AssetsService {
@@ -649,10 +703,11 @@ struct Worker {
       bundled @11 :Text;
       # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
       # Worker, `/workerd/cron.js`, cron triggers, `/workerd/queues.js`, the Queues Worker,
-      # `/workerd/workflows.js`, a Workflows engine, `/workerd/d1.js`, D1 databases, or
-      # `/workerd/ratelimit.js`, rate limiting, or `/workerd/secrets-store.js`, Secrets Store secrets
-      # (see each one's header for the config it takes). Unlike built-in modules such as `node:`
-      # ones, user code cannot import it; it is a Worker's source. Experimental.
+      # `/workerd/r2.js`, the R2 Worker, `/workerd/workflows.js`, a Workflows engine,
+      # `/workerd/d1.js`, D1 databases, `/workerd/ratelimit.js`, rate limiting, or
+      # `/workerd/secrets-store.js`, Secrets Store secrets (see each one's header for the config
+      # it takes). Unlike built-in modules such as `node:` ones, user code cannot import it; it is
+      # a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

@@ -10,15 +10,20 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `triggers` (`crons`), `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`,
-//! `ratelimits`, `assets`, `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
+//! `r2_buckets`, `triggers` (`crons`), `queues`, `workflows`, `d1_databases`,
+//! `secrets_store_secrets`, `ratelimits`, `assets`, `no_bundle` and `$schema`. Any other field is
+//! an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
 //! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
 //! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
-//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `triggers.crons`,
+//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `r2_buckets`, also
+//! `--experimental`, are bindings to the Worker `<name>-r2` (the bundled module `/workerd/r2.js`)
+//! in the same way, with the bucket's `bucket_name` (else its binding name) in its props;
+//! `preview_bucket_name`, `jurisdiction` and `remote` are ignored. Its objects are in
+//! `.wrangler/state/workerd/r2/`, one store object per R2 object. `triggers.crons`,
 //! also `--experimental`, are the schedule of the Worker `<name>-cron` (the bundled module
 //! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. `queues`, also
 //! `--experimental`, are served by the Worker `<name>-queues` (the bundled module
@@ -51,8 +56,9 @@
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
-//! each node's own config defines. A deployment cannot have `kv_namespaces`, `triggers.crons`,
-//! `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits` or `assets` yet.
+//! each node's own config defines. A deployment cannot have `kv_namespaces`, `r2_buckets`,
+//! `triggers.crons`, `queues`, `workflows`, `d1_databases`, `secrets_store_secrets`, `ratelimits`
+//! or `assets` yet.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -99,6 +105,8 @@ struct Wrangler {
     migrations: Vec<Migration>,
     #[serde(default)]
     kv_namespaces: Vec<KvNamespace>,
+    #[serde(default)]
+    r2_buckets: Vec<R2Bucket>,
     #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
@@ -274,6 +282,19 @@ struct KvNamespace {
     id: Option<String>,
     #[serde(rename = "preview_id")]
     _preview_id: Option<String>,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct R2Bucket {
+    binding: String,
+    bucket_name: Option<String>,
+    #[serde(rename = "preview_bucket_name")]
+    _preview_bucket_name: Option<String>,
+    #[serde(rename = "jurisdiction")]
+    _jurisdiction: Option<String>,
     #[serde(rename = "remote")]
     _remote: Option<bool>,
 }
@@ -470,6 +491,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         workers
             + do_storage
             + 3 * u32::from(!wrangler.kv_namespaces.is_empty())
+            + 3 * u32::from(!wrangler.r2_buckets.is_empty())
             + 4 * u32::from(!wrangler.secrets_store_secrets.is_empty())
             + 2 * u32::from(!wrangler.triggers.crons.is_empty())
             + 2 * u32::from(!wrangler.queues.is_empty())
@@ -531,6 +553,7 @@ fn assets_only(wrangler: &Wrangler) -> Result<(), String> {
         ("exports", !wrangler.exports.is_empty()),
         ("migrations", !wrangler.migrations.is_empty()),
         ("kv_namespaces", !wrangler.kv_namespaces.is_empty()),
+        ("r2_buckets", !wrangler.r2_buckets.is_empty()),
         ("triggers.crons", !wrangler.triggers.crons.is_empty()),
         ("queues", !wrangler.queues.is_empty()),
         ("workflows", !wrangler.workflows.is_empty()),
@@ -599,12 +622,13 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces`, `triggers.crons`, `queues`, `workflows`, `d1_databases`,
+/// `kv_namespaces`, `r2_buckets`, `triggers.crons`, `queues`, `workflows`, `d1_databases`,
 /// `secrets_store_secrets`, `ratelimits` and `assets` need `--experimental`, and a deployment
 /// cannot have them yet.
 fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
     for (used, field) in [
         (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
+        (!wrangler.r2_buckets.is_empty(), "r2_buckets"),
         (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
         (!wrangler.queues.is_empty(), "queues"),
         (!wrangler.workflows.is_empty(), "workflows"),
@@ -672,9 +696,9 @@ fn check_bindings(wrangler: &Wrangler) -> Result<(), String> {
     Ok(())
 }
 
-/// The KV, cron, Queues, Workflows, D1, rate-limiting and assets services `wrangler` asks for, with their disks
-/// under `storage`, from `services[at]`. Each is named after the worker, `<name>-<kind>`, so it
-/// cannot collide with it.
+/// The KV, R2, Secrets Store, cron, Queues, Workflows, D1, rate-limiting and assets services
+/// `wrangler` asks for, with their disks under `storage`, from `services[at]`. Each is named after
+/// the worker, `<name>-<kind>`, so it cannot collide with it.
 fn bundled_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     mut at: u32,
@@ -687,6 +711,10 @@ fn bundled_services(
     if !wrangler.kv_namespaces.is_empty() {
         let kv = format!("{name}-kv");
         kv_services(services, at, &kv, &storage.join("kv"), "KVNamespace")?;
+        at += 3;
+    }
+    if !wrangler.r2_buckets.is_empty() {
+        r2_services(services, at, &format!("{name}-r2"), storage)?;
         at += 3;
     }
     let secrets = &wrangler.secrets_store_secrets;
@@ -895,6 +923,29 @@ fn secrets_services(
     Ok(())
 }
 
+/// The R2 Worker `name` at `services[at]`, then its disk, `storage`, and its `BLOBS`, a bucket
+/// service storing the objects in `storage/r2/`.
+fn r2_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    storage: &Path,
+) -> Result<(), String> {
+    fs::create_dir_all(storage).map_err(|e| format!("{}: {e}", storage.display()))?;
+    let disk = format!("{name}-storage");
+    disk_service(services.reborrow().get(at + 1), &disk, storage);
+    let mut service = services.reborrow().get(at + 2);
+    service.set_name(format!("{name}-blobs"));
+    let mut bucket = service.init_bucket();
+    bucket.set_path("r2");
+    bucket.set_local_disk(disk);
+    let service = services.reborrow().get(at);
+    let mut blobs = bundled_worker(service, name, "r2.js", &[], None, 1).get(0);
+    blobs.set_name("BLOBS");
+    blobs.init_service().set_name(format!("{name}-blobs"));
+    Ok(())
+}
+
 /// A writable disk service `name` at `path`.
 fn disk_service(mut service: service::Builder<'_>, name: &str, path: &Path) {
     service.set_name(name);
@@ -981,6 +1032,7 @@ fn cron_services(
 /// [`bundled_services`] names after it, Secrets Store secrets, and rate limits.
 fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
     let kv = &wrangler.kv_namespaces;
+    let r2 = &wrangler.r2_buckets;
     let producers = &wrangler.queues.producers;
     let workflows = &wrangler.workflows;
     let d1 = &wrangler.d1_databases;
@@ -990,7 +1042,7 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
-    let n = wrangler.vars.len() + do_bindings.len() + kv.len();
+    let n = wrangler.vars.len() + do_bindings.len() + kv.len() + r2.len();
     let assets = wrangler.assets.as_ref().and_then(|a| a.binding.as_ref());
     let m = n + producers.len() + workflows.len();
     let at = m + d1.len();
@@ -1020,6 +1072,16 @@ fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, name: &str) {
         let mut designator = b.init_kv_namespace();
         designator.set_name(format!("{name}-kv"));
         let props = serde_json::json!({ "namespace": id });
+        designator.init_props().set_json(props.to_string());
+    }
+    for (i, r) in r2.iter().enumerate() {
+        let at = wrangler.vars.len() + do_bindings.len() + kv.len() + i;
+        let mut b = bs.reborrow().get(at as u32);
+        b.set_name(&r.binding);
+        let bucket = r.bucket_name.as_ref().unwrap_or(&r.binding);
+        let mut designator = b.init_r2_bucket();
+        designator.set_name(format!("{name}-r2"));
+        let props = serde_json::json!({ "bucket": bucket });
         designator.init_props().set_json(props.to_string());
     }
     for (i, p) in producers.iter().enumerate() {

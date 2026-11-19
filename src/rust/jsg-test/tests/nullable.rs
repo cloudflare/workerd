@@ -255,3 +255,44 @@ fn lenient_converts_to_optional_nullable() {
         Ok(())
     });
 }
+
+/// As in "maybes - don't substitute null" (value-test.c++): a value that `T` does not take is
+/// null for a worker without `dont_substitute_null_on_type_error`, and a type error with it.
+#[test]
+fn nullable_type_mismatch_follows_dont_substitute_null_on_type_error() {
+    type Strict = Nullable<jsg::NonCoercible<String>>;
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(convert::<Strict>(lock, ctx, "123")?, Nullable::Null);
+        // A value that `T` takes, and null, convert as before.
+        assert_eq!(
+            convert::<Strict>(lock, ctx, "'x'")?,
+            Nullable::Some(jsg::NonCoercible::new("x".to_owned()))
+        );
+        assert_eq!(convert::<Strict>(lock, ctx, "null")?, Nullable::Null);
+        // Only a top-level mismatch is null: an element of the wrong type is still an error.
+        let err =
+            convert::<Nullable<Vec<jsg::NonCoercible<String>>>>(lock, ctx, "[1]").unwrap_err();
+        assert_eq!(
+            err.message,
+            "Incorrect type for array element 0: the provided value is not of type 'string'."
+        );
+        // Each element of a sequence of nullables is converted the same way.
+        assert_eq!(
+            convert::<Vec<Strict>>(lock, ctx, "['a', 1]")?,
+            vec![
+                Nullable::Some(jsg::NonCoercible::new("a".to_owned())),
+                Nullable::Null
+            ]
+        );
+        Ok(())
+    });
+
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_no_substitute_null(true));
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<Strict>(lock, ctx, "123").unwrap_err();
+        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        assert_eq!(err.message, "Expected a string value but got number");
+        Ok(())
+    });
+}

@@ -1284,13 +1284,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     jsg::isolateRegisterExternalReference(
         lock->v8Isolate, reinterpret_cast<intptr_t>(&messageCallback));
 
-    // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
-    // machine is competing for memory so it might as well use all it wants and be lazy about GC.
-    //
-    // In our production environment, however, we can safely assume that there is always memory
-    // pressure, because every machine is handling thousands of tenants all the time. So we might
-    // as well just throw the switch to "moderate" right away.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    // This notification has no lasting effect: V8 handles it synchronously because we hold the
+    // lock, then resets the level to "none" before returning. Its only GC action at "moderate" is
+    // starting incremental marking, which we disable. What it does do is free caches shared by the
+    // whole process: it flushes the Liftoff code of every Wasm module, so every isolate recompiles
+    // the Wasm it runs, and it empties the isolate group's memory pools.
+    if (!util::Autogate::isEnabled(util::AutogateKey::SKIP_ISOLATE_MEMORY_PRESSURE_HINT)) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that the current lock can release tracked
     // WebAssembly instances and count the full collections it pays for.
