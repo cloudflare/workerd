@@ -14,6 +14,7 @@ pub use promise::PromiseFuture;
 pub use promise::new_callbacks_promise_future;
 pub use refcount::repr::KjArc;
 pub use refcount::repr::KjRc;
+pub use refcount::repr::KjWeakRc;
 
 pub use crate::ffi::KjWaker;
 

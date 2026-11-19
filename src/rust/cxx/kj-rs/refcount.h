@@ -28,4 +28,28 @@ void cxxbridge$kjrs$arc$clone(const void* arc, void* out);
 
 // Destroys the input `kj::Arc<T>` in place, decrementing the control pointer's refcount.
 void cxxbridge$kjrs$arc$drop(void* arc);
+
+// The `weak` inputs point to Rust `kj_rs::repr::KjWeakRc<T>` values, which hold the bytes of a
+// `kj::WeakRc<T>`: pointers to the owner's weak cell and to the referent. The helpers read only
+// the cell, as `kj::WeakRc` does, and return or store the referent pointer without dereferencing
+// it.
+
+// Constructs a `kj::WeakRc<T>` of the input `kj::Rc<T>`'s referent into `out`, which points to
+// uninitialized storage with the layout of `kj::WeakRc<T>`.
+void cxxbridge$kjrs$rc$downgrade(const void* rc, void* out);
+
+// Returns the referent of the input `kj::WeakRc<T>`, or null if it has expired.
+void* cxxbridge$kjrs$weak_rc$try_get(const void* weak);
+
+// If the referent of the input `kj::WeakRc<T>` has not expired, constructs a `kj::Rc<T>` of it
+// into `out`, which points to uninitialized storage with the layout of `kj::Rc<T>`, and returns
+// true. Returns false otherwise, leaving `out` uninitialized.
+bool cxxbridge$kjrs$weak_rc$upgrade(const void* weak, void* out);
+
+// Constructs a cloned `kj::WeakRc<T>` into `out`, which points to uninitialized storage with the
+// layout of `kj::WeakRc<T>`.
+void cxxbridge$kjrs$weak_rc$clone(const void* weak, void* out);
+
+// Destroys the input `kj::WeakRc<T>` in place, releasing its reference to the weak cell.
+void cxxbridge$kjrs$weak_rc$drop(void* weak);
 }
