@@ -20,6 +20,13 @@ LoneSurrogates stringBodyLoneSurrogates(jsg::Lock& js) {
                                                                 : LoneSurrogates::WTF8;
 }
 
+// Whether JsReadableStream::text() removes a leading UTF-8 byte order mark: the TypeScript
+// implementation always does, and the C++ one does under strip_bom_in_read_all_text.
+bool textStripsBom(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  return flags.getTypeScriptImplementedStreams() || flags.getStripBomInReadAllText();
+}
+
 }  // namespace
 
 BodySource::BodySource(kj::Array<const kj::byte> bytes)
@@ -70,6 +77,56 @@ JsReadableStream BodySource::createStream(jsg::Lock& js) {
     }
   }
   KJ_UNREACHABLE;
+}
+
+jsg::JsArrayBuffer BodySource::readArrayBuffer(jsg::Lock& js) {
+  KJ_IF_SOME(bytes, tryGetBytes(js)) {
+    return jsg::JsArrayBuffer::create(js, bytes);
+  }
+  auto& text = KJ_ASSERT_NONNULL(value.tryGet<jsg::JsRef<jsg::JsString>>());
+  // Allocate the buffer first: encoding must not cause a V8 GC.
+  auto buffer =
+      jsg::JsArrayBuffer::create(js, KJ_ASSERT_NONNULL(tryGetLength(js, StreamEncoding::IDENTITY)));
+  encodeText(js, text.getHandle(js), buffer.asArrayPtr().asChars());
+  return buffer;
+}
+
+kj::String BodySource::readText(jsg::Lock& js) {
+  kj::String text;
+  KJ_IF_SOME(bytes, tryGetBytes(js)) {
+    text = kj::heapString(bytes.asChars());
+  } else {
+    auto& string = KJ_ASSERT_NONNULL(value.tryGet<jsg::JsRef<jsg::JsString>>());
+    text = kj::heapString(KJ_ASSERT_NONNULL(tryGetLength(js, StreamEncoding::IDENTITY)));
+    encodeText(js, string.getHandle(js), text.asArray());
+  }
+  if (textStripsBom(js) && hasUtf8Bom(text.asBytes())) {
+    return kj::heapString(text.slice(UTF8_BOM_SIZE));
+  }
+  return text;
+}
+
+kj::Maybe<kj::ArrayPtr<const kj::byte>> BodySource::tryGetBytes(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(bytes, Bytes) {
+      return bytes->asPtr();
+    }
+    KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
+      return buffer.getHandle(js).asArrayPtr().asConst();
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      return blob->getData(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void BodySource::encodeText(jsg::Lock& js, jsg::JsString text, kj::ArrayPtr<char> output) {
+  auto result = encodeUtf8Prefix(js, text, 0, output, stringBodyLoneSurrogates(js));
+  KJ_ASSERT(result.written == output.size(), "a string produced fewer bytes than its UTF-8 length");
 }
 
 kj::Maybe<uint64_t> BodySource::tryGetLength(jsg::Lock& js, StreamEncoding encoding) {

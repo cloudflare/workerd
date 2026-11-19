@@ -40,6 +40,13 @@ class BodySource final {
   // Returns a new stream that reads the source from the start. Requires the current IoContext.
   JsReadableStream createStream(jsg::Lock& js);
 
+  // A new ArrayBuffer holding the bytes createStream() produces.
+  jsg::JsArrayBuffer readArrayBuffer(jsg::Lock& js);
+
+  // The bytes createStream() produces, as text, as JsReadableStream::text() reads them: that
+  // removes a leading UTF-8 byte order mark under some flags.
+  kj::String readText(jsg::Lock& js);
+
   // The number of bytes a stream created from the source produces, for StreamEncoding::IDENTITY.
   // kj::none for any other encoding, as for any in-memory stream.
   kj::Maybe<uint64_t> tryGetLength(jsg::Lock& js, StreamEncoding encoding);
@@ -56,6 +63,13 @@ class BodySource final {
   BodySource(Value value, kj::Maybe<uint64_t> stringLength)
       : value(kj::mv(value)),
         stringLength(stringLength) {}
+
+  // The source's bytes, valid while the isolate lock is held, or kj::none for a string, whose
+  // bytes must be encoded.
+  kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetBytes(jsg::Lock& js);
+
+  // Encodes a string source into `output`, which must be as long as its UTF-8 length.
+  void encodeText(jsg::Lock& js, jsg::JsString text, kj::ArrayPtr<char> output);
 
   Value value;
 

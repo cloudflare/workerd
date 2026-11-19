@@ -148,19 +148,23 @@ export const inMemoryBodyLongBufferInChunks = {
 
 export const inMemoryBodyWritesLoneSurrogates = {
   async test() {
-    const response = new Response('a\uD800b');
     const surrogate = replaceSurrogates
       ? [0xef, 0xbf, 0xbd]
       : [0xed, 0xa0, 0x80];
-    deepStrictEqual(
-      new Uint8Array(await response.clone().arrayBuffer()),
-      new Uint8Array([0x61, ...surrogate, 0x62])
-    );
+    const expected = new Uint8Array([0x61, ...surrogate, 0x62]);
     // A decoder replaces each of the WTF-8 bytes, which are not valid UTF-8.
-    strictEqual(
-      await response.text(),
-      replaceSurrogates ? 'a\uFFFDb' : 'a\uFFFD\uFFFD\uFFFDb'
+    const text = replaceSurrogates ? 'a\uFFFDb' : 'a\uFFFD\uFFFD\uFFFDb';
+    // Read through the body's stream, and straight from the string.
+    deepStrictEqual(
+      concat(await readChunks(new Response('a\uD800b').body)),
+      expected
     );
+    strictEqual(await new Response(new Response('a\uD800b').body).text(), text);
+    deepStrictEqual(
+      new Uint8Array(await new Response('a\uD800b').arrayBuffer()),
+      expected
+    );
+    strictEqual(await new Response('a\uD800b').text(), text);
   },
 };
 
@@ -224,5 +228,200 @@ export const inMemoryBodyCompressedResponseDropsLength = {
     const resp = await env.SELF.fetch('http://example.org/gzip-in-memory-body');
     strictEqual(resp.headers.get('content-encoding'), 'gzip');
     strictEqual(await resp.text(), PAYLOAD);
+  },
+};
+
+// The body of each kind a value can make, and the bytes its stream produces.
+function readSources() {
+  const text = '"a=b\uD800"';
+  const bytes = encodeBody(text);
+  return [
+    ['string', () => text, bytes],
+    ['string with a BOM', () => '\uFEFF' + text, encodeBody('\uFEFF' + text)],
+    ['empty string', () => '', new Uint8Array(0)],
+    ['Uint8Array', () => bytes.slice(), bytes],
+    ['ArrayBuffer', () => bytes.slice().buffer, bytes],
+    ['Blob', () => new Blob([bytes]), bytes],
+    ['URLSearchParams', () => new URLSearchParams('a=b'), enc.encode('a=b')],
+  ];
+}
+
+// A stream of `bytes` that closes only when it is read, as an in-memory
+// body's stream does: a stream already closed when it is read is left
+// unlocked by the legacy implementation.
+function streamOf(bytes) {
+  return new ReadableStream(
+    {
+      pull(controller) {
+        if (bytes.byteLength > 0) controller.enqueue(bytes.slice());
+        controller.close();
+      },
+    },
+    { highWaterMark: 0 }
+  );
+}
+
+// Each way JavaScript reads a whole body, with what it read in a form that
+// deepStrictEqual() compares.
+const READS = {
+  arrayBuffer: async (r) => [...new Uint8Array(await r.arrayBuffer())],
+  bytes: async (r) => [...(await r.bytes())],
+  text: (r) => r.text(),
+  json: (r) => r.json(),
+  formData: async (r) => [...(await r.formData())],
+  blob: async (r) => {
+    const blob = await r.blob();
+    return { type: blob.type, text: await blob.text() };
+  },
+};
+
+async function outcome(promise) {
+  try {
+    return { value: await promise };
+  } catch (e) {
+    return { error: `${e.name}: ${e.message}` };
+  }
+}
+
+// How a used Request or Response shows it: each further use, and how it
+// fails. Each use is made on a body that `makeUsed` has just used, so that
+// no earlier use creates the body's stream first.
+async function usedState(makeUsed, env) {
+  const uses = {
+    bodyUsed: (r) => r.bodyUsed,
+    locked: (r) => r.body?.locked,
+    getReader: (r) => r.body.getReader(),
+    cancel: (r) => r.body.cancel(),
+    tee: (r) => r.body.tee(),
+    clone: (r) => r.clone(),
+    newResponse: (r) => new Response(r.body),
+  };
+  for (const [read, consume] of Object.entries(READS)) {
+    uses[read] = consume;
+  }
+  const state = {};
+  for (const [name, use] of Object.entries(uses)) {
+    const r = await makeUsed();
+    state[name] = await outcome((async () => use(r))());
+  }
+  if ((await makeUsed()) instanceof Request) {
+    const requestUses = {
+      newRequest: (r) => new Request(r).bodyUsed,
+      requestAsInit: async (r) => {
+        const request = new Request('http://example.org', r);
+        return {
+          bodyUsed: request.bodyUsed,
+          text: await outcome(request.text()),
+        };
+      },
+      fetch: async (r) => (await env.SELF.fetch(r)).status,
+    };
+    for (const [name, use] of Object.entries(requestUses)) {
+      const r = await makeUsed();
+      state[name] = await outcome((async () => use(r))());
+    }
+  }
+  return state;
+}
+
+// A body made from a value is read straight from the value, without the
+// body's stream, but reads what its stream would, and is left as reading
+// its stream would leave it.
+export const inMemoryBodyReadsLikeItsStream = {
+  async test(ctrl, env) {
+    const headers = { 'content-type': 'application/x-www-form-urlencoded' };
+    const kinds = {
+      Response: (body) => new Response(body, { headers }),
+      Request: (body) =>
+        new Request('http://example.org', {
+          method: 'POST',
+          body,
+          headers,
+          duplex: 'half',
+        }),
+    };
+    for (const [kind, make] of Object.entries(kinds)) {
+      for (const [read, consume] of Object.entries(READS)) {
+        for (const [name, value, bytes] of readSources()) {
+          const label = `${kind} of ${name}, ${read}()`;
+          deepStrictEqual(
+            await outcome(consume(make(value()))),
+            await outcome(consume(make(streamOf(bytes)))),
+            label
+          );
+          const usedBy = (body) => async () => {
+            const r = make(body());
+            await outcome(consume(r));
+            return r;
+          };
+          deepStrictEqual(
+            await usedState(usedBy(value), env),
+            await usedState(
+              usedBy(() => streamOf(bytes)),
+              env
+            ),
+            label
+          );
+        }
+      }
+    }
+  },
+};
+
+// Sent, a body made from a value is left as a sent stream would leave it.
+export const inMemoryBodySentLikeItsStream = {
+  async test(ctrl, env) {
+    for (const [name, value, bytes] of readSources()) {
+      const sentBy = (body, init) => async () => {
+        const r = new Request('http://example.org', {
+          method: 'POST',
+          body: body(),
+          ...init,
+        });
+        deepStrictEqual(
+          [...new Uint8Array(await (await env.SELF.fetch(r)).arrayBuffer())],
+          [...bytes],
+          name
+        );
+        return r;
+      };
+      deepStrictEqual(
+        await usedState(sentBy(value), env),
+        await usedState(
+          sentBy(() => streamOf(bytes), { duplex: 'half' }),
+          env
+        ),
+        name
+      );
+    }
+  },
+};
+
+// The number of promise jobs that run before `promise` settles.
+async function jobsToSettle(promise) {
+  let settled = false;
+  const settle = () => {
+    settled = true;
+  };
+  promise.then(settle, settle);
+  let jobs = 0;
+  while (!settled) {
+    await null;
+    jobs++;
+  }
+  return jobs;
+}
+
+// Read straight from the value, a body's arrayBuffer(), bytes(), text() and
+// formData() settle as a promise that one job resolves does: nothing is read
+// through a stream.
+export const inMemoryBodyReadSettlesAtOnce = {
+  async test() {
+    const headers = { 'content-type': 'application/x-www-form-urlencoded' };
+    const oneJob = await jobsToSettle(Promise.resolve().then(() => {}));
+    for (const read of ['arrayBuffer', 'bytes', 'text', 'formData']) {
+      const body = new Response('a=b', { headers });
+      strictEqual(await jobsToSettle(body[read]()), oneJob, read);
+    }
   },
 };

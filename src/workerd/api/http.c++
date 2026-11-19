@@ -193,30 +193,54 @@ void Body::rewindBody() {
   // Drop the stream, which may already have been sent; the next use creates a new one from the
   // source. A null body is trivially "rewound" (there is nothing to do).
   bodyStream.nullify();
+  readFromSource = false;
 }
 
 void Body::nullifyBody() {
   bodyStream.nullify();
   bodySource = kj::none;
+  readFromSource = false;
 }
 
 kj::Maybe<uint64_t> Body::tryGetBodyLength(jsg::Lock& js, StreamEncoding encoding) {
-  KJ_IF_SOME(source, bodySource) {
-    // Until the stream is read from, the source's length is the stream's.
-    if (!bodyStream.isDisturbed(js)) {
-      return source.tryGetLength(js, encoding);
+  if (!readFromSource) {
+    KJ_IF_SOME(source, bodySource) {
+      // Until the stream is read from, the source's length is the stream's.
+      if (!bodyStream.isDisturbed(js)) {
+        return source.tryGetLength(js, encoding);
+      }
     }
   }
-  return bodyStream.tryGetLength(js, encoding);
+  return getBodyStream(js).tryGetLength(js, encoding);
 }
 
 JsReadableStream& Body::getBodyStream(jsg::Lock& js) {
   if (bodyStream.isNull()) {
     KJ_IF_SOME(source, bodySource) {
       bodyStream = source.createStream(js);
+      if (readFromSource) {
+        // Detaching the stream leaves it locked and disturbed, as reading it would have.
+        KJ_UNUSED auto detached = bodyStream.detach(js);
+      }
     }
   }
   return bodyStream;
+}
+
+kj::Maybe<BodySource&> Body::tryGetUnreadSource() {
+  if (!bodyStream.isNull() || readFromSource) {
+    return kj::none;
+  }
+  return bodySource;
+}
+
+kj::Maybe<BodySource&> Body::tryReadFromSource(jsg::Lock& js, uint64_t limit) {
+  auto& source = KJ_UNWRAP_OR(tryGetUnreadSource(), return kj::none);
+  if (KJ_ASSERT_NONNULL(source.tryGetLength(js, StreamEncoding::IDENTITY)) > limit) {
+    return kj::none;
+  }
+  readFromSource = true;
+  return source;
 }
 
 bool Body::isNullBody() const {
@@ -235,7 +259,7 @@ kj::Maybe<JsReadableStream> Body::getBody(jsg::Lock& js) {
   return stream.addRef(js);
 }
 bool Body::getBodyUsed(jsg::Lock& js) {
-  return bodyStream.isDisturbed(js);
+  return readFromSource || bodyStream.isDisturbed(js);
 }
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   // A null body yields an empty result without consulting the IoContext (see bufferingLimit()).
@@ -243,14 +267,27 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   if (isNullBody()) {
     return bodyStream.arrayBuffer(js, 0);
   }
-  return js.evalNow([&] { return getBodyStream(js).arrayBuffer(js, bufferingLimit()); });
+  return js.evalNow([&] {
+    auto limit = bufferingLimit();
+    KJ_IF_SOME(source, tryReadFromSource(js, limit)) {
+      return js.resolvedPromise(source.readArrayBuffer(js).addRef(js));
+    }
+    return getBodyStream(js).arrayBuffer(js, limit);
+  });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
   if (isNullBody()) {
     return bodyStream.bytes(js, 0);
   }
-  return js.evalNow([&] { return getBodyStream(js).bytes(js, bufferingLimit()); });
+  return js.evalNow([&] {
+    auto limit = bufferingLimit();
+    KJ_IF_SOME(source, tryReadFromSource(js, limit)) {
+      auto buffer = source.readArrayBuffer(js);
+      return js.resolvedPromise(jsg::JsUint8Array::create(js, buffer).addRef(js));
+    }
+    return getBodyStream(js).bytes(js, limit);
+  });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
@@ -261,10 +298,9 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
   }
 
   return js.evalNow([&] {
-    auto& stream = getBodyStream(js);
-    // Check for a disturbed body before emitting the non-text warning below. (stream.text()
-    // performs the same check with the same error message; this one just runs first.)
-    JSG_REQUIRE(!stream.isDisturbed(js), TypeError,
+    // Check for a used body before emitting the non-text warning below. (stream.text() performs
+    // the same check with the same error message; this one just runs first.)
+    JSG_REQUIRE(!getBodyUsed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -278,7 +314,11 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       }
     }
 
-    return stream.text(js, context.getLimitEnforcer().getBufferingLimit());
+    auto limit = context.getLimitEnforcer().getBufferingLimit();
+    KJ_IF_SOME(source, tryReadFromSource(js, limit)) {
+      return js.resolvedPromise(source.readText(js));
+    }
+    return getBodyStream(js).text(js, limit);
   });
 }
 
@@ -291,23 +331,26 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "It can only be used once. Use tee() first if you need to read it twice.");
 
     auto maybeContentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE);
+    auto parse = [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
+                     jsg::Lock& js, kj::String rawText) mutable {
+      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
+          "Parsing a Body as FormData requires a Content-Type header.");
+      formData->parse(js, kj::mv(rawText), contentType,
+          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
+      return kj::mv(formData);
+    };
 
     // The body is read before the Content-Type is checked, so that an error from the body stream
     // takes precedence. A null body reads as the empty string, which FormData::parse() accepts as
     // application/x-www-form-urlencoded but not as multipart/form-data.
     // See https://fetch.spec.whatwg.org/#concept-body-consume-body
     auto limit = isNullBody() ? 0 : bufferingLimit();
+    KJ_IF_SOME(source, tryReadFromSource(js, limit)) {
+      return js.resolvedPromise(parse(js, source.readText(js)));
+    }
     auto& stream = getBodyStream(js);
     KJ_ASSERT(!stream.isDisturbed(js));
-    return stream.text(js, limit).then(js,
-        [maybeContentType = kj::mv(maybeContentType), formData = kj::mv(formData)](
-            auto& js, kj::String rawText) mutable {
-      auto& contentType = JSG_REQUIRE_NONNULL(maybeContentType, TypeError,
-          "Parsing a Body as FormData requires a Content-Type header.");
-      formData->parse(js, kj::mv(rawText), contentType,
-          !FeatureFlags::get(js).getFormDataParserSupportsFiles());
-      return kj::mv(formData);
-    });
+    return stream.text(js, limit).then(js, kj::mv(parse));
   });
 }
 
@@ -337,15 +380,16 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
 }
 
 kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
-  if (bodyStream.isNull()) {
+  if (bodyStream.isNull() && !readFromSource) {
     // No stream has been created yet, so the clone just shares the source, if there is one, and
     // creates its own stream when it needs one.
     return bodySource.map([&](BodySource& source) { return ExtractedBody(source.clone(js)); });
   }
 
   // tee() nullifies bodyStream and hands back two branches. We keep one branch and give the other,
-  // along with the source, to the new Body.
-  auto tee = bodyStream.tee(js);
+  // along with the source, to the new Body. A body read from its source has a stream that is
+  // locked, which tee() rejects.
+  auto tee = getBodyStream(js).tee(js);
   bodyStream = kj::mv(tee.branch1);
   ExtractedBody result(js, kj::mv(tee.branch2));
   result.source = bodySource.map([&](BodySource& source) { return source.clone(js); });

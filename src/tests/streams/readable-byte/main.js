@@ -341,4 +341,7 @@ export {
   inMemoryBodyIsCopiedAtConstruction,
   inMemoryBodyDeclaresItsLength,
   inMemoryBodyCompressedResponseDropsLength,
+  inMemoryBodyReadsLikeItsStream,
+  inMemoryBodySentLikeItsStream,
+  inMemoryBodyReadSettlesAtOnce,
 } from 'in-memory-body';
