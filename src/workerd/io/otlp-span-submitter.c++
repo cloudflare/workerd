@@ -207,9 +207,7 @@ SpanBuilder startSpan(kj::Own<OtlpSpanSubmitter> submitter,
     kj::ConstString operationName) {
   // The submitter records this span itself, so its observer carries its span id and its parent's.
   auto rootSpanId = submitter->getRootSpanId();
-  return SpanBuilder(
-      kj::rc<UserSpanObserver>(kj::mv(submitter), context.getTraceId(), context.getTraceFlags(),
-          rootSpanId, context.getSpanId().orDefault(tracing::SpanId::nullId)),
+  return SpanBuilder(UserSpanObserver::forOpenedRoot(kj::mv(submitter), context, rootSpanId),
       kj::mv(operationName));
 }
 
