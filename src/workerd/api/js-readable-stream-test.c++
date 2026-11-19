@@ -27,6 +27,14 @@ namespace {
 constexpr uint64_t kLimit = 1024 * 1024;
 constexpr kj::StringPtr kData = "hello world"_kj;
 
+// The description of the exception a test sink's write fails with, as a pipe's does once nothing
+// reads it.
+constexpr kj::StringPtr kSinkGone = "the sink's reader went away"_kj;
+
+kj::Exception sinkGone() {
+  return kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__, kj::str(kSinkGone));
+}
+
 // A stream over a native memory source holding a copy of `data`.
 JsReadableStream memoryStream(jsg::Lock& js, kj::StringPtr data) {
   return JsReadableStream::create(js, IoContext::current(), newMemorySource(data.asBytes()));
@@ -2040,6 +2048,8 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
 struct QueuedSourceCancels {
   uint count = 0;
   bool reasonWasUndefined = false;
+  // The latest reason, as a string.
+  kj::String reason;
 };
 
 // Builds a plain-JS underlying source (the queued backend) that enqueues kData once as bytes,
@@ -2064,6 +2074,7 @@ jsg::JsValue makeCancelTrackingQueuedSource(
           [&cancels](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
     ++cancels.count;
     cancels.reasonWasUndefined = jsg::JsValue(info[0]).isUndefined();
+    cancels.reason = jsg::JsValue(info[0]).toString(js);
   })));
   return jsg::JsValue(underlying);
 }
@@ -2230,6 +2241,42 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream aborts the sink i
   KJ_EXPECT(exception.getDescription() == "jsg.Error: write failed", exception.getDescription());
   KJ_EXPECT(calls.aborted);
   KJ_EXPECT(!calls.ended);
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream keeps a failed write's exception in "
+        "C++") {
+  // As the legacy pump does, the pump cancels the source with the failure and rethrows the failure
+  // as the sink reported it. Passed through JavaScript, it would be logged as an uncaught
+  // exception.
+  auto fixture = makeTsStreamsFixture();
+  LogRecorder uncaught("uncaught exception");
+  QueuedSourceCancels cancels;
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    // The source stays open, so that the write is not the last.
+    auto stream = makeTsStream(js, makeCancelTrackingQueuedSource(js, cancels, false));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->reject(sinkGone());
+  auto& ws = fixture.getWaitScope();
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws); }));
+  KJ_EXPECT(exception.getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(exception.getDescription() == kSinkGone, exception.getDescription());
+  KJ_EXPECT(cancels.count == 1);
+  KJ_EXPECT(cancels.reason == "Error: Network connection lost.", cancels.reason);
+  KJ_EXPECT(calls.aborted);
+  KJ_EXPECT(uncaught.messages.empty(), kj::strArray(uncaught.messages, " | "));
 
   pump = kj::none;
   fixture.drainAndDestroy(kj::mv(request));

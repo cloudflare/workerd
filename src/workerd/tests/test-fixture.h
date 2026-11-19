@@ -449,4 +449,26 @@ class RecordedSpans final: public kj::Refcounted {
   kj::Function<kj::Own<RequestObserver>()> requestObserverFactory();
 };
 
+// Records, while it exists, the messages that KJ logs at INFO level and that contain `substring`,
+// and passes on the other messages that the log level allowed before. Workers log uncaught
+// exceptions only at INFO level, as jsg does the internal exceptions it converts to JavaScript.
+class LogRecorder final: public kj::ExceptionCallback {
+ public:
+  explicit LogRecorder(kj::StringPtr substring);
+  ~LogRecorder() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(LogRecorder);
+
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override;
+
+  kj::Vector<kj::String> messages;
+
+ private:
+  kj::StringPtr substring;
+  kj::LogSeverity previousLevel;
+};
+
 }  // namespace workerd

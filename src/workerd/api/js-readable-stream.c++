@@ -596,10 +596,22 @@ struct QueuedPumpState {
   // Cancels the reader if the sink disconnects while the pump is running; see
   // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
   kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
+  // The exception a write before the last failed with, which ends the loop. awaitQueuedPump()
+  // throws it once the loop is done; see endQueuedPumpAfterFailedWrite().
+  kj::Maybe<kj::Exception> writeFailure;
   // Set once the pump is dropped; see awaitQueuedPump(). The loop then winds down without
   // touching the sink again.
   bool dropped = false;
 };
+
+// Cancels `reader` (a ReadableStreamDrainingReader) with `reason`. The pump reports its own
+// outcome, so the cancel's is ignored.
+void cancelDrainingReader(jsg::Lock& js, jsg::JsObject reader, jsg::JsValue reason) {
+  auto result = webstreams::invokeMethod(js, reader, "cancel"_kj, reason);
+  KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
+    promise.markAsHandled(js);
+  }
+}
 
 // Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
 // any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
@@ -611,10 +623,7 @@ void cancelReaderFromKj(
         [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       auto reason = exceptionToCancelReason(js, kj::mv(exception));
-      auto result = webstreams::invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
-      KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
-        promise.markAsHandled(js);
-      }
+      cancelDrainingReader(js, reader.getHandle(js), reason);
     }));
   });
 }
@@ -665,15 +674,43 @@ kj::Promise<void> awaitQueuedPump(IoContext& context,
     cancelReaderOfDroppedPump(*weakContext, kj::mv(reader));
   });
   co_await loop;
+  KJ_IF_SOME(exception, state->writeFailure) {
+    kj::throwFatalException(kj::mv(exception));
+  }
   KJ_IF_SOME(lastWrite, state->lastWrite) {
     co_await lastWrite;
   }
 }
 
+// Settles with the exception that `write` fails with, rather than rejecting, so that awaitIo()
+// does not convert the exception to JavaScript. Rejecting the loop with it would have
+// awaitQueuedPump()'s awaitJs() log it as an uncaught exception, as for any JavaScript promise
+// that rejects into C++.
+kj::Promise<kj::Maybe<kj::Exception>> settleQueuedWrite(kj::Promise<void> write) {
+  return write.then([]() -> kj::Maybe<kj::Exception> { return kj::none; },
+      [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> { return kj::mv(exception); });
+}
+
+// Ends the queued pump's loop after a write before the last fails with `exception`: aborts the
+// sink, as the last write does should it fail; cancels the reader with the exception as the
+// reason, as the legacy pump cancels its source; and leaves the exception for awaitQueuedPump()
+// to throw.
+void endQueuedPumpAfterFailedWrite(jsg::Lock& js, QueuedPumpState& state, kj::Exception exception) {
+  // The reader is canceled here, so the disconnect watch has nothing left to cancel.
+  state.sinkDisconnectWatch = kj::none;
+  state.sink->abort(exception.clone());
+  state.writeFailure = exception.clone();
+  // Converting the reason can run JavaScript that drops the pump. The cancel the drop queues then
+  // finds the stream closed.
+  auto reason = exceptionToCancelReason(js, kj::mv(exception));
+  cancelDrainingReader(js, state.reader.getHandle(js), reason);
+}
+
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
-// vectored write, and recurse until done, leaving the last write to awaitQueuedPump(). All JS
-// state (the reader) travels through the jsg promise chain.
+// vectored write, and recurse until done, leaving the last write to awaitQueuedPump(). A write
+// before the last that fails ends the loop; see endQueuedPumpAfterFailedWrite(). All JS state (the
+// reader) travels through the jsg promise chain.
 jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, EndStream end) {
   auto& context = IoContext::current();
   auto readResult = webstreams::invokeMethod(js, state->reader.getHandle(js), "read"_kj);
@@ -722,9 +759,17 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
     }
     auto writeStep = state->writeCanceler.wrap(
         queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), EndStream::NO));
-    return context.awaitIo(js, kj::mv(writeStep),
-        context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext&) mutable {
-      return state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
+    return context.awaitIo(js, settleQueuedWrite(kj::mv(writeStep)),
+        context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext&,
+                               kj::Maybe<kj::Exception> failure) mutable -> jsg::Promise<void> {
+      if (state->dropped) {
+        return js.resolvedPromise();
+      }
+      KJ_IF_SOME(exception, failure) {
+        endQueuedPumpAfterFailedWrite(js, *state, kj::mv(exception));
+        return js.resolvedPromise();
+      }
+      return queuedPumpStep(js, kj::mv(state), end);
     }));
   }));
 }
@@ -765,15 +810,12 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
       // Nothing awaits the result any more, and the drop cancels the reader itself.
       return;
     }
-    // The pump failed: abort the sink, cancel the reader, then propagate the failure.
+    // Reading failed, or produced something other than bytes: abort the sink, cancel the reader,
+    // then propagate the failure. A failed write does not come here; see
+    // endQueuedPumpAfterFailedWrite().
     auto reason = jsg::JsValue(exception.getHandle(js));
     state->sink->abort(js.exceptionToKj(reason));
-
-    auto cancelResult =
-        webstreams::invokeMethod(js, state->reader.getHandle(js), "cancel"_kj, reason);
-    KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(cancelResult)) {
-      promise.markAsHandled(js);
-    }
+    cancelDrainingReader(js, state->reader.getHandle(js), reason);
     js.throwException(kj::mv(exception));
   }));
   return addNoopDeferredProxy(awaitQueuedPump(

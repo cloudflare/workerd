@@ -713,4 +713,36 @@ kj::Function<kj::Own<RequestObserver>()> RecordedSpans::requestObserverFactory()
   };
 }
 
+namespace {
+
+// KJ has no getter for the log level.
+kj::LogSeverity currentLogLevel() {
+  for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
+         kj::LogSeverity::FATAL}) {
+    if (kj::_::Debug::shouldLog(severity)) return severity;
+  }
+  return kj::LogSeverity::DBG;
+}
+
+}  // namespace
+
+LogRecorder::LogRecorder(kj::StringPtr substring)
+    : substring(substring),
+      previousLevel(currentLogLevel()) {
+  kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+}
+
+LogRecorder::~LogRecorder() noexcept(false) {
+  kj::_::Debug::setLogLevel(previousLevel);
+}
+
+void LogRecorder::logMessage(
+    kj::LogSeverity severity, const char* file, int line, int contextDepth, kj::String&& text) {
+  if (severity == kj::LogSeverity::INFO && text.contains(substring)) {
+    messages.add(kj::mv(text));
+  } else if (severity >= previousLevel) {
+    next.logMessage(severity, file, line, contextDepth, kj::mv(text));
+  }
+}
+
 }  // namespace workerd
