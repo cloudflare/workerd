@@ -321,6 +321,17 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // True when a "move alarm later" request is currently in-flight via scheduleLaterAlarm().
   bool alarmLaterIsInFlight = false;
 
+  // How many requests scheduleLaterAlarm() has started, and how many of them have finished,
+  // successfully or not. sync() counts these rather than waiting for alarmLaterIsInFlight to
+  // clear, which may never happen while commits keep moving the alarm later.
+  uint64_t laterAlarmRequestsStarted = 0;
+  uint64_t laterAlarmRequestsFinished = 0;
+
+  // The last request scheduleLaterAlarm() started, which resolves once laterAlarmRequestsFinished
+  // counts it. armAlarmHandler() can replace alarmLaterInFlight with a request that finishes
+  // first, so sync() waits on this one instead.
+  kj::ForkedPromise<void> laterAlarmRequest = kj::Promise<void>(kj::READY_NOW).fork();
+
   // When a "move alarm later" request is already in-flight and we need to schedule
   // another one, we store the desired alarm time here. When the in-flight request
   // completes, it checks this variable and starts a new request if needed. The outer
@@ -353,6 +364,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // immediately. If one is already in-flight, stores the desired time in `pendingLaterAlarmTime`
   // so it will be picked up when the current in-flight operation completes.
   void scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParent parentSpan);
+
+  // Resolves once `count` requests started by scheduleLaterAlarm() have finished, or once none is
+  // in flight.
+  kj::Promise<void> whenLaterAlarmRequestsFinished(uint64_t count);
 
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling
