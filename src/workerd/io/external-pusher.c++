@@ -12,13 +12,27 @@ namespace workerd {
 
 namespace {
 
+// What the two ends of a pushed byte stream's pipe know about its writer.
+struct PipeWriterState {
+  // Set when the writer calls end(), or when the reader has received every byte of a stream of
+  // known length.
+  bool ended = false;
+
+  // Set when the writer is destroyed.
+  bool gone = false;
+};
+
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
 class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
  public:
-  ExplicitEndOutputPipeAdapter(kj::Own<kj::AsyncOutputStream> inner, kj::Rc<bool> ended)
+  ExplicitEndOutputPipeAdapter(kj::Own<kj::AsyncOutputStream> inner, kj::Rc<PipeWriterState> state)
       : inner(kj::mv(inner)),
-        ended(kj::mv(ended)) {}
+        state(kj::mv(state)) {}
+
+  ~ExplicitEndOutputPipeAdapter() {
+    state->gone = true;
+  }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     return KJ_REQUIRE_NONNULL(inner)->write(buffer);
@@ -53,26 +67,33 @@ class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream 
 
   kj::Promise<void> end() override {
     // Signal to the other side that end() was actually called.
-    *ended = true;
+    state->ended = true;
     inner = kj::none;
     return kj::READY_NOW;
   }
 
  private:
   kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
-  kj::Rc<bool> ended;
+  kj::Rc<PipeWriterState> state;
 };
 
 class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
  public:
-  ExplicitEndInputPipeAdapter(
-      kj::Own<kj::AsyncInputStream> inner, kj::Rc<bool> ended, kj::Maybe<uint64_t> expectedLength)
+  ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
+      kj::Rc<PipeWriterState> writer,
+      kj::Maybe<uint64_t> expectedLength)
       : inner(kj::mv(inner)),
-        ended(kj::mv(ended)),
+        writer(kj::mv(writer)),
         expectedLength(expectedLength) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
+    size_t result = 0;
+    KJ_TRY {
+      result = co_await inner->tryRead(buffer, minBytes, maxBytes);
+    }
+    KJ_CATCH(exception) {
+      rethrowPipeFailure(kj::mv(exception));
+    }
     accountForRead(result, minBytes);
     co_return result;
   }
@@ -90,15 +111,41 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
   }
 
   kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
-    uint64_t result = co_await inner->pumpTo(output, amount);
+    uint64_t result = 0;
+    KJ_TRY {
+      result = co_await inner->pumpTo(output, amount);
+    }
+    KJ_CATCH(exception) {
+      rethrowPipeFailure(kj::mv(exception));
+    }
     accountForRead(result, amount);
     co_return result;
   }
 
  private:
+  static constexpr kj::StringPtr PREMATURE_DISCONNECT =
+      "ReadableStream received over RPC disconnected prematurely."_kj;
+
   kj::Own<kj::AsyncInputStream> inner;
-  kj::Rc<bool> ended;
+  kj::Rc<PipeWriterState> writer;
   kj::Maybe<uint64_t> expectedLength;
+
+  // A writer that goes away before end() usually leaves the pipe at EOF, which accountForRead()
+  // reports. While the ByteStream that feeds the pipe is still probing for a shorter path, though,
+  // the first read or pump is served by the probe, and destroying the probe, which holds the
+  // writer, cancels that read instead. Both mean the same thing, so they are reported alike.
+  //
+  // A pump's failure may also come from its output, as when the client of a response streaming
+  // this body disconnects. That failure is the output's, and is passed on as it is: only one that
+  // arrives once the writer is gone is taken for the writer's. The read that the probe's
+  // destruction cancels continues in a later turn than the one that destroyed the writer.
+  [[noreturn]] void rethrowPipeFailure(kj::Exception&& exception) {
+    if (exception.getType() == kj::Exception::Type::DISCONNECTED && !writer->ended &&
+        writer->gone) {
+      JSG_FAIL_REQUIRE(Error, PREMATURE_DISCONNECT);
+    }
+    kj::throwFatalException(kj::mv(exception));
+  }
 
   // Records that `amount` bytes were consumed by an operation that returns fewer than `minBytes`
   // only at EOF. Every way of consuming the stream must report here, since callers may mix them,
@@ -111,13 +158,13 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
         // If we got all the bytes we expected, we treat this as a successful end, because the
         // underlying KJ pipe is not actually going to wait for the other side to drop. This is
         // consistent with the behavior of Content-Length in HTTP anyway.
-        *ended = true;
+        writer->ended = true;
       }
     }
 
-    if (amount < minBytes && !*ended) {
+    if (amount < minBytes && !writer->ended) {
       // EOF without end() means the writer went away mid-stream.
-      JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+      JSG_FAIL_REQUIRE(Error, PREMATURE_DISCONNECT);
     }
   }
 };
@@ -140,11 +187,11 @@ kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext conte
 
   auto pipe = kj::newOneWayPipe(expectedLength);
 
-  auto endedFlag = kj::rc<bool>(false);
+  auto writerState = kj::rc<PipeWriterState>();
 
-  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), endedFlag.addRef());
+  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), writerState.addRef());
   auto in =
-      kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
+      kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(writerState), expectedLength);
 
   auto results = context.initResults(capnp::MessageSize{4, 2});
 

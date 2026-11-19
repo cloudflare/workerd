@@ -485,12 +485,9 @@ export const returnedReadableErrorDisconnectsCaller = {
     const writer = writable.getWriter();
     await writer.write(enc.encode('trigger source error'));
     await writer.close();
-    // Result streams surface different transport errors in the two receiving implementations.
     await assert.rejects(read, {
       name: 'Error',
-      message: usingTsImpl
-        ? 'ReadableStream received over RPC disconnected prematurely.'
-        : 'Network connection lost.',
+      message: 'ReadableStream received over RPC disconnected prematurely.',
     });
   },
 };
