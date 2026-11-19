@@ -192,19 +192,18 @@ impl Local {
     fn sweep(&self) -> Result<()> {
         self.locked(|| {
             for dir in ["uploads", "tmp"] {
-                for file in std::fs::read_dir(self.root.join(dir))? {
-                    let file = file?;
-                    let age = file.metadata()?.modified()?.elapsed();
-                    if age.is_ok_and(|age| age < STALE) {
+                // Another process may rename a file away mid-scan, and a
+                // future mtime is fresh, so skip what can't be aged.
+                for file in std::fs::read_dir(self.root.join(dir))?.flatten() {
+                    let age = file.metadata().and_then(|m| m.modified());
+                    if age.map_or(true, |t| t.elapsed().map_or(true, |a| a < STALE)) {
                         continue;
                     }
-                    let json = std::fs::read(file.path()).unwrap_or_default();
-                    let json: Option<Json> = serde_json::from_slice(&json).ok();
-                    match json
-                        .as_ref()
-                        .and_then(Upload::of)
-                        .filter(|_| dir == "uploads")
-                    {
+                    let json = (dir == "uploads")
+                        .then(|| std::fs::read(file.path()).ok())
+                        .flatten()
+                        .and_then(|json| serde_json::from_slice::<Json>(&json).ok());
+                    match json.as_ref().and_then(Upload::of) {
                         Some(upload) => self.forget(&file.file_name().to_string_lossy(), &upload),
                         None => drop(std::fs::remove_file(file.path())),
                     }

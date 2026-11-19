@@ -174,10 +174,14 @@ fn an_abandoned_upload_is_swept_when_a_store_opens() {
         bucket.part("k", &old, 1, "ab".into()).await.unwrap();
         let live = bucket.begin("k", &Headers::default(), &[]).await.unwrap();
         let day_ago = std::time::SystemTime::now() - STALE - std::time::Duration::from_mins(1);
-        let file = std::fs::File::options()
-            .write(true)
-            .open(dir.join("uploads").join(&old));
-        file.unwrap().set_modified(day_ago).unwrap();
+        let touch = |id: &str, t| {
+            let file = std::fs::File::options()
+                .write(true)
+                .open(dir.join("uploads").join(id));
+            file.unwrap().set_modified(t).unwrap();
+        };
+        touch(&old, day_ago);
+        touch(&live, std::time::SystemTime::now() + STALE);
         let bucket = local(&dir, 1);
         let count = |d: &str| std::fs::read_dir(dir.join(d)).unwrap().count();
         assert_eq!((count("uploads"), count("blobs")), (1, 0));
