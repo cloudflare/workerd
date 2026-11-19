@@ -5,10 +5,8 @@
 #include "body-source.h"
 
 #include <workerd/api/encoding.h>
-#include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/streams/common.h>
 #include <workerd/io/features.h>
-#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 
@@ -29,22 +27,17 @@ bool textStripsBom(jsg::Lock& js) {
 
 }  // namespace
 
-BodySource::BodySource(kj::Array<const kj::byte> bytes)
-    : value(kj::rc<kj::Array<const kj::byte>>(kj::mv(bytes))) {}
-
-BodySource::BodySource(kj::String text): BodySource(webstreams::stringToBytes(kj::mv(text))) {}
-
 BodySource::BodySource(jsg::Lock& js, jsg::JsString text): value(text.addRef(js)) {}
 
 BodySource::BodySource(jsg::Lock& js, jsg::JsBufferSource buffer): value(buffer.addRef(js)) {}
+
+BodySource::BodySource(jsg::Lock& js, kj::ArrayPtr<const kj::byte> bytes)
+    : BodySource(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, bytes))) {}
 
 BodySource::BodySource(jsg::Ref<Blob> blob): value(kj::mv(blob)) {}
 
 BodySource BodySource::clone(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {
-      return BodySource(bytes.addRef(), kj::none);
-    }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       return BodySource(text.addRef(js), stringLength);
     }
@@ -60,12 +53,6 @@ BodySource BodySource::clone(jsg::Lock& js) {
 
 JsReadableStream BodySource::createStream(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {
-      // newMemorySource() reads the shared bytes in place, keeping them alive as its backing.
-      auto data = bytes->asPtr();
-      return JsReadableStream::create(
-          js, IoContext::current(), newMemorySource(data, bytes.addRef().toOwn()));
-    }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       return JsReadableStream::create(js, text.getHandle(js), stringBodyLoneSurrogates(js));
     }
@@ -108,9 +95,6 @@ kj::String BodySource::readText(jsg::Lock& js) {
 
 kj::Maybe<kj::ArrayPtr<const kj::byte>> BodySource::tryGetBytes(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {
-      return bytes->asPtr();
-    }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       return kj::none;
     }
@@ -134,9 +118,6 @@ kj::Maybe<uint64_t> BodySource::tryGetLength(jsg::Lock& js, StreamEncoding encod
     return kj::none;
   }
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {
-      return bytes->size();
-    }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       KJ_IF_SOME(length, stringLength) {
         return length;
@@ -157,7 +138,6 @@ kj::Maybe<uint64_t> BodySource::tryGetLength(jsg::Lock& js, StreamEncoding encod
 
 void BodySource::visitForGc(jsg::GcVisitor& visitor) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {}
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       visitor.visit(text);
     }
@@ -172,9 +152,6 @@ void BodySource::visitForGc(jsg::GcVisitor& visitor) {
 
 void BodySource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(bytes, Bytes) {
-      tracker.trackFieldWithSize("bytes", bytes->size());
-    }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
       tracker.trackField("text", text);
     }

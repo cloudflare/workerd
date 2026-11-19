@@ -140,15 +140,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       workerd::getEntropy(boundaryBuffer);
       auto boundary = kj::encodeHex(boundaryBuffer);
       auto contentType = MimeType::formDataWithBoundary(boundary);
-      return ExtractedBody(BodySource(formData->serialize(js, boundary)), kj::mv(contentType));
+      return ExtractedBody(BodySource(js, formData->serialize(js, boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      return ExtractedBody(
-          BodySource(searchParams->toString()), MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+      return ExtractedBody(BodySource(js, searchParams->toString().asBytes()),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
-      return ExtractedBody(
-          BodySource(searchParams->toString()), MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+      return ExtractedBody(BodySource(js, searchParams->toString().asBytes()),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
       return ExtractedBody(BodySource(js, searchParams.serializeJs(js)),

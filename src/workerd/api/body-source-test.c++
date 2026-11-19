@@ -3,6 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/body-source.h>
+#include <workerd/api/form-data.h>
+#include <workerd/api/http.h>
+#include <workerd/api/url-standard.h>
+#include <workerd/api/url.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -30,8 +34,7 @@ TestFixture makeFixture(bool typescript) {
 // One source of each kind, all holding kText.
 kj::Vector<BodySource> makeSources(jsg::Lock& js) {
   kj::Vector<BodySource> sources;
-  sources.add(BodySource(kj::heapArray(kText.asBytes())));
-  sources.add(BodySource(kj::str(kText)));
+  sources.add(BodySource(js, kText.asBytes()));
   sources.add(BodySource(js, js.str(kText)));
   sources.add(BodySource(js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kText.asBytes()))));
   sources.add(BodySource(js.alloc<Blob>(
@@ -96,6 +99,32 @@ KJ_TEST("BodySource creates a new stream over the whole source each time") {
       return kj::joinPromises(awaited.releaseAsArray());
     });
   }
+}
+
+KJ_TEST("A FormData or URLSearchParams body is held in memory the isolate accounts for") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    constexpr size_t kValueSize = 64 * 1024;
+    auto value = kj::str(kj::repeat('a', kValueSize));
+    auto formData = FormData::constructor(js);
+    formData->append(js, kj::str("a"), kj::str(value), kj::none);
+    auto legacyParams =
+        URLSearchParams::constructor(js, URLSearchParams::Initializer(kj::str("a=", value)));
+    auto params = url::URLSearchParams::constructor(
+        js, url::URLSearchParams::Initializer(jsg::USVString(kj::str("a=", value))));
+    // Each is passed by a new reference, so that the value, which the legacy URLSearchParams
+    // accounts for, lives on through the measurement.
+    auto initializers =
+        kj::arr<Body::Initializer>(formData.addRef(), legacyParams.addRef(), params.addRef());
+    for (auto i: kj::indices(initializers)) {
+      // External memory counts an ArrayBuffer's backing store, and does not count native memory.
+      int64_t before = js.v8Isolate->GetExternalMemory();
+      auto body = Body::extractBody(js, kj::mv(initializers[i]));
+      int64_t held = js.v8Isolate->GetExternalMemory() - before;
+      KJ_EXPECT(held >= kValueSize, held, i);
+    }
+  });
 }
 
 }  // namespace
