@@ -242,7 +242,11 @@ export const zstdMaxOutputLengthTest = {
     // Try to decompress with a maxOutputLength that's too small
     assert.throws(
       () => zlib.zstdDecompressSync(compressed, { maxOutputLength: 10 }),
-      /Memory limit exceeded/,
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: 'Cannot create a Buffer larger than 10 bytes',
+      },
       'Should throw when maxOutputLength is exceeded'
     );
   },
@@ -543,7 +547,11 @@ export const zstdCompressSyncMaxOutputLengthTest = {
         zlib.zstdCompressSync(xorshiftBytes(200_000), {
           maxOutputLength: 64 * 1024,
         }),
-      { name: 'RangeError', message: /Memory limit exceeded/ }
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: /^Cannot create a Buffer larger than \d+ bytes$/,
+      }
     );
   },
 };
@@ -556,7 +564,11 @@ export const zstdCompressSyncMaxOutputLengthAtBufferBoundaryTest = {
         zlib.zstdCompressSync(xorshiftBytes(200_000), {
           maxOutputLength: 2 * syncFirstBufferSize,
         }),
-      { name: 'RangeError', message: /Memory limit exceeded/ }
+      {
+        name: 'RangeError',
+        code: 'ERR_BUFFER_TOO_LARGE',
+        message: /^Cannot create a Buffer larger than \d+ bytes$/,
+      }
     );
   },
 };

@@ -1875,10 +1875,11 @@ export const zipBombTest = {
     const zlib_bomb_1 = zlib.inflateSync(zlib_bomb_2);
 
     // Would be 1 GB, if we let it
-    assert.throws(
-      () => zlib.inflateSync(zlib_bomb_1),
-      new RangeError('Memory limit exceeded')
-    );
+    assert.throws(() => zlib.inflateSync(zlib_bomb_1), {
+      name: 'RangeError',
+      code: 'ERR_BUFFER_TOO_LARGE',
+      message: 'Cannot create a Buffer larger than 134217728 bytes',
+    });
   },
 };
 
@@ -2240,7 +2241,10 @@ export const maxOutputLength = {
       zlib.brotliDecompress(encoded, { maxOutputLength: 64 }, (err) => {
         assert.strictEqual(err.name, 'RangeError');
         assert.strictEqual(err.code, 'ERR_BUFFER_TOO_LARGE');
-        assert.match(err.message, /Memory limit exceeded/);
+        assert.match(
+          err.message,
+          /^Cannot create a Buffer larger than 64 bytes$/
+        );
         resolve();
       });
       await promise;

@@ -130,6 +130,9 @@ class GrowableBuffer final {
   bool atMaxCapacity() const {
     return size() >= maxCapacity;
   }
+  size_t getMaxCapacity() const {
+    return maxCapacity;
+  }
 
  private:
   kj::ArrayBuilder<kj::byte> builder;
@@ -800,7 +803,10 @@ static kj::Array<kj::byte> syncProcessBuffer(jsg::Lock& js, Context& ctx, Growab
       // If the stream is done, the output just happened to fit exactly — return it.
       // Otherwise the decompressed data exceeds maxOutputLength.
       if (!ctx.isStreamEnd()) {
-        throwWithCode(js, js.rangeError("Memory limit exceeded"_kj), "ERR_BUFFER_TOO_LARGE"_kj);
+        throwWithCode(js,
+            js.rangeError(
+                kj::str("Cannot create a Buffer larger than ", result.getMaxCapacity(), " bytes")),
+            "ERR_BUFFER_TOO_LARGE"_kj);
       }
       break;
     }
