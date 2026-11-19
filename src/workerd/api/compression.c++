@@ -801,14 +801,17 @@ void ZstdDecoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::ZSTD_DECODE, Error, "Mode should be ZSTD_DECODE"_kj);
   JSG_REQUIRE(dctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
 
+  auto inputPosBefore = input_.pos;
   lastResult = ZSTD_decompressStream(dctx_.get(), &output_, &input_);
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
-  } else if (input_.size > 0) {
-    // Track whether we're mid-frame: lastResult > 0 means more data needed,
-    // lastResult == 0 means frame is complete.
-    frameInProgress_ = (lastResult > 0);
+  } else if (lastResult == 0) {
+    frameInProgress_ = false;
+  } else if (input_.pos > inputPosBefore) {
+    // A call that consumes no input only drains buffered output, or, after a frame has ended,
+    // returns the header size hint for a frame that hasn't started. Neither starts a frame.
+    frameInProgress_ = true;
   }
 }
 
