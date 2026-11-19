@@ -107,13 +107,24 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "canceler",
+    srcs = ["canceler.c++"],
+    hdrs = ["canceler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ],
+)
+
+wd_cc_library(
     name = "abortable",
     hdrs = [
         "abortable.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":util",
+        ":canceler",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -132,7 +143,6 @@ wd_cc_library(
 wd_cc_library(
     name = "util",
     srcs = [
-        "canceler.c++",
         "wait-list.c++",
     ],
     # This is verbose, but allows us to be intentional about what we include here and e.g. avoid
@@ -140,7 +150,6 @@ wd_cc_library(
     # TODO (cleanup): Break this up entirely.
     hdrs = [
         "batch-queue.h",
-        "canceler.h",
         "color-util.h",
         "uncaught-exception-source.h",
         "wait-list.h",
@@ -341,11 +350,13 @@ wd_cc_library(
     hdrs = ["autogate.h"],
     # Make missing string repr for an autogate into a hard error
     copts = ["-Werror=switch"],
+    implementation_deps = [
+        ":sentry",
+        ":zlib-router",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        ":sentry",
         ":strong-bool",
-        ":zlib-router",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
@@ -444,7 +455,7 @@ kj_test(
 kj_test(
     src = "canceler-test.c++",
     deps = [
-        ":util",
+        ":canceler",
     ],
 )
 

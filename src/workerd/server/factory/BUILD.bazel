@@ -55,6 +55,9 @@ wd_cc_library(
         "worker-factory-otlp.c++",
         "worker-factory-rpc.c++",
     ],
+    implementation_deps = [
+        "//src/workerd/util:stream-utils",
+    ],
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
         ":otlp-export-queue",
