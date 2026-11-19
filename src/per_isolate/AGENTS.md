@@ -30,6 +30,8 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_PERFORMANCE_NOW` autogate, `main.ts` installs the
+  TypeScript `performance.now()`/`timeOrigin`; see `performance/AGENTS.md`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Modules get `DOMException` from `require('dom-exception')`, which
