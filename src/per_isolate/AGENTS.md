@@ -90,6 +90,8 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   (an own data property read never consults the patchable prototype chain).
   The bootstrap runs for every worker regardless of compat date — both layouts
   must work. JSG *methods* are always on the prototype.
+- A module that keeps a C++ API's Illegal invocation error takes its message
+  from `jsg-errors.ts`.
 - Internal cross-module surfaces are exported as a single namespace
   object (`internalsForPipe`, `nativeStreamInternals`), never
   re-exported to users.
