@@ -918,3 +918,71 @@ export const opendirSyncAndAsyncTest2 = {
     strictEqual(entries[7].name, 'random');
   },
 };
+
+export const readdirRecursiveNamesAreRelative = {
+  async test() {
+    mkdirSync('/tmp/rd/sub', { recursive: true });
+    writeFileSync('/tmp/rd/a.txt', 'a');
+    writeFileSync('/tmp/rd/sub/b.txt', 'b');
+
+    // Matches Node.js: strings are relative to the directory being read,
+    // Dirent names are the entry's own name.
+    const kNames = ['a.txt', 'sub', 'sub/b.txt'];
+    const kEnts = [
+      ['a.txt', '/tmp/rd'],
+      ['b.txt', '/tmp/rd/sub'],
+      ['sub', '/tmp/rd'],
+    ];
+    const toPairs = (ents) =>
+      ents.map((e) => [e.name.toString(), e.parentPath]).sort();
+
+    deepStrictEqual(readdirSync('/tmp/rd', { recursive: true }).sort(), kNames);
+    deepStrictEqual(
+      toPairs(readdirSync('/tmp/rd', { recursive: true, withFileTypes: true })),
+      kEnts
+    );
+    deepStrictEqual(
+      toPairs(
+        readdirSync('/tmp/rd', {
+          recursive: true,
+          withFileTypes: true,
+          encoding: 'buffer',
+        })
+      ),
+      kEnts
+    );
+
+    const names = await new Promise((resolve, reject) => {
+      readdir('/tmp/rd', { recursive: true }, (err, files) => {
+        if (err) reject(err);
+        else resolve(files);
+      });
+    });
+    deepStrictEqual(names.sort(), kNames);
+
+    deepStrictEqual(
+      (await promises.readdir('/tmp/rd', { recursive: true })).sort(),
+      kNames
+    );
+    deepStrictEqual(
+      toPairs(
+        await promises.readdir('/tmp/rd', {
+          recursive: true,
+          withFileTypes: true,
+        })
+      ),
+      kEnts
+    );
+
+    const dir = opendirSync('/tmp/rd', { recursive: true });
+    const dirEnts = [];
+    for (let ent; (ent = dir.readSync()) !== null;) dirEnts.push(ent);
+    dir.closeSync();
+    deepStrictEqual(toPairs(dirEnts), kEnts);
+
+    // A non-recursive read is unchanged.
+    deepStrictEqual(readdirSync('/tmp/rd/sub'), ['b.txt']);
+
+    rmSync('/tmp/rd', { recursive: true });
+  },
+};
