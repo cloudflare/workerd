@@ -17,10 +17,22 @@ export function createCommentsTransformer(
 ): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
-      const visitor = createVisitor(comments);
+      const visitor = createVisitor(comments, interfaceNames(node));
       return ts.visitEachChild(node, visitor, ctx);
     };
   };
+}
+
+// The names `file` declares as interfaces. A global declared as an interface
+// and a variable holding its constructor, as `lib.dom.d.ts` declares them, is
+// documented on the interface alone: editors show the documentation of every
+// declaration of a name, so documenting both shows it twice.
+function interfaceNames(file: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const statement of file.statements) {
+    if (ts.isInterfaceDeclaration(statement)) names.add(statement.name.text);
+  }
+  return names;
 }
 
 function maybeAddComment(node: ts.Node, comment?: string): void {
@@ -45,7 +57,10 @@ function lookup<T>(
     : undefined;
 }
 
-function createVisitor(data: CommentsData): ts.Visitor {
+function createVisitor(
+  data: CommentsData,
+  interfaces: ReadonlySet<string>
+): ts.Visitor {
   return (node) => {
     if (
       (ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node)) &&
@@ -83,7 +98,7 @@ function createVisitor(data: CommentsData): ts.Visitor {
     ) {
       const declaration = node.declarationList.declarations[0];
       const name = declaration.name;
-      if (ts.isIdentifier(name)) {
+      if (ts.isIdentifier(name) && !interfaces.has(name.text)) {
         const comments = lookup(data, name.text);
         maybeAddComment(node, lookup(comments, "$"));
       }

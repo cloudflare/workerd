@@ -2028,11 +2028,6 @@ export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/blob) */
   blob(): Promise<Blob>;
 }
-/**
- * The **`Response`** interface of the Fetch API represents the response to a request.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
- */
 export declare var Response: {
   prototype: Response;
   new (body?: BodyInit | null, init?: ResponseInit): Response;
@@ -2109,11 +2104,6 @@ export type RequestInfo<
   CfHostMetadata = unknown,
   Cf = CfProperties<CfHostMetadata>,
 > = Request<CfHostMetadata, Cf> | string;
-/**
- * The **`Request`** interface of the Fetch API represents a resource request.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
- */
 export declare var Request: {
   prototype: Request;
   new <CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>(
@@ -2774,11 +2764,6 @@ export interface ReadableStream<R = any> {
     options?: ReadableStreamValuesOptions,
   ): AsyncIterableIterator<R>;
 }
-/**
- * The **`ReadableStream`** interface of the Streams API represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
- */
 export declare const ReadableStream: {
   prototype: ReadableStream;
   new (
@@ -3367,11 +3352,6 @@ export type WebSocketEventMap = {
   open: Event;
   error: ErrorEvent;
 };
-/**
- * The **`WebSocket`** object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
- */
 export declare var WebSocket: {
   prototype: WebSocket;
   new (url: string, protocols?: string[] | string): WebSocket;
@@ -4193,11 +4173,6 @@ export interface DOMException extends Error {
   readonly INVALID_NODE_TYPE_ERR: 24;
   readonly DATA_CLONE_ERR: 25;
 }
-/**
- * The **`DOMException`** interface represents an abnormal event (called an exception) that occurs as a result of calling a method or accessing a property of a web API. This is how error conditions are described in web APIs.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
- */
 export declare var DOMException: {
   prototype: DOMException;
   new (message?: string, name?: string): DOMException;
