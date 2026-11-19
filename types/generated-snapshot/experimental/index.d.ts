@@ -3654,6 +3654,7 @@ interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
   proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  accept(): void;
 }
 interface SocketOptions {
   secureTransport?: string;

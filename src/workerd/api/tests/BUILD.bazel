@@ -276,15 +276,19 @@ wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
     data = [
+        "connect-handler-immediate-tls-test.js",
         "connect-handler-server.key",
         "connect-handler-server.pem",
         "connect-handler-starttls-test.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {"connect-starttls": "STARTTLS_PORT"},
-    # The STARTTLS listener's certificate names 127.0.0.1, not the random loopback address the
-    # supervisor would otherwise pick.
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {
+        "connect-starttls": "STARTTLS_PORT",
+        "connect-tls": "TLS_PORT",
+    },
+    # The TLS listeners' certificate names 127.0.0.1, not the random loopback address the supervisor
+    # would otherwise pick.
     sidecar_randomize_ip = False,
 )
 

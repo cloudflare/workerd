@@ -3660,6 +3660,7 @@ export interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
   proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  accept(): void;
 }
 export interface SocketOptions {
   secureTransport?: string;
