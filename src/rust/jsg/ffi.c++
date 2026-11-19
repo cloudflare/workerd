@@ -376,6 +376,10 @@ bool local_is_date(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
 }
 
+bool local_is_wasm_module_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsWasmModuleObject();
+}
+
 bool local_is_shared_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSharedArrayBuffer();
 }
@@ -897,6 +901,21 @@ uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
+}
+
+// Local<WasmModuleObject>
+kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
+  return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
+}
+
+// CompiledWasmModule
+const uint8_t* compiled_wasm_module_get_wire_bytes(
+    const CompiledWasmModule& module, size_t& length) {
+  // GetWireBytesRef() is not const, but only reads the bytes, atomically, and V8 never replaces
+  // them once the module object exists.
+  auto bytes = const_cast<CompiledWasmModule&>(module).GetWireBytesRef();
+  length = bytes.size();
+  return bytes.data();
 }
 
 // Local<ArrayBufferView>

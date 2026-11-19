@@ -231,6 +231,7 @@ impl_traced_noop!(
     std::sync::atomic::AtomicIsize,
     std::time::SystemTime,
     crate::v8::BackingStore,
+    crate::v8::CompiledWasmModule,
     str,
 );
 
@@ -1799,6 +1800,7 @@ impl_marker_type! {
     Function: "Function", is_function, UnionTypes::OTHER;
     Promise: "Promise", is_promise, UnionTypes::OTHER;
     TypedArray: "TypedArray", is_typed_array, UnionTypes::OTHER;
+    WasmModuleObject: "WasmModuleObject", is_wasm_module_object, UnionTypes::OTHER;
 }
 
 // Any value is a `v8::Value`.
@@ -1855,6 +1857,7 @@ impl_handle_from_js! {
     Object: UnionMember::Fallible;
     Function: UnionMember::Fallible;
     TypedArray: UnionMember::Fallible;
+    WasmModuleObject: UnionMember::Fallible;
 }
 
 // =============================================================================

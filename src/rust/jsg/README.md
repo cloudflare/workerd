@@ -876,9 +876,15 @@ assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 A method parameter can be a handle of the types that C++ JSG's `v8::Local<T>` parameters
 take: `Local<Value>` takes any value, and `Local<String>`, `Local<Object>`,
 `Local<Function>`, `Local<BigInt>`, `Local<TypedArray>`, `Local<ArrayBuffer>`,
-`Local<ArrayBufferView>` and the typed arrays take a value of exactly that type, with no
-coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any value, as a
-promise resolved with it.
+`Local<ArrayBufferView>`, `Local<WasmModuleObject>` and the typed arrays take a value of exactly
+that type, with no coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any
+value, as a promise resolved with it.
+
+A `Local<WasmModuleObject>` is a `WebAssembly.Module`. Its `compiled_module()` returns a
+`v8::CompiledWasmModule`, which owns the module's compiled code and its `wire_bytes()`, needs no
+lock, and can be handed to C++ with `into_ffi()` as a `kj::Own<v8::CompiledWasmModule>`, from
+which C++ makes another module object without recompiling. As in C++, RTTI describes the module
+as `unknown`; a TypeScript override names it `WebAssembly.Module`.
 
 ### `Global<T>`
 
