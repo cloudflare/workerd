@@ -20,6 +20,11 @@ export default {
   'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
+  'queuing-strategies-size-function-navigation.window.js': {
+    comment:
+      'Window-only test that navigates iframes across origins; workerd has no document, iframes or navigation',
+    omittedTests: true,
+  },
   'queuing-strategies-size-function-per-global.window.js': {
     comment: 'document is not defined',
     disabledTests: true,

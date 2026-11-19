@@ -4,6 +4,12 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+const backForwardCacheOnly = {
+  comment:
+    'Window-only back/forward cache test that opens and navigates remote browsing contexts; workerd has no navigation or bfcache',
+  omittedTests: true,
+} as const;
+
 export default {
   'buffered-flag-after-timeout.any.js': {
     comment: 'This is not yet implemented',
@@ -50,6 +56,19 @@ export default {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
   },
+  'not-restored-reasons/attributes.window.js': backForwardCacheOnly,
+  'not-restored-reasons/bfcache-reasons-stay.window.js': backForwardCacheOnly,
+  'not-restored-reasons/bfcache.window.js': backForwardCacheOnly,
+  'not-restored-reasons/cross-origin-bfcache.window.js': backForwardCacheOnly,
+  'not-restored-reasons/fetch.window.js': backForwardCacheOnly,
+  'not-restored-reasons/iframes-without-attributes.window.js':
+    backForwardCacheOnly,
+  'not-restored-reasons/navigation-failure.window.js': backForwardCacheOnly,
+  'not-restored-reasons/not-bfcached.window.js': backForwardCacheOnly,
+  'not-restored-reasons/redirect-on-history.window.js': backForwardCacheOnly,
+  'not-restored-reasons/reload.window.js': backForwardCacheOnly,
+  'not-restored-reasons/same-origin-bfcache.window.js': backForwardCacheOnly,
+  'not-restored-reasons/same-origin-replace.window.js': backForwardCacheOnly,
   'observer-buffered-false.any.js': {
     comment: 'This is not yet implemented',
     disabledTests: [

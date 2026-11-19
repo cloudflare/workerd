@@ -25,6 +25,7 @@ export default {
   'api-invalid-label.any.js': {},
   'api-replacement-encodings.any.js': {},
   'api-surrogates-utf8.any.js': {},
+  'encodeInto-tail-unmodified.any.js': {},
   'encodeInto.any.js': {
     comment: 'Requires MessageChannel.postMessage transfer list support',
     expectedFailures: ['encodeInto() and a detached output buffer'],

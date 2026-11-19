@@ -44,6 +44,15 @@ export default {
   'Channel_postMessage_target_source.any.js': {
     replace: removeUseCapture,
   },
+  'Channel_postMessage_transfer_target_port.any.js': {
+    comment:
+      'MessagePort.postMessage() rejects any transfer list, so the entangled target port cannot be transferred or detached',
+    expectedFailures: [
+      'Transferring the entangled target port does not throw',
+      'Transferring the entangled target port detaches it',
+      'Transferring the entangled target port via StructuredSerializeOptions detaches it',
+    ],
+  },
   'Channel_postMessage_transfer_xsite_incoming_messages.window.js': {
     comment: 'Requires document and cross-site iframes',
     omittedTests: true,
