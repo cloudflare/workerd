@@ -15,6 +15,7 @@ pub mod bucket;
 pub mod disk;
 pub mod network;
 pub mod rewriter;
+pub mod udp;
 
 use std::cell::RefCell;
 use std::pin::Pin;
@@ -434,6 +435,7 @@ struct Network {
     factory: Rc<Factory>,
     /// The connections of every event.
     pool: ClientPool,
+    filter: Arc<PeerFilter>,
 }
 
 /// A `network` service: connections to whatever host a request names, within the filter.
@@ -461,10 +463,9 @@ impl NetworkRequest {
 /// for `https` URLs (which fail when it is None, the config having no `tlsOptions`).
 fn internet_pool(
     loopback: &Loopback,
-    filter: PeerFilter,
+    filter: Arc<PeerFilter>,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> ClientPool {
-    let filter = Arc::new(filter);
     let loopback = loopback.clone();
     let connect = move |host: String, port| {
         let filter = Arc::clone(&filter);
@@ -520,6 +521,17 @@ impl Service for NetworkRequest {
 
 #[async_trait::async_trait(?Send)]
 impl Interface for NetworkRequest {
+    async fn custom_event(&mut self, mut event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+        if !ffi::is_udp_egress(event.pin_mut()) {
+            return worker::not_supported(event).await;
+        }
+        let host = ffi::udp_egress_host(event.pin_mut())?;
+        let socket = udp::UdpEgress::connect(&host, &self.0.filter).await?;
+        Ok(ffi::complete_udp_egress(event, Box::new(socket))
+            .await?
+            .into())
+    }
+
     async fn run_scheduled(&mut self, _time: &SystemTime, _cron: &str) -> Result<ScheduledResult> {
         Err(unsupported("External HTTP servers"))
     }
@@ -606,9 +618,11 @@ fn network_service(
     filter: PeerFilter,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Rc<dyn Channel> {
+    let filter = Arc::new(filter);
     Rc::new(NetworkService(Rc::new(Network {
         factory: Rc::clone(factory),
-        pool: internet_pool(factory.loopback(), filter, tls),
+        pool: internet_pool(factory.loopback(), Arc::clone(&filter), tls),
+        filter,
     })))
 }
 

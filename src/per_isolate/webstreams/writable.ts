@@ -205,6 +205,7 @@ let writableStreamFinishInFlightCloseWithError: StreamOp<
   void
 >;
 let writableStreamCloseQueuedOrInFlight: StreamOp<[], boolean>;
+let getPendingWritableStreamClose: StreamOp<[], Promise<void> | undefined>;
 let writableStreamWriteQueuedOrInFlight: StreamOp<[], boolean>;
 let writableStreamUpdateBackpressure: StreamOp<[backpressure: boolean], void>;
 let writableStreamHasOperationMarkedInFlight: StreamOp<[], boolean>;
@@ -506,6 +507,9 @@ class WritableStream<W = unknown> {
         stream.#inFlightCloseRequest !== undefined
       );
     };
+
+    getPendingWritableStreamClose = (stream) =>
+      stream.#inFlightCloseRequest?.promise ?? stream.#closeRequest?.promise;
 
     // Includes writes queued before the controller has started. Ignores
     // flush markers, which do no sink I/O; a native sink's flush can be
@@ -1766,12 +1770,12 @@ function isWritableStreamClosedOrClosing<W>(
 }
 
 // The forcible close (JsWritableStream::forceClose's TS arm): the internal
-// close algorithm, deliberately blind to the writer lock. Terminal-state
-// behavior mirrors WritableStreamInternalController::closeImpl exactly:
-// already closed-or-closing resolves (idempotent -- NOT the public close()'s
-// "Stream is already closing" rejection), errored rejects with the stored
-// error.
+// close algorithm, deliberately blind to the writer lock:
+// already closed resolves, an existing close is awaited, and errored rejects
+// with the stored error. Public close() still rejects a repeated close.
 function writableStreamClose<W>(stream: WritableStream<W>): Promise<void> {
+  const pendingClose = getPendingWritableStreamClose(stream);
+  if (pendingClose !== undefined) return pendingClose;
   if (isWritableStreamClosedOrClosing(stream)) {
     return PromiseResolve();
   }
