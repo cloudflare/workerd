@@ -625,7 +625,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `#[jsg_traced]` generates for a struct whose fields all hold no GC references (and `jsg::jsg_traced_unchecked!` for a type whose fields can't implement the marker); `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
-- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. A live instance of such a type transfers through a V8 startup snapshot: the generated `GarbageCollected::snapshot_recreate` leaks a `Default` instance (`jsg::snapshot_recreate_leak`) for the C++ `Wrappable` that backs the restored wrapper. Every Rust resource shares one CppHeapPointerTag, so the type is recorded through C++ `snapshotClone()` rather than by tag. A live instance of any other Rust resource type keeps the Worker out of the pipeline (it starts without a snapshot). See `docs/startup-snapshot.md`.
+- **Startup snapshots**: `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is interchangeable with any other, as C++ `jsgSnapshotStateless` does, and requires `Default`. It generates a `jsg::SnapshotTransfer` impl with an empty snapshot; a type with state implements `SnapshotTransfer` itself. See [Startup snapshots](#startup-snapshots).
 - **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
@@ -762,6 +762,40 @@ unsafe fn is_my_resource(isolate: *mut ffi::Isolate, value: ffi::Local) -> KjMay
 
 Tested by `src/rust/jsg-test/tests/resource_from_cpp.rs`, through a C++ helper that holds the
 wrapper only in a `v8::Global` across a full GC.
+
+### Startup snapshots
+
+A Worker whose top level leaves a resource reachable can start from a V8 startup snapshot
+([`docs/startup-snapshot.md`](../../../docs/startup-snapshot.md)) only if the resource's type
+implements `jsg::SnapshotTransfer`, the counterpart of C++ `Wrappable::snapshotClone()`. The
+zygote calls `snapshot()` on the live instance and stores the `Snapshot` it returns, which holds
+no GC reference and is `Send` and `Sync`, as the threads of the Workers started from it read it.
+Each Worker started from the snapshot calls `restore()` on it, with no lock, and attaches the
+result to the restored wrapper. A type without the impl makes the Worker start without the
+snapshot. `#[jsg_resource(snapshot_stateless)]` implements it for a `Default` type with no state,
+such as `UrlUtil`; a type with state copies it into its `Snapshot`:
+
+```rust
+impl jsg::SnapshotTransfer for Point {
+    type Snapshot = (f64, f64);
+
+    fn snapshot(&self) -> (f64, f64) {
+        (self.x, self.y)
+    }
+
+    fn restore(&(x, y): &(f64, f64)) -> Self {
+        Self { x, y }
+    }
+}
+```
+
+A restored instance is new, so a `jsg::Rc` it holds would not be to the resource behind the
+restored wrapper that JavaScript sees. `snapshot_references()` lists the references whose identity
+JavaScript can observe, and `snapshot_relink()` takes the restored resources in the same order,
+with a lock, as C++ `snapshotReferences()` and `snapshotRelink()` do. `RestoredReferences::next`
+returns `None` for a resource the snapshot did not carry, such as one the context reaches only
+through Rust, which the instance then rebuilds from its own `Snapshot`; see
+`jsg-test/tests/startup_snapshot.rs`.
 
 ## V8 Handle Types
 

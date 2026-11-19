@@ -1420,6 +1420,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-rust-case-test.js",
         "startup-snapshot-node-test.js",
     ],
 )

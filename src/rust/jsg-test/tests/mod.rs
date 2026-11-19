@@ -60,6 +60,7 @@ mod resource_this;
 mod rest_arguments;
 mod serialization;
 mod signature_callback;
+mod startup_snapshot;
 mod string;
 mod symbol;
 mod termination;
