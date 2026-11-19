@@ -92,6 +92,12 @@ Prefer it to `Option<Nullable<T>>`. Both wrappers trace their contained value.
 | `Nullable<T>` | `null` or `undefined` → `Null` | `TypeError` |
 | `NullOrUndefined<T>` | `null` → `Null`; `undefined` → `Undefined` | `Undefined` |
 
+As for C++ `kj::Maybe<T>`, a value that `T` does not take, such as a number for a
+`Nullable<NonCoercible<String>>` or a plain object for a `Nullable<jsg::Rc<R>>`, is `Null`
+for a worker without the `dont_substitute_null_on_type_error` compatibility flag (dated
+before 2022-06-01), and a `TypeError` with it. Only the top-level type counts: a
+`Nullable<Vec<T>>` whose element `T` does not take is an error either way.
+
 `NullOrUndefined::default()` is `Undefined`, without requiring `T: Default`.
 `as_ref()`, `as_mut()`, and `map()` preserve `Null` and `Undefined`.
 Conversions to and from `Option<Nullable<T>>` preserve all three states;
@@ -1393,9 +1399,8 @@ behave as they do in C++ rather than as their position suggests:
 - `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
   also takes a number of milliseconds, before any numeric variant does.
 - `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
-  and `undefined`, and converts any other value as `T` would, coercion included. A value
-  that `T` does not take is not taken as `null`, as in C++ JSG with the
-  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+  and `undefined`, and converts any other value as `T` would, coercion included, including
+  a [type mismatch](#nullablet-and-nullorundefinedt).
 - A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
   `v8::Local<'s, v8::String>` is a string type, but never coerces, and
   `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
