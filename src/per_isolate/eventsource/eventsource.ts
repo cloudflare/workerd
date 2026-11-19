@@ -50,6 +50,7 @@
 
 import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type { RuntimeClassHelpers } from '../runtime-class';
 
 const {
@@ -157,11 +158,12 @@ const HeadersGet = uncurryThis(globalThis.Headers.prototype.get) as (
   name: string
 ) => string | null;
 
-// JSG's messages, so that misuse reads the same as with the C++ class.
-const kIllegalInvocation =
-  'Illegal invocation: function called with incorrect `this` reference. ' +
-  'See https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
+const {
+  kIllegalInvocation,
+  constructorParameterMessage,
+  methodParameterMessage,
+  structFieldMessage,
+} = require('jsg-errors') as JsgErrorMessages;
 const kNoRequest =
   'An EventSource can only be created within the context of a worker request.';
 
@@ -422,8 +424,7 @@ class EventSource extends EventTarget {
     // anything is checked.
     if (url === undefined) {
       throw new TypeError(
-        "Failed to construct 'EventSource': constructor parameter 1 is not " +
-          "of type 'string'."
+        constructorParameterMessage('EventSource', 1, 'string')
       );
     }
     const urlString = `${url as string}`;
@@ -432,8 +433,7 @@ class EventSource extends EventTarget {
     if (init !== undefined && init !== null) {
       if (typeof init !== 'object' && typeof init !== 'function') {
         throw new TypeError(
-          "Failed to construct 'EventSource': constructor parameter 2 is " +
-            "not of type 'EventSourceInit'."
+          constructorParameterMessage('EventSource', 2, 'EventSourceInit')
         );
       }
       withCredentials = !!(init as { withCredentials?: unknown })
@@ -441,8 +441,7 @@ class EventSource extends EventTarget {
       fetcher = (init as { fetcher?: unknown }).fetcher;
       if (fetcher !== undefined && !isFetcher(fetcher)) {
         throw new TypeError(
-          "Incorrect type for the 'fetcher' field on 'EventSourceInit': " +
-            "the provided value is not of type 'Fetcher'."
+          structFieldMessage('EventSourceInit', 'fetcher', 'Fetcher')
         );
       }
     }
@@ -478,8 +477,7 @@ class EventSource extends EventTarget {
     const state = readableStreamState(stream);
     if (state === undefined) {
       throw new TypeError(
-        "Failed to execute 'from' on 'EventSource': parameter 1 is not of " +
-          "type 'JsReadableStream'."
+        methodParameterMessage('EventSource', 'from', 1, 'JsReadableStream')
       );
     }
     const io = createRequestIo();

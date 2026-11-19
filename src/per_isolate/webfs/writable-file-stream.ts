@@ -36,6 +36,7 @@
 // lock held until the context is collected.
 
 import type { DomExceptionModule } from '../dom-exception';
+import type { JsgErrorMessages } from '../jsg-errors';
 import type {
   UnderlyingSink,
   WritableStream as WritableStreamType,
@@ -53,6 +54,7 @@ const {
 const { createFileSystemWriteContext } = utils;
 
 const { DOMException } = require('dom-exception') as DomExceptionModule;
+const { methodParameterMessage } = require('jsg-errors') as JsgErrorMessages;
 
 const { kNullProtoObject, kEnumerable } = require('webstreams/common');
 
@@ -165,8 +167,12 @@ function readKeepExistingData(options: unknown): boolean {
   if (options === undefined || options === null) return false;
   if (typeof options !== 'object' && typeof options !== 'function') {
     throw new TypeError(
-      "Failed to execute 'createWritable' on 'FileSystemFileHandle': " +
-        "parameter 1 is not of type 'FileSystemCreateWritableOptions'."
+      methodParameterMessage(
+        'FileSystemFileHandle',
+        'createWritable',
+        1,
+        'FileSystemCreateWritableOptions'
+      )
     );
   }
   // A user-provided bag, so ordinary property access and ToBoolean are correct.

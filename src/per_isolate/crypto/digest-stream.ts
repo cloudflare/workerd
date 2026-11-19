@@ -56,6 +56,7 @@ import type {
   WritableStream as WritableStreamType,
 } from '../webstreams/types';
 import type { ViewExtentHelpers } from '../webstreams/view-extent';
+import type { JsgErrorMessages } from '../jsg-errors';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
@@ -75,6 +76,8 @@ const {
 } = utils;
 
 const { kNullProtoObject, kEnumerable } = require('webstreams/common');
+const { constructorParameterMessage } =
+  require('jsg-errors') as JsgErrorMessages;
 
 const { WritableStream } = require('webstreams/writable') as {
   WritableStream: typeof WritableStreamType;
@@ -141,8 +144,7 @@ function readToWellFormed(options: unknown): boolean {
   if (options === undefined || options === null) return false;
   if (typeof options !== 'object' && typeof options !== 'function') {
     throw new TypeError(
-      "Failed to construct 'DigestStream': constructor parameter 2 is not of " +
-        "type 'Options'."
+      constructorParameterMessage('DigestStream', 2, 'Options')
     );
   }
   // A user-provided bag, so ordinary property access and ToBoolean are correct.

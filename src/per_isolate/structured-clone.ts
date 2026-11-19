@@ -11,6 +11,8 @@
 // C++. Where the conversion differs from C++ it follows WebIDL; the differences
 // are tabled in src/tests/structured-clone/AGENTS.md.
 
+import type { JsgErrorMessages } from './jsg-errors';
+
 const {
   ArrayPrototypePush,
   FunctionPrototypeCall,
@@ -20,24 +22,33 @@ const {
 } = primordials;
 
 const { structuredClone: nativeStructuredClone } = utils;
+const {
+  kIllegalInvocation: ILLEGAL_INVOCATION,
+  methodParameterMessage,
+  structFieldMessage,
+} = require('jsg-errors') as JsgErrorMessages;
 
 // The global proxy, which is the receiver of `globalThis.structuredClone(v)`.
 const globalReceiver: unknown = globalThis;
 
 // The C++ texts, kept where the behaviour matches.
-const ILLEGAL_INVOCATION =
-  'Illegal invocation: function called with incorrect `this` reference. See ' +
-  'https://developers.cloudflare.com/workers/observability/errors/' +
-  '#illegal-invocation-errors for details.';
-const NO_VALUE =
-  "Failed to execute 'structuredClone' on 'ServiceWorkerGlobalScope': " +
-  "parameter 1 is not of type 'Value'.";
-const BAD_OPTIONS =
-  "Failed to execute 'structuredClone' on 'ServiceWorkerGlobalScope': " +
-  "parameter 2 is not of type 'StructuredCloneOptions'.";
-const BAD_TRANSFER =
-  "Incorrect type for the 'transfer' field on 'StructuredCloneOptions': " +
-  "the provided value is not of type 'sequence<object>'.";
+const NO_VALUE = methodParameterMessage(
+  'ServiceWorkerGlobalScope',
+  'structuredClone',
+  1,
+  'Value'
+);
+const BAD_OPTIONS = methodParameterMessage(
+  'ServiceWorkerGlobalScope',
+  'structuredClone',
+  2,
+  'StructuredCloneOptions'
+);
+const BAD_TRANSFER = structFieldMessage(
+  'StructuredCloneOptions',
+  'transfer',
+  'sequence<object>'
+);
 const BAD_TRANSFER_ITEM =
   "Incorrect type for an element of the 'transfer' field on " +
   "'StructuredCloneOptions': the provided value is not of type 'object'.";
