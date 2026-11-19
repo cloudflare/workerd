@@ -96,6 +96,7 @@ wd_cc_library(
         "//src/workerd/server:workerd_capnp",
         "//src/workerd/server/server:bridge.rs@cxx",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:loop-pin",
         "//src/workerd/util:perfetto",
         # :bootstrap exists only for the workerd binary, so it links the binary's kj::setupAsyncIo()
         # (the inspector and fallback-service threads' loops).

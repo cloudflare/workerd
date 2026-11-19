@@ -14,6 +14,9 @@
 
 #include <kj/compat/http.h>
 
+#include <atomic>
+#include <cstdlib>
+
 namespace workerd::server {
 
 namespace {
@@ -35,13 +38,41 @@ kj::Array<Edit> resolveEdits(
   };
 }
 
+// A test hook. With WORKERD_TEST_REPORT_LOOP in the environment, the response to a request from
+// an HTTP socket has an `x-workerd-test-loop` header with three numbers: the event loop that
+// serves the request, the thread that dispatched the request, and the thread that sends the
+// response's head. The threads differ when the loop moved to another thread meanwhile
+// (`workerd serve --loops`). The numbers are the order in which loops and threads first
+// reported, not system ids.
+bool reportsLoop() {
+  static const bool enabled = getenv("WORKERD_TEST_REPORT_LOOP") != nullptr;
+  return enabled;
+}
+
+uint reportedThread() {
+  static std::atomic<uint> threads = 0;
+  static thread_local const uint thread = threads.fetch_add(1, std::memory_order_relaxed);
+  return thread;
+}
+
+uint reportedLoop() {
+  static std::atomic<uint> loops = 0;
+  static const kj::EventLoopLocal<kj::Maybe<uint>> loop;
+  KJ_IF_SOME(number, *loop) {
+    return number;
+  }
+  return loop->emplace(loops.fetch_add(1, std::memory_order_relaxed));
+}
+
 // A response applying a socket's or external server's `injectResponseHeaders` before forwarding
 // to the response it wraps.
 class RewritingResponse final: public kj::HttpService::Response {
  public:
   RewritingResponse(kj::HttpService::Response& inner, kj::Array<Edit> edits)
       : inner(inner),
-        edits(kj::mv(edits)) {}
+        edits(kj::mv(edits)) {
+    if (reportsLoop()) dispatchThread = reportedThread();
+  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -57,6 +88,8 @@ class RewritingResponse final: public kj::HttpService::Response {
  private:
   kj::HttpService::Response& inner;
   kj::Array<Edit> edits;
+  // See `reportsLoop()`.
+  kj::Maybe<uint> dispatchThread;
 
   kj::HttpHeaders rewrite(const kj::HttpHeaders& headers) {
     auto rewritten = headers.cloneShallow();
@@ -66,6 +99,10 @@ class RewritingResponse final: public kj::HttpService::Response {
       } else {
         rewritten.unset(edit.id);
       }
+    }
+    KJ_IF_SOME(dispatched, dispatchThread) {
+      rewritten.addPtr("x-workerd-test-loop"_kj,
+          kj::str(reportedLoop(), ' ', dispatched, ' ', reportedThread()));
     }
     return rewritten;
   }

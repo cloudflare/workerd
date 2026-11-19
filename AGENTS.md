@@ -199,6 +199,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Server / binary        | `src/workerd/server/`                                         | Rust `workerd-server` crate (`server/`) drives the C++ `worker-factory`; see `server/AGENTS.md`              |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
+| Loop scheduling        | `src/workerd/server/server/threads.rs`, `units.rs`            | `--threads`: a KJ loop per thread; `--loops`: `LoopUnit`s (`src/rust/cxx/kj-rs-tokio/`) on one tokio runtime |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
 | Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |

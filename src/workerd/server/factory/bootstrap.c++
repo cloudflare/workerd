@@ -17,10 +17,12 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
+#include <workerd/util/loop-pin.h>
 #include <workerd/util/perfetto-tracing.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <kj-rs-io/async-io.h>
+#include <kj-rs-tokio/loop-unit.h>
 #include <kj-rs/kj-rs.h>
 #include <v8-initialization.h>
 
@@ -316,16 +318,16 @@ class ProcessBootstrap {
 // What one loop thread's factory needs of its loop: the tokio-backed `kj::Network` over the
 // loop's timer. Attached to the factory, so destroyed after it.
 struct LoopBootstrap {
-  explicit LoopBootstrap(kj_rs_tokio::TokioAsyncIoContext& loop): provider(loop.getTimer()) {}
+  explicit LoopBootstrap(kj::Timer& timer): provider(timer) {}
   kj_rs_io::TokioAsyncIoProvider provider;
 };
 
-// A factory on `loop`, which is the current thread's.
+// A factory on the loop of `timer`, which is the one entered on the current thread.
 kj::Own<WorkerFactory> newLoopFactory(
-    kj::Arc<SharedFactory> shared, kj_rs_tokio::TokioAsyncIoContext& loop, PrimaryLoop primary) {
-  auto loopBootstrap = kj::heap<LoopBootstrap>(loop);
-  auto factory = kj::heap<WorkerFactory>(kj::mv(shared), loop.getTimer(),
-      kj::systemPreciseMonotonicClock(), loopBootstrap->provider.getNetwork(), primary);
+    kj::Arc<SharedFactory> shared, kj::Timer& timer, PrimaryLoop primary) {
+  auto loopBootstrap = kj::heap<LoopBootstrap>(timer);
+  auto factory = kj::heap<WorkerFactory>(kj::mv(shared), timer, kj::systemPreciseMonotonicClock(),
+      loopBootstrap->provider.getNetwork(), primary);
   return factory.attach(kj::mv(loopBootstrap));
 }
 
@@ -388,7 +390,33 @@ kj::Arc<SharedFactory> bootstrap_process(::rust::Vec<uint64_t> config,
 
 kj::Own<WorkerFactory> bootstrap_loop(
     const SharedFactory& shared, kj_rs_tokio::TokioAsyncIoContext& loop) {
-  return newLoopFactory(shared.addRef(), loop, PrimaryLoop::NO);
+  return newLoopFactory(shared.addRef(), loop.getTimer(), PrimaryLoop::NO);
+}
+
+bool structured_logging(const SharedFactory& shared) {
+  return structuredLogging(shared.getConfigWords());
+}
+
+void with_loop_entry_context(bool structured, LoopEntry& entry) {
+  // An exception callback belongs to the thread whose stack it is on, and a loop unit is
+  // entered by whichever thread polls it, so every entry has a JSON logger of its own.
+  kj::Maybe<JsonLogger> jsonLogger;
+  if (structured) {
+    jsonLogger.emplace();
+  }
+  run_loop_entry(entry);
+}
+
+kj::Own<WorkerFactory> bootstrap_unit(const SharedFactory& shared,
+    kj_rs_tokio::LoopUnitContext& unit,
+    bool primary,
+    uint32_t isolateCopy) {
+  // A fiber on the unit's loop keeps the unit on its thread.
+  unit.setPinCheck([]() { return util::LoopPin::isPinned(); });
+  auto factory = newLoopFactory(
+      shared.addRef(), unit.getTimer(), primary ? PrimaryLoop::YES : PrimaryLoop::NO);
+  factory_share_workers(*factory, isolateCopy);
+  return factory;
 }
 
 kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
@@ -397,7 +425,7 @@ kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     kj::Maybe<const TestOptions&> test,
     kj::Maybe<const BenchOptions&> bench) {
   return newLoopFactory(
-      bootstrap_process(kj::mv(config), options, test, bench), loop, PrimaryLoop::YES);
+      bootstrap_process(kj::mv(config), options, test, bench), loop.getTimer(), PrimaryLoop::YES);
 }
 
 BuildInfo build_info() {

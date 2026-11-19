@@ -217,9 +217,16 @@ fn bad_values_are_usage_errors() {
         &["serve", "c.capnp", "--threads=257"],
         &["serve", "c.capnp", "--threads=two"],
         &["serve", "c.capnp", "--threads"],
-        // Only `serve` has threads.
+        &["serve", "c.capnp", "--loops=0"],
+        &["serve", "c.capnp", "--loops=257"],
+        &["serve", "c.capnp", "--loops=2", "--isolates=0"],
+        &["serve", "c.capnp", "--loops=2", "--isolates=257"],
+        // Only `serve` has threads, loops and isolates.
         &["test", "c.capnp", "--threads=2"],
         &["bench", "c.capnp", "--threads=2"],
+        &["test", "c.capnp", "--loops=2"],
+        &["bench", "c.capnp", "--loops=2"],
+        &["test", "c.capnp", "--isolates=2"],
         &["serve"],
         &["test", "c.capnp", "a", "b"],
         &["unknown"],
@@ -502,6 +509,154 @@ fn several_threads_are_refused_on_windows() {
     }
     assert_eq!(
         refused(&["--threads=2", "--experimental"], Platform::Unix),
+        None
+    );
+}
+
+#[test]
+fn loops_and_isolates_default_to_none() {
+    let (serve, _) = serve_args(&[]);
+    assert_eq!(serve.loops, None);
+    assert_eq!(serve.isolates, None);
+    let (serve, _) = serve_args(&["--threads=2", "--loops=8", "--isolates=4"]);
+    assert_eq!(serve.threads, 2);
+    assert_eq!(serve.loops, Some(8));
+    assert_eq!(serve.isolates, Some(4));
+    let (serve, _) = serve_args(&["--loops=3"]);
+    assert_eq!(serve.threads, 1);
+    assert_eq!(serve.loops, Some(3));
+    assert_eq!(serve.isolates, None);
+    let main = CompiledMain::try_parse_from(["workerd", "--loops=2", "--isolates=2"]).unwrap();
+    assert_eq!(main.serve.loops, Some(2));
+    assert_eq!(main.serve.isolates, Some(2));
+}
+
+#[test]
+fn isolates_require_loops() {
+    for args in [
+        &["serve", "c.capnp", "--isolates=1"][..],
+        &["serve", "c.capnp", "--threads=4", "--isolates=2"],
+    ] {
+        let argv = std::iter::once("workerd").chain(args.iter().copied());
+        assert!(Main::try_parse_from(argv).is_err(), "{args:?}");
+    }
+}
+
+#[test]
+fn loops_refuse_what_they_do_not_support() {
+    let refused = |args: &[&str]| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test, Platform::Unix)
+    };
+    let experimental = refused(&["--loops=2"]).unwrap();
+    assert!(experimental.starts_with("--loops: "), "{experimental}");
+    assert!(experimental.contains("`--experimental`"), "{experimental}");
+    // Without --experimental that is the error, whatever else is given.
+    assert_eq!(
+        refused(&["--loops=2", "--inspector-addr=127.0.0.1:0", "--isolates=2"]),
+        Some(experimental)
+    );
+
+    for (option, named) in [
+        ("--inspector-addr=127.0.0.1:0", "--inspector-addr"),
+        ("-i127.0.0.1:0", "--inspector-addr"),
+        ("--watch", "--watch"),
+        ("-w", "--watch"),
+        ("--python-save-snapshot", "Python snapshot"),
+        ("--python-save-baseline-snapshot", "Python snapshot"),
+        ("--async-trace=trace", "--async-trace"),
+        ("--perfetto-trace=trace=workerd", "--perfetto-trace"),
+    ] {
+        let message = refused(&["--loops=2", "--experimental", option]).unwrap();
+        assert!(message.starts_with("--loops: "), "{message}");
+        assert!(message.contains(named), "{option}: {message}");
+    }
+
+    let message = refused(&["--loops=2", "--isolates=3", "--experimental"]).unwrap();
+    assert!(message.starts_with("--isolates: "), "{message}");
+    assert!(
+        message.contains("more copies of a Worker than loops"),
+        "{message}"
+    );
+}
+
+#[test]
+fn one_loop_is_refused_what_several_are() {
+    // Unlike --threads=1, one loop on one thread still runs on the scheduler.
+    let refused = |args: &[&str]| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test, Platform::Unix)
+    };
+    let message = refused(&["--loops=1"]).unwrap();
+    assert!(message.contains("`--experimental`"), "{message}");
+    for args in [
+        &[
+            "--loops=1",
+            "--experimental",
+            "--inspector-addr=127.0.0.1:0",
+        ][..],
+        &["--threads=1", "--loops=1", "--experimental", "--watch"],
+        &["--loops=1", "--experimental", "--python-save-snapshot"],
+        &["--loops=1", "--experimental", "--async-trace=trace"],
+    ] {
+        let message = refused(args).unwrap();
+        assert!(message.starts_with("--loops: "), "{args:?}: {message}");
+    }
+    let message = refused(&["--loops=1", "--isolates=2", "--experimental"]).unwrap();
+    assert!(message.starts_with("--isolates: "), "{message}");
+    let (serve, serve_or_test) = serve_args(&["--loops=1", "--experimental"]);
+    let message = threads_refused(&serve, &serve_or_test, Platform::Windows).unwrap();
+    assert!(message.contains("not supported on Windows"), "{message}");
+}
+
+#[test]
+fn loops_serve_what_they_support() {
+    let refused = |args: &[&str]| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test, Platform::Unix)
+    };
+    for args in [
+        &["--loops=1", "--experimental"][..],
+        &["--loops=2", "--experimental"],
+        &["--loops=256", "--experimental"],
+        &["--threads=2", "--loops=8", "--experimental"],
+        &["--threads=256", "--loops=1", "--experimental"],
+        &["--threads=4", "--loops=4", "--isolates=4", "--experimental"],
+        &["--loops=8", "--isolates=1", "--experimental"],
+        &["--loops=2", "--experimental", "--control-fd=3"],
+        &["--loops=2", "--experimental", "-Shttp=4"],
+        &["--loops=2", "--experimental", "-shttp=*:8080"],
+        &["--loops=2", "--experimental", "--debug-port=127.0.0.1:0"],
+        &["--loops=2", "--experimental", "--python-load-snapshot=x"],
+        &["--loops=2", "--experimental", "--cluster-addr=0.0.0.0:7000"],
+    ] {
+        assert_eq!(refused(args), None, "{args:?}");
+    }
+}
+
+#[test]
+fn loops_are_refused_on_windows() {
+    let refused = |args: &[&str], platform| {
+        let (serve, serve_or_test) = serve_args(args);
+        threads_refused(&serve, &serve_or_test, platform)
+    };
+    // Whatever else is given, --experimental too.
+    for args in [
+        &["--loops=2"][..],
+        &["--loops=1", "--experimental"],
+        &["--threads=4", "--loops=4", "--isolates=4", "--experimental"],
+        &[
+            "--loops=2",
+            "--experimental",
+            "--inspector-addr=127.0.0.1:0",
+        ],
+    ] {
+        let message = refused(args, Platform::Windows).unwrap();
+        assert!(message.starts_with("--loops: "), "{message}");
+        assert!(message.contains("not supported on Windows"), "{message}");
+    }
+    assert_eq!(
+        refused(&["--loops=2", "--experimental"], Platform::Unix),
         None
     );
 }

@@ -10,16 +10,20 @@
 //! a `Box` of a Rust type handed to C++ is a cheap handle (an `Rc` inside), so C++ may hold it
 //! for as long as the wrapping KJ object lives and clone it through `*_clone`.
 //!
-//! Threads: everything here belongs to the loop thread it was made on (the factory, its compiled
-//! workers, actors, channels and every `Box` handed to C++), with one exception. An
-//! `ffi::SharedFactory` is what the loop threads of a process share: a `KjArc` of it is `Send`
-//! and `Sync` and may be cloned and dropped on any thread, and it lives as long as it has to,
-//! since every factory made from it holds a reference. `bootstrap_loop` makes a thread's own
-//! `WorkerFactory` from one, on that thread's loop; the thread then compiles its own copy of each
-//! worker and drops the factory before its loop. The thread that drops the last reference to a
-//! `SharedFactory` tears down V8 and the rest of the process's state: `workerd serve
-//! --threads` (threads.rs) joins every other loop thread before the first drops its factory, so
-//! that is the main thread.
+//! Threads: everything here belongs to the loop it was made on (the factory, its compiled workers,
+//! actors, channels and every `Box` handed to C++), with one exception, the shared factory. A loop
+//! is a loop thread's, or with `workerd serve --loops` a loop unit's (units.rs), which any thread
+//! of the process's scheduler may run, one at a time, so what is a unit's belongs to its loop
+//! rather than to a thread. An `ffi::SharedFactory` is what the loops of a process share: a `KjArc`
+//! of it is `Send` and `Sync` and may be cloned and dropped on any thread, and it lives as long as
+//! it has to, since every factory made from it holds a reference. `bootstrap_loop` makes a thread's
+//! own `WorkerFactory` from one, on that thread's loop, and the thread then compiles its own copy
+//! of each worker; `bootstrap_unit` makes a unit's, whose config Workers are compiled once per copy
+//! for every unit that shares them, each unit serving one through a `CompiledWorker` of its own.
+//! Either drops the factory before its loop. The thread that drops the last reference to a
+//! `SharedFactory` tears down V8 and the rest of the process's state: `workerd serve --threads`
+//! (threads.rs) joins every other loop thread before the first drops its factory, and `--loops`
+//! waits for every unit's task and shuts the scheduler down first, so that is the main thread.
 
 #![allow(
     unsafe_code,
@@ -53,6 +57,8 @@ pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 pub use crate::threads::SessionEnd;
+pub use crate::units::LoopEntry;
+pub use crate::units::run_loop_entry;
 
 #[cxx::bridge(namespace = "workerd::server")]
 #[expect(
@@ -277,6 +283,12 @@ pub mod ffi {
         /// The KJ event loop's context (`kj_rs_tokio::Runtime::context`): the
         /// `kj::Timer` and `kj::EventLoop` the process's C++ runs on.
         type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
+
+        include!("kj-rs-tokio/loop-unit.h");
+
+        /// A loop unit's context (`kj_rs_tokio::LoopUnit`): the `kj::Timer` of a loop that a
+        /// task of the process's tokio runtime drives.
+        type LoopUnitContext = kj_rs_tokio::LoopUnitContext;
     }
 
     #[namespace = "workerd::server::cli"]
@@ -318,6 +330,26 @@ pub mod ffi {
         fn bootstrap_loop(
             shared: &SharedFactory,
             event_loop: Pin<&mut TokioAsyncIoContext>,
+        ) -> Result<KjOwn<WorkerFactory>>;
+
+        /// Whether the config of `shared` asks for structured logging.
+        fn structured_logging(shared: &SharedFactory) -> Result<bool>;
+
+        /// Runs `entry` (`run_loop_entry`), one entry of a thread into a loop unit, with the
+        /// process's logging set up on this thread's stack around it: the JSON logger if
+        /// `structured`.
+        unsafe fn with_loop_entry_context<'a>(structured: bool, entry: &mut LoopEntry<'a>);
+
+        /// The worker factory of a loop unit, on the unit's loop, which the calling thread has
+        /// entered: as `bootstrap_loop` makes one, or, if `primary`, as the process's first
+        /// loop has one. It does not compile the config's Workers for itself: it serves the
+        /// process's copy `isolate_copy` of each, which the first unit to need it compiles and
+        /// the units with that number share. It dies on the unit's loop.
+        fn bootstrap_unit(
+            shared: &SharedFactory,
+            unit: Pin<&mut LoopUnitContext>,
+            primary: bool,
+            isolate_copy: u32,
         ) -> Result<KjOwn<WorkerFactory>>;
 
         /// `bootstrap_process`, then the worker factory of the process's first loop thread on
@@ -866,6 +898,10 @@ pub mod ffi {
         type LoopThread;
         fn run_loop_thread(thread: Box<LoopThread>) -> Result<()>;
 
+        /// One entry of a thread into a loop unit, run by `with_loop_entry_context` (units.rs).
+        type LoopEntry<'a>;
+        fn run_loop_entry(entry: &mut LoopEntry<'_>);
+
         /// The Rust half of a command, run by `with_process_context` (entry.rs).
         type PendingCommand;
         fn run_pending_command(
@@ -1158,6 +1194,14 @@ pub mod ffi {
         fn is_streaming(self: &WorkerInterfaceList, index: usize) -> bool;
         fn take(self: &mut WorkerInterfaceList, index: usize) -> Result<KjOwn<WorkerInterface>>;
     }
+}
+
+/// Runs `body` inside `ffi::with_loop_entry_context`: one entry of a thread into a loop unit.
+pub fn with_loop_entry_context(structured: bool, body: &mut dyn FnMut()) {
+    let mut entry = LoopEntry(body);
+    // Safety: the function borrows `entry` for the call only, during which it calls
+    // `run_loop_entry` on it once.
+    unsafe { ffi::with_loop_entry_context(structured, &mut entry) }
 }
 
 // Safety: a `SharedFactory` is what the loop threads share. Its C++ state is immutable once
