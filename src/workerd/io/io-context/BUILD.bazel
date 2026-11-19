@@ -73,7 +73,10 @@ wd_rust_crate(
     testonly = True,
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
-    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/api/channel-interop:ffi.rs@cxx",
+    ],
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     link_deps = [":test-bridge"],
@@ -81,6 +84,8 @@ wd_rust_crate(
     deps = [
         ":io-context",
         "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+        "//src/workerd/api/channel-interop",
         "@crates_vendor//futures",
     ],
 )

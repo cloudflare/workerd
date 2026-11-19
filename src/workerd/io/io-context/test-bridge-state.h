@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/io-channels.h>
 #include <workerd/jsg/async-context.h>
 
 #include <kj/async.h>
@@ -20,5 +21,8 @@ extern kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY;
 extern kj::Maybe<uint64_t> awaitContextId;
 // Fulfilled when an await_io_and_run() callback runs, if set.
 extern kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
+
+// The channel keep_channel() last kept, if any.
+extern kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> keptChannel;
 
 }  // namespace workerd::io_context::test
