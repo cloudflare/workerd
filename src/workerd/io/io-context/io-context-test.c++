@@ -940,11 +940,19 @@ KJ_TEST("an add_object() value can be used in place only while its IoContext is 
   fixture.drainAndDestroy(kj::mv(owner));
 }
 
+// A full garbage collection that doesn't scan the native stack. By default cppgc scans the stack
+// conservatively, so a stale pointer left there can keep an unreachable JSG object alive,
+// depending on how the compiler laid out the frames.
+void collectGarbageIgnoringStack(v8::Isolate* isolate) {
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::kFullGarbageCollection, v8::StackState::kNoHeapPointers);
+}
+
 // A full garbage collection, in the request that `request` runs. It runs in an enterContext() of
 // its own, so that no handle in the frames of the one that created the objects keeps them alive.
 void collectGarbage(TestFixture& fixture, IoContext::IncomingRequest& request) {
-  fixture.enterContext(
-      request, [&](const TestFixture::Environment& env) { env.isolate->LowMemoryNotification(); });
+  fixture.enterContext(request,
+      [&](const TestFixture::Environment& env) { collectGarbageIgnoringStack(env.isolate); });
 }
 
 // How the wait of the last await_js_start() ended.
@@ -2316,7 +2324,7 @@ AbortedWaitOutcome abortWait(AbortedWait scenario, Implementation implementation
         fixture.pollEventLoop();
         fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
           abort();
-          env.isolate->LowMemoryNotification();
+          collectGarbageIgnoringStack(env.isolate);
           // GC collected the reactions, and with them the sender, which holds the watcher and
           // destroys the unsettled resource as it is dropped.
           if (rust) {
