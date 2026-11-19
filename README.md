@@ -117,7 +117,8 @@ are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `assets`, `main` may be left out to serve files only, and then fields that need
 a Worker are an error. Each KV namespace and each D1 database is one Durable
 Object, so its throughput is that of one object; each R2 object is an object in
-the store.
+the store. A cluster's bucket should have a lifecycle rule that aborts incomplete
+multipart uploads, or the parts of R2 uploads that never finish stay forever.
 
 A simple "Hello World!" config file might look like:
 

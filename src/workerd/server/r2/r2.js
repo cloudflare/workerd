@@ -54,8 +54,9 @@
 //     every object's storage class is Standard;
 //   - a key with a `.` or `..` segment is refused (InvalidObjectName), as
 //     stores and proxies may resolve them;
-//   - an upload never completed or aborted keeps its parts: a store's
-//     lifecycle rule for incomplete multipart uploads collects them.
+//   - an upload never completed or aborted keeps its parts until a store's
+//     lifecycle rule for incomplete multipart uploads collects them (the
+//     local store drops those a day old when it opens).
 //
 // Limits and error messages follow Miniflare's R2 simulator (workers-sdk,
 // packages/miniflare/src/workers/r2). Not supported, as there: SSE-C keys

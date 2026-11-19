@@ -191,7 +191,10 @@ struct ClusterConfig {
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
-  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage. Give the
+  # bucket a lifecycle rule that aborts incomplete multipart uploads: a `bucket` service's upload
+  # that is never completed or aborted, such as an R2 put cut off mid-stream, otherwise keeps its
+  # parts, and their storage, forever.
   #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
@@ -464,9 +467,10 @@ struct Service {
 
 struct ClusterBucket {
   # A directory of objects served over a small HTTP API (the one workerd's R2 Worker
-  # uses): `/<key>` is the object `<key>`, the path percent-decoded whole, so keys may hold `/`,
-  # empty segments and dot segments. HEAD, GET (with one `Range`), PUT (content headers,
-  # `x-meta-<name>` user metadata, `If-Match: <x-version>`, `If-None-Match: *`) and DELETE;
+  # uses): `/<key>` is the object `<key>`, the path percent-decoded whole, so keys may hold `/`
+  # and empty segments, but not a `.` or `..` segment, which is refused. HEAD, GET (with one
+  # `Range`), PUT (content headers, `x-meta-<name>` user metadata, `If-Match: <x-version>`,
+  # `If-None-Match: *`) and DELETE;
   # `GET /?list&prefix=&start-after=&delimiter=&max=&token=`; multipart uploads with
   # `POST /<key>?uploads`, `PUT /<key>?part=<n>&upload=<id>`, and `GET` (parts), `POST`
   # (complete) and `DELETE` (abort) on `/<key>?upload=<id>`. Errors answer `{code, message}`

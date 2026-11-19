@@ -60,6 +60,9 @@ use serde_json::json;
 /// The chunks a read streams a body in.
 const CHUNK: usize = 64 << 10;
 
+/// An upload no part has reached for this long is abandoned.
+const STALE: std::time::Duration = std::time::Duration::from_hours(24);
+
 /// An object, as its file in `objects/` holds it.
 #[derive(Clone)]
 struct Meta {
@@ -175,10 +178,39 @@ impl Local {
         for dir in ["objects", "uploads", "blobs", "tmp"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
-        Ok(Self {
+        let store = Self {
             root: root.to_owned(),
             min_part,
             lock: std::fs::File::create(root.join("lock"))?,
+        };
+        store.sweep()?;
+        Ok(store)
+    }
+
+    /// Drops uploads no part has reached in `STALE`, and their parts, and
+    /// files a write left in `tmp/`: a store has no lifecycle rule to.
+    fn sweep(&self) -> Result<()> {
+        self.locked(|| {
+            for dir in ["uploads", "tmp"] {
+                for file in std::fs::read_dir(self.root.join(dir))? {
+                    let file = file?;
+                    let age = file.metadata()?.modified()?.elapsed();
+                    if age.is_ok_and(|age| age < STALE) {
+                        continue;
+                    }
+                    let json = std::fs::read(file.path()).unwrap_or_default();
+                    let json: Option<Json> = serde_json::from_slice(&json).ok();
+                    match json
+                        .as_ref()
+                        .and_then(Upload::of)
+                        .filter(|_| dir == "uploads")
+                    {
+                        Some(upload) => self.forget(&file.file_name().to_string_lossy(), &upload),
+                        None => drop(std::fs::remove_file(file.path())),
+                    }
+                }
+            }
+            Ok(())
         })
     }
 

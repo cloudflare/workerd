@@ -164,3 +164,24 @@ fn an_upload_completes_once_across_stores() {
         assert_eq!(blobs, 1);
     });
 }
+
+#[test]
+fn an_abandoned_upload_is_swept_when_a_store_opens() {
+    block_on(async {
+        let dir = dir();
+        let bucket = local(&dir, 1);
+        let old = bucket.begin("k", &Headers::default(), &[]).await.unwrap();
+        bucket.part("k", &old, 1, "ab".into()).await.unwrap();
+        let live = bucket.begin("k", &Headers::default(), &[]).await.unwrap();
+        let day_ago = std::time::SystemTime::now() - STALE - std::time::Duration::from_mins(1);
+        let file = std::fs::File::options()
+            .write(true)
+            .open(dir.join("uploads").join(&old));
+        file.unwrap().set_modified(day_ago).unwrap();
+        let bucket = local(&dir, 1);
+        let count = |d: &str| std::fs::read_dir(dir.join(d)).unwrap().count();
+        assert_eq!((count("uploads"), count("blobs")), (1, 0));
+        assert!(bucket.parts("k", &old).await.is_err());
+        assert!(bucket.parts("k", &live).await.unwrap().is_empty());
+    });
+}
