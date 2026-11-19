@@ -19,6 +19,13 @@
 //! with a loop and a factory of its own; they have ended, their loops and factories gone, by the
 //! time `run::run` returns, so this thread's factory is the last and V8 is torn down here.
 //!
+//! `workerd serve --loops=<L>` has another schedule (`serve_units`, `units.rs`): this thread
+//! sets up the process and V8 (`bootstrap_process`), starts a tokio multi-thread runtime with
+//! `--threads` workers, and blocks on the task of the first loop unit, which runs
+//! `server_serve` as the first loop thread does and starts the other L-1 units as its replicas.
+//! Once that task has ended, the others' with it, this thread shuts the runtime down and drops
+//! the last reference to the shared factory, and with it V8.
+//!
 //! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
 //! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
 //! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
@@ -60,8 +67,54 @@ pub fn serve(
     run_options: RunOptions,
     watch: Option<Watch>,
 ) -> Result<i32> {
+    if let Some(work_stealing) = run_options.work_stealing {
+        return serve_units(verbose, config, options, run_options, work_stealing);
+    }
     let command = move |factory, structured| server_serve(factory, run_options, watch, structured);
     run(verbose, config, options, None, None, command)
+}
+
+/// `workerd serve --loops` (see `units.rs`): the process's schedule when its loops are units of
+/// one work-stealing scheduler. This thread sets up the process and V8, starts the scheduler and
+/// the first unit on it, which runs `server_serve` as the first loop thread does, and waits for
+/// that unit's task; then it shuts the scheduler down and drops the shared factory, the last
+/// reference to it.
+fn serve_units(
+    verbose: bool,
+    config: Vec<u64>,
+    options: ffi::ServeOrTestOptions,
+    run_options: RunOptions,
+    work_stealing: crate::run::WorkStealing,
+) -> Result<i32> {
+    let command = move |config, structured| {
+        let none = (None::<&ffi::TestOptions>, None::<&ffi::BenchOptions>);
+        let shared = ffi::bootstrap_process(config, &options, none.0.into(), none.1.into())?;
+        // After V8 is set up, by the thread that set it up (see `units::runtime`).
+        let runtime = crate::units::runtime(work_stealing.threads)?;
+        let role = crate::units::Role {
+            structured,
+            primary: true,
+            isolate_copy: 0,
+        };
+        let home = crate::units::unit(shared.clone(), role, move |factory| {
+            server_serve(factory, run_options, None, structured)
+        });
+        let result = crate::units::run_to_end(&runtime, home);
+        if let Err(failure) = result {
+            let failure = ffi::exception_text(cxx::KjException::from(failure));
+            let message = format!("*** Uncaught exception ***\n{failure}");
+            error(structured, &message);
+        }
+        let code = i32::from(HAD_ERRORS.load(Ordering::Relaxed));
+        if std::env::var_os("KJ_CLEAN_SHUTDOWN").is_none() {
+            ffi::cli_exit(code);
+        }
+        drop(runtime);
+        drop(shared);
+        Ok(code)
+    };
+    let command = Box::new(PendingCommand(Box::new(command)));
+    Ok(ffi::with_process_context(verbose, config, command)?)
 }
 
 /// Runs `workerd test` (see the module doc); the exit status, if the process is to go on.

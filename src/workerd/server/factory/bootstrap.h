@@ -7,10 +7,12 @@
 // The C++ half of workerd's command line: the functions the Rust entry point (cli/lib.rs) calls
 // through the cxx bridges in cli/bridge.rs (the build's capabilities) and
 // server/bridge.rs (the process's logging, the bootstrap, the exit). Rust parses the command
-// line, produces the encoded config (config-compiler.h compiles schema files), owns the event loop
-// (kj_rs_tokio::Runtime) and runs the server (server/entry.rs); the bootstrap sets up the process
+// line, produces the encoded config (config-compiler.h compiles schema files), owns the event loops
+// (kj_rs_tokio::Runtime, or kj_rs_tokio::LoopUnit) and runs the server (server/entry.rs); the
+// bootstrap sets up the process
 // and V8 around it once (`bootstrap_process`) and builds a worker factory on each loop thread's
-// loop (`bootstrap_loop`; `bootstrap` does both for the first).
+// loop (`bootstrap_loop`; `bootstrap` does both for the first), or on each loop unit's
+// (`bootstrap_unit`) when the loops are tasks of one tokio runtime (server/units.rs).
 //
 // Do not include a generated bridge header here: both bridges include this header.
 
@@ -21,6 +23,7 @@
 
 namespace kj_rs_tokio {
 struct TokioAsyncIoContext;
+class LoopUnitContext;
 }  // namespace kj_rs_tokio
 
 namespace workerd::server {
@@ -28,6 +31,7 @@ class SharedFactory;
 class WorkerFactory;
 struct PendingCommand;
 struct LoopThread;
+struct LoopEntry;
 }  // namespace workerd::server
 
 namespace workerd::server::cli {
@@ -51,6 +55,12 @@ kj::Arc<SharedFactory> bootstrap_process(::rust::Vec<uint64_t> config,
     kj::Maybe<const BenchOptions&> bench);
 kj::Own<WorkerFactory> bootstrap_loop(
     const SharedFactory& shared, kj_rs_tokio::TokioAsyncIoContext& loop);
+bool structured_logging(const SharedFactory& shared);
+void with_loop_entry_context(bool structured, LoopEntry& entry);
+kj::Own<WorkerFactory> bootstrap_unit(const SharedFactory& shared,
+    kj_rs_tokio::LoopUnitContext& unit,
+    bool primary,
+    uint32_t isolateCopy);
 kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
     const ServeOrTestOptions& options,

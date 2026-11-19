@@ -423,6 +423,7 @@ wd_cc_library(
     srcs = ["html-rewriter.c++"],
     hdrs = ["html-rewriter.h"],
     implementation_deps = [
+        "//src/workerd/util:loop-pin",
         "@com_cloudflare_lol_html//:lolhtml",
     ],
     visibility = ["//visibility:public"],

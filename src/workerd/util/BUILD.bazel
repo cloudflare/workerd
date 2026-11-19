@@ -126,6 +126,16 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "loop-pin",
+    hdrs = ["loop-pin.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ],
+)
+
+wd_cc_library(
     name = "consume",
     hdrs = ["consume.h"],
     visibility = ["//visibility:public"],

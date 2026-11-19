@@ -433,18 +433,19 @@ pub struct ServeArgs {
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
 
-    /// Serve on <N> event-loop threads; more than one requires --experimental.
+    /// Serve on <N> threads; more than one requires --experimental.
     ///
-    /// Every thread accepts connections from the config's sockets and runs its own copy of every
-    /// Worker: a Worker's global scope runs once per thread, its global state is per thread, and
-    /// a service binding reaches the Worker of the same thread. Each thread loads its own dynamic
-    /// Workers too, so threads can run different code under one name if a Worker Loader's
-    /// getCode callback returns different code for it. Durable Objects all run on one
-    /// thread, where the other threads call them, and a cluster instance is a member of its
-    /// cluster on that thread. A Durable Object does not see the trace span of a caller on
-    /// another thread. --inspector-addr and the options that save a Python snapshot are not
-    /// supported with more than one thread. UDP sockets, cron triggers and --debug-port are
-    /// served by one thread only. More than one thread is not supported on Windows.
+    /// Without --loops, each thread runs an event loop of its own. Every thread accepts connections
+    /// from the config's sockets and runs its own copy of every Worker: a Worker's global scope
+    /// runs once per thread, its global state is per thread, and a service binding reaches the
+    /// Worker of the same thread. Each thread loads its own dynamic Workers too, so threads can run
+    /// different code under one name if a Worker Loader's getCode callback returns different code
+    /// for it. Durable Objects all run on one thread, where the other threads call them, and a
+    /// cluster instance is a member of its cluster on that thread. A Durable Object does not see
+    /// the trace span of a caller on another thread. --inspector-addr and the options that save a
+    /// Python snapshot are not supported with more than one thread. UDP sockets, cron triggers and
+    /// --debug-port are served by one thread only. More than one thread is not supported on
+    /// Windows. With --loops, the threads are those of the scheduler that runs the loops.
     #[arg(
         long,
         value_name = "N",
@@ -452,10 +453,47 @@ pub struct ServeArgs {
         value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
     )]
     pub threads: u32,
+
+    /// Serve <L> event loops on the --threads threads of one work-stealing scheduler, instead
+    /// of one loop per thread; requires --experimental.
+    ///
+    /// The loops are tasks of one scheduler, which runs each loop that has work on whichever of the
+    /// --threads threads is free, so there can be more loops than threads. A connection stays with
+    /// the loop that accepted it; it waits for that loop's other events and for the isolate it runs
+    /// JavaScript in, not for other loops. Every loop serves the same Workers: a Worker is compiled
+    /// once and its global scope runs once, unless --isolates asks for more copies, and at most one
+    /// thread runs JavaScript in an isolate at a time. Dynamic Workers of a Worker Loader are
+    /// loaded by each loop, as each thread loads them without this option. Durable Objects all run
+    /// on one loop, where the other loops call them, and that loop alone serves UDP sockets, cron
+    /// triggers and --debug-port. Python Workers, --inspector-addr, --watch, --async-trace,
+    /// --perfetto-trace and the options that save a Python snapshot are not supported with this
+    /// option, and neither is Windows.
+    #[arg(
+        long,
+        value_name = "L",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub loops: Option<u32>,
+
+    /// With --loops, compile <R> copies of every Worker instead of one, and spread the loops
+    /// over them.
+    ///
+    /// One thread at a time runs JavaScript in an isolate, so a single copy of a Worker uses at
+    /// most one core for JavaScript. With R copies, R requests run JavaScript at once, the Worker's
+    /// global scope runs R times, and its global state is per copy. Loop u, counting from 0 for the
+    /// loop that has the Durable Objects, serves copy u mod R. R is at most L.
+    #[arg(
+        long,
+        value_name = "R",
+        requires = "loops",
+        value_parser = clap::value_parser!(u32).range(1..=MAX_THREADS)
+    )]
+    pub isolates: Option<u32>,
 }
 
 /// The most `--threads`: every thread compiles its own copy of every Worker, so more than a
-/// machine has cores only costs memory.
+/// machine has cores only costs memory. Also the most `--loops`, each of which builds its own
+/// services.
 const MAX_THREADS: i64 = 256;
 
 #[derive(Args, Debug)]
@@ -795,14 +833,17 @@ impl Platform {
     };
 }
 
-/// Why `serve` cannot run on the `--threads` asked for with the other options given on
-/// `platform`, if it cannot. The server reports the inspector as a config error, too
+/// Why `serve` cannot run on the `--threads` (and `--loops`) asked for with the other options
+/// given on `platform`, if it cannot. The server reports the inspector as a config error, too
 /// (`workerd_server::threads::obstacles`).
 pub fn threads_refused(
     serve: &ServeArgs,
     serve_or_test: &ServeOrTestArgs,
     platform: Platform,
 ) -> Option<&'static str> {
+    if serve.loops.is_some() {
+        return loops_refused(serve, serve_or_test, platform);
+    }
     if serve.threads <= 1 {
         return None;
     }
@@ -823,6 +864,50 @@ pub fn threads_refused(
         return Some(
             "--threads: Saving a Python snapshot is not supported with more than one thread.",
         );
+    }
+    None
+}
+
+/// Why `serve` cannot run its loops on a work-stealing scheduler (`--loops`) with the other
+/// options given on `platform`, if it cannot. Unlike `--threads` alone, this applies with one
+/// thread too: the scheduler is the same.
+fn loops_refused(
+    serve: &ServeArgs,
+    serve_or_test: &ServeOrTestArgs,
+    platform: Platform,
+) -> Option<&'static str> {
+    if platform == Platform::Windows {
+        return Some("--loops: A work-stealing scheduler is not supported on Windows.");
+    }
+    if !serve_or_test.experimental {
+        return Some(
+            "--loops: Serving loops on a work-stealing scheduler is an experimental feature \
+             which may change or go away in the future. You must run workerd with \
+             `--experimental` to use this feature.",
+        );
+    }
+    if serve_or_test.inspector_addr.is_some() {
+        return Some("--loops: --inspector-addr is not supported with --loops.");
+    }
+    if serve_or_test.watch {
+        return Some("--loops: --watch is not supported with --loops.");
+    }
+    if serve_or_test.python_save_snapshot || serve_or_test.python_save_baseline_snapshot {
+        return Some("--loops: Saving a Python snapshot is not supported with --loops.");
+    }
+    // What traces async activity keeps its state with the thread that started a request, and a
+    // loop moves between threads.
+    if serve_or_test.async_trace.is_some() {
+        return Some("--loops: --async-trace is not supported with --loops.");
+    }
+    if serve_or_test.perfetto_trace.is_some() {
+        return Some("--loops: --perfetto-trace is not supported with --loops.");
+    }
+    if serve
+        .isolates
+        .is_some_and(|isolates| Some(isolates) > serve.loops)
+    {
+        return Some("--isolates: There cannot be more copies of a Worker than loops.");
     }
     None
 }

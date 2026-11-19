@@ -9,7 +9,8 @@
 //! then starts the others, the replicas (`threads.rs`); each builds the graph again for itself
 //! and listens on duplicates of the first thread's sockets (`run_replica`). The Durable Objects
 //! and the cluster are the first thread's alone, which the replicas reach over their sessions
-//! with it.
+//! with it. With `--loops=<L>` the same holds for L loops that are units of one work-stealing
+//! scheduler rather than threads (`units.rs`), the first of them in the first thread's place.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -85,8 +86,20 @@ pub struct RunOptions {
     /// The source deployment of each appended service and of each service left absent because its
     /// deployment was skipped.
     pub deployments: Deployments,
-    /// `--threads`, less the thread the server starts on: the loop threads to start besides it.
+    /// The loops to start besides the one the server starts on: `--threads` less one, each a
+    /// thread, or with `--loops` that many less one, each a unit (`units.rs`).
     pub replicas: usize,
+    /// `--loops`: the loops are units on a work-stealing scheduler.
+    pub work_stealing: Option<WorkStealing>,
+}
+
+/// `--loops`: how the scheduler that runs the loops as units is set up (`units.rs`).
+#[derive(Clone, Copy, Debug)]
+pub struct WorkStealing {
+    /// `--threads`: the scheduler's worker threads.
+    pub threads: usize,
+    /// `--isolates`: the copies of each Worker.
+    pub isolates: usize,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -173,8 +186,9 @@ async fn start(
 
     // What several threads cannot serve is a config error. A reporter that serves despite errors
     // (`--watch`) then serves on this thread alone, like any config with an error.
-    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory));
-    if replicas.is_some() {
+    let units = options.work_stealing.map(|scheduler| scheduler.isolates);
+    let replicas = (options.replicas > 0).then(|| Replicas::new(options.replicas, &factory, units));
+    if replicas.is_some() || units.is_some() {
         for obstacle in threads::obstacles(options.inspector.is_some()) {
             report.error(obstacle);
         }

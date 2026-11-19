@@ -31,6 +31,17 @@ assert(
 const THREADS = 4;
 const UUID = /^[0-9a-f-]{36}$/;
 
+// How the tests serve on several threads: `threads`, a loop of its own on every thread, or
+// `units`, as many loops as threads on a work-stealing scheduler, each with its own copy of every
+// Worker, which serves the same as `threads` does.
+const MODE = env.WORKERD_THREADS_MODE ?? 'threads';
+assert(
+  MODE === 'threads' || MODE === 'units',
+  `WORKERD_THREADS_MODE must be threads or units, not ${MODE}`
+);
+// One thread serves the same in either mode: `threads` mode tests it.
+const ONE_THREAD = { skip: MODE !== 'threads' && 'threads mode tests this' };
+
 // Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
 // there.
 const SIGTERM_DRAINS = {
@@ -46,6 +57,13 @@ const SEVERAL_THREADS = {
     'several threads are not supported on Windows',
 };
 
+// The options that serve on `n` threads in this mode.
+function threadArgs(n) {
+  return MODE === 'units'
+    ? [`--threads=${n}`, `--loops=${n}`, `--isolates=${n}`]
+    : [`--threads=${n}`];
+}
+
 // Starts `workerd serve` on `threads` threads with a new directory for the objects. `log` is
 // what the server has written so far.
 async function serve(threads) {
@@ -58,7 +76,7 @@ async function serve(threads) {
       'serve',
       env.WORKERD_DURABLE_CONFIG,
       '--experimental',
-      ...(threads > 1 ? [`--threads=${threads}`] : []),
+      ...(threads > 1 ? threadArgs(threads) : []),
       '--control-fd=3',
       `--directory-path=objects=${directory}`,
     ],
@@ -304,7 +322,7 @@ function webSocket(connection, path) {
 
 for (const threads of [THREADS, 1]) {
   const on = `on ${threads} thread${threads > 1 ? 's' : ''}`;
-  const supported = threads > 1 ? SEVERAL_THREADS : {};
+  const supported = threads > 1 ? SEVERAL_THREADS : ONE_THREAD;
 
   test(`requests of every thread count in one object ${on}`, supported, () =>
     withServer(threads, async (server) => {
@@ -483,7 +501,7 @@ for (const threads of [THREADS, 1]) {
 
   test(
     `SIGTERM completes the object calls in flight ${on}`,
-    SIGTERM_DRAINS,
+    { skip: SIGTERM_DRAINS.skip || (threads === 1 && ONE_THREAD.skip) },
     async () => {
       const server = await serve(threads);
       const connections = await connect(server, threads);

@@ -10,18 +10,26 @@
 //! back whenever a tokio task has queued KJ work.
 //!
 //! [`Runtime`] is that loop for a Rust `main`: it owns the C++ context and blocks on a future.
+//!
+//! [`LoopUnit`] is the other way around: a KJ loop that owns no thread, driven by a task of a
+//! multi-thread tokio runtime on whichever worker polls it (`unit.rs`, `loop-unit.h`).
 
 // `unsafe` is quarantined into a single named FFI island: `ffi.rs`, the `#[cxx::bridge]` wire, is
 // the one module that opts in via `#![allow(unsafe_code)]`, so the entire event-port business
 // logic (`TokioPort`, the `wait`/`poll`/`wake` machinery) is *compiler-proven* to contain no
 // hand-written unsafe.
 
+pub use ffi::LoopUnitContext;
 pub use ffi::TokioAsyncIoContext;
 pub use port::TokioPort;
 pub use port::current_handle;
 pub use port::spawn;
 pub use runtime::Runtime;
+pub use unit::LoopUnit;
+pub use unit::UnitScope;
+pub use unit::spawn_unit;
 
 mod ffi;
 mod port;
 mod runtime;
+mod unit;

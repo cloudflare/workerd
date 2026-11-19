@@ -121,9 +121,10 @@ WD_STRONG_BOOL(PrimaryLoop);
 // rather than a peer's or the debug port's.
 WD_STRONG_BOOL(LocalCaller);
 
-// What the loop threads of one run share, which outlives every loop: the config and the options,
-// V8, the HTTP header table, the memory caches, the channel token key and the inspector's
-// registrar. Every loop thread has a `WorkerFactory` of its own over it.
+// What the loops of one run share, which outlives every loop: the config and the options, V8, the
+// HTTP header table, the memory caches, the channel token key, the inspector's registrar and the
+// config's Workers that loops share (`factory_share_workers`). Every loop, a loop thread's or a
+// loop unit's (server/units.rs), has a `WorkerFactory` of its own over it.
 //
 // Thread-safe: any thread may hold a reference and drop it, and the state is immutable or guards
 // itself. Whatever is attached at construction is destroyed with the object, on the thread that
@@ -189,14 +190,14 @@ class SharedFactory final: public kj::AtomicRefcounted {
   kj::Own<Impl> impl;
 };
 
-// Everything the workers of one loop thread share: the loop's timer and network, the capnp
-// factories, the background tasks, and the Rust server of that thread, which resolves channel
-// tokens. Bound to the loop it was constructed on, where it must also be destroyed.
+// Everything the workers of one loop share: the loop's timer and network, the capnp factories,
+// the background tasks, and the Rust server of that loop, which resolves channel tokens. Bound to
+// the loop it was constructed on, where it must also be destroyed.
 class WorkerFactory final: private ChannelTokenHandler::Resolver {
  public:
   using Options = SharedFactory::Options;
 
-  // A factory on the current thread's loop, whose `timer` and `network` these are.
+  // A factory on the loop the current thread has entered, whose `timer` and `network` these are.
   // `monotonicClock` must read consistently with `timer` whenever the timer is advanced.
   WorkerFactory(kj::Arc<SharedFactory> shared,
       kj::Timer& timer,
@@ -228,6 +229,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
 };
 
 kj::Arc<SharedFactory> factory_shared(const WorkerFactory& factory);
+// Has `factory` serve the config's Workers from the process's shared copies of number `copy`
+// instead of compiling its own (see `SharedWorker`). Before the factory compiles a Worker.
+void factory_share_workers(const WorkerFactory& factory, uint32_t copy);
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory);
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory);
 bool factory_experimental(const WorkerFactory& factory);
@@ -251,7 +255,9 @@ kj::Promise<::rust::Vec<uint64_t>> factory_bench_startup(const WorkerFactory& fa
 // =======================================================================================
 
 // A compiled worker: its isolate, script and `Worker`, and what compiling them revealed. Bound to
-// the loop of the factory that compiled it: each loop thread compiles its own copy of a worker.
+// the loop of the factory it came from. Each loop thread compiles its own copy of a worker;
+// loops that share Workers (`factory_share_workers`) each have their own `CompiledWorker` over
+// one isolate.
 class CompiledWorker final {
  public:
   class Impl;

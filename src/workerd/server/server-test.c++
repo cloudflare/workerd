@@ -10502,11 +10502,15 @@ class SharedEntropySource final: public kj::EntropySource {
 // the server is a replica's: its actors are the primary loop's.
 class LoopThreadServer {
  public:
+  // With `sharedCopy`, the server serves the process's shared copy of that number of each of the
+  // config's workers (`factory_share_workers`) instead of compiling its own.
   LoopThreadServer(kj::Arc<SharedFactory> shared,
       PrimaryLoop primary,
-      kj::Maybe<::rust::Box<SessionEnd>> session = kj::none) {
+      kj::Maybe<::rust::Box<SessionEnd>> session = kj::none,
+      kj::Maybe<uint32_t> sharedCopy = kj::none) {
     auto ownFactory = kj::heap<WorkerFactory>(kj::mv(shared), io.getTimer(),
         kj::systemPreciseMonotonicClock(), provider.getNetwork(), primary);
+    KJ_IF_SOME(copy, sharedCopy) factory_share_workers(*ownFactory, copy);
     factory = *ownFactory;
     auto& started = *server.emplace(new_in_process_server(kj::mv(ownFactory)));
     KJ_IF_SOME(end, session) started.forward_to_first_thread(kj::mv(end));
@@ -10703,6 +10707,110 @@ KJ_TEST("Server: two loop threads each compile and serve the workers of one shar
     // And the secondary loop's token names the primary's copy.
     KJ_EXPECT(primary.getByToken(secondaryToken).wait(primary.ws) == kj::str(requests + 1));
   }
+}
+
+KJ_TEST("Server: loop threads that share the workers of the config serve one isolate") {
+  // Each request takes its number from a counter of the isolate that serves it and gives the
+  // isolate lock up while a timer of its loop runs.
+  auto config = parseConfig(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let count = 0;
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const n = ++count;
+                `    await scheduler.wait(1);
+                `    ctx.waitUntil(scheduler.wait(1));
+                `    return new Response(String(n));
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [ ( name = "main", address = "loopback:test-addr", service = "hello" ) ]
+  ))"_kj,
+      {});
+  capnp::MallocMessageBuilder message;
+  message.setRoot(*config);
+  auto words = capnp::messageToFlatArray(message);
+
+  SharedEntropySource entropySource;
+  auto options = kj::heap<WorkerFactory::Options>();
+  options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::INSPECTOR_ONLY);
+  auto shared = kj::arc<SharedFactory>(v8System, entropySource, TempDir::disk(), kj::mv(options),
+      kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+          .as<kj_rs::RustCopy>());
+
+  // The threads start at once, so they race to compile the worker: one does, and the others
+  // wait for it and serve what it compiled. They serve rounds of concurrent requests until each
+  // has served `MIN_ROUNDS` of them, so for that long every loop is in the isolate in turn. Then
+  // they leave one after another, each serving more rounds than the one before it: whichever
+  // compiled the worker, a thread serves it after that one's loop is gone, or it outlives the
+  // loops that only had a view of it.
+  static constexpr uint THREADS = 3;
+  static constexpr uint MIN_ROUNDS = 25;
+  static constexpr uint MAX_ROUNDS = 20000;
+  static constexpr uint REQUESTS_PER_ROUND = 4;
+  struct Progress {
+    std::atomic<uint> rounds = 0;
+    std::atomic<bool> failed = false;
+  };
+  Progress progress[THREADS];
+  // The numbers the requests got, on every thread.
+  kj::MutexGuarded<kj::Vector<uint>> numbers;
+
+  auto serve = [&](uint index) {
+    KJ_ON_SCOPE_FAILURE(progress[index].failed = true);
+    LoopThreadServer loop(shared.addRef(), PrimaryLoop::NO, kj::none, 0u);
+    auto round = [&]() {
+      auto bodies = kj::heapArrayBuilder<kj::Promise<kj::String>>(REQUESTS_PER_ROUND);
+      for (uint i = 0; i < REQUESTS_PER_ROUND; i++) bodies.add(loop.get("test-addr"_kj));
+      auto served = kj::joinPromisesFailFast(bodies.finish()).wait(loop.ws);
+      auto lock = numbers.lockExclusive();
+      for (auto& body: served) lock->add(body.parseAs<uint>());
+      ++progress[index].rounds;
+    };
+    auto allServed = [&]() {
+      for (auto& other: progress) {
+        KJ_ASSERT(!other.failed, "another loop thread failed");
+        if (other.rounds < MIN_ROUNDS) return false;
+      }
+      return true;
+    };
+    while (!allServed()) {
+      KJ_ASSERT(progress[index].rounds < MAX_ROUNDS, "another loop thread never served");
+      round();
+    }
+    for (uint i = 0; i < index * MIN_ROUNDS; i++) round();
+  };
+
+  {
+    kj::Vector<kj::Own<kj::Thread>> threads;
+    for (uint index = 0; index < THREADS; index++) {
+      threads.add(kj::heap<kj::Thread>([&serve, index]() { serve(index); }));
+    }
+    // Joined here, each with its server closed and its factory destroyed on it.
+  }
+
+  for (auto& thread: progress) {
+    KJ_EXPECT(!thread.failed);
+    KJ_EXPECT(thread.rounds >= MIN_ROUNDS);
+  }
+  // One isolate counted every thread's requests: each number once, none missing.
+  auto lock = numbers.lockExclusive();
+  kj::HashSet<uint> seen;
+  for (auto n: *lock) {
+    KJ_EXPECT(!seen.contains(n), "two requests got one number", n);
+    seen.upsert(n, [](uint&, uint&&) {});
+  }
+  for (uint n = 1; n <= lock->size(); n++) KJ_EXPECT(seen.contains(n), n, lock->size());
 }
 
 KJ_TEST("Server: a loop thread without the actors reaches them on the primary loop's") {

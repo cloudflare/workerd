@@ -28,6 +28,7 @@ pub mod run;
 pub mod services;
 pub mod tasks;
 pub mod threads;
+pub mod units;
 pub mod worker;
 
 pub type Error = cxx::KjError;

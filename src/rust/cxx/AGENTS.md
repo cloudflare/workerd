@@ -36,7 +36,13 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
   `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
-  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes)
+  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes);
+  and `LoopUnit` (unit.rs, loop-unit.h): a KJ event loop that owns no thread, a `Send` future
+  that a task of a multi-thread tokio runtime drives (`spawn_unit`), each poll entering the loop
+  on whichever worker thread polls it and leaving it before returning. `UnitScope` puts a frame
+  on the stack around every entry (workerd's JSON logger); `LoopUnitContext` is the C++ loop,
+  whose `setPinCheck` keeps a unit with a fiber on its thread, blocking it in
+  `tokio::task::block_in_place`. The `Send` claim and what keeps it are in ffi.rs, `UnitContext`
 - `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
   client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
   transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
@@ -87,8 +93,14 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
   lints around them. `ensure_loop_thread()` goes before every registration; `ensure_owner_loop()`
   (the resource's recorded owner runtime) goes at the point an operation is about to wait for
   readiness, never on the fast path -- a read whose syscall completes at once pays nothing.
-  Accept always waits, so it checks up front. The file watcher is runtime-independent (notify
-  delivers from its own thread; `tokio::sync::Notify` needs no runtime) and checks nothing.
+  Accept always waits, so it checks up front. On a thread that has a `LoopUnit` entered,
+  `kj_rs_tokio::current_handle()` is the shared multi-thread runtime, which is also the one
+  entered, so `ensure_loop_thread()` passes; and since `ensure_owner_loop()` compares runtime
+  ids, it does not tell one unit's objects from another unit's of the same runtime (their
+  resources are registered with the one shared driver, so a wait there does not hang). KJ's own
+  checks remain: an event armed on a thread where its loop is not entered throws. The file
+  watcher is runtime-independent (notify delivers from its own thread; `tokio::sync::Notify`
+  needs no runtime) and checks nothing.
 - **Raw handles and buffers become typed at the bridge.** `ffi.rs` is the crate's only module
   allowed to write `unsafe`. An fd/SOCKET arrives as an integer and becomes a `socket2::Socket` /
   `OwnedFd` in one `unsafe` block naming the C++ contract; a `tryRead` buffer arrives as pointer +

@@ -22,6 +22,12 @@
 //! connections from duplicates of the first thread's stream sockets, which share their accept
 //! queues, so a connection is served by whichever thread accepts it.
 //!
+//! With `--loops` the loops are not threads but units of one work-stealing scheduler
+//! (`units.rs`, which has the detail): a replica is a task (`Replica::spawn_unit`) whose loop
+//! any of the scheduler's threads runs, and it serves the process's shared copies of the config's
+//! Workers instead of compiling its own, while its dynamic Workers are still its own. The rest of
+//! this module holds for units as it does for threads, with a task where it says thread.
+//!
 //! What a replica lacks it reaches on the first thread, over its session with it
 //! ([`FirstThread`]): a capnp `WorkerdDebugPort` session, as a cluster instance keeps with a
 //! peer, over an in-process pipe made when the replica starts. A replica's Durable Object
@@ -63,9 +69,9 @@
 //! - **Teardown.** A replica drops its server, then its factory, then its loop, on its own
 //!   thread, and waits for nothing of the first thread to do so: what it has in flight there are
 //!   futures it drops, and the pipe's wake-ups cross threads without waiting. Dropping the
-//!   `Replicas` tells those still running to stop at once and joins every thread, so the first
-//!   thread's server, which serves the sessions, and its factory, and with it the process's
-//!   `SharedFactory` and V8, outlive every other loop.
+//!   `Replicas` tells those still running to stop at once and joins every thread (or waits for
+//!   every unit's task to end), so the first thread's server, which serves the sessions, and its
+//!   factory, and with it the process's `SharedFactory` and V8, outlive every other loop.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -137,23 +143,38 @@ impl Signals {
     }
 }
 
+/// A replica that was started, to wait for.
+enum Running {
+    /// A thread with a loop of its own.
+    Thread(JoinHandle<()>),
+    /// A unit on the process's scheduler (`units.rs`): disconnects once the unit's task has
+    /// ended, its loop gone.
+    Unit(std::sync::mpsc::Receiver<()>),
+}
+
 /// The replicas of a run, for the first loop thread. Dropping it stops and joins them.
 pub struct Replicas {
     count: usize,
     shared: KjArc<ffi::SharedFactory>,
+    /// `--loops`: the loops are units on a work-stealing scheduler, not threads, and share
+    /// this many copies of each Worker.
+    units: Option<usize>,
     phase: watch::Sender<Phase>,
-    threads: RefCell<Vec<JoinHandle<()>>>,
+    running: RefCell<Vec<Running>>,
 }
 
 impl Replicas {
     /// `count` replicas of the server of `factory`, the first loop thread's; none runs yet.
+    /// They are threads, or with `units`, units of the scheduler the caller runs on, which
+    /// share that many copies of each Worker.
     #[must_use]
-    pub fn new(count: usize, factory: &Factory) -> Self {
+    pub fn new(count: usize, factory: &Factory, units: Option<usize>) -> Self {
         Self {
             count,
             shared: factory.shared(),
+            units,
             phase: watch::Sender::new(Phase::Starting),
-            threads: RefCell::new(Vec::new()),
+            running: RefCell::new(Vec::new()),
         }
     }
 
@@ -175,6 +196,7 @@ impl Replicas {
     ) -> Result<Started> {
         let (events, received) = mpsc::unbounded_channel();
         let count = sockets.len();
+        let structured = self.units.is_some() && ffi::structured_logging(&self.shared)?;
         for (index, sockets) in (1..).zip(sockets) {
             let (ours, theirs) = session_pipe();
             factory.spawn_detached(serve_session(Rc::clone(factory), index, ours));
@@ -194,12 +216,23 @@ impl Replicas {
                 events: events.clone(),
                 result: None,
             };
-            let thread = std::thread::Builder::new()
-                .name(format!("loop-{index}"))
-                .stack_size(REPLICA_STACK_SIZE)
-                .spawn(move || replica.run_thread(exit))
-                .map_err(|e| kj::failed!("starting loop thread {index}: {e}"))?;
-            self.threads.borrow_mut().push(thread);
+            let running = if let Some(isolates) = self.units {
+                let role = crate::units::Role {
+                    structured,
+                    primary: false,
+                    // The first unit, where the Durable Objects are, serves copy 0.
+                    isolate_copy: u32::try_from(index % isolates.max(1)).unwrap_or(0),
+                };
+                Running::Unit(replica.spawn_unit(exit, role))
+            } else {
+                let thread = std::thread::Builder::new()
+                    .name(format!("loop-{index}"))
+                    .stack_size(REPLICA_STACK_SIZE)
+                    .spawn(move || replica.run_thread(exit))
+                    .map_err(|e| kj::failed!("starting loop thread {index}: {e}"))?;
+                Running::Thread(thread)
+            };
+            self.running.borrow_mut().push(running);
         }
         drop(events);
         await_ready(received, self.phase.subscribe(), count).await
@@ -229,10 +262,20 @@ impl Replicas {
 impl Drop for Replicas {
     fn drop(&mut self) {
         self.advance(Phase::Stopping);
-        for thread in std::mem::take(self.threads.get_mut()) {
-            // A thread that panicked aborted the process: a panic does not unwind through the
-            // C++ frame a loop thread runs under.
-            let _ = thread.join();
+        for running in std::mem::take(self.running.get_mut()) {
+            match running {
+                // A thread that panicked aborted the process: a panic does not unwind through
+                // the C++ frame a loop thread runs under.
+                Running::Thread(thread) => {
+                    let _ = thread.join();
+                }
+                // This thread blocks with the first unit's loop entered, as a first loop thread
+                // blocks in a join; the scheduler moves its other work, the units to wait for
+                // among it, to other threads meanwhile.
+                Running::Unit(ended) => tokio::task::block_in_place(|| {
+                    let _ = ended.recv();
+                }),
+            }
         }
     }
 }
@@ -379,6 +422,30 @@ impl Replica {
         let body = LoopThread::new(move || self.run());
         let result = ffi::with_loop_thread_context(&shared, body);
         exit.result = Some(result.map_err(crate::Error::from));
+    }
+
+    /// The replica as a unit of the scheduler this is called on, whose task reports through
+    /// `exit` once the unit is gone. What is returned disconnects after that.
+    fn spawn_unit(
+        self,
+        mut exit: ExitReport,
+        role: crate::units::Role,
+    ) -> std::sync::mpsc::Receiver<()> {
+        let (ended, wait) = std::sync::mpsc::channel();
+        let shared = self.shared.clone();
+        let unit = crate::units::unit(shared, role, move |factory| self.serve(factory));
+        let unit = kj_rs_tokio::spawn_unit(unit);
+        tokio::spawn(async move {
+            let result = unit.await;
+            // The unit's task has ended, and dropped the unit and with it the loop.
+            exit.result = Some(match result {
+                Ok(result) => result.and_then(|served| served),
+                Err(error) => Err(kj::failed!("the loop's task ended: {error}")),
+            });
+            drop(exit);
+            drop(ended);
+        });
+        wait
     }
 
     /// The loop, the factory on it, and the server until it ends; dropped in reverse.

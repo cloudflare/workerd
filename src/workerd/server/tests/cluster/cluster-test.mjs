@@ -95,10 +95,29 @@ const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
 if (env.TEST_SHARD_STATUS_FILE !== undefined) {
   await writeFile(env.TEST_SHARD_STATUS_FILE, '');
 }
+// How a node of the tests of `--threads` serves on several threads: `threads`, a
+// loop of its own on every thread, or `units`, as many loops as threads on a
+// work-stealing scheduler, each with its own copy of every Worker. `units` runs
+// only the cases on several threads.
+const MODE = env.WORKERD_THREADS_MODE ?? 'threads';
+assert(
+  MODE === 'threads' || MODE === 'units',
+  `WORKERD_THREADS_MODE must be threads or units, not ${MODE}`
+);
+const SEVERAL_THREADS_CASE = /^cluster: on several threads, /;
 let testIndex = 0;
 function test(name, ...rest) {
-  if (picked.test(name) && testIndex++ % SHARDS === SHARD)
-    nodeTest(name, ...rest);
+  if (!picked.test(name)) return;
+  if (MODE !== 'threads' && !SEVERAL_THREADS_CASE.test(name)) {
+    // Skipped once, by the first shard.
+    if (SHARD === 0) {
+      nodeTest(name, {
+        skip: `${MODE} mode runs only the cases on several threads`,
+      });
+    }
+    return;
+  }
+  if (testIndex++ % SHARDS === SHARD) nodeTest(name, ...rest);
 }
 
 const CONTROL_FD = 3;
@@ -360,8 +379,13 @@ async function fetchJson(port, path, { timeoutMs } = {}) {
 
 // How many loop threads a node of the tests of `--threads` serves on.
 const THREADS = 3;
-// What makes the nodes of `withCluster` serve on that many.
-const THREADED = { extraArgs: () => [`--threads=${THREADS}`] };
+// What makes the nodes of `withCluster` serve on that many, in this mode.
+const THREADED = {
+  extraArgs: () =>
+    MODE === 'units'
+      ? [`--threads=${THREADS}`, `--loops=${THREADS}`, `--isolates=${THREADS}`]
+      : [`--threads=${THREADS}`],
+};
 // More than one thread is a usage error on Windows.
 const SEVERAL_THREADS = {
   skip:

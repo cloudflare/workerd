@@ -34,6 +34,7 @@ use workerd_server::bridge::ffi as server;
 use workerd_server::config::Overrides;
 use workerd_server::entry;
 use workerd_server::run::RunOptions;
+use workerd_server::run::WorkStealing;
 
 use crate::bridge::ffi;
 use crate::config::Config;
@@ -640,7 +641,11 @@ fn serve_options<T: CommandFactory>(
         debug_port: serve.debug_port,
         cluster_address: serve.cluster_address,
         cluster_advertise: serve.cluster_advertise,
-        replicas: serve.threads.saturating_sub(1) as usize,
+        replicas: serve.loops.unwrap_or(serve.threads).saturating_sub(1) as usize,
+        work_stealing: serve.loops.map(|_| WorkStealing {
+            threads: serve.threads as usize,
+            isolates: serve.isolates.unwrap_or(1) as usize,
+        }),
         ..run_options(serve_or_test)
     };
     (options, inherited)

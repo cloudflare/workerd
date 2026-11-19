@@ -33,3 +33,57 @@ js_test(
     },
     tags = ["js-test"],
 )
+
+js_test(
+    name = "threads-units-test",
+    size = "large",
+    data = [
+        ":config.capnp",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+        "WORKERD_THREADS_MODE": "units",
+    },
+    tags = ["js-test"],
+)
+
+js_test(
+    name = "threads-durable-units-test",
+    size = "large",
+    data = [
+        ":durable-config.capnp",
+        ":durable-worker.mjs",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "durable-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_DURABLE_CONFIG": "$(rootpath :durable-config.capnp)",
+        "WORKERD_THREADS_MODE": "units",
+    },
+    tags = ["js-test"],
+)
+
+js_test(
+    name = "threads-shared-test",
+    size = "large",
+    data = [
+        ":shared-config.capnp",
+        ":shared-worker.mjs",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "shared-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_SHARED_CONFIG": "$(rootpath :shared-config.capnp)",
+        "WORKERD_TEST_REPORT_LOOP": "1",
+    },
+    tags = ["js-test"],
+)

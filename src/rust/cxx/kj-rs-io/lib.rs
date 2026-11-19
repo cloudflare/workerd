@@ -44,6 +44,13 @@
 //! they check up front. The file watcher is runtime-independent (notify delivers from its own
 //! thread; `tokio::sync::Notify` stores wakeups without a runtime) and checks nothing.
 //!
+//! A loop can also be a `kj_rs_tokio::LoopUnit`, which a task of a multi-thread runtime drives on
+//! whichever worker thread polls it. While a unit is entered, `kj_rs_tokio::current_handle()` is
+//! that runtime, and so is the one entered, so both checks pass there; the units of one runtime
+//! share its driver and its id, so [`ensure_owner_loop`] does not tell one unit's objects from
+//! another's. KJ's own check remains: an event armed on a thread where its loop is not entered
+//! throws.
+//!
 //! # Scope: workerd's provider
 //!
 //! This crate implements KJ's I/O interfaces for **workerd**, which is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for

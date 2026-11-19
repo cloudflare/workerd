@@ -21,6 +21,19 @@ assert(
 
 const THREADS = 4;
 
+// How the tests serve on several threads: `threads`, a loop of its own on every thread, or
+// `units`, as many loops as threads on a work-stealing scheduler, each with its own copy of every
+// Worker, which serves the same as `threads` does.
+const MODE = env.WORKERD_THREADS_MODE ?? 'threads';
+assert(
+  MODE === 'threads' || MODE === 'units',
+  `WORKERD_THREADS_MODE must be threads or units, not ${MODE}`
+);
+// What only `threads` mode tests: one thread, and the usage errors of `--threads`.
+const THREADS_MODE_ONLY = {
+  skip: MODE !== 'threads' && 'threads mode tests this',
+};
+
 // Node's SIGTERM is TerminateProcess on Windows: the server neither drains nor exits by itself
 // there.
 const SIGTERM_DRAINS = {
@@ -35,6 +48,13 @@ const SEVERAL_THREADS = {
     process.platform === 'win32' &&
     'several threads are not supported on Windows',
 };
+
+// The options that serve on `n` threads in this mode.
+function threadArgs(n) {
+  return MODE === 'units'
+    ? [`--threads=${n}`, `--loops=${n}`, `--isolates=${n}`]
+    : [`--threads=${n}`];
+}
 
 // Starts `workerd serve` with `extraArgs` and returns the harness and the port it listens on.
 async function serve(extraArgs) {
@@ -117,7 +137,7 @@ test(
   async () => {
     const { workerd, port } = await serve([
       '--experimental',
-      `--threads=${THREADS}`,
+      ...threadArgs(THREADS),
     ]);
     try {
       // Which `back` each `front` reached, by the isolates' identities.
@@ -164,7 +184,7 @@ test(
   async () => {
     const { workerd, port } = await serve([
       '--experimental',
-      `--threads=${THREADS}`,
+      ...threadArgs(THREADS),
     ]);
     const requests = Array.from({ length: 64 }, () => request(port));
     // The server has the requests, and waits for their bodies.
@@ -184,25 +204,29 @@ test(
 );
 
 for (const extraArgs of [[], ['--threads=1']]) {
-  test(`one thread serves alone: ${JSON.stringify(extraArgs)}`, async () => {
-    // One thread needs no --experimental.
-    const { workerd, port } = await serve(extraArgs);
-    try {
-      const fronts = new Set();
-      for (let attempt = 0; attempt < 3; attempt++) {
-        for (const { front } of await concurrentRequests(port, 32)) {
-          fronts.add(front);
+  test(
+    `one thread serves alone: ${JSON.stringify(extraArgs)}`,
+    THREADS_MODE_ONLY,
+    async () => {
+      // One thread needs no --experimental.
+      const { workerd, port } = await serve(extraArgs);
+      try {
+        const fronts = new Set();
+        for (let attempt = 0; attempt < 3; attempt++) {
+          for (const { front } of await concurrentRequests(port, 32)) {
+            fronts.add(front);
+          }
+          const { spun, answered, overlapped } = await requestDuringSpin(port);
+          fronts.add(spun.front).add(answered.front);
+          assert(!overlapped, 'a request was served while the thread was busy');
         }
-        const { spun, answered, overlapped } = await requestDuringSpin(port);
-        fronts.add(spun.front).add(answered.front);
-        assert(!overlapped, 'a request was served while the thread was busy');
+        assert.strictEqual(fronts.size, 1);
+      } finally {
+        const [code, signal] = await workerd.stop();
+        assert.deepStrictEqual([code, signal], SIGTERM_EXIT);
       }
-      assert.strictEqual(fronts.size, 1);
-    } finally {
-      const [code, signal] = await workerd.stop();
-      assert.deepStrictEqual([code, signal], SIGTERM_EXIT);
     }
-  });
+  );
 }
 
 test(
@@ -224,7 +248,7 @@ test(
         'serve',
         env.WORKERD_CONFIG,
         '--experimental',
-        `--threads=${THREADS}`,
+        ...threadArgs(THREADS),
         '--control-fd=3',
         '--socket-fd=http=4',
       ],
@@ -282,7 +306,7 @@ async function serveToExit(args) {
 
 test(
   'options several threads do not support are usage errors',
-  SEVERAL_THREADS,
+  { skip: SEVERAL_THREADS.skip || THREADS_MODE_ONLY.skip },
   async () => {
     for (const [args, message] of [
       [['--threads=2'], /--threads: .*`--experimental`/],
@@ -303,7 +327,11 @@ test(
 
 test(
   'several threads are a usage error on Windows',
-  { skip: process.platform !== 'win32' && 'only Windows refuses them' },
+  {
+    skip:
+      (process.platform !== 'win32' && 'only Windows refuses them') ||
+      THREADS_MODE_ONLY.skip,
+  },
   async () => {
     const { code, signal, stderr } = await serveToExit([
       env.WORKERD_CONFIG,

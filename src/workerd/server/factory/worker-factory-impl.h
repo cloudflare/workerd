@@ -76,6 +76,56 @@ uint startInspector(kj::String address, InspectorServiceIsolateRegistrar& regist
 
 // =======================================================================================
 
+// A Worker of the config that the loops of a process share (`--loops`): compiled once, by the
+// first loop to need it, and served by every loop through a `CompiledWorker` of its own, which
+// holds a reference to this.
+//
+// It has what is the same for every loop and outlives none of them: the `Worker`, with its
+// script and isolate, which any thread may use under the isolate lock, and what the isolate
+// points into. What a request needs of its own loop (the timer, the task set, the channels)
+// is in the loop's `CompiledWorker::Impl`. Immutable once constructed. The loop that drops
+// the last reference destroys it, and with it the isolate.
+class SharedWorker final: public kj::AtomicRefcounted {
+ public:
+  SharedWorker(const SharedFactory::Impl& factory,
+      uint64_t key,
+      kj::Own<capnp::MessageReader> config,
+      kj::Own<capnp::MallocMessageBuilder> flagsArena,
+      kj::Own<const Worker> worker,
+      const CompiledWorker::Impl& compiled);
+  // Takes itself out of the factory's table.
+  ~SharedWorker() noexcept(false);
+
+  // The factory outlives every loop's factory, and so every reference to this.
+  const SharedFactory::Impl& factory;
+  const uint64_t key;
+  // The reader of the config message the isolate was compiled from, which its `WorkerdApi`
+  // reads the extensions through: not a loop's own reader, which goes with that loop.
+  kj::Own<capnp::MessageReader> config;
+  kj::Own<capnp::MallocMessageBuilder> flagsArena;
+  kj::Own<const Worker> worker;
+  kj::Maybe<kj::String> accessBlobHeader;
+  WorkerInfo info;
+  api::WorkerStartupTiming startupTiming;
+};
+
+// The shared Workers of a process, by `SharedWorker::key`.
+struct SharedWorkers {
+  struct Slot {
+    // The worker, once a loop has compiled it. Not a reference: the entry is removed by the
+    // worker's destructor, so a lookup that races with it takes a weak reference.
+    kj::Maybe<const SharedWorker&> worker;
+    // A loop is compiling the worker; the others wait for it.
+    bool compiling = false;
+    kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> waiters;
+  };
+  kj::HashMap<uint64_t, Slot> slots;
+
+  static uint64_t key(uint32_t configService, uint32_t copy) {
+    return (static_cast<uint64_t>(configService) << 32) | copy;
+  }
+};
+
 class SharedFactory::Impl final {
  public:
   Impl(jsg::V8System& v8System,
@@ -108,6 +158,9 @@ class SharedFactory::Impl final {
   ChannelTokenHandler::Key channelTokenKey;
   // Set when the primary loop starts the inspector.
   kj::MutexGuarded<kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>>> inspectorRegistrar;
+  // The config's Workers that loops share. Empty unless a loop's factory shares
+  // (`factory_share_workers`), and again once those loops are gone.
+  kj::MutexGuarded<SharedWorkers> sharedWorkers;
 };
 
 // Writes a `Frankenvalue` for another loop thread of the process: the capabilities of its cap
@@ -137,6 +190,9 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   kj::Arc<SharedFactory> sharedRef;
   const SharedFactory::Impl& shared;
   PrimaryLoop primary;
+  // Set by `factory_share_workers`: this loop serves the config's Workers from the copies of
+  // this number that the process's loops share, instead of compiling its own.
+  kj::Maybe<uint32_t> sharedCopy;
   // The loop this factory is bound to.
   const kj::Executor& executor;
 
@@ -215,8 +271,12 @@ class WorkerTimerChannel final: public TimerChannel {
   const kj::MonotonicClock& monotonicClock;
 };
 
-// Everything requests on a compiled worker share. Refcounted so that the I/O channel factory of a
-// request in flight keeps it alive after the server drops the worker.
+// Everything the requests of one loop on a compiled worker share. Refcounted so that the I/O
+// channel factory of a request in flight keeps it alive after the server drops the worker.
+//
+// Bound to its loop. For a Worker that loops share, this is the loop's view of it: `shared` is
+// set, `worker` is another reference to the `SharedWorker`'s, and `name`, `accessBlobHeader`,
+// `info` and `startupTiming` are copies.
 class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
  public:
   Impl(const WorkerFactory& factory, kj::String name);
@@ -243,8 +303,10 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   bool isDynamic = false;
 
   kj::Maybe<kj::Own<const Worker>> worker;
+  // The Worker as the loops share it, if they do; it owns what `worker` points into.
+  kj::Maybe<kj::Own<const SharedWorker>> shared;
   // Held from compilation until `worker_set_ctx_exports()` fills the object in; none for a worker
-  // whose script failed to compile.
+  // whose script failed to compile, and for a view of a Worker another loop compiled.
   kj::Maybe<jsg::V8Ref<v8::Object>> ctxExportsHandle;
 
   WorkerInfo info;
