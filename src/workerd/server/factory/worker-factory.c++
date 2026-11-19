@@ -571,6 +571,10 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     return tracing::SpanId::fromEntropy(entropySource);
   }
 
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId::fromEntropy(entropySource);
+  }
+
  private:
   uint64_t nextSpanId = 1;
   kj::Own<BaseTracer::WeakRef> weakTracer;

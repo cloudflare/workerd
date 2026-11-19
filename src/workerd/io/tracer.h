@@ -21,20 +21,25 @@ class WorkerTracer;
 
 // Takes the logs and exceptions of an invocation whose span is exported, along with its spans (see
 // BaseTracer::setStartInvocationSpanFunc()). They are the ones the streaming tail would get as
-// `log` and `exception` events. `spanId` is the span that was active, and `message` is a log's
+// `log` and `exception` events. `spanId` is the span that was active, and `traceId` and
+// `traceFlags` its trace; a null `traceId` means the invocation's. `message` is a log's
 // JSON array of arguments unless `truncated`. `errorInfo` holds the fields of the arguments that
 // were native Errors, which the JSON does not keep.
 class InvocationLogSubmitter {
  public:
   virtual ~InvocationLogSubmitter() noexcept(false) = default;
 
-  virtual void submitLog(tracing::SpanId spanId,
+  virtual void submitLog(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       kj::Date timestamp,
       LogLevel level,
       kj::ArrayPtr<const char> message,
       tracing::LogTruncated truncated,
       const tracing::LogErrorInfo& errorInfo) = 0;
-  virtual void submitException(tracing::SpanId spanId,
+  virtual void submitException(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,
       kj::StringPtr message,
@@ -97,7 +102,8 @@ class BaseTracer: public kj::Refcounted {
       kj::String message,
       tracing::LogErrorInfo errorInfo = kj::none) = 0;
   // Add a span open event. `traceId` and `traceFlags` are the span's trace, which its later events
-  // are reported in too. A null `traceId` means the invocation's trace.
+  // are reported in too. A null `traceId` means the invocation's trace. A span with no parent is
+  // the root of its trace.
   virtual void addSpanOpen(tracing::TraceId traceId,
       kj::Maybe<tracing::TraceFlags> traceFlags,
       tracing::SpanId spanId,
@@ -221,15 +227,17 @@ class BaseTracer: public kj::Refcounted {
       kj::StringPtr message,
       kj::Maybe<kj::StringPtr> stack);
   void endInvocationSpan(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
-  // For implementations: hand a log, or an exception reported for `spanId`, to the invocation's
-  // log submitter if the hook returned one. A message too big on its own is truncated as the
-  // streaming tail truncates it.
+  // For implementations: hand a log, or an exception reported for `spanId` in `traceId`, to the
+  // invocation's log submitter if the hook returned one. A message too big on its own is truncated
+  // as the streaming tail truncates it.
   void exportInvocationLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel level,
       kj::StringPtr message,
       const tracing::LogErrorInfo& errorInfo);
-  void exportInvocationException(tracing::SpanId spanId,
+  void exportInvocationException(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,
       kj::StringPtr message,
@@ -418,11 +426,23 @@ class SpanSubmitter: public kj::Refcounted {
       kj::Maybe<kj::String> stack) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
+
+  // Returns the ID of a new trace, for a span that starts one.
+  virtual tracing::TraceId makeRootTraceId() = 0;
 };
 
 // The user tracing observer
 class UserSpanObserver final: public SpanObserver {
  public:
+  // Returns a top-level observer that stands in for no active span. It has no trace ID, and each
+  // of its children starts a new trace, as in OpenTelemetry.
+  static kj::Rc<UserSpanObserver> withoutActiveSpan(kj::Own<SpanSubmitter> submitter);
+  // constructor for withoutActiveSpan()
+  UserSpanObserver(kj::Badge<UserSpanObserver>, kj::Own<SpanSubmitter> submitter)
+      : submitter(kj::mv(submitter)),
+        spanId(tracing::SpanId::nullId),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(nullptr) {}
   // Returns an observer for a root span the submitter records itself (see
   // startExportedUserSpan()), with its own `spanId` and `parentContext`'s trace and optional
   // parent span.
@@ -439,9 +459,9 @@ class UserSpanObserver final: public SpanObserver {
         parentSpanId(parentContext.getSpanId().orDefault(tracing::SpanId::nullId)),
         traceId(parentContext.getTraceId()),
         traceFlags(parentContext.getTraceFlags()) {}
-  // constructor for a top-level observer standing in for the span `context` identifies, such as
-  // the invocation's onset span. It is never opened; its children are that span's children, in its
-  // trace.
+  // constructor for a top-level observer standing in for the span `context` identifies: the
+  // invocation's onset span, or a span created elsewhere (see forActiveContext()). It is never
+  // opened; its children are that span's children, in its trace.
   UserSpanObserver(kj::Own<SpanSubmitter> submitter, const tracing::SpanContext& context)
       : submitter(kj::mv(submitter)),
         spanId(context.getSpanId().orDefault(tracing::SpanId::nullId)),
@@ -466,6 +486,7 @@ class UserSpanObserver final: public SpanObserver {
 
   kj::Rc<SpanObserver> newChild() override;
   kj::Rc<SpanObserver> newChildFromUserCode() override;
+  kj::Rc<SpanObserver> forActiveContext(kj::Maybe<const tracing::SpanContext&> context) override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
@@ -495,6 +516,9 @@ class UserSpanObserver final: public SpanObserver {
   // children created via `newChild()` — runtime sub-operations nested inside an enterSpan
   // callback (e.g. `kv_get`) should remain subject to runtime-span policies.
   bool fromUserCode = false;
+
+  // The parent span and trace of this observer's children.
+  tracing::SpanContext childParent();
 };
 
 }  // namespace workerd

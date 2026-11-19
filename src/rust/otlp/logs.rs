@@ -13,6 +13,7 @@ use serde::de::Visitor;
 
 use crate::attributes::Attributes;
 use crate::attributes::key_value;
+use crate::buffer::Trace;
 use crate::proto;
 use crate::proto::any_value::Value;
 
@@ -46,12 +47,25 @@ impl Level {
 
 /// What is fixed for one invocation's logs.
 pub struct Options {
-    /// The 16-byte trace id every record shares with the invocation's spans.
+    /// The 16-byte id of the invocation's trace, which records are in unless they say otherwise.
     pub trace_id: Vec<u8>,
     /// The W3C trace flags, zero when the trace carries none.
     pub trace_flags: u32,
     /// Leaves every timestamp at zero, for tests that compare whole records.
     pub omit_timestamps: bool,
+}
+
+/// The span that was active when a record was made, and its trace if that is not the invocation's.
+pub struct ActiveSpan {
+    /// Zero for none.
+    pub id: u64,
+    pub trace: Option<Trace>,
+}
+
+impl From<u64> for ActiveSpan {
+    fn from(id: u64) -> Self {
+        Self { id, trace: None }
+    }
 }
 
 /// The structured fields of a `console` argument that was a native `Error`, which its place in
@@ -71,8 +85,8 @@ pub struct Batch {
 /// One invocation's logs and uncaught exceptions on their way to an OTLP collector, as the
 /// `LogRecord`s that the streaming tail's `log` and `exception` events would be.
 ///
-/// Each record carries the trace id and the id of the span that was active when it was made, so a
-/// collector can join it to the invocation's spans, and the same resource and default attributes.
+/// Each record carries the trace and the id of the span that was active when it was made, so a
+/// collector can join it to that span, and the same resource and default attributes.
 /// Records collect into a batch that is handed out when it grows large or when [`Self::flush`]
 /// is called, which the invocation's span closing does. From then on every record is handed out
 /// on its own: it belongs to work that outlives the invocation, and nothing bounds how long the
@@ -112,7 +126,7 @@ impl LogBuffer {
     /// and `stack` for an `Error`, an empty value for any other argument.
     pub fn add_log(
         &mut self,
-        span_id: u64,
+        span: impl Into<ActiveSpan>,
         time: i64,
         level: Level,
         message: &str,
@@ -130,14 +144,14 @@ impl LogBuffer {
                 error_info_value(error_info),
             ));
         }
-        self.add(span_id, time, level, body, attributes, String::new())
+        self.add(span.into(), time, level, body, attributes, String::new())
     }
 
     /// Adds an uncaught exception as an `exception` event with the `exception.*` attributes and
     /// the message as its body.
     pub fn add_exception(
         &mut self,
-        span_id: u64,
+        span: impl Into<ActiveSpan>,
         time: i64,
         name: String,
         message: String,
@@ -151,7 +165,7 @@ impl LogBuffer {
             attributes.push(key_value("exception.stacktrace", stack));
         }
         self.add(
-            span_id,
+            span.into(),
             time,
             Level::Error,
             Value::String(message),
@@ -191,7 +205,7 @@ impl LogBuffer {
 
     fn add(
         &mut self,
-        span_id: u64,
+        span: ActiveSpan,
         time: i64,
         level: Level,
         body: Value,
@@ -205,9 +219,13 @@ impl LogBuffer {
         }
         let (severity, severity_text) = level.severity();
         let time = self.timestamp(time);
-        let span_id = match span_id {
+        let span_id = match span.id {
             0 => Vec::new(),
             id => id.to_be_bytes().to_vec(),
+        };
+        let (trace_id, flags) = match span.trace {
+            Some(trace) => (trace.id, trace.flags),
+            None => (self.options.trace_id.clone(), self.options.trace_flags),
         };
         let record = proto::LogRecord {
             time_unix_nano: time,
@@ -215,8 +233,8 @@ impl LogBuffer {
             severity_text: severity_text.to_owned(),
             body: Some(proto::AnyValue { value: Some(body) }),
             attributes,
-            flags: self.options.trace_flags,
-            trace_id: self.options.trace_id.clone(),
+            flags,
+            trace_id,
             span_id,
             observed_time_unix_nano: time,
             event_name,

@@ -10,6 +10,7 @@
 #include <workerd/tests/test-fixture.h>
 
 #include <opentelemetry/proto/collector/logs/v1/logs_service.pb.h>
+#include <opentelemetry/proto/collector/trace/v1/trace_service.pb.h>
 
 #include <kj/test.h>
 
@@ -47,6 +48,9 @@ class RecordingSpanSubmitter final: public SpanSubmitter {
   tracing::SpanId makeSpanId() override {
     return tracing::SpanId(nextId++);
   }
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId(nextId++, 0);
+  }
 
  private:
   uint64_t nextId = 1;
@@ -69,9 +73,17 @@ class RecordingExporter final: public OtlpSpanExporter {
   uint spanCount = 0;
   uint logCount = 0;
   kj::Vector<otlp::collector::logs::v1::ExportLogsServiceRequest> logRequests;
+  kj::Vector<otlp::trace::v1::Span> spans;
 
   void exportSpans(kj::Array<const kj::byte> request, uint count) override {
     spanCount += count;
+    otlp::collector::trace::v1::ExportTraceServiceRequest decoded;
+    KJ_ASSERT(decoded.ParseFromArray(request.begin(), request.size()));
+    for (auto& resourceSpans: decoded.resource_spans()) {
+      for (auto& scopeSpans: resourceSpans.scope_spans()) {
+        for (auto& span: scopeSpans.spans()) spans.add(span);
+      }
+    }
   }
   void exportLogs(kj::Array<const kj::byte> request, uint count) override {
     logCount += count;
@@ -153,6 +165,58 @@ KJ_TEST("streaming spans use I/O time while native spans use precise time") {
 
 KJ_TEST("native span clocks work without an IoContext") {
   expectNativeClocks();
+}
+
+// The OTLP form of a trace ID.
+std::string otlpId(kj::ArrayPtr<const kj::byte> bytes) {
+  return std::string(bytes.asChars().begin(), bytes.size());
+}
+
+const otlp::trace::v1::Span& exportedSpan(RecordingExporter& exporter, kj::StringPtr name) {
+  for (auto& span: exporter.spans) {
+    if (span.name() == name.cStr()) return span;
+  }
+  KJ_FAIL_ASSERT("span not exported", name);
+}
+
+KJ_TEST("an exported span's descendants outside its trace are exported in their own trace") {
+  TestEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  tracing::TraceId invocationTraceId(1, 2);
+  tracing::TraceId remoteTraceId(4, 5);
+  {
+    auto root = startExportedUserSpan(entropy, exporter.addRef(),
+        tracing::SpanContext(invocationTraceId, tracing::SpanId(3), tracing::TraceFlags(1)),
+        {.serviceName = "trace-test"}, "root"_kjc);
+    SpanParent parent(root);
+    auto local = parent.newChild("local"_kjc);
+    auto remote = parent.forActiveContext(
+        tracing::SpanContext(remoteTraceId, tracing::SpanId(6), tracing::TraceFlags(0)));
+    auto remoteChild = remote.newChild("remote"_kjc);
+    SpanParent remoteChildParent(remoteChild);
+    auto remoteGrandchild = remoteChildParent.newChild("remote-grandchild"_kjc);
+    auto newRoot = parent.forActiveContext(kj::none).newChild("new-root"_kjc);
+  }
+  KJ_ASSERT(exporter->spanCount == 5, exporter->spanCount);
+
+  auto invocationTrace = otlpId(invocationTraceId.toProtobuf());
+  auto remoteTrace = otlpId(remoteTraceId.toProtobuf());
+  auto& local = exportedSpan(*exporter, "local"_kj);
+  KJ_EXPECT(local.trace_id() == invocationTrace);
+  KJ_EXPECT(local.flags() == 1);
+  auto& remote = exportedSpan(*exporter, "remote"_kj);
+  KJ_EXPECT(remote.trace_id() == remoteTrace);
+  KJ_EXPECT(remote.flags() == 0);
+  KJ_EXPECT(remote.parent_span_id() == std::string("\0\0\0\0\0\0\0\x06", 8));
+  auto& grandchild = exportedSpan(*exporter, "remote-grandchild"_kj);
+  KJ_EXPECT(grandchild.trace_id() == remoteTrace);
+  KJ_EXPECT(grandchild.parent_span_id() == remote.span_id());
+  // A span that starts a new trace has no parent.
+  auto& newRoot = exportedSpan(*exporter, "new-root"_kj);
+  KJ_EXPECT(newRoot.trace_id() != invocationTrace);
+  KJ_EXPECT(newRoot.trace_id() != remoteTrace);
+  KJ_EXPECT(newRoot.parent_span_id().empty());
+  KJ_EXPECT(newRoot.flags() == 1);
 }
 
 KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps") {

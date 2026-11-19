@@ -1323,6 +1323,10 @@ class SpanParent {
   // carries identity for toSpanContext() but does not record spans.
   static SpanParent fromSpanContext(tracing::SpanContext context);
 
+  // See SpanObserver::forActiveContext(). Returns a null SpanParent if this parent is not observed
+  // or the observer doesn't support it.
+  SpanParent forActiveContext(kj::Maybe<const tracing::SpanContext&> context);
+
  private:
   kj::Rc<SpanObserver> observer;
 };
@@ -1465,6 +1469,18 @@ class SpanObserver: public kj::Refcounted {
     return newChild();
   }
 
+  // Returns the parent for spans created while `context` is the active span context, as in
+  // OpenTelemetry. `context` is usually a span created elsewhere, for example by another Worker
+  // that sent its span context in a queue message: spans created from the returned observer are
+  // children of that span, in its trace. With kj::none or an invalid context there is no active
+  // span, so each span created from the returned observer starts a new trace. The returned
+  // observer is never opened. Returns null if this observer doesn't report spans outside the
+  // invocation's trace.
+  [[nodiscard]] virtual kj::Rc<SpanObserver> forActiveContext(
+      kj::Maybe<const tracing::SpanContext&> context) {
+    return {};
+  }
+
   // Called when the span is opened. Delivers the initial operation name and start time.
   // Called exactly once, before any other lifecycle method.
   virtual void onOpen(kj::ConstString operationName, kj::Date startTime) = 0;
@@ -1542,6 +1558,11 @@ inline tracing::SpanId SpanParent::getSpanId() {
 
 inline SpanParent SpanParent::fromSpanContext(tracing::SpanContext context) {
   return SpanParent(kj::rc<NonRecordingSpanObserver>(kj::mv(context)));
+}
+
+inline SpanParent SpanParent::forActiveContext(kj::Maybe<const tracing::SpanContext&> context) {
+  if (observer == nullptr) return nullptr;
+  return SpanParent(observer->forActiveContext(context));
 }
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(builder.observer.addRef()) {}

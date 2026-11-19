@@ -67,11 +67,30 @@ template <typename Tags>
   return resource;
 }
 
+// A trace ID as the OTLP buffers take it: no bytes for a null ID, which means the invocation's
+// trace.
+kj::Array<kj::byte> traceIdBytes(const tracing::TraceId& traceId) {
+  if (traceId == nullptr) return nullptr;
+  return traceId.toProtobuf();
+}
+
 uint32_t toRust(kj::Maybe<tracing::TraceFlags> traceFlags) {
   KJ_IF_SOME(flags, traceFlags) {
     return static_cast<uint8_t>(flags);
   }
   return 0;
+}
+
+// The span that was active for a log, in the trace whose bytes are `traceBytes` (see
+// traceIdBytes()), which the result borrows.
+rust::otlp::ActiveSpan activeSpan(const kj::Array<kj::byte>& traceBytes,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId) {
+  return {
+    .trace_id = traceBytes.as<kj_rs::Rust>(),
+    .trace_flags = toRust(traceFlags),
+    .span_id = spanId.getId(),
+  };
 }
 
 rust::otlp::LogLevel toRust(LogLevel level) {
@@ -285,7 +304,7 @@ bool OtlpSpanSubmitter::submitSpanOpen(tracing::TraceId traceId,
   if (spanId != rootSpanId && !exporter->exportsRuntimeSpan(operationName)) {
     return false;
   }
-  return open(spanId, parentSpanId, operationName, startTime);
+  return open(traceId, traceFlags, spanId, parentSpanId, operationName, startTime);
 }
 
 bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::TraceId traceId,
@@ -297,17 +316,20 @@ bool OtlpSpanSubmitter::submitUserSpanOpen(tracing::TraceId traceId,
   if (!exporter->exportsUserSpan(operationName)) {
     return false;
   }
-  return open(spanId, parentSpanId, operationName, startTime);
+  return open(traceId, traceFlags, spanId, parentSpanId, operationName, startTime);
 }
 
-bool OtlpSpanSubmitter::open(tracing::SpanId spanId,
+bool OtlpSpanSubmitter::open(const tracing::TraceId& traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::StringPtr operationName,
     kj::Date startTime) {
   // Not a dropped span: there is no trace to export it in.
   if (!exportSpans && spanId != rootSpanId) return false;
-  if (rust::otlp::open_span(*buffer, spanId.getId(), parentSpanId.getId(), toRust(operationName),
-          toUnixNanos(startTime))) {
+  auto traceBytes = traceIdBytes(traceId);
+  if (rust::otlp::open_span(*buffer, traceBytes.as<kj_rs::Rust>(), toRust(traceFlags),
+          spanId.getId(), parentSpanId.getId(), toRust(operationName), toUnixNanos(startTime))) {
     return true;
   }
   exporter->spansDropped(1);
@@ -346,7 +368,9 @@ void OtlpSpanSubmitter::submitSpanException(tracing::SpanId spanId,
       toRust(message), stack.map([](kj::String& s) { return toRust(s); }));
 }
 
-void OtlpSpanSubmitter::submitLog(tracing::SpanId spanId,
+void OtlpSpanSubmitter::submitLog(const tracing::TraceId& traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     kj::Date timestamp,
     LogLevel level,
     kj::ArrayPtr<const char> message,
@@ -358,21 +382,30 @@ void OtlpSpanSubmitter::submitLog(tracing::SpanId spanId,
     KJ_IF_SOME(slots, errorInfo) {
       arguments = KJ_MAP(slot, slots) { return toRust(slot); };
     }
-    exportLogs(rust::otlp::add_log(*l, spanId.getId(), toUnixNanos(timestamp), toRust(level),
-        message.asBytes().as<kj_rs::Rust>(), static_cast<bool>(truncated),
-        arguments.as<kj_rs::Rust>()));
+    auto traceBytes = traceIdBytes(traceId);
+    exportLogs(rust::otlp::add_log(*l, activeSpan(traceBytes, traceFlags, spanId),
+        toUnixNanos(timestamp), toRust(level), message.asBytes().as<kj_rs::Rust>(),
+        static_cast<bool>(truncated), arguments.as<kj_rs::Rust>()));
   }
 }
 
-void OtlpSpanSubmitter::submitException(tracing::SpanId spanId,
+void OtlpSpanSubmitter::submitException(const tracing::TraceId& traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    tracing::SpanId spanId,
     kj::Date timestamp,
     kj::StringPtr name,
     kj::StringPtr message,
     kj::Maybe<kj::StringPtr> stack) {
   KJ_IF_SOME(l, logs) {
-    exportLogs(rust::otlp::add_exception_log(*l, spanId.getId(), toUnixNanos(timestamp),
-        toRust(name), toRust(message), stack.map([](kj::StringPtr s) { return toRust(s); })));
+    auto traceBytes = traceIdBytes(traceId);
+    exportLogs(rust::otlp::add_exception_log(*l, activeSpan(traceBytes, traceFlags, spanId),
+        toUnixNanos(timestamp), toRust(name), toRust(message),
+        stack.map([](kj::StringPtr s) { return toRust(s); })));
   }
+}
+
+tracing::TraceId OtlpSpanSubmitter::makeRootTraceId() {
+  return tracing::TraceId::fromEntropy(entropySource);
 }
 
 tracing::SpanId OtlpSpanSubmitter::makeSpanId() {

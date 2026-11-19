@@ -42,6 +42,9 @@ class NullSpanSubmitter final: public SpanSubmitter {
   tracing::SpanId makeSpanId() override {
     return tracing::SpanId(1);
   }
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId(1, 2);
+  }
 };
 
 kj::Rc<BaseTracer> makeObservedTracer() {

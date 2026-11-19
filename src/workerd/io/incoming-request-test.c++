@@ -101,6 +101,9 @@ class NullSpanSubmitter final: public SpanSubmitter {
   tracing::SpanId makeSpanId() override {
     return tracing::SpanId(0x77);
   }
+  tracing::TraceId makeRootTraceId() override {
+    return tracing::TraceId(0x3333, 0x4444);
+  }
 };
 
 KJ_TEST("request trace scopes capture both roots and restore enclosing tracing and storage") {

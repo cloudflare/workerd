@@ -123,7 +123,8 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
     ExportInvocationLog exportInvocationLog = ExportInvocationLog::NO;
   };
 
-  // `context`'s trace id and flags are shared by every span. The root span is `rootSpanId`, or
+  // `context`'s trace id and flags are the invocation's, which spans and logs are in unless they
+  // say otherwise. The root span is `rootSpanId`, or
   // takes the first span id if that is null; see getRootSpanId(). `options` is only read during
   // construction.
   OtlpSpanSubmitter(kj::EntropySource& entropySource,
@@ -159,25 +160,32 @@ class OtlpSpanSubmitter final: public SpanSubmitter, public InvocationLogSubmitt
       kj::String message,
       kj::Maybe<kj::String> stack) override;
 
-  void submitLog(tracing::SpanId spanId,
+  void submitLog(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       kj::Date timestamp,
       LogLevel level,
       kj::ArrayPtr<const char> message,
       tracing::LogTruncated truncated,
       const tracing::LogErrorInfo& errorInfo) override;
-  void submitException(tracing::SpanId spanId,
+  void submitException(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       kj::Date timestamp,
       kj::StringPtr name,
       kj::StringPtr message,
       kj::Maybe<kj::StringPtr> stack) override;
 
   tracing::SpanId makeSpanId() override;
+  tracing::TraceId makeRootTraceId() override;
   tracing::SpanId getRootSpanId() const {
     return rootSpanId;
   }
 
  private:
-  bool open(tracing::SpanId spanId,
+  bool open(const tracing::TraceId& traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::StringPtr operationName,
       kj::Date startTime);
