@@ -43,7 +43,8 @@
 //! secret name in its props. Each store is a KV namespace of the Worker `<name>-secrets-kv`, in
 //! `.wrangler/state/workerd/secrets-store/`, which on Unix only this user may read. The variable
 //! [`secret_variable`] names after a `secret_name`, read when the server starts, overrides that
-//! secret in every store and is never stored. `ratelimits`,
+//! secret in every store and is never stored. The admin API stays off, so a Worker can only
+//! `get()`, as on Cloudflare. `ratelimits`,
 //! also `--experimental`, are the entrypoint `RateLimit` of the Worker `<name>-ratelimit` (the
 //! bundled module `/workerd/ratelimit.js`), its settings in its props, so they are called over JS
 //! RPC; it keeps its counts in memory. `assets`, also
@@ -881,8 +882,8 @@ fn stateless_worker<'a>(
 /// The Secrets Store Worker `<name>-secrets-store` at `services[at]`, then the KV Worker
 /// `<name>-secrets-kv` that holds its stores and that KV Worker's disks under `dir`, a real
 /// directory that on Unix only this user may read. Each store is a KV namespace, bound as
-/// `store:<store_id>`; each secret's
-/// variable, which overrides it in every store, is bound as `env:<secret_name>`.
+/// `store:<store_id>`; each secret's variable, which overrides it in every store, is bound as
+/// `env:<secret_name>`. Without `ADMIN`, the admin API is off.
 fn secrets_services(
     services: &mut capnp::struct_list::Builder<'_, service::Owned>,
     at: u32,

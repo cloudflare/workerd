@@ -12,9 +12,10 @@
 // `get()` resolves to the secret's value or throws `Secret "<name>" not
 // found`, as Miniflare's does. `["SecretsStoreSecret::admin_api"]()` answers
 // Miniflare's local admin API: `create`, `update`, `duplicate`, `delete`,
-// `list` and `get`, with Miniflare's ids and errors. Any Worker holding the
-// binding can call it. wrangler's local `secrets-store secret` commands write
-// Miniflare's own state, not this store.
+// `list` and `get`, with Miniflare's ids and errors, when this Worker has
+// `ADMIN`; it reaches every secret in the store. Without `ADMIN` a Worker can
+// only `get()`, as on Cloudflare. wrangler's local `secrets-store secret`
+// commands write Miniflare's own state, not this store.
 //
 // The config that runs this module (`bundled = "/workerd/secrets-store.js"`)
 // is an interface: cli/wrangler.rs and hand-written configs write it.
@@ -27,6 +28,8 @@
 //   env:<secret_name>    Optional. When not null, the secret's value in every
 //                        store, ahead of the stored one; cli/wrangler.rs binds
 //                        it `fromEnvironment`, so it is never stored.
+//   ADMIN                Optional. JSON `true` turns on the admin API, for
+//                        tests and local tools; cli/wrangler.rs never sets it.
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
@@ -46,6 +49,9 @@ export class SecretsStoreSecret extends WorkerEntrypoint {
   }
 
   [ADMIN_API]() {
+    if (this.env.ADMIN !== true) {
+      throw new Error('The Secrets Store admin API is off');
+    }
     const store = this.#store;
     const name = this.ctx.props.secret_name;
     // The name of the secret `id`, from the first page of the store.

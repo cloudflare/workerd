@@ -78,3 +78,14 @@ export const adminApi = {
     }
   },
 };
+
+// Without `ADMIN`, as in a wrangler.json config, a Worker can only `get()`.
+export const getOnly = {
+  async test(ctrl, env) {
+    await assert.rejects(admin(env.GET_ONLY), {
+      message: 'The Secrets Store admin API is off',
+    });
+    await (await admin(env.WRITER)).create('example');
+    assert.strictEqual(await env.GET_ONLY.get(), 'example');
+  },
+};
