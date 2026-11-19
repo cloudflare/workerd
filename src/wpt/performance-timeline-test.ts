@@ -50,6 +50,66 @@ export default {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
   },
+  'not-restored-reasons/attributes.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/bfcache-reasons-stay.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/cross-origin-bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/fetch.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/iframes-without-attributes.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/navigation-failure.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/not-bfcached.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/redirect-on-history.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/reload.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/same-origin-bfcache.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
+  'not-restored-reasons/same-origin-replace.window.js': {
+    comment:
+      'Back/forward cache and NotRestoredReasons require browser windows and navigation',
+    omittedTests: true,
+  },
   'observer-buffered-false.any.js': {
     comment: 'This is not yet implemented',
     disabledTests: [

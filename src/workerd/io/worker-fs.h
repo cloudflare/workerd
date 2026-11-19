@@ -494,11 +494,17 @@ class Directory: public kj::Refcounted {
 // virtual file system and a target path. The target node may or may not
 // exist, can be deleted and recreated at any time and the symlink will
 // remain valid.
+//
+// The target path is always absolute: a relative target is resolved against
+// the directory the link was created in. The target as written, when there
+// is one, is kept separately for readlink. Links created from a URL, and
+// cp copies of relative links, have none.
 class SymbolicLink final: public kj::Refcounted {
  public:
-  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath)
+  SymbolicLink(kj::Rc<Directory> root, kj::Path targetPath, kj::Maybe<kj::String> rawTarget)
       : root(kj::mv(root)),
-        targetPath(kj::mv(targetPath)) {}
+        targetPath(kj::mv(targetPath)),
+        rawTarget(kj::mv(rawTarget)) {}
   KJ_DISALLOW_COPY_AND_MOVE(SymbolicLink);
 
   // Gets the stat for the symbolic link itself.
@@ -515,6 +521,9 @@ class SymbolicLink final: public kj::Refcounted {
 
   jsg::Url getTargetUrl() const KJ_WARN_UNUSED_RESULT;
 
+  // Returns the target as written, or the target path if none was kept.
+  kj::String getRawTarget() const KJ_WARN_UNUSED_RESULT;
+
   // Returns a UUID that uniquely identifies this fs node. The value stable across
   // multiple calls to getUniqueId() on the same node, but is not guaranteed to
   // be stable across worker restarts. This is primarily useful for implementing
@@ -529,6 +538,7 @@ class SymbolicLink final: public kj::Refcounted {
  private:
   kj::Rc<Directory> root;
   kj::Path targetPath;
+  kj::Maybe<kj::String> rawTarget;
   mutable kj::Maybe<kj::String> maybeUniqueId;
   mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
 };
@@ -592,8 +602,9 @@ class VirtualFileSystem {
 
   // Creates a new symbolic link to the given target path. The target path
   // does not need to exist.
-  kj::Rc<SymbolicLink> newSymbolicLink(
-      jsg::Lock& js, const jsg::Url& url) const KJ_WARN_UNUSED_RESULT;
+  kj::Rc<SymbolicLink> newSymbolicLink(jsg::Lock& js,
+      const jsg::Url& url,
+      kj::Maybe<kj::String> rawTarget = kj::none) const KJ_WARN_UNUSED_RESULT;
 
   // Return the configured root paths for the bundle, temp, and dev directories.
   virtual const jsg::Url& getBundleRoot() const KJ_WARN_UNUSED_RESULT = 0;

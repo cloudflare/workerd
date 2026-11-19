@@ -76,19 +76,24 @@ export default {
   },
   'basic/error-after-response.any.js': {
     comment:
-      'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
-    disabledTests: true,
+      'A network error on a response body rejects with Error("Network connection lost."), not TypeError. ' +
+      'The closed test hangs: the body is only read on demand, so with no read pending the bad ' +
+      'chunk is never seen, reader.closed never settles, and the request is cancelled as hung.',
+    disabledTests: [
+      'Response reader closed promise should reject after a network error happening after resolving fetch promise',
+    ],
+    expectedFailures: [
+      'Response reader read() promise should reject after a network error happening after resolving fetch promise',
+    ],
   },
   'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
-      "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
-    disabledTests: true,
+      'The .asis responses end their header block at EOF, without the blank line that ' +
+      'terminates it. fetch() rejects a truncated header block before headers are combined.',
+    expectedFailures: true,
   },
-  'basic/header-value-null-byte.any.js': {
-    comment: 'We should return a nicer TypeError instead of "internal error"',
-    expectedFailures: ['Ensure fetch() rejects null bytes in headers'],
-  },
+  'basic/header-value-null-byte.any.js': {},
   'basic/historical.any.js': {
     comment: 'This test expects us not to implement getAll',
     expectedFailures: ['Headers object no longer has a getAll() method'],
@@ -124,7 +129,10 @@ export default {
   },
   'basic/request-head.any.js': {},
   'basic/request-headers-case.any.js': {
-    comment: 'To be investigated',
+    comment:
+      'The casing of the first name is kept, but each value is sent on its own header line ' +
+      'rather than combined into one, which RFC 9110 section 5.3 allows. The test expects ' +
+      'one combined line.',
     expectedFailures: [
       'Multiple headers with the same name, different case (THIS-IS-A-TEST first)',
       'Multiple headers with the same name, different case (THIS-is-A-test first)',
@@ -179,8 +187,19 @@ export default {
     ],
   },
   'basic/request-upload.any.js': {
-    comment: 'Appears to corrupt the state of workerd',
-    disabledTests: true,
+    comment:
+      'fetch() resolves with the response even when the request body stream errors, and the ' +
+      "body's TypeError escapes as an uncaught waitUntil() error that fails the whole test " +
+      'event (https://github.com/cloudflare/workerd/issues/7983). workerd allows streaming ' +
+      'uploads over HTTP/1.1 with chunked encoding.',
+    disabledTests: [
+      'Fetch with POST with ReadableStream containing String',
+      'Fetch with POST with ReadableStream containing null',
+      'Fetch with POST with ReadableStream containing number',
+      'Fetch with POST with ReadableStream containing ArrayBuffer',
+      'Fetch with POST with ReadableStream containing Blob',
+    ],
+    expectedFailures: ["Streaming upload shouldn't work on Http/1.1."],
   },
   'basic/request-upload.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',
@@ -210,6 +229,7 @@ export default {
     ],
   },
   'basic/scheme-others.sub.any.js': {},
+  'basic/split-byte-order-mark.any.js': {},
   'basic/status.h2.any.js': {
     comment: 'Enable if HTTP/2 is implemented',
     disabledTests: true,
@@ -294,6 +314,10 @@ export default {
     omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
+    comment: 'CORS is not implemented',
+    omittedTests: true,
+  },
+  'cors/cors-preflight-safelist-value-size.any.js': {
     comment: 'CORS is not implemented',
     omittedTests: true,
   },
@@ -506,7 +530,11 @@ export default {
       'Fix our handling of empty Location header. Even when fixed, tests will still fail due to CORS stuff',
     expectedFailures: [
       'redirect response with empty Location, manual mode',
-      'redirect response with empty Location, follow mode',
+      '301 redirect response with empty Location, follow mode',
+      '302 redirect response with empty Location, follow mode',
+      '303 redirect response with empty Location, follow mode',
+      '307 redirect response with empty Location, follow mode',
+      '308 redirect response with empty Location, follow mode',
     ],
   },
   'redirect/redirect-keepalive.any.js': {
@@ -720,11 +748,7 @@ export default {
     ],
   },
   'request/request-cache.js': {},
-  'request/request-clone-readable-stream-body.any.js': {
-    comment:
-      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
-    expectedFailures: true,
-  },
+  'request/request-clone-readable-stream-body.any.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

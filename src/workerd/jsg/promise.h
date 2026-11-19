@@ -454,6 +454,19 @@ class Promise {
     return js.withinHandleScope([&] {
       auto context = js.v8Context();
 
+      if (js.isPreparingSnapshot()) {
+        // The continuation functions are API functions whose callbacks are template
+        // instantiations, one pair per continuation type, so the zygote's external reference
+        // table cannot list them up front. A continuation still pending when top-level
+        // evaluation ends (a C++ stream whose pull() returned a pending promise, say) stays
+        // reachable from the context; with its callbacks registered, CreateBlob() serializes
+        // the function and reaches `funcPairHandle`, an opaque wrapper with no snapshot
+        // transfer, which the serializer callback reports and the zygote fails on. Without the
+        // registration V8 aborts the process on the unknown address instead.
+        isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(thenCallback));
+        isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(errCallback));
+      }
+
       auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
 
       auto then = check(v8::Function::New(
@@ -623,6 +636,13 @@ class PromiseWrapper {
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
+    if (js.isPreparingSnapshot()) {
+      // A template instantiation per T, which the zygote's external reference table cannot list
+      // up front; see Promise::thenImpl(). The function stays reachable while `promise` is
+      // pending, and `creator` is an ordinary object the serializer transfers or reports.
+      isolateRegisterExternalReference(
+          js.v8Isolate, reinterpret_cast<intptr_t>(&thenWrap<TypeWrapper, T>));
+    }
     auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
         1, v8::ConstructorBehavior::kThrow));
     auto ret = check(promise.consumeHandle(js)->Then(context, then));
@@ -660,6 +680,11 @@ class PromiseWrapper {
         // TODO(perf): We could in theory check if promise->State() is kFulfilled and, in that
         //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
         //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
+        if (js.isPreparingSnapshot()) {
+          // As in wrap() above: reachable from `promise` while it is pending.
+          isolateRegisterExternalReference(
+              js.v8Isolate, reinterpret_cast<intptr_t>(&thenUnwrap<TypeWrapper, T>));
+        }
         auto then = check(v8::Function::New(
             context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));

@@ -19,10 +19,12 @@ trap "rm -f $ACTUAL_STDOUT $ACTUAL_STDERR $FILTERED_STDOUT $FILTERED_STDERR" EXI
 
 "$WORKERD_BINARY" test "$TEST_CONFIG" --experimental >"$ACTUAL_STDOUT" 2>"$ACTUAL_STDERR" --compat-date 2025-05-01 "$@"
 
-# Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr, and the warning logged when V8 rejects the
-# per-isolate bootstrap's compile cache. Builds that generate the cache for other V8 flags
-# (--@workerd//build/config:compile_cache_v8_flags) log it on every run of this binary.
-grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]|per-isolate bootstrap compile cache" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
+# Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr, the warning logged when V8 rejects the
+# per-isolate bootstrap's compile cache (builds that generate the cache for other V8 flags,
+# --@workerd//build/config:compile_cache_v8_flags, log it on every run of this binary), and the
+# startup snapshot pipeline's INFO lines: whether the Worker started from a snapshot or fell back
+# is not what this test checks.
+grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]|per-isolate bootstrap compile cache|startup snapshot" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
 
 # Compare with expected output (normalize line endings for cross-platform compatibility)
 echo "Comparing stdout..."

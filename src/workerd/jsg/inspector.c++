@@ -36,6 +36,20 @@ kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
 
 namespace workerd::jsg {
 
+namespace {
+
+// `value` as kj::str(value) describes it, without a jsg::Lock. kj::none if V8 fails, leaving an
+// exception pending.
+kj::Maybe<kj::String> describe(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  v8::Local<v8::String> detail;
+  if (!toDetailString(isolate, value).ToLocal(&detail)) return kj::none;
+  v8::String::Utf8Value utf8(isolate, detail);
+  if (*utf8 == nullptr) return kj::str("(couldn't stringify)");
+  return kj::str(*utf8);
+}
+
+}  // namespace
+
 StringViewWithScratch toInspectorStringView(kj::StringPtr text) {
   bool isAscii = simdutf::validate_ascii(text.begin(), text.size());
 
@@ -73,28 +87,39 @@ void sendExceptionToInspector(jsg::Lock& js,
     message = jsg::JsMessage::create(js, jsg::JsValue(exception));
   }
 
-  // TODO(cleanup): Move the inspector stuff into a utility within jsg to better
-  // encapsulate
   KJ_ASSERT(message);
-  v8::Local<v8::Message> msg = message;
+  if (!sendExceptionToInspector(js.v8Isolate, inspector, source, exception, message)) {
+    throw JsExceptionThrown();
+  }
+}
 
-  auto context = js.v8Context();
+bool sendExceptionToInspector(v8::Isolate* isolate,
+    v8_inspector::V8Inspector& inspector,
+    kj::StringPtr source,
+    v8::Local<v8::Value> exception,
+    v8::Local<v8::Message> message) {
+  v8::HandleScope scope(isolate);
+  auto context = isolate->GetCurrentContext();
 
-  auto stackTrace = msg->GetStackTrace();
+  auto stackTrace = message->GetStackTrace();
 
   // The resource name is whatever we set in the Script ctor, e.g. "worker.js".
-  auto scriptResourceName = kj::str(msg->GetScriptResourceName());
-  auto detailedMessage = kj::str(msg->Get());
+  KJ_IF_SOME(scriptResourceName, describe(isolate, message->GetScriptResourceName())) {
+    KJ_IF_SOME(detailedMessage, describe(isolate, message->Get())) {
+      auto lineNumber = message->GetLineNumber(context).FromMaybe(0);
+      auto startColumn = message->GetStartColumn(context).FromMaybe(0);
 
-  auto lineNumber = msg->GetLineNumber(context).FromMaybe(0);
-  auto startColumn = msg->GetStartColumn(context).FromMaybe(0);
-
-  // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
-  //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
-  inspector.exceptionThrown(context, jsg::toInspectorStringView(source).stringView, exception,
-      jsg::toInspectorStringView(detailedMessage).stringView,
-      jsg::toInspectorStringView(scriptResourceName).stringView, lineNumber, startColumn,
-      inspector.createStackTrace(stackTrace), 0);
+      // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect
+      //   this has something to do with the incorrect links in the console when it logs uncaught
+      //   exceptions.
+      inspector.exceptionThrown(context, toInspectorStringView(source).stringView, exception,
+          toInspectorStringView(detailedMessage).stringView,
+          toInspectorStringView(scriptResourceName).stringView, lineNumber, startColumn,
+          inspector.createStackTrace(stackTrace), 0);
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace workerd::jsg

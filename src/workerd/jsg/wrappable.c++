@@ -7,6 +7,7 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <cppgc/allocation.h>
@@ -94,6 +95,8 @@ void HeapTracer::unbind(Wrappable& wrappable) {
   if (wrappable.link.isLinked()) {
     (wrappable.linkedInWrappers ? wrappers : unwrapped).remove(wrappable);
     wrappable.linkedInWrappers = false;
+    // Its charge goes with this isolate, so a later isolate does not release it.
+    wrappable.accountedBytes = 0;
   }
   wrappable.isolate = nullptr;
 }
@@ -108,7 +111,37 @@ void Wrappable::unlinkFromTracer() {
     abort();
   }
   auto& tracer = HeapTracer::getTracer(isolate);
+  tracer.releaseWrappable(*this);
   (linkedInWrappers ? tracer.wrappers : tracer.unwrapped).remove(*this);
+}
+
+void HeapTracer::chargeWrappable(Wrappable& wrappable) {
+  if (wrappable.accountedBytes != 0) return;
+  size_t size = wrappable.jsgGetMemorySelfSize();
+  wrappable.accountedBytes = static_cast<uint16_t>(kj::min(size, size_t{UINT16_MAX}));
+  unreportedWrappableBytes += wrappable.accountedBytes;
+}
+
+void HeapTracer::releaseWrappable(Wrappable& wrappable) {
+  unreportedWrappableBytes -= wrappable.accountedBytes;
+  wrappable.accountedBytes = 0;
+}
+
+void HeapTracer::flushExternalMemory() {
+  if (isolate == nullptr ||
+      !util::Autogate::isEnabled(util::AutogateKey::WRAPPABLE_EXTERNAL_MEMORY)) {
+    return;
+  }
+  if (unreportedWrappableBytes < kExternalMemoryFlushBytes &&
+      unreportedWrappableBytes > -kExternalMemoryFlushBytes) {
+    return;
+  }
+  // Taken before the call: V8 may run a GC inside it, and what that GC charges or releases must
+  // stay pending for the next flush.
+  int64_t delta = unreportedWrappableBytes;
+  unreportedWrappableBytes = 0;
+  reportedWrappableBytes += delta;
+  isolate->AdjustAmountOfExternalAllocatedMemoryImpl(delta);
 }
 
 void HeapTracer::destroyLiveWrappableInstances() {
@@ -378,6 +411,7 @@ void HeapTracer::linkRestoredWrapper(
   shim.state = JSGWrappable::CppgcShim::Active{kj::mv(own)};
   wrappable.isolate = isolate;
   wrappable.weakShim = &shim;
+  chargeWrappable(wrappable);
 
   {
     // Same invariant as in attachWrapper.
@@ -670,6 +704,10 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
   auto* shim = tracer.allocateShim(*this, tag);
 
+  // Nothing below throws, so `this` is always linked, and therefore released, by the end of this
+  // function.
+  tracer.chargeWrappable(*this);
+
   // No garbage collection may run from here to the end of this function. Between creating the
   // TracedReference below and linking `object` to its CppgcShim, the traced node exists but
   // nothing in the cppgc object graph reaches it, so a major GC's ResetDeadNodes() would free the
@@ -840,7 +878,9 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
   if (isolate == nullptr && parent.isolate != nullptr) {
     // A Ref<T> to an unbound Wrappable implies it has no wrapper.
     isolate = parent.isolate;
-    HeapTracer::getTracer(isolate).addUnwrapped({}, *this);
+    auto& tracer = HeapTracer::getTracer(isolate);
+    tracer.addUnwrapped({}, *this);
+    tracer.chargeWrappable(*this);
   }
 
   // Make ref strength match the parent.

@@ -52,6 +52,9 @@ use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
 use crate::worker::WorkerService;
 
+/// Where `serve` prints a line for a person.
+pub type Announce = Box<dyn Fn(&str)>;
+
 /// The command line's choices for a run.
 #[derive(Default)]
 pub struct RunOptions {
@@ -68,6 +71,8 @@ pub struct RunOptions {
     pub control: Option<std::fs::File>,
     /// `--debug-port`.
     pub debug_port: Option<String>,
+    /// Where `serve` tells a person each socket's URL, unless a tool reads `--control-fd`.
+    pub announce: Option<Announce>,
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
@@ -79,7 +84,8 @@ pub struct RunOptions {
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
 /// events are formatted by hand to keep their fields in a fixed order, `port` last: consumers
 /// include shell scripts that cut the port off the end of the line.
-struct Control(Option<std::fs::File>);
+/// Without a control channel, the socket URLs go to `RunOptions::announce`.
+struct Control(Option<std::fs::File>, Option<Announce>);
 
 impl Control {
     fn write(&mut self, line: &str) {
@@ -90,7 +96,10 @@ impl Control {
         }
     }
 
-    fn listen(&mut self, socket: &str, port: u16) {
+    fn listen(&mut self, socket: &str, port: u16, url: Option<String>) {
+        if let (None, Some(announce), Some(url)) = (&self.0, &self.1, url) {
+            announce(&format!("Listening on {url}"));
+        }
         let socket = serde_json::Value::from(socket);
         self.write(&format!(
             "{{\"event\":\"listen\",\"socket\":{socket},\"port\":{port}}}\n"
@@ -136,7 +145,7 @@ async fn start(
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
-    let mut control = Control(options.control.take());
+    let mut control = Control(options.control.take(), options.announce.take());
 
     let bound = listen::bind_sockets(
         config,
@@ -207,7 +216,8 @@ async fn start(
             server.report().error(error);
         }
         let channel = server.lookup(&designator);
-        ports.push((name, listen::bound_port(&bound)?));
+        let port = listen::bound_port(&bound)?;
+        ports.push((name, port, listen::url(sock, &address, port)));
         if let Some(listener) =
             listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
         {
@@ -223,14 +233,14 @@ async fn start(
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener, &mut control).await?;
     }
-    for (name, port) in ports {
-        control.listen(&name, port);
+    for (name, port, url) in ports {
+        control.listen(&name, port, url);
     }
     listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
-        control.listen("debug-port", listener.port()?);
+        control.listen("debug-port", listener.port()?, None);
         listeners.push(Box::pin(listen::listen_debug_port(
             Rc::clone(&context),
             listener,

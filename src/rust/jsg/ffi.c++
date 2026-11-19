@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -20,6 +21,7 @@
 #include <kj/mutex.h>
 #include <kj/string.h>
 
+#include <limits>
 #include <memory>
 
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
@@ -127,6 +129,79 @@ size_t Wrappable::jsgGetMemorySelfSize() const {
 void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
   ::workerd::jsg::Wrappable::jsgGetMemoryInfo(tracker);
   wrappable_invoke_get_memory_info(*this, tracker);
+}
+
+kj::Vector<v8::Global<v8::FunctionTemplate>> pinResourceTemplatesIntoSnapshot(
+    v8::Isolate* isolate) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  KJ_REQUIRE(isolateBase.isPreparingSnapshot());
+  kj::Vector<v8::Global<v8::FunctionTemplate>> handles;
+  auto* realm = realm_from_isolate(isolate);
+  if (realm == nullptr) return handles;
+  v8::HandleScope scope(isolate);
+  auto& records = isolateBase.mutableSnapshotArtifact().rustResourceTemplates;
+  for (auto& entry: realm_take_resource_templates(*realm)) {
+    auto handle = global_from_ffi<v8::FunctionTemplate>(kj::mv(entry.handle));
+    records.add(::workerd::jsg::SnapshotArtifact::RustResourceTemplate{
+      .typeIdLo = entry.type_id_lo,
+      .typeIdHi = entry.type_id_hi,
+      .index = isolateBase.pinIntoIsolateSnapshot(handle.Get(isolate)),
+    });
+    handles.add(kj::mv(handle));
+  }
+  return handles;
+}
+
+void restoreResourceTemplatesFromSnapshot(v8::Isolate* isolate) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  if (!isolateBase.isStartingFromSnapshot()) return;
+  auto& records = isolateBase.finalizedSnapshotArtifact().rustResourceTemplates;
+  if (records.size() == 0) return;
+  v8::HandleScope scope(isolate);
+  ::rust::Vec<ResourceTemplate> templates;
+  templates.reserve(records.size());
+  for (auto& record: records) {
+    v8::Local<v8::FunctionTemplate> functionTemplate;
+    KJ_REQUIRE(isolate->GetDataFromSnapshotOnce<v8::FunctionTemplate>(record.index)
+                   .ToLocal(&functionTemplate),
+        "START_FROM_SNAPSHOT: Rust resource template missing from snapshot", record.index);
+    templates.push_back(ResourceTemplate{
+      .type_id_lo = record.typeIdLo,
+      .type_id_hi = record.typeIdHi,
+      .handle = to_ffi(v8::Global<v8::FunctionTemplate>(isolate, functionTemplate)),
+    });
+  }
+  auto* realm = realm_from_isolate(isolate);
+  KJ_REQUIRE(realm != nullptr, "START_FROM_SNAPSHOT: no Rust Realm to restore templates into");
+  realm_restore_resource_templates(*realm, kj::mv(templates));
+}
+
+kj::Maybe<kj::Own<::workerd::jsg::Wrappable>> Wrappable::snapshotClone() const {
+  TraitObjectPtr copy = {0, 0, 0, 0};
+  if (!wrappable_invoke_snapshot_clone(*this, copy)) return kj::none;
+  // Unlike wrappable_new(), it adds no strong reference: no Rust Rc refers to the copy.
+  auto clone = kj::refcounted<Wrappable>();
+  clone->trait_object = copy;
+  return kj::Own<::workerd::jsg::Wrappable>(kj::mv(clone));
+}
+
+kj::Array<const ::workerd::jsg::Wrappable*> Wrappable::snapshotReferences() const {
+  auto references = wrappable_invoke_snapshot_references(*this);
+  return KJ_MAP(reference, references) -> const ::workerd::jsg::Wrappable* {
+    return reinterpret_cast<const Wrappable*>(reference);
+  };
+}
+
+void Wrappable::snapshotRelink(kj::ArrayPtr<::workerd::jsg::Wrappable* const> restored) {
+  auto* isolate = v8::Isolate::GetCurrent();
+  v8::HandleScope scope(isolate);
+  // Every reference snapshotReferences() returned was to a Rust resource, so each restored one
+  // is too; Rust checks its type.
+  auto wrappables = KJ_MAP(target, restored) -> size_t {
+    return reinterpret_cast<size_t>(static_cast<Wrappable*>(target));
+  };
+  wrappable_invoke_snapshot_relink(
+      *this, isolate, ::rust::Slice<const size_t>(wrappables.begin(), wrappables.size()));
 }
 
 // Local<T>
@@ -299,6 +374,10 @@ bool local_is_big_int(const Local& val) {
 
 bool local_is_date(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
+bool local_is_wasm_module_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsWasmModuleObject();
 }
 
 bool local_is_shared_array_buffer(const Local& val) {
@@ -822,6 +901,21 @@ uintptr_t local_array_buffer_contents(const Local& buffer, size_t& byteLength) {
 size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
+}
+
+// Local<WasmModuleObject>
+kj::Own<CompiledWasmModule> local_wasm_module_object_get_compiled_module(const Local& module) {
+  return kj::heap(local_as_ref_from_ffi<v8::WasmModuleObject>(module)->GetCompiledModule());
+}
+
+// CompiledWasmModule
+const uint8_t* compiled_wasm_module_get_wire_bytes(
+    const CompiledWasmModule& module, size_t& length) {
+  // GetWireBytesRef() is not const, but only reads the bytes, atomically, and V8 never replaces
+  // them once the module object exists.
+  auto bytes = const_cast<CompiledWasmModule&>(module).GetWireBytesRef();
+  length = bytes.size();
+  return bytes.data();
 }
 
 // Local<ArrayBufferView>
@@ -1469,7 +1563,7 @@ void fast_api_throw_exception(FastApiCallbackOptions* options,
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
   v8::HandleScope scope(options->isolate);
-  isolate_throw_internal_error(options->isolate, internalMessage);
+  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::Error);
 }
 
 void fast_api_terminate_execution(FastApiCallbackOptions* options) {
@@ -1580,6 +1674,25 @@ v8::Intrinsic v8Intrinsic(Intrinsic intrinsic) {
   }
   KJ_UNREACHABLE;
 }
+
+// Builds that enable cfi-icall, V8 included, check the indirect call V8 makes to a function
+// callback through its C++ thunk, which it uses while the CPU profiler or side-effect checks are
+// active. The check traps unless the callee is a C++ function of type v8::FunctionCallback. Rust
+// is compiled without CFI (see kj-rs's future.h), so a resource template never hands V8 a Rust
+// callback directly: it gets this trampoline instead, with the Rust callback as its data (see
+// rustCallbackData()).
+__attribute__((no_sanitize("cfi-icall"))) void callRustFunctionCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+  auto callback = reinterpret_cast<v8::FunctionCallback>(
+      info.DataV2().As<v8::Value>().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
+  callback(info);
+}
+
+// The data of a function template whose callback is callRustFunctionCallback().
+v8::Local<v8::External> rustCallbackData(v8::Isolate* isolate, size_t callback) {
+  return v8::External::New(
+      isolate, reinterpret_cast<void*>(callback), v8::kExternalPointerTypeTagDefault);
+}
 }  // namespace
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
@@ -1592,6 +1705,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   auto registerExternalRef = [&](size_t callback) {
     workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
   };
+  registerExternalRef(reinterpret_cast<size_t>(&callRustFunctionCallback));
 
   const bool specCompliant = workerd::jsg::getSpecCompliantPropertyAttributes(isolate);
 
@@ -1601,9 +1715,9 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   v8::Local<v8::FunctionTemplate> constructor;
   KJ_IF_SOME(descriptor, descriptor.constructor) {
-    constructor = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)),
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), specLength(descriptor.length));
+    constructor = v8::FunctionTemplate::New(isolate, &callRustFunctionCallback,
+        rustCallbackData(isolate, descriptor.callback), v8::Local<v8::Signature>(),
+        specLength(descriptor.length));
     registerExternalRef(descriptor.callback);
   } else {
     constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
@@ -1644,18 +1758,17 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   auto makeMethod = [&](const MethodDescriptor& method, v8::Local<v8::Signature> methodSignature) {
     registerExternalRef(method.callback);
-    auto callback =
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback));
+    auto data = rustCallbackData(isolate, method.callback);
     if (fastApiEnabled) {
       KJ_IF_SOME(fast, method.fast) {
         const auto& cFunction = getFastCFunction(fast);
         registerExternalRef(reinterpret_cast<size_t>(&cFunction));
-        return v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, callback,
-            v8::Local<v8::Value>(), methodSignature, specLength(method.length),
-            v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+        return v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &callRustFunctionCallback,
+            data, methodSignature, specLength(method.length), v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
       }
     }
-    return v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), methodSignature,
+    return v8::FunctionTemplate::New(isolate, &callRustFunctionCallback, data, methodSignature,
         specLength(method.length), v8::ConstructorBehavior::kThrow);
   };
 
@@ -1675,9 +1788,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   auto setDisposer = [&](v8::Local<v8::Symbol> symbol, size_t callback) {
     registerExternalRef(callback);
     prototype->Set(symbol,
-        v8::FunctionTemplate::New(isolate,
-            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::FunctionTemplate::New(isolate, &callRustFunctionCallback,
+            rustCallbackData(isolate, callback), signature, 0, v8::ConstructorBehavior::kThrow),
         v8::PropertyAttribute::DontEnum);
   };
   KJ_IF_SOME(callback, descriptor.dispose) {
@@ -1717,15 +1829,14 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         int len = isGetter ? 0 : 1;
         // Per Web IDL, spec-compliant getters/setters use empty signature (matching C++
         // registerPrototypeProperty/registerReadonlyPrototypeProperty in resource.h:1438-1441).
-        fn = v8::FunctionTemplate::New(isolate,
-            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
-            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), len,
+        fn = v8::FunctionTemplate::New(isolate, &callRustFunctionCallback,
+            rustCallbackData(isolate, callback), v8::Local<v8::Signature>(), len,
             v8::ConstructorBehavior::kThrow);
         auto prefix = isGetter ? "get " : "set ";
         fn->SetClassName(::workerd::jsg::v8Str(isolate, kj::str(prefix, prop.name)));
       } else {
         fn = v8::FunctionTemplate::New(
-            isolate, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)));
+            isolate, &callRustFunctionCallback, rustCallbackData(isolate, callback));
       }
       return fn;
     };
@@ -1790,8 +1901,9 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         // spec_compliant_property_attributes has no effect on inspect properties.
         auto symbol = v8::Symbol::New(isolate, v8Name);
         inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
-        auto getterFn = v8::FunctionTemplate::New(isolate,
-            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(prop.getter_callback)));
+        registerExternalRef(prop.getter_callback);
+        auto getterFn = v8::FunctionTemplate::New(
+            isolate, &callRustFunctionCallback, rustCallbackData(isolate, prop.getter_callback));
         prototype->SetAccessorProperty(symbol, getterFn, v8::Local<v8::FunctionTemplate>(),
             static_cast<v8::PropertyAttribute>(
                 v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
@@ -1821,7 +1933,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   // prototype, and V8 runs it with the instance as `this`.
   KJ_IF_SOME(callable, descriptor.callable) {
     instance->SetCallAsFunctionHandler(
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callable)));
+        &callRustFunctionCallback, rustCallbackData(isolate, callable));
     registerExternalRef(callable);
   }
 
@@ -2033,20 +2145,50 @@ bool dom_exception_try_unwrap(Isolate* isolate,
 }
 
 namespace {
-// Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
-// the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
-// "internal error; reference = <id>" JS Error.
-v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalMessage) {
+// Logs the message of an internal error that is not created, as `log` says. With
+// InternalErrorLog::Error there is no ID to log it with, since no error carries one.
+void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
+  switch (log) {
+    case InternalErrorLog::Error:
+      KJ_LOG(ERROR, message);
+      return;
+    case InternalErrorLog::Info:
+      KJ_LOG(INFO, message);
+      return;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Generates a unique error ID and returns a generic "internal error; reference = <id>" JS Error.
+// With InternalErrorLog::Error, this is makeInternalError() from util.c++, which it calls: the
+// internal message is logged with the ID to KJ_LOG(ERROR) for Sentry. With
+// InternalErrorLog::Info, the message is logged to KJ_LOG(INFO) without the ID, as
+// reportInternalException() in util.c++ logs an exception marked worker_do_not_log.
+v8::Local<v8::Value> createInternalError(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  return ::workerd::jsg::makeInternalError(isolate, message);
+  switch (log) {
+    case InternalErrorLog::Error:
+      return ::workerd::jsg::makeInternalError(isolate, message);
+    case InternalErrorLog::Info: {
+      logInternalMessage(message, log);
+      // The text makeInternalError() gives the error.
+      auto text = kj::str("internal error; reference = ", ::workerd::makeInternalErrorId());
+      return v8::Exception::Error(
+          v8::String::NewFromUtf8(isolate, text.cStr(), v8::NewStringType::kNormal, text.size())
+              .ToLocalChecked());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
-Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
-  return to_ffi(createInternalError(isolate, internalMessage));
+Local exception_create_internal(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
+  return to_ffi(createInternalError(isolate, internalMessage, log));
 }
 
 uint64_t tunneled_exception_detail_id() {
@@ -2101,14 +2243,15 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
-void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
+void isolate_throw_internal_error(
+    Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
   if (isolate->IsExecutionTerminating()) {
     // Logs the message, but creates no error, since it would not be thrown. See
     // createInternalError() for why the message is copied.
-    KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
+    logInternalMessage(kj::heapString(internalMessage.data(), internalMessage.size()), log);
     return;
   }
-  isolate->ThrowException(createInternalError(isolate, internalMessage));
+  isolate->ThrowException(createInternalError(isolate, internalMessage, log));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {
@@ -2171,6 +2314,76 @@ bool isolate_in_context(Isolate* isolate) {
 
 Local isolate_current_context_global(Isolate* isolate) {
   return to_ffi(isolate->GetCurrentContext()->Global());
+}
+
+// ExternalMemory
+namespace {
+
+class ExternalMemoryAdjustmentImpl final: public ExternalMemoryAdjustment {
+ public:
+  explicit ExternalMemoryAdjustmentImpl(::workerd::jsg::ExternalMemoryAdjustment adjustment)
+      : adjustment(kj::mv(adjustment)) {}
+
+  ::workerd::jsg::ExternalMemoryAdjustment adjustment;
+};
+
+kj::Own<ExternalMemoryAdjustment> wrap(::workerd::jsg::ExternalMemoryAdjustment adjustment) {
+  return kj::heap<ExternalMemoryAdjustmentImpl>(kj::mv(adjustment));
+}
+
+::workerd::jsg::ExternalMemoryAdjustment& unwrap(ExternalMemoryAdjustment& adjustment) {
+  return kj::downcast<ExternalMemoryAdjustmentImpl>(adjustment).adjustment;
+}
+
+const ::workerd::jsg::ExternalMemoryAdjustment& unwrap(const ExternalMemoryAdjustment& adjustment) {
+  return kj::downcast<const ExternalMemoryAdjustmentImpl>(adjustment).adjustment;
+}
+
+// C++ JSG passes an amount on as a ssize_t (an int64_t through IsolateBase), and set() passes
+// `amount - getAmount()`, so an amount above SSIZE_MAX would wrap to a fall below zero, which
+// throws. Capped, every operand is in range, and the amount still aborts as too large.
+size_t capAmount(size_t amount) {
+  return kj::min(amount, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+}
+
+}  // namespace
+
+kj::Arc<ExternalMemoryTarget> isolate_external_memory_target(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryTarget();
+}
+
+kj::Own<ExternalMemoryAdjustment> isolate_external_memory_adjustment(
+    Isolate* isolate, size_t amount) {
+  // The caller holds the lock and has entered the isolate, so maybeDeferAdjustment() reports the
+  // amount to V8 at once.
+  KJ_DASSERT(v8::Isolate::TryGetCurrent() == isolate);
+  return wrap(
+      ::workerd::jsg::IsolateBase::from(isolate).getExternalMemoryAdjustment(capAmount(amount)));
+}
+
+kj::Own<ExternalMemoryAdjustment> external_memory_target_adjustment(
+    ExternalMemoryTarget& target, size_t amount) {
+  return wrap(target.getAdjustment(capAmount(amount)));
+}
+
+bool external_memory_target_is_isolate_alive(ExternalMemoryTarget& target) {
+  return target.isIsolateAlive();
+}
+
+int64_t external_memory_target_pending_update_for_test(ExternalMemoryTarget& target) {
+  return target.getPendingMemoryUpdateForTest();
+}
+
+size_t external_memory_adjustment_amount(const ExternalMemoryAdjustment& adjustment) {
+  return unwrap(adjustment).getAmount();
+}
+
+void external_memory_adjustment_adjust(ExternalMemoryAdjustment& adjustment, ::rust::isize delta) {
+  unwrap(adjustment).adjust(delta);
+}
+
+void external_memory_adjustment_set(ExternalMemoryAdjustment& adjustment, size_t amount) {
+  unwrap(adjustment).set(capAmount(amount));
 }
 
 }  // namespace workerd::rust::jsg

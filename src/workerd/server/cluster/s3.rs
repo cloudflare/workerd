@@ -145,63 +145,78 @@ impl Dialect for SigV4 {
     }
 
     async fn authorize(&self, request: &mut Request<'_>) -> Result<Option<String>> {
-        let Request {
-            method,
-            host,
-            path,
-            query,
-            ..
-        } = *request;
         self.refresh();
         let credentials = self.credentials.borrow().clone();
-        let (date, time) = amz_date(SystemTime::now());
-        // The payload is not hashed: TLS protects it, and hashing would mean
-        // a second pass over every LTX file.
-        let mut signed = vec![
-            ("host".to_owned(), host.to_owned()),
-            (
-                "x-amz-content-sha256".to_owned(),
-                "UNSIGNED-PAYLOAD".to_owned(),
-            ),
-            ("x-amz-date".to_owned(), time.clone()),
-        ];
-        if let Some(token) = &credentials.token {
-            signed.push(("x-amz-security-token".to_owned(), token.clone()));
-        }
-        signed.sort();
-        let names = signed
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(";");
-        let canonical = format!(
-            "{method}\n{path}\n{query}\n{}\n{names}\nUNSIGNED-PAYLOAD",
-            signed.iter().fold(String::new(), |out, (name, value)| out
-                + name
-                + ":"
-                + value
-                + "\n"),
-        );
-        let scope = format!("{date}/{}/s3/aws4_request", self.region);
-        let to_sign = format!(
-            "AWS4-HMAC-SHA256\n{time}\n{scope}\n{}",
-            hex(&sha256(canonical.as_bytes()))
-        );
-        let mut signing = format!("AWS4{}", credentials.secret).into_bytes();
-        for part in [date.as_str(), &self.region, "s3", "aws4_request"] {
-            signing = hmac_sha256(&signing, part.as_bytes());
-        }
-        let signature = hex(&hmac_sha256(&signing, to_sign.as_bytes()));
-        request.headers.extend(signed);
-        request.headers.push((
-            "authorization".into(),
-            format!(
-                "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={names}, Signature={signature}",
-                credentials.key_id
-            ),
-        ));
+        sign(request, &credentials, &self.region, SystemTime::now());
         Ok(None)
     }
+}
+
+/// Signs `request` at `now`: adds its `host`, `x-amz-*` and `authorization`
+/// headers. Every `x-amz-*` header is signed, as `SigV4` requires, the
+/// metadata ones included.
+fn sign(request: &mut Request<'_>, credentials: &Credentials, region: &str, now: SystemTime) {
+    let Request {
+        method,
+        host,
+        path,
+        query,
+        ..
+    } = *request;
+    let (date, time) = amz_date(now);
+    // The payload is not hashed: TLS protects it, and hashing would mean a
+    // second pass over every LTX file.
+    let mut added = vec![
+        ("host".to_owned(), host.to_owned()),
+        (
+            "x-amz-content-sha256".to_owned(),
+            "UNSIGNED-PAYLOAD".to_owned(),
+        ),
+        ("x-amz-date".to_owned(), time.clone()),
+    ];
+    if let Some(token) = &credentials.token {
+        added.push(("x-amz-security-token".to_owned(), token.clone()));
+    }
+    let amz = request.headers.iter().filter_map(|(name, value)| {
+        let name = name.to_ascii_lowercase();
+        // A canonical value is trimmed, its runs of spaces one space.
+        let value = value.split(' ').filter(|w| !w.is_empty());
+        name.starts_with("x-amz-")
+            .then(|| (name, value.collect::<Vec<_>>().join(" ")))
+    });
+    let mut signed: Vec<_> = amz.chain(added.iter().cloned()).collect();
+    signed.sort();
+    let names = signed
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(";");
+    let canonical = format!(
+        "{method}\n{path}\n{query}\n{}\n{names}\nUNSIGNED-PAYLOAD",
+        signed.iter().fold(String::new(), |out, (name, value)| out
+            + name
+            + ":"
+            + value
+            + "\n"),
+    );
+    let scope = format!("{date}/{region}/s3/aws4_request");
+    let to_sign = format!(
+        "AWS4-HMAC-SHA256\n{time}\n{scope}\n{}",
+        hex(&sha256(canonical.as_bytes()))
+    );
+    let mut signing = format!("AWS4{}", credentials.secret).into_bytes();
+    for part in [date.as_str(), region, "s3", "aws4_request"] {
+        signing = hmac_sha256(&signing, part.as_bytes());
+    }
+    let signature = hex(&hmac_sha256(&signing, to_sign.as_bytes()));
+    request.headers.extend(added);
+    request.headers.push((
+        "authorization".into(),
+        format!(
+            "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={names}, Signature={signature}",
+            credentials.key_id
+        ),
+    ));
 }
 
 impl SigV4 {

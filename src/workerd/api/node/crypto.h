@@ -90,6 +90,10 @@ class CryptoImpl final: public jsg::Object {
 
    private:
     HashContext ctx;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      ctx.visitForGc(visitor);
+    }
   };
 
   // Hmac
@@ -119,6 +123,10 @@ class CryptoImpl final: public jsg::Object {
 
    private:
     HmacContext ctx;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      ctx.visitForGc(visitor);
+    }
   };
 
   // Hkdf

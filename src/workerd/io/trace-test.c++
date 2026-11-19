@@ -163,6 +163,37 @@ KJ_TEST("InvocationSpanContext propagates traceFlags from trigger") {
   KJ_EXPECT(child2.getTraceFlags() == kj::none);
 }
 
+KJ_TEST(
+    "InvocationSpanContext default trace flags propagate without replacing upstream decisions") {
+  setPredictableModeForTest();
+  FakeEntropySource fakeEntropySource;
+
+  auto root = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
+  root.setDefaultTraceFlags(TraceFlags(0x01));
+  KJ_EXPECT(root.getParent() == kj::none);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(root.getTraceFlags()) == TraceFlags(0x01));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(root.clone().getTraceFlags()) == TraceFlags(0x01));
+  auto child = root.newChild();
+  KJ_EXPECT(child.getTraceId() == root.getTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == TraceFlags(0x01));
+
+  for (auto flags: {0x00, 0x03}) {
+    auto trigger =
+        InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(flags));
+    auto invocation = InvocationSpanContext::newForInvocation(trigger, fakeEntropySource);
+    invocation.setDefaultTraceFlags(TraceFlags(0x01));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getTraceFlags()) == TraceFlags(flags));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParent()).getSpanId() == trigger.getSpanId());
+
+    capnp::MallocMessageBuilder builder;
+    invocation.toCapnp(builder.initRoot<rpc::InvocationSpanContext>());
+    auto restored = KJ_ASSERT_NONNULL(
+        InvocationSpanContext::fromCapnp(builder.getRoot<rpc::InvocationSpanContext>()));
+    auto next = InvocationSpanContext::newForInvocation(restored, fakeEntropySource);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(next.newChild().getTraceFlags()) == TraceFlags(flags));
+  }
+}
+
 KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagation") {
   setPredictableModeForTest();
   FakeEntropySource fakeEntropySource;
@@ -623,6 +654,58 @@ KJ_TEST("Read/Write SpanUpdate status works") {
   auto& status3 = info3.info.get<SpanStatus>();
   KJ_ASSERT(status3.getCode() == SpanStatusCode::ERROR);
   KJ_ASSERT(KJ_ASSERT_NONNULL(status3.getMessage()) == "failed");
+}
+
+KJ_TEST("SpanLink context parsing preserves all ID bits and permits zero IDs") {
+  constexpr auto traceId = "fedcba98765432100123456789abcdef"_kj;
+  constexpr auto spanId = "f123456789abcdef"_kj;
+  auto context = KJ_ASSERT_NONNULL(SpanLink::parseContext(traceId, spanId, TraceFlags(0xfe)));
+  KJ_EXPECT(context.getTraceId().toW3C() == traceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(context.getSpanId()).toGoString() == spanId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(context.getTraceFlags()) == 0xfe);
+  KJ_EXPECT(SpanLink::parseContext(
+                "00000000000000000000000000000000", "0000000000000000", TraceFlags(0)) != kj::none);
+  auto mixedCase = KJ_ASSERT_NONNULL(SpanLink::parseContext(
+      "FEDCBA98765432100123456789abcDEF"_kj, "F123456789ABCdef"_kj, TraceFlags(0)));
+  KJ_EXPECT(mixedCase.getTraceId().toW3C() == traceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(mixedCase.getSpanId()).toGoString() == spanId);
+  for (const auto& invalid:
+      {"fedcba98765432100123456789abcde"_kj, "gedcba98765432100123456789abcdef"_kj}) {
+    KJ_EXPECT(SpanLink::parseContext(invalid, spanId, TraceFlags(0)) == kj::none);
+  }
+  for (const auto& invalid: {"123456789abcdef"_kj, "z123456789abcdef"_kj}) {
+    KJ_EXPECT(SpanLink::parseContext(traceId, invalid, TraceFlags(0)) == kj::none);
+  }
+}
+
+KJ_TEST("SpanLinks tail events round-trip and clone metadata, order, and duplicates") {
+  auto target = KJ_ASSERT_NONNULL(SpanLink::parseContext(
+      "fedcba98765432100123456789abcdef", "f123456789abcdef", TraceFlags(0xfe)));
+  SpanLink first(SpanContext::clone(target),
+      kj::arr(Attribute("message"_kjc, kj::ConstString("original"_kjc))), 7);
+  auto duplicate = first.clone();
+  SpanLink plain(SpanContext::clone(target), {});
+  SpanLinks links(kj::arr(kj::mv(first), kj::mv(plain), kj::mv(duplicate)));
+  auto size = links.size();
+  auto receiver = SpanContext(TraceId(1, 2), SpanId(3), TraceFlags(1));
+  TailEvent event(SpanContext::clone(receiver), TraceId(4, 5), kj::UNIX_EPOCH, 6, kj::mv(links));
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::Trace::TailEvent>();
+  event.copyTo(root);
+  for (auto& copy: kj::arr(TailEvent(root.asReader()), event.clone())) {
+    KJ_EXPECT(copy.spanContext == receiver);
+    KJ_EXPECT(copy.sequence == 6);
+    auto& result = copy.event.get<SpanLinks>();
+    KJ_ASSERT(result.links.size() == 3);
+    KJ_EXPECT(result.size() == size);
+    KJ_EXPECT(result.links[0].context == target);
+    KJ_EXPECT(result.links[1].context == target);
+    KJ_EXPECT(result.links[1].attributes.size() == 0);
+    KJ_EXPECT(result.links[1].droppedAttributesCount == 0);
+    KJ_EXPECT(result.links[2].context == target);
+    KJ_EXPECT(result.links[2].droppedAttributesCount == 7);
+    KJ_EXPECT(result.links[2].attributes[0].value[0].get<kj::ConstString>() == "original");
+  }
 }
 
 KJ_TEST("SpanStatus ignores messages for non-error status codes") {

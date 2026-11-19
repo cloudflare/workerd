@@ -12,6 +12,7 @@ mod async_context;
 mod buffer;
 mod cell;
 mod dict;
+mod external_memory;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -30,6 +31,7 @@ pub mod resource;
 pub mod rtti;
 mod scope;
 pub mod ser;
+mod snapshot;
 mod string;
 mod structs;
 mod tunnel;
@@ -45,6 +47,8 @@ pub use buffer::ToJsTypedArray;
 pub use cell::Cell;
 pub use cell::RefCell;
 pub use dict::Dict;
+pub use external_memory::ExternalMemoryAdjustment;
+pub use external_memory::ExternalMemoryTarget;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
@@ -97,6 +101,11 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use snapshot::ErasedSnapshotTransfer;
+pub use snapshot::RestoredReferences;
+pub use snapshot::SnapshotCopy;
+pub use snapshot::SnapshotReferences;
+pub use snapshot::SnapshotTransfer;
 pub use string::JsString;
 #[doc(hidden)]
 pub use structs::StructShape;
@@ -128,14 +137,19 @@ mod ffi {
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
-        /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
-        /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
-        /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
-        /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
-        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway). The handles
-        /// cached for struct types are reset, so the isolate must be locked, with no Rust `Lock`
-        /// in use.
-        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+        /// Drains the Realm's cached resource templates for the `PREPARE_SNAPSHOT` pipeline,
+        /// which pins each one into the snapshot and must dispose its handle before
+        /// `CreateBlob`. Each `handle` is a `v8::Global<v8::FunctionTemplate>`, recovered on
+        /// the C++ side with `global_from_ffi`; ownership transfers to the caller. The cache is
+        /// left empty. The handles cached for struct types are reset, so the isolate must be
+        /// locked, with no Rust `Lock` in use.
+        unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ResourceTemplate>;
+
+        /// Fills the empty template cache of a Realm created for an isolate started from a
+        /// snapshot with the templates `realm_take_resource_templates` drained in the zygote, so
+        /// that the restored wrappers and the new ones of a resource type share its template.
+        /// Ownership of each handle transfers to the Realm.
+        fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ResourceTemplate>);
 
         /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
         /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
@@ -155,6 +169,14 @@ mod ffi {
         /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the same hook, with
         /// the same reference, which it hands back.
         unsafe fn isolate_disposed(state: *const IsolateState);
+    }
+
+    /// A resource type's template, by the type's `TypeId`, which is stable within a binary,
+    /// as the producer and the consumer of a startup snapshot are.
+    struct ResourceTemplate {
+        type_id_lo: usize,
+        type_id_hi: usize,
+        handle: Global,
     }
 
     unsafe extern "C++" {
@@ -308,7 +330,8 @@ pub struct Error {
     /// implementation details (a raw KJ exception description, a C++ source
     /// expression, etc.). `Lock::throw_exception()` redacts it, throwing a
     /// generic `"internal error; reference = <id>"` instead and logging
-    /// `message` (with that ID) via `KJ_LOG(ERROR)`. Mirrors the `isInternal`
+    /// `message` (with that ID) via `KJ_LOG(ERROR)`, or without it via `KJ_LOG(INFO)` if
+    /// `do_not_log` is set. Mirrors the `isInternal`
     /// flag computed by C++ `jsg::tunneledErrorType()` / applied by
     /// `decodeTunneledException()` (`src/workerd/jsg/exception.c++`,
     /// `src/workerd/jsg/util.c++`). Constructors in this module (and the
@@ -318,6 +341,13 @@ pub struct Error {
     /// Whether this error stands for an exception or termination that is pending in V8; see
     /// [`Error::is_pending`].
     pending: bool,
+    /// Whether this error came from a KJ exception marked `worker_do_not_log`, as C++
+    /// `jsg::tunneledErrorType()` finds the marker. `Lock::throw_exception()` then logs the
+    /// message of an internal error at `INFO`, without its reference ID, rather than at `ERROR`,
+    /// as C++ JSG logs such an exception that it throws to JavaScript (`reportInternalException()`
+    /// in `src/workerd/jsg/util.c++`). What JavaScript gets is the same either way. Only
+    /// `from_kj_description()` sets it.
+    do_not_log: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -338,6 +368,7 @@ macro_rules! impl_error_constructors {
                         message: message.into(),
                         is_internal: false,
                         pending: false,
+                        do_not_log: false,
                     }
                 }
             )*
@@ -404,6 +435,7 @@ impl<'s> FromJS<'s> for Error {
                 message,
                 is_internal: false,
                 pending: false,
+                do_not_log: false,
             })
         } else {
             Err(Self::new_type_error("Unknown error"))
@@ -420,6 +452,7 @@ impl Error {
             message: message.to_owned(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -437,6 +470,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -452,6 +486,7 @@ impl Error {
             message: message.into(),
             is_internal: false,
             pending: false,
+            do_not_log: false,
         }
     }
 
@@ -535,6 +570,9 @@ impl Error {
     const ERROR_PREFIX_DELIM: &'static str = "; ";
     /// Repeated when an error is tunneled over RPC (see `annotateBroken()`).
     const ERROR_REMOTE_PREFIX: &'static str = "remote.";
+    /// Marks a KJ exception that is not worth logging as an internal error (C++
+    /// `jsg::isDoNotLogException()`).
+    const DO_NOT_LOG_MARKER: &'static str = "worker_do_not_log";
 
     /// Parses a KJ exception description for a JSG tunneling prefix, mirroring the
     /// prefix-peeling of C++ `jsg::tunneledErrorType()`
@@ -544,9 +582,11 @@ impl Error {
     /// exposing it to guest JS.
     ///
     /// This mirrors only the *prefix-peeling structure* of `tunneledErrorType()`, not
-    /// its full semantics: `isFromRemote` / `isDurableObjectReset` /
-    /// `isDoNotLogException` are peeled off (to keep peeling in sync with C++) but the
-    /// resulting signals are discarded rather than attached to the `Error`.
+    /// its full semantics: `isFromRemote` / `isDurableObjectReset` are peeled off (to keep
+    /// peeling in sync with C++) but the resulting signals are discarded rather than attached
+    /// to the `Error`. `isDoNotLogException` is kept, as the `Error`'s `do_not_log`, and found
+    /// where C++ looks for it: anywhere in the description for a tunneled error, and only in
+    /// what is left after the prefixes for any other.
     ///
     /// A tunneled JSG error is `jsg.<Type>: <message>` or
     /// `jsg.DOMException(<Name>): <message>` (or `jsg-internal.` instead of `jsg.`,
@@ -577,12 +617,12 @@ impl Error {
             while let Some(idx) = rest.find(Self::ERROR_PREFIX_DELIM) {
                 rest = &rest[idx + Self::ERROR_PREFIX_DELIM.len()..];
                 if let Some(err) = Self::try_extract_tunneled(rest) {
-                    return err;
+                    return err.do_not_log_if_marked(description);
                 }
             }
             // No tunneling tag found: matches C++ `makeDefaultError()`, which marks
             // the message `isInternal` and redacts it before it reaches guest JS.
-            return Self::new_internal_error(description.to_owned());
+            return Self::new_internal_error(description.to_owned()).do_not_log_if_marked(rest);
         }
 
         // Trim any number of "broken.<reason>; " prefixes (from `annotateBroken()`).
@@ -593,8 +633,26 @@ impl Error {
             }
         }
 
-        Self::try_extract_tunneled(msg)
-            .unwrap_or_else(|| Self::new_internal_error(description.to_owned()))
+        match Self::try_extract_tunneled(msg) {
+            Some(err) => err.do_not_log_if_marked(description),
+            None => Self::new_internal_error(description.to_owned()).do_not_log_if_marked(msg),
+        }
+    }
+
+    /// Sets `do_not_log` if `text`, part of a KJ exception description, has the
+    /// `worker_do_not_log` marker.
+    fn do_not_log_if_marked(mut self, text: &str) -> Self {
+        self.do_not_log = text.contains(Self::DO_NOT_LOG_MARKER);
+        self
+    }
+
+    /// How throwing this error logs its message if it is internal.
+    fn internal_error_log(&self) -> v8::ffi::InternalErrorLog {
+        if self.do_not_log {
+            v8::ffi::InternalErrorLog::Info
+        } else {
+            v8::ffi::InternalErrorLog::Error
+        }
     }
 
     /// Tries to parse `msg` as a `jsg.<Type>: <message>` or
@@ -619,6 +677,7 @@ impl Error {
                 message: message.to_owned(),
                 is_internal,
                 pending: false,
+                do_not_log: false,
             });
         }
 
@@ -628,6 +687,7 @@ impl Error {
             message: message.to_owned(),
             is_internal,
             pending: false,
+            do_not_log: false,
         })
     }
 
@@ -642,8 +702,61 @@ impl Error {
             message: message.into(),
             is_internal: true,
             pending: false,
+            do_not_log: false,
         }
     }
+
+    /// The `TypeError` C++ JSG throws for a value in `context` that is not of type
+    /// `expected` (`typeErrorMessage()` in jsg/util.c++).
+    #[doc(hidden)]
+    #[cold]
+    #[must_use]
+    pub fn new_incorrect_type(context: TypeErrorContext<'_>, expected: &str) -> Self {
+        let message = match context {
+            TypeErrorContext::MethodArgument {
+                method,
+                class,
+                index,
+            } => format!(
+                "Failed to execute '{method}' on '{class}': parameter {} is not of type \
+                 '{expected}'.",
+                index + 1
+            ),
+            TypeErrorContext::StructField { field, class } => format!(
+                "Incorrect type for the '{field}' field on '{class}': the provided value is not \
+                 of type '{expected}'."
+            ),
+            TypeErrorContext::ArrayElement(index) => format!(
+                "Incorrect type for array element {index}: the provided value is not of type \
+                 '{expected}'."
+            ),
+            TypeErrorContext::DictField(name) => format!(
+                "Incorrect type for map entry '{name}': the provided value is not of type \
+                 '{expected}'."
+            ),
+        };
+        Self::new_type_error(message)
+    }
+}
+
+/// Where a value that is not of its type was, like C++ JSG's `TypeErrorContext`; see
+/// [`Error::new_incorrect_type`].
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub enum TypeErrorContext<'a> {
+    /// An argument of a `#[jsg_method]`, by the method's JavaScript name, the resource's class
+    /// name and the argument's index.
+    MethodArgument {
+        method: &'a str,
+        class: &'a str,
+        index: usize,
+    },
+    /// A `#[jsg_struct]` field, by its JavaScript name and the struct's class name.
+    StructField { field: &'a str, class: &'a str },
+    /// An element of a `Vec`, by its index.
+    ArrayElement(usize),
+    /// The value of a `Dict` entry, by its key.
+    DictField(&'a str),
 }
 
 /// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
@@ -1013,7 +1126,7 @@ impl<'s> Lock<'s> {
             return;
         }
         if err.is_internal {
-            self.throw_internal_error(&err.message);
+            self.throw_internal_error_logged(&err.message, err.internal_error_log());
             return;
         }
         if self.is_execution_terminating() {
@@ -1146,7 +1259,7 @@ impl<'s> Lock<'s> {
             // Nothing could be rejected with the exception, so it is not created.
             if err.is_internal {
                 // Logs the message and throws nothing.
-                self.throw_internal_error(&err.message);
+                self.throw_internal_error_logged(&err.message, err.internal_error_log());
             }
             return Err(Error::pending());
         }
@@ -1157,6 +1270,7 @@ impl<'s> Lock<'s> {
                 v8::Local::from_ffi(v8::ffi::exception_create_internal(
                     self.isolate().as_ffi(),
                     &err.message,
+                    err.internal_error_log(),
                 ))
             });
         }
@@ -1171,9 +1285,18 @@ impl<'s> Lock<'s> {
     /// internal message is never exposed to JavaScript. While execution is terminating, it
     /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
+        self.throw_internal_error_logged(internal_message, v8::ffi::InternalErrorLog::Error);
+    }
+
+    /// [`Lock::throw_internal_error`], logging `internal_message` as `log` says.
+    fn throw_internal_error_logged(
+        &mut self,
+        internal_message: &str,
+        log: v8::ffi::InternalErrorLog,
+    ) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message);
+            v8::ffi::isolate_throw_internal_error(self.isolate().as_ffi(), internal_message, log);
         }
     }
 
@@ -1632,6 +1755,14 @@ pub trait GarbageCollected: Traced {
     fn detach_before_drop(&self) -> bool {
         false
     }
+
+    /// The resource as a [`SnapshotTransfer`], if its type implements it; `None` otherwise,
+    /// which makes a Worker whose top level leaves it reachable start without the snapshot.
+    /// `#[jsg_resource]` implements it.
+    #[doc(hidden)]
+    fn snapshot_transfer(&self) -> Option<&dyn ErasedSnapshotTransfer> {
+        None
+    }
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
@@ -1783,17 +1914,41 @@ unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     realm.state.drain_awaiting_lock(isolate);
 }
 
-/// See the bridge declaration: drains the cached resource-template persistent handles for
-/// the `PREPARE_SNAPSHOT` pipeline.
+/// See the bridge declaration.
 #[expect(
     unsafe_code,
     reason = "frees the struct shapes, which no Lock may be using"
 )]
-unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+unsafe fn realm_take_resource_templates(realm: &mut Realm) -> Vec<ffi::ResourceTemplate> {
     // The struct handles are reset here, under the isolate lock, rather than handed over.
     // SAFETY: the isolate is locked with no `Lock` in use (guaranteed by the C++ caller).
     unsafe { realm.structs.clear() };
-    realm.resources.take_template_handles()
+    realm
+        .resources
+        .take_templates()
+        .into_iter()
+        .map(|(type_id, handle)| {
+            let [type_id_lo, type_id_hi] = v8::split_type_id(type_id);
+            ffi::ResourceTemplate {
+                type_id_lo,
+                type_id_hi,
+                handle,
+            }
+        })
+        .collect()
+}
+
+/// See the bridge declaration.
+fn realm_restore_resource_templates(realm: &mut Realm, templates: Vec<ffi::ResourceTemplate>) {
+    realm
+        .resources
+        .restore_templates(templates.into_iter().map(|t| {
+            let type_id = v8::join_type_id([t.type_id_lo, t.type_id_hi]);
+            (
+                type_id,
+                v8::Global::from_ffi_in(t.handle, Arc::clone(&realm.state)),
+            )
+        }));
 }
 
 /// Runs `body`, the body of the generated callback of a method or property that returns a
@@ -1872,7 +2027,11 @@ where
             // context entered and a `HandleScope` open, while `scope` lives. The unwind closed
             // the scopes opened inside `f`.
             unsafe {
-                v8::ffi::isolate_throw_internal_error(isolate.as_ffi(), msg);
+                v8::ffi::isolate_throw_internal_error(
+                    isolate.as_ffi(),
+                    msg,
+                    v8::ffi::InternalErrorLog::Error,
+                );
                 v8::ffi::isolate_terminate_execution(isolate.as_ffi());
             }
             None

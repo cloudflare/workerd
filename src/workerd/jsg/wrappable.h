@@ -456,8 +456,15 @@ class Wrappable: public kj::Refcounted {
   // In a Worker started from a snapshot, once every restored wrapper is linked: one entry per
   // entry snapshotReferences() returned in the zygote, the restored instance behind that object's
   // wrapper, or nullptr when the snapshot carried no wrapper for it (keep what this instance has).
-  // Must not throw.
+  // Runs under the isolate lock with the new context entered. Must not throw.
   virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
+
+  // In a Worker started from a snapshot, once the embedder has populated the restored context's
+  // embedder-data slots (IsolateBase::notifySnapshotContextReady()): lets a restored instance
+  // bind state that lives on the context and so was not available to snapshotClone(), which runs
+  // before the context exists. Called with the context entered, on every object with a live
+  // wrapper. Must not throw, attach or detach wrappers, or allocate on the V8 or cppgc heap.
+  virtual void snapshotContextReady(Lock& js) {}
 
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
@@ -519,6 +526,12 @@ class Wrappable: public kj::Refcounted {
   // the assert in ~CppgcShim), which means strongRefcount is 0 -- so the expression is false both
   // before and after. In other words, a wrapper can only be condemned while strongRefcount == 0.
   uint strongRefcount = 0;
+
+  // The bytes HeapTracer::chargeWrappable() charged to this isolate's external memory, or 0 if
+  // none. Stored because ~Wrappable() runs after the subclass destructors, when
+  // jsgGetMemorySelfSize() no longer reports the subclass's size. 16 bits, so that it fits in the
+  // padding after `strongRefcount`; shallow sizes are far smaller.
+  uint16_t accountedBytes = 0;
 
   // Whether `link` is in `HeapTracer::wrappers` rather than `HeapTracer::unwrapped`.
   bool linkedInWrappers = false;
@@ -635,6 +648,43 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   static void substituteCppgcShimForTest(
       v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
 
+  // External memory accounting for Wrappables.
+  //
+  // V8 sees a Wrappable only as its small CppgcShim, so garbage made of API objects gives it no
+  // reason to run a major GC. Each Wrappable is charged its shallow size (jsgGetMemorySelfSize())
+  // when first bound to this isolate and released when destroyed, both under the isolate lock, so
+  // the total is a plain integer. The total is always kept, so getChargedWrappableBytes() can be
+  // observed before anything depends on it; only with the WRAPPABLE_EXTERNAL_MEMORY autogate is it
+  // reported to V8.
+  //
+  // Neither charging nor releasing calls into V8: both can happen during a GC, and reporting
+  // external memory can run a full GC synchronously, which must not happen in the middle of
+  // attaching a wrapper. IsolateBase::applyDeferredActions() calls flushExternalMemory() each time
+  // the isolate lock is taken, and it reports the total once it has moved by
+  // kExternalMemoryFlushBytes.
+  void chargeWrappable(Wrappable& wrappable);
+  void releaseWrappable(Wrappable& wrappable);
+  void flushExternalMemory();
+
+  static constexpr int64_t kExternalMemoryFlushBytes = 64 * 1024;
+
+  // The shallow size of every Wrappable currently bound to this isolate, whether or not it has
+  // been reported to V8.
+  int64_t getChargedWrappableBytes() const {
+    return reportedWrappableBytes + unreportedWrappableBytes;
+  }
+
+  // The Wrappable bytes this isolate has reported to V8 as external memory, and so included in
+  // v8::Isolate::GetExternalMemory(). An embedder that enforces a memory limit from
+  // GetExternalMemory() can subtract these to leave them out of the limit.
+  int64_t getReportedWrappableBytes() const {
+    return reportedWrappableBytes;
+  }
+
+  int64_t getUnreportedWrappableBytesForTest() const {
+    return unreportedWrappableBytes;
+  }
+
  private:
   // Returns the head slot of the intrusive freelist for `tag`. The slot has a stable address (it
   // lives in the fixed-size freelistedShimsByTag array), so freelisted shims may point back to it.
@@ -677,6 +727,11 @@ class HeapTracer: public v8::EmbedderRootsHandler {
  private:
   v8::Isolate* isolate;
   kj::Vector<Wrappable*> wrappersToTrace;
+
+  // Charged minus released bytes not yet reported to V8.
+  int64_t unreportedWrappableBytes = 0;
+  // Bytes reported to V8 so far, net. See getReportedWrappableBytes().
+  int64_t reportedWrappableBytes = 0;
 
   // Wrappables on which detachWrapper() should be called at the end of this GC pass.
   kj::Vector<Wrappable*> detachLater;

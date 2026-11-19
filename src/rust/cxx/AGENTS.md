@@ -67,6 +67,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   `releaseException` in `include/cxx.h`, `cxx::private::kj_exception_{into,from}_raw`). Use it
   to hand an exception to the other side without throwing; it is only allowed as a top-level
   argument or return value (`syntax/check.rs`).
+- An `extern "C++"` function is called through a shim that catches every exception, unless it is
+  `#[nothrow]` (README.md, "`#[nothrow]` C++ functions"); keep a `#[nothrow]` shim free of
+  exception handling so that LTO can still inline it into Rust.
 - Run formatting and the full component tests after changing generated ABI behavior.
 
 ## kj-rs-io ownership and reactor rules

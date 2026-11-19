@@ -127,8 +127,13 @@ export function getDate(time: RawTime | Date): Date {
   );
 }
 
-// Normalizes the input file path to a URL object.
-export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
+// Normalizes the input file path to a URL object. A relative path resolves
+// against `base` when given, otherwise against the current working directory.
+export function normalizePath(
+  path: FilePath,
+  encoding: string = 'utf8',
+  base?: URL
+): URL {
   // We treat all of our virtual file system paths as file URLs
   // as a way of normalizing them. Because our file system is
   // fully virtual, we don't need to worry about a number of the
@@ -169,7 +174,9 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
 
   return new URL(
     path,
-    path.startsWith('/') ? 'file://' : `file://${processImpl.getCwd()}/`
+    path.startsWith('/')
+      ? 'file://'
+      : (base ?? `file://${processImpl.getCwd()}/`)
   );
 }
 

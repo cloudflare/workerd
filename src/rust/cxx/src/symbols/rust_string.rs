@@ -30,6 +30,10 @@ unsafe extern "C" {
     fn latin1_utf8_length(ptr: *const u8, len: usize) -> usize;
     #[link_name = "cxxbridge1$latin1$convert_to_utf8"]
     fn latin1_convert_to_utf8(ptr: *const u8, len: usize, out: *mut u8) -> usize;
+    #[link_name = "cxxbridge1$utf16$utf8_length_lossy"]
+    fn utf16_utf8_length_lossy(ptr: *const u16, len: usize) -> usize;
+    #[link_name = "cxxbridge1$utf16$convert_to_utf8_lossy"]
+    fn utf16_convert_to_utf8_lossy(ptr: *const u16, len: usize, out: *mut u8) -> usize;
 }
 
 #[unsafe(export_name = "cxxbridge1$string$from_latin1")]
@@ -121,9 +125,18 @@ unsafe extern "C" fn string_from_utf16_lossy(
     ptr: *const u16,
     len: usize,
 ) {
-    // Safety: the bridge representation and ownership invariants satisfy this operation.
-    let slice = unsafe { slice::from_raw_parts(ptr, len) };
-    let owned = String::from_utf16_lossy(slice);
+    // Safety: `ptr` is valid for reads of `len` code units.
+    let utf8_len = unsafe { utf16_utf8_length_lossy(ptr, len) };
+    let mut utf8 = Vec::<u8>::with_capacity(utf8_len);
+    // Safety: the UTF-16 input converts to exactly `utf8_len` bytes of UTF-8, unpaired surrogates
+    // included, which `utf8` has room for.
+    let written = unsafe { utf16_convert_to_utf8_lossy(ptr, len, utf8.as_mut_ptr()) };
+    // The length and convert functions must agree, so abort in release builds too if they don't.
+    assert_eq!(written, utf8_len);
+    // Safety: simdutf initialized the first `written` bytes.
+    unsafe { utf8.set_len(written) };
+    // Safety: simdutf writes valid UTF-8, replacing unpaired surrogates with U+FFFD.
+    let owned = unsafe { String::from_utf8_unchecked(utf8) };
     let this = this.as_mut_ptr();
     // Safety: the bridge representation and ownership invariants satisfy this operation.
     unsafe { ptr::write(this, owned) }
