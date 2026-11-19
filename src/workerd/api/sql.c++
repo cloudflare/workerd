@@ -310,11 +310,11 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
-  return js.alloc<RowIterator>(JSG_THIS);
+  return js.alloc<RowIterator>(IteratorState{.cursor = JSG_THIS});
 }
 
-kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  return obj->nextRow(js);
+kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, IteratorState& state) {
+  return state.cursor->nextRow(js);
 }
 
 kj::Maybe<jsg::JsObject> SqlStorage::Cursor::nextRow(jsg::Lock& js) {
@@ -332,7 +332,7 @@ kj::Maybe<jsg::JsObject> SqlStorage::Cursor::nextRow(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock& js) {
-  return js.alloc<RawIterator>(JSG_THIS);
+  return js.alloc<RawIterator>(IteratorState{.cursor = JSG_THIS});
 }
 
 // Returns the set of column names for the current Cursor. An exception will be thrown if the
@@ -342,8 +342,8 @@ jsg::JsArray SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
   return columnNames.getHandle(js);
 }
 
-kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  KJ_IF_SOME(values, obj->iteratorImpl(js)) {
+kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, IteratorState& state) {
+  KJ_IF_SOME(values, state.cursor->iteratorImpl(js)) {
     return jsg::JsArray(v8::Array::New(js.v8Isolate, values.data(), values.size()));
   } else {
     return kj::none;
