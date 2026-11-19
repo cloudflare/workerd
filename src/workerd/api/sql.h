@@ -305,7 +305,8 @@ class SqlStorage::Cursor final: public jsg::Object {
 
   static kj::Maybe<jsg::JsObject> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   static kj::Maybe<jsg::JsArray> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  kj::Maybe<jsg::JsObject> nextRow(jsg::Lock& js);
+  kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js);
 
   friend class Statement;
 
