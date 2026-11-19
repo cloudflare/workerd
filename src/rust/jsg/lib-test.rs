@@ -115,10 +115,7 @@ fn do_not_log_marker_is_kept() {
     let err = from_description("worker_do_not_log; message = Unable to deserialize cloned data");
     assert!(err.is_internal);
     assert!(err.do_not_log);
-    assert_eq!(
-        err.internal_error_log(),
-        v8::ffi::InternalErrorLog::DoNotLog
-    );
+    assert_eq!(err.internal_error_log(), v8::ffi::InternalErrorLog::Info);
 
     let err = from_description("remote exception: worker_do_not_log; script exceeded time limit");
     assert!(err.do_not_log);
@@ -158,7 +155,7 @@ fn errors_without_the_marker_are_logged() {
         assert!(!err.do_not_log, "{description}");
         assert_eq!(
             err.internal_error_log(),
-            v8::ffi::InternalErrorLog::WithId,
+            v8::ffi::InternalErrorLog::Error,
             "{description}"
         );
     }

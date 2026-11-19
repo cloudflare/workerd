@@ -185,12 +185,12 @@ pub mod ffi {
     /// How throwing an internal error logs its message.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum InternalErrorLog {
-        /// At `ERROR`, with the reference ID that JavaScript gets, as C++ `makeInternalError()`
-        /// logs it.
-        WithId,
+        /// At `ERROR`, with the reference ID that JavaScript gets when an error is created.
+        /// While execution is terminating, logs only the message without creating an error.
+        Error,
         /// At `INFO`, without the reference ID, as C++ JSG logs a KJ exception marked
         /// `worker_do_not_log` that it throws to JavaScript.
-        DoNotLog,
+        Info,
     }
 
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.

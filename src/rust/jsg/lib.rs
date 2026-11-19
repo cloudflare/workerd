@@ -649,9 +649,9 @@ impl Error {
     /// How throwing this error logs its message if it is internal.
     fn internal_error_log(&self) -> v8::ffi::InternalErrorLog {
         if self.do_not_log {
-            v8::ffi::InternalErrorLog::DoNotLog
+            v8::ffi::InternalErrorLog::Info
         } else {
-            v8::ffi::InternalErrorLog::WithId
+            v8::ffi::InternalErrorLog::Error
         }
     }
 
@@ -1285,7 +1285,7 @@ impl<'s> Lock<'s> {
     /// internal message is never exposed to JavaScript. While execution is terminating, it
     /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
-        self.throw_internal_error_logged(internal_message, v8::ffi::InternalErrorLog::WithId);
+        self.throw_internal_error_logged(internal_message, v8::ffi::InternalErrorLog::Error);
     }
 
     /// [`Lock::throw_internal_error`], logging `internal_message` as `log` says.
@@ -2030,7 +2030,7 @@ where
                 v8::ffi::isolate_throw_internal_error(
                     isolate.as_ffi(),
                     msg,
-                    v8::ffi::InternalErrorLog::WithId,
+                    v8::ffi::InternalErrorLog::Error,
                 );
                 v8::ffi::isolate_terminate_execution(isolate.as_ffi());
             }

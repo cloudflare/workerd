@@ -1544,7 +1544,7 @@ void fast_api_throw_exception(FastApiCallbackOptions* options,
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
   v8::HandleScope scope(options->isolate);
-  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::WithId);
+  isolate_throw_internal_error(options->isolate, internalMessage, InternalErrorLog::Error);
 }
 
 void fast_api_terminate_execution(FastApiCallbackOptions* options) {
@@ -2127,13 +2127,13 @@ bool dom_exception_try_unwrap(Isolate* isolate,
 
 namespace {
 // Logs the message of an internal error that is not created, as `log` says. With
-// InternalErrorLog::WithId there is no ID to log it with, since no error carries one.
+// InternalErrorLog::Error there is no ID to log it with, since no error carries one.
 void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
   switch (log) {
-    case InternalErrorLog::WithId:
+    case InternalErrorLog::Error:
       KJ_LOG(ERROR, message);
       return;
-    case InternalErrorLog::DoNotLog:
+    case InternalErrorLog::Info:
       KJ_LOG(INFO, message);
       return;
   }
@@ -2141,9 +2141,9 @@ void logInternalMessage(kj::StringPtr message, InternalErrorLog log) {
 }
 
 // Generates a unique error ID and returns a generic "internal error; reference = <id>" JS Error.
-// With InternalErrorLog::WithId, this is makeInternalError() from util.c++, which it calls: the
+// With InternalErrorLog::Error, this is makeInternalError() from util.c++, which it calls: the
 // internal message is logged with the ID to KJ_LOG(ERROR) for Sentry. With
-// InternalErrorLog::DoNotLog, the message is logged to KJ_LOG(INFO) without the ID, as
+// InternalErrorLog::Info, the message is logged to KJ_LOG(INFO) without the ID, as
 // reportInternalException() in util.c++ logs an exception marked worker_do_not_log.
 v8::Local<v8::Value> createInternalError(
     Isolate* isolate, ::rust::Str internalMessage, InternalErrorLog log) {
@@ -2152,9 +2152,9 @@ v8::Local<v8::Value> createInternalError(
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
   switch (log) {
-    case InternalErrorLog::WithId:
+    case InternalErrorLog::Error:
       return ::workerd::jsg::makeInternalError(isolate, message);
-    case InternalErrorLog::DoNotLog: {
+    case InternalErrorLog::Info: {
       logInternalMessage(message, log);
       // The text makeInternalError() gives the error.
       auto text = kj::str("internal error; reference = ", ::workerd::makeInternalErrorId());
