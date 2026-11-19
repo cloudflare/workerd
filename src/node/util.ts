@@ -46,6 +46,8 @@ import {
 
 import {
   callbackify,
+  kCustomPromisifiedSymbol,
+  kCustomPromisifyArgsSymbol,
   kNullProtoObject,
   parseEnv,
 } from 'node-internal:internal_utils';
@@ -119,11 +121,6 @@ export { diff };
 export const types = internalTypes;
 
 export { MIMEParams, MIMEType };
-
-const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
-const kCustomPromisifyArgsSymbol = Symbol.for(
-  'nodejs.util.promisify.custom.args'
-);
 
 // TODO(later): Proper type signature for promisify.
 /* eslint-disable */
