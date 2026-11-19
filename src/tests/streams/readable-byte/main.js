@@ -334,9 +334,9 @@ export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';
 export {
   inMemoryBodySmallValueIsOneChunk,
   inMemoryBodyEmptyValueClosesWithoutChunks,
-  inMemoryBodyChunksAreCompleteUtf8,
+  inMemoryBodyChunksEndOnCodePoints,
   inMemoryBodyLongBufferInChunks,
-  inMemoryBodyWritesLoneSurrogatesAsReplacement,
+  inMemoryBodyWritesLoneSurrogates,
   inMemoryBodyReadsIntoByobViews,
   inMemoryBodyIsCopiedAtConstruction,
   inMemoryBodyDeclaresItsLength,

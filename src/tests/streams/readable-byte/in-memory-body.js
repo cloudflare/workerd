@@ -5,13 +5,39 @@
 // The body of a Request or Response made from a string, BufferSource or
 // Blob: a byte stream that copies the value into a new chunk for each
 // read. A value of up to 128 KiB is one chunk, and a longer one is split
-// into chunks of up to 128 KiB, each of a string complete UTF-8 on its
-// own. The stream declares the value's length. PARITY throughout.
+// into chunks of up to 128 KiB, each of a string ending on a code point
+// boundary. A lone surrogate in a string is written as U+FFFD under
+// string_body_replace_surrogates, and as WTF-8 otherwise. The stream
+// declares the value's length. PARITY throughout.
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 
 const MAX_CHUNK = 128 * 1024;
 const enc = new TextEncoder();
+const replaceSurrogates =
+  globalThis.Cloudflare.compatibilityFlags['string_body_replace_surrogates'] ===
+  true;
+
+// Encodes `text` as WTF-8: as UTF-8, but with a lone surrogate written as the
+// three bytes UTF-8 would give its code point.
+function wtf8(text) {
+  const bytes = [];
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code >= 0xd800 && code <= 0xdfff) {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f));
+      bytes.push(0x80 | (code & 0x3f));
+    } else {
+      bytes.push(...enc.encode(char));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+// The bytes of a string body.
+function encodeBody(text) {
+  return replaceSurrogates ? enc.encode(text) : wtf8(text);
+}
 
 async function readChunks(stream) {
   const reader = stream.getReader();
@@ -33,13 +59,13 @@ function concat(chunks) {
   return result;
 }
 
-// Checks that each chunk is at most MAX_CHUNK bytes and decodes on its own
-// with a fatal decoder, and that together they are `expected`.
+// Checks that each chunk is at most MAX_CHUNK bytes and starts a code point
+// rather than continuing one, and that together they are `expected`.
 function checkTextChunks(chunks, expected, label) {
   for (const chunk of chunks) {
     ok(chunk.byteLength > 0, label);
     ok(chunk.byteLength <= MAX_CHUNK, label);
-    new TextDecoder('utf-8', { fatal: true }).decode(chunk);
+    ok((chunk[0] & 0xc0) !== 0x80, label);
   }
   deepStrictEqual(concat(chunks), expected, label);
 }
@@ -85,10 +111,10 @@ function longText() {
   return text;
 }
 
-export const inMemoryBodyChunksAreCompleteUtf8 = {
+export const inMemoryBodyChunksEndOnCodePoints = {
   async test() {
     const text = longText();
-    const expected = enc.encode(text);
+    const expected = encodeBody(text);
     ok(expected.byteLength > 4 * MAX_CHUNK);
     checkTextChunks(
       await readChunks(new Response(text).body),
@@ -120,14 +146,21 @@ export const inMemoryBodyLongBufferInChunks = {
   },
 };
 
-export const inMemoryBodyWritesLoneSurrogatesAsReplacement = {
+export const inMemoryBodyWritesLoneSurrogates = {
   async test() {
     const response = new Response('a\uD800b');
+    const surrogate = replaceSurrogates
+      ? [0xef, 0xbf, 0xbd]
+      : [0xed, 0xa0, 0x80];
     deepStrictEqual(
       new Uint8Array(await response.clone().arrayBuffer()),
-      new Uint8Array([0x61, 0xef, 0xbf, 0xbd, 0x62])
+      new Uint8Array([0x61, ...surrogate, 0x62])
     );
-    strictEqual(await response.text(), 'a�b');
+    // A decoder replaces each of the WTF-8 bytes, which are not valid UTF-8.
+    strictEqual(
+      await response.text(),
+      replaceSurrogates ? 'a\uFFFDb' : 'a\uFFFD\uFFFD\uFFFDb'
+    );
   },
 };
 

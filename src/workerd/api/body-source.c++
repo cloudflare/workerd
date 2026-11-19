@@ -4,11 +4,23 @@
 
 #include "body-source.h"
 
+#include <workerd/api/encoding.h>
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/streams/common.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
+
+namespace {
+
+// How a string body writes a lone surrogate; see string_body_replace_surrogates.
+LoneSurrogates stringBodyLoneSurrogates(jsg::Lock& js) {
+  return FeatureFlags::get(js).getStringBodyReplaceSurrogates() ? LoneSurrogates::REPLACE
+                                                                : LoneSurrogates::WTF8;
+}
+
+}  // namespace
 
 BodySource::BodySource(kj::Array<const kj::byte> bytes)
     : value(kj::rc<kj::Array<const kj::byte>>(kj::mv(bytes))) {}
@@ -48,7 +60,7 @@ JsReadableStream BodySource::createStream(jsg::Lock& js) {
           js, IoContext::current(), newMemorySource(data, bytes.addRef().toOwn()));
     }
     KJ_CASE_ONEOF(text, jsg::JsRef<jsg::JsString>) {
-      return JsReadableStream::create(js, text.getHandle(js));
+      return JsReadableStream::create(js, text.getHandle(js), stringBodyLoneSurrogates(js));
     }
     KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
       return JsReadableStream::create(js, buffer.getHandle(js));

@@ -802,8 +802,9 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::String data) {
   return create(js, webstreams::stringToBytes(kj::mv(data)));
 }
 
-JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsString str) {
-  return create(js, kj::rc<ByteChunker>(js, str));
+JsReadableStream JsReadableStream::create(
+    jsg::Lock& js, jsg::JsString str, LoneSurrogates loneSurrogates) {
+  return create(js, kj::rc<ByteChunker>(js, str, loneSurrogates));
 }
 
 JsReadableStream JsReadableStream::create(jsg::Lock& js, jsg::JsBufferSource source) {

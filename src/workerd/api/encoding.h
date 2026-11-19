@@ -189,11 +189,26 @@ struct Utf8EncodedPrefix {
   size_t written;
 };
 
+// How a UTF-8 encoder writes a lone surrogate, a UTF-16 code unit in the range D800-DFFF that is
+// not half of a surrogate pair. Both take three bytes.
+// js-readable-stream.h declares it too, with the same underlying type.
+enum class LoneSurrogates : uint8_t {
+  // As U+FFFD, as TextEncoder does. The output is valid UTF-8.
+  REPLACE,
+  // As the three bytes UTF-8 would give the surrogate's code point (WTF-8), as
+  // jsg::JsString::toString() does. The output is not valid UTF-8.
+  WTF8,
+};
+
 // Encodes as much of `str`, starting at UTF-16 code unit `start`, as fits in `output` as UTF-8,
 // as TextEncoder.encodeInto() does: it writes only whole code points, never splitting a surrogate
-// pair, and writes a lone surrogate as U+FFFD. `start` must not fall inside a surrogate pair.
-Utf8EncodedPrefix encodeUtf8Prefix(
-    jsg::Lock& js, jsg::JsString str, size_t start, kj::ArrayPtr<char> output);
+// pair, and writes a lone surrogate as `loneSurrogates` says. `start` must not fall inside a
+// surrogate pair.
+Utf8EncodedPrefix encodeUtf8Prefix(jsg::Lock& js,
+    jsg::JsString str,
+    size_t start,
+    kj::ArrayPtr<char> output,
+    LoneSurrogates loneSurrogates = LoneSurrogates::REPLACE);
 
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \

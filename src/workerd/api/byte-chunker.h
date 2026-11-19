@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/blob.h>
+#include <workerd/api/encoding.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/one-of.h>
@@ -13,8 +14,9 @@ namespace workerd::api {
 
 // Produces the bytes of a JavaScript string (as UTF-8), BufferSource or Blob as a sequence of new
 // Uint8Arrays, for a byte stream to enqueue. A value of at most kMaxChunkSize bytes is produced
-// as one chunk, and a longer one in chunks of up to that size. Each chunk of a string is complete,
-// valid UTF-8: chunks end on code point boundaries, and a lone surrogate is written as U+FFFD.
+// as one chunk, and a longer one in chunks of up to that size. Each chunk of a string ends on a
+// code point boundary, and a lone surrogate is written as the `loneSurrogates` the chunker was
+// made with says; with LoneSurrogates::REPLACE, every chunk is valid UTF-8.
 //
 // Every chunk is a copy, so the value itself is never handed to JavaScript, transferred or
 // detached. The chunker drops the value once it has produced every byte, or when cancelled.
@@ -22,7 +24,8 @@ class ByteChunker final {
  public:
   static constexpr size_t kMaxChunkSize = 128 * 1024;
 
-  ByteChunker(jsg::Lock& js, jsg::JsString text);
+  ByteChunker(
+      jsg::Lock& js, jsg::JsString text, LoneSurrogates loneSurrogates = LoneSurrogates::REPLACE);
   ByteChunker(jsg::Lock& js, jsg::JsBufferSource buffer);
   explicit ByteChunker(jsg::Ref<Blob> blob);
 
@@ -65,6 +68,8 @@ class ByteChunker final {
 
   // Where the next chunk starts: in UTF-16 code units for a string, in bytes otherwise.
   size_t offset = 0;
+
+  LoneSurrogates loneSurrogates = LoneSurrogates::REPLACE;
 
   jsg::JsUint8Array nextTextChunk(jsg::Lock& js, jsg::JsString text, size_t size);
 };

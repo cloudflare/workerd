@@ -4,13 +4,13 @@
 
 #include "byte-chunker.h"
 
-#include <workerd/api/encoding.h>
-
 namespace workerd::api {
 
-ByteChunker::ByteChunker(jsg::Lock& js, jsg::JsString text)
+// A lone surrogate takes three bytes however it is written, as utf8Length() counts it.
+ByteChunker::ByteChunker(jsg::Lock& js, jsg::JsString text, LoneSurrogates loneSurrogates)
     : length(text.utf8Length(js)),
-      remaining(length) {
+      remaining(length),
+      loneSurrogates(loneSurrogates) {
   if (length > 0) {
     value = Value(text.addRef(js));
   }
@@ -59,7 +59,7 @@ kj::Maybe<jsg::JsUint8Array> ByteChunker::next(jsg::Lock& js) {
 jsg::JsUint8Array ByteChunker::nextTextChunk(jsg::Lock& js, jsg::JsString text, size_t size) {
   // Allocate the chunk first: encoding must not cause a V8 GC.
   auto buffer = jsg::JsArrayBuffer::create(js, size);
-  auto encoded = encodeUtf8Prefix(js, text, offset, buffer.asArrayPtr().asChars());
+  auto encoded = encodeUtf8Prefix(js, text, offset, buffer.asArrayPtr().asChars(), loneSurrogates);
   // Any code point fits in four bytes, and a chunk shorter than that holds the rest of the string,
   // so every chunk has something in it.
   KJ_ASSERT(encoded.written > 0, "a string produced fewer bytes than its UTF-8 length");

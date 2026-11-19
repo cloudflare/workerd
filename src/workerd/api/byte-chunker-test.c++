@@ -14,8 +14,9 @@ namespace {
 constexpr size_t kMax = ByteChunker::kMaxChunkSize;
 
 // Drains the chunker, checking that each chunk is at most kMaxChunkSize bytes and, for a string,
-// complete UTF-8 on its own. `total` is the number of bytes the chunker had already produced.
-// Returns the chunks.
+// starts a code point rather than continuing one, so that, given that the chunks together are the
+// string's encoding, none ends partway through a code point. `total` is the number of bytes the
+// chunker had already produced. Returns the chunks.
 kj::Vector<kj::Array<kj::byte>> drain(
     jsg::Lock& js, ByteChunker& chunker, bool text, uint64_t total = 0) {
   kj::Vector<kj::Array<kj::byte>> chunks;
@@ -25,10 +26,7 @@ kj::Vector<kj::Array<kj::byte>> drain(
     KJ_EXPECT(bytes.size() > 0);
     KJ_EXPECT(bytes.size() <= kMax, bytes.size());
     if (text) {
-      // Decoding replaces an incomplete or invalid sequence with U+FFFD, so a chunk that is
-      // complete UTF-8 is the only kind that encodes back to itself.
-      auto decoded = js.str(bytes.asChars()).toString(js);
-      KJ_EXPECT(decoded.asBytes() == bytes, chunks.size());
+      KJ_EXPECT((bytes[0] & 0xc0) != 0x80, chunks.size());
     }
     total += bytes.size();
     chunks.add(kj::heapArray(bytes));
@@ -44,6 +42,21 @@ kj::Array<kj::byte> concat(kj::ArrayPtr<const kj::Array<kj::byte>> chunks) {
     result.addAll(chunk);
   }
   return result.releaseAsArray();
+}
+
+// The bytes a chunker writing lone surrogates as `loneSurrogates` produces for `str`.
+kj::Array<kj::byte> encodingOf(jsg::Lock& js, jsg::JsString str, LoneSurrogates loneSurrogates) {
+  switch (loneSurrogates) {
+    case LoneSurrogates::REPLACE:
+      return kj::heapArray(str.toUSVString(js).asBytes());
+    case LoneSurrogates::WTF8:
+      return kj::heapArray(str.toString(js).asBytes());
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::StringPtr modeName(LoneSurrogates loneSurrogates) {
+  return loneSurrogates == LoneSurrogates::REPLACE ? "REPLACE"_kj : "WTF8"_kj;
 }
 
 // `prefix` ASCII letters followed by `rest`.
@@ -68,13 +81,20 @@ KJ_TEST("ByteChunker produces a small value as one chunk") {
     KJ_ASSERT(chunks.size() == 1);
     KJ_EXPECT(chunks[0].asPtr() == "h\xc3\xa9l\xf0\x9f\x98\x80"_kjb);
 
-    // A lone surrogate is written as U+FFFD, as TextEncoder writes it.
+    // A lone surrogate is written as U+FFFD, as TextEncoder writes it, or as WTF-8.
     const char16_t lone[] = {u'a', 0xd800, u'b'};
-    ByteChunker loneChunker(js, js.str(kj::ArrayPtr<const char16_t>(lone, kj::size(lone))));
-    auto loneChunks = drain(js, loneChunker, true);
-    KJ_ASSERT(loneChunks.size() == 1);
-    KJ_EXPECT(loneChunks[0].asPtr() ==
+    auto loneText = js.str(kj::ArrayPtr<const char16_t>(lone, kj::size(lone)));
+    ByteChunker replacing(js, loneText);
+    auto replaced = drain(js, replacing, true);
+    KJ_ASSERT(replaced.size() == 1);
+    KJ_EXPECT(replaced[0].asPtr() ==
         "a\xef\xbf\xbd"
+        "b"_kjb);
+    ByteChunker wtf8(js, loneText, LoneSurrogates::WTF8);
+    auto encoded = drain(js, wtf8, true);
+    KJ_ASSERT(encoded.size() == 1);
+    KJ_EXPECT(encoded[0].asPtr() ==
+        "a\xed\xa0\x80"
         "b"_kjb);
   });
 }
@@ -97,19 +117,26 @@ KJ_TEST("ByteChunker ends string chunks on code point boundaries") {
       {"surrogate pair with three bytes left"_kj, kMax - 3,
         kj::heapArray<char16_t>({0xd83d, 0xde00, u'z'}), kMax - 3},
       {"lone lead surrogate"_kj, kMax - 2, kj::heapArray<char16_t>({0xd800, u'z'}), kMax - 2},
+      // simdutf reports a lone lead surrogate with three bytes left as the output being full.
+      {"lone lead surrogate with three bytes left"_kj, kMax - 3,
+        kj::heapArray<char16_t>({0xd800, u'z'}), kMax},
+      {"lone lead surrogate at the end"_kj, kMax - 1, kj::heapArray<char16_t>({0xd800}), kMax - 1},
       {"lone trail surrogate"_kj, kMax - 1, kj::heapArray<char16_t>({0xdc00, u'z'}), kMax - 1},
       {"pair after lone surrogate"_kj, kMax - 5,
         kj::heapArray<char16_t>({0xdc00, 0xd83d, 0xde00, u'z'}), kMax - 2},
     };
-    for (auto& c: cases) {
-      auto str = stringOf(js, c.prefix, c.rest);
-      ByteChunker chunker(js, str);
-      auto expected = str.toUSVString(js);
-      KJ_EXPECT(chunker.getLength() == expected.size(), c.name);
-      auto chunks = drain(js, chunker, true);
-      KJ_ASSERT(chunks.size() == 2, c.name, chunks.size());
-      KJ_EXPECT(chunks[0].size() == c.firstChunk, c.name, chunks[0].size());
-      KJ_EXPECT(concat(chunks).asPtr() == expected.asBytes(), c.name);
+    for (auto loneSurrogates: {LoneSurrogates::REPLACE, LoneSurrogates::WTF8}) {
+      auto mode = modeName(loneSurrogates);
+      for (auto& c: cases) {
+        auto str = stringOf(js, c.prefix, c.rest);
+        ByteChunker chunker(js, str, loneSurrogates);
+        auto expected = encodingOf(js, str, loneSurrogates);
+        KJ_EXPECT(chunker.getLength() == expected.size(), c.name);
+        auto chunks = drain(js, chunker, true);
+        KJ_ASSERT(chunks.size() == 2, c.name, mode, chunks.size());
+        KJ_EXPECT(chunks[0].size() == c.firstChunk, c.name, mode, chunks[0].size());
+        KJ_EXPECT(concat(chunks) == expected, c.name, mode);
+      }
     }
   });
 }
@@ -128,12 +155,15 @@ KJ_TEST("ByteChunker splits a long string of mixed code points") {
       }
     }
     auto str = js.str(units.asPtr());
-    ByteChunker chunker(js, str);
-    auto expected = str.toUSVString(js);
-    KJ_EXPECT(chunker.getLength() == expected.size());
-    auto chunks = drain(js, chunker, true);
-    KJ_EXPECT(chunks.size() == expected.size() / kMax + 1, chunks.size());
-    KJ_EXPECT(concat(chunks).asPtr() == expected.asBytes());
+    for (auto loneSurrogates: {LoneSurrogates::REPLACE, LoneSurrogates::WTF8}) {
+      auto mode = modeName(loneSurrogates);
+      ByteChunker chunker(js, str, loneSurrogates);
+      auto expected = encodingOf(js, str, loneSurrogates);
+      KJ_EXPECT(chunker.getLength() == expected.size(), mode);
+      auto chunks = drain(js, chunker, true);
+      KJ_EXPECT(chunks.size() == expected.size() / kMax + 1, mode, chunks.size());
+      KJ_EXPECT(concat(chunks) == expected, mode);
+    }
   });
 }
 
