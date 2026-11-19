@@ -566,6 +566,19 @@ kj::Promise<void> queuedWriteStep(
   }
 }
 
+// The pump's last write: queuedWriteStep(), owning the sink, which it aborts should the write
+// fail, as the pump's loop does when an earlier write fails.
+kj::Promise<void> lastQueuedWriteStep(
+    kj::Own<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
+  KJ_TRY {
+    co_await queuedWriteStep(sink->getPtr(), kj::mv(pieces), end);
+  }
+  KJ_CATCH(exception) {
+    sink->abort(exception.clone());
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
 struct QueuedPumpState {
   QueuedPumpState(jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink)
       : reader(kj::mv(reader)),
@@ -576,6 +589,10 @@ struct QueuedPumpState {
   // Wraps each sink operation so that dropping the pump can cancel the one in flight. Declared
   // after `sink` so that it is destroyed first.
   kj::Canceler writeCanceler;
+  // The last write, which owns the sink from then on. The loop leaves it for awaitQueuedPump()
+  // to await, so that the pump settles when it does, without taking the isolate lock again.
+  // Declared after `writeCanceler`, which wraps it, so that it is destroyed first.
+  kj::Maybe<kj::Promise<void>> lastWrite;
   // Cancels the reader if the sink disconnects while the pump is running; see
   // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
   kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
@@ -626,12 +643,13 @@ void cancelReaderOfDroppedPump(IoContext::WeakRef& weakContext, jsg::JsRef<jsg::
   });
 }
 
-// Awaits the queued pump's JS loop. Dropping the returned promise before the loop settles (for
-// example, because the client disconnected and the HTTP layer dropped the response body) cancels
-// the sink operation in flight, stops the loop from writing to or ending the sink, and cancels the
-// reader with an undefined reason, so that the source's cancel algorithm runs and it stops
-// producing data. Dropping the promise alone would do none of this: the JS loop, which owns the
-// pump state, would stay parked on its pending read, or go on writing to a sink nothing consumes.
+// Awaits the queued pump's JS loop, then its last write. Dropping the returned promise before the
+// pump settles (for example, because the client disconnected and the HTTP layer dropped the
+// response body) cancels the sink operation in flight, stops the loop from writing to or ending
+// the sink, and cancels the reader with an undefined reason, so that the source's cancel algorithm
+// runs and it stops producing data. Dropping the promise alone would do none of this: the JS loop,
+// which owns the pump state, would stay parked on its pending read, or go on writing to a sink
+// nothing consumes.
 //
 // `reader` is the state's reader, passed separately because taking a reference to it requires the
 // isolate lock, which the frame teardown does not hold.
@@ -647,12 +665,15 @@ kj::Promise<void> awaitQueuedPump(IoContext& context,
     cancelReaderOfDroppedPump(*weakContext, kj::mv(reader));
   });
   co_await loop;
+  KJ_IF_SOME(lastWrite, state->lastWrite) {
+    co_await lastWrite;
+  }
 }
 
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
-// vectored write, and recurse until done. All JS state (the reader) travels through the
-// jsg promise chain.
+// vectored write, and recurse until done, leaving the last write to awaitQueuedPump(). All JS
+// state (the reader) travels through the jsg promise chain.
 jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, EndStream end) {
   auto& context = IoContext::current();
   auto readResult = webstreams::invokeMethod(js, state->reader.getHandle(js), "read"_kj);
@@ -690,11 +711,20 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
       }
     }
 
-    auto writeStep = state->writeCanceler.wrap(queuedWriteStep(
-        state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO));
+    if (done) {
+      // Nothing is left for JavaScript to do. The last write takes the sink, so that it does not
+      // depend on the IoContext, and the disconnect watch, which has no read left to cancel, ends
+      // before it.
+      state->sinkDisconnectWatch = kj::none;
+      state->lastWrite = state->writeCanceler.wrap(
+          lastQueuedWriteStep(kj::mv(state->sink), pieces.releaseAsArray(), end));
+      return js.resolvedPromise();
+    }
+    auto writeStep = state->writeCanceler.wrap(
+        queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), EndStream::NO));
     return context.awaitIo(js, kj::mv(writeStep),
-        context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
-      return done || state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
+        context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext&) mutable {
+      return state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
     }));
   }));
 }
@@ -715,8 +745,9 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
   // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
   // waiting for the source to produce data whose write would fail. The pending read then settles
   // as done and the loop winds down; its final end() is best-effort against a destination that is
-  // already gone. The watch is owned by the pump state so that it ends with the pump, and it
-  // reaches the IoContext through a weak reference because it fires outside any JS-lock scope.
+  // already gone. The watch is owned by the pump state so that it ends with the pump, if not at
+  // the last write, and it reaches the IoContext through a weak reference because it fires
+  // outside any JS-lock scope.
   state->sinkDisconnectWatch = context.addObject(kj::heap<kj::Promise<void>>(
       state->sink->whenWriteDisconnected()
           .then([](kj::Exception&& exception) { return kj::mv(exception); },

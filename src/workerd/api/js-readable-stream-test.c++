@@ -2153,6 +2153,111 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream does not cancel i
   KJ_EXPECT(cancels.count == 0);
 }
 
+// Counts the isolate locks taken.
+class LockCounter final: public IsolateObserver {
+ public:
+  kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>>) const override {
+    ++count;
+    return kj::none;
+  }
+
+  mutable std::atomic<uint> count = 0;
+};
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream settles without the lock") {
+  // The stream closes in the pull that enqueues its only chunk, so the pump's first read is its
+  // last. Nothing is left for JavaScript to do then: the pump writes the chunk, ends the sink and
+  // settles without taking the isolate lock again.
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setTypeScriptImplementedStreams(true);
+  auto locks = kj::atomicRefcounted<LockCounter>();
+  TestFixture fixture(
+      {.featureFlags = flags.asReader(), .isolateObserver = kj::atomicAddRef(*locks)});
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  uint locksBeforeWriteDone = locks->count;
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->fulfill();
+  auto& ws = fixture.getWaitScope();
+  KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws);
+  KJ_EXPECT(calls.ended);
+  KJ_EXPECT(!calls.aborted);
+  KJ_EXPECT(locks->count == locksBeforeWriteDone, locks->count - locksBeforeWriteDone);
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream aborts the sink if its last write "
+        "fails") {
+  auto fixture = makeTsStreamsFixture();
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  KJ_ASSERT_NONNULL(calls.pendingWrite)->reject(JSG_KJ_EXCEPTION(FAILED, Error, "write failed"));
+  auto& ws = fixture.getWaitScope();
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { KJ_ASSERT_NONNULL(pump).wait(ws).proxyTask.wait(ws); }));
+  KJ_EXPECT(exception.getDescription() == "jsg.Error: write failed", exception.getDescription());
+  KJ_EXPECT(calls.aborted);
+  KJ_EXPECT(!calls.ended);
+
+  pump = kj::none;
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped during its last write") {
+  // As for an earlier write, dropping the pump cancels the write, and the sink is neither ended
+  // nor aborted.
+  auto fixture = makeTsStreamsFixture();
+  StallingSinkCalls calls;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, jsg::JsBufferSource(jsg::JsUint8Array::create(js, kData.asBytes())));
+    pump = stream.pumpTo(js, kj::heap<StallingSink>(calls), EndStream::YES);
+  });
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(calls.writes == 1);
+  auto& pendingWrite = *KJ_ASSERT_NONNULL(calls.pendingWrite);
+  KJ_ASSERT(pendingWrite.isWaiting());
+
+  pump = kj::none;
+  KJ_EXPECT(!pendingWrite.isWaiting(), "the write in flight was not canceled");
+  fixture.pollEventLoop();
+
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(calls.writes == 1);
+  KJ_EXPECT(!calls.ended);
+  KJ_EXPECT(!calls.aborted);
+}
+
 KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped in IoContext teardown") {
   // A pump can be owned by the IoContext's own task sets, in which case it is dropped while the
   // IoContext is being destroyed. There is nothing left to run the cancel algorithm in, so the
