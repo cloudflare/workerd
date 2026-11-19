@@ -18,6 +18,10 @@ export type {
   URLPatternOptions,
 } from './urlpattern/urlpattern';
 export type {
+  EventSource,
+  EventSourceEventSourceInit,
+} from './eventsource/eventsource.public';
+export type {
   MessagePort,
   MessageChannel,
   MessagePortPostMessageOptions,

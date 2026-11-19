@@ -270,6 +270,15 @@ declare interface RequestIo {
   logUncaughtException(error: unknown): void;
 }
 
+// A service binding, as the Workers types' Fetcher declares it in full,
+// which EventSourceInit's `fetcher` names (eventsource.public.d.ts). The
+// bootstrap only checks one with utils.isFetcher() and passes it to
+// RequestIo.fetch(). The Workers types publish their own declaration, not
+// this one.
+declare interface Fetcher {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
 // An abort algorithm registration. Obtained only from
 // utils.addAbortAlgorithm(); it has no JS-reachable constructor.
 declare interface AbortAlgorithmHandle {
