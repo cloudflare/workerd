@@ -4,10 +4,13 @@
 
 #include "bench.h"
 
+#include <workerd/api/bench-core/ffi.rs.h>
 #include <workerd/io/io-context.h>
-#include <workerd/rust/histogram/ffi.rs.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <kj-rs/convert.h>
+
+#include <capnp/serialize.h>
 #include <kj/glob-filter.h>
 
 #include <algorithm>
@@ -46,19 +49,6 @@ constexpr uint64_t MIN_BATCH_NS = 1'000'000;
 
 constexpr uint64_t MAX_CALLS_PER_BATCH = uint64_t{1} << 40;
 constexpr uint32_t MAX_SAMPLES = 1'000'000;
-
-// Samples are recorded into histograms in picoseconds, up to an hour per call.
-constexpr int64_t HISTOGRAM_HIGHEST_PS = 3'600'000'000'000'000;
-constexpr int32_t HISTOGRAM_FIGURES = 3;
-constexpr double CONFIDENCE = 0.95;
-
-// A case is flagged as high-variance when the coefficient of variation of its wall time per call
-// exceeds this.
-constexpr double HIGH_VARIANCE_CV = 0.1;
-
-// A case is flagged as at the measurement floor when its median wall time before subtracting the
-// overhead is less than this multiple of the overhead.
-constexpr double AT_FLOOR_FACTOR = 2;
 
 // Budgets for the cases that measure overhead, which are capped further under --quick.
 constexpr uint64_t OVERHEAD_MIN_TIME_NS = 200'000'000;
@@ -137,6 +127,9 @@ uint64_t parseCount(double value, uint64_t max, kj::StringPtr what) {
   return static_cast<uint64_t>(value);
 }
 
+// TODO(cleanup): Same as `median()` in the bench-core crate (src/workerd/api/bench-core),
+// which the report uses. Its only remaining user here is the overhead measurement, and it goes
+// away when BenchController moves to Rust.
 double median(kj::ArrayPtr<const double> samples) {
   KJ_ASSERT(samples.size() > 0);
   auto sorted = kj::heapArray(samples);
@@ -151,46 +144,6 @@ jsg::Promise<jsg::Value> settle(jsg::Lock& js, jsg::Value value) {
     return js.toPromise(value.getHandle(js));
   }
   return js.resolvedPromise(kj::mv(value));
-}
-
-// Whether any of `samples` is longer than the histograms hold.
-bool exceedsHistogram(kj::ArrayPtr<const double> samples) {
-  for (auto ns: samples) {
-    if (ns * 1000 > HISTOGRAM_HIGHEST_PS) return true;
-  }
-  return false;
-}
-
-::workerd::rust::histogram::Summary fillMetric(
-    kj::ArrayPtr<const double> samples, bench::BenchReport::Metric::Builder metric) {
-  auto list = metric.initSamples(samples.size());
-  for (auto i: kj::indices(samples)) {
-    list.set(i, samples[i]);
-  }
-
-  auto histogram =
-      ::workerd::rust::histogram::new_histogram(1, HISTOGRAM_HIGHEST_PS, HISTOGRAM_FIGURES);
-  for (auto sample: samples) {
-    // fillBenchReport() fails cases with samples out of range, so every sample is recorded.
-    KJ_ASSERT(histogram->record(static_cast<int64_t>(std::llround(kj::max(sample, 0.0) * 1000))));
-  }
-  auto summary = ::workerd::rust::histogram::summarize(*histogram, CONFIDENCE);
-
-  auto ns = [](auto ps) { return static_cast<double>(ps) / 1000; };
-  metric.setMean(ns(summary.mean));
-  metric.setMeanLow(ns(summary.mean_lower));
-  metric.setMeanHigh(ns(summary.mean_upper));
-  metric.setMedian(ns(summary.median));
-  metric.setMedianLow(ns(summary.median_lower));
-  metric.setMedianHigh(ns(summary.median_upper));
-  metric.setP75(ns(summary.p75));
-  metric.setP99(ns(summary.p99));
-  metric.setMin(ns(summary.min));
-  metric.setMax(ns(summary.max));
-  metric.setStddev(ns(summary.stddev));
-  metric.setSkewness(summary.skewness);
-  metric.setKurtosis(summary.kurtosis);
-  return summary;
 }
 
 }  // namespace
@@ -209,65 +162,35 @@ kj::String describeBenchException(jsg::Lock& js, const jsg::Value& exception) {
 }
 
 void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::Builder report) {
+  auto group = new_bench_group_report();
   KJ_IF_SOME(error, result.error) {
-    report.setError(error);
+    group->set_error(error.asBytes().as<kj_rs::Rust>());
   }
   KJ_IF_SOME(o, result.overhead) {
-    auto overhead = report.initOverhead();
-    overhead.setSyncNs(o.syncNs);
-    overhead.setSyncCpuNs(o.syncCpuNs);
-    overhead.setAsyncNs(o.asyncNs);
-    overhead.setAsyncCpuNs(o.asyncCpuNs);
-    overhead.setBlackBoxNs(o.blackBoxNs);
+    group->set_overhead(o.syncNs, o.syncCpuNs, o.asyncNs, o.asyncCpuNs, o.blackBoxNs);
   }
-  auto cases = report.initCases(result.cases.size());
-  for (auto i: kj::indices(result.cases)) {
-    auto& from = result.cases[i];
-    auto to = cases[i];
-    to.setName(from.name);
-    to.setStatus(from.status);
-    KJ_IF_SOME(error, from.error) {
-      to.setError(error);
-    }
-    if (from.status != bench::BenchReport::Case::Status::OK) {
-      continue;
-    }
-    if (exceedsHistogram(from.wallNs) || exceedsHistogram(from.cpuNs)) {
-      // The histograms can't record such a sample; fail the case rather than leave it out.
-      to.setStatus(bench::BenchReport::Case::Status::FAILED);
-      to.setError(
-          "A call took longer than an hour, the longest that the statistics can represent.");
-      continue;
-    }
-    to.setIterationsPerSample(from.iterationsPerSample);
-
-    double wallOverhead = 0, cpuOverhead = 0;
-    KJ_IF_SOME(o, result.overhead) {
-      wallOverhead = from.async ? o.asyncNs : o.syncNs;
-      cpuOverhead = from.async ? o.asyncCpuNs : o.syncCpuNs;
-    }
-    auto subtract = [](kj::ArrayPtr<const double> samples, double overhead) {
-      return KJ_MAP(sample, samples) { return kj::max(sample - overhead, 0.0); };
-    };
-    auto wall = fillMetric(subtract(from.wallNs, wallOverhead), to.initWallNs());
-    fillMetric(subtract(from.cpuNs, cpuOverhead), to.initCpuNs());
-
-    using Flag = bench::BenchReport::Case::Flag;
-    kj::Vector<Flag> flags;
-    if (wallOverhead > 0 && median(from.wallNs) < AT_FLOOR_FACTOR * wallOverhead) {
-      flags.add(Flag::AT_FLOOR);
-    } else if (wall.mean > 0 && wall.stddev / wall.mean > HIGH_VARIANCE_CV) {
-      // At the floor, what's left after subtracting the overhead is mostly noise, so its variance
-      // means nothing.
-      flags.add(Flag::HIGH_VARIANCE);
-    }
-    if (!flags.empty()) {
-      auto list = to.initFlags(flags.size());
-      for (auto i: kj::indices(flags)) {
-        list.set(i, flags[i]);
-      }
+  for (auto& c: result.cases) {
+    group->add_case(c.name.asBytes().as<kj_rs::Rust>(), static_cast<uint16_t>(c.status),
+        c.iterationsPerSample, c.wallNs.as<kj_rs::Rust>(), c.cpuNs.as<kj_rs::Rust>(), c.async);
+    KJ_IF_SOME(error, c.error) {
+      group->set_case_error(error.asBytes().as<kj_rs::Rust>());
     }
   }
+
+  auto words = group->encode();
+  // A group holds up to MAX_SAMPLES wall and CPU samples per case, which can be more than the
+  // default traversal limit.
+  capnp::FlatArrayMessageReader message(
+      kj::arrayPtr(reinterpret_cast<const capnp::word*>(words.data()), words.size()),
+      capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
+  auto encoded = message.getRoot<bench::BenchReport::Group>();
+  if (encoded.hasError()) {
+    report.setError(encoded.getError());
+  }
+  if (encoded.hasOverhead()) {
+    report.setOverhead(encoded.getOverhead());
+  }
+  report.setCases(encoded.getCases());
 }
 
 BenchTiming BenchTiming::now() {
