@@ -739,3 +739,63 @@ export const zstdDecompressEmptyInputTest = {
     assert.strictEqual(zlib.zstdDecompressSync(Buffer.alloc(0)).length, 0);
   },
 };
+// Bytes that zstd cannot compress, so it stores them in raw blocks.
+function incompressibleBytes(length) {
+  const bytes = Buffer.allocUnsafe(length);
+  let x = 0x9e3779b9;
+  for (let i = 0; i < length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    bytes[i] = x & 0xff;
+  }
+  return bytes;
+}
+
+// When a frame ends exactly at the end of an output buffer, nothing follows it: in particular not
+// the empty frame that a further ZSTD_e_end call would write. The sync output buffer starts at
+// 40 KiB, and the stream's chunkSize defaults to 16 KiB.
+export const zstdCompressFrameEndsAtOutputBufferEndTest = {
+  async test() {
+    // With a checksum, a frame holding 256 to 65791 incompressible bytes is 14 bytes longer than
+    // its input: a 7-byte frame header, a 3-byte block header and a 4-byte checksum.
+    const options = {
+      params: {
+        [zlib.constants.ZSTD_c_compressionLevel]: 1,
+        [zlib.constants.ZSTD_c_checksumFlag]: 1,
+      },
+    };
+    for (const frameSize of [16 * 1024, 32 * 1024, 40 * 1024]) {
+      const input = incompressibleBytes(frameSize - 14);
+
+      const sync = zlib.zstdCompressSync(input, options);
+      assert.strictEqual(sync.length, frameSize, `sync, ${frameSize}`);
+      assert(input.equals(zlib.zstdDecompressSync(sync)));
+
+      const info = zlib.zstdCompressSync(input, { ...options, info: true });
+      assert.strictEqual(info.buffer.length, frameSize, `info, ${frameSize}`);
+
+      const { promise, resolve, reject } = Promise.withResolvers();
+      zlib.zstdCompress(input, options, (err, res) => {
+        if (err) reject(err);
+        else resolve(res);
+      });
+      assert.strictEqual(
+        (await promise).length,
+        frameSize,
+        `callback, ${frameSize}`
+      );
+
+      // A stream doesn't know its input size up front, so its frame header leaves out the content
+      // size, which takes 2 bytes here, and has a 1-byte window descriptor instead.
+      const streamInput = incompressibleBytes(frameSize - 13);
+      const streamed = await zstdCompressStreaming(
+        streamInput,
+        options,
+        streamInput.length
+      );
+      assert.strictEqual(streamed.length, frameSize, `stream, ${frameSize}`);
+      assert(streamInput.equals(zlib.zstdDecompressSync(streamed)));
+    }
+  },
+};
