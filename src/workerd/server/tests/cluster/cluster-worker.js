@@ -123,6 +123,7 @@ export default {
       }
       return kv(url, env.KV);
     }
+    if (url.pathname.startsWith('/r2/')) return r2(url, env.R2);
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
@@ -188,6 +189,80 @@ async function kv(url, ns) {
       const options = { prefix: q.prefix, cursor: q.cursor };
       if (q.limit) options.limit = Number(q.limit);
       return Response.json(await ns.list(options));
+    }
+  }
+  return Response.json({ error: 'no such path' }, { status: 404 });
+}
+
+// The R2 binding, by query parameters: /r2/put?key=K&size=N[&meta=M] (N
+// bytes, each its index mod 251, with M bytes of customMetadata), /r2/get?key=K[&offset=O&length=L] (answers the bytes'
+// length and whether they are right), /r2/list?prefix=P, /r2/delete?key=K,
+// and a multipart upload's /r2/create?key=K, /r2/part?key=K&upload=U&n=N
+// &size=S and /r2/complete?key=K&upload=U&parts=JSON. Answers JSON.
+async function r2(url, bucket) {
+  const q = Object.fromEntries(url.searchParams);
+  // Built and compared with native copies and hashes: a loop over each
+  // byte of a multipart object holds the node's thread for seconds in
+  // debug builds, past its lease.
+  const bytes = (size, from = 0) => {
+    const out = new Uint8Array(size);
+    for (let i = 0; i < Math.min(size, 251); i++) out[i] = (from + i) % 251;
+    for (let n = 251; n < size; n *= 2) out.copyWithin(n, 0, n);
+    return out;
+  };
+  const digest = async (b) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', b)).join();
+  switch (url.pathname) {
+    case '/r2/put': {
+      const customMetadata = { m: 'x'.repeat(Number(q.meta ?? 0)) };
+      try {
+        const put = await bucket.put(q.key, bytes(Number(q.size)), {
+          customMetadata,
+        });
+        return Response.json({ etag: put.etag });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 400 });
+      }
+    }
+    case '/r2/get': {
+      const range = q.length
+        ? { offset: Number(q.offset), length: Number(q.length) }
+        : undefined;
+      const got = await bucket.get(q.key, { range });
+      if (got === null) return Response.json(null);
+      const value = new Uint8Array(await got.arrayBuffer());
+      const want = bytes(value.length, Number(q.offset ?? 0));
+      const right = (await digest(value)) === (await digest(want));
+      return Response.json({ size: got.size, length: value.length, right });
+    }
+    case '/r2/list': {
+      // Keys, each listed with the version a head answers.
+      const listed = await bucket.list({ prefix: q.prefix });
+      for (const o of listed.objects) {
+        const head = await bucket.head(o.key);
+        if (head.version !== o.version) return Response.json({ o, head });
+      }
+      return Response.json(listed.objects.map((o) => o.key));
+    }
+    case '/r2/delete':
+      await bucket.delete(q.key);
+      return Response.json({});
+    case '/r2/create': {
+      const upload = await bucket.createMultipartUpload(q.key);
+      return Response.json({ upload: upload.uploadId });
+    }
+    case '/r2/part': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const size = Number(q.size);
+      const n = Number(q.n);
+      return Response.json(
+        await upload.uploadPart(n, bytes(size, (n - 1) * size))
+      );
+    }
+    case '/r2/complete': {
+      const upload = bucket.resumeMultipartUpload(q.key, q.upload);
+      const object = await upload.complete(JSON.parse(q.parts));
+      return Response.json({ size: object.size, etag: object.etag });
     }
   }
   return Response.json({ error: 'no such path' }, { status: 404 });

@@ -751,7 +751,7 @@ fn quick() -> Timing {
 #[test]
 fn a_dribbling_endpoint_is_given_up_on() {
     runtime().block_on(async {
-        let endpoint = Server::serving(|_, _| Answer::Dribble).await;
+        let endpoint = Server::serving(|_, _| Answer::Dribble(Vec::new())).await;
         // Each 300 ms attempt would take over half an hour to read the whole answer, which
         // never pauses for as long as an attempt.
         let credentials = metadata(&endpoint, quick());

@@ -39,6 +39,8 @@
 //      paced by the nodes' readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
+//  13a. R2: a bucket is seen from every node, each object is an object in
+//      the cluster's bucket, and a multipart upload may span nodes.
 //  14. A cron trigger runs once a minute, through its schedule owner's death
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
 //      a test clock moved to each minute, and an occurrence does not run
@@ -1074,6 +1076,85 @@ test('cluster: a KV namespace is an object, seen from every node', async () => {
     assert.strictEqual(await served(), before + 65537);
   });
 });
+
+test('cluster: an R2 bucket is an object, seen from every node', async () => {
+  await withCluster(2, r2Bucket);
+});
+
+// R2 on two nodes: each object is the bucket's object of the same name, and
+// a multipart upload spans the nodes. `gcs` for a Cloud Storage bucket.
+async function r2Bucket({ nodes, bucket }, gcs = false) {
+  const [a, b] = nodes.map((n) => n.httpPort);
+  const q = (params) => new URLSearchParams(params);
+  const r2 = async (port, path, params) => {
+    const r = await fetchJson(port, `/r2/${path}?${q(params)}`);
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    return r.body;
+  };
+  // Each R2 object is the bucket's object of the same name.
+  const stored = () => bucket.list('services/r2/');
+  await r2(a, 'put', { key: 'small', size: '1000' });
+  const small = await r2(b, 'get', { key: 'small' });
+  assert.deepStrictEqual(small, { size: 1000, length: 1000, right: true });
+  assert.deepStrictEqual(await stored(), ['services/r2/cluster-r2/small']);
+
+  // S3 keeps 2 KB of user metadata, R2 8 KB: a put over S3's is R2's
+  // MetadataTooLarge.
+  if (!gcs) {
+    await r2(a, 'put', { key: 'meta', size: '1', meta: '1500' });
+    const tooLarge = q({ key: 'meta', size: '1', meta: '3000' });
+    const refused = await fetchJson(a, `/r2/put?${tooLarge}`);
+    assert.strictEqual(refused.status, 400);
+    assert.match(refused.body.error, /\(10012\)/);
+    await r2(a, 'delete', { key: 'meta' });
+  }
+
+  await r2(a, 'put', { key: 'big', size: '100000' });
+  assert.strictEqual((await stored()).length, 2);
+  const big = await r2(b, 'get', { key: 'big' });
+  assert.deepStrictEqual(big, { size: 100000, length: 100000, right: true });
+  const range = { key: 'big', offset: '16000', length: '40000' };
+  const part = await r2(b, 'get', range);
+  assert.deepStrictEqual(part, { size: 100000, length: 40000, right: true });
+
+  // A multipart upload begun on one node, its parts, of the store's
+  // minimum size, from both.
+  const { upload } = await r2(a, 'create', { key: 'multi' });
+  const parts = [];
+  for (const [n, port] of [
+    [1, b],
+    [2, a],
+    [3, b],
+  ]) {
+    parts.push(
+      await r2(port, 'part', { key: 'multi', upload, n, size: '5242880' })
+    );
+  }
+  const done = await r2(b, 'complete', {
+    key: 'multi',
+    upload,
+    parts: JSON.stringify(parts),
+  });
+  assert.strictEqual(done.size, 15728640);
+  assert.match(done.etag, /-3$/);
+  const multi = await r2(a, 'get', { key: 'multi' });
+  assert.deepStrictEqual(multi, {
+    size: 15728640,
+    length: 15728640,
+    right: true,
+  });
+  assert.deepStrictEqual(await r2(b, 'list', { prefix: '' }), [
+    'big',
+    'multi',
+    'small',
+  ]);
+
+  for (const key of ['small', 'big', 'multi']) {
+    await r2(b, 'delete', { key });
+  }
+  assert.strictEqual(await r2(a, 'get', { key: 'big' }), null);
+  assert.deepStrictEqual(await stored(), []);
+}
 
 // A node keeps the KV blobs it writes and reads on its disk, so it
 // downloads a value once.
@@ -3041,6 +3122,9 @@ test('cluster: a gs:// bucket holds the cluster, with tokens from the metadata s
       const big = await kv(nodes[1], 'get', { key: 'big' });
       assert.strictEqual(big.status, 200, JSON.stringify(big.body));
       assert.strictEqual(big.body.value.length, 100000);
+
+      // R2 objects, ranges and multipart, in Cloud Storage's dialect.
+      await r2Bucket({ nodes, bucket }, true);
 
       // Each node process takes two tokens at startup, for its deployments
       // and for its cluster, and replaces a token halfway through its

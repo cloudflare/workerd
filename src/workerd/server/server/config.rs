@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -59,6 +60,7 @@ use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
 use crate::services::assets::Assets;
+use crate::services::bucket::Home;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -2048,8 +2050,8 @@ impl Server {
 #[path = "config-test.rs"]
 mod tests;
 
-/// Replaces each `bucket` service's stand-in with the directory of the
-/// cluster's bucket it names.
+/// Replaces each `bucket` service's stand-in with the directory it names:
+/// of the cluster's bucket, or without a cluster of its `localDisk`.
 fn make_bucket_services(
     config: config::Reader<'_>,
     services: &mut Services,
@@ -2062,12 +2064,29 @@ fn make_bucket_services(
             continue;
         };
         let name = text(conf.get_name())?;
-        let Some(node) = cluster else {
-            report.service_error(&name, "A bucket service requires Config.cluster.");
-            continue;
-        };
         let bucket = bucket.map_err(capnp_error)?;
-        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let disk = text(bucket.get_local_disk())?;
+        let disk = match services.0.get(&disk) {
+            Some(Service::Disk(disk)) => disk.writable_path().map(PathBuf::from),
+            _ => None,
+        };
+        let home = match (cluster, &disk) {
+            (Some(node), _) => Home::Cluster(node),
+            (None, Some(_)) if !factory.experimental() => {
+                report.service_error(&name, "A bucket service requires --experimental.");
+                continue;
+            }
+            (None, Some(disk)) => Home::Disk(disk),
+            (None, None) => {
+                report.service_error(
+                    &name,
+                    "A bucket service requires Config.cluster, or localDisk naming a writable \
+                     disk service.",
+                );
+                continue;
+            }
+        };
+        let made = crate::services::bucket::make_bucket_service(bucket, home, factory);
         let channel: Rc<dyn Channel> = match made {
             Ok(service) => Rc::new(service),
             Err(error) => {
