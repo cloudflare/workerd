@@ -1420,6 +1420,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-rust-case-test.js",
         "startup-snapshot-node-test.js",
     ],
 )
@@ -1484,6 +1485,19 @@ wd_test(
     src = "websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "fetch-invalid-response-sidecar",
+    entry_point = "fetch-invalid-response-sidecar.js",
+)
+
+wd_test(
+    src = "fetch-invalid-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-invalid-response-test.js"],
+    sidecar = "fetch-invalid-response-sidecar",
+    sidecar_port_bindings = ["INVALID_RESPONSE_SERVER_PORT"],
 )
 
 js_binary(

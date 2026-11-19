@@ -666,10 +666,11 @@ use no-op `Traced` impls (`#[jsg_traced]` or `jsg::jsg_traced_unchecked!`); cont
 recurse to inner values. `Traced::trace` has no default, so a hand-written impl must spell out
 its visits.
 
-`#[jsg_traced]` on a struct implements a no-op `Traced` and `jsg::HoldsNoGcReferences`, bounding
-each field's type by `HoldsNoGcReferences`, so a field that holds a `jsg::Rc` or a `TracedGlobal`
-fails to compile. `jsg::jsg_traced_unchecked!(Foo)` makes the same claim without checking it; it is
-for a type whose fields can't implement the marker, such as a wrapper of a type from outside JSG.
+`#[jsg_traced]` on a struct or enum implements a no-op `Traced` and `jsg::HoldsNoGcReferences`,
+bounding each field's type (in every variant, for an enum) by `HoldsNoGcReferences`, so a field
+that holds a `jsg::Rc` or a `TracedGlobal` fails to compile. `jsg::jsg_traced_unchecked!(Foo)`
+makes the same claim without checking it; it is for a type whose fields can't implement the
+marker, such as a wrapper of a type from outside JSG.
 
 ### Supported field shapes
 
@@ -697,8 +698,8 @@ because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 
 `#[jsg_resource(snapshot_stateless)]` declares that any fresh instance of the type is
 interchangeable with any other, so a live instance can transfer through a V8 startup snapshot:
-the macro adds a `GarbageCollected::snapshot_recreate` method that leaks a `Default` instance
-for the wrapper restored from the snapshot. The type must implement `Default`. See
+the macro implements `jsg::SnapshotTransfer` with an empty snapshot, restoring every instance
+as the type's `Default`. The type must implement `Default`. See
 `jsg/README.md` §Startup snapshots.
 
 ### Manual tracing with `custom_trace`

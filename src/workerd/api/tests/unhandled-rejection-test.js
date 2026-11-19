@@ -5,7 +5,7 @@
 // Unhandled rejection should NOT fire for promises that are handled through
 // multi-tick promise chains.
 
-import { strictEqual, ok, rejects } from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, rejects } from 'node:assert';
 import { mock } from 'node:test';
 
 const asyncFunction = async (name) => {
@@ -194,6 +194,71 @@ export const handlerTriggeredUnhandledRejection = {
     } finally {
       removeEventListener('unhandledrejection', handler);
     }
+  },
+};
+
+// Rejects two promises, one after the other, with `handler` as the listener of unhandledrejection.
+// Returns the reasons of the events, as strings.
+async function reasonsOfTwoRejections(handler) {
+  const reasons = [];
+  const listener = (event) => {
+    reasons.push(String(event.reason));
+    return handler(event);
+  };
+  addEventListener('unhandledrejection', listener);
+  try {
+    for (const reason of ['first', 'second']) {
+      Promise.reject(reason);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  } finally {
+    removeEventListener('unhandledrejection', listener);
+  }
+  return reasons;
+}
+
+// Verifies unhandledrejection keeps firing when the handler rejects a promise while it runs.
+export const handlerRejectsSynchronously = {
+  async test() {
+    const reasons = await reasonsOfTwoRejections((event) => {
+      if (event.reason !== 'rejected by the handler') {
+        Promise.reject('rejected by the handler');
+      }
+    });
+    deepStrictEqual(reasons, [
+      'first',
+      'rejected by the handler',
+      'second',
+      'rejected by the handler',
+    ]);
+  },
+};
+
+// Verifies unhandledrejection keeps firing when an async handler throws, which rejects the
+// promise it returns while it runs.
+export const asyncHandlerThrows = {
+  async test() {
+    const reasons = await reasonsOfTwoRejections(async (event) => {
+      if (!(event.reason instanceof Error)) {
+        throw new Error('thrown by the handler');
+      }
+    });
+    deepStrictEqual(reasons, [
+      'first',
+      'Error: thrown by the handler',
+      'second',
+      'Error: thrown by the handler',
+    ]);
+  },
+};
+
+// Verifies unhandledrejection keeps firing when the handler handles the promise of the event.
+export const handlerHandlesThePromise = {
+  async test() {
+    const reasons = await reasonsOfTwoRejections((event) => {
+      event.promise.catch(() => {});
+    });
+    deepStrictEqual(reasons, ['first', 'second']);
   },
 };
 

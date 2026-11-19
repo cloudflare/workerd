@@ -15,6 +15,7 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_traced;
 
 /// Creates a function whose data is `greeting` and stores it as the global `greet`.
 fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greeting: &str) {
@@ -154,6 +155,7 @@ fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
 // =============================================================================
 
 /// Counts its drops in the counter it points to.
+#[jsg_traced]
 struct DropCounter(&'static AtomicUsize);
 
 impl Drop for DropCounter {
@@ -161,8 +163,6 @@ impl Drop for DropCounter {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
-
-jsg::jsg_traced_unchecked!(DropCounter);
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 

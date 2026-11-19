@@ -84,8 +84,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         &name_str,
         &memory_info.gc_fn,
         &drop_detach_types(custom_trace, &fields),
-        &snapshot_recreate_method(snapshot_stateless),
     );
+    let snapshot_transfer_impl = snapshot_stateless_impl(&name, snapshot_stateless);
     let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
@@ -153,6 +153,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+
+        #snapshot_transfer_impl
         #visit_for_memory_info_impl
     }
     .into()
@@ -652,16 +654,26 @@ fn drop_probe_items() -> proc_macro2::TokenStream {
     }
 }
 
-/// The `snapshot_recreate` method of a `#[jsg_resource(snapshot_stateless)]` type, which rebuilds
-/// the instance behind every wrapper restored from a startup snapshot through its `Default` impl;
-/// nothing for any other type.
-fn snapshot_recreate_method(snapshot_stateless: bool) -> proc_macro2::TokenStream {
+/// The `jsg::SnapshotTransfer` impl of a `#[jsg_resource(snapshot_stateless)]` type, whose
+/// snapshot is empty and whose every restored instance is its `Default`; nothing for any other
+/// type.
+fn snapshot_stateless_impl(
+    name: &syn::Ident,
+    snapshot_stateless: bool,
+) -> proc_macro2::TokenStream {
     if !snapshot_stateless {
         return quote! {};
     }
     quote! {
-        fn snapshot_recreate(&self) -> Option<jsg::SnapshotRecreated> {
-            Some(jsg::snapshot_recreate_leak(<Self as ::core::default::Default>::default()))
+        #[automatically_derived]
+        impl jsg::SnapshotTransfer for #name {
+            type Snapshot = ();
+
+            fn snapshot(&self) {}
+
+            fn restore((): &()) -> Self {
+                <Self as ::core::default::Default>::default()
+            }
         }
     }
 }
@@ -684,15 +696,13 @@ fn drop_detach_types(
 }
 
 /// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
-/// `memory_info` method or nothing, `drop_detach_types`, the types whose
-/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped,
-/// and `snapshot_recreate_fn`, its `snapshot_recreate` method or nothing.
+/// `memory_info` method or nothing, and `drop_detach_types`, the types whose
+/// `Traced::needs_drop_detach` makes the resource detach its references before it is dropped.
 fn generate_gc_impl(
     name: &syn::Ident,
     name_str: &str,
     memory_info_fn: &proc_macro2::TokenStream,
     drop_detach_types: &[proc_macro2::TokenStream],
-    snapshot_recreate_fn: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let drop_probe = drop_probe_items();
     quote! {
@@ -717,7 +727,23 @@ fn generate_gc_impl(
                         .needs_drop_detach())*
             }
 
-            #snapshot_recreate_fn
+            fn snapshot_transfer(&self) -> ::std::option::Option<&dyn jsg::ErasedSnapshotTransfer> {
+                // As in `has_drop_impl`: the inherent method applies exactly when the resource
+                // implements `jsg::SnapshotTransfer`.
+                struct Probe<'a, T>(&'a T);
+                trait NoSnapshotTransfer<'a> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::None
+                    }
+                }
+                impl<'a, T> NoSnapshotTransfer<'a> for Probe<'a, T> {}
+                impl<'a, T: jsg::SnapshotTransfer> Probe<'a, T> {
+                    fn snapshot_transfer(&self) -> ::std::option::Option<&'a dyn jsg::ErasedSnapshotTransfer> {
+                        ::std::option::Option::Some(self.0)
+                    }
+                }
+                Probe(self).snapshot_transfer()
+            }
         }
     }
 }

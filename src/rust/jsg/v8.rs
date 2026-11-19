@@ -205,11 +205,6 @@ pub mod ffi {
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
 
-        /// Called from C++ `Wrappable::snapshotClone`: the trait object of a fresh instance for
-        /// a wrapper restored from a startup snapshot (`GarbageCollected::snapshot_recreate`), or
-        /// a cleared pointer (`data_ptr == 0`) when the resource's type is not stateless.
-        unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &Wrappable) -> TraitObjectPtr;
-
         /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
         /// which C++ adds to the Wrappable's own.
         unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
@@ -219,6 +214,28 @@ pub mod ffi {
         unsafe fn wrappable_invoke_get_memory_info(
             wrappable: &Wrappable,
             tracker: Pin<&mut MemoryTracker>,
+        );
+
+        /// Called from C++ `Wrappable::snapshotClone()`. If the resource's type implements
+        /// `jsg::SnapshotTransfer`, stores in `copy` what the snapshot stores of the resource,
+        /// or, called on that, a restored resource; the caller's new `Wrappable` then owns it.
+        /// Returns false otherwise. May run on any thread, with no isolate locked.
+        unsafe fn wrappable_invoke_snapshot_clone(
+            wrappable: &Wrappable,
+            copy: &mut TraitObjectPtr,
+        ) -> bool;
+
+        /// Called from C++ `Wrappable::snapshotReferences()`: the Wrappables of the resources
+        /// that `jsg::SnapshotTransfer::snapshot_references` adds, 0 for `None`.
+        unsafe fn wrappable_invoke_snapshot_references(wrappable: &Wrappable) -> Vec<usize>;
+
+        /// Called from C++ `Wrappable::snapshotRelink()`, under the isolate lock with a context
+        /// entered and a `HandleScope` open: calls `jsg::SnapshotTransfer::snapshot_relink` with
+        /// the restored Wrappables, 0 for none.
+        unsafe fn wrappable_invoke_snapshot_relink(
+            wrappable: &Wrappable,
+            isolate: *mut Isolate,
+            restored: &[usize],
         );
     }
 
@@ -1251,10 +1268,6 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
-
-    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
-    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
-    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -5023,8 +5036,7 @@ impl ffi::TraitObjectPtr {
 
         assert!(!data.is_null(), "Rc::into_raw returned null");
 
-        // SAFETY: TypeId is 128 bits (two usize on 64-bit), transmute to split halves for FFI storage.
-        let [type_id_lo, type_id_hi]: [usize; 2] = unsafe { std::mem::transmute(type_id) };
+        let [type_id_lo, type_id_hi] = split_type_id(type_id);
 
         Self {
             data_ptr: data as usize,
@@ -5050,8 +5062,7 @@ impl ffi::TraitObjectPtr {
 
     /// Returns the stored `TypeId`.
     pub(crate) fn type_id(&self) -> std::any::TypeId {
-        // SAFETY: Reconstructing TypeId from the same [lo, hi] halves stored in from_raw.
-        unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
+        join_type_id([self.type_id_lo, self.type_id_hi])
     }
 
     /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
@@ -5095,7 +5106,7 @@ impl ffi::TraitObjectPtr {
     /// # Safety
     /// The data pointer must have originated from `Rc::into_raw`.
     /// Must only be called once per allocation.
-    unsafe fn drop_rc(&self) {
+    pub(crate) unsafe fn drop_rc(&self) {
         // SAFETY: transmuting [data, vtable] back into a fat pointer; Rc::from_raw
         // reclaims the allocation originally created by Rc::into_raw in from_raw.
         unsafe {
@@ -5165,6 +5176,58 @@ unsafe fn wrappable_invoke_trace(wrappable: &ffi::Wrappable, visitor: *mut ffi::
     }
 }
 
+/// A `TypeId` as the two halves C++ stores.
+pub(crate) fn split_type_id(type_id: TypeId) -> [usize; 2] {
+    // SAFETY: a `TypeId` is 128 bits, two `usize`s on the 64-bit targets workerd builds for.
+    unsafe { std::mem::transmute(type_id) }
+}
+
+/// The `TypeId` that [`split_type_id`] split into `halves`, which C++ stored.
+pub(crate) fn join_type_id(halves: [usize; 2]) -> TypeId {
+    // SAFETY: the halves of a `TypeId` of this binary, from `split_type_id`.
+    unsafe { std::mem::transmute(halves) }
+}
+
+/// The resource of `wrappable` as a `jsg::SnapshotTransfer`, if its type implements it.
+fn snapshot_transfer_of(wrappable: &ffi::Wrappable) -> Option<&dyn crate::ErasedSnapshotTransfer> {
+    let trait_ptr = ffi::TraitObjectPtr::from_wrappable(wrappable)?;
+    // SAFETY: the resource is alive while its Wrappable holds it.
+    unsafe { trait_ptr.as_gc_ref() }.snapshot_transfer()
+}
+
+unsafe fn wrappable_invoke_snapshot_clone(
+    wrappable: &ffi::Wrappable,
+    copy: &mut ffi::TraitObjectPtr,
+) -> bool {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return false;
+    };
+    *copy = transfer.snapshot_copy().into_trait_object();
+    true
+}
+
+unsafe fn wrappable_invoke_snapshot_references(wrappable: &ffi::Wrappable) -> Vec<usize> {
+    snapshot_transfer_of(wrappable)
+        .map_or_else(Vec::new, crate::ErasedSnapshotTransfer::snapshot_references)
+}
+
+unsafe fn wrappable_invoke_snapshot_relink(
+    wrappable: &ffi::Wrappable,
+    isolate: *mut ffi::Isolate,
+    restored: &[usize],
+) {
+    let Some(transfer) = snapshot_transfer_of(wrappable) else {
+        return;
+    };
+    // SAFETY: C++ calls this under the isolate lock, with a context entered and its own
+    // `HandleScope` innermost until it returns.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    let lock = scope.open();
+    // SAFETY: C++ passes the Wrappables of restored wrappers of this isolate, which stay alive
+    // while the context is created.
+    unsafe { transfer.snapshot_relink(lock, restored) };
+}
+
 unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str {
     // SAFETY: wrappable is valid.
     unsafe {
@@ -5175,25 +5238,6 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // literal). Convert to &str so CXX can pass it as rust::Str. The C++
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
-    }
-}
-
-unsafe fn wrappable_invoke_snapshot_recreate(wrappable: &ffi::Wrappable) -> ffi::TraitObjectPtr {
-    const NONE: ffi::TraitObjectPtr = ffi::TraitObjectPtr {
-        data_ptr: 0,
-        vtable_ptr: 0,
-        type_id_lo: 0,
-        type_id_hi: 0,
-    };
-    // SAFETY: wrappable is valid.
-    unsafe {
-        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
-            return NONE;
-        };
-        trait_ptr
-            .as_gc_ref()
-            .snapshot_recreate()
-            .map_or(NONE, |recreated| recreated.0)
     }
 }
 

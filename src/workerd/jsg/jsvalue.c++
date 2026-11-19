@@ -654,7 +654,11 @@ size_t JsFunction::length(Lock& js) const {
   JsObject obj = *this;
   auto lengthVal = obj.get(js, "length"_kj);
   KJ_IF_SOME(num, lengthVal.tryCast<jsg::JsNumber>()) {
-    return static_cast<size_t>(num.value(js).orDefault(0));
+    double value = num.value(js).orDefault(0);
+    // `!(value > 0)` also catches NaN. SIZE_MAX is not a double: it rounds up to 2^64.
+    if (!(value > 0)) return 0;
+    if (value >= 0x1p64) return kj::maxValue;
+    return static_cast<size_t>(value);
   }
   return 0;
 }
