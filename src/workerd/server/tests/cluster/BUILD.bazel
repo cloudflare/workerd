@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 
 # One suite, split by test name: cluster-test, and cluster-cron-test, whose
 # config runs a cron trigger. cluster-test runs in shards, each of which
@@ -6,7 +6,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 # takes a second under TSan, the takeovers wait out a dead owner's lease, a
 # quarter of the default in cluster-test.wd-test, and the drain tests wait
 # out stop deadlines. Add takeovers to the simulations instead.
-[js_test(
+[wd_js_test(
     name = name,
     size = "large",
     timeout = "eternal",

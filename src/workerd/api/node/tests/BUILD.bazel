@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_sh_test.bzl", "wd_sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -381,7 +381,7 @@ wd_test(
     data = ["process-stdio-fs-nodejs-test.js"],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -399,7 +399,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-sh-test@all-autogates",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -418,7 +418,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-fs-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -436,7 +436,7 @@ sh_test(
     ],
 )
 
-sh_test(
+wd_sh_test(
     name = "process-stdio-fs-sh-test@all-autogates",
     srcs = ["test_process_stdio.sh"],
     args = [

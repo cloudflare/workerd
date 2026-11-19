@@ -1,6 +1,6 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//:build/wd_js_test.bzl", "wd_js_test")
 
-js_test(
+wd_js_test(
     name = "udp-connect-test",
     size = "large",
     data = [
