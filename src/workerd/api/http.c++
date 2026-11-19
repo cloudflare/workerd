@@ -420,6 +420,12 @@ kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
 }
 
 kj::Maybe<Body::ExtractedBody> Body::takeBody(jsg::Lock& js) {
+  KJ_IF_SOME(source, tryGetUnreadSource()) {
+    // As when the body is read straight from its source, this body keeps the source, and creates
+    // its stream locked and disturbed if it is ever asked for.
+    readFromSource = true;
+    return ExtractedBody(source.clone(js));
+  }
   auto& stream = getBodyStream(js);
   if (stream.isNull()) {
     return kj::none;

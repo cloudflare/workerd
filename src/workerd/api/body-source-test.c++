@@ -600,6 +600,49 @@ KJ_TEST("Body::tryDirectPump begins deferred proxying only once it has ended the
   KJ_EXPECT(log.data.asPtr().asConst() == text.asBytes());
 }
 
+jsg::Ref<Request> makePost(jsg::Lock& js, kj::StringPtr text) {
+  return Request::constructor(js, kj::str("https://example.com/"),
+      Request::Initializer(Request::InitializerDict{
+        .method = kj::str("POST"),
+        .body = kj::Maybe<Body::Initializer>(stringBody(js, text)),
+      }));
+}
+
+KJ_TEST("A Request built from a Request takes over its unread source without a stream") {
+  SinkLog sent;
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto original = makePost(js, kText);
+    auto copy = Request::constructor(js, original.addRef(), kj::none);
+
+    // The original is left used, as taking over its stream would have left it.
+    KJ_EXPECT(original->getBodyUsed(js));
+    auto stream = KJ_ASSERT_NONNULL(original->getBody(js));
+    KJ_EXPECT(stream.isDisturbed(js));
+    KJ_EXPECT(stream.isLocked(js));
+    KJ_EXPECT_THROW_MESSAGE("Cannot reconstruct a Request with a used body.",
+        Request::constructor(js, original.addRef(), kj::none));
+
+    // The copy is still sent straight from the source, as fetch(request) sends its own copy.
+    KJ_EXPECT(!copy->getBodyUsed(js));
+    kj::Own<WritableStreamSink> sink = kj::heap<TestSink>(sent, SinkMode::SYNC);
+    auto pump = KJ_ASSERT_NONNULL(copy->tryDirectPump(js, sink, TryWriteSync::YES));
+
+    // A Request that has created its stream hands the stream over, and the copy pumps it.
+    auto streamed = makePost(js, kText);
+    KJ_UNUSED auto created = streamed->getBody(js);
+    auto streamedCopy = Request::constructor(js, streamed.addRef(), kj::none);
+    KJ_EXPECT(streamed->getBodyUsed(js));
+    SinkLog unused;
+    kj::Own<WritableStreamSink> kept = kj::heap<TestSink>(unused, SinkMode::SYNC);
+    KJ_EXPECT(streamedCopy->tryDirectPump(js, kept, TryWriteSync::YES) == kj::none);
+
+    return finishPump(kj::mv(pump));
+  });
+  KJ_EXPECT(sent.data.asPtr().asConst() == kText.asBytes());
+}
+
 // Records the response that Response::send() sends.
 class RecordingHttpResponse final: public kj::HttpService::Response {
  public:

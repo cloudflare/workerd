@@ -173,8 +173,10 @@ class Body: public jsg::Object {
   // Helper to implement Request/Response::clone().
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
-  // Takes over this body for another Request, as `new Request(request)` does: the result has this
-  // body's stream, detached, and its source, leaving this body locked and disturbed.
+  // Takes over this body for another Request, as `new Request(request)` does, leaving this body
+  // used, locked and disturbed. The result has this body's source and, if this body has created
+  // its stream, the stream, detached. An unread source is handed over without a stream, so that
+  // the other Request can still send it straight from the source (see tryDirectPump()).
   kj::Maybe<ExtractedBody> takeBody(jsg::Lock& js);
 
   // Returns an ExtractedBody with the same stream and source as this body, for a Request passed as
