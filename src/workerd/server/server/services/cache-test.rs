@@ -218,14 +218,11 @@ fn a_blank_line_is_found_across_reads() {
 
 #[test]
 fn keys_are_the_namespace_and_the_cf_cache_key_or_url() {
-    assert_eq!(
-        entry_name(b"", b"http://a/"),
-        "f890e4f0687138b4616f6b95be7ad9942250b94ab3dc99b041fee0e4ca4771d0"
-    );
-    assert_ne!(
-        entry_name(b"", b"http://a/"),
-        entry_name(b"n", b"http://a/")
-    );
+    let key = "282a35d7a0da6ae48eee116ad6193fa861bd88958a4c38a8042f6712ed9474f7";
+    assert_eq!(entry_name(b"", b"http://a/"), format!("default/{key}"));
+    // The name decoded: `a b`.
+    let cache = "c8687a08aa5d6ed2044328fa6a697ab8e96dc34291e8c2034ae8c38e6fcc6d65";
+    assert_eq!(entry_name(b"a%20b", b"http://a/"), format!("{cache}/{key}"));
     assert_eq!(cache_key(r#"{"cacheKey":"k"}"#).as_deref(), Some("k"));
     assert_eq!(cache_key(r#"{"cacheKey":""}"#), None);
     assert_eq!(cache_key(r#"{"cacheTtl":5}"#), None);

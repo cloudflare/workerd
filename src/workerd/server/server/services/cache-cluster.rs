@@ -409,7 +409,10 @@ impl Store for Clustered {
             None => None,
         };
         let url = std::str::from_utf8(url).map_err(|_| bad())?;
-        let key = url.rsplit('/').next().unwrap_or_default().to_owned();
+        let key = url
+            .strip_prefix("http://cache/")
+            .ok_or_else(bad)?
+            .to_owned();
         let msg = match method {
             Method::GET => Msg::Get { op, key, have },
             Method::PUT => Msg::Put {

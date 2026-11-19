@@ -22,9 +22,10 @@
 //! What entries mean is decided here; where they live is a [`Store`]'s: a [`Directory`], or
 //! with `Config.cluster` the nodes' one cache (`cache-cluster.rs`). An entry is a record, a
 //! file: a line with its expiry in ms since the epoch, then the response as HTTP/1.1, its body
-//! as it was put, still content-encoded. Its key is `<sha256 of namespace \0 key, lowercase hex>`. A put writes a
-//! draft and has the store put it once the whole body was read and matched its
-//! `Content-Length`, so an entry is never partial. Disk I/O is synchronous, as in `disk`.
+//! as it was put, still content-encoded. Its key is its cache's directory and its file
+//! ([`entry_name`]), so that one cache can be removed by itself. A put writes a draft and has
+//! the store put it once the whole body was read and matched its `Content-Length`, so an entry
+//! is never partial. Disk I/O is synchronous, as in `disk`.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -52,6 +53,7 @@ use kj::io::AsyncIoStream;
 use kj::io::AsyncOutputStream;
 use kj_hyper::io_kj_error;
 use kj_rs::KjOwn;
+use percent_encoding::percent_decode;
 use ring::digest::SHA256;
 use ring::digest::digest;
 use worker::AlarmResult;
@@ -102,9 +104,16 @@ const DAY_MS: u64 = 24 * 3600 * 1000;
 // =======================================================================================
 // Pure parts
 
-/// The file name of the entry for `key` in `namespace` (`CF-Cache-Namespace` as sent).
+/// The path of the entry for `key` in the cache `namespace` names (`CF-Cache-Namespace` as sent:
+/// the name URI-encoded, empty for `caches.default`): `<cache>/<key>`, each the SHA-256 in
+/// lowercase hex, but `default` for the default cache.
 fn entry_name(namespace: &[u8], key: &[u8]) -> String {
-    HEXLOWER.encode(digest(&SHA256, &[namespace, b"\0", key].concat()).as_ref())
+    let hex = |b: &[u8]| HEXLOWER.encode(digest(&SHA256, b).as_ref());
+    let cache = match namespace {
+        b"" => "default".to_owned(),
+        name => hex(&percent_decode(name).collect::<Vec<_>>()),
+    };
+    format!("{cache}/{}", hex(key))
 }
 
 /// A request's `cf.cacheKey`, from its cf blob.
@@ -391,7 +400,7 @@ trait Store {
     }
 }
 
-/// The records in a directory, each the file named for its key.
+/// The records in a directory, each the file its key names.
 struct Directory(PathBuf);
 
 /// `None` for a file that is not there.
@@ -410,7 +419,11 @@ impl Store for Directory {
     }
 
     fn draft(&self, key: &str) -> Result<(Temporary, File)> {
-        Temporary::beside(&self.0.join(key))
+        let path = self.0.join(key);
+        if let Some(cache) = path.parent() {
+            std::fs::create_dir_all(cache).map_err(|e| io_kj_error(&e))?;
+        }
+        Temporary::beside(&path)
     }
 
     async fn put(&self, key: &str, temp: Temporary, file: File) -> Result<Option<bool>> {

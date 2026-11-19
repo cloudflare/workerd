@@ -6,6 +6,7 @@
 // store entries, which persist across a restart; without it they throw.
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -113,6 +114,9 @@ test('caches in a wrangler.jsonc', async () => {
   assert.strictEqual((await get('/default/k')).status, 404);
   assert.strictEqual((await get('/named/k')).text, 'in named');
   await server.stop();
-  const files = await readdir(join(dir, '.wrangler/state/workerd/cache'));
-  assert.deepStrictEqual(files.length, 1);
+  // A directory per cache: `default`, and the SHA-256 of a name.
+  const root = join(dir, '.wrangler/state/workerd/cache');
+  const named = createHash('sha256').update('named').digest('hex');
+  assert.deepStrictEqual(await readdir(join(root, 'default')), []);
+  assert.strictEqual((await readdir(join(root, named))).length, 1);
 });
