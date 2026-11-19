@@ -1,0 +1,21 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# The serving workload that trains the PGO profile (build/pgo/README.md). Outside training it sends
+# only a few requests, checking that the workload still works.
+js_test(
+    name = "pgo-workload-test",
+    data = [
+        ":config.capnp",
+        ":hello.js",
+        ":hello-async.js",
+        ":mixed.js",
+        ":upstream.js",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "pgo-workload-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = ["js-test"],
+)
