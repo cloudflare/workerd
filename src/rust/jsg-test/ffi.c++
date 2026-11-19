@@ -382,6 +382,46 @@ void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callba
   callback(data);
 }
 
+namespace {
+// Records what is logged on this thread while it lives, as kj::_::LogExpectation does for
+// KJ_EXPECT_LOG.
+class LogCapture final: public kj::ExceptionCallback {
+ public:
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    auto entry = kj::str(severity, ": ", text);
+    messages.push_back(::rust::String::lossy(entry.begin(), entry.size()));
+  }
+
+  ::rust::Vec<::rust::String> messages;
+};
+}  // namespace
+
+::rust::Vec<::rust::String> capture_kj_logs(size_t data, ::rust::Fn<void(size_t)> callback) {
+  // kj::_::Debug has no getter for the severity, so the lowest one that is logged is found.
+  auto previous = kj::LogSeverity::DBG;
+  for (auto severity: {kj::LogSeverity::INFO, kj::LogSeverity::WARNING, kj::LogSeverity::ERROR,
+         kj::LogSeverity::FATAL}) {
+    if (kj::_::Debug::shouldLog(severity)) {
+      previous = severity;
+      break;
+    }
+  }
+  kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+  KJ_DEFER(kj::_::Debug::setLogLevel(previous));
+  LogCapture capture;
+  callback(data);
+  return kj::mv(capture.messages);
+}
+
+void fail_with_kj_exception(::rust::Str description) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::heapString(description.data(), description.size())));
+}
+
 size_t used_global_handles_size(Isolate* isolate) {
   v8::HeapStatistics stats;
   isolate->GetHeapStatistics(&stats);
