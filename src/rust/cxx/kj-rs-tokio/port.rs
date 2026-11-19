@@ -38,7 +38,8 @@ pub fn current_handle() -> Option<Handle> {
 
 /// Spawns a future onto this thread's KJ-loop tokio runtime.
 ///
-/// Tasks run from the port's `wait()` and `poll()`, in bounded batches between KJ's own events.
+/// Tasks run from the port's `wait()` and `poll()`, in bounded batches between KJ's own events,
+/// and about every 20 ms while the KJ loop stays busy.
 /// The future need not be `Send`: the runtime is a `LocalRuntime`, pinned to this thread, so a
 /// task may hold `!Send` KJ handles (`OwnPromiseNode`, `kj::Own`, ...). Dropping the returned
 /// `JoinHandle` detaches the task, matching `tokio::spawn`; port teardown cancels detached tasks.
@@ -243,10 +244,10 @@ impl TokioPort {
         self.take_wake_latch()
     }
 
-    /// Consumes the wake latch: returns `true` iff `wake()` was called since the last `true`
-    /// return from `wait_*`/`poll`.
-    fn take_wake_latch(&self) -> bool {
-        self.state.woken.swap(false, Ordering::SeqCst)
+    /// Consumes the wake latch: returns `true` iff `wake()` was called since it was last
+    /// consumed. A busy KJ loop calls this every turn, so the unset latch costs only a load.
+    pub(crate) fn take_wake_latch(&self) -> bool {
+        self.state.woken.load(Ordering::Relaxed) && self.state.woken.swap(false, Ordering::SeqCst)
     }
 
     #[expect(

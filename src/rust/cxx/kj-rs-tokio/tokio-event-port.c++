@@ -9,6 +9,11 @@
 namespace kj_rs_tokio {
 
 namespace {
+// How often a busy loop gives tokio a batch: often enough that a tokio socket or timer is served
+// within tens of milliseconds however long KJ stays busy, and seldom enough that the batches cost
+// a busy loop nothing measurable.
+constexpr kj::Duration BUSY_POLL_INTERVAL = 20 * kj::MILLISECONDS;
+
 // The port active on this loop thread, to enforce one port per thread (KJ's one-loop-per-thread
 // model); set by the constructor, cleared by the destructor.
 thread_local TokioEventPort* activePort = nullptr;
@@ -28,10 +33,12 @@ const kj::MonotonicClock& requireNoActivePort() {
 TokioEventPort::TokioEventPort()
     : ownerThread(kj::ThreadId::current()),
       clock(requireNoActivePort()),
+      coarseClock(kj::systemCoarseMonotonicClock()),
       timerImpl(clock.now()),
       rustPort(new_tokio_port()),
       rustWaker(new_tokio_waker(*rustPort)),
-      loop(kj::heap<kj::EventLoop>(*this)) {
+      loop(kj::heap<kj::EventLoop>(*this)),
+      lastTick(coarseClock.now()) {
   activePort = this;
 }
 
@@ -75,6 +82,18 @@ bool TokioEventPort::wait() {
 
 bool TokioEventPort::poll() {
   assertOwnerThread();
+  if (loop->isRunnable()) {
+    // A busy poll, between two turns of a promise.wait(). It reports the wake latch every time,
+    // so cross-thread events reach KJ within a turn, and runs a batch of tokio tasks only every
+    // BUSY_POLL_INTERVAL. The KJ timer stays put while KJ has work queued: a due timer fires once
+    // the queue drains, after the work queued ahead of it, as on a loop that does not busy poll.
+    auto now = coarseClock.now();
+    if (now - lastTick < BUSY_POLL_INTERVAL) {
+      return rustPort->take_wake_latch();
+    }
+    lastTick = now;
+    return rustPort->tick();
+  }
   return tick();
 }
 
@@ -84,6 +103,7 @@ bool TokioEventPort::tick() {
   // arms. Load-bearing: TimerImpl only fires timer events from advanceTo(). Forgetting this after
   // a wait means every kj::Timer promise silently never resolves.
   timerImpl.advanceTo(clock.now());
+  lastTick = coarseClock.now();
   return rustPort->tick();
 }
 

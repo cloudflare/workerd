@@ -158,6 +158,9 @@ mod bridge {
         /// `TokioPort::take_wake_latch`).
         fn tick(&mut self) -> bool;
 
+        /// Consume the wake latch without running tokio: `true` iff `wake()` was called since
+        /// the latch was last consumed. Every busy poll that skips tokio reports it.
+        fn take_wake_latch(&self) -> bool;
     }
 
     extern "Rust" {
