@@ -739,11 +739,7 @@ export default {
     ],
   },
   'request/request-cache.js': {},
-  'request/request-clone-readable-stream-body.any.js': {
-    comment:
-      'TODO(soon): new Request() drops a ReadableStream body taken from clone()',
-    expectedFailures: true,
-  },
+  'request/request-clone-readable-stream-body.any.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:

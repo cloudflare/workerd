@@ -49,7 +49,7 @@ function relativizeRequest(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Request {
-  if (input instanceof Request) {
+  if (input instanceof realRequest) {
     return new realRequest(
       relativizeRequest(input.url),
       new realRequest(input, init)
