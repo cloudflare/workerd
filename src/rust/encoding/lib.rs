@@ -137,6 +137,16 @@ pub fn decode<'a>(
 
     // Reuse the output buffer — clear length but keep the allocation.
     state.output.clear();
+
+    if !options.flush && input.is_empty() {
+        // Avoid encoding_rs empty-chunk streaming bug:
+        // https://github.com/hsivonen/encoding_rs/issues/126#issuecomment-3677642122
+        return ffi::DecodeResult {
+            output: &state.output,
+            had_error: false,
+        };
+    }
+
     let max_len = state
         .inner
         .max_utf16_buffer_length(input.len())
