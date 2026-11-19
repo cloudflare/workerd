@@ -89,6 +89,7 @@ use crate::NonCoercible;
 use crate::NullOrUndefined;
 use crate::Nullable;
 use crate::Type;
+use crate::TypeErrorContext;
 use crate::UnionMember;
 use crate::UnionTypes;
 use crate::v8;
@@ -524,9 +525,10 @@ pub trait FromJS<'s>: Sized {
 
     /// Performs a shallow conversion probe.
     ///
-    /// `Ok(None)` indicates a top-level type mismatch. Once the top-level type
-    /// matches, nested conversions must use `from_js()` so malformed contents
-    /// remain hard errors.
+    /// `Ok(None)` indicates a top-level type mismatch: the value is not of this type at all. Once
+    /// the top-level type matches, a malformed nested value is an error, not `Ok(None)`. A
+    /// container converts each nested value with `try_from_js()` and turns its `Ok(None)` into
+    /// the error that names where it was (see [`Error::new_incorrect_type`]).
     #[doc(hidden)]
     fn try_from_js(
         lock: &mut Lock<'s>,
@@ -1521,6 +1523,13 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         result
             .try_reserve_exact(length)
             .map_err(|_| too_large(length))?;
+        // As C++ JSG does, reports an element that is not a `T` as that element, while an error
+        // from converting one passes through.
+        let convert = |lock: &mut Lock<'s>, index: usize, element: v8::Local<'s, v8::Value>| {
+            T::try_from_js(lock, element)?.ok_or_else(|| {
+                Error::new_incorrect_type(TypeErrorContext::ArrayElement(index), &T::type_name())
+            })
+        };
         // If reading stopped at an object, it is the last element read.
         let stopped = until == v8::ArrayIterateUntil::Object
             && elements
@@ -1529,19 +1538,20 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         for (index, element) in elements {
             while result.len() < index {
                 let undefined = lock.undefined();
-                result.push(T::from_js(lock, undefined)?);
+                result.push(convert(lock, result.len(), undefined)?);
             }
-            result.push(T::from_js(lock, element)?);
+            result.push(convert(lock, index, element)?);
         }
         if stopped {
             // The conversion can have changed the array, so the rest is read one element at a
-            // time, each after the previous one converts.
+            // time, each after the previous one converts, up to the current length (C++ JSG
+            // reads the length once).
             while result.len() < array.len() {
                 let Ok(index) = u32::try_from(result.len()) else {
                     unreachable!("an array's length is a u32");
                 };
                 let element = array.get(lock, index)?;
-                let element = T::from_js(lock, element)?;
+                let element = convert(lock, result.len(), element)?;
                 // A conversion can lengthen the array past the space reserved.
                 result.try_reserve(1).map_err(|_| too_large(array.len()))?;
                 result.push(element);
@@ -1549,7 +1559,7 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         } else {
             while result.len() < length {
                 let undefined = lock.undefined();
-                result.push(T::from_js(lock, undefined)?);
+                result.push(convert(lock, result.len(), undefined)?);
             }
         }
         Ok(Some(result))
@@ -1642,11 +1652,10 @@ impl<'s, V: FromJS<'s, ResultType = V>> FromJS<'s> for Dict<V> {
             // Like a string argument: the name is a string, so this runs no JavaScript.
             let name = String::from_js(lock, key.into())?;
             let Some(value) = V::try_from_js(lock, value)? else {
-                return Err(Error::new_type_error(format!(
-                    "Incorrect type for map entry '{name}': the provided value is not of type \
-                     '{}'.",
-                    V::type_name()
-                )));
+                return Err(Error::new_incorrect_type(
+                    TypeErrorContext::DictField(&name),
+                    &V::type_name(),
+                ));
             };
             entries.push((name, value));
         }

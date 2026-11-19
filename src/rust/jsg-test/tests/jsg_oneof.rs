@@ -630,7 +630,10 @@ fn nested_value_no_variant_takes_names_the_union() {
     with_context(|lock, ctx| {
         let message = expect_type_error(lock, ctx, "cx.takePointsOrBytes([5])");
         assert!(
-            message.contains("Expected Point or Array but got number"),
+            message.contains(
+                "Incorrect type for array element 0: the provided value is not of type 'Point or \
+                 Array'."
+            ),
             "{message}"
         );
     });

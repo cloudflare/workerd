@@ -62,6 +62,7 @@ mod serialization;
 mod signature_callback;
 mod startup_snapshot;
 mod string;
+mod struct_field_errors;
 mod symbol;
 mod termination;
 mod to_js_creator;
