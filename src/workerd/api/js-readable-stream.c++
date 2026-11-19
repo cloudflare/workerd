@@ -853,16 +853,16 @@ JsReadableStream JsReadableStream::create(jsg::Lock& js, kj::Rc<ByteChunker> chu
     return JsReadableStream(kj::mv(stream));
   }
 
-  // TypeScript arm: the same source, built as a JS object.
+  // TypeScript arm: the same source, built as a JS object. The last chunk is enqueued and the
+  // stream closed in one call.
   auto pull = js.wrapSimpleFunction(js.v8Context(),
       [chunker = chunker.addRef()](
           jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
     auto controller = jsg::JsValue(info[0]);
     KJ_IF_SOME(chunk, chunker->next(js)) {
-      webstreams::dispatchCall(
-          js, "readableByteControllerEnqueue", controller, jsg::JsValue(chunk));
-    }
-    if (chunker->isDone()) {
+      webstreams::dispatchCall(js, "readableByteControllerEnqueue", controller, jsg::JsValue(chunk),
+          js.boolean(chunker->isDone()));
+    } else {
       webstreams::dispatchCall(js, "readableByteControllerClose", controller);
     }
   });

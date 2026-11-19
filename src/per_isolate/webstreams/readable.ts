@@ -5211,11 +5211,17 @@ const cppExports = ObjectFreeze({
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
   // The same for the byte streams of the C++ in-memory-body arm
-  // (JsReadableStream::create() over a string or buffer).
+  // (JsReadableStream::create() over a string or buffer). With `close`, the
+  // stream is closed after the chunk, so that the pull that enqueues the last
+  // chunk calls in once.
   readableByteControllerEnqueue: (
     controller: object,
-    chunk: ArrayBufferView
-  ): void => byteControllerEnqueue(controller, chunk),
+    chunk: ArrayBufferView,
+    close: boolean
+  ): void => {
+    byteControllerEnqueue(controller, chunk);
+    if (close) byteControllerClose(controller);
+  },
   readableByteControllerClose: (controller: object): void =>
     byteControllerClose(controller),
   consumeReadableStreamAsArrayBufferRecord,
