@@ -1,0 +1,131 @@
+diff --git a/src/proto/h1/role.rs b/src/proto/h1/role.rs
+--- a/src/proto/h1/role.rs
++++ b/src/proto/h1/role.rs
+@@ -29,6 +29,17 @@ use crate::proto::RequestHead;
+ use crate::proto::{BodyLength, MessageHead, RequestLine};
+ 
+ pub(crate) const DEFAULT_MAX_HEADERS: usize = 100;
++
++/// workerd: the limit to parse a head with first. A limit above the default would otherwise be
++/// allocated whole for every head, a large allocation for a large limit, so a head is parsed
++/// against the default on the stack first, and against the configured limit only when it has
++/// more headers than that.
++fn first_max_headers(max_headers: Option<usize>) -> Option<usize> {
++    match max_headers {
++        Some(cap) if cap > DEFAULT_MAX_HEADERS => None,
++        max_headers => max_headers,
++    }
++}
+ const AVERAGE_HEADER_SIZE: usize = 30; // totally scientific
+ #[cfg(feature = "server")]
+ const MAX_URI_LEN: usize = (u16::MAX - 1) as usize;
+@@ -159,25 +170,44 @@ impl Http1Transaction for Server {
+         // but we *never* read any of it until after httparse has assigned
+         // values into it. By not zeroing out the stack memory, this saves
+         // a good ~5% on pipeline benchmarks.
++        // workerd: a limit above the default is allocated only for a head that has more
++        // headers than the default; see `first_max_headers`.
++        let first_max_headers = first_max_headers(ctx.h1_max_headers);
+         let mut headers_indices: SmallVec<[MaybeUninit<HeaderIndices>; DEFAULT_MAX_HEADERS]> =
+-            match ctx.h1_max_headers {
++            match first_max_headers {
+                 Some(cap) => smallvec![MaybeUninit::uninit(); cap],
+                 None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
+             };
+         {
+             let mut headers: SmallVec<[MaybeUninit<httparse::Header<'_>>; DEFAULT_MAX_HEADERS]> =
+-                match ctx.h1_max_headers {
++                match first_max_headers {
+                     Some(cap) => smallvec![MaybeUninit::uninit(); cap],
+                     None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
+                 };
++            let mut more_headers: SmallVec<
++                [MaybeUninit<httparse::Header<'_>>; DEFAULT_MAX_HEADERS],
++            >;
+             trace!(bytes = buf.len(), "Request.parse");
+             let mut req = httparse::Request::new(&mut []);
+             let bytes = buf.as_ref();
+-            let parsed = ctx.h1_parser_config.parse_request_with_uninit_headers(
++            let mut parsed = ctx.h1_parser_config.parse_request_with_uninit_headers(
+                 &mut req,
+                 bytes,
+                 &mut headers,
+             );
++            if let (Err(httparse::Error::TooManyHeaders), Some(cap)) = (&parsed, ctx.h1_max_headers)
++            {
++                if first_max_headers != ctx.h1_max_headers {
++                    headers_indices = smallvec![MaybeUninit::uninit(); cap];
++                    more_headers = smallvec![MaybeUninit::uninit(); cap];
++                    req = httparse::Request::new(&mut []);
++                    parsed = ctx.h1_parser_config.parse_request_with_uninit_headers(
++                        &mut req,
++                        bytes,
++                        &mut more_headers,
++                    );
++                }
++            }
+             // workerd: a request line naming HEAD is recorded even when the head does not parse,
+             // so that the response to the parse error is written without a body.
+             if req.method == Some("HEAD") {
+@@ -1043,17 +1073,19 @@ impl Http1Transaction for Client {
+     fn parse(buf: &mut BytesMut, ctx: ParseContext<'_>) -> ParseResult<StatusCode> {
+         debug_assert!(!buf.is_empty(), "parse called with empty buf");
+ 
++        // workerd: as for a request, see `first_max_headers`.
++        let mut max_headers = first_max_headers(ctx.h1_max_headers);
+         // Loop to skip information status code headers (100 Continue, etc).
+         loop {
+             let mut headers_indices: SmallVec<[MaybeUninit<HeaderIndices>; DEFAULT_MAX_HEADERS]> =
+-                match ctx.h1_max_headers {
++                match max_headers {
+                     Some(cap) => smallvec![MaybeUninit::uninit(); cap],
+                     None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
+                 };
+             let (len, status, reason, version, headers_len) = {
+                 let mut headers: SmallVec<
+                     [MaybeUninit<httparse::Header<'_>>; DEFAULT_MAX_HEADERS],
+-                > = match ctx.h1_max_headers {
++                > = match max_headers {
+                     Some(cap) => smallvec![MaybeUninit::uninit(); cap],
+                     None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
+                 };
+@@ -1065,6 +1097,10 @@ impl Http1Transaction for Client {
+                     bytes,
+                     &mut headers,
+                 ) {
++                    Err(httparse::Error::TooManyHeaders) if max_headers != ctx.h1_max_headers => {
++                        max_headers = ctx.h1_max_headers;
++                        continue;
++                    }
+                     Ok(httparse::Status::Complete(len)) => {
+                         trace!("Response.parse Complete({})", len);
+                         if let Some(max_header_size) = ctx.h1_max_header_size {
+@@ -3195,7 +3231,8 @@ mod tests {
+                     },
+                 );
+                 if should_success {
+-                    result.expect("parse ok").expect("parse complete");
++                    let msg = result.expect("parse ok").expect("parse complete");
++                    assert_eq!(msg.head.headers.len(), gen_size);
+                 } else {
+                     result.expect_err("parse should err");
+                 }
+@@ -3220,7 +3257,8 @@ mod tests {
+                     },
+                 );
+                 if should_success {
+-                    result.expect("parse ok").expect("parse complete");
++                    let msg = result.expect("parse ok").expect("parse complete");
++                    assert_eq!(msg.head.headers.len(), gen_size);
+                 } else {
+                     result.expect_err("parse should err");
+                 }
+@@ -3279,6 +3317,8 @@ mod tests {
+         parse(Some(200), 0, true);
+         parse(Some(200), 1, true);
+         parse(Some(200), 100, true);
++        parse(Some(200), 101, true);
++        parse(Some(200), 150, true);
+         parse(Some(200), 200, true);
+         //
+         // - more than 200, rejected

@@ -246,8 +246,7 @@ IoContext::IoContext(ThreadContext& thread,
       reverseIoOwnValidity(kj::arc<ReverseIoOwnValidity>()),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
-      tasks(*this),
-      deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
+      tasks(*this) {
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -282,7 +281,9 @@ IoContext::IoContext(ThreadContext& thread,
   }
 
   // Arrange to abort when limits expire.
-  abortWhen(makeLimitsPromise());
+  if (limitEnforcer->canExceedLimits()) {
+    abortWhen(makeLimitsPromise());
+  }
 
   KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
@@ -525,7 +526,7 @@ void IoContext::IncomingRequest::cancelPendingWorkForHibernation() {
   // Cross-context promise reactions queued for this context would run on its next turn. The
   // context is about to be destroyed, which drops them anyway; drop them now. The task only runs
   // on its own event-loop turns, never within this call, so it is safe to destroy here.
-  context->deleteQueueSignalTask = nullptr;
+  context->deleteQueueSignalTask = kj::Promise<void>(kj::NEVER_DONE);
   KJ_IF_SOME(exception, context->cancelPendingWork([]() {
     return JSG_KJ_EXCEPTION(FAILED, Error, "The Durable Object is hibernating.");
   }, ClearTasks::NO)) {
@@ -913,6 +914,15 @@ void IoContext::IncomingRequest::drain(
     return;
   }
 
+  if (context->actor == kj::none && context->waitUntilTasks.isEmpty()) {
+    // There is nothing to wait for: waiting on the empty task set would finish on the next turn
+    // without the timeout or abort ever mattering. Drop the request on the next turn the same
+    // way, without building that wait.
+    waitUntilTasks.add(
+        maybeAddGcPassForTest(kj::Promise<void>(kj::READY_NOW).attach(kj::mv(ownedSelf))));
+    return;
+  }
+
   kj::Promise<void> timeoutPromise = nullptr;
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
@@ -1023,6 +1033,9 @@ IoContext::~IoContext() noexcept(false) {
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;
   }
+  if (hangCheckWaiter.link.isLinked()) {
+    thread.getHangChecks().waiters.remove(hangCheckWaiter);
+  }
 
   // Invalidate ReverseIoOwn instances before destroying their backing OwnedObjects.
   reverseIoOwnValidity->invalidate();
@@ -1042,29 +1055,59 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
   // We can't abort just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.abortFromHangTask =
-      Worker::AsyncLock::whenThreadIdle()
-          .then([weakContext = context.getWeakRef()]() mutable noexcept -> kj::Promise<void> {
-    // Reject rather than throw: a throw would terminate the process from this `noexcept` lambda.
-    auto& ctx = KJ_UNWRAP_OR(weakContext->tryGet(),
-        { return KJ_EXCEPTION(FAILED, "IoContext destroyed before hang abort"); });
+  context.scheduleHangCheck();
+}
+
+void IoContext::scheduleHangCheck() {
+  auto& checks = thread.getHangChecks();
+  if (!hangCheckWaiter.link.isLinked()) {
+    checks.waiters.add(hangCheckWaiter);
+  }
+  if (!checks.waiting) {
+    checks.waiting = true;
+    // The wait stays pending when every context unlinks: under load the next request would only
+    // start a new one.
+    checks.idleWait = Worker::AsyncLock::whenThreadIdle()
+                          .then([weakChecks = thread.getWeakHangChecks()]() {
+      // The wait is held by the checks, so they are still there when it ends.
+      runHangChecks(
+          KJ_REQUIRE_NONNULL(weakChecks.tryGet(), "hang checks destroyed before their wait"));
+    }).eagerlyEvaluate(nullptr);
+  }
+}
+
+void IoContext::cancelHangCheck() {
+  if (hangCheckWaiter.link.isLinked()) {
+    thread.getHangChecks().waiters.remove(hangCheckWaiter);
+  }
+  abortFromHangTask = kj::none;
+}
+
+void IoContext::runHangChecks(ThreadContext::HangChecks& checks) {
+  // Cleared on the way out, so that the wait whose continuation this is isn't replaced while it
+  // runs. Starting an abort runs no JavaScript and registers no PendingEvent, so no context links
+  // itself while we drain the list, and no context is destroyed.
+  KJ_DEFER(checks.waiting = false);
+  while (!checks.waiters.empty()) {
+    auto& context = checks.waiters.front().context;
+    checks.waiters.remove(context.hangCheckWaiter);
 
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
     //
     // By the time the thread goes idle the IncomingRequest may already be gone, even though the
     // IoContext lives on (e.g. waitUntil work is still outstanding). getMetrics() requires a
-    // current IncomingRequest, and this continuation is `noexcept`, so reaching for it in that
-    // state would terminate the process instead of aborting the context. Fall back to the
-    // request-less lock, which only costs us the lock-timing metrics.
-    auto lockPromise = ctx.incomingRequests.empty()
-        ? ctx.worker->takeAsyncLockWithoutRequest(nullptr)
-        : ctx.worker->takeAsyncLock(ctx.getMetrics());
-    return lockPromise.then([weakContext = kj::mv(weakContext)](Worker::AsyncLock asyncLock) {
-      // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
+    // current IncomingRequest, so fall back to the request-less lock, which only costs us the
+    // lock-timing metrics.
+    auto lockPromise = context.incomingRequests.empty()
+        ? context.worker->takeAsyncLockWithoutRequest(nullptr)
+        : context.worker->takeAsyncLock(context.getMetrics());
+    context.abortFromHangTask =
+        lockPromise
+            .then([weakContext = context.getWeakRef()](Worker::AsyncLock asyncLock) {
       KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before hang abort")
           .abortFromHang(asyncLock);
-    });
-  }).eagerlyEvaluate(nullptr);
+    }).eagerlyEvaluate(nullptr);
+  }
 }
 
 kj::Own<void> IoContext::registerPendingEvent() {
@@ -1082,7 +1125,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
     }
 
     // Cancel any already-scheduled finalization.
-    abortFromHangTask = kj::none;
+    cancelHangCheck();
 
     auto result = kj::refcounted<PendingEvent>(*this);
     pendingEvent = *result;
@@ -1584,12 +1627,33 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+IoContext::RequestTraceScope::RequestTraceScope(Worker::Lock& lock, IoContext& context) {
+  jsg::Lock& js = lock;
+  auto span = context.getMetrics().getSpan();
+  auto userSpan = context.getRootUserTraceSpan();
+  // The shared frame inherits nothing, so it can only stand in for a frame built in the root.
+  if (!span.isObserved() && !userSpan.isObserved() && context.actor == kj::none &&
+      jsg::AsyncContextFrame::current(js) == kj::none) {
+    scope.init<jsg::AsyncContextFrame::Scope>(js, lock.getRequestRootTraceFrame());
+    return;
+  }
   jsg::AsyncContextFrame::StorageEntry entries[] = {
-    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
-    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+    {lock.getTraceAsyncContextKey(), context.makeTraceScopeValue(lock, kj::mv(span))},
+    {lock.getUserTraceAsyncContextKey(), context.makeUserTraceScopeValue(lock, kj::mv(userSpan))},
   };
-  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+  scope.init<jsg::AsyncContextFrame::StorageScope>(js, entries);
+}
+
+v8::Local<v8::Value> IoContext::getRequestRootUserTraceScope(Worker::Lock& lock) {
+  jsg::Lock& js = lock;
+  if (incomingRequests.empty()) {
+    return makeUserTraceScopeValue(lock, kj::none).getHandle(js);
+  }
+  auto& request = getCurrentIncomingRequest();
+  KJ_IF_SOME(value, request.rootUserTraceScope) {
+    return value.getHandle(js);
+  }
+  return request.rootUserTraceScope.emplace(makeUserTraceScopeValue(lock, kj::none)).getHandle(js);
 }
 
 jsg::Value IoContext::makeTraceScopeValue(
@@ -1649,17 +1713,20 @@ SpanParent IoContext::getCurrentTraceSpan() {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
       KJ_IF_SOME(value, frame.get(*lock.getTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
-        jsg::Lock& js = lock;
-        auto& state = jsg::unwrapOpaqueRef<TraceScopeState>(js.v8Isolate, handle);
-        // The frame may have been captured by a different request (e.g. via
-        // AsyncLocalStorage.snapshot()), whose span this request can't use.
-        KJ_SWITCH_ONEOF(state) {
-          KJ_CASE_ONEOF(id, Id) {
-            if (id.isCurrent()) return SpanParent(nullptr);
-          }
-          KJ_CASE_ONEOF(spanParent, IoOwn<SpanParent>) {
-            KJ_IF_SOME(span, spanParent.tryGet()) {
-              return span.addRef();
+        // A request-root entry stands for the current request's span, which is the fallback below.
+        if (!isRequestRootTraceScope(handle)) {
+          jsg::Lock& js = lock;
+          auto& state = jsg::unwrapOpaqueRef<TraceScopeState>(js.v8Isolate, handle);
+          // The frame may have been captured by a different request (e.g. via
+          // AsyncLocalStorage.snapshot()), whose span this request can't use.
+          KJ_SWITCH_ONEOF(state) {
+            KJ_CASE_ONEOF(id, Id) {
+              if (id.isCurrent()) return SpanParent(nullptr);
+            }
+            KJ_CASE_ONEOF(spanParent, IoOwn<SpanParent>) {
+              KJ_IF_SOME(span, spanParent.tryGet()) {
+                return span.addRef();
+              }
             }
           }
         }
@@ -1669,6 +1736,9 @@ SpanParent IoContext::getCurrentTraceSpan() {
 
   // If async context is unavailable (unset, from another request, or JS lock is not held), fall
   // back to heuristic of using the trace info from the most recent active request.
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  }
   return getMetrics().getSpan();
 }
 
@@ -1682,17 +1752,20 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
       KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
-        jsg::Lock& js = lock;
-        auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, handle);
-        // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
-        // fall back to this request's root span.
-        KJ_SWITCH_ONEOF(state) {
-          KJ_CASE_ONEOF(id, Id) {
-            if (id.isCurrent()) return SpanParent(nullptr);
-          }
-          KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
-            KJ_IF_SOME(context, asyncContext.tryGet()) {
-              return context.getSpan();
+        // A request-root entry stands for this request's root span, which is the fallback below.
+        if (!isRequestRootTraceScope(handle)) {
+          jsg::Lock& js = lock;
+          auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, handle);
+          // As in getCurrentTraceSpan(), the frame may belong to a different request, in which
+          // case fall back to this request's root span.
+          KJ_SWITCH_ONEOF(state) {
+            KJ_CASE_ONEOF(id, Id) {
+              if (id.isCurrent()) return SpanParent(nullptr);
+            }
+            KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
+              KJ_IF_SOME(context, asyncContext.tryGet()) {
+                return context.getSpan();
+              }
             }
           }
         }
@@ -1770,8 +1843,18 @@ void IoContext::runInContextScope(Worker::LockType lockType,
     currentLock = lock;
 
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      v8::Isolate::PromiseContextScope promiseContextScope(
-          lock.getIsolate(), getPromiseContextTag(lock));
+      // Many requests never create a promise, so until one does, the scope makes the tag only
+      // when its first promise needs it. Once there is a tag, promises from earlier scopes carry
+      // it, so the scope has to start with it.
+      kj::Maybe<v8::Isolate::PromiseContextScope> promiseContextScope;
+      KJ_IF_SOME(tag, promiseContextTag) {
+        promiseContextScope.emplace(lock.getIsolate(), tag.getHandle(js));
+      } else {
+        promiseContextScope.emplace(
+            lock.getIsolate(), [](v8::Isolate* isolate, void* context) -> v8::Local<v8::Object> {
+          return static_cast<IoContext*>(context)->getPromiseContextTag(jsg::Lock::from(isolate));
+        }, this);
+      }
 
       {
         // Handle any pending deletions that arrived while the worker was processing a different
@@ -2113,10 +2196,24 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
+    ensureDeleteQueueSignalTask();
     auto deferral = kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
     promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
+}
+
+IoCrossContextExecutor IoContext::getCrossContextExecutor() {
+  ensureDeleteQueueSignalTask();
+  return IoCrossContextExecutor(deleteQueue.queue.addRef());
+}
+
+void IoContext::ensureDeleteQueueSignalTask() {
+  if (deleteQueueSignalTask == kj::none) {
+    // The coroutine installs the queue's signal before it first suspends, so before the caller
+    // hands out an executor.
+    deleteQueueSignalTask = startDeleteQueueSignalTask(this);
+  }
 }
 
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {

@@ -36,9 +36,30 @@ namespace _ {  // private
 template <typename Resource>
 class AsyncLockWaiter: public kj::Refcounted {
  public:
-  AsyncLockWaiter(const AsyncLockQueue<Resource>& queue, kj::Own<const Resource> resourceParam);
+  using WaiterList = AsyncLockQueue<Resource>::WaiterList;
+
+  // Joins the back of the queue, whose list `lockedList` is, locked by the caller.
+  AsyncLockWaiter(const AsyncLockQueue<Resource>& queue,
+      kj::Own<const Resource> resourceParam,
+      WaiterList& lockedList);
   ~AsyncLockWaiter() noexcept;
   KJ_DISALLOW_COPY_AND_MOVE(AsyncLockWaiter);
+
+  // Resolves when this waiter reaches the front of the queue.
+  kj::Promise<void> whenReady() {
+    KJ_IF_SOME(p, readyPromise) {
+      return p.addBranch();
+    }
+    return kj::READY_NOW;
+  }
+
+  // Resolves when this waiter is destroyed, i.e. the lock is released.
+  kj::Promise<void> whenReleased() {
+    KJ_IF_SOME(flag, releaseFlag) {
+      return flag.whenSignaled();
+    }
+    return releaseFlag.emplace().whenSignaled();
+  }
 
   // Executor for this waiter's thread. Never read, but constructing it forces the thread's
   // executor to exist, which `newPromiseAndCrossThreadFulfiller()` would otherwise only do on the
@@ -53,14 +74,15 @@ class AsyncLockWaiter: public kj::Refcounted {
   kj::Own<const Resource> resource;
 
   // Fires when this waiter reaches the front of the queue. Fulfilled by the departing front
-  // waiter, which may be on another thread.
-  kj::ForkedPromise<void> readyPromise = nullptr;
+  // waiter, which may be on another thread. Null if the waiter was at the front when it joined.
+  kj::Maybe<kj::ForkedPromise<void>> readyPromise;
   kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
 
   // Fires when this waiter is destroyed, i.e. the lock is released. Used to serialize one thread's
   // attempts on different resources so it only ever chases one at a time. Deliberately NOT a
-  // cross-thread fulfiller: only the owning thread may fulfill it.
-  kj::StickyFlag releaseFlag;
+  // cross-thread fulfiller: only the owning thread may fulfill it. Made by the first call to
+  // whenReleased(), which only the owning thread makes.
+  kj::Maybe<kj::StickyFlag> releaseFlag;
 
   // Guarded by the queue's mutex, along with the list itself.
   kj::Maybe<AsyncLockWaiter&> next;
@@ -123,6 +145,11 @@ class AsyncLockQueue {
   // keeps alive. `hooks`, if provided, must outlive the returned promise.
   kj::Promise<Lock> lock(kj::Own<const Resource> resource, kj::Maybe<Hooks&> hooks) const;
 
+  // Takes the lock at once if it's this thread's turn already: the thread holds or awaits no lock
+  // and nobody is queued, or the thread already holds this resource's lock. Otherwise returns
+  // kj::none without queueing or calling `hooks`, and the caller should use lock().
+  kj::Maybe<Lock> tryLockNow(kj::Own<const Resource>& resource, kj::Maybe<Hooks&> hooks) const;
+
   // Number of threads currently queued for (or holding) this resource.
   uint getCurrentLoad() const {
     return __atomic_load_n(&loadGauge, __ATOMIC_RELAXED);
@@ -167,26 +194,24 @@ class AsyncLockQueue {
 namespace _ {  // private
 
 template <typename Resource>
-AsyncLockWaiter<Resource>::AsyncLockWaiter(
-    const AsyncLockQueue<Resource>& queue, kj::Own<const Resource> resourceParam)
+AsyncLockWaiter<Resource>::AsyncLockWaiter(const AsyncLockQueue<Resource>& queue,
+    kj::Own<const Resource> resourceParam,
+    WaiterList& lockedList)
     : executor(kj::getCurrentThreadExecutor()),
       queue(queue),
       resource(kj::mv(resourceParam)) {
-  auto lock = queue.waiters.lockExclusive();
-  if (lock->tail == &lock->head) {
-    // Queue is empty, so it's immediately our turn.
-    readyPromise = kj::Promise<void>(kj::READY_NOW).fork();
-    // `readyFulfiller` can stay null; nobody will ever invoke it.
-  } else {
+  if (lockedList.tail != &lockedList.head) {
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
     readyPromise = paf.promise.fork();
     readyFulfiller = kj::mv(paf.fulfiller);
   }
+  // Otherwise the queue is empty, so it's immediately our turn. `readyFulfiller` can stay null;
+  // nobody will ever invoke it.
 
   next = kj::none;
-  prev = lock->tail;
-  *lock->tail = this;
-  lock->tail = &next;
+  prev = lockedList.tail;
+  *lockedList.tail = this;
+  lockedList.tail = &next;
 
   *AsyncLockQueue<Resource>::threadCurrentWaiter = this;
 
@@ -201,7 +226,9 @@ AsyncLockWaiter<Resource>::~AsyncLockWaiter() noexcept {
 
   auto lock = queue.waiters.lockExclusive();
 
-  releaseFlag.signal();
+  KJ_IF_SOME(flag, releaseFlag) {
+    flag.signal();
+  }
 
   // Unlink.
   *prev = next;
@@ -242,8 +269,8 @@ kj::Promise<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::l
         h.reportAsyncInfo(
             KJ_ASSERT_NONNULL(currentLoad), false /* coalesced */, blockedByOtherResourceCount);
       }
-      auto newWaiter = kj::refcounted<Waiter>(*this, kj::mv(resource));
-      co_await newWaiter->readyPromise;
+      auto newWaiter = kj::refcounted<Waiter>(*this, kj::mv(resource), *waiters.lockExclusive());
+      co_await newWaiter->whenReady();
       co_return Lock(kj::mv(newWaiter));
     } else if (&waiter->queue == this) {
       // Thread is already queued for this same resource, so share its turn.
@@ -252,7 +279,7 @@ kj::Promise<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::l
             KJ_ASSERT_NONNULL(currentLoad), true /* coalesced */, blockedByOtherResourceCount);
       }
       auto newWaiterRef = kj::addRef(*waiter);
-      co_await newWaiterRef->readyPromise;
+      co_await newWaiterRef->whenReady();
       co_return Lock(kj::mv(newWaiterRef));
     } else {
       // Thread holds, or is waiting for, a lock on a different resource. Wait for that to be
@@ -262,9 +289,35 @@ kj::Promise<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::l
       KJ_IF_SOME(h, hooks) {
         h.waitingForOtherResource(waiter->resource->getId());
       }
-      co_await waiter->releaseFlag.whenSignaled();
+      co_await waiter->whenReleased();
     }
   }
+}
+
+template <typename Resource>
+kj::Maybe<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::tryLockNow(
+    kj::Own<const Resource>& resource, kj::Maybe<Hooks&> hooks) const {
+  Waiter* waiter = *threadCurrentWaiter;
+  if (waiter == nullptr) {
+    kj::Own<Waiter> newWaiter;
+    {
+      auto lock = waiters.lockExclusive();
+      if (lock->tail != &lock->head) return kj::none;
+      // Report before joining, like lock() does, so the load doesn't count us.
+      KJ_IF_SOME(h, hooks) {
+        h.reportAsyncInfo(getCurrentLoad(), false /* coalesced */, 0);
+      }
+      newWaiter = kj::refcounted<Waiter>(*this, kj::mv(resource), *lock);
+    }
+    return Lock(kj::mv(newWaiter));
+  } else if (&waiter->queue == this && waiter->readyPromise == kj::none) {
+    // This thread already holds this resource's lock, so share its turn.
+    KJ_IF_SOME(h, hooks) {
+      h.reportAsyncInfo(getCurrentLoad(), true /* coalesced */, 0);
+    }
+    return Lock(kj::addRef(*waiter));
+  }
+  return kj::none;
 }
 
 template <typename Resource>
@@ -272,7 +325,7 @@ kj::Promise<void> AsyncLockQueue<Resource>::whenThreadIdle() {
   Waiter*& currentWaiter = *threadCurrentWaiter;
   for (;;) {
     if (currentWaiter != nullptr) {
-      co_await currentWaiter->releaseFlag.whenSignaled();
+      co_await currentWaiter->whenReleased();
       continue;
     }
 

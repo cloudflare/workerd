@@ -2,7 +2,7 @@
 //! and rustls on the Rust side, `kj::HttpService` and friends on the C++ side.
 //!
 //! - [`server`]: `serve_connection(io, Hangup, &HeaderTable, Rc<ServerSettings>,
-//!   Rc<dyn Handler>, &Shutdown)` serves one accepted tokio connection with hyper, each request
+//!   Rc<impl Handler>, &Shutdown)` serves one accepted tokio connection with hyper, each request
 //!   dispatched to a [`server::Handler`] with kj-typed arguments: [`server::Handler::request`]
 //!   takes exactly what `kj::http::Service::request` takes (`kj::http::HeadersRef`,
 //!   `kj::io::AsyncInputStream`, `kj::http::ServiceResponse`), so it can be forwarded straight to
@@ -63,13 +63,16 @@
 #![deny(clippy::absolute_paths)]
 
 mod body;
+mod calls;
 pub mod client;
 pub mod ffi;
 mod handshake;
 mod io;
+mod scratch;
 pub mod server;
 mod starttls;
 pub mod tls;
+mod wakes;
 
 use std::result;
 

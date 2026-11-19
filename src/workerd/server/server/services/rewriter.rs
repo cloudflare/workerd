@@ -192,11 +192,20 @@ impl HttpRewriter {
         physical_protocol: &str,
         headers: HeadersRef<'a>,
     ) -> Result<Option<(Rewritten<'a>, Option<String>)>> {
-        let mut url = url.to_owned();
         let mut edits = Vec::new();
-        if self.style == Style::Host {
-            let Ok(parsed) = url.parse::<Uri>() else {
-                return Ok(None);
+        let url = if self.style == Style::Host {
+            // An origin-form target, as nearly every request has, is the path and query already.
+            let parsed;
+            let path = if url.starts_with('/') {
+                url
+            } else {
+                let Ok(uri) = url.parse::<Uri>() else {
+                    return Ok(None);
+                };
+                parsed = uri;
+                parsed
+                    .path_and_query()
+                    .map_or("/", http::uri::PathAndQuery::as_str)
             };
             let Some(host) = headers
                 .get(HeaderId::HOST)
@@ -214,11 +223,10 @@ impl HttpRewriter {
                 scheme = forwarded;
                 edits.push(edit(header, None));
             }
-            let path = parsed
-                .path_and_query()
-                .map_or("/", http::uri::PathAndQuery::as_str);
-            url = format!("{scheme}://{host}{path}");
-        }
+            [scheme, "://", host, path].concat()
+        } else {
+            url.to_owned()
+        };
 
         let mut cf_blob_json = None;
         if let Some(header) = &self.cf_blob_header

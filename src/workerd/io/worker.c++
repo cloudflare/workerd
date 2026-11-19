@@ -545,13 +545,24 @@ struct Worker::Impl {
   // Note: The default export is given the string name "default", because that's what V8 tells us,
   // and so it's easiest to go with it. I guess that means that you can't actually name an export
   // "default"?
-  kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
+  struct NamedHandler {
+    api::ExportedHandler handler;
+
+    // A clone of `handler` that getExportedHandler() handed out and got back, kept with its `ctx`
+    // reset so that the next request needn't clone `handler` again. Cloning copies every handler
+    // field and creates a global handle for each function, `self` and `env`.
+    kj::Maybe<kj::Own<api::ExportedHandler>> spare;
+  };
+  kj::HashMap<kj::String, NamedHandler> namedHandlers;
   kj::HashMap<kj::String, ActorClassInfo> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
   kj::HashMap<kj::String, EntrypointClass> workflowClasses;
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
+
+  // See Lock::getRequestRootTraceFrame().
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> requestRootTraceFrame;
 };
 
 // Note that Isolate mutable state is protected by locking the JsgWorkerIsolate unless otherwise
@@ -2602,7 +2613,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             }
                           }
                         } else {
-                          impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                          impl->namedHandlers.insert(
+                              kj::mv(handler.name), Impl::NamedHandler{.handler = kj::mv(obj)});
                         }
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
@@ -2875,6 +2887,30 @@ static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
 }
 
+// The props to give an event's ExecutionContext: none for an event without props, so that its
+// empty `ctx.props` object is only created if read.
+static kj::Maybe<jsg::JsValue> propsToJs(jsg::Lock& js, Frankenvalue& props) {
+  if (props.empty()) return kj::none;
+  return props.toJs(js);
+}
+
+// Lends `handler`, a clone of a named handler, to a request. If the request gives it back while
+// holding the isolate lock, as a fetch handler's does, it becomes the handler's `spare`, with the
+// request's `ctx` dropped. `worker` is kept alive meanwhile, so that `spare` stays valid.
+static kj::Own<api::ExportedHandler> lendToRequest(kj::Own<api::ExportedHandler> handler,
+    kj::Maybe<kj::Own<api::ExportedHandler>>& spare,
+    Worker& worker,
+    v8::Isolate* isolate) {
+  auto& ref = *handler;
+  return fakeOwn(ref).attach(kj::defer(
+      [handler = kj::mv(handler), &spare, isolate, worker = kj::atomicAddRef(worker)]() mutable {
+    if (v8::Locker::IsLocked(isolate)) {
+      handler->ctx = kj::none;
+      spare = kj::mv(handler);
+    }
+  }));
+}
+
 kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     kj::Maybe<kj::StringPtr> name,
     kj::Maybe<VersionInfo> versionInfo,
@@ -2895,8 +2931,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
         js.alloc<api::ExecutionContext>(js,
-            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
-            kj::mv(versionInfo)),
+            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)),
+            propsToJs(js, props), kj::mv(versionInfo)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
@@ -2910,15 +2946,23 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     return handler;
   };
 
-  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+  KJ_IF_SOME(entry, worker.impl->namedHandlers.find(n)) {
     jsg::Lock& js = *this;
+    auto& h = entry.handler;
     if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
-      api::ExportedHandler constructedHandler = h.clone(js);
-      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
-          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
-          kj::mv(versionInfo));
-      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler.self.getHandle(js)));
-      return kj::heap(kj::mv(constructedHandler));
+      auto ctx = js.alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)),
+          propsToJs(js, props), kj::mv(versionInfo));
+      kj::Own<api::ExportedHandler> constructedHandler;
+      KJ_IF_SOME(spare, entry.spare) {
+        constructedHandler = kj::mv(spare);
+        entry.spare = kj::none;
+      } else {
+        constructedHandler = kj::heap(h.clone(js));
+      }
+      constructedHandler->ctx = kj::mv(ctx);
+      ioctx.setEntrypointHandler(js, jsg::JsObject(constructedHandler->self.getHandle(js)));
+      return lendToRequest(kj::mv(constructedHandler), entry.spare, worker, getIsolate());
     }
     ioctx.setEntrypointHandler(js, jsg::JsObject(h.self.getHandle(js)));
     return fakeOwn(h);
@@ -2971,6 +3015,21 @@ kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getTraceAsyncContextKe
 
 kj::Arc<jsg::AsyncContextFrame::StorageKey> Worker::Lock::getUserTraceAsyncContextKey() {
   return worker.getIsolate().userTraceAsyncContextKey.addRef();
+}
+
+jsg::AsyncContextFrame& Worker::Lock::getRequestRootTraceFrame() {
+  KJ_IF_SOME(frame, worker.impl->requestRootTraceFrame) {
+    return *frame;
+  }
+  jsg::Lock& js = *this;
+  // A new frame copies the current frame's storage, so build this one in the root.
+  jsg::AsyncContextFrame::Scope rootScope(js);
+  auto requestRoot = js.v8Ref(v8::Null(js.v8Isolate).As<v8::Value>());
+  jsg::AsyncContextFrame::StorageEntry entries[] = {
+    {getTraceAsyncContextKey(), requestRoot.addRef(js)},
+    {getUserTraceAsyncContextKey(), kj::mv(requestRoot)},
+  };
+  return *worker.impl->requestRootTraceFrame.emplace(jsg::AsyncContextFrame::create(js, entries));
 }
 
 bool Worker::Lock::isInspectorEnabled() {
@@ -3204,7 +3263,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       };
 
       for (auto& entry: worker.impl->namedHandlers) {
-        report(getEntrypointName(entry.key), entry.value);
+        report(getEntrypointName(entry.key), entry.value.handler);
       }
       for (auto& entry: worker.impl->actorClasses) {
         KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
@@ -3311,6 +3370,23 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLock(RequestObserver& r
 }
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
+    kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
+  {
+    // When it's already this thread's turn, skip the waiting coroutine below.
+    kj::Maybe<AsyncLockHooks> hooks;
+    kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
+    KJ_IF_SOME(lt, lockTiming) {
+      hooksRef = hooks.emplace(*lt);
+    }
+    auto self = kj::atomicAddRef(*this);
+    KJ_IF_SOME(lock, asyncLockQueue.tryLockNow(self, hooksRef)) {
+      return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
+    }
+  }
+  return takeAsyncLockSlow(kj::mv(lockTiming));
+}
+
+kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockSlow(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
   // Held on the coroutine frame so it outlives the wait below.
   kj::Maybe<AsyncLockHooks> hooks;
@@ -4092,6 +4168,10 @@ void Worker::Isolate::flushDeferredConsoleOutput() {
   for (auto& line: lines) {
     writeConsoleLine(line.toStderr ? stderr : stdout, line.text);
   }
+}
+
+void Worker::Isolate::retainThreadStateBetweenLocks() {
+  jsg::IsolateBase::from(impl->v8Isolate).retainThreadStateBetweenLocks();
 }
 
 void Worker::Isolate::logErrorOnce(kj::StringPtr description) {

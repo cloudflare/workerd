@@ -233,6 +233,10 @@ class IsolateBase {
   // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
   static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
+  // The template that newInternalFunction() instantiates for `callback`, created on first use:
+  // an object V8 can call, with one internal field for the function's data.
+  v8::Local<v8::ObjectTemplate> getInternalFunctionTemplate(v8::FunctionCallback callback);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -570,6 +574,22 @@ class IsolateBase {
     return throwOnUnrecognizedImportAssertion;
   }
 
+  // Makes each later lock on this isolate from the calling thread cheaper to take and release.
+  // By default, V8 builds the thread's isolate state (handle scopes, stack guard) on every lock
+  // and frees it on unlock. This keeps that state between locks instead, by holding an outer
+  // v8::Locker that is permanently unlocked by a v8::Unlocker, so that every lock nests in it.
+  // The lock is still released between locks, so other threads can take it as before; they only
+  // pay to archive this thread's state the first time they do.
+  //
+  // Call it with the isolate unlocked, from the thread that will usually lock it, on that thread's
+  // own stack: V8 sets this thread's stack limit from the calling frame now, rather than at each
+  // lock. The state is kept until the isolate is destroyed, so this suits an isolate that one
+  // thread mostly uses.
+  void retainThreadStateBetweenLocks();
+  bool retainsThreadStateBetweenLocks() const {
+    return retainedThreadState != kj::none;
+  }
+
   void setUsingEnhancedErrorSerialization() {
     usingEnhancedErrorSerialization = true;
   }
@@ -876,6 +896,15 @@ class IsolateBase {
 
   kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
 
+  // See retainThreadStateBetweenLocks(). Destroyed first in ~IsolateBase(), which relocks the
+  // isolate and frees the thread's state.
+  struct RetainedThreadState {
+    explicit RetainedThreadState(v8::Isolate* isolate): locker(isolate), unlocker(isolate) {}
+    v8::Locker locker;
+    v8::Unlocker unlocker;
+  };
+  kj::Maybe<kj::Own<RetainedThreadState>> retainedThreadState;
+
   v8::Isolate* ptr;
   // Determines how the isolate was created:
   //  * kj::none: plain `v8::Isolate::New(params)`, no SnapshotCreator. The default.
@@ -964,6 +993,9 @@ class IsolateBase {
 
   // FunctionTemplate returned by getDomExceptionTemplate().
   v8::Global<v8::FunctionTemplate> domExceptionTemplate;
+
+  // Templates returned by getInternalFunctionTemplate(), keyed by callback address.
+  kj::HashMap<uintptr_t, v8::Global<v8::ObjectTemplate>> internalFunctionTemplates;
 
   // The private symbol that getJsSerializeModeKey() returns.
   v8::Global<v8::Private> jsSerializeModeKey;

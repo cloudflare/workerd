@@ -175,6 +175,11 @@ public:
   using HeaderKey = kj::OneOf<uint, kj::String>;
 
 private:
+  // Appends a header without checking it. `name` is a kj::String to keep or a kj::StringPtr to
+  // copy, which is copied only if the header keeps its own spelling of the name.
+  template <typename Name>
+  void appendUnguardedImpl(Name&& name, kj::String value);
+
   struct Header final {
     // The name is only set when the casing of the name differs from the lower-cased key.
     kj::Maybe<kj::String> name;
@@ -199,8 +204,49 @@ private:
     }
   };
 
-  // This wastes one slot, but it is a fixed array for fast access.
-  kj::FixedArray<kj::Maybe<kj::Own<Header>>, MAX_COMMON_HEADER_ID + 1> commonHeaders;
+  // Headers copied from a kj::HttpHeaders, kept in one buffer until something reads or changes
+  // them, since many Workers never look at most of a request's or a subrequest response's headers.
+  // parse() adds them to `commonHeaders` and `uncommonHeaders` in their original order, exactly as
+  // the constructor once did.
+  struct Unparsed {
+    struct Entry {
+      kj::StringPtr name;
+      kj::StringPtr value;
+    };
+    // One allocation: the entries, then each name and value, NUL-terminated, in order.
+    kj::Array<kj::byte> storage;
+    kj::ArrayPtr<Entry> entries;
+
+    explicit Unparsed(const kj::HttpHeaders& headers);
+    // The number of bytes `storage` uses.
+    size_t size() const {
+      return storage.size();
+    }
+    Unparsed clone() const;
+
+   private:
+    Unparsed() = default;
+  };
+
+  kj::Maybe<Unparsed> unparsed;
+
+  // Every method that reads or changes the parsed tables calls this first.
+  void parse();
+
+  struct CommonHeader {
+    kj::uint id;
+    kj::Own<Header> header;
+  };
+
+  // The common headers present, in increasing order of ID. A request or response carries few of
+  // the ~90 common headers, so this is smaller, and quicker to create, scan and destroy, than a
+  // slot for each.
+  kj::Vector<CommonHeader> commonHeaders;
+
+  kj::Maybe<kj::Own<Header>&> findCommon(kj::uint id);
+  // Adds the common header `id`, which must not be present yet.
+  kj::Own<Header>& addCommon(kj::uint id, kj::Own<Header> header);
+  void eraseCommon(kj::uint id);
 
   // The key is always lower-case.
   kj::HashMap<kj::String, kj::Own<Header>> uncommonHeaders;

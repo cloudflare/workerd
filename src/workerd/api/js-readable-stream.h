@@ -59,6 +59,9 @@ class JsReadableStream final {
   };
 
   struct Impl {
+    // False for a buffer-backed stream that nothing has needed yet: `stream` is empty and is
+    // built from `maybeOwnedBuffer` by ensureStream().
+    bool hasStream = true;
     StreamImpl stream;
     kj::Maybe<kj::Rc<Buffer>> maybeOwnedBuffer;
   };
@@ -221,6 +224,11 @@ class JsReadableStream final {
   kj::Promise<DeferredProxy<void>> pumpTo(
       jsg::Lock& js, kj::Own<WritableStreamSink> sink, EndStream end);
 
+  // If this is a buffer-backed stream that no stream was built for and that nothing has consumed,
+  // marks it disturbed, as pumpTo() would, and returns its bytes for the caller to send itself.
+  // Otherwise returns kj::none, and pumpTo() is the way to send it.
+  kj::Maybe<kj::Rc<Buffer>> tryTakeUnstreamedBuffer();
+
   // Pipe this stream into the given destination, exactly like ReadableStream.prototype.pipeTo():
   // both ends are locked for the duration of the pipe, and the returned promise settles when the
   // pipe completes. Rejects (does not throw) if either end is already locked. By default the
@@ -334,6 +342,9 @@ class JsReadableStream final {
   // typescript_implemented_streams flag buffer-backed streams are TypeScript-backed like every
   // other stream.
   static Impl bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer);
+
+  // Constructs `i.stream` if bufferBackedImpl() deferred it.
+  void ensureStream(jsg::Lock& js, Impl& i);
 
   kj::Maybe<Impl> impl;
   // Cache the result of isDisturbed() so that repeated calls don't dispatch to the JS

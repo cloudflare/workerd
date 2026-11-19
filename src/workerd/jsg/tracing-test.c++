@@ -59,11 +59,45 @@ class GcDetector: public jsg::Object {
     return true;
   }
 
+  // Returning a jsg::Promise from a method makes the promise keep the method's object alive.
+  jsg::Promise<kj::String> settle(jsg::Lock& js) {
+    return js.resolvedPromise(kj::str("value"));
+  }
+
   JSG_RESOURCE_TYPE(GcDetector) {
-    // NOTE: Using an instance property instead of a prototype property causes V8 to refuse to
-    //   collect the wrapper during minor GCs, as it always thinks the wrapper is "modified".
     JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
     JSG_METHOD(touch);
+    JSG_METHOD(settle);
+  }
+};
+
+// A GcDetector with properties on its instance template, as ExecutionContext has. V8 installs
+// them on each wrapper as native data properties, so no wrapper is ever on its constructor's
+// initial map.
+class InstancePropertyGcDetector: public jsg::Object {
+ public:
+  ~InstancePropertyGcDetector() noexcept(false) {
+    KJ_IF_SOME(s, sibling) s.sibling = kj::none;
+  }
+
+  kj::Maybe<InstancePropertyGcDetector&> sibling;
+
+  bool getSiblingCollected() {
+    return sibling == kj::none;
+  }
+
+  int getEager() {
+    return 1;
+  }
+
+  int getLazy() {
+    return 2;
+  }
+
+  JSG_RESOURCE_TYPE(InstancePropertyGcDetector) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(siblingCollected, getSiblingCollected);
+    JSG_READONLY_INSTANCE_PROPERTY(eager, getEager);
+    JSG_LAZY_INSTANCE_PROPERTY(lazy, getLazy);
   }
 };
 
@@ -177,9 +211,35 @@ struct TraceTestContext: public Object, public ContextGlobal {
     strongRef = kj::mv(ref);
   }
 
+  // Sets `strongRef` to a new NumberBox that has no wrapper yet.
+  void makeStrongRef(jsg::Lock& js, double value) {
+    strongRef = js.alloc<NumberBox>(value);
+  }
+
+  // NumberBoxes held strongly, without tracing, and returned to JavaScript as an ArrayPtr, whose
+  // wrapper wraps each element without consuming it.
+  kj::Array<jsg::Ref<NumberBox>> boxes;
+
+  void makeBoxes(jsg::Lock& js) {
+    boxes = kj::arr(js.alloc<NumberBox>(1), js.alloc<NumberBox>(2));
+  }
+
+  kj::ArrayPtr<jsg::Ref<NumberBox>> getBoxes() {
+    return boxes;
+  }
+
   kj::Array<jsg::Ref<GcDetector>> makeGcDetectorPair(jsg::Lock& js) {
     auto obj1 = js.alloc<GcDetector>();
     auto obj2 = js.alloc<GcDetector>();
+    obj1->sibling = *obj2;
+    obj2->sibling = *obj1;
+    return kj::arr(kj::mv(obj1), kj::mv(obj2));
+  }
+
+  kj::Array<jsg::Ref<InstancePropertyGcDetector>> makeInstancePropertyGcDetectorPair(
+      jsg::Lock& js) {
+    auto obj1 = js.alloc<InstancePropertyGcDetector>();
+    auto obj2 = js.alloc<InstancePropertyGcDetector>();
     obj1->sibling = *obj2;
     obj2->sibling = *obj1;
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
@@ -191,6 +251,44 @@ struct TraceTestContext: public Object, public ContextGlobal {
     obj1->inner->sibling = *obj2->inner;
     obj2->inner->sibling = *obj1->inner;
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
+  }
+
+  // Hides `detector` in an opaque wrapper, the kind that jsg::Promise uses to carry C++ values.
+  jsg::JsValue wrapOpaquely(jsg::Lock& js, jsg::Ref<GcDetector> detector) {
+    return jsg::JsValue(wrapOpaque(js.v8Context(), kj::mv(detector)));
+  }
+
+  // The number of wrappers this isolate currently has attached, whatever their type.
+  uint liveWrapperCount(jsg::Lock& js) {
+    uint count = 0;
+    HeapTracer::getTracer(js.v8Isolate)
+        .forEachLiveWrapper(
+            [&](jsg::Wrappable&, v8::Object::Wrappable&, v8::CppHeapPointerTag) { ++count; });
+    return count;
+  }
+
+  // Attaches C++ continuations to settled promises and drops the results, so the continuations
+  // run at the next microtask checkpoint and are garbage afterwards.
+  void attachContinuations(jsg::Lock& js) {
+    js.resolvedPromise().then(js, [](jsg::Lock&) {});
+    js.resolvedPromise(kj::str("value")).then(js, [](jsg::Lock&, kj::String) {
+    }, [](jsg::Lock&, jsg::Value) {});
+    js.rejectedPromise<void>(js.v8Undefined()).catch_(js, [](jsg::Lock&, jsg::Value) {});
+  }
+
+  // Returning a jsg::Promise to JavaScript attaches a continuation that converts its value.
+  jsg::Promise<kj::String> resolvedString(jsg::Lock& js) {
+    return js.resolvedPromise(kj::str("value"));
+  }
+
+  // Accepting a JavaScript promise as a jsg::Promise attaches a continuation that converts its
+  // value.
+  void acceptStringPromise(jsg::Lock& js, jsg::Promise<kj::String> promise) {
+    promise.then(js, [](jsg::Lock&, kj::String) {});
+  }
+
+  void runMicrotasks(jsg::Lock& js) {
+    js.runMicrotasks();
   }
 
   void assert_(bool condition, jsg::Optional<kj::String> message) {
@@ -205,8 +303,18 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(ItemQueue);
     JSG_METHOD(take);
     JSG_METHOD(putBack);
+    JSG_METHOD(makeStrongRef);
+    JSG_METHOD(makeBoxes);
+    JSG_METHOD(getBoxes);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
+    JSG_METHOD(wrapOpaquely);
+    JSG_METHOD(makeInstancePropertyGcDetectorPair);
+    JSG_METHOD(liveWrapperCount);
+    JSG_METHOD(attachContinuations);
+    JSG_METHOD(resolvedString);
+    JSG_METHOD(acceptStringPromise);
+    JSG_METHOD(runMicrotasks);
     JSG_METHOD_NAMED(assert, assert_);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
@@ -217,6 +325,7 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     NumberBox,
     NumberBoxHolder,
     GcDetector,
+    InstancePropertyGcDetector,
     GcDetectorBox,
     ValueBox,
     ItemQueue);
@@ -298,6 +407,44 @@ KJ_TEST("GC collects objects when expected") {
   )",
       "undefined", "undefined");
 
+  // Test that minor GC collects an opaque wrapper and the native object it holds.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    (() => {
+      wrapOpaquely(pair[0]);
+    })();
+    pair = null;
+    // As with ValueBox below, the first pass drops the opaque wrapper, which releases its strong
+    // reference to the detector, and the second drops the detector's own wrapper.
+    gc({type: "minor"});
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect an opaque wrapper");
+  )",
+      "undefined", "undefined");
+
+  // Test that minor GC collects the wrappers of promise continuations that have run, along with
+  // the opaque wrappers that carried their values.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let b = pair[1];
+    let before = liveWrapperCount();
+    attachContinuations();
+    resolvedString().then(() => {});
+    acceptStringPromise(Promise.resolve("value"));
+    pair[0].settle().then(() => {});
+    pair = null;
+    runMicrotasks();
+    // The first pass drops the wrappers and the second whatever they still referenced.
+    gc({type: "minor"});
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect the object a promise kept alive");
+    // pair[0] was counted in `before`.
+    let survivors = liveWrapperCount() - (before - 1);
+    assert(survivors == 0, `${survivors} wrappers survived minor GCs`);
+  )",
+      "undefined", "undefined");
+
   // Test that minor GC can collect unreachable jsg::Value.
   e.expectEval(R"(
     let pair = makeGcDetectorPair();
@@ -321,6 +468,65 @@ KJ_TEST("GC collects objects when expected") {
     gc({type: "minor"});
 
     assert(b.siblingCollected, "minor GC did not collect jsg::Value");
+  )",
+      "undefined", "undefined");
+}
+
+KJ_TEST("minor GC collects wrappers with instance properties") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // The instance properties alone don't make the wrapper "modified".
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    a = null;
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect a wrapper with instance properties");
+  )",
+      "undefined", "undefined");
+
+  // Reading an eager instance property leaves the wrapper as it was.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    (() => {
+      assert(a.eager === 1);
+    })();
+    a = null;
+    gc({type: "minor"});
+    assert(b.siblingCollected, "minor GC did not collect a wrapper after an eager read");
+  )",
+      "undefined", "undefined");
+
+  // Reading a lazy instance property stores its value on the wrapper, which modifies it.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    (() => {
+      assert(a.lazy === 2);
+    })();
+    a = null;
+    gc({type: "minor"});
+    assert(!b.siblingCollected, "minor GC collected a wrapper holding a lazy property's value");
+  )",
+      "undefined", "undefined");
+
+  // So does deleting an instance property.
+  e.expectEval(R"(
+    let pair = makeInstancePropertyGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+    delete a.lazy;
+    a = null;
+    gc({type: "minor"});
+    assert(!b.siblingCollected, "minor GC collected a wrapper missing an instance property");
   )",
       "undefined", "undefined");
 }
@@ -416,6 +622,37 @@ KJ_TEST("TracedReference usage does not lead to crashes") {
       // Verify the value is still there...
       "holder.inner.value",
       "number", "123");
+}
+
+KJ_TEST("a wrapper made by consuming one of two strong Refs stays alive") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // Reading `strongRef` wraps a new Ref to an object with no wrapper, consuming that Ref. The
+  // context's own Ref is still strong, so the wrapper must survive both kinds of GC with its
+  // properties.
+  e.expectEval(R"(
+    makeStrongRef(123);
+    strongRef.note = "kept";
+    gc({type: "minor"});
+    gc();
+    strongRef.note + " " + strongRef.value
+  )",
+      "string", "kept 123");
+}
+
+KJ_TEST("wrapping an ArrayPtr of strong Refs leaves them keeping their wrappers alive") {
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // The context still holds each box strongly once JavaScript has dropped the array, so a box's
+  // wrapper must survive both kinds of GC with its properties.
+  e.expectEval(R"(
+    makeBoxes();
+    getBoxes()[0].note = "kept";
+    gc({type: "minor"});
+    gc();
+    getBoxes()[0].note + " " + getBoxes()[0].value
+  )",
+      "string", "kept 1");
 }
 
 KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {

@@ -18,6 +18,7 @@ pub use bridge::AsyncInputStream;
 pub use bridge::AsyncIoStream;
 pub use bridge::ConnectResponse;
 pub use bridge::Ecdsa;
+pub use bridge::HeaderIds;
 pub use bridge::HttpHeaderTable;
 pub use bridge::HttpHeaders;
 pub use bridge::HttpMethod;
@@ -30,7 +31,6 @@ pub use bridge::WsCompression;
 pub use bridge::WsOffer;
 pub use bridge::ecdsa_verify;
 pub use bridge::for_each_header;
-pub use bridge::new_body_stream;
 pub use bridge::new_connect_response;
 pub use bridge::new_rust_io_stream;
 pub use bridge::new_tls_starter;
@@ -130,8 +130,18 @@ mod bridge {
 
         /// Every header, in kj's order, appended to `head`.
         fn for_each_header(headers: &HttpHeaders, head: &mut Head);
-        /// `kj::HttpHeaders` from a packed block (body.rs's `HeaderBlock`), checked against the
-        /// block's bounds.
+        /// The ids `table` gives the header names a connection's requests carry, each looked
+        /// up once (body.rs's `HeaderIds`).
+        type HeaderIds;
+        /// # Safety
+        ///
+        /// The ids keep a reference to `table`, which the `KjOwn` does not carry: the caller
+        /// keeps `table` alive for as long as they exist ([`Borrowing`] does).
+        unsafe fn new_header_ids(table: &HttpHeaderTable) -> KjOwn<HeaderIds>;
+        /// The slot of the id the table gives `name`; -1 for a name it lacks.
+        fn resolve(self: Pin<&mut HeaderIds>, name: &str) -> i32;
+        /// `kj::HttpHeaders` owning a copy of a packed block (body.rs's `HeaderBlock`), checked
+        /// against the block's bounds.
         ///
         /// # Safety
         ///
@@ -140,8 +150,34 @@ mod bridge {
         unsafe fn headers_from_block(
             table: &HttpHeaderTable,
             arena: &[u8],
-            lens: &[u32],
+            fields: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
+        /// `kj::HttpHeaders` pointing into a packed block whose slots `ids` resolved, checked
+        /// against the block's bounds and the slots.
+        ///
+        /// # Safety
+        ///
+        /// The headers keep references to the table behind `ids` and into `arena`, which the
+        /// `KjOwn` does not carry: the caller keeps the table alive for as long as they exist,
+        /// and the arena alive and unchanged for as long as they are read ([`ReusedHeaders`]).
+        /// Refilling or dropping them reads none of the old values.
+        unsafe fn headers_over_block(
+            ids: &HeaderIds,
+            arena: &[u8],
+            fields: &[u32],
+        ) -> Result<KjOwn<HttpHeaders>>;
+        /// [`headers_over_block`], refilling `headers` (made over the same table) in place of
+        /// whatever they held.
+        ///
+        /// # Safety
+        ///
+        /// As [`headers_over_block`].
+        unsafe fn refill_headers_over_block(
+            headers: Pin<&mut HttpHeaders>,
+            ids: &HeaderIds,
+            arena: &[u8],
+            fields: &[u32],
+        ) -> Result<()>;
         /// kj's parse of a request method; false for one kj has no name for.
         fn parse_method(name: &[u8], method: &mut HttpMethod) -> bool;
         /// `BoringSSL`'s check of a DER `signature` over `message` by `public_key`, an encoded
@@ -156,22 +192,33 @@ mod bridge {
         // --- Rust objects behind kj interfaces.
 
         fn new_rust_io_stream(io: Box<RustIo>) -> KjOwn<AsyncIoStream>;
-        fn new_body_stream(body: Box<RustBody>) -> KjOwn<AsyncInputStream>;
-        /// `kj::HttpService::Response` for a request of `method` with `headers`, which decide
-        /// whether it is a WebSocket handshake and whether that handshake is acceptable.
+        /// A request's body stream and `kj::HttpService::Response`, which a connection's calls
+        /// take in turn ([`ServerCall`]).
+        type ServerCall;
+        fn new_server_call() -> KjOwn<ServerCall>;
+        /// Points the call's stream at `body` and its response at `response`, for a request of
+        /// `method` with `headers`, which decide whether it is a WebSocket handshake and whether
+        /// that handshake is acceptable.
         ///
         /// # Safety
         ///
-        /// The response, and a WebSocket it accepts, keep the reference in `errors`, which the
-        /// `KjOwn` does not carry: the caller keeps the handler alive for as long as they exist
-        /// ([`Borrowing`] does).
-        unsafe fn new_server_response(
-            response: Box<ServerResponse>,
+        /// The call keeps the references to `body` and `response`, and the stream and response
+        /// (and a WebSocket the response accepts) the one in `errors`: the caller keeps them
+        /// alive until it calls `finish`, and a WebSocket's handler for as long as it exists
+        /// ([`Started`] does).
+        unsafe fn start(
+            self: Pin<&mut ServerCall>,
+            body: &RustBody,
+            response: &ServerResponse,
             method: HttpMethod,
             headers: &HttpHeaders,
             compression: WebSocketCompression,
             errors: KjMaybe<&WebSocketErrorHandler>,
-        ) -> KjOwn<HttpServiceResponse>;
+        );
+        /// Lets go of what `start` pointed the call at.
+        fn finish(self: Pin<&mut ServerCall>);
+        fn body<'c>(self: Pin<&'c mut ServerCall>) -> Pin<&'c mut AsyncInputStream>;
+        fn response<'c>(self: Pin<&'c mut ServerCall>) -> Pin<&'c mut HttpServiceResponse>;
         fn new_connect_response(response: Box<ConnectResponder>) -> KjOwn<ConnectResponse>;
         /// kj's `WebSocket` for the client end of an upgraded connection, masking its frames
         /// and running the agreed compression.
@@ -239,6 +286,9 @@ mod bridge {
         fn body_length(body: &RustBody) -> KjMaybe<u64>;
 
         type BodySink;
+        /// Queues `data` if the body has room for it, as it nearly always does; false when
+        /// `write()` must wait for room instead.
+        fn try_write(self: &BodySink, data: &[u8]) -> Result<bool>;
         async fn write(self: &BodySink, data: &[u8]) -> Result<()>;
         async fn when_write_disconnected(self: &BodySink);
 
@@ -314,7 +364,17 @@ impl<T: OwnTarget> Deref for Borrowing<'_, T> {
     }
 }
 
-/// `kj::HttpHeaders` over `table` from a packed block ([`crate::body::HeaderBlock`]).
+/// The ids `table` gives header names, looked up as they are first resolved.
+pub fn new_header_ids(table: &HttpHeaderTable) -> Borrowing<'_, HeaderIds> {
+    Borrowing {
+        // SAFETY: the result is bounded by the borrow of `table` the ids keep.
+        own: unsafe { bridge::new_header_ids(table) },
+        borrow: PhantomData,
+    }
+}
+
+/// `kj::HttpHeaders` over `table` owning a copy of a packed block
+/// ([`crate::body::HeaderBlock`]).
 ///
 /// # Errors
 ///
@@ -322,35 +382,122 @@ impl<T: OwnTarget> Deref for Borrowing<'_, T> {
 pub fn headers_from_block<'t>(
     table: &'t HttpHeaderTable,
     arena: &[u8],
-    lens: &[u32],
+    fields: &[u32],
 ) -> Result<Borrowing<'t, HttpHeaders>> {
     // SAFETY: the result is bounded by `'t`, the borrow of `table` the headers keep.
-    let own = unsafe { bridge::headers_from_block(table, arena, lens) }?;
+    let own = unsafe { bridge::headers_from_block(table, arena, fields) }?;
     Ok(Borrowing {
         own,
         borrow: PhantomData,
     })
 }
 
-/// `kj::HttpService::Response` for a request of `method` with `headers`.
+/// `kj::HttpHeaders` over a table that outlives `'t`, made once and refilled for each block.
 ///
-/// The headers decide whether the request is a WebSocket handshake and whether that handshake is
-/// acceptable. A WebSocket the response accepts reports protocol errors through `errors`.
-pub fn new_server_response<'e>(
-    response: Box<ServerResponse>,
-    method: HttpMethod,
-    headers: &HttpHeaders,
-    compression: WebSocketCompression,
-    errors: KjMaybe<&'e WebSocketErrorHandler>,
-) -> Borrowing<'e, HttpServiceResponse> {
-    // SAFETY: the result is bounded by `'e`, the borrow of `errors` the response keeps. The
-    // WebSocket it accepts keeps the same borrow and reaches the application only through the
-    // response (`kj::HttpService::Response::acceptWebSocket`), within the call that has it.
-    let own =
-        unsafe { bridge::new_server_response(response, method, headers, compression, errors) };
-    Borrowing {
-        own,
-        borrow: PhantomData,
+/// Each packed block ([`crate::body::HeaderBlock`]) is one the headers point into, so a request's
+/// headers are not an allocation of their own.
+#[derive(Default)]
+pub struct ReusedHeaders<'t> {
+    /// Points into the arena of the last [`ReusedHeaders::over`], which may have changed since:
+    /// read only within the borrow `over` returns.
+    own: Option<KjOwn<HttpHeaders>>,
+    table: PhantomData<&'t HttpHeaderTable>,
+}
+
+impl<'t> ReusedHeaders<'t> {
+    /// The headers of a packed block whose slots `ids` resolved, in place of the last ones.
+    ///
+    /// # Errors
+    ///
+    /// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
+    pub fn over<'a>(
+        &'a mut self,
+        ids: &Borrowing<'t, HeaderIds>,
+        arena: &'a [u8],
+        fields: &[u32],
+    ) -> Result<&'a HttpHeaders> {
+        let own = match self.own.take() {
+            Some(mut own) => {
+                // SAFETY: the headers are over the table behind `ids`, which outlives `'t` and
+                // so them; they are read only through the result, whose borrow of `arena` keeps
+                // the bytes unchanged.
+                unsafe { bridge::refill_headers_over_block(own.as_mut(), ids, arena, fields) }?;
+                own
+            }
+            // SAFETY: as above.
+            None => unsafe { bridge::headers_over_block(ids, arena, fields) }?,
+        };
+        let headers: &HttpHeaders = self.own.insert(own);
+        Ok(headers)
+    }
+}
+
+/// A request's kj body stream and `kj::HttpService::Response`, which a connection makes once and
+/// its calls take in turn, each over a [`RustBody`] and a [`ServerResponse`] of its own.
+pub struct ServerCall(KjOwn<bridge::ServerCall>);
+
+impl Default for ServerCall {
+    fn default() -> Self {
+        Self(bridge::new_server_call())
+    }
+}
+
+impl ServerCall {
+    /// Starts a call over `body` and `response`, for a request of `method` with `headers`, which
+    /// decide whether it is a WebSocket handshake and whether that handshake is acceptable. A
+    /// WebSocket the response accepts reports protocol errors through `errors`.
+    pub fn start<'c>(
+        &'c mut self,
+        body: &'c RustBody,
+        response: &'c ServerResponse,
+        method: HttpMethod,
+        headers: &HttpHeaders,
+        compression: WebSocketCompression,
+        errors: KjMaybe<&'c WebSocketErrorHandler>,
+    ) -> Started<'c> {
+        // SAFETY: `Started` holds the borrows of `body`, `response` and `errors` for `'c`, and
+        // finishes the call when dropped, before they end. The stream and the response are
+        // reached only through it, and a WebSocket the response accepts reaches the application
+        // only through the response (`kj::HttpService::Response::acceptWebSocket`), within the
+        // call that has it.
+        unsafe {
+            self.0
+                .as_mut()
+                .start(body, response, method, headers, compression, errors);
+        }
+        Started {
+            call: self,
+            borrow: PhantomData,
+        }
+    }
+}
+
+/// A [`ServerCall`] between [`ServerCall::start`] and its end, which dropping this is.
+pub struct Started<'c> {
+    call: &'c mut ServerCall,
+    borrow: PhantomData<&'c RustBody>,
+}
+
+impl Started<'_> {
+    /// The request's body stream and its response, for the handler.
+    pub fn parts(&mut self) -> (Pin<&mut AsyncInputStream>, Pin<&mut HttpServiceResponse>) {
+        // SAFETY: the stream and the response are separate members of the call, so the two
+        // borrows never reach the same bytes. Rust sees neither's bytes: like the call, they
+        // are opaque C++ types, which cxx declares with no size. Neither is moved out of its
+        // pin.
+        unsafe {
+            let call: *mut bridge::ServerCall = self.call.0.as_mut().get_unchecked_mut();
+            let body: *mut AsyncInputStream =
+                Pin::new_unchecked(&mut *call).body().get_unchecked_mut();
+            let response = Pin::new_unchecked(&mut *call).response();
+            (Pin::new_unchecked(&mut *body), response)
+        }
+    }
+}
+
+impl Drop for Started<'_> {
+    fn drop(&mut self) {
+        self.call.0.as_mut().finish();
     }
 }
 

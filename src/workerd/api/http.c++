@@ -26,6 +26,7 @@
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.capnp.h>
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
@@ -148,23 +149,28 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   KJ_UNREACHABLE;
 }
 
-Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers): headersRef(headers) {
+Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, kj::Maybe<Headers&> maybeHeaders) {
   KJ_IF_SOME(i, init) {
     KJ_IF_SOME(ct, i.contentType) {
-      if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
-        // The spec allows the user to override the Content-Type, if they wish, so we only set
-        // the Content-Type if it doesn't already exist.
-        headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
-      } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
-        if (MimeType::FORM_DATA == parsed) {
-          // Custom content-type request/responses with FormData are broken since they require a
-          // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
-          IoContext::current().logWarning(
-              "A FormData body was provided with a custom Content-Type header when constructing "
-              "a Request or Response object. This will prevent the recipient of the Request or "
-              "Response from being able to parse the body. Consider omitting the custom "
-              "Content-Type header.");
+      KJ_IF_SOME(headers, maybeHeaders) {
+        if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
+          // The spec allows the user to override the Content-Type, if they wish, so we only set
+          // the Content-Type if it doesn't already exist.
+          headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
+        } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
+          if (MimeType::FORM_DATA == parsed) {
+            // Custom content-type request/responses with FormData are broken since they require a
+            // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
+            IoContext::current().logWarning(
+                "A FormData body was provided with a custom Content-Type header when constructing "
+                "a Request or Response object. This will prevent the recipient of the Request or "
+                "Response from being able to parse the body. Consider omitting the custom "
+                "Content-Type header.");
+          }
         }
+      } else {
+        // A Response that creates its Headers only once they are used.
+        pendingContentType = kj::mv(ct);
       }
     }
     bodyStream = kj::mv(i.stream);
@@ -237,7 +243,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
     // When running with a warning handler, let's warn the developer if they do this.
     auto& context = IoContext::current();
     if (context.hasWarningHandler()) {
-      KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
+      KJ_IF_SOME(type, getHeadersRef(js).getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
         maybeWarnIfNotText(js, type);
       }
     }
@@ -255,7 +261,7 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "It can only be used once. Use tee() first if you need to read it twice.");
 
     auto contentType =
-        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
+        JSG_REQUIRE_NONNULL(getHeadersRef(js).getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
             TypeError, "Parsing a Body as FormData requires a Content-Type header.");
 
     if (!bodyStream.isNull()) {
@@ -288,7 +294,8 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
       js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
-    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
+    kj::String contentType = self->getHeadersRef(js)
+                                 .getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
     }).orDefault(nullptr);
@@ -339,6 +346,7 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<Headers>> headers;
   kj::Maybe<jsg::Ref<Fetcher>> fetcher;
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
+  kj::Maybe<jsg::Ref<IncomingRequestSignal>> incomingSignal;
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
   Redirect redirect = Redirect::FOLLOW;
@@ -413,7 +421,9 @@ jsg::Ref<Request> Request::constructor(
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
-      signal = oldRequest->getSignal();
+      signal = oldRequest->signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+      incomingSignal = oldRequest->incomingSignal.map(
+          [](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
     }
   }
 
@@ -472,6 +482,7 @@ jsg::Ref<Request> Request::constructor(
           // explicitly say `signal: null`, they must want to drop the signal that was on the
           // original request.
           signal = kj::mv(s);
+          incomingSignal = kj::none;
           initDict.signal = kj::none;
         }
 
@@ -526,7 +537,9 @@ jsg::Ref<Request> Request::constructor(
         cacheMode = otherRequest->cacheMode;
         responseBodyEncoding = otherRequest->responseBodyEncoding;
         fetcher = otherRequest->getFetcher();
-        signal = otherRequest->getSignal();
+        signal = otherRequest->signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+        incomingSignal = otherRequest->incomingSignal.map(
+            [](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
         headers = js.alloc<Headers>(js, *otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
         KJ_IF_SOME(b, otherRequest->getBody(js)) {
@@ -544,9 +557,11 @@ jsg::Ref<Request> Request::constructor(
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
-  return js.alloc<Request>(js, method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
+  auto request = js.alloc<Request>(js, method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
       kj::mv(fetcher), kj::mv(signal), kj::mv(cf), kj::mv(body), /* thisSignal */ kj::none,
       cacheMode, responseBodyEncoding);
+  request->incomingSignal = kj::mv(incomingSignal);
+  return request;
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -555,9 +570,12 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
   auto cfClone = cf.deepClone(js);
   auto bodyClone = Body::clone(js);
 
-  return js.alloc<Request>(js, method, url, redirect, kj::mv(headersClone), getFetcher(),
-      /* signal */ getSignal(), kj::mv(cfClone), kj::mv(bodyClone), /* thisSignal */ kj::none,
-      cacheMode, responseBodyEncoding);
+  auto request = js.alloc<Request>(js, method, url, redirect, kj::mv(headersClone), getFetcher(),
+      /* signal */ signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); }), kj::mv(cfClone),
+      kj::mv(bodyClone), /* thisSignal */ kj::none, cacheMode, responseBodyEncoding);
+  request->incomingSignal =
+      incomingSignal.map([](jsg::Ref<IncomingRequestSignal>& s) { return s.addRef(); });
+  return request;
 }
 
 kj::StringPtr Request::getMethod() {
@@ -585,8 +603,43 @@ kj::StringPtr Request::getRedirect() {
 kj::Maybe<jsg::Ref<Fetcher>> Request::getFetcher() {
   return fetcher.map([](jsg::Ref<Fetcher>& f) { return f.addRef(); });
 }
-kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal() {
+kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal(jsg::Lock& js) {
+  takeIncomingSignal(js);
   return signal.map([](jsg::Ref<AbortSignal>& s) { return s.addRef(); });
+}
+
+jsg::Ref<AbortSignal> IncomingRequestSignal::get(jsg::Lock& js) {
+  KJ_IF_SOME(s, signal) {
+    return s.addRef();
+  }
+  auto s = js.alloc<AbortSignal>(kj::none, kj::none, flag);
+  KJ_IF_SOME(reason, abortReason) {
+    s->triggerAbort(js, kj::mv(reason));
+    abortReason = kj::none;
+  }
+  signal = s.addRef();
+  return s;
+}
+
+void IncomingRequestSignal::triggerAbort(jsg::Lock& js, kj::Exception reason) {
+  KJ_IF_SOME(s, signal) {
+    s->triggerAbort(js, kj::mv(reason));
+  } else {
+    abortReason = kj::mv(reason);
+  }
+}
+
+bool IncomingRequestSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
+  return !FeatureFlags::get(js).getRequestSignalPassthrough() &&
+      flag == AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
+}
+
+void Request::takeIncomingSignal(jsg::Lock& js) {
+  KJ_IF_SOME(incoming, incomingSignal) {
+    auto s = incoming->get(js);
+    incomingSignal = kj::none;
+    signal = kj::mv(s);
+  }
 }
 
 jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
@@ -602,6 +655,7 @@ jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
 // The name "thisSignal" is derived from the fetch spec, which draws a
 // distinction between the "signal" and "this' signal".
 jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
+  takeIncomingSignal(js);
   KJ_IF_SOME(s, signal) {
     return s.addRef();
   }
@@ -614,6 +668,11 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
 }
 
 void Request::clearSignalIfIgnoredForSubrequest(jsg::Lock& js) {
+  KJ_IF_SOME(s, incomingSignal) {
+    if (s->isIgnoredForSubrequests(js)) {
+      incomingSignal = kj::none;
+    }
+  }
   KJ_IF_SOME(s, signal) {
     if (s->isIgnoredForSubrequests(js)) {
       signal = kj::none;
@@ -782,6 +841,7 @@ void Request::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
     const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
   serializer.writeLengthDelimited(url);
+  takeIncomingSignal(js);
 
   // Our strategy is to construct an initializer dict object and serialize that as a JS object.
   // This makes the deserialization end really simple (just call the constructor), and it also
@@ -1003,13 +1063,13 @@ void validateStatusText(jsg::Lock& js, kj::StringPtr statusText) {
 Response::Response(jsg::Lock& js,
     int statusCode,
     kj::Maybe<kj::String> statusText,
-    jsg::Ref<Headers> headers,
+    kj::Maybe<jsg::Ref<Headers>> headers,
     CfProperty&& cf,
     kj::Maybe<Body::ExtractedBody> body,
     kj::Array<kj::String> urlList,
     kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding)
-    : Body(js, kj::mv(body), *headers),
+    : Body(js, kj::mv(body), headers.map([](jsg::Ref<Headers>& h) -> Headers& { return *h; })),
       statusCode(statusCode),
       statusText(kj::mv(statusText)),
       headers(kj::mv(headers)),
@@ -1036,7 +1096,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
   kj::Maybe<kj::String> statusText;
   kj::Maybe<Body::ExtractedBody> body = kj::none;
-  jsg::Ref<Headers> headers = nullptr;
+  kj::Maybe<jsg::Ref<Headers>> headers;
   CfProperty cf;
   kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none;
 
@@ -1060,8 +1120,6 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
       KJ_IF_SOME(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(initHeaders));
-      } else {
-        headers = js.alloc<Headers>();
       }
 
       KJ_IF_SOME(newCf, initDict.cf) {
@@ -1085,7 +1143,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
       statusText = otherResponse->statusText.clone();
-      headers = js.alloc<Headers>(js, *otherResponse->headers);
+      headers = js.alloc<Headers>(js, otherResponse->getHeadersRef(js));
       cf = otherResponse->cf.deepClone(js);
       KJ_IF_SOME(otherWs, otherResponse->webSocket) {
         webSocket = otherWs.addRef();
@@ -1214,7 +1272,7 @@ jsg::Ref<Response> Response::json_(
         auto newInit = InitializerDict{
           .status = res->statusCode,
           .statusText = res->statusText.clone(),
-          .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
+          .headers = maybeSetContentType(js, Headers::constructor(js, res->getHeaders(js))),
           .cf = res->cf.getRef(js),
           .encodeBody =
               kj::str(res->bodyEncoding == Response::BodyEncoding::MANUAL ? "manual" : "automatic"),
@@ -1249,7 +1307,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   JSG_REQUIRE(
       webSocket == kj::none, TypeError, "Cannot clone a response to a WebSocket handshake.");
 
-  auto headersClone = headers->clone(js);
+  auto headersClone = getHeadersRef(js).clone(js);
   auto cfClone = cf.deepClone(js);
 
   auto bodyClone = Body::clone(js);
@@ -1260,6 +1318,54 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
       statusText.clone(),
       kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
+
+namespace {
+
+// Writes `bytes` to `stream`, unless `written`, then ends it as EncodedAsyncOutputStream::end()
+// does. On failure, aborts the stream.
+kj::Promise<void> finishBufferWrite(kj::Own<kj::AsyncOutputStream> stream,
+    kj::Rc<JsReadableStream::Buffer> buffer,
+    bool written) {
+  try {
+    if (!written) {
+      co_await stream->write(buffer->view);
+    }
+    KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+      co_await ee.end();
+    } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+      aio.shutdownWrite();
+    }
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    stream->abortWrite(exception.clone());
+    kj::throwException(kj::mv(exception));
+  }
+}
+
+// Writes a body that no stream was built for, as for `new Response("text")`, straight to the
+// response stream, without the stream and pump that sending any other body needs. The bytes are
+// kj-heap memory owned by `buffer` and the response stream doesn't depend on the IoContext, so
+// the whole write can be deferred past it. If the stream takes the bytes synchronously and needs
+// no asynchronous end, as a response body nearly always does, nothing is left to wait for.
+kj::Promise<void> writeBufferToResponse(
+    kj::Own<kj::AsyncOutputStream> stream, kj::Rc<JsReadableStream::Buffer> buffer) {
+  auto bytes = buffer->view;
+  bool written = false;
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    written = bytes.size() == 0 || stream->tryWriteSync(bytes);
+  })) {
+    stream->abortWrite(exception.clone());
+    return kj::mv(exception);
+  }
+  if (written &&
+      kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream) == kj::none &&
+      kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream) == kj::none) {
+    return kj::READY_NOW;
+  }
+  return finishBufferWrite(kj::mv(stream), kj::mv(buffer), written);
+}
+
+}  // namespace
 
 kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     kj::HttpService::Response& outer,
@@ -1278,7 +1384,11 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
 
   auto& context = IoContext::current();
   kj::HttpHeaders outHeaders(context.getHeaderTable());
-  headers->shallowCopyTo(outHeaders);
+  KJ_IF_SOME(h, headers) {
+    h->shallowCopyTo(outHeaders);
+  } else KJ_IF_SOME(contentType, getPendingContentType()) {
+    outHeaders.setPtr(kj::HttpHeaderId::CONTENT_TYPE, contentType);
+  }
 
   KJ_IF_SOME(ws, webSocket) {
     // `Response::acceptWebSocket()` can throw if we did not ask for a WebSocket. This
@@ -1331,8 +1441,16 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       }
     }
     return wsPromise;
-  } else KJ_IF_SOME(jsBody, getBody(js)) {
+  } else KJ_IF_SOME(jsBody, tryGetBodyStream()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    if (encoding == StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(buffer, jsBody.tryTakeUnstreamedBuffer()) {
+        auto size = buffer->view.size();
+        return DeferredProxy<void>{writeBufferToResponse(
+            outer.send(statusCode, getReasonPhrase(), outHeaders, static_cast<uint64_t>(size)),
+            kj::mv(buffer))};
+      }
+    }
     auto flushAfterWrite = FlushCompressionAfterWrite::NO;
     if (encoding != StreamEncoding::IDENTITY) {
       KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {
@@ -1374,7 +1492,19 @@ kj::StringPtr Response::getReasonPhrase() {
   return defaultStatusText(statusCode);
 }
 jsg::Ref<Headers> Response::getHeaders(jsg::Lock& js) {
-  return headers.addRef();
+  getHeadersRef(js);
+  return KJ_ASSERT_NONNULL(headers).addRef();
+}
+
+Headers& Response::getHeadersRef(jsg::Lock& js) {
+  KJ_IF_SOME(h, headers) {
+    return *h;
+  }
+  auto& h = headers.emplace(js.alloc<Headers>());
+  KJ_IF_SOME(contentType, takePendingContentType()) {
+    h->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(contentType));
+  }
+  return *h;
 }
 
 bool Response::getOk() {
@@ -1415,7 +1545,7 @@ void Response::serialize(jsg::Lock& js,
           InitializerDict{
             .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
             .statusText = statusText.map([](auto& txt) { return kj::str(txt); }),
-            .headers = headers.addRef(),
+            .headers = getHeaders(js),
             .cf = cf.getRef(js),
 
             // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
@@ -1488,12 +1618,7 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
   forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
-    // Once a Response is returned, we need to apply the output lock.
-    promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
-      auto& context = IoContext::current();
-      return context.awaitIo(js, context.waitForOutputLocks(),
-          [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
-    });
+    promise = waitForOutputLocks(js, kj::mv(promise));
   }
 
   KJ_SWITCH_ONEOF(state) {
@@ -1512,6 +1637,15 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
   }
 
   stopImmediatePropagation();
+}
+
+jsg::Promise<jsg::Ref<Response>> FetchEvent::waitForOutputLocks(
+    jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
+  return promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
+    auto& context = IoContext::current();
+    return context.awaitIo(js, context.waitForOutputLocks(),
+        [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
+  });
 }
 
 void FetchEvent::passThroughOnException() {
@@ -1739,7 +1873,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
 }
 
 kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
-  KJ_IF_SOME(signal, request.getSignal()) {
+  KJ_IF_SOME(signal, request.getSignal(js)) {
     if (signal->getAborted(js)) {
       return signal->getReason(js);
     }
@@ -1768,7 +1902,7 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   auto& ioContext = IoContext::current();
   jsRequest->rewindBody(js);
 
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
   auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
                           .catch_([retryState = retryState.addRef()](
                                       kj::Exception&& exception) mutable -> kj::Promise<void> {
@@ -1854,7 +1988,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
 
   auto& ioContext = IoContext::current();
 
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
     KJ_IF_SOME(state, retryState) {
       state->recordCanceled();
@@ -2056,7 +2190,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     kj::HttpClient::Response&& response,
     kj::Maybe<kj::TimePoint> callStart) {
-  auto signal = jsRequest->getSignal();
+  auto signal = jsRequest->getSignal(js);
 
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.

@@ -297,6 +297,21 @@ wd_test(
 )
 
 wd_test(
+    src = "fetch-handler-sync-response-test.wd-test",
+    data = ["fetch-handler-sync-response-test.js"],
+)
+
+wd_test(
+    src = "incoming-headers-test.wd-test",
+    data = ["incoming-headers-test.js"],
+)
+
+wd_test(
+    src = "response-headers-test.wd-test",
+    data = ["response-headers-test.js"],
+)
+
+wd_test(
     src = "connect-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["connect-half-open-test.js"],
@@ -506,6 +521,11 @@ wd_test(
 wd_test(
     src = "ctx-props-test.wd-test",
     args = ["--experimental"],
+)
+
+wd_test(
+    src = "ctx-per-event-test.wd-test",
+    data = ["ctx-per-event-test.js"],
 )
 
 wd_test(
@@ -1929,6 +1949,11 @@ wd_test(
         "response-used-body-test",
     ],
     data = ["response-used-body-test.js"],
+)
+
+wd_test(
+    src = "response-buffer-body-test.wd-test",
+    data = ["response-buffer-body-test.js"],
 )
 
 wd_test(

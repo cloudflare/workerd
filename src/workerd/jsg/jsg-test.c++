@@ -576,6 +576,35 @@ KJ_TEST("External memory adjustment") {
   });
 }
 
+KJ_TEST("retainThreadStateBetweenLocks() keeps the isolate lockable from any thread") {
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.retainThreadStateBetweenLocks();
+
+  // Each lock uses the isolate's handle scopes, and collects garbage to visit the thread states
+  // that V8 keeps, then releases the lock.
+  v8::Isolate* v8Isolate = nullptr;
+  auto useIsolate = [&]() {
+    isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+      v8Isolate = lock.v8Isolate;
+      lock.withinHandleScope([&]() {
+        auto text = v8::String::NewFromUtf8Literal(lock.v8Isolate, "retained");
+        KJ_EXPECT(text->Length() == 8);
+        lock.v8Isolate->LowMemoryNotification();
+        KJ_EXPECT(text->Length() == 8);
+      });
+    });
+    KJ_EXPECT(!v8::Locker::IsLocked(v8Isolate));
+  };
+
+  useIsolate();
+  useIsolate();
+  {
+    // Another thread takes the lock between this thread's locks, archiving this thread's state.
+    kj::Thread thread(useIsolate);
+  }
+  useIsolate();
+}
+
 KJ_TEST("External memory adjustment - defered") {
   kj::Arc<const ExternalMemoryTarget> target;
 

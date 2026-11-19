@@ -482,6 +482,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Writes the deferred lines to stdout/stderr in order and clears them.
   void flushDeferredConsoleOutput();
 
+  // Makes later locks from the calling thread cheaper; see
+  // jsg::IsolateBase::retainThreadStateBetweenLocks(). Call it with the isolate unlocked, for an
+  // isolate that the calling thread mostly locks.
+  void retainThreadStateBetweenLocks();
+
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
 
@@ -560,6 +565,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
  private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
+      kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
+  kj::Promise<AsyncLock> takeAsyncLockSlow(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
 
   kj::Own<IsolateObserver> metrics;
@@ -870,6 +877,12 @@ class Worker::Lock {
 
   // Get the opaque storage key to use for recording user trace information in async contexts.
   kj::Arc<jsg::AsyncContextFrame::StorageKey> getUserTraceAsyncContextKey();
+
+  // Returns this worker's request-root frame, made on first use. It inherits nothing, and its
+  // entries for both trace keys are request-root entries (see
+  // IoContext::isRequestRootTraceScope()): they hold no request's state, and readers resolve them
+  // to the root spans of the current request. So every request can share the frame.
+  jsg::AsyncContextFrame& getRequestRootTraceFrame();
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);

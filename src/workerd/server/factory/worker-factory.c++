@@ -396,6 +396,9 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
+  bool canExceedLimits() override {
+    return false;
+  }
   void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
@@ -773,9 +776,12 @@ class RustIoChannelFactory final: public IoChannelFactory {
 
   ~RustIoChannelFactory() noexcept(false) {
     // A request's drain task runs in the worker's own task set and may hold the worker's last
-    // references (the server dropped the worker meanwhile; `channels` may hold the Rust side's,
-    // and drops it before this member), so destroying the worker here would destroy the task set
-    // from inside one of its tasks. The factory's tasks drop this reference on a later turn.
+    // references (the server dropped the worker meanwhile, and `channels` may hold the Rust
+    // side's), so destroying the worker here would destroy the task set from inside one of its
+    // tasks. Drop the Rust side's references first. If the worker is still shared, dropping ours
+    // cannot destroy it. Otherwise the factory's tasks drop it on a later turn.
+    { auto droppedChannels = kj::mv(channels); }
+    if (worker->isShared()) return;
     worker->factory.getImpl().tasks.add(kj::evalLater([worker = kj::mv(worker)]() {}));
   }
 
@@ -1797,6 +1803,11 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
   auto isolateStart = api::BenchTiming::now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = api::BenchTiming::now() - isolateStart;
+  if (!inspectorConfigured) {
+    // This thread serves the Worker's requests. With an inspector, its thread locks the isolate
+    // too, and would take the thread state from this one on each message.
+    isolate->retainThreadStateBetweenLocks();
+  }
   KJ_IF_SOME(r, registrar) {
     r.registerIsolate(impl->name, *isolate);
   }

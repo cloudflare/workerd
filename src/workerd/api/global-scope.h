@@ -328,14 +328,16 @@ class AccessContext: public jsg::Object {
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
-      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), /*versionInfo=*/kj::none) {}
+      : ExecutionContext(js, kj::mv(exports), /*props=*/kj::none, /*versionInfo=*/kj::none) {}
 
+  // `props` is none for an event without props, whose `ctx.props` is an empty object that is only
+  // created if read.
   ExecutionContext(jsg::Lock& js,
       jsg::JsValue exports,
-      jsg::JsValue props,
+      kj::Maybe<jsg::JsValue> props,
       kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, props) {
+        props(props.map([&](jsg::JsValue p) { return jsg::JsRef(js, p); })) {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableVersionApi()) {
       version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
@@ -359,7 +361,12 @@ class ExecutionContext: public jsg::Object {
   }
 
   jsg::JsValue getProps(jsg::Lock& js) {
-    return props.getHandle(js);
+    KJ_IF_SOME(p, props) {
+      return p.getHandle(js);
+    }
+    auto empty = js.obj();
+    props = jsg::JsRef<jsg::JsValue>(js, empty);
+    return empty;
   }
 
   // Call the `[restore]()` method of the current entrypoint with the given params object and
@@ -473,7 +480,7 @@ class ExecutionContext: public jsg::Object {
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
-  jsg::JsRef<jsg::JsValue> props;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> props;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -517,27 +524,65 @@ class AlarmInvocationInfo: public jsg::Object {
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
-      jsg::Value env,
+  // What a fetch handler returns. A Response the handler returns itself is taken as it is, rather
+  // than as an already-resolved promise for it, so that it can be sent without awaiting anything.
+  // So is the Response that an `async` handler's promise has already been fulfilled with, which
+  // spares making a resolved promise of our own only to take the Response straight back out.
+  struct FetchResult {
+    using Value = kj::OneOf<jsg::Ref<api::Response>, jsg::Promise<jsg::Ref<api::Response>>>;
+    using JsgRttiDelegate = Value;
+    Value value;
+
+    static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        kj::Maybe<v8::Local<v8::Object>> creator,
+        FetchResult result) {
+      return typeWrapper.wrap(js, context, creator, kj::mv(result.value));
+    }
+
+    // A FetchResult is only ever a handler's return value, so any other value is unwrapped, and
+    // fails if it is of the wrong type, exactly as a returned Value would be.
+    static kj::Maybe<FetchResult> jsgTryUnwrap(auto& typeWrapper,
+        jsg::Lock& js,
+        v8::Local<v8::Context> context,
+        v8::Local<v8::Value> handle,
+        kj::Maybe<v8::Local<v8::Object>> parentObject) {
+      if (handle->IsPromise()) {
+        auto promise = handle.As<v8::Promise>();
+        if (promise->State() == v8::Promise::kFulfilled) {
+          KJ_IF_SOME(response,
+              typeWrapper.tryUnwrap(js, context, promise->Result(),
+                  static_cast<jsg::Ref<api::Response>*>(nullptr), kj::none)) {
+            return FetchResult{kj::mv(response)};
+          }
+        }
+      }
+      return FetchResult{typeWrapper.template unwrap<Value>(
+          js, context, handle, jsg::TypeErrorContext::callbackReturn(), parentObject)};
+    }
+  };
+  using FetchHandler = FetchResult(jsg::Ref<api::Request> request,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
   using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Ref<Socket> socket, jsg::JsValue env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
   using TailStreamHandler = kj::Promise<void>(
-      jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::JsObject obj, jsg::JsValue env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
   using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
@@ -546,7 +591,7 @@ struct ExportedHandler {
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
@@ -643,7 +688,7 @@ struct ExportedHandler {
 // benchmark runs.
 struct BenchExportedHandler {
   using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
-      jsg::Value env,
+      jsg::JsValue env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
 
@@ -734,7 +779,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler,
-      kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
+      kj::Maybe<jsg::Ref<IncomingRequestSignal>> signal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 

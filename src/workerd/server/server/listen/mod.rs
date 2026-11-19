@@ -480,7 +480,7 @@ pub async fn listen_http(
                 .flatten();
             let hangup = hangup(&accepted);
             let io = transport(accepted, socket.tls.as_ref(), &context).await?;
-            let handler: Rc<dyn Handler> = Rc::new(HttpConnection {
+            let handler = Rc::new(HttpConnection {
                 context: Rc::clone(&context),
                 socket,
                 cf_blob,
@@ -517,7 +517,6 @@ impl HttpConnection {
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl Handler for HttpConnection {
     async fn request<'a>(
         &'a self,
@@ -541,18 +540,22 @@ impl Handler for HttpConnection {
             else {
                 return send_error(response, 400, "Bad Request", &Headers::new(table)).await;
             };
-            let cf_blob = cf_blob.or_else(|| self.cf_blob.clone());
-            let mut worker = self.start_request(cf_blob.as_deref())?;
+            let cf_blob = cf_blob.as_deref().or(self.cf_blob.as_deref());
+            let mut worker = self.start_request(cf_blob)?;
             let headers = rewritten
                 .headers
                 .as_deref()
                 .map_or(headers, HeadersRef::from);
-            let mut response =
-                bridge::rewriting_response(response.into_ffi(), table, rewriter.response_edits())?;
+            let url = rewritten.url.as_bytes();
+            let edits = rewriter.response_edits();
+            if edits.is_empty() {
+                return worker.request(method, url, headers, body, response).await;
+            }
+            let mut response = bridge::rewriting_response(response.into_ffi(), table, edits)?;
             worker
                 .request(
                     method,
-                    rewritten.url.as_bytes(),
+                    url,
                     headers,
                     body,
                     ServiceResponse::from(response.as_mut()),

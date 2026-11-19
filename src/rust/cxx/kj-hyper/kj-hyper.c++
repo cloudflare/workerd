@@ -76,19 +76,30 @@ class RustIoStream final: public kj::AsyncIoStream {
   kj::Promise<void> shutdownTask = kj::READY_NOW;
 };
 
+// A request body, over the Rust body of the call that has it.
 class BodyStream final: public kj::AsyncInputStream {
  public:
-  explicit BodyStream(::rust::Box<RustBody> body): body(kj::mv(body)) {}
+  void start(const RustBody& body) {
+    this->body = body;
+  }
+  void finish() {
+    body = kj::none;
+  }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
+    // The read holds a share of the body, so the call may end while it waits.
+    return hot(body_read(get(), static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
   kj::Maybe<uint64_t> tryGetLength() override {
-    return body_length(*body);
+    return body_length(get());
   }
 
  private:
-  ::rust::Box<RustBody> body;
+  kj::Maybe<const RustBody&> body;
+
+  const RustBody& get() {
+    return KJ_REQUIRE_NONNULL(body, "request body used after its call ended");
+  }
 };
 
 class BodySinkStream final: public kj::AsyncOutputStream {
@@ -96,12 +107,28 @@ class BodySinkStream final: public kj::AsyncOutputStream {
   explicit BodySinkStream(::rust::Box<BodySink> sink): sink(kj::mv(sink)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    // A write that finds room is done once Rust has copied it, without a bridged future.
+    bool queued = false;
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&] { queued = tryWriteSync(buffer); })) {
+      return kj::mv(e);
+    }
+    if (queued) return kj::READY_NOW;
     return hot(sink->write(bytes(buffer)));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    if (pieces.size() == 1) return write(pieces[0]);
+    // Rust copies the bytes before write() returns, so the joined copy need not outlive it.
     auto joined = join(pieces);
-    auto promise = sink->write(bytes(joined));
-    return hot(kj::mv(promise)).attach(kj::mv(joined));
+    return write(joined.asPtr());
+  }
+  // The body takes a chunk whenever hyper has taken the last one, as it nearly always has.
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return sink->try_write(bytes(buffer));
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    if (pieces.size() == 1) return tryWriteSync(pieces[0]);
+    auto joined = join(pieces);
+    return tryWriteSync(joined.asPtr());
   }
   kj::Promise<void> whenWriteDisconnected() override {
     return hot(sink->when_write_disconnected());
@@ -188,22 +215,30 @@ struct WebSocketRequest {
   kj::Maybe<kj::String> offers;
 };
 
+// A request's response, over the Rust response of the call that has it. What it sends or
+// accepts owns its own Rust objects, so it outlives the call.
 class ServerResponseImpl final: public kj::HttpService::Response {
  public:
-  ServerResponseImpl(::rust::Box<ServerResponse> impl,
+  void start(const ServerResponse& impl,
       kj::Maybe<kj::WebSocketErrorHandler&> webSocketErrors,
       WebSocketCompression compressionMode,
-      kj::Maybe<WebSocketRequest> webSocketRequest)
-      : impl(kj::mv(impl)),
-        webSocketErrors(webSocketErrors),
-        compressionMode(compressionMode),
-        webSocketRequest(kj::mv(webSocketRequest)) {}
+      kj::Maybe<WebSocketRequest> webSocketRequest) {
+    this->impl = impl;
+    this->webSocketErrors = webSocketErrors;
+    this->compressionMode = compressionMode;
+    this->webSocketRequest = kj::mv(webSocketRequest);
+  }
+  void finish() {
+    impl = kj::none;
+    webSocketErrors = kj::none;
+    webSocketRequest = kj::none;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(kj::uint statusCode,
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize) override {
-    auto sink = impl->send(statusCode, bytes(statusText), headers, kj::mv(expectedBodySize));
+    auto sink = get().send(statusCode, bytes(statusText), headers, kj::mv(expectedBodySize));
     return kj::heap<BodySinkStream>(kj::mv(sink));
   }
 
@@ -213,7 +248,7 @@ class ServerResponseImpl final: public kj::HttpService::Response {
     KJ_IF_SOME(refused, request.refusal) {
       // As kj's HttpServer: answers, closes the connection, and fails the service's call as if
       // the client had gone away, since the fault is the client's.
-      impl->send_error(
+      get().send_error(
           refused.status, bytes(refused.statusText), bytes(kj::str("ERROR: ", refused.message)));
       kj::throwException(
           KJ_EXCEPTION(DISCONNECTED, "received bad WebSocket handshake", refused.message));
@@ -241,17 +276,61 @@ class ServerResponseImpl final: public kj::HttpService::Response {
       agreement = kj::_::generateExtensionResponse(p);
     }
     auto io =
-        impl->accept_websocket(headers, bytes(agreement == nullptr ? ""_kj : agreement.asPtr()));
+        get().accept_websocket(headers, bytes(agreement == nullptr ? ""_kj : agreement.asPtr()));
     // A server's frames are unmasked (RFC 6455 section 5.1), hence no entropy source.
     return kj::newWebSocket(
         kj::heap<RustIoStream>(kj::mv(io)), kj::none, kj::mv(agreed), webSocketErrors);
   }
 
  private:
-  ::rust::Box<ServerResponse> impl;
+  kj::Maybe<const ServerResponse&> impl;
   kj::Maybe<kj::WebSocketErrorHandler&> webSocketErrors;
-  WebSocketCompression compressionMode;
+  WebSocketCompression compressionMode = WebSocketCompression::NONE;
   kj::Maybe<WebSocketRequest> webSocketRequest;
+
+  const ServerResponse& get() {
+    return KJ_REQUIRE_NONNULL(impl, "response used after its call ended");
+  }
+};
+
+// The handshake a request of `method` with `headers` asks for, if it asks for one.
+kj::Maybe<WebSocketRequest> webSocketRequestOf(
+    kj::HttpMethod method, const kj::HttpHeaders& headers) {
+  if (!headers.isWebSocket()) return kj::none;
+  return WebSocketRequest{
+    .refusal = websocketRefusal(method, headers),
+    .offers = headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
+    return kj::str(offers);
+  }),
+  };
+}
+
+class ServerCallImpl final: public ServerCall {
+ public:
+  void start(const RustBody& body,
+      const ServerResponse& response,
+      kj::HttpMethod method,
+      const kj::HttpHeaders& headers,
+      WebSocketCompression compression,
+      kj::Maybe<const kj::WebSocketErrorHandler&> errors) override {
+    bodyStream.start(body);
+    serverResponse.start(
+        response, mutableHandler(errors), compression, webSocketRequestOf(method, headers));
+  }
+  void finish() override {
+    bodyStream.finish();
+    serverResponse.finish();
+  }
+  kj::AsyncInputStream& body() override {
+    return bodyStream;
+  }
+  kj::HttpService::Response& response() override {
+    return serverResponse;
+  }
+
+ private:
+  BodyStream bodyStream;
+  ServerResponseImpl serverResponse;
 };
 
 class ConnectResponseImpl final: public kj::HttpService::ConnectResponse {
@@ -283,53 +362,92 @@ void for_each_header(const kj::HttpHeaders& headers, Head& head) {
       [&](kj::StringPtr name, kj::StringPtr value) { head.append(bytes(name), bytes(value)); });
 }
 
-kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
-    ::rust::Slice<const uint8_t> arena,
-    ::rust::Slice<const uint32_t> lens) {
-  KJ_REQUIRE(lens.size() % 2 == 0, "malformed header block");
-  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
-  kj::ArrayPtr<const char> rest = owned;
+int32_t HeaderIds::resolve(::rust::Str name) {
+  KJ_IF_SOME(id, table.stringToId(kj::str(kj::arrayPtr(name.data(), name.size())))) {
+    ids.add(id);
+    return static_cast<int32_t>(ids.size() - 1);
+  }
+  return -1;
+}
+
+kj::Own<HeaderIds> new_header_ids(const kj::HttpHeaderTable& table) {
+  return kj::heap<HeaderIds>(table);
+}
+
+namespace {
+
+// A header whose name is in no slot, as body.rs's `UNINDEXED`.
+constexpr uint32_t UNINDEXED = UINT32_MAX;
+
+// Adds a block's headers: a name with a slot by its id, unless it repeats, and any other as kj
+// adds a name it looks up.
+void addBlock(kj::HttpHeaders& headers,
+    kj::Maybe<const HeaderIds&> ids,
+    kj::ArrayPtr<const char> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  KJ_REQUIRE(fields.size() % 3 == 0, "malformed header block");
+  kj::ArrayPtr<const char> rest = arena;
   auto next = [&](uint32_t len) {
     KJ_REQUIRE(len < rest.size() && rest[len] == '\0', "malformed header block");
     kj::StringPtr text(rest.begin(), len);
     rest = rest.slice(len + 1);
     return text;
   };
-  auto headers = kj::heap<kj::HttpHeaders>(table);
-  for (size_t i = 0; i < lens.size(); i += 2) {
-    auto name = next(lens[i]);
-    auto value = next(lens[i + 1]);
-    headers->addPtrPtr(name, value);
+  for (size_t i = 0; i < fields.size(); i += 3) {
+    auto slot = fields[i];
+    auto name = next(fields[i + 1]);
+    auto value = next(fields[i + 2]);
+    KJ_IF_SOME(slots, ids) {
+      if (slot != UNINDEXED) {
+        KJ_REQUIRE(slot < slots.size(), "malformed header block");
+        auto id = slots[slot];
+        // A repeat is joined to the first value (or, for Set-Cookie, kept apart) by kj.
+        if (headers.get(id) == kj::none) {
+          headers.setPtr(id, value);
+          continue;
+        }
+      }
+    }
+    headers.addPtrPtr(name, value);
   }
+}
+
+}  // namespace
+
+kj::Own<kj::HttpHeaders> headers_from_block(const kj::HttpHeaderTable& table,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
+  auto headers = kj::heap<kj::HttpHeaders>(table);
+  addBlock(*headers, kj::none, owned, fields);
   headers->takeOwnership(kj::mv(owned));
   return headers;
+}
+
+kj::Own<kj::HttpHeaders> headers_over_block(const HeaderIds& ids,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  auto headers = kj::heap<kj::HttpHeaders>(ids.getTable());
+  refill_headers_over_block(*headers, ids, arena, fields);
+  return headers;
+}
+
+void refill_headers_over_block(kj::HttpHeaders& headers,
+    const HeaderIds& ids,
+    ::rust::Slice<const uint8_t> arena,
+    ::rust::Slice<const uint32_t> fields) {
+  // Empties the headers without reading the values they point to.
+  headers.clear();
+  addBlock(headers, ids, kj::arrayPtr(reinterpret_cast<const char*>(arena.data()), arena.size()),
+      fields);
 }
 
 kj::Own<kj::AsyncIoStream> new_rust_io_stream(::rust::Box<RustIo> io) {
   return kj::heap<RustIoStream>(kj::mv(io));
 }
 
-kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body) {
-  return kj::heap<BodyStream>(kj::mv(body));
-}
-
-kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
-    const kj::HttpHeaders& headers,
-    WebSocketCompression compression,
-    kj::Maybe<const kj::WebSocketErrorHandler&> errors) {
-  kj::Maybe<WebSocketRequest> webSocketRequest;
-  if (headers.isWebSocket()) {
-    webSocketRequest = WebSocketRequest{
-      .refusal = websocketRefusal(method, headers),
-      .offers =
-          headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
-      return kj::str(offers);
-    }),
-    };
-  }
-  return kj::heap<ServerResponseImpl>(
-      kj::mv(response), mutableHandler(errors), compression, kj::mv(webSocketRequest));
+kj::Own<ServerCall> new_server_call() {
+  return kj::heap<ServerCallImpl>();
 }
 
 kj::Own<kj::HttpService::ConnectResponse> new_connect_response(

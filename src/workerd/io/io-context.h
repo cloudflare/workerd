@@ -278,6 +278,11 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
+  // The user trace scope value for rootUserTraceSpan, made the first time a request-root frame
+  // (see Worker::Lock::getRequestRootTraceFrame()) needs one. The active span that
+  // tracing.getActiveSpan() returns for such a frame is cached on it.
+  kj::Maybe<jsg::Value> rootUserTraceScope;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
@@ -666,6 +671,18 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   using TraceScopeState = kj::OneOf<Id, IoOwn<SpanParent>>;
   using UserTraceScopeState = kj::OneOf<Id, IoOwn<UserTraceAsyncContext>>;
 
+  // True if `value`, read from a trace key of an async context frame, is a request-root entry
+  // rather than a wrapped TraceScopeState or UserTraceScopeState. A request-root entry stands for
+  // the root spans of whichever request is current. See Worker::Lock::getRequestRootTraceFrame().
+  static bool isRequestRootTraceScope(v8::Local<v8::Value> value) {
+    return value->IsNull();
+  }
+
+  // Returns the wrapped UserTraceScopeState for the current request's root user span, which is
+  // what a request-root entry of the user trace key resolves to. The value is made once per
+  // request.
+  v8::Local<v8::Value> getRequestRootUserTraceScope(Worker::Lock& lock);
+
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
 
@@ -688,9 +705,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns an executor through which other IoContexts (or code running outside any
   // IoContext) can later check whether this context is current, still alive, or defer work
   // into it. Safe to retain beyond this context's lifetime.
-  IoCrossContextExecutor getCrossContextExecutor() {
-    return IoCrossContextExecutor(deleteQueue.queue.addRef());
-  }
+  IoCrossContextExecutor getCrossContextExecutor();
 
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
@@ -1340,8 +1355,23 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Captures the request's internal and user tracing contexts in a single async frame.
-  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
-      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  //
+  // When neither span is observed, a stateless request uses its worker's shared request-root
+  // frame instead of building one, so an untraced request allocates nothing here. Its IoContext
+  // never runs another request, so resolving the frame against the current request yields this
+  // request's spans. Actors don't use it: a continuation of an unobserved actor request must keep
+  // masking the spans of a newer, observed request in the same IoContext.
+  class RequestTraceScope {
+   public:
+    RequestTraceScope(Worker::Lock& lock, IoContext& context);
+    KJ_DISALLOW_COPY_AND_MOVE(RequestTraceScope);
+
+   private:
+    kj::OneOf<jsg::AsyncContextFrame::Scope, jsg::AsyncContextFrame::StorageScope> scope;
+  };
+  [[nodiscard]] RequestTraceScope makeRequestTraceScope(Worker::Lock& lock) {
+    return RequestTraceScope(lock, *this);
+  }
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
@@ -1441,6 +1471,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Maybe<PendingEvent&> pendingEvent;
   kj::Maybe<kj::Promise<void>> abortFromHangTask;
+  // Linked into the thread's hang checks while this context has no PendingEvent and waits for the
+  // thread to go idle. See scheduleHangCheck().
+  ThreadContext::HangCheckWaiter hangCheckWaiter{*this};
 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
@@ -1558,6 +1591,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void abortFromHang(Worker::AsyncLock& asyncLock);
 
+  // Arranges for this context to be aborted as hung once the thread goes idle, unless a
+  // PendingEvent is registered first. All contexts on the thread share one wait for idleness.
+  void scheduleHangCheck();
+  void cancelHangCheck();
+  static void runHangChecks(ThreadContext::HangChecks& checks);
+
   template <typename T>
   struct IdentityFunc {
     inline T operator()(jsg::Lock&, T&& value) const {
@@ -1637,7 +1676,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       kj::Function<void(Worker::Lock&)> func);
 
-  kj::Promise<void> deleteQueueSignalTask;
+  // Runs the actions other contexts schedule on deleteQueue. Only an IoCrossContextExecutor can
+  // schedule them, and this context makes each one on its own thread, so the task starts when the
+  // first executor is made rather than for every context. Once hibernation has stopped it, it
+  // holds NEVER_DONE, so that it doesn't start again.
+  kj::Maybe<kj::Promise<void>> deleteQueueSignalTask;
+  void ensureDeleteQueueSignalTask();
   static kj::Promise<void> startDeleteQueueSignalTask(IoContext* context);
 
   // Runs the actions queued on deleteQueue under the input lock and current IncomingRequest. If

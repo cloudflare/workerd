@@ -12,6 +12,10 @@ V8System v8System;
 int promiseTestResult = 0;
 kj::String catchTestResult;
 
+struct PromiseValue: public jsg::Object {
+  JSG_RESOURCE_TYPE(PromiseValue) {}
+};
+
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   Promise<kj::String> makePromise(jsg::Lock& js) {
     auto [p, r] = js.newPromiseAndResolver<int>();
@@ -104,6 +108,23 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     js.resolvedPromise(js.num(1));
   }
 
+  jsg::Ref<PromiseValue> makeValue(jsg::Lock& js) {
+    return js.alloc<PromiseValue>();
+  }
+
+  // Whether a promise for a resource can be taken out without waiting for a microtask. A promise
+  // that can't records the reason it rejects in catchTestResult.
+  kj::StringPtr consumeIfSettled(jsg::Lock& js, Promise<jsg::Ref<PromiseValue>> promise) {
+    if (promise.tryConsumeResolved(js) != kj::none) {
+      return "settled"_kj;
+    }
+    promise.catch_(js, [](jsg::Lock& js, Value value) -> jsg::Ref<PromiseValue> {
+      catchTestResult = kj::str(value.getHandle(js));
+      return js.alloc<PromiseValue>();
+    });
+    return "pending"_kj;
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -118,11 +139,13 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     JSG_METHOD(thenable);
     JSG_METHOD(prototypePolution);
+    JSG_METHOD(makeValue);
+    JSG_METHOD(consumeIfSettled);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
 };
-JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext);
+JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext, PromiseValue);
 
 KJ_TEST("jsg::Promise<T>") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
@@ -177,6 +200,23 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   { e.expectEval("testConsumeResolved()", "undefined", "undefined"); }
 }
 
+KJ_TEST("a promise already fulfilled with a resource is unwrapped settled") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+  e.expectEval("consumeIfSettled(Promise.resolve(makeValue()))", "string", "settled");
+  e.expectEval("consumeIfSettled((async () => makeValue())())", "string", "settled");
+  e.expectEval("consumeIfSettled(new Promise(() => {}))", "string", "pending");
+
+  // A value of another type still rejects, with the usual TypeError.
+  e.expectEval("consumeIfSettled(Promise.resolve(123))", "string", "pending");
+  KJ_EXPECT(catchTestResult == nullptr);
+  e.runMicrotasks();
+  KJ_EXPECT(catchTestResult ==
+          "TypeError: Incorrect type for Promise: the Promise did not resolve to 'PromiseValue'.",
+      catchTestResult);
+  catchTestResult = nullptr;
+}
+
 KJ_TEST("whenResolved") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
@@ -215,6 +255,89 @@ KJ_TEST("prototype polution") {
     m;
   )A",
       "boolean", "false");
+}
+
+// Makes a PromiseContextScope's tag, counting how often it is asked to.
+struct DeferredPromiseTag {
+  uint makeCount = 0;
+  kj::Maybe<JsRef<JsObject>> tag;
+
+  static v8::Local<v8::Object> make(v8::Isolate* isolate, void* data) {
+    auto& self = *static_cast<DeferredPromiseTag*>(data);
+    auto& js = Lock::from(isolate);
+    ++self.makeCount;
+    auto tag = js.obj();
+    self.tag = JsRef(js, tag);
+    return tag;
+  }
+};
+
+uint crossContextCount = 0;
+kj::Maybe<JsRef<JsObject>> crossContextTag;
+
+KJ_TEST("a deferred promise context tag is made by the scope's first promise") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.run([](auto& lock) {
+    Lock& js = lock;
+    auto eval = [&](kj::StringPtr code) {
+      auto script = check(v8::Script::Compile(js.v8Context(), v8Str(js.v8Isolate, code)));
+      check(script->Run(js.v8Context()));
+    };
+
+    js.v8Isolate->SetPromiseCrossContextCallback(
+        [](v8::Local<v8::Context> context, v8::Local<v8::Promise> promise,
+            v8::Local<v8::Object> tag) -> v8::MaybeLocal<v8::Promise> {
+      auto& js = Lock::current();
+      ++crossContextCount;
+      crossContextTag = JsRef(js, JsObject(tag));
+      return promise;
+    });
+    KJ_DEFER(js.v8Isolate->SetPromiseCrossContextCallback(nullptr));
+
+    DeferredPromiseTag first;
+    {
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &first);
+      eval("globalThis.x = 1 + 1");
+      KJ_EXPECT(first.makeCount == 0);
+
+      // JavaScript promises get their tag from Runtime_PromiseContextInit.
+      eval("globalThis.p = new Promise(() => {}); Promise.resolve(1); (async () => {})()");
+      KJ_EXPECT(first.makeCount == 1);
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 0);
+    }
+
+    DeferredPromiseTag second;
+    {
+      // A promise from another scope is from another context, both before this scope has a tag
+      // and after it has made one.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &second);
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 1);
+      JsValue seenTag = KJ_ASSERT_NONNULL(crossContextTag).getHandle(js);
+      KJ_EXPECT(seenTag.strictEquals(KJ_ASSERT_NONNULL(first.tag).getHandle(js)));
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
+    }
+
+    DeferredPromiseTag third;
+    {
+      // Promises made through the API get their tag from Factory::NewJSPromiseWithoutHook.
+      v8::Isolate::PromiseContextScope scope(js.v8Isolate, &DeferredPromiseTag::make, &third);
+      check(v8::Promise::Resolver::New(js.v8Context()));
+      check(v8::Promise::Resolver::New(js.v8Context()));
+      KJ_EXPECT(third.makeCount == 1);
+    }
+
+    {
+      // A scope that starts with the first scope's tag treats its promises as its own.
+      v8::Isolate::PromiseContextScope scope(
+          js.v8Isolate, KJ_ASSERT_NONNULL(first.tag).getHandle(js));
+      eval("p.then(() => {})");
+      KJ_EXPECT(crossContextCount == 2);
+    }
+    crossContextTag = kj::none;
+  });
 }
 
 }  // namespace

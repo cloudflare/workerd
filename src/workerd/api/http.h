@@ -81,7 +81,9 @@ class Body: public jsg::Object {
   // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
   static ExtractedBody extractBody(jsg::Lock& js, Initializer init);
 
-  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
+  // `headers` is none only for a Response that creates its Headers on first use, which then gets
+  // the body's Content-Type from getPendingContentType().
+  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, kj::Maybe<Headers&> headers);
 
   // The following body rewind/nullification functions are helpers for implementing fetch() redirect
   // handling.
@@ -145,6 +147,26 @@ class Body: public jsg::Object {
   // Helper to implement Request/Response::clone().
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
+  // The body stream itself, or none for a null body. Unlike getBody(), this doesn't make a new
+  // reference, so a buffer-backed body that is only sent never constructs a ReadableStream.
+  kj::Maybe<JsReadableStream&> tryGetBodyStream() {
+    if (bodyStream.isNull()) return kj::none;
+    return bodyStream;
+  }
+
+  // The Headers object of the Request/Response subclass.
+  virtual Headers& getHeadersRef(jsg::Lock& js) = 0;
+
+  // The Content-Type the body implies, if the constructor got no Headers to put it in.
+  kj::Maybe<kj::StringPtr> getPendingContentType() const {
+    return pendingContentType;
+  }
+  kj::Maybe<kj::String> takePendingContentType() {
+    auto result = kj::mv(pendingContentType);
+    pendingContentType = kj::none;
+    return result;
+  }
+
  private:
   // The body stream. The null state represents a null body ("no body"). Buffer-backed streams
   // carry their own retransmit buffer, making the body rewindable for redirect handling.
@@ -155,10 +177,8 @@ class Body: public jsg::Object {
   // working outside of a request context (where IoContext::current() would throw).
   uint64_t bufferingLimit();
 
-  // HACK: This `headersRef` variable refers to a Headers object in the Request/Response subclass.
-  //   As such, it will briefly dangle during object destruction. While unlikely to be an issue,
-  //   it's worth being aware of.
-  Headers& headersRef;
+  // The Content-Type the body implies, if the constructor got no Headers to put it in.
+  kj::Maybe<kj::String> pendingContentType;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(bodyStream);
@@ -807,6 +827,46 @@ struct RequestInitializerDict {
   void validate(jsg::Lock&);
 };
 
+// The AbortSignal of an incoming request, created only when something first asks for it, since most
+// fetch handlers never read `request.signal`. WorkerEntrypoint holds this to abort the signal if
+// the client disconnects, and requests derived from the incoming one share it.
+class IncomingRequestSignal final: public jsg::Object {
+ public:
+  explicit IncomingRequestSignal(AbortSignal::Flag flag): flag(flag) {}
+
+  // Returns the signal, creating it on the first call.
+  jsg::Ref<AbortSignal> get(jsg::Lock& js);
+
+  // Aborts the signal, or the one created later if it doesn't exist yet.
+  void triggerAbort(jsg::Lock& js, kj::Exception reason);
+
+  // See AbortSignal::isIgnoredForSubrequests().
+  bool isIgnoredForSubrequests(jsg::Lock& js) const;
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "IncomingRequestSignal"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(IncomingRequestSignal);
+  }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackField("signal", signal);
+  }
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override {
+    visitForGc(visitor);
+  }
+
+ private:
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(signal);
+  }
+
+  AbortSignal::Flag flag;
+  kj::Maybe<jsg::Ref<AbortSignal>> signal;
+  // Set if the request was aborted before the signal was created.
+  kj::Maybe<kj::Exception> abortReason;
+};
+
 class Request final: public Body {
  public:
   enum class Redirect {
@@ -900,6 +960,9 @@ class Request final: public Body {
   kj::StringPtr getMethod();
   kj::StringPtr getUrl();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
+  Headers& getHeadersRef(jsg::Lock& js) override {
+    return *headers;
+  }
   kj::StringPtr getRedirect();
   kj::Maybe<jsg::Ref<Fetcher>> getFetcher();
 
@@ -908,13 +971,19 @@ class Request final: public Body {
   // used only on the JavaScript side to conform to the spec, which requires
   // request.signal to always return an AbortSignal even if one is not actively
   // used on this request.
-  kj::Maybe<jsg::Ref<AbortSignal>> getSignal();
+  kj::Maybe<jsg::Ref<AbortSignal>> getSignal(jsg::Lock& js);
   jsg::Ref<AbortSignal> getThisSignal(jsg::Lock& js);
 
   // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
   // a request from an incoming fetch is passed-through to another fetch. We want to avoid
   // aborting the subrequest in that case.
   void clearSignalIfIgnoredForSubrequest(jsg::Lock& js);
+
+  // Gives an incoming request its signal, which is created only if it is used.
+  void setIncomingSignal(jsg::Ref<IncomingRequestSignal> incoming) {
+    KJ_ASSERT(signal == kj::none);
+    incomingSignal = kj::mv(incoming);
+  }
 
   // Returns the `cf` field containing Cloudflare feature flags.
   jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
@@ -1061,6 +1130,7 @@ class Request final: public Body {
     tracker.trackField("fetcher", fetcher);
     tracker.trackField("signal", signal);
     tracker.trackField("thisSignal", thisSignal);
+    tracker.trackField("incomingSignal", incomingSignal);
     tracker.trackField("cf", cf);
   }
 
@@ -1080,13 +1150,20 @@ class Request final: public Body {
   // used explicitly, thisSignal will not be.
   kj::Maybe<jsg::Ref<AbortSignal>> thisSignal;
 
+  // An incoming request's signal before anything asked for it; it then moves to `signal`. Only one
+  // of `signal` and `incomingSignal` is set.
+  kj::Maybe<jsg::Ref<IncomingRequestSignal>> incomingSignal;
+
+  // Moves an incoming request's signal into `signal`, creating it if needed.
+  void takeIncomingSignal(jsg::Lock& js);
+
   CfProperty cf;
 
   // Controls how to handle Content-Encoding headers in the response
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(headers, fetcher, signal, thisSignal, cf);
+    visitor.visit(headers, fetcher, signal, thisSignal, incomingSignal, cf);
   }
 };
 
@@ -1095,10 +1172,11 @@ class Response final: public Body {
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
+  // `headers` is none if they should be created only when used.
   Response(jsg::Lock& js,
       int statusCode,
       kj::Maybe<kj::String> statusText,
-      jsg::Ref<Headers> headers,
+      kj::Maybe<jsg::Ref<Headers>> headers,
       CfProperty&& cf,
       kj::Maybe<Body::ExtractedBody> body,
       kj::Array<kj::String> urlList = {},
@@ -1181,6 +1259,7 @@ class Response final: public Body {
   // unset status message falls back to the status code's conventional phrase.
   kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
+  Headers& getHeadersRef(jsg::Lock& js) override;
 
   bool getOk();
   bool getRedirected();
@@ -1272,7 +1351,9 @@ class Response final: public Body {
   // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
   // requires, while getReasonPhrase() derives the status code's conventional phrase.
   kj::Maybe<kj::String> statusText;
-  jsg::Ref<Headers> headers;
+  // Created on first use, with the body's Content-Type, if the Response was constructed without
+  // headers: most Responses are only sent, which needs nothing but the Content-Type.
+  kj::Maybe<jsg::Ref<Headers>> headers;
   CfProperty cf;
 
   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
@@ -1318,6 +1399,11 @@ class FetchEvent final: public ExtendableEvent {
 
   jsg::Ref<Request> getRequest();
   void respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
+
+  // The promise for a fetch handler's Response, resolving only once the actor's output locks
+  // allow it to be sent. Call only in an IoContext with an output gate.
+  static jsg::Promise<jsg::Ref<Response>> waitForOutputLocks(
+      jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
 
   void passThroughOnException();
 

@@ -294,7 +294,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -328,7 +328,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
         js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
@@ -336,21 +336,46 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
   JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
 }
 
-kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
+namespace {
+
+// Sends the request on to the next service unmodified, as a service worker's fetch event does when
+// no listener called respondWith() or preventDefault().
+kj::Promise<DeferredProxy<void>> sendWithDefaultHandling(Worker::Lock& lock,
+    IoContext& ioContext,
+    kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response,
-    kj::Maybe<kj::StringPtr> cfBlobJson,
-    Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler,
-    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
-  TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
-  // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
-  // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
-  // is not under our control -- it's attached to the request. So, we wrap it in a
-  // NeuterableInputStream which allows us to disconnect the stream before it becomes invalid.
-  auto ownRequestBody = newNeuterableInputStream(requestBody);
+    kj::Maybe<JsReadableStream> maybeJsStream,
+    kj::Maybe<kj::StringPtr> cfBlobJson) {
+  KJ_IF_SOME(jsStream, maybeJsStream) {
+    if (jsStream.isDisturbed(lock)) {
+      lock.logUncaughtException(
+          "Script consumed request body but didn't call respondWith(). Can't forward request.");
+      return addNoopDeferredProxy(
+          response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
+    }
+  }
+  // Release our reference; we don't need it anymore.
+  maybeJsStream = kj::none;
+
+  auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL, false,
+      cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }), "fetch_default"_kjc);
+  auto adapter = kj::newHttpService(*client);
+  auto promise = adapter->request(method, url, headers, requestBody, response);
+  // Default handling doesn't rely on the IoContext at all so we can return it as a
+  // deferred proxy task.
+  return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
+}
+
+// A request body's ReadableStream needs an Own<AsyncInputStream> so that it can drop the stream
+// whenever it gets GC'ed. But the request's stream is attached to the request, so its lifetime is
+// not under our control. So, it is wrapped in a NeuterableInputStream, which is disconnected
+// before the request's stream becomes invalid: once `sent` and its proxy task finish, or once the
+// request is canceled.
+kj::Promise<DeferredProxy<void>> neuterBodyAfterSend(
+    kj::Promise<DeferredProxy<void>> sent, kj::Own<NeuterableInputStream> ownRequestBody) {
   auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
     // Make sure to cancel the request body stream since the native stream is no longer valid once
     // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
@@ -360,7 +385,58 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
     }
   });
-  KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+  auto body2 = kj::addRef(*ownRequestBody);
+  return sent.then(
+      [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
+          DeferredProxy<void> deferredProxy) mutable {
+    // In the case of bidirectional streaming, the request body stream needs to remain valid
+    // while proxying the response. So, arrange for neutering to happen only after the proxy
+    // task finishes.
+    deferredProxy.proxyTask = deferredProxy.proxyTask
+                                  .then([body = kj::addRef(*ownRequestBody)]() mutable {
+      body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
+    }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
+      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      kj::throwException(kj::mv(e));
+    }).attach(kj::mv(deferredNeuter));
+
+    return deferredProxy;
+  },
+      [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+    // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
+    //   so `deferredNeuter` hasn't been destroyed yet.
+    body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+    kj::throwException(kj::mv(e));
+  });
+}
+
+}  // namespace
+
+kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    kj::HttpService::Response& response,
+    kj::Maybe<kj::StringPtr> cfBlobJson,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler,
+    kj::Maybe<jsg::Ref<IncomingRequestSignal>> signal) {
+  TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
+  // Set only if the request has a body. See neuterBodyAfterSend() for why it is wrapped.
+  kj::Maybe<kj::Own<NeuterableInputStream>> ownRequestBody;
+  // Unless the body is handed to neuterBodyAfterSend(), its stream is canceled on return.
+  kj::UnwindDetector unwindDetector;
+  KJ_DEFER({
+    KJ_IF_SOME(b, ownRequestBody) {
+      if (unwindDetector.isUnwinding()) {
+        b->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      } else if (!b->isNeutered()) {
+        b->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+      }
+    } else {
+      // (else block needed to squelch spurious clang warning)
+    }
+  });
 
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
@@ -396,7 +472,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       requestBody.tryGetLength().orDefault(1) > 0) {
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
-    auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+    auto& ownBody = ownRequestBody.emplace(newNeuterableInputStream(requestBody));
+    auto b = newSystemStream(kj::addRef(*ownBody), StreamEncoding::IDENTITY);
     auto jsStream = JsReadableStream::create(js, ioContext, kj::mv(b));
     body = Body::ExtractedBody(js, jsStream.addRef(js));
     maybeJsStream = kj::mv(jsStream);
@@ -407,8 +484,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
-  if (body != kj::none && !jsHeaders->hasCommon(capnp::CommonHeaderName::CONTENT_LENGTH) &&
-      !jsHeaders->hasCommon(capnp::CommonHeaderName::TRANSFER_ENCODING)) {
+  // `headers` is checked rather than `jsHeaders`, which parses its headers only once read.
+  if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
       jsHeaders->setCommon(capnp::CommonHeaderName::CONTENT_LENGTH, kj::str(l));
     } else {
@@ -428,8 +506,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       KJ_ASSERT_NONNULL(defaultFetcher).addRef(),
-      /* signal */ kj::mv(abortSignal), kj::mv(cf), kj::mv(body),
+      /* signal */ kj::none, kj::mv(cf), kj::mv(body),
       /* thisSignal */ kj::none, Request::CacheMode::NONE);
+  KJ_IF_SOME(s, signal) {
+    jsRequest->setIncomingSignal(kj::mv(s));
+  }
 
   // signal vs thisSignal
   // --------------------
@@ -443,124 +524,127 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
-  auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
-
-  uint tasksBefore = ioContext.taskCount();
-
   // We'll drop our span once the promise (fetch handler result) resolves.
   kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("fetch_handler"_kjc);
-  bool useDefaultHandling;
+  // The Response to send now, or else the promise for it to await.
+  kj::Maybe<jsg::Ref<Response>> syncResponse;
+  kj::Maybe<jsg::Promise<jsg::Ref<Response>>> responsePromise;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
-      event->respondWith(lock, kj::mv(promise));
-      useDefaultHandling = false;
+      KJ_SWITCH_ONEOF(f(lock, kj::mv(jsRequest), jsg::JsValue(h.env.getHandle(js)), h.getCtx())
+                          .value) {
+        KJ_CASE_ONEOF(response, jsg::Ref<Response>) {
+          syncResponse = kj::mv(response);
+        }
+        KJ_CASE_ONEOF(promise, jsg::Promise<jsg::Ref<Response>>) {
+          responsePromise = kj::mv(promise);
+        }
+      }
     } else {
       // In modules mode we don't have a concept of "default handling".
       lock.logWarningOnce("Received a FetchEvent but we lack a handler for FetchEvents. "
                           "Did you remember to export a fetch() function?");
       JSG_FAIL_REQUIRE(Error, "Handler does not export a fetch() function.");
     }
+    if (ioContext.hasOutputGate()) {
+      // An actor's Response waits for its output locks, as FetchEvent::respondWith() arranges
+      // for a service worker's.
+      KJ_IF_SOME(response, syncResponse) {
+        responsePromise = js.resolvedPromise(kj::mv(response));
+      }
+      syncResponse = kj::none;
+      responsePromise =
+          FetchEvent::waitForOutputLocks(js, KJ_ASSERT_NONNULL(kj::mv(responsePromise)));
+    }
   } else {
+    auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
+    uint tasksBefore = ioContext.taskCount();
+
     // Fire off the handlers.
-    useDefaultHandling = dispatchEventImpl(lock, event.addRef()).result;
+    if (dispatchEventImpl(lock, event.addRef()).result) {
+      // No one called respondWith() or preventDefault(). Go directly to subrequest.
+      if (ioContext.taskCount() > tasksBefore) {
+        lock.logWarning(
+            "FetchEvent handler did not call respondWith() before returning, but initiated some "
+            "asynchronous task. That task will be canceled and default handling will occur -- the "
+            "request will be sent unmodified to your origin. Remember that you must call "
+            "respondWith() *before* the event handler returns, if you don't want default "
+            "handling. You cannot call it asynchronously later on. If you need to wait for I/O "
+            "(e.g. a subrequest) before generating a Response, then call respondWith() with a "
+            "Promise (for the eventual Response) as the argument.");
+      }
+      return sendWithDefaultHandling(lock, ioContext, method, url, headers, requestBody, response,
+          kj::mv(maybeJsStream), cfBlobJson);
+    }
+
+    // The service worker API says that if default handling is prevented and respondWith()
+    // wasn't called, the request should result in "a network error".
+    responsePromise = KJ_UNWRAP_OR(event->getResponsePromise(lock),
+        return KJ_EXCEPTION(DISCONNECTED, "preventDefault() called but respondWith() not called"));
+  }
+  KJ_IF_SOME(promise, responsePromise) {
+    KJ_IF_SOME(resolved, promise.tryConsumeResolved(lock)) {
+      syncResponse = kj::mv(resolved);
+      responsePromise = kj::none;
+    }
   }
 
-  if (useDefaultHandling) {
-    // No one called respondWith() or preventDefault(). Go directly to subrequest.
+  maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
 
-    if (ioContext.taskCount() > tasksBefore) {
-      lock.logWarning(
-          "FetchEvent handler did not call respondWith() before returning, but initiated some "
-          "asynchronous task. That task will be canceled and default handling will occur -- the "
-          "request will be sent unmodified to your origin. Remember that you must call "
-          "respondWith() *before* the event handler returns, if you don't want default handling. "
-          "You cannot call it asynchronously later on. If you need to wait for I/O (e.g. a "
-          "subrequest) before generating a Response, then call respondWith() with a Promise (for "
-          "the eventual Response) as the argument.");
+  auto sendResponse =
+      [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
+          jsg::Lock& js,
+          jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
+    JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
+        "Return value from serve handler must not be an error response (like Response.error())");
+
+    // Drop our fetch_handler span now that the promise has resolved.
+    span = kj::none;
+    return innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
+  };
+
+  kj::Promise<DeferredProxy<void>> sent = nullptr;
+  KJ_IF_SOME(innerResponse, syncResponse) {
+    // The handler gave a Response itself rather than a promise for one, so it is sent now,
+    // without the promise reaction and the wrappers that awaiting it would allocate. That reaction
+    // would have run after the microtasks the handler queued, which may still change the
+    // Response, so they run first.
+    js.runMicrotasks();
+    if (js.v8Isolate->IsExecutionTerminating()) {
+      throw jsg::JsExceptionThrown();
     }
-
-    KJ_IF_SOME(jsStream, maybeJsStream) {
-      if (jsStream.isDisturbed(js)) {
-        lock.logUncaughtException(
-            "Script consumed request body but didn't call respondWith(). Can't forward request.");
-        return addNoopDeferredProxy(
-            response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
-      }
-      maybeJsStream = kj::none;  // Release our reference; we don't need it anymore.
-    }
-
-    auto client = ioContext.getHttpClient(
-        IoContext::NEXT_CLIENT_CHANNEL, false, cfBlobJson.clone(), "fetch_default"_kjc);
-    auto adapter = kj::newHttpService(*client);
-    auto promise = adapter->request(method, url, headers, requestBody, response);
-    // Default handling doesn't rely on the IoContext at all so we can return it as a
-    // deferred proxy task.
-    return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
-  } else KJ_IF_SOME(promise, event->getResponsePromise(lock)) {
-    maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
-    auto body2 = kj::addRef(*ownRequestBody);
-
+    sent = sendResponse(js, kj::mv(innerResponse));
+  } else {
     // The response is sent from within awaitJs()'s own continuation so that the promise returned
     // by send(), which owns the response body stream or the accepted WebSocket, is handed to the
     // KJ promise chain in the same microtask that created it. See awaitJs() for why. awaitJs()
     // also skips the continuation if this request was canceled, such as when the client
     // disconnected, in which case `response` would be a dangling reference.
-    return ioContext
-        .awaitJs(lock, kj::mv(promise),
-            [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
-                jsg::Lock& js,
-                jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
-      JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
-          "Return value from serve handler must not be an error response (like Response.error())");
-
-      // Drop our fetch_handler span now that the promise has resolved.
-      span = kj::none;
-      return innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
-    })
-        .then(
-            [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
-                DeferredProxy<void> deferredProxy) mutable {
-      // In the case of bidirectional streaming, the request body stream needs to remain valid
-      // while proxying the response. So, arrange for neutering to happen only after the proxy
-      // task finishes.
-      deferredProxy.proxyTask = deferredProxy.proxyTask
-                                    .then([body = kj::addRef(*ownRequestBody)]() mutable {
-        body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
-      }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
-        body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-        kj::throwException(kj::mv(e));
-      }).attach(kj::mv(deferredNeuter));
-
-      return deferredProxy;
-    },
-            [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
-      // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
-      //   so `deferredNeuter` hasn't been destroyed yet.
-      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-      kj::throwException(kj::mv(e));
-    });
-  } else {
-    // The service worker API says that if default handling is prevented and respondWith() wasn't
-    // called, the request should result in "a network error".
-    return KJ_EXCEPTION(DISCONNECTED, "preventDefault() called but respondWith() not called");
+    sent =
+        ioContext.awaitJs(lock, KJ_ASSERT_NONNULL(kj::mv(responsePromise)), kj::mv(sendResponse));
   }
+  KJ_IF_SOME(b, ownRequestBody) {
+    auto body = kj::mv(b);
+    ownRequestBody = kj::none;
+    return neuterBodyAfterSend(kj::mv(sent), kj::mv(body));
+  }
+  return sent;
 }
 
 void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
-  auto isolate = lock.getIsolate();
   jsg::Lock& js = lock;
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
       auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kjc, traces);
-      auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise = f(lock, tailEvent->getEvents(), jsg::JsValue(h.env.getHandle(js)), h.getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
       auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kjc, traces);
-      auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
+      auto promise =
+          f(lock, traceEvent->getEvents(), jsg::JsValue(h.env.getHandle(js)), h.getCtx());
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce("Attempted to send events but we lack a handler, "
@@ -590,13 +674,11 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
 
   auto event = js.alloc<ScheduledEvent>(eventTime, cron);
 
-  auto isolate = lock.getIsolate();
-
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
-      auto promise =
-          f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx())
-              .then([weakContext = context.getWeakRef()]() {
+      auto promise = f(lock, js.alloc<ScheduledController>(event.addRef()),
+          jsg::JsValue(h.env.getHandle(js)), h.getCtx())
+                         .then([weakContext = context.getWeakRef()]() {
         auto& context = KJ_REQUIRE_NONNULL(
             weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
@@ -889,7 +971,8 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
   jsg::Lock& js = lock;
-  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  return testHandler(
+      lock, js.alloc<TestController>(), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
 }
 
 jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
@@ -906,8 +989,9 @@ jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& loc
   auto controller = js.alloc<BenchController>(params);
   return js
       .tryCatch(
-          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
-          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+          [&] {
+    return benchHandler(lock, controller.addRef(), jsg::JsValue(eh.env.getHandle(js)), eh.getCtx());
+  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
       .then(js,
           IoContext::current().addFunctor(
               [controller = controller.addRef()](

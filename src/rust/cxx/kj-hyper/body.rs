@@ -17,40 +17,48 @@
 //! `Transfer-Encoding`, and hyper closes a connection, saying so after the other headers, when
 //! the request asked it to (`Connection: close`, HTTP/1.0 without keep-alive, which it also
 //! answers as HTTP/1.0 and never chunked); kj kept those open. hyper's headers come back packed
-//! ([`HeaderBlock`]) and C++ checks the block's bounds before building `kj::HttpHeaders`.
+//! ([`HeaderBlock`]) and C++ checks the block's bounds before building `kj::HttpHeaders`; a
+//! server resolves each name's kj id once per connection ([`HeaderIds`]).
 
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
-use std::future::pending;
 use std::future::poll_fn;
+use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::task::Context;
 use std::task::Poll;
+use std::task::Waker;
 
 use bytes::Buf;
 use bytes::Bytes;
 use cxx::KjError;
 use cxx::KjExceptionType;
-use futures::FutureExt;
+use http::header;
 use http_body::Body;
 use http_body::Frame;
 use http_body::SizeHint;
 use hyper::body::Incoming;
 use hyper::ext::HeaderCaseMap;
 use tokio::io::ReadBuf;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 
 use crate::Result;
+use crate::ffi;
 use crate::ffi::Borrowing;
 use crate::ffi::HttpHeaderTable;
 use crate::ffi::HttpHeaders;
+use crate::ffi::ReusedHeaders;
 use crate::ffi::for_each_header;
 use crate::ffi::headers_from_block;
+use crate::ffi::new_header_ids;
+use crate::scratch::Scratch;
 
 struct BodyState {
     body: RefCell<Option<Incoming>>,
@@ -67,6 +75,27 @@ impl RustBody {
             body: RefCell::new(Some(body)),
             buffered: RefCell::new(Bytes::new()),
         }))
+    }
+
+    /// `body` in place of the one this held, in the same state unless a read still holds that.
+    pub fn refill(&mut self, body: Incoming) {
+        match Rc::get_mut(&mut self.0) {
+            Some(state) => {
+                *state.body.get_mut() = Some(body);
+                *state.buffered.get_mut() = Bytes::new();
+            }
+            None => *self = Self::new(body),
+        }
+    }
+
+    /// Lets go of the body, unless a read still holds it: false then.
+    pub fn clear(&mut self) -> bool {
+        let Some(state) = Rc::get_mut(&mut self.0) else {
+            return false;
+        };
+        *state.body.get_mut() = None;
+        *state.buffered.get_mut() = Bytes::new();
+        true
     }
 
     /// kj's `tryRead`: reads until `min_bytes` or the body's end.
@@ -121,10 +150,88 @@ impl RustBody {
     }
 }
 
+/// What a [`BodySink`] and the [`ChannelBody`] it feeds share: a channel with room for one
+/// chunk, as a write waits for the chunk before it to be read. A mutex, not a cell: the client's
+/// bodies must be `Send`, though each side is only ever used on one thread at a time.
+#[derive(Default)]
+pub struct Pipe(Mutex<PipeState>);
+
+#[derive(Default)]
+struct PipeState {
+    /// Written and not yet read.
+    chunk: Option<Bytes>,
+    /// The sink is gone: the body ends once its chunk is read.
+    ended: bool,
+    /// The body fails instead of ending ([`BodyAbort`]).
+    aborted: bool,
+    /// The body is gone: nothing written reaches anyone.
+    gone: bool,
+    /// The body, waiting for a chunk or its end.
+    reader: Option<Waker>,
+    /// A write waiting for room.
+    writer: Option<Waker>,
+    /// Waiting for the body to go (`whenWriteDisconnected()`).
+    disconnect: Vec<Waker>,
+}
+
+impl Pipe {
+    fn ended(chunk: Option<Bytes>) -> Self {
+        Self(Mutex::new(PipeState {
+            chunk,
+            ended: true,
+            ..PipeState::default()
+        }))
+    }
+
+    fn state(&self) -> MutexGuard<'_, PipeState> {
+        // Nothing panics while holding the lock, so its state is never left half-changed.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Puts `data` in the pipe once it has room.
+    fn poll_put(&self, cx: &Context<'_>, data: &mut Option<Bytes>) -> Poll<Result<()>> {
+        let mut state = self.state();
+        if state.gone {
+            return Poll::Ready(Err(peer_gone()));
+        }
+        if state.chunk.is_some() {
+            register(&mut state.writer, cx);
+            return Poll::Pending;
+        }
+        state.chunk = data.take();
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Keeps the waker of the task polling with `cx` in `slot`.
+fn register(slot: &mut Option<Waker>, cx: &Context<'_>) {
+    if !slot.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+        *slot = Some(cx.waker().clone());
+    }
+}
+
+fn wake(waker: Option<Waker>) {
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+
+fn peer_gone() -> KjError {
+    KjError::new(
+        KjExceptionType::Disconnected,
+        "HTTP body: the peer went away".to_owned(),
+    )
+}
+
 /// A `kj::AsyncOutputStream` feeding an outgoing hyper body. Dropping it ends the body.
 pub struct BodySink {
     /// `None` for a body that is discarded (a response to HEAD).
-    tx: Option<mpsc::Sender<Bytes>>,
+    pipe: Option<Arc<Pipe>>,
+    /// Where a server's writes are copied to.
+    scratch: Option<Rc<Scratch>>,
     /// Bytes still to be written, for a body of declared length. A `Cell`: kj writes through
     /// `&self`, as `whenWriteDisconnected()` may be awaited alongside a write.
     remaining: Cell<Option<u64>>,
@@ -135,75 +242,138 @@ impl BodySink {
     #[must_use]
     pub fn discarding() -> Self {
         Self {
-            tx: None,
+            pipe: None,
+            scratch: None,
             remaining: Cell::new(None),
         }
     }
 
-    /// Queues `data`; resolves once the body has room for more. A write beyond the declared
-    /// length fails before any of it is queued, as kj's does.
-    pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<()>> + use<> {
-        let queued = match (&self.tx, self.remaining.get()) {
-            (None, _) => Ok(None),
-            (Some(_), Some(remaining)) if data.len() as u64 > remaining => Err(KjError::new(
+    fn copy(&self, data: &[u8]) -> Bytes {
+        self.scratch.as_ref().map_or_else(
+            || Bytes::copy_from_slice(data),
+            |scratch| scratch.copy(data),
+        )
+    }
+
+    /// A write beyond the declared length fails before any of it is queued, as kj's does.
+    fn check_length(&self, len: usize) -> Result<Option<u64>> {
+        match self.remaining.get() {
+            Some(remaining) if len as u64 > remaining => Err(KjError::new(
                 KjExceptionType::Failed,
                 "overwrote Content-Length".to_owned(),
             )),
-            (Some(tx), remaining) => {
-                self.remaining.set(remaining.map(|r| r - data.len() as u64));
-                Ok(Some((tx.clone(), Bytes::copy_from_slice(data))))
-            }
+            remaining => Ok(remaining.map(|r| r - len as u64)),
+        }
+    }
+
+    /// Queues `data` if the body has room for it, which a write finds nearly always: true once
+    /// it is queued (or discarded), false if [`BodySink::write`] must wait for room instead.
+    ///
+    /// # Errors
+    ///
+    /// A write past the declared length, or to a body whose peer went away.
+    pub fn try_write(&self, data: &[u8]) -> Result<bool> {
+        let Some(pipe) = &self.pipe else {
+            return Ok(true);
+        };
+        let remaining = self.check_length(data.len())?;
+        if data.is_empty() {
+            return Ok(true);
+        }
+        let mut state = pipe.state();
+        if state.gone {
+            return Err(peer_gone());
+        }
+        if state.chunk.is_some() {
+            return Ok(false);
+        }
+        self.remaining.set(remaining);
+        state.chunk = Some(self.copy(data));
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
+        Ok(true)
+    }
+
+    /// Queues `data`; resolves once the body has room for it.
+    pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<()>> + use<> {
+        let queued = match &self.pipe {
+            None => Ok(None),
+            Some(pipe) => self.check_length(data.len()).map(|remaining| {
+                self.remaining.set(remaining);
+                (!data.is_empty()).then(|| (Arc::clone(pipe), self.copy(data)))
+            }),
         };
         async move {
-            let Some((tx, data)) = queued? else {
+            let Some((pipe, data)) = queued? else {
                 return Ok(());
             };
-            if data.is_empty() {
-                return Ok(());
-            }
-            tx.send(data).await.map_err(|_| {
-                KjError::new(
-                    KjExceptionType::Disconnected,
-                    "HTTP body: the peer went away".to_owned(),
-                )
-            })
+            let mut data = Some(data);
+            poll_fn(|cx| pipe.poll_put(cx, &mut data)).await
         }
     }
 
     pub fn when_write_disconnected(&self) -> impl Future<Output = ()> + use<> {
-        let tx = self.tx.clone();
-        async move {
-            match tx {
-                Some(tx) => tx.closed().await,
-                None => pending().await,
+        let pipe = self.pipe.clone();
+        poll_fn(move |cx| {
+            let Some(pipe) = &pipe else {
+                return Poll::Pending;
+            };
+            let mut state = pipe.state();
+            if state.gone {
+                return Poll::Ready(());
             }
+            if !state.disconnect.iter().any(|w| w.will_wake(cx.waker())) {
+                state.disconnect.push(cx.waker().clone());
+            }
+            Poll::Pending
+        })
+    }
+}
+
+impl Drop for BodySink {
+    fn drop(&mut self) {
+        if let Some(pipe) = &self.pipe {
+            let mut state = pipe.state();
+            state.ended = true;
+            let reader = state.reader.take();
+            drop(state);
+            wake(reader);
         }
     }
 }
 
 /// Ends a [`ChannelBody`] with an error, so hyper drops the connection instead of framing what
 /// was written as a complete message. Dropping it unused has no effect.
-pub struct BodyAbort(oneshot::Sender<()>);
+pub struct BodyAbort(Arc<Pipe>);
 
 impl BodyAbort {
+    /// The pipe, for a later body once nothing else holds it ([`Scratch::take_pipe`]).
+    pub fn into_pipe(self) -> Arc<Pipe> {
+        self.0
+    }
+
     pub fn abort(self) {
-        let _ = self.0.send(());
+        let mut state = self.0.state();
+        state.aborted = true;
+        let reader = state.reader.take();
+        drop(state);
+        wake(reader);
     }
 }
 
 /// The outgoing body a [`BodySink`] feeds.
 pub struct ChannelBody {
-    rx: Option<mpsc::Receiver<Bytes>>,
-    abort: Option<oneshot::Receiver<()>>,
+    /// `None` for a body that was built empty.
+    pipe: Option<Arc<Pipe>>,
     length: Option<u64>,
 }
 
 impl ChannelBody {
     #[must_use]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
-            rx: None,
-            abort: None,
+            pipe: None,
             length: Some(0),
         }
     }
@@ -211,14 +381,9 @@ impl ChannelBody {
     /// A body of exactly `data`.
     #[must_use]
     pub fn full(data: Bytes) -> Self {
-        let length = Some(data.len() as u64);
-        let (tx, rx) = mpsc::channel(1);
-        // A fresh channel has room for the one chunk.
-        let _ = tx.try_send(data);
         Self {
-            rx: Some(rx),
-            abort: None,
-            length,
+            length: Some(data.len() as u64),
+            pipe: Some(Arc::new(Pipe::ended(Some(data)))),
         }
     }
 
@@ -227,10 +392,23 @@ impl ChannelBody {
     #[must_use]
     pub fn ended(&self) -> Self {
         Self {
-            // A channel whose sender is already gone: the body ends on its first poll.
-            rx: self.rx.as_ref().map(|_| mpsc::channel(1).1),
-            abort: None,
+            pipe: self.pipe.as_ref().map(|_| Arc::new(Pipe::ended(None))),
             length: self.length,
+        }
+    }
+}
+
+impl Drop for ChannelBody {
+    fn drop(&mut self) {
+        if let Some(pipe) = &self.pipe {
+            let mut state = pipe.state();
+            state.gone = true;
+            state.chunk = None;
+            let writer = state.writer.take();
+            let disconnect = mem::take(&mut state.disconnect);
+            drop(state);
+            wake(writer);
+            disconnect.into_iter().for_each(Waker::wake);
         }
     }
 }
@@ -239,17 +417,31 @@ impl ChannelBody {
 /// if known.
 #[must_use]
 pub fn channel(length: Option<u64>) -> (BodySink, BodyAbort, ChannelBody) {
-    let (tx, rx) = mpsc::channel(1);
-    let (abort_tx, abort_rx) = oneshot::channel();
+    channel_with(Arc::new(Pipe::default()), None, length)
+}
+
+/// [`channel`], for a served connection whose responses reuse `scratch`.
+pub fn channel_in(
+    scratch: &Rc<Scratch>,
+    length: Option<u64>,
+) -> (BodySink, BodyAbort, ChannelBody) {
+    channel_with(scratch.take_pipe(), Some(Rc::clone(scratch)), length)
+}
+
+fn channel_with(
+    pipe: Arc<Pipe>,
+    scratch: Option<Rc<Scratch>>,
+    length: Option<u64>,
+) -> (BodySink, BodyAbort, ChannelBody) {
     (
         BodySink {
-            tx: Some(tx),
+            pipe: Some(Arc::clone(&pipe)),
+            scratch,
             remaining: Cell::new(length),
         },
-        BodyAbort(abort_tx),
+        BodyAbort(Arc::clone(&pipe)),
         ChannelBody {
-            rx: Some(rx),
-            abort: Some(abort_rx),
+            pipe: Some(pipe),
             length,
         },
     )
@@ -275,26 +467,30 @@ impl Body for ChannelBody {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, Aborted>>> {
-        let this = self.get_mut();
-        if let Some(abort) = this.abort.as_mut() {
-            match abort.poll_unpin(cx) {
-                Poll::Ready(Ok(())) => return Poll::Ready(Some(Err(Aborted))),
-                // The abort handle was dropped unused: nothing more to watch.
-                Poll::Ready(Err(_)) => this.abort = None,
-                Poll::Pending => {}
-            }
-        }
-        let Some(rx) = &mut this.rx else {
+        let Some(pipe) = &self.pipe else {
             return Poll::Ready(None);
         };
-        rx.poll_recv(cx)
-            .map(|chunk| chunk.map(|data| Ok(Frame::data(data))))
+        let mut state = pipe.state();
+        if state.aborted {
+            return Poll::Ready(Some(Err(Aborted)));
+        }
+        if let Some(chunk) = state.chunk.take() {
+            let writer = state.writer.take();
+            drop(state);
+            wake(writer);
+            return Poll::Ready(Some(Ok(Frame::data(chunk))));
+        }
+        if state.ended {
+            return Poll::Ready(None);
+        }
+        register(&mut state.reader, cx);
+        Poll::Pending
     }
 
     // Only a body that was built empty: hyper drops the `Content-Length: 0` of a message whose
     // body says it has ended and, for a response, writes its own after the other headers.
     fn is_end_stream(&self) -> bool {
-        self.rx.is_none()
+        self.pipe.is_none()
     }
 
     fn size_hint(&self) -> SizeHint {
@@ -343,6 +539,22 @@ const BUILTIN: [&str; 12] = [
     "Host",
 ];
 
+/// The [`Builtin`] headers' names, indexed by the enum.
+static BUILTIN_NAMES: [http::HeaderName; BUILTIN.len()] = [
+    header::CONNECTION,
+    http::HeaderName::from_static("keep-alive"),
+    header::TE,
+    header::TRAILER,
+    header::UPGRADE,
+    header::CONTENT_LENGTH,
+    header::TRANSFER_ENCODING,
+    header::SEC_WEBSOCKET_KEY,
+    header::SEC_WEBSOCKET_VERSION,
+    header::SEC_WEBSOCKET_ACCEPT,
+    header::SEC_WEBSOCKET_EXTENSIONS,
+    header::HOST,
+];
+
 /// The builtin headers a message's protocol sets itself (kj's `connectionHeaders`): the
 /// application's values for them are not sent.
 #[derive(Clone, Copy, Debug)]
@@ -377,12 +589,19 @@ impl Protocol {
 ///
 /// `http::HeaderName` lowercases, so the spellings ride along in hyper's `HeaderCaseMap`
 /// extension, which its encoder honors (made public by
-/// patches/rust/crates/hyper/public-header-case-map.patch).
+/// patches/rust/crates/hyper/public-header-case-map.patch). hyper title-cases a name it has no
+/// spelling for (kj-hyper sets `title_case_headers`), so a message whose names are all spelled as
+/// hyper title-cases them, as most are, and whose values are not empty carries no extension.
+/// hyper pairs a name's spellings with its values in order and title-cases the values past its
+/// last spelling, so a name with a spelling for any of its values has one for each.
 pub struct Head {
     builtin: [Option<http::HeaderValue>; BUILTIN.len()],
     /// Every other header, in kj's order.
-    map: http::HeaderMap,
-    spellings: HeaderCaseMap,
+    others: Vec<(http::HeaderName, http::HeaderValue)>,
+    /// None until a name is spelled other than as hyper title-cases it.
+    spellings: Option<HeaderCaseMap>,
+    /// Where a served connection's values are copied to, and `others` is kept.
+    scratch: Option<Rc<Scratch>>,
 }
 
 impl Head {
@@ -393,18 +612,43 @@ impl Head {
         head
     }
 
+    /// [`Head::new`], for a served connection whose responses reuse `scratch`.
+    pub fn new_in(scratch: &Rc<Scratch>, headers: &HttpHeaders) -> Self {
+        let mut head = Self::empty_in(scratch);
+        for_each_header(headers, &mut head);
+        head
+    }
+
     #[must_use]
     pub fn empty() -> Self {
         Self {
             builtin: Default::default(),
-            map: http::HeaderMap::new(),
-            spellings: HeaderCaseMap::default(),
+            others: Vec::new(),
+            spellings: None,
+            scratch: None,
+        }
+    }
+
+    #[must_use]
+    pub fn empty_in(scratch: &Rc<Scratch>) -> Self {
+        Self {
+            others: scratch.take_others(),
+            scratch: Some(Rc::clone(scratch)),
+            ..Self::empty()
+        }
+    }
+
+    /// A header value of `bytes`, which are valid as one.
+    fn value(&self, bytes: &[u8]) -> Option<http::HeaderValue> {
+        match &self.scratch {
+            Some(scratch) => http::HeaderValue::from_maybe_shared(scratch.copy(bytes)).ok(),
+            None => http::HeaderValue::from_bytes(bytes).ok(),
         }
     }
 
     /// One header from kj, in order. kj validated both parts, so they are valid here too.
     pub fn append(&mut self, name: &[u8], value: &[u8]) {
-        let Ok(value) = http::HeaderValue::from_bytes(value) else {
+        let Some(value) = self.value(value) else {
             return;
         };
         let builtin = BUILTIN
@@ -413,9 +657,32 @@ impl Head {
         if let Some(builtin) = builtin {
             self.builtin[builtin] = Some(value);
         } else if let Ok(header) = http::HeaderName::from_bytes(name) {
-            self.spellings.append(&header, Bytes::copy_from_slice(name));
-            self.map.append(header, value);
+            self.spell(&header, name);
+            self.others.push((header, value));
         }
+    }
+
+    /// Records the spelling of the value of `name` about to be appended, if hyper would write it
+    /// otherwise or the name's earlier values have spellings.
+    fn spell(&mut self, name: &http::HeaderName, spelling: &[u8]) {
+        let spelled = self
+            .spellings
+            .as_ref()
+            .map_or(0, |spellings| spellings.get_all_internal(name).count());
+        if spelled == 0 && is_title_case(spelling) {
+            return;
+        }
+        let spellings = self.spellings.get_or_insert_with(HeaderCaseMap::default);
+        // The name's earlier values went unspelled, as hyper would write them.
+        let values = self
+            .others
+            .iter()
+            .filter(|(other, _)| other == name)
+            .count();
+        for _ in spelled..values {
+            spellings.append(name, title_case(name));
+        }
+        spellings.append(name, Bytes::copy_from_slice(spelling));
     }
 
     /// Drops the application's values of the headers that are `protocol`'s to set.
@@ -435,7 +702,14 @@ impl Head {
     /// Frames a body of `length` bytes, or a chunked one when the length is unknown.
     pub fn frame(&mut self, length: Option<u64>) {
         match length {
-            Some(length) => self.set(Builtin::ContentLength, http::HeaderValue::from(length)),
+            Some(length) => {
+                let mut digits = [0; 20];
+                let len = format_decimal(length, &mut digits);
+                let value = self
+                    .value(&digits[digits.len() - len..])
+                    .unwrap_or_else(|| http::HeaderValue::from(length));
+                self.set(Builtin::ContentLength, value);
+            }
             None => self.set(
                 Builtin::TransferEncoding,
                 http::HeaderValue::from_static("chunked"),
@@ -443,40 +717,165 @@ impl Head {
         }
     }
 
-    /// Installs the headers and their spellings on a message's parts.
-    pub fn apply(mut self, headers: &mut http::HeaderMap, extensions: &mut http::Extensions) {
-        let mut map = http::HeaderMap::with_capacity(self.map.len() + BUILTIN.len());
-        for (spelling, value) in BUILTIN.into_iter().zip(self.builtin) {
-            // `from_bytes` lowercases; the spellings are valid header names.
-            if let (Some(value), Ok(name)) =
-                (value, http::HeaderName::from_bytes(spelling.as_bytes()))
-            {
+    /// Installs the headers and their spellings on a message's parts, in place of the headers
+    /// there, reusing the map's room.
+    pub fn apply(mut self, map: &mut http::HeaderMap, extensions: &mut http::Extensions) {
+        let builtins = self.builtin.iter().flatten().count();
+        map.clear();
+        map.reserve(self.others.len() + builtins);
+        for (index, value) in self.builtin.into_iter().enumerate() {
+            let Some(value) = value else {
+                continue;
+            };
+            let (spelling, name) = (BUILTIN[index], &BUILTIN_NAMES[index]);
+            // A builtin header has one value, and no spelling yet.
+            if !is_title_case(spelling.as_bytes()) {
                 self.spellings
-                    .append(&name, Bytes::from_static(spelling.as_bytes()));
-                map.append(name, value);
+                    .get_or_insert_with(HeaderCaseMap::default)
+                    .append(name, Bytes::from_static(spelling.as_bytes()));
             }
+            map.append(name.clone(), value);
         }
-        map.extend(self.map);
-        *headers = map;
-        extensions.insert(self.spellings);
+        for (name, value) in self.others.drain(..) {
+            map.append(name, value);
+        }
+        if let Some(scratch) = &self.scratch {
+            scratch.keep_others(mem::take(&mut self.others));
+        }
+        // hyper's client writes an empty value as `Name:` only through the extension.
+        let spellings = self.spellings.or_else(|| {
+            map.values()
+                .any(http::HeaderValue::is_empty)
+                .then(HeaderCaseMap::default)
+        });
+        if let Some(spellings) = spellings {
+            extensions.insert(spellings);
+        }
     }
 }
 
-/// Incoming headers packed for C++ to build `kj::HttpHeaders` from in one allocation.
+/// Writes `n` in decimal at the end of `digits`; returns how many digits it took.
+fn format_decimal(mut n: u64, digits: &mut [u8; 20]) -> usize {
+    let mut len = 0;
+    loop {
+        len += 1;
+        digits[digits.len() - len] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            return len;
+        }
+    }
+}
+
+/// Whether hyper's title-casing of the lowercased `spelling` gives `spelling` back: a letter at
+/// the start or after a `-` is uppercase, and every other letter is lowercase.
+fn is_title_case(spelling: &[u8]) -> bool {
+    let mut after_dash = true;
+    spelling.iter().all(|&c| {
+        let cased = if after_dash {
+            !c.is_ascii_lowercase()
+        } else {
+            !c.is_ascii_uppercase()
+        };
+        after_dash = c == b'-';
+        cased
+    })
+}
+
+/// `name` as hyper title-cases it.
+fn title_case(name: &http::HeaderName) -> Bytes {
+    let mut after_dash = true;
+    let cased: Vec<u8> = name
+        .as_str()
+        .bytes()
+        .map(|c| {
+            let c = if after_dash {
+                c.to_ascii_uppercase()
+            } else {
+                c
+            };
+            after_dash = c == b'-';
+            c
+        })
+        .collect();
+    cased.into()
+}
+
+/// A header in a [`HeaderBlock`] whose name has no slot in [`HeaderIds`]: C++ looks it up.
+const UNINDEXED: u32 = u32::MAX;
+
+/// How many names [`HeaderIds`] remembers, so a peer cannot grow it without end. Names past
+/// that are looked up as kj looks them up.
+const MAX_REMEMBERED_NAMES: usize = 128;
+
+/// The kj ids of the header names one connection's requests carry, each looked up in the table
+/// once instead of on every request (`kj::HttpHeaderTable::stringToId` hashes a name byte by
+/// byte; hyper's `HeaderName` of a standard header hashes as one number).
+pub struct HeaderIds<'t> {
+    kj: Borrowing<'t, ffi::HeaderIds>,
+    /// The slot in `kj` of each name looked up so far, or [`UNINDEXED`].
+    slots: http::HeaderMap<u32>,
+}
+
+impl<'t> HeaderIds<'t> {
+    pub fn new(table: &'t HttpHeaderTable) -> Self {
+        Self {
+            kj: new_header_ids(table),
+            slots: http::HeaderMap::default(),
+        }
+    }
+
+    fn slot(&mut self, name: &http::HeaderName) -> u32 {
+        if let Some(slot) = self.slots.get(name) {
+            return *slot;
+        }
+        let slot = u32::try_from(self.kj.as_mut().resolve(name.as_str())).unwrap_or(UNINDEXED);
+        if self.slots.len() < MAX_REMEMBERED_NAMES {
+            self.slots.insert(name.clone(), slot);
+        }
+        slot
+    }
+}
+
+/// Incoming headers packed for C++ to build `kj::HttpHeaders` from.
 ///
-/// Each header's name and value, each followed by a NUL, and their lengths. Names keep the
-/// peer's spelling where hyper recorded it (`preserve_header_case`); hyper groups repeated names.
+/// Each header's name and value, each followed by a NUL, and per header its name's slot in
+/// [`HeaderIds`] (or [`UNINDEXED`]) and the two lengths. Names keep the peer's spelling where
+/// hyper recorded it (`preserve_header_case`); hyper groups repeated names. A server reuses its
+/// blocks, so filling one allocates only when its headers outgrow it.
 #[derive(Default)]
 pub struct HeaderBlock {
     arena: Vec<u8>,
-    lens: Vec<u32>,
+    fields: Vec<u32>,
 }
 
 impl HeaderBlock {
+    /// A block of `map`'s headers, every name to be looked up by C++.
     pub fn new(map: &http::HeaderMap, extensions: &http::Extensions) -> Self {
-        let spellings = extensions.get::<HeaderCaseMap>();
         let mut block = Self::default();
+        block.fill(map, extensions, None);
+        block
+    }
+
+    /// Packs `map`'s headers in place of the block's, with the slots `ids` gives their names.
+    pub fn fill(
+        &mut self,
+        map: &http::HeaderMap,
+        extensions: &http::Extensions,
+        mut ids: Option<&mut HeaderIds<'_>>,
+    ) {
+        let spellings = extensions.get::<HeaderCaseMap>();
+        // A spelling is as long as its name.
+        let size = map
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.len() + 2)
+            .sum();
+        self.arena.clear();
+        self.arena.reserve(size);
+        self.fields.clear();
+        self.fields.reserve(3 * map.len());
         for name in map.keys() {
+            let slot = ids.as_mut().map_or(UNINDEXED, |ids| ids.slot(name));
             let mut spelled = spellings.map(|s| s.get_all_internal(name));
             for value in map.get_all(name) {
                 let spelling = spelled.as_mut().and_then(Iterator::next);
@@ -487,23 +886,42 @@ impl HeaderBlock {
                 else {
                     continue;
                 };
-                block.arena.extend_from_slice(name);
-                block.arena.push(0);
-                block.arena.extend_from_slice(value.as_bytes());
-                block.arena.push(0);
-                block.lens.extend([name_len, value_len]);
+                self.arena.extend_from_slice(name);
+                self.arena.push(0);
+                self.arena.extend_from_slice(value.as_bytes());
+                self.arena.push(0);
+                self.fields.extend([slot, name_len, value_len]);
             }
         }
-        block
     }
 
-    /// The headers as `kj::HttpHeaders` over `table`, which they borrow.
+    /// The headers as `kj::HttpHeaders` over `table`, which they borrow, owning a copy of the
+    /// block.
     ///
     /// # Errors
     ///
     /// A block whose lengths do not describe its bytes.
     pub fn to_kj<'t>(&self, table: &'t HttpHeaderTable) -> Result<Borrowing<'t, HttpHeaders>> {
-        headers_from_block(table, &self.arena, &self.lens)
+        headers_from_block(table, &self.arena, &self.fields)
+    }
+
+    /// The headers as `kj::HttpHeaders` over the table behind `ids`, which filled the block,
+    /// pointing into the block, which they borrow.
+    ///
+    /// # Errors
+    ///
+    /// A block whose lengths do not describe its bytes, or with a slot `ids` lacks.
+    pub fn as_kj<'a, 't>(
+        &'a self,
+        ids: &HeaderIds<'t>,
+        headers: &'a mut ReusedHeaders<'t>,
+    ) -> Result<&'a HttpHeaders> {
+        headers.over(&ids.kj, &self.arena, &self.fields)
+    }
+
+    /// Whether the block is small enough to keep for another request.
+    pub fn reusable(&self) -> bool {
+        self.arena.capacity() <= 8192
     }
 }
 

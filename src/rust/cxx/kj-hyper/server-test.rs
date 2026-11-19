@@ -27,7 +27,6 @@ fn table() -> KjOwn<HeaderTable> {
 /// needed.
 struct Echo<'t>(&'t HeaderTable);
 
-#[async_trait::async_trait(?Send)]
 impl Handler for Echo<'_> {
     async fn request<'a>(
         &'a self,
@@ -76,18 +75,59 @@ impl Handler for Echo<'_> {
     }
 }
 
+/// Answers each request with an empty 200 whose `Location` reports the request's `Range` and
+/// `X-Custom` headers, `-` for one it lacks.
+struct Report<'t>(&'t HeaderTable);
+
+impl Handler for Report<'_> {
+    async fn request<'a>(
+        &'a self,
+        _method: Method,
+        url: &'a [u8],
+        headers: HeadersRef<'a>,
+        _body: Pin<&'a mut AsyncInputStream>,
+        response: ServiceResponse<'a>,
+    ) -> Result<()> {
+        let text = |value: Option<&[u8]>| from_utf8(value.unwrap_or(b"-")).unwrap().to_owned();
+        let report = format!(
+            "{} range={} custom={}",
+            from_utf8(url).unwrap(),
+            text(headers.get(HeaderId::RANGE)),
+            text(headers.get_by_name("x-custom")),
+        );
+        let mut sent = Headers::new(self.0);
+        sent.set(HeaderId::LOCATION, &report);
+        response.send(200, "OK", &sent, Some(0))?;
+        Ok(())
+    }
+
+    async fn connect<'a>(
+        &'a self,
+        _host: &'a [u8],
+        _headers: HeadersRef<'a>,
+        _connect: Connect,
+    ) -> Result<()> {
+        Err(failed("no CONNECT here"))
+    }
+}
+
 /// Serves `request` and returns what the peer read until the server closed the connection.
 fn exchange(request: &[u8]) -> String {
     let table = table();
+    exchange_with(&table, request, Echo(&table))
+}
+
+/// [`exchange`], with `handler` over `table`.
+fn exchange_with(table: &HeaderTable, request: &[u8], handler: impl Handler) -> String {
     runtime().block_on(async {
         let (ours, mut peer) = duplex(1 << 16);
         let shutdown = Shutdown::new();
         let served = serve_connection(
             ours,
             Box::pin(pending()),
-            &table,
+            table,
             Rc::new(ServerSettings::default()),
-            Rc::new(Echo(&table)),
+            Rc::new(handler),
             &shutdown,
         );
         let client = async {
@@ -117,6 +157,28 @@ fn a_request_reaches_the_handler_with_kj_types_and_its_response_is_written() {
         "{response}"
     );
     assert!(response.contains("\r\nContent-Length: 0\r\n"), "{response}");
+}
+
+#[test]
+fn each_request_on_a_connection_gets_its_own_headers() {
+    // The second request reuses what the first resolved and the block it filled.
+    let table = table();
+    let response = exchange_with(
+        &table,
+        b"GET /a HTTP/1.1\r\nHost: example.com\r\nRange: bytes=0-1\r\nX-Custom: one\r\n\
+          range: bytes=2-3\r\n\r\n\
+          GET /b HTTP/1.1\r\nHost: example.com\r\nX-Custom: two\r\n\r\n",
+        Report(&table),
+    );
+    // A repeated header the table has is one, its values joined as kj joins them.
+    assert!(
+        response.contains("\r\nLocation: /a range=bytes=0-1, bytes=2-3 custom=one\r\n"),
+        "{response}"
+    );
+    assert!(
+        response.contains("\r\nLocation: /b range=- custom=two\r\n"),
+        "{response}"
+    );
 }
 
 #[test]

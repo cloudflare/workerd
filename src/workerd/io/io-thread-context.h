@@ -2,8 +2,11 @@
 
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>
+#include <kj/list.h>
 
 namespace workerd {
+
+class IoContext;
 
 // Thread-level stuff needed to construct a IoContext. One of these is created for each
 // request-handling thread.
@@ -65,6 +68,27 @@ class ThreadContext {
     return byteStreamFactory;
   }
 
+  // The IoContexts on this thread waiting for it to go idle so they can check for a hang (see
+  // IoContext::PendingEvent), and the one wait they share. IoContext manages both. They live here
+  // because the wait must end before this thread's event loop does.
+  struct HangCheckWaiter {
+    explicit HangCheckWaiter(IoContext& context): context(context) {}
+    IoContext& context;
+    kj::ListLink<HangCheckWaiter> link;
+  };
+  struct HangChecks {
+    kj::List<HangCheckWaiter, &HangCheckWaiter::link> waiters;
+    kj::Maybe<kj::Promise<void>> idleWait;
+    // True while idleWait is pending or running its continuation.
+    bool waiting = false;
+  };
+  HangChecks& getHangChecks() {
+    return *hangChecks;
+  }
+  kj::Weak<HangChecks> getWeakHangChecks() {
+    return hangChecks.addWeak();
+  }
+
  private:
   // NOTE: This timer only updates when entering the event loop!
   kj::Timer& timer;
@@ -72,6 +96,7 @@ class ThreadContext {
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::Pin<HangChecks> hangChecks;
 };
 
 }  // namespace workerd

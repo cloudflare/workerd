@@ -555,6 +555,28 @@ kj::Promise<DeferredProxy<void>> pumpExtractedSource(
   return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
+// Writes a buffer-backed body's bytes straight to the sink, for a body that no stream was built
+// for. Like the memory source it replaces, it finishes all I/O before resolving rather than
+// deferring any of it: the sink may depend on the IoContext. A failure, or the sink disconnecting
+// while a write is blocked, aborts the sink.
+kj::Promise<DeferredProxy<void>> writeBufferToSink(
+    kj::Rc<JsReadableStream::Buffer> buffer, kj::Own<WritableStreamSink> sink, EndStream end) {
+  auto bytes = buffer->view;
+  try {
+    if (bytes.size() > 0 && !sink->tryWriteSync(bytes)) {
+      co_await sink->write(bytes).exclusiveJoin(rejectWhenWriteDisconnected<void>(*sink));
+    }
+    if (end == EndStream::YES) {
+      co_await sink->end();
+    }
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    sink->abort(exception.clone());
+    kj::throwException(kj::mv(exception));
+  }
+  co_return;
+}
+
 // Writes one drained batch to the sink and, when this is the final batch, ends it.
 kj::Promise<void> queuedWriteStep(
     kj::Ptr<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
@@ -793,16 +815,29 @@ JsReadableStream::StreamImpl newBackingStream(
 
 }  // namespace
 
-JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock& js, kj::Rc<Buffer> buffer) {
+JsReadableStream::Impl JsReadableStream::bufferBackedImpl(jsg::Lock&, kj::Rc<Buffer> buffer) {
   // Use newMemorySource() rather than newSystemStream() wrapping a memory input stream:
   // it reads the Buffer's bytes in place, so every stream derived from this Buffer -- rewinds
   // and tee branches alike -- shares the one allocation.
-  auto view = buffer->view;
-  auto source = newMemorySource(view, buffer.addRef().toOwn());
+  // The stream itself is constructed by ensureStream() once something needs it, which for a
+  // Response that is only sent is never.
   return Impl{
-    .stream = newBackingStream(js, IoContext::current(), kj::mv(source)),
+    .hasStream = false,
     .maybeOwnedBuffer = kj::mv(buffer),
   };
+}
+
+void JsReadableStream::ensureStream(jsg::Lock& js, Impl& i) {
+  if (i.hasStream) return;
+  auto& buffer = KJ_ASSERT_NONNULL(i.maybeOwnedBuffer);
+  i.stream = newBackingStream(
+      js, IoContext::current(), newMemorySource(buffer->view, buffer.addRef().toOwn()));
+  i.hasStream = true;
+  if (cachedIsDisturbed) {
+    // pumpTo() already sent the buffer. Leave the stream locked and disturbed, as a pump of a
+    // constructed stream would have.
+    detach(js, IgnoreDisturbed::YES);
+  }
 }
 
 JsReadableStream::JsReadableStream(jsg::Ref<ReadableStream> stream)
@@ -983,6 +1018,7 @@ kj::Maybe<JsReadableStream> JsReadableStream::tryUnwrapTs(
 
 JsReadableStream JsReadableStream::addRef(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return JsReadableStream(Impl{
@@ -1018,6 +1054,9 @@ bool JsReadableStream::isDisturbed(jsg::Lock& js) {
   // Disturbed is a one-way switch
   if (cachedIsDisturbed) return true;
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream) {
+      return false;
+    }
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return cachedIsDisturbed = stream->isDisturbed();
@@ -1044,6 +1083,9 @@ bool JsReadableStream::isDisturbed(jsg::Lock& js) {
 
 bool JsReadableStream::isLocked(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream) {
+      return cachedIsDisturbed;
+    }
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return stream->isLocked();
@@ -1064,6 +1106,7 @@ bool JsReadableStream::isLocked(jsg::Lock& js) {
 
 jsg::Promise<void> JsReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return stream->cancel(js, kj::mv(reason));
@@ -1091,6 +1134,7 @@ jsg::Promise<void> JsReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::Js
 jsg::Promise<void> JsReadableStream::forceCancel(
     jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         // Going through the controller (rather than ReadableStream::cancel()) deliberately
@@ -1109,6 +1153,7 @@ jsg::Promise<void> JsReadableStream::forceCancel(
 
 void JsReadableStream::setPendingClosure(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return stream->getController().setPendingClosure();
@@ -1123,6 +1168,7 @@ void JsReadableStream::setPendingClosure(jsg::Lock& js) {
 
 jsg::Promise<void> JsReadableStream::onEof(jsg::Lock& js) {
   auto& i = KJ_ASSERT_NONNULL(impl, "onEof() called on a null JsReadableStream");
+  ensureStream(js, i);
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       return stream->onEof(js);
@@ -1136,6 +1182,10 @@ jsg::Promise<void> JsReadableStream::onEof(jsg::Lock& js) {
 
 kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding encoding) {
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream && encoding == StreamEncoding::IDENTITY) {
+      return KJ_ASSERT_NONNULL(i.maybeOwnedBuffer)->view.size();
+    }
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return stream->tryGetLength(encoding);
@@ -1172,6 +1222,9 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
 
 StreamEncoding JsReadableStream::getPreferredEncoding(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream) {
+      return StreamEncoding::IDENTITY;
+    }
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         return stream->getController().getPreferredEncoding();
@@ -1199,6 +1252,7 @@ StreamEncoding JsReadableStream::getPreferredEncoding(jsg::Lock& js) {
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> JsReadableStream::arrayBuffer(
     jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
@@ -1219,6 +1273,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> JsReadableStream::arrayBuffer(
 
 jsg::Promise<kj::String> JsReadableStream::text(jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
@@ -1239,6 +1294,7 @@ jsg::Promise<kj::String> JsReadableStream::text(jsg::Lock& js, uint64_t limit) {
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> JsReadableStream::bytes(jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
@@ -1263,6 +1319,7 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> JsReadableStream::bytes(jsg::Lock& j
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> JsReadableStream::json(jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
@@ -1293,6 +1350,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> JsReadableStream::json(jsg::Lock& js, uin
 jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
     jsg::Lock& js, uint64_t limit, kj::String contentType) {
   KJ_IF_SOME(i, impl) {
+    ensureStream(js, i);
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         if (stream->isDisturbed()) {
@@ -1324,6 +1382,12 @@ jsg::Promise<jsg::Ref<Blob>> JsReadableStream::blob(
 kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, EndStream end) {
   auto& i = KJ_ASSERT_NONNULL(impl, "pumpTo() called on a null JsReadableStream");
+  if (!i.hasStream) {
+    // Nothing in JS has seen this stream, so write the buffer without constructing one.
+    JSG_REQUIRE(!cachedIsDisturbed, TypeError, "The ReadableStream has been locked to a reader.");
+    cachedIsDisturbed = true;
+    return writeBufferToSink(KJ_ASSERT_NONNULL(i.maybeOwnedBuffer).addRef(), kj::mv(sink), end);
+  }
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       return stream->pumpTo(js, kj::mv(sink), end == EndStream::YES);
@@ -1363,12 +1427,23 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
   KJ_UNREACHABLE;
 }
 
+kj::Maybe<kj::Rc<JsReadableStream::Buffer>> JsReadableStream::tryTakeUnstreamedBuffer() {
+  KJ_IF_SOME(i, impl) {
+    if (!i.hasStream && !cachedIsDisturbed) {
+      cachedIsDisturbed = true;
+      return KJ_ASSERT_NONNULL(i.maybeOwnedBuffer).addRef();
+    }
+  }
+  return kj::none;
+}
+
 jsg::Promise<void> JsReadableStream::pipeTo(
     jsg::Lock& js, JsWritableStream& destination, PipeToOptions options) {
   auto& i = KJ_ASSERT_NONNULL(impl, "pipeTo() called on a null JsReadableStream");
 
   KJ_REQUIRE(!destination.isNull(), "pipeTo() called with a null destination JsWritableStream");
 
+  ensureStream(js, i);
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(source, jsg::Ref<ReadableStream>) {
       // Both ends must be legacy C++: the TS implementation, when enabled, constructs all
@@ -1433,6 +1508,7 @@ JsReadableStream JsReadableStream::pipeThrough(
 
 JsReadableStream::Tee JsReadableStream::tee(jsg::Lock& js) {
   auto& i = KJ_ASSERT_NONNULL(impl, "tee() called on a null JsReadableStream");
+  ensureStream(js, i);
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       auto branches = stream->tee(js);
@@ -1507,6 +1583,7 @@ kj::Maybe<JsReadableStream> JsReadableStream::tryClone(jsg::Lock& js) {
 
 JsReadableStream JsReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   auto& i = KJ_ASSERT_NONNULL(impl, "detach() called on a null JsReadableStream");
+  ensureStream(js, i);
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       // ReadableStream::detach() takes over the internal state, leaving the original stream (i.e.
@@ -1540,6 +1617,7 @@ void JsReadableStream::nullify() {
 
 void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& i = KJ_ASSERT_NONNULL(impl, "serialize() called on a null JsReadableStream");
+  ensureStream(js, i);
   KJ_SWITCH_ONEOF(i.stream) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       stream->serialize(js, serializer);
@@ -1572,6 +1650,7 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 void JsReadableStream::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream) return;
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         visitor.visit(stream);
@@ -1587,6 +1666,7 @@ void JsReadableStream::visitForGc(jsg::GcVisitor& visitor) {
 
 void JsReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(i, impl) {
+    if (!i.hasStream) return;
     KJ_SWITCH_ONEOF(i.stream) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         tracker.trackField("stream", stream);

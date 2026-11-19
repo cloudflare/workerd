@@ -571,6 +571,13 @@ IsolateBase::IsolateBase(V8System& system,
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+      // Opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable check does
+      // Get(value, "then"). This shadowing property ends that lookup before Object.prototype, so
+      // application code can't intercept it. It lives on the prototype rather than the instance
+      // so that instances keep the constructor's initial map, which V8 requires before it drops
+      // an unreachable wrapper in a scavenge; see Wrappable::attachOpaqueWrapper().
+      opaqueTemplate->PrototypeTemplate()->Set(v8StrIntern(ptr, "then"), v8::Undefined(ptr),
+          static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum | v8::DontDelete));
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
 
       jsSerializeModeKey.Reset(
@@ -761,6 +768,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
   domExceptionTemplate.Reset();
+  internalFunctionTemplates.clear();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
   domExceptionBrandKey.Reset();
@@ -1184,12 +1192,23 @@ void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Cont
   }
 }
 
+void IsolateBase::retainThreadStateBetweenLocks() {
+  KJ_REQUIRE(!v8::Locker::IsLocked(ptr), "retainThreadStateBetweenLocks() called under the lock");
+  if (retainedThreadState == kj::none) {
+    // Locking may set up the thread's state, which records where the V8 stack starts.
+    jsg::runInV8Stack(
+        [&](jsg::V8StackScope&) { retainedThreadState = kj::heap<RetainedThreadState>(ptr); });
+  }
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
   externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // Relocks the isolate and frees the retained thread state, before disposal.
+    retainedThreadState = kj::none;
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     // When preparing a snapshot the v8::SnapshotCreator keeps the isolate "entered" by the current
@@ -1216,6 +1235,29 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate* isolate) {
   return from(isolate).domExceptionTemplate.Get(isolate);
+}
+
+v8::Local<v8::ObjectTemplate> IsolateBase::getInternalFunctionTemplate(
+    v8::FunctionCallback callback) {
+  auto& slot = internalFunctionTemplates.findOrCreate(reinterpret_cast<uintptr_t>(callback), [&]() {
+    auto objectTemplate = v8::ObjectTemplate::New(ptr);
+    objectTemplate->SetInternalFieldCount(1);
+    objectTemplate->SetCallAsFunctionHandler(callback);
+    // A startup snapshot that holds one of these objects refers to the callback.
+    registerExternalReference(reinterpret_cast<intptr_t>(callback));
+    return decltype(internalFunctionTemplates)::Entry{
+      reinterpret_cast<uintptr_t>(callback), v8::Global<v8::ObjectTemplate>(ptr, objectTemplate)};
+  });
+  return slot.Get(ptr);
+}
+
+v8::Local<v8::Function> newInternalFunction(
+    v8::Local<v8::Context> context, v8::FunctionCallback callback, v8::Local<v8::Value> data) {
+  auto isolate = v8::Isolate::GetCurrent();
+  auto object =
+      check(IsolateBase::from(isolate).getInternalFunctionTemplate(callback)->NewInstance(context));
+  object->SetInternalField(0, data.IsEmpty() ? v8::Undefined(isolate).As<v8::Value>() : data);
+  return object.As<v8::Function>();
 }
 
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
@@ -1263,6 +1305,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(domExceptionTemplate.Reset());
+    KJ_DEFER(internalFunctionTemplates.clear());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(domExceptionBrandKey.Reset());

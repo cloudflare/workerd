@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ctx-per-event-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ctx-per-event-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "unique_ctx_per_invocation"],
+        bindings = [
+          (name = "A", service = (name = "ctx-per-event-test", props = (json = "{\"a\": 1}"))),
+          (name = "B", service = (name = "ctx-per-event-test", props = (json = "{\"b\": 2}"))),
+          (name = "PLAIN", service = "ctx-per-event-test"),
+        ],
+      )
+    ),
+  ],
+);
